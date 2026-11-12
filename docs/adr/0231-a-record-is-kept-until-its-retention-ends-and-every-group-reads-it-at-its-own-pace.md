@@ -202,3 +202,48 @@ with it:
    most 54 bytes (PostgreSQL's 63 less `__cursors`): with no double
    underscore, no stream's table is another stream's derived one. A group's
    cursor is keyed by the SHA-256 of its name, the name kept beside it.
+
+## Amendment — the subscriber (#823), 2026-11-12
+
+`Subscribe(ctx, stream, SubscriberConfig)` reads a stream for one consumer
+group, modelled on `queue.Consume`. Decided with it:
+
+1. **One worker per assigned partition, in a joined group.** Each reads its
+   partition in offset order from the group's committed offset — or, for a
+   group new to the partition, from its first retained offset; a cursor
+   retention passed resumes at the first kept. The stream's `Waker` signal
+   is taken before each `Read`, the idle wait is bounded by `PollInterval`
+   on the injected clock. Assignment is static (`Partitions`, empty for
+   every one): a rebalance needs membership, which this domain leaves to
+   consensus.
+2. **A refused batch blocks its partition, and only it.** It is retried on
+   the `kernel/backoff` curve (`Retry`, 100 ms doubling to 30 s when zero),
+   so the records of one key keep their order — the per-key ordering ADR 0054
+   deferred, with its head-of-line blocking stated. With `Park`, a batch
+   refused `After` times is narrowed to one record at a time, and a record
+   refused `After` times alone is published to a `queue.Broker` as the JSON
+   of its `EntryValue` and committed past. A handler's panic is a refusal.
+3. **Two commit modes.** `CommitAfterHandler`, the zero: the subscriber
+   commits the offset after a batch the handler accepted — at least once on
+   every engine, a crash between the two delivering the batch again.
+   `CommitByHandler`: the handler commits through the stream's `Committer`
+   inside the transaction holding its effect — on the SQL engine, where an
+   Append and a Commit on a transaction's context are savepoints of it
+   (amendment #822), exactly once in effect; on memory and file, at least
+   once, the cursor durable after the handler. `HandlerIsIdempotent` is
+   required in both, as the queue requires it.
+4. **What a stop leaves.** The handler's context is cancelled; a batch
+   accepted as the stop lands is still committed, a dead letter still
+   published and a fence still released, on the context without its
+   cancellation and bounded by `SettleTimeout` (5 s) on the clock.
+5. **An optional fence.** With a `core/app/lock.Locker`, each worker holds
+   `stream:<Name>:<Group>:<partition>` while it reads (`TryAcquire`, a
+   standby of `PollInterval` when held elsewhere), renews an expiring lease
+   a third of its life on and before every commit it makes, and gives the
+   partition up uncommitted on a refused renewal. The stores do not check the
+   fencing token, so the fence narrows a double reader's window and does not
+   close it.
+6. **No new code.** A configuration the subscriber cannot run is
+   `SUBSCRIBER_MISCONFIGURED` (`0.3.94.4`, allocated with the domain), its
+   `field` naming the value; a medium's refusal — the stream's, the park's
+   queue's, the locker's — is returned as it came and stops every worker.

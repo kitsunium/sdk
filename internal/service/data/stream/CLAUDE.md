@@ -8,8 +8,10 @@ conformance suite every one of them runs. Today: the memory engine,
 over `kernel/fs/seglog` with retention by age and bytes, `Trim` and
 `OffsetAt` (#821, ADR 0231's amendment), and the SQL engine, `NewSQL`, three
 tables of the caller's database joined to the transaction its context
-carries on ADR 0151's pattern (#822, ADR 0231's second amendment). To come:
-the subscriber that reads a stream for a consumer group (#823).
+carries on ADR 0151's pattern (#822, ADR 0231's second amendment), and the
+subscriber, `Subscribe`, that reads a stream for a consumer group — one
+worker per partition, the group's offset committed after the handler or by
+the handler in its own transaction (#823, ADR 0231's third amendment).
 
 ## Surface
 
@@ -21,6 +23,11 @@ the subscriber that reads a stream for a consumer group (#823).
 | `SQLConfig{Transactor, Dialect, Table, Policy, Clock}` | the transactor (a `Joiner` and a `Deferrer`), the dialect, the table (lower-case words joined by single underscores, at most 54 bytes, not `sqlite_…`), the policy and the engine's clock (`clock.Clock`, nil: `clock.System`) |
 | `SQLMigration(dialect, table, version) (coresql.MigrationValue, error)` | the three `CREATE TABLE IF NOT EXISTS`, checksummed; Down drops them |
 | `FileConfig{Clock, Dir, Policy}` | the clock that stamps and ages, the stream directory (the queue's directory rules), and the policy, refused at construction by the core's `Validate` and by a `MaxRecordBytes` one segment record cannot hold |
+| `Subscribe(ctx, Stream, SubscriberConfig) error` | one worker per assigned partition, offset order, the group's offset moved past each accepted batch; a refused batch retried on `Retry` and blocking its partition alone, narrowed then parked with `Park`; nil at the stop, `SUBSCRIBER_MISCONFIGURED`, or the medium's error |
+| `SubscriberConfig{BatchSize, Clock, Commit, Fence, Group, Handler, HandlerIsIdempotent, Name, Park, Partitions, PollInterval, Retry, SettleTimeout}` | `Group`, `Handler` and `HandlerIsIdempotent` required; `Partitions` empty is every one; `Fence` a `core/app/lock.Locker` (`Name` then required); zero `PollInterval` 100 ms, `SettleTimeout` 5 s, `Retry` 100 ms doubling to 30 s |
+| `CommitMode`: `CommitAfterHandler` (zero), `CommitByHandler` | who commits an accepted batch: the subscriber after the handler (at least once), or the handler inside its transaction (exactly once in effect on the SQL engine) |
+| `Handler` | `func(ctx, []corestream.EntryValue) error`: one partition's batch, never empty |
+| `ParkConfig{After, Broker}` | the dead letters' queue and how many consecutive refusals park a record; a dead letter's payload is the entry's JSON |
 | `MemoryConfig{Clock, Policy}` | the `clock.Timed` that stamps, ages and times the backpressure wait (nil: `clock.System`), and the `corestream.PolicyValue`, refused at construction by the core's `Validate` |
 
 ## Contents
@@ -51,6 +58,10 @@ the subscriber that reads a stream for a consumer group (#823).
 | `sql_dialect.go` | every statement, rendered once per dialect; the DDL and `SQLMigration` |
 | `sql_compliance.go` | the compile-time assertions of the port and its four siblings |
 | `batch.go` | what every engine checks before it writes (`admit`, `keyedPartition`) and the byte copies (`carve`, `copyEntries`) |
+| `subscribe_config.go` | `CommitMode` and its two values, `Handler`, `ParkConfig`, `SubscriberConfig`, its `validate`, `missing` and `normalized` |
+| `subscribe.go` | `Subscribe`, `subscriber`, `cursor`, a worker's `run`, `follow`, `start`, `turn`, `settle`, `handle` (a panic is a refusal), `advance` (the commit), `sleep`, `settled` and `bound` (an outcome past the stop) |
+| `subscribe_fence.go` | `heldFence`: the lock's name, `acquire` (`TryAcquire`), `renew` (a third of the lease's life), `bounded` (a wait never past a renewal), `release` |
+| `subscribe_park.go` | `narrowOrPark` and `park`: a refused batch narrowed to one record, a refused record published as its entry's JSON and committed past |
 | `errors.go` | the core's sentinels wrapped with their fields — no code is declared here |
 | `wake.go` | `wakeSignal`, the queue's broadcast without its due instant |
 | `harness_external_test.go` | `everyStream`, the table of engines, and the helpers the suite shares |
@@ -60,6 +71,9 @@ the subscriber that reads a stream for a consumer group (#823).
 | `sql_external_test.go` | what only the SQL engine has: an Append that exists if and only if its transaction commits, a failed one leaving the caller's transaction usable with the driver's words withheld, offsets committed in order under concurrent appenders some of which roll back, the statements per call (`Append` = 3 + one per chunk of 199, `Read` = 1, `Commit` = 2), a Commit in the handler's transaction, Trim and the age sweep deleting rows, the refusals, the statement texts pinned |
 | `file_external_test.go` | what only the file engine has: its refusals, the lock, a reopen keeping records, trim, cursors and the byte bound, a segment past `RetainFor` unlinked |
 | `death_external_test.go` | the SIGKILL test: a child appending numbered batches is killed, and every batch its `Append` acknowledged is read back whole, none in part (the queue's victim pattern, `KTNS_VICTIM_STREAM_DIR`) |
+| `subscribe_external_test.go` | the subscriber over `everyStream`: two groups each receiving every record once, per-key order over four partitions and a failing partition blocking only itself, a crash before the commit redelivering, a record parked as JSON, the fence keeping one reader per partition, the refusals |
+| `subscribe_sql_external_test.go` | exactly-once in effect on the SQL engine: the handler's effect (a record on partition 1) and its Commit in one transaction failed after the write then committed, one effect after a restart; and the contrast, `CommitAfterHandler` applying the effect twice |
+| `subscribe_bench_test.go` | `BenchmarkSubscribe`: a record delivered and committed at batches of 1, 16 and 256 |
 | `stream_bench_test.go`, `BENCH.md` | Append (1/16/256 records at 64 B and 4 KiB), Read (1/16), `PartitionOf`, keyed against unkeyed; the file engine's Append (1/16/256) and Read of 16 at a 1 000 and a 1 000 000-record backlog |
 
 ## The conformance suite, and adding an engine
@@ -142,6 +156,23 @@ without it: a sibling is optional (ADR 0039).
   refused at construction rather than ignored.
 - **A group's cursor is keyed by the SHA-256 of its name**, so no group is
   too long for a key; the name is kept beside it for an operator.
+
+- **The subscriber is `queue.Consume` for a stream, with one worker per
+  partition rather than `Parallelism`**: a partition is read by one worker,
+  in order, and a refused batch blocks it — the per-key ordering ADR 0054
+  deferred, its head-of-line blocking the design rather than a defect. The
+  other partitions carry on. Assignment is static (`Partitions`); a dynamic
+  rebalance needs membership, which is consensus's problem.
+- **A group's first position is the first retained offset**, never the
+  end: a record appended before the group's first subscriber is delivered.
+  An offset retention removed resumes at the first one kept.
+- **The subscriber commits past a parked record in both modes**: the
+  handler never accepted it, so nothing else would move the group.
+- **The fence narrows the window; it does not close it.** A worker renews
+  its lease before every turn and before every commit it makes, and a
+  refused renewal gives the partition up uncommitted; a handler that runs
+  past its lease can still commit through `CommitByHandler`. The stores do
+  not compare the lease's fencing token.
 
 ## Do NOT
 

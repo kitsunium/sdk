@@ -83,6 +83,147 @@ constants:
       - name: maxSegmentPayload
         value: 1<<30 - 28
     name: maxSegmentPayload
+  - doc: |-
+      sqlSweepEvery bounds how often an Append releases a partition's expired
+      records: at most once per RetainFor, and at least once a minute.
+    items:
+      - name: sqlSweepEvery
+        type: time.Duration
+        value: time.Minute
+    name: sqlSweepEvery
+  - doc: |-
+      sqlHeadsSuffix and sqlCursorsSuffix derive the stream's two other tables
+      from its records' table.
+    grouped: true
+    items:
+      - name: sqlHeadsSuffix
+        type: string
+        value: "\"__heads\""
+      - name: sqlCursorsSuffix
+        type: string
+        value: "\"__cursors\""
+    name: sqlHeadsSuffix
+  - doc: |-
+      sqlMaxTableLen is the longest Table NewSQL accepts, in bytes: PostgreSQL's
+      63-byte identifier limit less the longest suffix, so no derived name is
+      ever truncated into another table's.
+    items:
+      - name: sqlMaxTableLen
+        type: int
+        value: 63 - len(sqlCursorsSuffix)
+    name: sqlMaxTableLen
+  - doc: |-
+      sqlReservedPrefix starts every name SQLite keeps for itself: refused on
+      every engine, so a stream moves between them unchanged.
+    items:
+      - name: sqlReservedPrefix
+        type: string
+        value: "\"sqlite_\""
+    name: sqlReservedPrefix
+  - doc: |-
+      sqlRecordArgs is how many arguments one record binds in an insertion: its
+      partition, offset, instant, key and payload.
+    items:
+      - name: sqlRecordArgs
+        type: int
+        value: "5"
+    name: sqlRecordArgs
+  - doc: |-
+      sqlRowsPerStatement bounds how many records one INSERT carries: with five
+      arguments each, 199 rows bind 995 parameters, under the 999 an SQLite older
+      than 3.32 accepts, so a large batch is several statements rather than one
+      the engine refuses.
+    items:
+      - name: sqlRowsPerStatement
+        type: int
+        value: "199"
+    name: sqlRowsPerStatement
+  - doc: |-
+      sqlOffsetsPerDelete bounds how many offsets one DELETE of a trimmed or
+      expired prefix covers, so a long prefix is released by several short
+      statements rather than one that holds its locks for as long as it runs.
+    items:
+      - name: sqlOffsetsPerDelete
+        type: int64
+        value: "1024"
+    name: sqlOffsetsPerDelete
+  - doc: |-
+      sqlMigrationPrefix starts the name of every migration SQLMigration builds,
+      so a version table read during an incident says what created the tables.
+    items:
+      - name: sqlMigrationPrefix
+        type: string
+        value: "\"stream \""
+    name: sqlMigrationPrefix
+  - doc: |-
+      The two ways [Subscribe] moves a group's offset past a batch its handler
+      accepted. The zero is the subscriber's own commit, which asks nothing of
+      the handler.
+    grouped: true
+    items:
+      - doc: |-
+          CommitAfterHandler is the zero CommitMode: once the handler returns nil,
+          the subscriber commits the offset after the batch's last record on the
+          stream's [corestream.Committer]. A stop or a crash between that return
+          and the commit delivers the batch again — at least once, on every engine.
+        name: CommitAfterHandler
+        type: CommitMode
+        value: "0"
+      - doc: |-
+          CommitByHandler leaves the commit to the handler, which calls the
+          stream's [corestream.Committer] Commit itself — the group, the batch's
+          partition, the offset after its last record — inside the transaction that
+          holds its effect. On the SQL engine the effect and the offset then commit
+          or roll back together: exactly-once in effect. On an engine whose cursors
+          live apart from the handler's effect — memory, file — it stays at least
+          once, the cursor durable after the handler. The subscriber commits
+          nothing for a batch the handler accepted, only past a record it parked.
+        name: CommitByHandler
+        type: CommitMode
+        value: "1"
+    name: CommitAfterHandler
+  - doc: |-
+      The values a zero field of SubscriberConfig is read as (ADR 0031: each zero
+      has one reading, "no opinion", and each value is defensible for any stream).
+    grouped: true
+    items:
+      - doc: |-
+          subscriberPollInterval is the queue consumer's default poll, for the
+          queue consumer's reason: a tenth of a second of idle latency for what
+          another process appended, the Waker covering this process at once.
+        name: subscriberPollInterval
+        type: time.Duration
+        value: 100 * time.Millisecond
+      - doc: subscriberSettleTimeout is the queue consumer's default settle bound.
+        name: subscriberSettleTimeout
+        type: time.Duration
+        value: 5 * time.Second
+      - doc: |-
+          retryBase, retryCeiling and retryJitter are the curve a zero Retry
+          reads as: 100 ms doubling to 30 s, widened by up to a fifth.
+        name: retryBase
+        type: time.Duration
+        value: 100 * time.Millisecond
+      - name: retryCeiling
+        type: time.Duration
+        value: 30 * time.Second
+      - name: retryJitter
+        type: float64
+        value: "0.2"
+      - doc: retryMultiplier is the curve's growth factor.
+        name: retryMultiplier
+        type: float64
+        value: "2"
+    name: subscriberPollInterval
+  - doc: |-
+      renewShare is the part of a lease's life after which it is renewed: a
+      third, the queue consumer's AutoExtend cadence, so two renewals may fail
+      before the lease ends.
+    items:
+      - name: renewShare
+        type: int64
+        value: "3"
+    name: renewShare
 files:
   - decls:
       - admit
@@ -238,6 +379,117 @@ files:
       - (*memoryStream).drop
       - (*memoryStream).Trim
     name: memory_retain.go
+  - decls:
+      - sqlSweepEvery
+      - sqlStreamKey
+      - sqlWakes
+      - sqlStream
+      - NewSQL
+      - sqlWakeFor
+      - sqlOwnTxOptions
+      - (*sqlStream).Partitions
+      - (*sqlStream).Append
+      - (*sqlStream).write
+      - nullable
+      - (*sqlStream).run
+      - (*sqlStream).announce
+      - (*sqlStream).failed
+      - sqlNameable
+      - (*sqlStream).cutoff
+    name: sql.go
+  - decls:
+      - (*sqlStream).Commit
+      - (*sqlStream).headNext
+      - (*sqlStream).Committed
+    name: sql_commit.go
+  - decls:
+      - _#3
+    name: sql_compliance.go
+  - decls:
+      - sqlHeadsSuffix
+      - sqlMaxTableLen
+      - sqlReservedPrefix
+      - sqlTablePattern
+      - SQLConfig
+      - sqlParts
+      - (*SQLConfig).validate
+      - validateSQLNames
+      - sqlMisconfigured
+      - sqlClockOrSystem
+    name: sql_config.go
+  - decls:
+      - sqlRecordArgs
+      - sqlRowsPerStatement
+      - sqlOffsetsPerDelete
+      - sqlStatements
+      - renderSQLStatements
+      - lockHeadStatement
+      - commitStatement
+      - (*sqlStatements).insertRows
+      - (*sqlStatements).insertFor
+      - createStreamTableStatements
+      - dropStreamTableStatements
+      - sqlMigrationPrefix
+      - SQLMigration
+    name: sql_dialect.go
+  - decls:
+      - (*sqlStream).checkPartition
+      - (*sqlStream).Read
+      - (*sqlStream).scanEntries
+      - nonEmpty
+      - (*sqlStream).Bounds
+      - (*sqlStream).OffsetAt
+      - (*sqlStream).headAndLowest
+      - (*sqlStream).Wake
+    name: sql_read.go
+  - decls:
+      - (*sqlStream).Trim
+      - (*sqlStream).raiseFloor
+      - (*sqlStream).release
+      - (*sqlStream).sweep
+    name: sql_retain.go
+  - decls:
+      - Subscribe
+      - subscriber
+      - cursor
+      - (*subscriber).run
+      - (*subscriber).follow
+      - (*subscriber).start
+      - (*subscriber).turn
+      - (*subscriber).limit
+      - (*subscriber).settle
+      - (*subscriber).handle
+      - (*subscriber).advance
+      - (*subscriber).sleep
+      - (*subscriber).settled
+      - (*subscriber).bound
+      - ignoreStop
+    name: subscribe.go
+  - decls:
+      - CommitMode
+      - CommitAfterHandler
+      - subscriberPollInterval
+      - Handler
+      - ParkConfig
+      - SubscriberConfig
+      - subscriberMisconfigured
+      - SubscriberConfig.validate
+      - SubscriberConfig.missing
+      - SubscriberConfig.normalized
+    name: subscribe_config.go
+  - decls:
+      - renewShare
+      - heldFence
+      - (*subscriber).fenceName
+      - (*subscriber).acquire
+      - (*subscriber).renew
+      - (*subscriber).bounded
+      - (*subscriber).release
+    name: subscribe_fence.go
+  - decls:
+      - (*subscriber).narrowOrPark
+      - (*subscriber).park
+    name: subscribe_park.go
   - decls:
       - wakeSignal
       - newWakeSignal
@@ -472,14 +724,126 @@ functions:
     name: clockOrSystem
     params: clk clock.Timed
     results: clock.Timed
+  - name: NewSQL
+    params: cfg SQLConfig
+    results: s corestream.Stream, err error
+  - doc: |-
+      sqlWakeFor returns the signal every engine over join's pool and table
+      shares in this process — or one of its own when the pool cannot key a map.
+    name: sqlWakeFor
+    params: join coresql.Joiner, table string
+    results: "*wakeSignal"
+  - doc: |-
+      sqlOwnTxOptions are the options of a transaction the engine opens itself:
+      READ COMMITTED on MySQL, whose REPEATABLE READ takes gap locks no statement
+      here needs (ADR 0139); every other engine keeps its default.
+    name: sqlOwnTxOptions
+    params: dialect coresql.Dialect
+    results: coresql.TxOptionsValue
+  - doc: |-
+      nullable binds an empty key or payload as NULL, which reads back as nil,
+      as the memory engine keeps an empty one.
+    name: nullable
+    params: b []byte
+    results: "[]byte"
+  - doc: |-
+      sqlNameable reports whether an instant fits 64-bit Unix nanoseconds, the
+      unit every instant of the tables is kept in.
+    name: sqlNameable
+    params: t time.Time
+    results: bool
+  - doc: |-
+      validateSQLNames refuses a dialect the engine cannot spell and a table name
+      it could not interpolate safely.
+    name: validateSQLNames
+    params: dialect coresql.Dialect, table string
+    results: error
+  - doc: sqlMisconfigured is SQLStreamMisconfigured naming a field and its problem.
+    name: sqlMisconfigured
+    params: field, problem string
+    results: error
+  - doc: sqlClockOrSystem resolves a nil clock to the wall clock.
+    name: sqlClockOrSystem
+    params: clk clock.Clock
+    results: clock.Clock
+  - doc: |-
+      renderSQLStatements renders every fixed statement of the stream keeping its
+      records in table on dialect. The table name was validated at NewSQL.
+    name: renderSQLStatements
+    params: dialect coresql.Dialect, table string
+    results: sqlStatements
+  - doc: |-
+      lockHeadStatement renders the upsert that creates a partition's head row
+      at offset zero when it is missing, and otherwise locks it by writing it
+      back unchanged — the row lock that serialises a partition's appenders on
+      PostgreSQL and MySQL, and the first write of the transaction on SQLite.
+      PostgreSQL wants the existing row's column qualified by its table, SQLite
+      names it bare, MySQL has no ON CONFLICT.
+    name: lockHeadStatement
+    params: dialect coresql.Dialect, h string
+    results: string
+  - doc: |-
+      commitStatement renders the upsert of a group's cursor: the digest of the
+      group, the partition, the offset, the group's name for an operator reading
+      the table, and the offset again for the update — bound twice rather than
+      read back from the insertion, which MySQL spells only with a deprecated
+      VALUES().
+    name: commitStatement
+    params: dialect coresql.Dialect, c string
+    results: string
+  - doc: |-
+      createStreamTableStatements renders the DDL that creates a stream's three
+      tables, each statement doing nothing when its table exists, so a migration
+      run twice — MySQL commits DDL implicitly, so a run can stop between them —
+      changes nothing the second time.
+
+      The UNIQUE constraint on (part, appended_at, record_offset) can never be
+      broken, since (part, record_offset) is the key: it builds the index
+      OffsetAt and the age bound walk, which PostgreSQL and SQLite declare no
+      other way inside CREATE TABLE. A key and a payload admit NULL, which an
+      empty one is written as and read back from.
+    name: createStreamTableStatements
+    params: dialect coresql.Dialect, table string
+    results: "[]string"
+  - doc: |-
+      dropStreamTableStatements renders the reversal of
+      createStreamTableStatements, doing nothing for a table already gone.
+    name: dropStreamTableStatements
+    params: dialect coresql.Dialect, table string
+    results: "[]string"
+  - name: SQLMigration
+    params: dialect coresql.Dialect, table string, version uint64
+    results: coresql.MigrationValue, error
+  - doc: |-
+      nonEmpty reads an empty column back as nil, as the memory engine keeps an
+      empty key or payload.
+    name: nonEmpty
+    params: b []byte
+    results: "[]byte"
+  - name: Subscribe
+    params: ctx context.Context, s corestream.Stream, cfg SubscriberConfig
+    results: error
+  - doc: ignoreStop reads a failure that is the subscriber's own stop as a stop.
+    name: ignoreStop
+    params: ctx context.Context, cause error
+    results: error
+  - doc: subscriberMisconfigured refuses the configuration field names.
+    name: subscriberMisconfigured
+    params: field string
+    results: error
   - doc: newWakeSignal returns a signal with its first channel armed.
     name: newWakeSignal
     results: "*wakeSignal"
 imports:
+  atomic: sync/atomic
+  backoff: github.com/kitsunium/sdk/internal/kernel/backoff
   binary: encoding/binary
   bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
+  corelock: github.com/kitsunium/sdk/internal/core/app/lock
+  corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+  coresql: github.com/kitsunium/sdk/internal/core/data/sql
   corestream: github.com/kitsunium/sdk/internal/core/data/stream
   corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
   errors: errors
@@ -487,16 +851,22 @@ imports:
   filepath: path/filepath
   flock: github.com/kitsunium/sdk/internal/kernel/fs/flock
   fs: io/fs
+  group: github.com/kitsunium/sdk/internal/kernel/concur/group
   hex: encoding/hex
   io: io
+  json: encoding/json
   math: math
   os: os
+  reflect: reflect
+  regexp: regexp
   seglog: github.com/kitsunium/sdk/internal/kernel/fs/seglog
   sha256: crypto/sha256
   slices: slices
   sort: sort
+  stdsql: database/sql
   strconv: strconv
   strings: strings
+  svcsql: github.com/kitsunium/sdk/internal/service/data/sql
   svcvfs: github.com/kitsunium/sdk/internal/service/data/vfs
   sync: sync
   time: time
@@ -1136,6 +1506,697 @@ types:
     kind: struct
     name: MemoryConfig
   - doc: |-
+      sqlStreamKey names one stream for the process's wake table: the database
+      pool and the records' table. Two engines over both are one stream.
+    fields:
+      - doc: pool is the executor a context with no transaction runs on.
+        name: pool
+        type: coresql.Executor
+      - doc: table is the records' table.
+        name: table
+        type: string
+    kind: struct
+    name: sqlStreamKey
+  - doc: |-
+      sqlStream is a stream kept in three tables of the caller's own database.
+
+      # Why the caller's database, and what that buys
+
+      An Append joins the transaction its context carries (ADR 0151), so its
+      records exist if and only if that transaction commits: the outbox, for a
+      log. A Commit does the same, so a handler that commits its group's offset
+      on its own transaction's context has its effect and its offset in one
+      commit — exactly-once in effect.
+
+      # Why offsets commit in order
+
+      The head row of a partition is locked by the Append's first statement and
+      held until its transaction ends, so a second appender of that partition
+      waits for the first to commit or roll back and then reads the next offset
+      the first left. Offsets are therefore assigned in commit order, and a
+      reader never sees offset n+1 committed while n is not — it cannot skip a
+      record that commits later. Appenders of different partitions do not wait
+      on one another.
+    fields:
+      - name: tm
+        type: coresql.Transactor
+      - name: clk
+        type: clock.Clock
+      - name: tx
+        type: sqlParts
+      - doc: |-
+          wake is shared by every engine over the same pool and table in this
+          process.
+        name: wake
+        type: "*wakeSignal"
+      - doc: table is the records' table, which every storage failure names.
+        name: table
+        type: string
+      - doc: |-
+          swept is, per partition, when this engine last released its expired
+          records, in Unix nanoseconds on its clock.
+        name: swept
+        type: "[]atomic.Int64"
+      - name: stmts
+        type: sqlStatements
+      - name: own
+        type: coresql.TxOptionsValue
+      - name: policy
+        type: corestream.PolicyValue
+      - doc: turn counts the unkeyed batches, which go to the partitions in turn.
+        name: turn
+        type: atomic.Uint64
+    kind: struct
+    methods:
+      - doc: Partitions returns how many partitions the stream has.
+        name: Partitions
+        recv: s *sqlStream
+        results: int
+      - doc: |-
+          Append writes records to one partition as one batch, in the transaction its
+          context carries or in one of its own.
+        name: Append
+        params: |2
+
+          	ctx context.Context, records []corestream.RecordValue,
+        recv: s *sqlStream
+        results: corestream.AppendValue, error
+      - doc: |-
+          write sends an Append's statements on ex: the head locked, then read, the
+          records inserted a chunk at a time, the head moved past them. Every record
+          of the batch is stamped with one instant, never before the partition's
+          previous batch.
+        name: write
+        params: |2
+
+          	ctx context.Context, ex coresql.Executor, partition int, records []corestream.RecordValue, now int64,
+        recv: s *sqlStream
+        results: corestream.AppendValue, error
+      - doc: |-
+          run runs a call's statements where they belong, as the queue's SQL broker
+          does (ADR 0151): inside the caller's transaction every call is a savepoint
+          of it, so its failure undoes it alone and leaves that transaction usable;
+          outside one, a call of several statements runs in a transaction of the
+          engine's own, and a call of one statement on the pool.
+        name: run
+        params: ctx context.Context, several bool, work coresql.TxFunc
+        recv: s *sqlStream
+        results: error
+      - doc: |-
+          announce wakes this stream's readers once the transaction ctx carries has
+          committed — at once when the call ran in a transaction of its own, which
+          has.
+        name: announce
+        params: ctx context.Context
+        recv: s *sqlStream
+      - doc: |-
+          failed is StreamBackendFailed for step, with the driver's error beside it
+          and its text withheld by service/data/sql's Withheld: JOINED rather than
+          wrapped, so the verdict's code stays the origin whatever the driver's chain
+          holds, and a record's bytes a driver quotes never reach a rendering.
+        name: failed
+        params: step string, cause error
+        recv: s *sqlStream
+        results: error
+      - doc: |-
+          cutoff returns the instant a record must be appended after to be readable
+          at now: RetainFor before now, or the dawn of int64 with no age bound.
+        name: cutoff
+        params: now time.Time
+        recv: s *sqlStream
+        results: int64
+      - doc: |-
+          Commit records next as the offset group reads next on partition, in the
+          transaction its context carries — so a handler that commits on its own
+          transaction's context commits its effect and its offset together — or on
+          the pool.
+
+          The partition's next offset is read first, unlocked: it only ever grows, so
+          a next at or below the value read is at or below the true one.
+        name: Commit
+        params: |2
+
+          	ctx context.Context, group string, partition int, next corestream.Offset,
+        recv: s *sqlStream
+        results: error
+      - doc: headNext reads partition's next offset, zero for a partition never written.
+        name: headNext
+        params: ctx context.Context, partition int
+        recv: s *sqlStream
+        results: corestream.Offset, error
+      - doc: Committed returns the offset group committed last on partition.
+        name: Committed
+        params: |2
+
+          	ctx context.Context, group string, partition int,
+        recv: s *sqlStream
+        results: corestream.Offset, error
+      - doc: checkPartition refuses a partition outside [0, Partitions()).
+        name: checkPartition
+        params: partition int
+        recv: s *sqlStream
+        results: error
+      - doc: |-
+          Read returns up to maxEntries entries of partition from offset from on, in
+          ONE unlocked statement on the executor the context's transaction joins —
+          the pool outside one.
+
+          The statement answers the head's next offset beside the readable records
+          from from on. Records are stored contiguously from the head's floor and
+          stamped in offset order, so the readable ones are a suffix: when the first
+          row returned is past from, from was trimmed or expired, and that row is the
+          first retained offset; when no record is returned, the partition holds
+          nothing readable at or after from, and its next offset is the first
+          retained.
+        name: Read
+        params: |2
+
+          	ctx context.Context, partition int, from corestream.Offset, maxEntries int,
+        recv: s *sqlStream
+        results: "[]corestream.EntryValue, error"
+      - doc: |-
+          scanEntries reads the rows of the read statement: the head's next offset on
+          each, a record on each but the lone row of a partition with none readable.
+          A partition never written has no head row, and its next offset is zero.
+        name: scanEntries
+        params: |2
+
+          	rows *stdsql.Rows, partition, maxEntries int,
+        recv: s *sqlStream
+        results: entries []corestream.EntryValue, next corestream.Offset, err error
+      - doc: Bounds returns partition's first retained offset and its next one.
+        name: Bounds
+        params: ctx context.Context, partition int
+        recv: s *sqlStream
+        results: corestream.BoundsValue, error
+      - doc: OffsetAt returns partition's first readable offset appended at or after t.
+        name: OffsetAt
+        params: |2
+
+          	ctx context.Context, partition int, t time.Time,
+        recv: s *sqlStream
+        results: corestream.Offset, error
+      - doc: |-
+          headAndLowest runs a statement answering the head's next offset and the
+          lowest offset matching it, and resolves a partition with no head, or no
+          matching record, to its next offset.
+        name: headAndLowest
+        params: |2
+
+          	ctx context.Context, statement, step string, args ...any,
+        recv: s *sqlStream
+        results: next, lowest corestream.Offset, err error
+      - doc: |-
+          Wake returns the channel the next committed Append through any engine over
+          this stream in this process closes.
+        name: Wake
+        recv: s *sqlStream
+        results: <-chan struct{}
+      - doc: |-
+          Trim makes before the first offset partition retains.
+
+          The head's floor is raised in one statement under the head's lock, so every
+          record below before is unreadable from the commit of that statement — at
+          once outside a transaction, at the caller's commit inside one. The rows
+          themselves are then deleted in bounded statements, each a savepoint of the
+          caller's transaction or a statement of its own: a failure there leaves rows
+          nobody can read, which the next Trim or age sweep deletes.
+        name: Trim
+        params: ctx context.Context, partition int, before corestream.Offset
+        recv: s *sqlStream
+        results: error
+      - doc: |-
+          raiseFloor locks partition's head, refuses a before past its next offset,
+          and raises its floor to before when that is higher. It reports whether the
+          floor moved.
+        name: raiseFloor
+        params: |2
+
+          	ctx context.Context, ex coresql.Executor, partition int, before corestream.Offset,
+        recv: s *sqlStream
+        results: bool, error
+      - doc: |-
+          release deletes partition's stored records below target, at most
+          sqlOffsetsPerDelete offsets per statement, from the lowest stored one up.
+          Every record it deletes is already unreadable.
+        name: release
+        params: ctx context.Context, partition int, target int64
+        recv: s *sqlStream
+        results: error
+      - doc: |-
+          sweep releases partition's records past RetainFor once its last sweep by
+          this engine is older than the sweep period. They are unreadable already —
+          every read filters them by age — so a sweep only gives their storage back,
+          and a sweep that fails is retried by the next one due: an Append that
+          committed is not reported as failed for it.
+        name: sweep
+        params: ctx context.Context, partition int, now time.Time
+        recv: s *sqlStream
+    name: sqlStream
+  - fields:
+      - doc: |-
+          Transactor is the transaction manager of the database the stream
+          lives in — the one the caller's own transactions are opened with, so
+          a call made under one of them joins it. It must also be a
+          core/data/sql Joiner and Deferrer, which the SDK's own transactor
+          is: the first is how an Append or a Commit joins the caller's
+          transaction, the second how the Waker fires only once that
+          transaction has committed.
+        name: Transactor
+        type: coresql.Transactor
+      - doc: |-
+          Dialect is the engine's, and must be the Transactor's own: the SQL
+          the stream speaks to it.
+        name: Dialect
+        type: coresql.Dialect
+      - doc: |-
+          Table names the records' table; the heads and the cursors are kept
+          in Table__heads and Table__cursors, which [SQLMigration] creates
+          with it. It is a lower-case SQL identifier of at most 54 bytes —
+          PostgreSQL's 63 less the longest suffix —, words of letters and
+          digits joined by single underscores, starting with a letter and not
+          with "sqlite_". Two streams over one database and one Table, in one
+          process or in twenty, are ONE stream.
+        name: Table
+        type: string
+      - doc: |-
+          Policy is what the stream enforces; its zero value works. Its
+          RetainBytes and MaxBytes must be zero: the engine keeps no byte
+          count. Its Partitions must stay the same for the life of the
+          tables: a key's partition is its hash modulo that number.
+        name: Policy
+        type: corestream.PolicyValue
+      - doc: |-
+          Clock stamps [corestream.EntryValue].AppendedAt and ages records for
+          [corestream.PolicyValue].RetainFor. The instants are the ENGINE's,
+          never the database's NOW(), so a test drives retention with a
+          ManualClock; engines in several processes over one table compare
+          instants their own clocks wrote, and a batch is never stamped before
+          the partition's previous one. Nil means clock.System.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          validate refuses a configuration no SQL stream could run, before any
+          statement is sent, and returns what the engine needs of its transactor.
+        name: validate
+        recv: c *SQLConfig
+        results: sqlParts, error
+    name: SQLConfig
+  - doc: |-
+      sqlParts are the two capabilities the SQL engine needs of its transactor,
+      found once at NewSQL.
+    fields:
+      - doc: join says where a statement issued under a context runs.
+        name: join
+        type: coresql.Joiner
+      - doc: hold keeps a wake until the transaction an Append joined commits.
+        name: hold
+        type: coresql.Deferrer
+    kind: struct
+    name: sqlParts
+  - doc: |-
+      sqlStatements are the statements one SQL stream sends, rendered once for
+      its dialect and tables at NewSQL; only an INSERT shorter than a full chunk
+      is rendered per call.
+
+      The records' table keeps one row per record, keyed (part, record_offset).
+      The heads table keeps one row per partition that was ever written: the
+      next offset, the floor below which Trim made every record unreadable, and
+      the instant of the last batch — the row an Append locks, which serialises
+      the appenders of one partition so its offsets commit in order. The cursors
+      table keeps one row per group and partition, the group keyed by its
+      SHA-256 so no group name is too long for a key.
+    fields:
+      - doc: |-
+          lockHead creates the partition's head row when it is missing and
+          locks it in every case: an upsert whose update writes the row back as
+          it is. It is the Append's and the Trim's first statement, so on
+          SQLite it is also the write that takes the database's write lock
+          before anything is read (ADR 0140).
+        name: lockHead
+        type: string
+      - doc: "head reads the locked head row: next offset, floor, last instant."
+        name: head
+        type: string
+      - doc: insertFull inserts a full chunk of sqlRowsPerStatement records.
+        name: insertFull
+        type: string
+      - doc: advance moves the head past a batch and records its instant.
+        name: advance
+        type: string
+      - doc: floor raises the head's floor to a Trim's offset.
+        name: floor
+        type: string
+      - doc: |-
+          read reads the head and up to a bound of records from an offset, one
+          unlocked statement: the head row LEFT JOINed with the readable
+          records, so a partition with no record still answers its next offset.
+        name: read
+        type: string
+      - doc: bounds reads the head's next offset and the lowest readable record.
+        name: bounds
+        type: string
+      - doc: |-
+          offsetAt reads the head's next offset and the lowest readable record
+          appended at or after an instant.
+        name: offsetAt
+        type: string
+      - doc: lowest reads the lowest offset a partition still stores.
+        name: lowest
+        type: string
+      - doc: release deletes a partition's records below an offset.
+        name: release
+        type: string
+      - doc: headNext reads a partition's next offset, unlocked.
+        name: headNext
+        type: string
+      - doc: commit writes a group's cursor, replacing the one it had.
+        name: commit
+        type: string
+      - doc: committed reads a group's cursor.
+        name: committed
+        type: string
+      - doc: records is the records' quoted table.
+        name: records
+        type: string
+      - doc: dialect selects the placeholder grammar of the per-call INSERT.
+        name: dialect
+        type: coresql.Dialect
+    kind: struct
+    methods:
+      - doc: insertRows renders the insertion of n records, five placeholders each.
+        name: insertRows
+        params: n int
+        recv: s *sqlStatements
+        results: string
+      - doc: |-
+          insertFor returns the insertion of n records: the full chunk rendered at
+          NewSQL, or one rendered now for a shorter one.
+        name: insertFor
+        params: n int
+        recv: s *sqlStatements
+        results: string
+    name: sqlStatements
+  - doc: |-
+      subscriber is what every worker of one Subscribe shares; nothing in it
+      changes after Subscribe built it.
+    fields:
+      - name: stream
+        type: corestream.Stream
+      - name: committer
+        type: corestream.Committer
+      - doc: waker is the stream's, nil when it has none.
+        name: waker
+        type: corestream.Waker
+      - name: cfg
+        type: SubscriberConfig
+    kind: struct
+    methods:
+      - doc: |-
+          run is one partition's worker: hold its fence, follow the partition, and
+          ask again for a fence lost.
+        name: run
+        params: ctx context.Context, partition int
+        recv: w *subscriber
+        results: error
+      - doc: |-
+          follow reads the partition from the group's offset until ctx ends, the
+          fence is lost (nil), or the medium refuses (its error).
+        name: follow
+        params: ctx context.Context, c *cursor
+        recv: w *subscriber
+        results: error
+      - doc: |-
+          start returns the offset the group reads first on partition: the one it
+          committed, or the first retained when it never committed.
+        name: start
+        params: ctx context.Context, partition int
+        recv: w *subscriber
+        results: corestream.Offset, error
+      - doc: |-
+          turn reads the batch at the cursor and hands it to the handler, or waits
+          when the partition holds nothing past it.
+        name: turn
+        params: ctx context.Context, c *cursor
+        recv: w *subscriber
+        results: error
+      - doc: |-
+          limit is how many records the next Read asks for: one while the cursor is
+          inside a batch the park narrowed.
+        name: limit
+        params: c *cursor
+        recv: w *subscriber
+        results: int
+      - doc: |-
+          settle runs the handler over entries and acts on its verdict: the offset
+          moves past an accepted batch, a refused one is retried, narrowed or
+          parked.
+        name: settle
+        params: ctx context.Context, c *cursor, entries []corestream.EntryValue
+        recv: w *subscriber
+        results: error
+      - doc: |-
+          handle runs the handler, a panic read as a refusal, and reports whether it
+          accepted the batch.
+        name: handle
+        params: ctx context.Context, entries []corestream.EntryValue
+        recv: w *subscriber
+        results: accepted bool
+      - doc: |-
+          advance commits past as the group's next offset on the cursor's partition
+          and moves the cursor there; a fence that cannot be renewed first leaves
+          both where they are.
+        name: advance
+        params: ctx context.Context, c *cursor, past corestream.Offset
+        recv: w *subscriber
+        results: error
+      - doc: sleep waits for the first of ctx's end, signal and d on the clock.
+        name: sleep
+        params: ctx context.Context, signal <-chan struct{}, d time.Duration
+        recv: w *subscriber
+      - doc: |-
+          settled runs call on ctx without its cancellation, bounded by
+          SettleTimeout on the clock from the instant ctx ends.
+        name: settled
+        params: ctx context.Context, call func(context.Context) error
+        recv: w *subscriber
+        results: error
+      - doc: |-
+          bound cancels a settling call SettleTimeout after ctx ends, unless it is
+          done first.
+        name: bound
+        params: ctx context.Context, done <-chan struct{}, cancel context.CancelFunc
+        recv: w *subscriber
+      - doc: fenceName is the lock a worker holds on partition.
+        name: fenceName
+        params: partition int
+        recv: w *subscriber
+        results: string
+      - doc: |-
+          acquire takes the partition's fence once: held false when another process
+          holds it. Without a Fence every partition is held, by a nil fence.
+        name: acquire
+        params: ctx context.Context, partition int
+        recv: w *subscriber
+        results: "*heldFence, bool, error"
+      - doc: |-
+          renew renews fence when its renewal is due and reports whether it is still
+          held; no fence is always held.
+        name: renew
+        params: ctx context.Context, fence *heldFence
+        recv: w *subscriber
+        results: bool
+      - doc: |-
+          bounded shortens a wait of d to the fence's next renewal, so a long wait
+          never outlasts the lease it is held under.
+        name: bounded
+        params: d time.Duration, fence *heldFence
+        recv: w *subscriber
+        results: time.Duration
+      - doc: |-
+          release gives the fence up, bounded past a stop; a lease already lost
+          releases nothing, which is not a failure.
+        name: release
+        params: ctx context.Context, fence *heldFence
+        recv: w *subscriber
+      - doc: |-
+          narrowOrPark acts on a batch refused Park.After times: a batch of several
+          records is narrowed to its first, so the record that fails is found one
+          at a time; a single record is parked and the group's offset committed
+          past it.
+        name: narrowOrPark
+        params: ctx context.Context, c *cursor, entries []corestream.EntryValue
+        recv: w *subscriber
+        results: error
+      - doc: "park publishes entry to the park's queue as a dead letter: its JSON."
+        name: park
+        params: ctx context.Context, entry corestream.EntryValue
+        recv: w *subscriber
+        results: error
+    name: subscriber
+  - doc: cursor is one worker's position on its partition.
+    fields:
+      - doc: fence is the lease the worker reads under, nil without a Fence.
+        name: fence
+        type: "*heldFence"
+      - doc: retryAt is when a refused batch may be delivered again.
+        name: retryAt
+        type: time.Time
+      - doc: |-
+          narrowUntil is the offset below which batches are one record: the
+          end of a batch the park narrowed.
+        name: narrowUntil
+        type: corestream.Offset
+      - name: partition
+        type: int
+      - doc: next is the offset read next.
+        name: next
+        type: corestream.Offset
+      - doc: failures counts the consecutive refusals of the batch at next.
+        name: failures
+        type: int
+    kind: struct
+    name: cursor
+  - kind: named
+    name: CommitMode
+    underlying: uint8
+  - kind: named
+    name: Handler
+    underlying: func(ctx context.Context, entries []corestream.EntryValue) error
+  - fields:
+      - doc: |-
+          After is how many consecutive refusals park a record: a batch
+          refused After times is narrowed to its first record, and a record
+          refused After times alone is parked. Below 1 it is read as 1.
+        name: After
+        type: int
+      - doc: |-
+          Broker is the queue the dead letters are published to. It must be
+          non-nil; its MaxMessageBytes must hold the JSON of the largest
+          record, or the park is refused and Subscribe returns that refusal.
+        name: Broker
+        type: corequeue.Broker
+    kind: struct
+    name: ParkConfig
+  - fields:
+      - doc: |-
+          BatchSize is the most records one Read hands the handler. Below 1
+          it is read as 1.
+        name: BatchSize
+        type: int
+      - doc: |-
+          Clock times the idle wait, the retry wait, the bound on what is sent
+          past a stop and the fence's renewals. Nil means clock.System;
+          nothing in the subscriber calls time.Sleep.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          Commit is who moves the offset past an accepted batch:
+          [CommitAfterHandler], the zero, or [CommitByHandler]. Any other
+          value is refused.
+        name: Commit
+        type: CommitMode
+      - doc: |-
+          Fence, when set, makes each worker hold the lock
+          "stream:<Name>:<Group>:<partition>" while it reads its partition,
+          so the same group in two processes never reads one partition
+          twice at once. Nil fences nothing: one process runs the group.
+        name: Fence
+        type: corelock.Locker
+      - doc: |-
+          Group names the consumer group whose offsets are read and
+          committed. It must not be empty; two groups over one stream read
+          every record each, at their own pace.
+        name: Group
+        type: string
+      - doc: Handler processes each batch. It must be non-nil.
+        name: Handler
+        type: Handler
+      - doc: |-
+          HandlerIsIdempotent asserts, in code, that Handler is safe to run
+          more than once for the same records. It must be true; its zero is
+          refused, as queue.ConsumerConfig's is: under [CommitAfterHandler]
+          a batch is delivered at least once, and under [CommitByHandler]
+          the assertion is that the handler's effect and its commit are one
+          transaction, which the SDK cannot see either.
+        name: HandlerIsIdempotent
+        type: bool
+      - doc: |-
+          Name names the stream in the fence's lock names. It is required
+          when Fence is set, and read for nothing else.
+        name: Name
+        type: string
+      - doc: |-
+          Park, when set, sends a record its handler keeps refusing to a
+          queue and moves past it. Nil retries forever: the partition stays
+          blocked until the handler accepts.
+        name: Park
+        type: "*ParkConfig"
+      - doc: |-
+          Partitions are the partitions this subscriber reads, one worker
+          each: static assignment, two processes splitting a group naming
+          disjoint sets (or both every partition, under Fence). Empty means
+          every partition of the stream; a partition outside it, or named
+          twice, is refused.
+        name: Partitions
+        type: "[]int"
+      - doc: |-
+          PollInterval bounds how long an idle worker waits before reading
+          again: the stream's Waker ends the wait at once on an Append in this
+          process, so it bounds only what another process appended. Zero, or
+          negative, means 100 ms.
+        name: PollInterval
+        type: time.Duration
+      - doc: |-
+          Retry is the wait between two deliveries of a refused batch, its
+          attempt counting the consecutive refusals. A zero BaseDelay means
+          100 ms doubling to 30 s with a fifth of jitter: a curve with no wait
+          would spin on a failing handler.
+        name: Retry
+        type: backoff.Value
+      - doc: |-
+          SettleTimeout bounds each commit, dead letter and fence release
+          sent once ctx has ended, on Clock. Zero, or negative, means 5 s.
+        name: SettleTimeout
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: |-
+          validate refuses a subscriber that could never run correctly over a stream
+          of partitions partitions.
+        name: validate
+        params: partitions int
+        recv: c SubscriberConfig
+        results: error
+      - doc: missing names the first required field c lacks, or returns "".
+        name: missing
+        recv: c SubscriberConfig
+        results: string
+      - doc: |-
+          normalized resolves the clamped fields, the partitions included, so every
+          worker reads the same numbers.
+        name: normalized
+        params: partitions int
+        recv: c SubscriberConfig
+        results: SubscriberConfig
+    name: SubscriberConfig
+  - doc: heldFence is the lease a worker reads its partition under.
+    fields:
+      - name: lease
+        type: corelock.Lease
+      - doc: |-
+          renewAt is when the lease is renewed next; zero for a lease that
+          cannot expire, which is never renewed.
+        name: renewAt
+        type: time.Time
+      - doc: every is the time between two renewals.
+        name: every
+        type: time.Duration
+    kind: struct
+    name: heldFence
+  - doc: |-
       wakeSignal is a broadcast: every reader waiting on the channel wakes when it
       is closed, and a fresh channel is armed for the next wait. A channel closed
       and replaced, rather than one value sent, is what makes it a broadcast — a
@@ -1204,3 +2265,45 @@ vars:
         type: corestream.Committer
         value: (*memoryStream)(nil)
     name: _#2
+  - doc: |-
+      sqlWakes is the process's table of SQL streams, so every engine over one
+      stream in this process wakes the readers of every other.
+    items:
+      - name: sqlWakes
+        value: |-
+          struct {
+          	signals map[sqlStreamKey]*wakeSignal
+          	mu      sync.Mutex
+          }{signals: map[sqlStreamKey]*wakeSignal{}}
+    name: sqlWakes
+  - doc: |-
+      The SQL engine answers the port and four of its siblings; Compactor is
+      left to #824.
+    grouped: true
+    items:
+      - name: _
+        type: corestream.Stream
+        value: (*sqlStream)(nil)
+      - name: _
+        type: corestream.Waker
+        value: (*sqlStream)(nil)
+      - name: _
+        type: corestream.Seeker
+        value: (*sqlStream)(nil)
+      - name: _
+        type: corestream.Trimmer
+        value: (*sqlStream)(nil)
+      - name: _
+        type: corestream.Committer
+        value: (*sqlStream)(nil)
+    name: _#3
+  - doc: |-
+      sqlTablePattern is the only shape a Table may take: words of lower-case
+      letters and digits joined by single underscores. It is interpolated, quoted,
+      into every statement — an identifier cannot be a bound parameter — so this
+      pattern is the whole defence against an injection; and since it holds no
+      double underscore, no stream's table is ever another stream's derived one.
+    items:
+      - name: sqlTablePattern
+        value: regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
+    name: sqlTablePattern

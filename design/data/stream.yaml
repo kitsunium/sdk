@@ -688,7 +688,36 @@ packages:
             - doc: Payload is the record's bytes. It may be empty.
               name: Payload
               type: "[]byte"
-  - doc: |-
+  - constants:
+      - blockDoc: |-
+          The two ways [Subscribe] moves a group's offset past a batch its handler
+          accepted. The zero is the subscriber's own commit, which asks nothing of
+          the handler.
+        doc: |-
+          CommitAfterHandler is the zero CommitMode: once the handler returns nil,
+          the subscriber commits the offset after the batch's last record on the
+          stream's [corestream.Committer]. A stop or a crash between that return
+          and the commit delivers the batch again — at least once, on every engine.
+        name: CommitAfterHandler
+        type: CommitMode
+        value: "0"
+      - blockDoc: |-
+          The two ways [Subscribe] moves a group's offset past a batch its handler
+          accepted. The zero is the subscriber's own commit, which asks nothing of
+          the handler.
+        doc: |-
+          CommitByHandler leaves the commit to the handler, which calls the
+          stream's [corestream.Committer] Commit itself — the group, the batch's
+          partition, the offset after its last record — inside the transaction that
+          holds its effect. On the SQL engine the effect and the offset then commit
+          or roll back together: exactly-once in effect. On an engine whose cursors
+          live apart from the handler's effect — memory, file — it stays at least
+          once, the cursor durable after the handler. The subscriber commits
+          nothing for a batch the handler accepted, only past a record it parked.
+        name: CommitByHandler
+        type: CommitMode
+        value: "1"
+    doc: |-
       Package stream holds the engines of core/data/stream's [Stream] port —
       memory, a directory of segments over kernel/fs/seglog, and a SQL table
       joined to the caller's transaction — and the subscriber that reads a stream
@@ -790,12 +819,85 @@ packages:
         out:
           - type: coresql.MigrationValue
           - type: error
+      - doc: |-
+          Subscribe reads s on behalf of the consumer group cfg.Group until ctx
+          ends: one worker per partition it is assigned, each handing cfg.Handler
+          the partition's records in offset order, batch after batch, and moving
+          the group's offset past each batch the handler accepted. It is
+          internal/service/data/queue.Consume for a stream: the handler runs on a
+          goroutine Subscribe owns, a handler's error is never returned, and every
+          worker has returned before Subscribe does.
+
+          A worker starts at the offset the group committed on its partition, or
+          at the partition's first retained offset when the group never committed
+          there; an offset retention has since removed resumes at the first one
+          still kept, the records in between never delivered. It takes the
+          stream's [corestream.Waker] signal before each Read, so an Append in this
+          process wakes it at once, and waits at most cfg.PollInterval on cfg.Clock
+          for what another process appended.
+
+          # A failing handler blocks its partition, by design
+
+          A batch whose handler fails is handed to it again after the cfg.Retry
+          wait, and the partition goes no further until it is accepted: the records
+          of one key are delivered in the order they were appended, which is the
+          promise a stream makes and a queue does not (ADR 0054's deferred per-key
+          ordering, kept here as head-of-line blocking stated rather than hidden).
+          The other partitions carry on. With cfg.Park, a batch failing After times
+          is narrowed to its first record, and a record failing After times alone
+          is published to the park's queue as a dead letter and the group's offset
+          committed past it.
+
+          # What a stop or a crash leaves
+
+          A stop cancels the handler's context. A batch accepted as the stop lands
+          is still committed, on ctx without its cancellation, bounded by
+          cfg.SettleTimeout on cfg.Clock, as a dead letter is published and a fence
+          released. Under [CommitAfterHandler] a crash between the handler's return
+          and the commit delivers the batch again; under [CommitByHandler] on the
+          SQL engine, the commit being part of the handler's own transaction, there
+          is no such moment.
+
+          # Fencing
+
+          With cfg.Fence each worker holds the lock
+          "stream:<Name>:<Group>:<partition>" while it reads the partition, so two
+          processes running the same group over the same partitions never read one
+          partition at once: a worker whose lock is held elsewhere waits a
+          PollInterval and asks again. A lease that can expire is renewed a third
+          of its life after it was taken or last renewed; a renewal refused gives
+          the partition up — its batch is not committed — and the worker goes back
+          to asking for the lock, resuming at whatever the group committed.
+
+          It returns nil when ctx ends, [corestream.SubscriberMisconfigured] for a
+          configuration it cannot run, and the storage's error — the stream's, the
+          park's queue's, the fence's — when one of them refuses, which stops every
+          worker: a medium that has stopped answering is not one a subscriber can
+          poll its way out of.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: s
+            type: corestream.Stream
+          - name: cfg
+            type: SubscriberConfig
+        name: Subscribe
+        out:
+          - type: error
     imports:
+      backoff: github.com/kitsunium/sdk/internal/kernel/backoff
       clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corelock: github.com/kitsunium/sdk/internal/core/app/lock
+      corequeue: github.com/kitsunium/sdk/internal/core/data/queue
       coresql: github.com/kitsunium/sdk/internal/core/data/sql
       corestream: github.com/kitsunium/sdk/internal/core/data/stream
     path: github.com/kitsunium/sdk/internal/service/data/stream
     types:
+      - doc: |-
+          CommitMode is who moves a group's offset past a batch the handler
+          accepted: [CommitAfterHandler] (the zero) or [CommitByHandler].
+        name: CommitMode
+        underlying: uint8
       - doc: |-
           FileConfig configures [NewFile]: the directory that holds the stream, the
           clock that stamps and ages its records, and the policy it enforces.
@@ -829,6 +931,14 @@ packages:
               name: Policy
               type: corestream.PolicyValue
       - doc: |-
+          Handler processes one batch of a partition's records, in offset order:
+          entries is never empty and holds one partition only. A nil return
+          accepts the whole batch; an error, or a panic, refuses it, and the batch
+          is handed back after the retry wait. The entries' bytes are the
+          handler's for the call; a handler that keeps them past it copies them.
+        name: Handler
+        underlying: func(ctx context.Context, entries []corestream.EntryValue) error
+      - doc: |-
           MemoryConfig configures [NewMemory]: the policy it enforces and the clock
           that stamps every batch and times every wait.
         name: MemoryConfig
@@ -848,6 +958,26 @@ packages:
                 forever, never full.
               name: Policy
               type: corestream.PolicyValue
+      - doc: |-
+          ParkConfig sends the records a handler keeps refusing to a queue as dead
+          letters, so their partition moves on: the dead letter's payload is the
+          record's [corestream.EntryValue] encoded by encoding/json, which
+          json.Unmarshal decodes back into one.
+        name: ParkConfig
+        struct:
+          fields:
+            - doc: |-
+                After is how many consecutive refusals park a record: a batch
+                refused After times is narrowed to its first record, and a record
+                refused After times alone is parked. Below 1 it is read as 1.
+              name: After
+              type: int
+            - doc: |-
+                Broker is the queue the dead letters are published to. It must be
+                non-nil; its MaxMessageBytes must hold the JSON of the largest
+                record, or the park is refused and Subscribe returns that refusal.
+              name: Broker
+              type: corequeue.Broker
       - doc: |-
           SQLConfig configures [NewSQL]: the database the stream lives in, its
           tables, the clock that stamps its records, and the policy it enforces.
@@ -896,3 +1026,92 @@ packages:
                 the partition's previous one. Nil means clock.System.
               name: Clock
               type: clock.Clock
+      - doc: |-
+          SubscriberConfig configures [Subscribe]: the group, its handler and the
+          one promise about it the SDK cannot check, which partitions, how the
+          offset moves, and what a failure, a stop and a second process do.
+          Group, Handler and HandlerIsIdempotent are required; every other field's
+          zero works.
+        name: SubscriberConfig
+        struct:
+          fields:
+            - doc: |-
+                BatchSize is the most records one Read hands the handler. Below 1
+                it is read as 1.
+              name: BatchSize
+              type: int
+            - doc: |-
+                Clock times the idle wait, the retry wait, the bound on what is sent
+                past a stop and the fence's renewals. Nil means clock.System;
+                nothing in the subscriber calls time.Sleep.
+              name: Clock
+              type: clock.Timed
+            - doc: |-
+                Commit is who moves the offset past an accepted batch:
+                [CommitAfterHandler], the zero, or [CommitByHandler]. Any other
+                value is refused.
+              name: Commit
+              type: CommitMode
+            - doc: |-
+                Fence, when set, makes each worker hold the lock
+                "stream:<Name>:<Group>:<partition>" while it reads its partition,
+                so the same group in two processes never reads one partition
+                twice at once. Nil fences nothing: one process runs the group.
+              name: Fence
+              type: corelock.Locker
+            - doc: |-
+                Group names the consumer group whose offsets are read and
+                committed. It must not be empty; two groups over one stream read
+                every record each, at their own pace.
+              name: Group
+              type: string
+            - doc: Handler processes each batch. It must be non-nil.
+              name: Handler
+              type: Handler
+            - doc: |-
+                HandlerIsIdempotent asserts, in code, that Handler is safe to run
+                more than once for the same records. It must be true; its zero is
+                refused, as queue.ConsumerConfig's is: under [CommitAfterHandler]
+                a batch is delivered at least once, and under [CommitByHandler]
+                the assertion is that the handler's effect and its commit are one
+                transaction, which the SDK cannot see either.
+              name: HandlerIsIdempotent
+              type: bool
+            - doc: |-
+                Name names the stream in the fence's lock names. It is required
+                when Fence is set, and read for nothing else.
+              name: Name
+              type: string
+            - doc: |-
+                Park, when set, sends a record its handler keeps refusing to a
+                queue and moves past it. Nil retries forever: the partition stays
+                blocked until the handler accepts.
+              name: Park
+              type: "*ParkConfig"
+            - doc: |-
+                Partitions are the partitions this subscriber reads, one worker
+                each: static assignment, two processes splitting a group naming
+                disjoint sets (or both every partition, under Fence). Empty means
+                every partition of the stream; a partition outside it, or named
+                twice, is refused.
+              name: Partitions
+              type: "[]int"
+            - doc: |-
+                PollInterval bounds how long an idle worker waits before reading
+                again: the stream's Waker ends the wait at once on an Append in this
+                process, so it bounds only what another process appended. Zero, or
+                negative, means 100 ms.
+              name: PollInterval
+              type: time.Duration
+            - doc: |-
+                Retry is the wait between two deliveries of a refused batch, its
+                attempt counting the consecutive refusals. A zero BaseDelay means
+                100 ms doubling to 30 s with a fifth of jitter: a curve with no wait
+                would spin on a failing handler.
+              name: Retry
+              type: backoff.Value
+            - doc: |-
+                SettleTimeout bounds each commit, dead letter and fence release
+                sent once ctx has ended, on Clock. Zero, or negative, means 5 s.
+              name: SettleTimeout
+              type: time.Duration

@@ -108,3 +108,32 @@ read the same thousand records as `tail` does.)
 - **Linux is not measured here.** The figures are darwin's `F_FULLFSYNC`; a
   Linux `fdatasync` is usually far cheaper, and the ratio between the rows is
   what carries over.
+
+## The subscriber (#823)
+
+`Subscribe` over the memory engine, one group, one partition, records of
+64 B appended before the timer starts; each batch is committed after its
+handler (`CommitAfterHandler`). `ns/op` is per record delivered. Same
+machine, a load average of 16 to 30 on 10 cores; `-test.benchtime=1s`,
+`-count=3`, on `31f091c61` with #823's change applied, 2026-11-12. Run with
+`cd internal && GOWORK=off go test -run=NONE -bench='^BenchmarkSubscribe$' -benchmem -count=3 ./service/data/stream/`.
+
+```
+BenchmarkSubscribe/batch=1-10         	 1456220	      2681 ns/op	  23.87 MB/s	     432 B/op	       7 allocs/op
+BenchmarkSubscribe/batch=1-10         	 1000000	      1803 ns/op	  35.49 MB/s	     432 B/op	       7 allocs/op
+BenchmarkSubscribe/batch=1-10         	 1010025	      1685 ns/op	  37.99 MB/s	     433 B/op	       7 allocs/op
+BenchmarkSubscribe/batch=16-10        	 4337635	       432.3 ns/op	 148.06 MB/s	     177 B/op	       0 allocs/op
+BenchmarkSubscribe/batch=16-10        	 2007829	       676.2 ns/op	  94.65 MB/s	     177 B/op	       0 allocs/op
+BenchmarkSubscribe/batch=16-10        	 6861765	       245.3 ns/op	 260.95 MB/s	     177 B/op	       0 allocs/op
+BenchmarkSubscribe/batch=256-10       	16743651	       182.2 ns/op	 351.26 MB/s	     161 B/op	       0 allocs/op
+BenchmarkSubscribe/batch=256-10       	12409358	       201.3 ns/op	 317.93 MB/s	     161 B/op	       0 allocs/op
+BenchmarkSubscribe/batch=256-10       	28200126	       503.1 ns/op	 127.22 MB/s	     161 B/op	       0 allocs/op
+```
+
+- **The cost is per batch, not per record.** A turn is a Wake, a Read (its
+  two allocations), the handler, and a Commit (the memory engine's cursor
+  map) — seven allocations a batch, which the per-record rows of 16 and 256
+  round down to zero. Batching takes a record from about 1.7 µs to 0.2 µs.
+- **The noise is the machine's.** The spread inside each row (245 to 676 ns,
+  182 to 503 ns) is the load of the other build lanes; re-run on a quiet
+  machine before quoting a figure. The allocation count is what travels.

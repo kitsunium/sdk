@@ -82382,6 +82382,44 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.CommitAfterHandler",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "CommitAfterHandler",
+      "spelled": "CommitMode",
+      "canonical": "github.com/kitsunium/sdk/internal/service/data/stream.CommitMode",
+      "value": "0",
+      "doc": "CommitAfterHandler is the zero CommitMode: once the handler returns nil,\nthe subscriber commits the offset after the batch's last record on the\nstream's [corestream.Committer]. A stop or a crash between that return\nand the commit delivers the batch again — at least once, on every engine.\n",
+      "file": "service/data/stream/subscribe_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.CommitByHandler",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "CommitByHandler",
+      "spelled": "CommitMode",
+      "canonical": "github.com/kitsunium/sdk/internal/service/data/stream.CommitMode",
+      "value": "1",
+      "doc": "CommitByHandler leaves the commit to the handler, which calls the\nstream's [corestream.Committer] Commit itself — the group, the batch's\npartition, the offset after its last record — inside the transaction that\nholds its effect. On the SQL engine the effect and the offset then commit\nor roll back together: exactly-once in effect. On an engine whose cursors\nlive apart from the handler's effect — memory, file — it stays at least\nonce, the cursor durable after the handler. The subscriber commits\nnothing for a batch the handler accepted, only past a record it parked.\n",
+      "file": "service/data/stream/subscribe_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.CommitMode",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "CommitMode",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "CommitMode is who moves a group's offset past a batch the handler\naccepted: [CommitAfterHandler] (the zero) or [CommitByHandler].\n",
+      "file": "service/data/stream/subscribe_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.FileConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/data/stream",
@@ -82407,6 +82445,18 @@
       ],
       "doc": "FileConfig configures [NewFile]: the directory that holds the stream, the\nclock that stamps and ages its records, and the policy it enforces.\n",
       "file": "service/data/stream/file_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.Handler",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "Handler",
+      "spelled": "func(ctx context.Context, entries []corestream.EntryValue) error",
+      "canonical": "func(ctx context.Context, entries []github.com/kitsunium/sdk/internal/core/data/stream.EntryValue) error",
+      "doc": "Handler processes one batch of a partition's records, in offset order:\nentries is never empty and holds one partition only. A nil return\naccepts the whole batch; an error, or a panic, refuses it, and the batch\nis handed back after the retry wait. The entries' bytes are the\nhandler's for the call; a handler that keeps them past it copies them.\n",
+      "file": "service/data/stream/subscribe_config.go",
       "layer": "service",
       "family": "data"
     },
@@ -82471,6 +82521,30 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.ParkConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "ParkConfig",
+      "spelled": "struct{After int; Broker corequeue.Broker}",
+      "canonical": "struct{After int; Broker github.com/kitsunium/sdk/internal/core/data/queue.Broker}",
+      "fields": [
+        {
+          "name": "After",
+          "type": "int",
+          "doc": "After is how many consecutive refusals park a record: a batch\nrefused After times is narrowed to its first record, and a record\nrefused After times alone is parked. Below 1 it is read as 1.\n"
+        },
+        {
+          "name": "Broker",
+          "type": "corequeue.Broker",
+          "doc": "Broker is the queue the dead letters are published to. It must be\nnon-nil; its MaxMessageBytes must hold the JSON of the largest\nrecord, or the park is refused and Subscribe returns that refusal.\n"
+        }
+      ],
+      "doc": "ParkConfig sends the records a handler keeps refusing to a queue as dead\nletters, so their partition moves on: the dead letter's payload is the\nrecord's [corestream.EntryValue] encoded by encoding/json, which\njson.Unmarshal decodes back into one.\n",
+      "file": "service/data/stream/subscribe_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.SQLConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/data/stream",
@@ -82518,6 +82592,97 @@
       "canonical": "func(dialect github.com/kitsunium/sdk/internal/core/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/internal/core/data/sql.MigrationValue, error)",
       "doc": "SQLMigration returns the migration that creates the three tables an SQL\nstream named table keeps on dialect — table, table__heads and\ntable__cursors —, as a core/data/sql MigrationValue numbered version, for\nthe caller's Migrator to run under the caller's version table. Its Down\ndrops the three, and every record and cursor in them.\n\nThe SDK numbers nothing (ADR 0055 §D12). Each statement does nothing when\nits table already exists, or is already gone, so applying it over tables a\nprevious deployment made changes nothing. Its Checksum fingerprints the\nstatements Up runs, which are therefore never edited: a later column\ncomes as a migration of its own.\n",
       "file": "service/data/stream/sql_dialect.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.Subscribe",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "Subscribe",
+      "spelled": "func(ctx context.Context, s corestream.Stream, cfg SubscriberConfig) error",
+      "canonical": "func(ctx context.Context, s github.com/kitsunium/sdk/internal/core/data/stream.Stream, cfg github.com/kitsunium/sdk/internal/service/data/stream.SubscriberConfig) error",
+      "doc": "Subscribe reads s on behalf of the consumer group cfg.Group until ctx\nends: one worker per partition it is assigned, each handing cfg.Handler\nthe partition's records in offset order, batch after batch, and moving\nthe group's offset past each batch the handler accepted. It is\ninternal/service/data/queue.Consume for a stream: the handler runs on a\ngoroutine Subscribe owns, a handler's error is never returned, and every\nworker has returned before Subscribe does.\n\nA worker starts at the offset the group committed on its partition, or\nat the partition's first retained offset when the group never committed\nthere; an offset retention has since removed resumes at the first one\nstill kept, the records in between never delivered. It takes the\nstream's [corestream.Waker] signal before each Read, so an Append in this\nprocess wakes it at once, and waits at most cfg.PollInterval on cfg.Clock\nfor what another process appended.\n\n# A failing handler blocks its partition, by design\n\nA batch whose handler fails is handed to it again after the cfg.Retry\nwait, and the partition goes no further until it is accepted: the records\nof one key are delivered in the order they were appended, which is the\npromise a stream makes and a queue does not (ADR 0054's deferred per-key\nordering, kept here as head-of-line blocking stated rather than hidden).\nThe other partitions carry on. With cfg.Park, a batch failing After times\nis narrowed to its first record, and a record failing After times alone\nis published to the park's queue as a dead letter and the group's offset\ncommitted past it.\n\n# What a stop or a crash leaves\n\nA stop cancels the handler's context. A batch accepted as the stop lands\nis still committed, on ctx without its cancellation, bounded by\ncfg.SettleTimeout on cfg.Clock, as a dead letter is published and a fence\nreleased. Under [CommitAfterHandler] a crash between the handler's return\nand the commit delivers the batch again; under [CommitByHandler] on the\nSQL engine, the commit being part of the handler's own transaction, there\nis no such moment.\n\n# Fencing\n\nWith cfg.Fence each worker holds the lock\n\"stream:<Name>:<Group>:<partition>\" while it reads the partition, so two\nprocesses running the same group over the same partitions never read one\npartition at once: a worker whose lock is held elsewhere waits a\nPollInterval and asks again. A lease that can expire is renewed a third\nof its life after it was taken or last renewed; a renewal refused gives\nthe partition up — its batch is not committed — and the worker goes back\nto asking for the lock, resuming at whatever the group committed.\n\nIt returns nil when ctx ends, [corestream.SubscriberMisconfigured] for a\nconfiguration it cannot run, and the storage's error — the stream's, the\npark's queue's, the fence's — when one of them refuses, which stops every\nworker: a medium that has stopped answering is not one a subscriber can\npoll its way out of.\n",
+      "file": "service/data/stream/subscribe.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.SubscriberConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "SubscriberConfig",
+      "spelled": "struct{BatchSize int; Clock clock.Timed; Commit CommitMode; Fence corelock.Locker; Group string; Handler Handler; HandlerIsIdempotent bool; Name string; Park *ParkConfig; Partitions []int; PollInterval time.Duration; Retry backoff.Value; SettleTimeout time.Duration}",
+      "canonical": "struct{BatchSize int; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Commit github.com/kitsunium/sdk/internal/service/data/stream.CommitMode; Fence github.com/kitsunium/sdk/internal/core/app/lock.Locker; Group string; Handler github.com/kitsunium/sdk/internal/service/data/stream.Handler; HandlerIsIdempotent bool; Name string; Park *github.com/kitsunium/sdk/internal/service/data/stream.ParkConfig; Partitions []int; PollInterval time.Duration; Retry github.com/kitsunium/sdk/internal/kernel/backoff.Value; SettleTimeout time.Duration}",
+      "fields": [
+        {
+          "name": "BatchSize",
+          "type": "int",
+          "doc": "BatchSize is the most records one Read hands the handler. Below 1\nit is read as 1.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock times the idle wait, the retry wait, the bound on what is sent\npast a stop and the fence's renewals. Nil means clock.System;\nnothing in the subscriber calls time.Sleep.\n"
+        },
+        {
+          "name": "Commit",
+          "type": "CommitMode",
+          "doc": "Commit is who moves the offset past an accepted batch:\n[CommitAfterHandler], the zero, or [CommitByHandler]. Any other\nvalue is refused.\n"
+        },
+        {
+          "name": "Fence",
+          "type": "corelock.Locker",
+          "doc": "Fence, when set, makes each worker hold the lock\n\"stream:<Name>:<Group>:<partition>\" while it reads its partition,\nso the same group in two processes never reads one partition\ntwice at once. Nil fences nothing: one process runs the group.\n"
+        },
+        {
+          "name": "Group",
+          "type": "string",
+          "doc": "Group names the consumer group whose offsets are read and\ncommitted. It must not be empty; two groups over one stream read\nevery record each, at their own pace.\n"
+        },
+        {
+          "name": "Handler",
+          "type": "Handler",
+          "doc": "Handler processes each batch. It must be non-nil.\n"
+        },
+        {
+          "name": "HandlerIsIdempotent",
+          "type": "bool",
+          "doc": "HandlerIsIdempotent asserts, in code, that Handler is safe to run\nmore than once for the same records. It must be true; its zero is\nrefused, as queue.ConsumerConfig's is: under [CommitAfterHandler]\na batch is delivered at least once, and under [CommitByHandler]\nthe assertion is that the handler's effect and its commit are one\ntransaction, which the SDK cannot see either.\n"
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "doc": "Name names the stream in the fence's lock names. It is required\nwhen Fence is set, and read for nothing else.\n"
+        },
+        {
+          "name": "Park",
+          "type": "*ParkConfig",
+          "doc": "Park, when set, sends a record its handler keeps refusing to a\nqueue and moves past it. Nil retries forever: the partition stays\nblocked until the handler accepts.\n"
+        },
+        {
+          "name": "Partitions",
+          "type": "[]int",
+          "doc": "Partitions are the partitions this subscriber reads, one worker\neach: static assignment, two processes splitting a group naming\ndisjoint sets (or both every partition, under Fence). Empty means\nevery partition of the stream; a partition outside it, or named\ntwice, is refused.\n"
+        },
+        {
+          "name": "PollInterval",
+          "type": "time.Duration",
+          "doc": "PollInterval bounds how long an idle worker waits before reading\nagain: the stream's Waker ends the wait at once on an Append in this\nprocess, so it bounds only what another process appended. Zero, or\nnegative, means 100 ms.\n"
+        },
+        {
+          "name": "Retry",
+          "type": "backoff.Value",
+          "doc": "Retry is the wait between two deliveries of a refused batch, its\nattempt counting the consecutive refusals. A zero BaseDelay means\n100 ms doubling to 30 s with a fifth of jitter: a curve with no wait\nwould spin on a failing handler.\n"
+        },
+        {
+          "name": "SettleTimeout",
+          "type": "time.Duration",
+          "doc": "SettleTimeout bounds each commit, dead letter and fence release\nsent once ctx has ended, on Clock. Zero, or negative, means 5 s.\n"
+        }
+      ],
+      "doc": "SubscriberConfig configures [Subscribe]: the group, its handler and the\none promise about it the SDK cannot check, which partitions, how the\noffset moves, and what a failure, a stop and a second process do.\nGroup, Handler and HandlerIsIdempotent are required; every other field's\nzero works.\n",
+      "file": "service/data/stream/subscribe_config.go",
       "layer": "service",
       "family": "data"
     },

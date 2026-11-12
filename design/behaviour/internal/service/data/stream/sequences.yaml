@@ -2836,6 +2836,1860 @@ sequences:
       - eval: m.drop(part, int(before-part.first))
         to: m.drop
       - return: nil
+  - of: NewSQL
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSQL
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: cfg.Policy.Normalized
+        kind: value
+    steps:
+      - bind: parts, invalid
+        eval: cfg.validate()
+        to: cfg.validate
+      - opt:
+          do:
+            - return: nil, invalid
+          when: invalid != nil
+      - bind: policy
+        eval: cfg.Policy.Normalized()
+        to: cfg.Policy.Normalized
+      - return: |-
+          &sqlStream{
+          		tm: cfg.Transactor, clk: sqlClockOrSystem(cfg.Clock), tx: parts,
+          		wake: sqlWakeFor(parts.join, cfg.Table), table: cfg.Table,
+          		swept: make([]atomic.Int64, policy.Partitions), stmts: renderSQLStatements(cfg.Dialect, cfg.Table),
+          		own: sqlOwnTxOptions(cfg.Dialect), policy: policy,
+          	}, nil
+  - of: sqlWakeFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: sqlWakeFor
+        kind: self
+      - id: join.Join
+        kind: value
+      - id: newWakeSignal
+        kind: internal
+    steps:
+      - bind: pool, _
+        eval: join.Join(context.Background())
+        to: join.Join
+      - opt:
+          do:
+            - return: newWakeSignal()
+              to: newWakeSignal
+          when: pool == nil || !reflect.TypeOf(pool).Comparable()
+      - bind: key
+        eval: "sqlStreamKey{pool: pool, table: table}"
+      - lock:
+          mutex: sqlWakes.mu
+      - bind: signal, found
+        eval: sqlWakes.signals[key]
+      - opt:
+          do:
+            - set: signal
+              to: newWakeSignal
+              value: newWakeSignal()
+            - set: sqlWakes.signals[key]
+              value: signal
+          when: "!found"
+      - return: signal
+  - of: sqlOwnTxOptions
+    steps:
+      - opt:
+          do:
+            - return: "coresql.TxOptionsValue{Isolation: stdsql.LevelReadCommitted}"
+          when: dialect == coresql.DialectMySQL
+      - return: coresql.TxOptionsValue{}
+  - of: (*sqlStream).Partitions
+    steps:
+      - return: s.policy.Partitions
+  - of: (*sqlStream).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Append
+        kind: self
+      - id: admit
+        kind: internal
+      - id: keyedPartition
+        kind: internal
+      - id: s.clk.Now
+        kind: value
+      - id: s.run
+        kind: internal
+      - id: s.announce
+        kind: internal
+      - id: s.sweep
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, context.Cause(ctx)
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, refused
+          init:
+            bind: _, refused
+            eval: admit(records, s.policy.MaxRecordBytes)
+            to: admit
+          when: refused != nil
+      - bind: partition, keyed, mixed
+        eval: keyedPartition(records, s.policy.Partitions)
+        to: keyedPartition
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, mixed
+          when: mixed != nil
+      - opt:
+          do:
+            - set: partition
+              value: int((s.turn.Add(1) - 1) % uint64(s.policy.Partitions))
+          when: "!keyed"
+      - bind: now
+        eval: s.clk.Now()
+        to: s.clk.Now
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, misconfigured("Clock")
+          when: "!sqlNameable(now)"
+      - var:
+          name: appended
+          type: corestream.AppendValue
+      - bind: writeErr
+        eval: |-
+          s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+          		var err error
+          		appended, err = s.write(txCtx, ex, partition, records, now.UnixNano())
+          		//: the batch, or nothing.
+          		return err
+          	})
+        to: s.run
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, writeErr
+          when: writeErr != nil
+      - eval: s.announce(ctx)
+        to: s.announce
+      - eval: s.sweep(ctx, partition, now)
+        to: s.sweep
+      - return: appended, nil
+  - of: (*sqlStream).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).write
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, s.failed("lock the head", err)
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, s.stmts.lockHead, int64(partition))
+            to: ex.ExecContext
+          when: err != nil
+      - leaf: a var of several names, or of no type
+        stmt: var next, first, last int64
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, s.failed("read the head", err)
+          init:
+            bind: err
+            eval: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan(&next, &first, &last)
+            to: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+          when: err != nil
+      - bind: stamp
+        eval: max(now, last)
+      - bind: args
+        eval: make([]any, 0, min(len(records), sqlRowsPerStatement)*sqlRecordArgs)
+      - loop:
+          cond: start < len(records)
+          do:
+            - bind: chunk
+              eval: records[start:min(start+sqlRowsPerStatement, len(records))]
+            - set: args
+              value: args[:0]
+            - loop:
+                do:
+                  - set: args
+                    value: append(args, int64(partition), next+int64(start+i), stamp, nullable(record.Key), nullable(record.Payload))
+                key: i
+                range: chunk
+                value: record
+            - opt:
+                do:
+                  - return: corestream.AppendValue{}, s.failed("insert records", err)
+                init:
+                  bind: _, err
+                  eval: ex.ExecContext(ctx, s.stmts.insertFor(len(chunk)), args...)
+                  to: ex.ExecContext
+                when: err != nil
+          init: start := 0
+          post: start += sqlRowsPerStatement
+      - bind: end
+        eval: next + int64(len(records))
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, s.failed("advance the head", err)
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, s.stmts.advance, end, stamp, int64(partition))
+            to: ex.ExecContext
+          when: err != nil
+      - return: |-
+          corestream.AppendValue{
+          		Partition: partition, First: corestream.Offset(next), Last: corestream.Offset(end - 1),
+          	}, nil
+  - of: nullable
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(b) == 0
+      - return: b
+  - of: (*sqlStream).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).run
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: s.tm.Transact
+        kind: value
+    steps:
+      - bind: ex, inTx
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - opt:
+          do:
+            - return: s.tm.Transact(ctx, coresql.TxOptionsValue{}, work)
+              to: s.tm.Transact
+          when: inTx
+      - opt:
+          do:
+            - return: work(ctx, ex)
+          when: "!several"
+      - return: s.tm.Transact(ctx, s.own, work)
+        to: s.tm.Transact
+  - of: (*sqlStream).announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).announce
+        kind: self
+      - id: s.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.tx.hold.Defer(ctx, s.wake.fire)
+      - eval: s.wake.fire()
+        to: s.wake.fire
+  - of: (*sqlStream).failed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).failed
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: |-
+          errors.Join(
+          		errs.Wrap(corestream.StreamBackendFailed, errs.WrapParams{}, errs.String("op", step), errs.String("table", s.table)),
+          		svcsql.NewWithheld(cause))
+        to: errors
+  - of: sqlNameable
+    steps:
+      - return: "!t.Before(time.Unix(0, 0)) && !t.After(time.Unix(0, math.MaxInt64))"
+  - of: (*sqlStream).cutoff
+    steps:
+      - opt:
+          do:
+            - return: math.MinInt64
+          when: s.policy.RetainFor == 0
+      - return: now.UnixNano() - int64(s.policy.RetainFor)
+  - of: (*sqlStream).Commit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Commit
+        kind: self
+      - id: misconfigured
+        kind: internal
+      - id: s.checkPartition
+        kind: internal
+      - id: s.headNext
+        kind: internal
+      - id: offsetAhead
+        kind: internal
+      - id: sha256
+        kind: stdlib
+      - id: s.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("group")
+              to: misconfigured
+          when: group == ""
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: head, err
+        eval: s.headNext(ctx, partition)
+        to: s.headNext
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: offsetAhead(next, head)
+              to: offsetAhead
+          when: next > head
+      - bind: digest
+        eval: sha256.Sum256([]byte(group))
+        to: sha256
+      - return: |-
+          s.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		_, execErr := ex.ExecContext(txCtx, s.stmts.commit, digest[:], int64(partition), int64(next), []byte(group), int64(next))
+          		//: kept, below the first retained offset included: the next Read says so.
+          		if execErr != nil {
+          			//: StreamBackendFailed, the driver's text withheld.
+          			return s.failed("commit a cursor", execErr)
+          		}
+          		//: committed.
+          		return nil
+          	})
+        to: s.run
+  - of: (*sqlStream).headNext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).headNext
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan
+        kind: value
+      - id: corestream
+        kind: package
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - var:
+          name: next
+          type: int64
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan(&next)
+        to: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan
+      - opt:
+          do:
+            - return: 0, nil
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: 0, s.failed("read the head", err)
+          when: err != nil
+      - return: corestream.Offset(next), nil
+        to: corestream
+  - of: (*sqlStream).Committed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Committed
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: sha256
+        kind: stdlib
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.committed, digest[:], int64(partition)).Scan
+        kind: value
+      - id: corestream
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: 0, misconfigured("group")
+          when: group == ""
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: digest
+        eval: sha256.Sum256([]byte(group))
+        to: sha256
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - var:
+          name: next
+          type: int64
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.committed, digest[:], int64(partition)).Scan(&next)
+        to: ex.QueryRowContext(ctx, s.stmts.committed, digest[:], int64(partition)).Scan
+      - opt:
+          do:
+            - return: 0, unknownGroup(group, partition)
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: 0, s.failed("read a cursor", err)
+          when: err != nil
+      - return: corestream.Offset(next), nil
+        to: corestream
+  - of: (*SQLConfig).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLConfig).validate
+        kind: self
+      - id: c.Policy.Validate
+        kind: value
+      - id: validateSQLNames
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sqlParts{}, invalid
+          init:
+            bind: invalid
+            eval: c.Policy.Validate()
+            to: c.Policy.Validate
+          when: invalid != nil
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Policy.RetainBytes", "the SQL engine keeps no byte count")
+          when: c.Policy.RetainBytes != 0
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Policy.MaxBytes", "the SQL engine keeps no byte count")
+          when: c.Policy.MaxBytes != 0
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Transactor", "nil")
+          when: c.Transactor == nil
+      - bind: joiner, joins
+        eval: c.Transactor.(coresql.Joiner)
+      - bind: deferrer, defers
+        eval: c.Transactor.(coresql.Deferrer)
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Transactor", "not a core/data/sql Joiner and Deferrer")
+          when: "!joins || !defers"
+      - opt:
+          do:
+            - return: sqlParts{}, invalid
+          init:
+            bind: invalid
+            eval: validateSQLNames(c.Dialect, c.Table)
+            to: validateSQLNames
+          when: invalid != nil
+      - return: "sqlParts{join: joiner, hold: deferrer}, nil"
+  - of: validateSQLNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateSQLNames
+        kind: self
+      - id: sqlMisconfigured
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: "sqlMisconfigured(\"Dialect\", \"not one the SDK speaks: \"+dialect.String())"
+              to: sqlMisconfigured
+          when: "!dialect.Valid()"
+      - var:
+          name: problem
+          type: string
+      - switch:
+          cases:
+            - case: "!sqlTablePattern.MatchString(table)"
+              do:
+                - set: problem
+                  value: "\"not lower-case words joined by single underscores\""
+            - case: len(table) > sqlMaxTableLen
+              do:
+                - set: problem
+                  value: "\"longer than \" + strconv.Itoa(sqlMaxTableLen) + \" bytes\""
+            - case: strings.HasPrefix(table, sqlReservedPrefix)
+              do:
+                - set: problem
+                  value: "\"starts with sqlite_, which SQLite reserves\""
+            - default: true
+              do:
+                - return: nil
+      - return: |-
+          errs.Wrap(corestream.SQLStreamMisconfigured, errs.WrapParams{},
+          		errs.String("field", "Table"), errs.String("problem", problem), errs.String("table", table))
+        to: errs
+  - of: sqlMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: sqlMisconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.SQLStreamMisconfigured, errs.WrapParams{},
+          		errs.String("field", field), errs.String("problem", problem))
+        to: errs
+  - of: sqlClockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: clk == nil
+      - return: clk
+  - of: renderSQLStatements
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderSQLStatements
+        kind: self
+      - id: dialect.QuoteIdent
+        kind: value
+      - id: s.insertRows
+        kind: internal
+    steps:
+      - bind: p
+        eval: dialect.Placeholder
+      - bind: t
+        eval: dialect.QuoteIdent(table)
+        to: dialect.QuoteIdent
+      - bind: h
+        eval: dialect.QuoteIdent(table + sqlHeadsSuffix)
+        to: dialect.QuoteIdent
+      - bind: c
+        eval: dialect.QuoteIdent(table + sqlCursorsSuffix)
+        to: dialect.QuoteIdent
+      - bind: readable
+        eval: "\"r.part = h.part AND r.record_offset >= h.first_offset AND r.appended_at > \""
+      - bind: s
+        eval: |-
+          sqlStatements{
+          		lockHead: lockHeadStatement(dialect, h),
+          		head:     "SELECT next_offset, first_offset, last_at FROM " + h + " WHERE part = " + p(1) + dialect.ForUpdate(),
+          		advance:  "UPDATE " + h + " SET next_offset = " + p(1) + ", last_at = " + p(2) + " WHERE part = " + p(3),
+          		floor:    "UPDATE " + h + " SET first_offset = " + p(1) + " WHERE part = " + p(2),
+          		read: "SELECT h.next_offset, r.record_offset, r.appended_at, r.record_key, r.payload FROM " + h + " h LEFT JOIN " + t +
+          			" r ON " + readable + p(1) + " AND r.record_offset >= " + p(2) + " WHERE h.part = " + p(3) +
+          			" ORDER BY r.record_offset LIMIT " + p(4),
+          		bounds: "SELECT h.next_offset, (SELECT MIN(r.record_offset) FROM " + t + " r WHERE " + readable + p(1) + ") FROM " + h +
+          			" h WHERE h.part = " + p(2),
+          		offsetAt: "SELECT h.next_offset, (SELECT MIN(r.record_offset) FROM " + t + " r WHERE " + readable + p(1) +
+          			" AND r.appended_at >= " + p(2) + ") FROM " + h + " h WHERE h.part = " + p(3),
+          		lowest:    "SELECT MIN(record_offset) FROM " + t + " WHERE part = " + p(1),
+          		release:   "DELETE FROM " + t + " WHERE part = " + p(1) + " AND record_offset < " + p(2),
+          		headNext:  "SELECT next_offset FROM " + h + " WHERE part = " + p(1),
+          		commit:    commitStatement(dialect, c),
+          		committed: "SELECT next_offset FROM " + c + " WHERE grp = " + p(1) + " AND part = " + p(2),
+          		records:   t,
+          		dialect:   dialect,
+          	}
+      - set: s.insertFull
+        to: s.insertRows
+        value: s.insertRows(sqlRowsPerStatement)
+      - return: s
+  - of: lockHeadStatement
+    steps:
+      - bind: insert
+        eval: "\"INSERT INTO \" + h + \" (part, next_offset, first_offset, last_at) VALUES (\" + dialect.Placeholder(1) + \", 0, 0, 0)\""
+      - switch:
+          cases:
+            - case: coresql.DialectMySQL
+              do:
+                - return: insert + " ON DUPLICATE KEY UPDATE next_offset = next_offset"
+            - case: coresql.DialectPostgres
+              do:
+                - return: insert + " ON CONFLICT (part) DO UPDATE SET next_offset = " + h + ".next_offset"
+            - default: true
+              do:
+                - return: insert + " ON CONFLICT (part) DO UPDATE SET next_offset = next_offset"
+          "on": dialect
+  - of: commitStatement
+    steps:
+      - bind: p
+        eval: dialect.Placeholder
+      - bind: insert
+        eval: "\"INSERT INTO \" + c + \" (grp, part, next_offset, grp_name) VALUES (\" + p(1) + \", \" + p(2) + \", \" + p(3) + \", \" + p(4) + \")\""
+      - opt:
+          do:
+            - return: insert + " ON DUPLICATE KEY UPDATE next_offset = " + p(5)
+          when: dialect == coresql.DialectMySQL
+      - return: insert + " ON CONFLICT (grp, part) DO UPDATE SET next_offset = " + p(5)
+  - of: (*sqlStatements).insertRows
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).insertRows
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.WriteString("INSERT INTO " + s.records + " (part, record_offset, appended_at, record_key, payload) VALUES ")
+        to: b.WriteString
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteString(", ")
+                    to: b.WriteString
+                when: i > 0
+            - eval: b.WriteByte('(')
+              to: b.WriteByte
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - eval: b.WriteString(", ")
+                          to: b.WriteString
+                      when: j > 0
+                  - eval: b.WriteString(s.dialect.Placeholder(i*sqlRecordArgs + j + 1))
+                    to: b.WriteString
+                key: j
+                range: sqlRecordArgs
+            - eval: b.WriteByte(')')
+              to: b.WriteByte
+          key: i
+          range: "n"
+      - return: b.String()
+        to: b.String
+  - of: (*sqlStatements).insertFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).insertFor
+        kind: self
+      - id: s.insertRows
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.insertFull
+          when: n == sqlRowsPerStatement
+      - return: s.insertRows(n)
+        to: s.insertRows
+  - of: createStreamTableStatements
+    participants:
+      - id: caller
+        kind: actor
+      - id: createStreamTableStatements
+        kind: self
+      - id: dialect.QuoteIdent
+        kind: value
+    steps:
+      - bind: t
+        eval: dialect.QuoteIdent(table)
+        to: dialect.QuoteIdent
+      - bind: h
+        eval: dialect.QuoteIdent(table + sqlHeadsSuffix)
+        to: dialect.QuoteIdent
+      - bind: c
+        eval: dialect.QuoteIdent(table + sqlCursorsSuffix)
+        to: dialect.QuoteIdent
+      - bind: ints, longs, blobs, digest, options
+        eval: "\"INTEGER\", \"BIGINT\", \"BLOB\", \"BLOB\", \"\""
+      - switch:
+          cases:
+            - case: coresql.DialectMySQL
+              do:
+                - set: ints, blobs, digest, options
+                  value: "\"INT\", \"LONGBLOB\", \"VARBINARY(32)\", \" ENGINE=InnoDB\""
+            - case: coresql.DialectPostgres
+              do:
+                - set: ints, longs, blobs, digest
+                  value: "\"integer\", \"bigint\", \"bytea\", \"bytea\""
+            - default: true
+              do:
+                - set: longs
+                  value: "\"INTEGER\""
+          "on": dialect
+      - return: |-
+          []string{
+          		"CREATE TABLE IF NOT EXISTS " + t + " (part " + ints + " NOT NULL, record_offset " + longs + " NOT NULL, appended_at " + longs +
+          			" NOT NULL, record_key " + blobs + " NULL, payload " + blobs + " NULL, PRIMARY KEY (part, record_offset)," +
+          			" UNIQUE (part, appended_at, record_offset))" + options,
+          		"CREATE TABLE IF NOT EXISTS " + h + " (part " + ints + " NOT NULL, next_offset " + longs + " NOT NULL, first_offset " + longs +
+          			" NOT NULL, last_at " + longs + " NOT NULL, PRIMARY KEY (part))" + options,
+          		"CREATE TABLE IF NOT EXISTS " + c + " (grp " + digest + " NOT NULL, part " + ints + " NOT NULL, next_offset " + longs +
+          			" NOT NULL, grp_name " + blobs + " NULL, PRIMARY KEY (grp, part))" + options,
+          	}
+  - of: dropStreamTableStatements
+    steps:
+      - return: |-
+          []string{
+          		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table+sqlCursorsSuffix),
+          		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table+sqlHeadsSuffix),
+          		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table),
+          	}
+  - of: SQLMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: SQLMigration
+        kind: self
+      - id: validateSQLNames
+        kind: internal
+      - id: createStreamTableStatements
+        kind: internal
+      - id: migration.Validate
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, invalid
+          init:
+            bind: invalid
+            eval: validateSQLNames(dialect, table)
+            to: validateSQLNames
+          when: invalid != nil
+      - bind: up
+        eval: createStreamTableStatements(dialect, table)
+        to: createStreamTableStatements
+      - bind: migration
+        eval: |-
+          coresql.MigrationValue{
+          		Version:  version,
+          		Name:     sqlMigrationPrefix + table,
+          		Up:       svcsql.Statements(up...),
+          		Down:     svcsql.Statements(dropStreamTableStatements(dialect, table)...),
+          		Checksum: svcsql.ChecksumOf(up...),
+          	}
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, err
+          init:
+            bind: err
+            eval: migration.Validate()
+            to: migration.Validate
+          when: err != nil
+      - return: migration, nil
+  - of: (*sqlStream).checkPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).checkPartition
+        kind: self
+      - id: unknownPartition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: unknownPartition(partition, s.policy.Partitions)
+              to: unknownPartition
+          when: partition < 0 || partition >= s.policy.Partitions
+      - return: nil
+  - of: (*sqlStream).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Read
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryContext
+        kind: value
+      - id: s.scanEntries
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: nil, invalidBatchSize("max", maxEntries)
+          when: maxEntries <= 0
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, s.stmts.read, s.cutoff(s.clk.Now()), int64(from), int64(partition), int64(maxEntries))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, s.failed("read records", err)
+          when: err != nil
+      - bind: entries, next, err
+        eval: s.scanEntries(rows, partition, maxEntries)
+        to: s.scanEntries
+      - opt:
+          do:
+            - return: nil, s.failed("read records", err)
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, offsetAhead(from, next)
+          when: from > next
+      - opt:
+          do:
+            - return: nil, offsetTrimmed(from, entries[0].Offset)
+          when: len(entries) > 0 && entries[0].Offset > from
+      - opt:
+          do:
+            - return: nil, offsetTrimmed(from, next)
+          when: len(entries) == 0 && from < next
+      - return: entries, nil
+  - of: (*sqlStream).scanEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).scanEntries
+        kind: self
+      - id: rows.Scan
+        kind: value
+      - id: corestream
+        kind: package
+    steps:
+      - defer: |-
+          func() {
+          		//: the first failure is the one reported.
+          		if closeErr := rows.Close(); closeErr != nil && err == nil {
+          			err = closeErr
+          		}
+          	}()
+      - loop:
+          cond: rows.Next()
+          do:
+            - leaf: a const or type declaration in a body
+              stmt: |-
+                var (
+                			head          int64
+                			offset, stamp stdsql.NullInt64
+                			key, payload  []byte
+                		)
+            - opt:
+                do:
+                  - return: nil, 0, scanErr
+                init:
+                  bind: scanErr
+                  eval: rows.Scan(&head, &offset, &stamp, &key, &payload)
+                  to: rows.Scan
+                when: scanErr != nil
+            - set: next
+              to: corestream
+              value: corestream.Offset(head)
+            - opt:
+                do:
+                  - continue: true
+                when: "!offset.Valid"
+            - opt:
+                do:
+                  - set: entries
+                    value: make([]corestream.EntryValue, 0, maxEntries)
+                when: entries == nil
+            - set: entries
+              value: |-
+                append(entries, corestream.EntryValue{
+                			Partition:  partition,
+                			Offset:     corestream.Offset(offset.Int64),
+                			AppendedAt: time.Unix(0, stamp.Int64),
+                			Record:     corestream.RecordValue{Key: nonEmpty(key), Payload: nonEmpty(payload)},
+                		})
+      - return: entries, next, rows.Err()
+  - of: nonEmpty
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(b) == 0
+      - return: b
+  - of: (*sqlStream).Bounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Bounds
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: s.headAndLowest
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: next, first, err
+        eval: s.headAndLowest(ctx, s.stmts.bounds, "read the bounds", s.cutoff(s.clk.Now()), int64(partition))
+        to: s.headAndLowest
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, err
+          when: err != nil
+      - return: "corestream.BoundsValue{First: first, Next: next}, nil"
+  - of: (*sqlStream).OffsetAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).OffsetAt
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: t.UnixNano
+        kind: value
+      - id: s.headAndLowest
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: at
+        eval: t.UnixNano()
+        to: t.UnixNano
+      - opt:
+          do:
+            - set: at
+              value: "0"
+          when: t.Before(time.Unix(0, 0))
+      - bind: _, found, err
+        eval: s.headAndLowest(ctx, s.stmts.offsetAt, "seek an instant", s.cutoff(s.clk.Now()), at, int64(partition))
+        to: s.headAndLowest
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - return: found, nil
+  - of: (*sqlStream).headAndLowest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).headAndLowest
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, statement, args...).Scan
+        kind: value
+      - id: corestream
+        kind: package
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - var:
+          name: head
+          type: int64
+      - var:
+          name: low
+          type: stdsql.NullInt64
+      - bind: scanErr
+        eval: ex.QueryRowContext(ctx, statement, args...).Scan(&head, &low)
+        to: ex.QueryRowContext(ctx, statement, args...).Scan
+      - opt:
+          do:
+            - return: 0, 0, nil
+          when: errors.Is(scanErr, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: 0, 0, s.failed(step, scanErr)
+          when: scanErr != nil
+      - set: next
+        to: corestream
+        value: corestream.Offset(head)
+      - opt:
+          do:
+            - return: next, next, nil
+          when: "!low.Valid"
+      - return: next, corestream.Offset(low.Int64), nil
+  - of: (*sqlStream).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Wake
+        kind: self
+      - id: s.wake.current
+        kind: internal
+    steps:
+      - return: s.wake.current()
+        to: s.wake.current
+  - of: (*sqlStream).Trim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Trim
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: s.run
+        kind: internal
+      - id: s.release
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: raised
+        eval: "false"
+      - bind: floorErr
+        eval: |-
+          s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+          		var err error
+          		raised, err = s.raiseFloor(txCtx, ex, partition, before)
+          		//: raised, unchanged, OffsetAhead or StreamBackendFailed.
+          		return err
+          	})
+        to: s.run
+      - opt:
+          do:
+            - return: floorErr
+          when: floorErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: "!raised"
+      - return: s.release(ctx, partition, int64(before))
+        to: s.release
+  - of: (*sqlStream).raiseFloor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).raiseFloor
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: false, s.failed("lock the head", err)
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, s.stmts.lockHead, int64(partition))
+            to: ex.ExecContext
+          when: err != nil
+      - leaf: a var of several names, or of no type
+        stmt: var next, first, last int64
+      - opt:
+          do:
+            - return: false, s.failed("read the head", err)
+          init:
+            bind: err
+            eval: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan(&next, &first, &last)
+            to: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+          when: err != nil
+      - opt:
+          do:
+            - return: false, offsetAhead(before, corestream.Offset(next))
+          when: before > corestream.Offset(next)
+      - opt:
+          do:
+            - return: false, nil
+          when: before <= corestream.Offset(first)
+      - opt:
+          do:
+            - return: false, s.failed("raise the floor", err)
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, s.stmts.floor, int64(before), int64(partition))
+            to: ex.ExecContext
+          when: err != nil
+      - return: true, nil
+  - of: (*sqlStream).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).release
+        kind: self
+      - id: s.run
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: done
+              eval: "false"
+            - bind: stepErr
+              eval: |-
+                s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+                			var lowest stdsql.NullInt64
+                			//: where the stored records start.
+                			if err := ex.QueryRowContext(txCtx, s.stmts.lowest, int64(partition)).Scan(&lowest); err != nil {
+                				//: StreamBackendFailed, the driver's text withheld.
+                				return s.failed("find the lowest record", err)
+                			}
+                			//: nothing stored below target.
+                			if !lowest.Valid || lowest.Int64 >= target {
+                				done = true
+                				return nil
+                			}
+                			upper := min(target, lowest.Int64+sqlOffsetsPerDelete)
+                			_, err := ex.ExecContext(txCtx, s.stmts.release, int64(partition), upper)
+                			//: one bounded step.
+                			if err != nil {
+                				//: StreamBackendFailed, the driver's text withheld.
+                				return s.failed("release records", err)
+                			}
+                			//: deleted.
+                			return nil
+                		})
+              to: s.run
+            - opt:
+                do:
+                  - return: stepErr
+                when: stepErr != nil || done
+          forever: true
+  - of: (*sqlStream).sweep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).sweep
+        kind: self
+      - id: s.swept[partition].Load
+        kind: value
+      - id: s.headAndLowest
+        kind: internal
+      - id: s.swept[partition].Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.policy.RetainFor == 0
+      - bind: last
+        eval: s.swept[partition].Load()
+        to: s.swept[partition].Load
+      - bind: period
+        eval: min(s.policy.RetainFor, sqlSweepEvery)
+      - opt:
+          do:
+            - return: ""
+          when: now.UnixNano()-last < int64(period)
+      - opt:
+          do:
+            - return: ""
+          when: "!s.swept[partition].CompareAndSwap(last, now.UnixNano())"
+      - bind: _, first, err
+        eval: s.headAndLowest(ctx, s.stmts.bounds, "read the bounds", s.cutoff(now), int64(partition))
+        to: s.headAndLowest
+      - opt:
+          do:
+            - eval: s.swept[partition].Store(last)
+              to: s.swept[partition].Store
+            - return: ""
+          when: err != nil
+      - opt:
+          do:
+            - eval: s.swept[partition].Store(last)
+              to: s.swept[partition].Store
+          when: s.release(ctx, partition, int64(first)) != nil
+  - of: Subscribe
+    participants:
+      - id: caller
+        kind: actor
+      - id: Subscribe
+        kind: self
+      - id: subscriberMisconfigured
+        kind: internal
+      - id: cfg.validate
+        kind: internal
+      - id: group
+        kind: package
+      - id: workers.Go
+        kind: value
+      - id: workers.Wait
+        kind: value
+    steps:
+      - bind: committer, ok
+        eval: s.(corestream.Committer)
+      - opt:
+          do:
+            - return: subscriberMisconfigured("Stream")
+              to: subscriberMisconfigured
+          when: "!ok"
+      - opt:
+          do:
+            - return: invalid
+          init:
+            bind: invalid
+            eval: cfg.validate(s.Partitions())
+            to: cfg.validate
+          when: invalid != nil
+      - bind: sub
+        eval: "&subscriber{stream: s, committer: committer, cfg: cfg.normalized(s.Partitions())}"
+      - set: sub.waker, _
+        value: s.(corestream.Waker)
+      - bind: workers, _
+        eval: group.NewJoined(ctx, len(sub.cfg.Partitions))
+        to: group
+      - loop:
+          do:
+            - eval: |-
+                workers.Go(func(stop context.Context) error {
+                			//: nil for a stopped worker, the medium's error otherwise.
+                			return sub.run(stop, partition)
+                		})
+              to: workers.Go
+          key: _
+          range: sub.cfg.Partitions
+          value: partition
+      - return: workers.Wait()
+        to: workers.Wait
+  - of: (*subscriber).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).run
+        kind: self
+      - id: w.acquire
+        kind: internal
+      - id: ignoreStop
+        kind: internal
+      - id: w.sleep
+        kind: internal
+      - id: w.follow
+        kind: internal
+      - id: w.release
+        kind: internal
+    steps:
+      - loop:
+          cond: ctx.Err() == nil
+          do:
+            - bind: fence, held, err
+              eval: w.acquire(ctx, partition)
+              to: w.acquire
+            - opt:
+                do:
+                  - return: ignoreStop(ctx, err)
+                    to: ignoreStop
+                when: err != nil
+            - opt:
+                do:
+                  - eval: w.sleep(ctx, nil, w.cfg.PollInterval)
+                    to: w.sleep
+                  - continue: true
+                when: "!held"
+            - set: err
+              to: w.follow
+              value: "w.follow(ctx, &cursor{partition: partition, fence: fence})"
+            - eval: w.release(ctx, fence)
+              to: w.release
+            - opt:
+                do:
+                  - return: ignoreStop(ctx, err)
+                    to: ignoreStop
+                when: err != nil
+      - return: nil
+  - of: (*subscriber).follow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).follow
+        kind: self
+      - id: w.start
+        kind: internal
+      - id: c.retryAt.Sub
+        kind: value
+      - id: w.sleep
+        kind: internal
+      - id: w.turn
+        kind: internal
+    steps:
+      - bind: start, err
+        eval: w.start(ctx, c.partition)
+        to: w.start
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: c.next
+        value: start
+      - loop:
+          cond: ctx.Err() == nil
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: "!w.renew(ctx, c.fence)"
+            - opt:
+                do:
+                  - eval: w.sleep(ctx, nil, w.bounded(wait, c.fence))
+                    to: w.sleep
+                  - continue: true
+                init:
+                  bind: wait
+                  eval: c.retryAt.Sub(w.cfg.Clock.Now())
+                  to: c.retryAt.Sub
+                when: wait > 0
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: w.turn(ctx, c)
+                  to: w.turn
+                when: err != nil
+      - return: nil
+  - of: (*subscriber).start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).start
+        kind: self
+      - id: w.committer.Committed
+        kind: value
+      - id: w.stream.Bounds
+        kind: value
+    steps:
+      - bind: next, err
+        eval: w.committer.Committed(ctx, w.cfg.Group, partition)
+        to: w.committer.Committed
+      - opt:
+          do:
+            - bind: bounds, boundsErr
+              eval: w.stream.Bounds(ctx, partition)
+              to: w.stream.Bounds
+            - return: bounds.First, boundsErr
+          when: errs.HasCode(err, corestream.CodeUnknownGroup)
+      - return: next, err
+  - of: (*subscriber).turn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).turn
+        kind: self
+      - id: w.waker.Wake
+        kind: value
+      - id: w.stream.Read
+        kind: value
+      - id: w.stream.Bounds
+        kind: value
+      - id: w.sleep
+        kind: internal
+      - id: w.settle
+        kind: internal
+    steps:
+      - var:
+          name: signal
+          type: <-chan struct{}
+      - opt:
+          do:
+            - set: signal
+              to: w.waker.Wake
+              value: w.waker.Wake()
+          when: w.waker != nil
+      - bind: entries, err
+        eval: w.stream.Read(ctx, c.partition, c.next, w.limit(c))
+        to: w.stream.Read
+      - opt:
+          do:
+            - bind: bounds, boundsErr
+              eval: w.stream.Bounds(ctx, c.partition)
+              to: w.stream.Bounds
+            - set: c.next, c.failures
+              value: bounds.First, 0
+            - return: boundsErr
+          when: errs.HasCode(err, corestream.CodeOffsetTrimmed)
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - eval: w.sleep(ctx, signal, w.bounded(w.cfg.PollInterval, c.fence))
+              to: w.sleep
+            - return: nil
+          when: len(entries) == 0
+      - return: w.settle(ctx, c, entries)
+        to: w.settle
+  - of: (*subscriber).limit
+    steps:
+      - opt:
+          do:
+            - return: "1"
+          when: c.next < c.narrowUntil
+      - return: w.cfg.BatchSize
+  - of: (*subscriber).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).settle
+        kind: self
+      - id: w.advance
+        kind: internal
+      - id: w.narrowOrPark
+        kind: internal
+      - id: w.cfg.Clock.Now().Add
+        kind: value
+    steps:
+      - bind: past
+        eval: entries[len(entries)-1].Offset + 1
+      - opt:
+          do:
+            - set: c.failures, c.retryAt
+              value: 0, time.Time{}
+            - opt:
+                do:
+                  - set: c.next
+                    value: past
+                  - return: nil
+                when: w.cfg.Commit == CommitByHandler
+            - return: w.advance(ctx, c, past)
+              to: w.advance
+          when: w.handle(ctx, entries)
+      - opt:
+          do:
+            - return: nil
+          when: ctx.Err() != nil
+      - op: ++
+        set: c.failures
+      - opt:
+          do:
+            - return: w.narrowOrPark(ctx, c, entries)
+              to: w.narrowOrPark
+          when: w.cfg.Park != nil && c.failures >= w.cfg.Park.After
+      - set: c.retryAt
+        to: w.cfg.Clock.Now().Add
+        value: w.cfg.Clock.Now().Add(w.cfg.Retry.Delay(c.failures))
+      - return: nil
+  - of: (*subscriber).handle
+    steps:
+      - defer: |-
+          func() {
+          		//: the panic is the refusal.
+          		if recover() != nil {
+          			accepted = false
+          		}
+          	}()
+      - return: w.cfg.Handler(ctx, entries) == nil
+  - of: (*subscriber).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).advance
+        kind: self
+      - id: w.settled
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!w.renew(ctx, c.fence)"
+      - bind: err
+        eval: |-
+          w.settled(ctx, func(settleCtx context.Context) error {
+          		//: the group's offset.
+          		return w.committer.Commit(settleCtx, w.cfg.Group, c.partition, past)
+          	})
+        to: w.settled
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: c.next
+        value: past
+      - return: nil
+  - of: (*subscriber).sleep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).sleep
+        kind: self
+      - id: w.cfg.Clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - bind: timer
+        eval: w.cfg.Clock.NewTimer(max(d, 0))
+        to: w.cfg.Clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+            - comm: <-signal
+            - comm: <-timer.C()
+  - of: (*subscriber).settled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).settled
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: w.bound
+        kind: internal
+    steps:
+      - bind: settleCtx, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - defer: cancel()
+      - bind: done
+        eval: make(chan struct{})
+      - defer: close(done)
+      - go: w.bound(ctx, done, cancel)
+        to: w.bound
+      - return: call(settleCtx)
+  - of: (*subscriber).bound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).bound
+        kind: self
+      - id: w.cfg.Clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - select:
+          cases:
+            - comm: <-done
+              do:
+                - return: ""
+            - comm: <-ctx.Done()
+      - bind: timer
+        eval: w.cfg.Clock.NewTimer(w.cfg.SettleTimeout)
+        to: w.cfg.Clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-done
+            - comm: <-timer.C()
+              do:
+                - eval: cancel()
+  - of: ignoreStop
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ctx.Err() != nil
+      - return: cause
+  - of: subscriberMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: subscriberMisconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corestream.SubscriberMisconfigured, errs.WrapParams{}, errs.String("field", field))
+        to: errs
+  - of: SubscriberConfig.validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: SubscriberConfig.validate
+        kind: self
+      - id: c.missing
+        kind: internal
+      - id: subscriberMisconfigured
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: subscriberMisconfigured(field)
+              to: subscriberMisconfigured
+          init:
+            bind: field
+            eval: c.missing()
+            to: c.missing
+          when: field != ""
+      - bind: seen
+        eval: make(map[int]bool, len(c.Partitions))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corestream.SubscriberMisconfigured, errs.WrapParams{},
+                      				errs.String("field", "Partitions"), errs.Int("partition", partition), errs.Int("partitions", partitions))
+                    to: errs
+                when: partition < 0 || partition >= partitions || seen[partition]
+            - set: seen[partition]
+              value: "true"
+          key: _
+          range: c.Partitions
+          value: partition
+      - return: nil
+  - of: SubscriberConfig.missing
+    steps:
+      - switch:
+          cases:
+            - case: c.Handler == nil
+              do:
+                - return: "\"Handler\""
+            - case: c.Group == ""
+              do:
+                - return: "\"Group\""
+            - case: "!c.HandlerIsIdempotent"
+              do:
+                - return: "\"HandlerIsIdempotent\""
+            - case: c.Commit != CommitAfterHandler && c.Commit != CommitByHandler
+              do:
+                - return: "\"Commit\""
+            - case: c.Fence != nil && c.Name == ""
+              do:
+                - return: "\"Name\""
+            - case: c.Park != nil && c.Park.Broker == nil
+              do:
+                - return: "\"Park.Broker\""
+            - default: true
+              do:
+                - return: "\"\""
+  - of: SubscriberConfig.normalized
+    steps:
+      - set: c.BatchSize
+        value: max(c.BatchSize, 1)
+      - opt:
+          do:
+            - set: c.PollInterval
+              value: subscriberPollInterval
+          when: c.PollInterval <= 0
+      - opt:
+          do:
+            - set: c.SettleTimeout
+              value: subscriberSettleTimeout
+          when: c.SettleTimeout <= 0
+      - opt:
+          do:
+            - set: c.Retry
+              value: |-
+                backoff.Value{
+                			BaseDelay: retryBase, MaxDelay: retryCeiling, Multiplier: retryMultiplier, Jitter: retryJitter,
+                		}
+          when: c.Retry.BaseDelay <= 0
+      - opt:
+          do:
+            - set: c.Clock
+              value: clock.System
+          when: c.Clock == nil
+      - opt:
+          do:
+            - bind: park
+              eval: "*c.Park"
+            - set: park.After
+              value: max(park.After, 1)
+            - set: c.Park
+              value: "&park"
+          when: c.Park != nil
+      - opt:
+          do:
+            - set: c.Partitions
+              value: make([]int, partitions)
+            - loop:
+                do:
+                  - set: c.Partitions[i]
+                    value: i
+                key: i
+                range: partitions
+          when: len(c.Partitions) == 0
+      - return: c
+  - of: (*subscriber).fenceName
+    steps:
+      - return: "\"stream:\" + w.cfg.Name + \":\" + w.cfg.Group + \":\" + strconv.Itoa(partition)"
+  - of: (*subscriber).acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).acquire
+        kind: self
+      - id: w.cfg.Fence.TryAcquire
+        kind: value
+      - id: w.cfg.Clock.Now
+        kind: value
+      - id: now.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, true, nil
+          when: w.cfg.Fence == nil
+      - bind: lease, held, err
+        eval: w.cfg.Fence.TryAcquire(ctx, w.fenceName(partition))
+        to: w.cfg.Fence.TryAcquire
+      - opt:
+          do:
+            - return: nil, false, err
+          when: err != nil || !held
+      - bind: fence
+        eval: "&heldFence{lease: lease}"
+      - opt:
+          do:
+            - bind: now
+              eval: w.cfg.Clock.Now()
+              to: w.cfg.Clock.Now
+            - set: fence.every
+              value: max(deadliner.Deadline().Sub(now)/time.Duration(renewShare), 0)
+            - set: fence.renewAt
+              to: now.Add
+              value: now.Add(fence.every)
+          init:
+            bind: deadliner, ok
+            eval: lease.(corelock.Deadliner)
+          when: ok
+      - return: fence, true, nil
+  - of: (*subscriber).renew
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).renew
+        kind: self
+      - id: w.cfg.Clock.Now
+        kind: value
+      - id: w.cfg.Clock.Now().Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: fence == nil || fence.renewAt.IsZero()
+      - bind: now
+        eval: w.cfg.Clock.Now()
+        to: w.cfg.Clock.Now
+      - opt:
+          do:
+            - return: "true"
+          when: now.Before(fence.renewAt)
+      - opt:
+          do:
+            - return: "false"
+          when: fence.lease.Extend(ctx) != nil
+      - set: fence.renewAt
+        to: w.cfg.Clock.Now().Add
+        value: w.cfg.Clock.Now().Add(fence.every)
+      - return: "true"
+  - of: (*subscriber).bounded
+    steps:
+      - opt:
+          do:
+            - return: d
+          when: fence == nil || fence.renewAt.IsZero()
+      - return: min(d, fence.renewAt.Sub(w.cfg.Clock.Now()))
+  - of: (*subscriber).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).release
+        kind: self
+      - id: w.settled
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: fence == nil
+      - set: _
+        to: w.settled
+        value: w.settled(ctx, fence.lease.Release)
+  - of: (*subscriber).narrowOrPark
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).narrowOrPark
+        kind: self
+      - id: w.park
+        kind: internal
+      - id: w.advance
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: c.narrowUntil
+              value: entries[len(entries)-1].Offset + 1
+            - set: c.failures
+              value: "0"
+            - return: nil
+          when: len(entries) > 1
+      - bind: err
+        eval: w.park(ctx, entries[0])
+        to: w.park
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: c.failures
+        value: "0"
+      - return: w.advance(ctx, c, entries[0].Offset+1)
+        to: w.advance
+  - of: (*subscriber).park
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).park
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: w.settled
+        kind: internal
+    steps:
+      - bind: payload, err
+        eval: json.Marshal(entry)
+        to: json
+      - opt:
+          do:
+            - return: errs.Wrap(corestream.StreamBackendFailed, errs.WrapParams{}, errs.String("op", "encode a dead letter"))
+              to: errs
+          when: err != nil
+      - return: |-
+          w.settled(ctx, func(settleCtx context.Context) error {
+          		_, publishErr := w.cfg.Park.Broker.Publish(settleCtx, payload)
+          		//: the queue's own refusal, as it gave it.
+          		return publishErr
+          	})
+        to: w.settled
   - of: newWakeSignal
     steps:
       - return: "&wakeSignal{ch: make(chan struct{})}"
