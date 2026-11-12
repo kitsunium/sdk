@@ -81,6 +81,14 @@ const (
 	// raise the cluster version to 3 while a member's last frame of the term
 	// lacks it.
 	FlagProtocol3
+	// FlagProtocol4 marks a frame from a node that speaks protocol version
+	// 4, which sets FlagProtocol2 and FlagProtocol3 beside it. A leader of
+	// protocol 4 carries its last index in the RejectHint of every
+	// heartbeat, which a follower reads only beside this flag: a node of
+	// protocol 3 or below ignores both, and a leader refuses to raise the
+	// cluster version to 4 while a member's last frame of the term lacks it
+	// (#919).
+	FlagProtocol4
 )
 
 // Lane returns the connection the kind belongs on.

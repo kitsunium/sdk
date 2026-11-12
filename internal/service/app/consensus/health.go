@@ -126,6 +126,16 @@ type HealthValue struct {
 	FailureTolerance int
 	// ApplyLagEntries is commit minus applied.
 	ApplyLagEntries uint64
+	// ReplicationLagEntries is, on a node that does not lead, how far its
+	// durable log trails the leader's last index as the leader's last
+	// heartbeat carried it; 0 on the leader, and while no heartbeat of a
+	// leader of protocol 4 reached it. It is informative: readiness does not
+	// refuse on it (R2-28, #919).
+	ReplicationLagEntries uint64
+	// LeaderLastAppend is, on a node that does not lead, how long ago it last
+	// took an append with entries from the leader of its term; negative on the
+	// leader, and while it took none from this one (#919).
+	LeaderLastAppend time.Duration
 	// Peers is the leader's view of every peer, nil elsewhere.
 	Peers []PeerHealthValue
 	// ChainRefusals counts identical chain refusals of this follower at
@@ -158,7 +168,7 @@ func (n *Node) Health() HealthValue {
 	st := n.Status()
 	h := HealthValue{
 		Status: st, Flags: HealthFlags(0).set(HealthStopped, n.stopped.Load()), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1,
-		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load(),
+		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load(), LeaderLastAppend: -1,
 	}
 	if r, ok := n.StopReason(); ok {
 		h.StopReason = r
@@ -264,8 +274,10 @@ func (n *Node) loopHealth(h *HealthValue) {
 	h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals = n.r.ChainRefusal()
 	conf := n.r.Status().Conf
 	h.SnapshotLimit = snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
-	last := n.r.Status().Last
-	window := n.r.Status().Timing.ElectionTimeoutMin
+	rs := n.r.Status()
+	h.ReplicationLagEntries, h.LeaderLastAppend = replicationLag(&rs, now)
+	last := rs.Last
+	window := rs.Timing.ElectionTimeoutMin
 	isolated := map[coreconsensus.NodeID]raft.IsolationFlags{}
 	for _, v := range n.r.Isolated() {
 		isolated[v.ID] = v.Flags
@@ -275,6 +287,25 @@ func (n *Node) loopHealth(h *HealthValue) {
 		ph.Flags |= isolationFlags(isolated[p.ID])
 		h.Peers = append(h.Peers, ph)
 	}
+}
+
+// replicationLag is, on a node that does not lead, how far its durable log
+// trails the leader's last index as last heard, and how long ago it took
+// the leader's last append with entries, negative for none (#919). The
+// durable end, not the last index, is what the leader's match counts: a
+// follower whose disk is slow holds in memory entries it cannot yet
+// acknowledge, and the leader's Lag of it agrees with this within the
+// window in flight. The leader reports 0 and -1.
+func replicationLag(st *raft.StatusValue, now time.Time) (uint64, time.Duration) {
+	if st.Role == coreconsensus.RoleLeader {
+		return 0, -1
+	}
+	since := time.Duration(-1)
+	if !st.Appended.IsZero() {
+		since = now.Sub(st.Appended)
+	}
+	held := min(st.Last, st.Stable)
+	return st.LeaderLast - min(st.LeaderLast, held), since
 }
 
 // isolationFlags are the health facts of a voter's isolation causes.

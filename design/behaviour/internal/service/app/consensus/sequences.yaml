@@ -6841,7 +6841,7 @@ sequences:
         eval: |-
           HealthValue{
           		Status: st, Flags: HealthFlags(0).set(HealthStopped, n.stopped.Load()), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1,
-          		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load(),
+          		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load(), LeaderLastAppend: -1,
           	}
       - opt:
           do:
@@ -6969,6 +6969,10 @@ sequences:
         kind: value
       - id: snapshotLimit
         kind: internal
+      - id: n.r.Status
+        kind: value
+      - id: replicationLag
+        kind: internal
       - id: n.peerHealth
         kind: internal
       - id: isolationFlags
@@ -6991,10 +6995,16 @@ sequences:
       - set: h.SnapshotLimit
         to: snapshotLimit
         value: snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
+      - bind: rs
+        eval: n.r.Status()
+        to: n.r.Status
+      - set: h.ReplicationLagEntries, h.LeaderLastAppend
+        to: replicationLag
+        value: replicationLag(&rs, now)
       - bind: last
-        eval: n.r.Status().Last
+        eval: rs.Last
       - bind: window
-        eval: n.r.Status().Timing.ElectionTimeoutMin
+        eval: rs.Timing.ElectionTimeoutMin
       - bind: isolated
         eval: map[coreconsensus.NodeID]raft.IsolationFlags{}
       - loop:
@@ -7018,6 +7028,33 @@ sequences:
           key: _
           range: n.r.PeerStats()
           value: p
+  - of: replicationLag
+    participants:
+      - id: caller
+        kind: actor
+      - id: replicationLag
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: now.Sub
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, -1
+          when: st.Role == coreconsensus.RoleLeader
+      - bind: since
+        eval: time.Duration(-1)
+        to: time
+      - opt:
+          do:
+            - set: since
+              to: now.Sub
+              value: now.Sub(st.Appended)
+          when: "!st.Appended.IsZero()"
+      - bind: held
+        eval: min(st.Last, st.Stable)
+      - return: st.LeaderLast - min(st.LeaderLast, held), since
   - of: isolatedText
     participants:
       - id: caller
@@ -14329,6 +14366,8 @@ sequences:
         kind: value
       - id: o.addTo
         kind: internal
+      - id: replicationLag
+        kind: internal
       - id: n.observePeer
         kind: internal
       - id: o.resetDeparted
@@ -14358,6 +14397,11 @@ sequences:
         to: n.r.Status
       - eval: o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
         to: o.addTo
+      - bind: lag, _
+        eval: replicationLag(&st, now)
+        to: replicationLag
+      - eval: o.setGauge(mReplicationLag, float64(lag))
+        to: o.setGauge
       - bind: seen
         eval: map[coreconsensus.NodeID]bool{}
       - loop:

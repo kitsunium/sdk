@@ -431,6 +431,18 @@ packages:
         name: FlagProtocol3
         type: MessageFlags
         value: "32"
+      - blockDoc: The flags.
+        doc: |-
+          FlagProtocol4 marks a frame from a node that speaks protocol version
+          4, which sets FlagProtocol2 and FlagProtocol3 beside it. A leader of
+          protocol 4 carries its last index in the RejectHint of every
+          heartbeat, which a follower reads only beside this flag: a node of
+          protocol 3 or below ignores both, and a leader refuses to raise the
+          cluster version to 4 while a member's last frame of the term lacks it
+          (#919).
+        name: FlagProtocol4
+        type: MessageFlags
+        value: "64"
       - blockDoc: The states of a stamp.
         doc: |-
           StampJoining is a directory Init prepared: it may join as an empty
@@ -3048,6 +3060,20 @@ packages:
             - doc: ApplyLagEntries is commit minus applied.
               name: ApplyLagEntries
               type: uint64
+            - doc: |-
+                ReplicationLagEntries is, on a node that does not lead, how far its
+                durable log trails the leader's last index as the leader's last
+                heartbeat carried it; 0 on the leader, and while no heartbeat of a
+                leader of protocol 4 reached it. It is informative: readiness does not
+                refuse on it (R2-28, #919).
+              name: ReplicationLagEntries
+              type: uint64
+            - doc: |-
+                LeaderLastAppend is, on a node that does not lead, how long ago it last
+                took an append with entries from the leader of its term; negative on the
+                leader, and while it took none from this one (#919).
+              name: LeaderLastAppend
+              type: time.Duration
             - doc: Peers is the leader's view of every peer, nil elsewhere.
               name: Peers
               type: "[]PeerHealthValue"
@@ -4310,10 +4336,12 @@ packages:
           Version 2 adds the snapshot metadata's checksum, the admin payload's
           Origin and the log identity's AdoptedFrom, each written only once the
           committed cluster version is 2 (lot S3). Version 3 adds the retired keys
-          of the configuration, written only once it is 3 (#648).
+          of the configuration, written only once it is 3 (#648). Version 4 adds
+          the leader's last index to every heartbeat, which a follower reads
+          beside FlagProtocol4 at any cluster version (#919).
         name: ProtocolMax
         type: uint32
-        value: "3"
+        value: "4"
       - doc: |-
           Protocol2 is the protocol version whose formats a node writes once the
           cluster version is raised to it.
@@ -4327,6 +4355,12 @@ packages:
         name: Protocol3
         type: uint32
         value: "3"
+      - doc: |-
+          Protocol4 is the protocol version whose heartbeats carry the leader's
+          last index, announced by FlagProtocol4 (#919).
+        name: Protocol4
+        type: uint32
+        value: "4"
     doc: |-
       Package raft is the consensus engine's step function (ADR 0152 D15): a
       value with no goroutine, no I/O and no clock. Every decision of the
@@ -5166,6 +5200,18 @@ packages:
                 election it cannot win (D13, consensus_prevotes_lost_total).
               name: PreVotesLost
               type: uint64
+            - doc: |-
+                LeaderLast is, on a node that does not lead, the leader's last index as
+                its last heartbeat of this term carried it (FlagProtocol4), 0 while
+                none did: a leader of protocol 3 or below sends none (#919).
+              name: LeaderLast
+              type: uint64
+            - doc: |-
+                Appended is, on a node that does not lead, the instant of the last
+                append with entries it took from the leader of this term, zero while
+                it took none (#919).
+              name: Appended
+              type: time.Time
       - doc: |-
           EngineValue is the engine's own replicated state: the timing contract, the
           cluster version and its generation, and the no-space alarm.
@@ -6128,6 +6174,10 @@ packages:
             reexport: coreconsensus.FlagProtocol3
             type: coreconsensus.MessageFlags
             value: "32"
+          - name: FlagProtocol4
+            reexport: coreconsensus.FlagProtocol4
+            type: coreconsensus.MessageFlags
+            value: "64"
           - name: MsgForward
             reexport: coreconsensus.MsgForward
             type: coreconsensus.MessageKind

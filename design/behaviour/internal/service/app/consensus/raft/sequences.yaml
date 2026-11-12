@@ -273,7 +273,7 @@ sequences:
                   - set: commit
                     value: r.log.committed
                 when: r.mutated(mutHeartbeatUnclamped)
-            - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id})"
+            - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id, RejectHint: r.heartbeatLast()})"
               to: r.send
             - opt:
                 do:
@@ -606,7 +606,7 @@ sequences:
         set: pr.facts
         value: peerHeard
       - set: pr.facts
-        value: pr.facts&^(peerProtocol2|peerProtocol3) | announced(m.Flags)
+        value: pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4) | announced(m.Flags)
       - switch:
           cases:
             - case: core.MsgAppResp
@@ -1228,7 +1228,28 @@ sequences:
               set: f
               value: core.FlagProtocol3
           when: v >= Protocol3
+      - opt:
+          do:
+            - op: "|="
+              set: f
+              value: core.FlagProtocol4
+          when: v >= Protocol4
       - return: f
+  - of: (*Raft).heartbeatLast
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).heartbeatLast
+        kind: self
+      - id: r.log.lastIndex
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: r.speaks() < Protocol4
+      - return: r.log.lastIndex()
+        to: r.log.lastIndex
   - of: (*Raft).announces
     participants:
       - id: caller
@@ -1257,6 +1278,12 @@ sequences:
               set: f
               value: peerProtocol3
           when: flags&core.FlagProtocol3 != 0
+      - opt:
+          do:
+            - op: "|="
+              set: f
+              value: peerProtocol4
+          when: flags&core.FlagProtocol4 != 0
       - return: f
   - of: (*Raft).checkNoSpaceClear
     steps:
@@ -3961,6 +3988,11 @@ sequences:
           	}
       - opt:
           do:
+            - set: st.LeaderLast, st.Appended
+              value: r.heard.last, r.heard.appended
+          when: r.role != core.RoleLeader && r.heard.term == r.term && r.heard.from == r.lead
+      - opt:
+          do:
             - set: st.HandedBy
               value: r.campaignIssuer
           when: r.role == core.RoleLeader
@@ -5497,6 +5529,8 @@ sequences:
         kind: internal
       - id: r.resetElection
         kind: internal
+      - id: r.handleAppend
+        kind: internal
       - id: r.maybeEndSilence
         kind: internal
     steps:
@@ -5508,11 +5542,27 @@ sequences:
         to: r.extendHint
       - eval: r.resetElection(now)
         to: r.resetElection
+      - bind: ok
+        eval: r.handleAppend(m)
+        to: r.handleAppend
+      - opt:
+          do:
+            - set: r.hearLeader(m.From).appended
+              value: now
+          when: ok && len(m.Entries) > 0
       - opt:
           do:
             - eval: r.maybeEndSilence(m)
               to: r.maybeEndSilence
-          when: r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal)
+          when: ok || r.mutated(mutSilenceEndsOnARefusal)
+  - of: (*Raft).hearLeader
+    steps:
+      - opt:
+          do:
+            - set: r.heard
+              value: "leaderHeard{from: from, term: r.term}"
+          when: r.heard.from != from || r.heard.term != r.term
+      - return: "&r.heard"
   - of: (*Raft).followHeartbeat
     participants:
       - id: caller
@@ -5546,6 +5596,11 @@ sequences:
             bind: c
             eval: min(m.Commit, r.log.lastIndex())
           when: c > r.log.committed
+      - opt:
+          do:
+            - set: r.hearLeader(m.From).last
+              value: m.RejectHint
+          when: m.Flags&core.FlagProtocol4 != 0 && r.speaks() >= Protocol4
       - bind: resp
         eval: |-
           core.MessageValue{

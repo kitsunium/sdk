@@ -59,13 +59,7 @@ workflows:
             - return: "0"
           when: v < Protocol2
       - bind: want
-        eval: peerHeard | peerProtocol2
-      - opt:
-          do:
-            - op: "|="
-              set: want
-              value: peerProtocol3
-          when: v >= Protocol3
+        eval: peerHeard | announcedBy[min(v, ProtocolMax)]
       - loop:
           do:
             - opt:

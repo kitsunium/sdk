@@ -41,8 +41,10 @@ const (
 // Version 2 adds the snapshot metadata's checksum, the admin payload's
 // Origin and the log identity's AdoptedFrom, each written only once the
 // committed cluster version is 2 (lot S3). Version 3 adds the retired keys
-// of the configuration, written only once it is 3 (#648).
-const ProtocolMax uint32 = 3
+// of the configuration, written only once it is 3 (#648). Version 4 adds
+// the leader's last index to every heartbeat, which a follower reads
+// beside FlagProtocol4 at any cluster version (#919).
+const ProtocolMax uint32 = 4
 
 // Protocol2 is the protocol version whose formats a node writes once the
 // cluster version is raised to it.
@@ -52,6 +54,10 @@ const Protocol2 uint32 = 2
 // key of every member removed, and of every pin denied, and refuses it to
 // any new member (#648).
 const Protocol3 uint32 = 3
+
+// Protocol4 is the protocol version whose heartbeats carry the leader's
+// last index, announced by FlagProtocol4 (#919).
+const Protocol4 uint32 = 4
 
 // raftFacts are the step function's own yes/no state, one bit each.
 type raftFacts uint8
@@ -439,6 +445,9 @@ type Raft struct {
 	heartbeatDue      time.Time
 	lastLeaderContact time.Time
 	now               time.Time
+	// heard is what this node last heard of the leader of its term, for the
+	// replication lag Health reports (#919).
+	heard leaderHeard
 
 	// selfVoteSeq is the write that carries this candidate's own vote; its
 	// vote counts once that write is durable (D5b).
@@ -876,6 +885,14 @@ type StatusValue struct {
 	// count climbs while the cluster has a leader keeps asking for an
 	// election it cannot win (D13, consensus_prevotes_lost_total).
 	PreVotesLost uint64
+	// LeaderLast is, on a node that does not lead, the leader's last index as
+	// its last heartbeat of this term carried it (FlagProtocol4), 0 while
+	// none did: a leader of protocol 3 or below sends none (#919).
+	LeaderLast uint64
+	// Appended is, on a node that does not lead, the instant of the last
+	// append with entries it took from the leader of this term, zero while
+	// it took none (#919).
+	Appended time.Time
 }
 
 // Status returns the step function's view.
@@ -886,6 +903,9 @@ func (r *Raft) Status() StatusValue {
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
 		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
 		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
+	}
+	if r.role != core.RoleLeader && r.heard.term == r.term && r.heard.from == r.lead {
+		st.LeaderLast, st.Appended = r.heard.last, r.heard.appended
 	}
 	if r.role == core.RoleLeader {
 		// The issuer of the TimeoutNow whose campaign won this term, 0 for

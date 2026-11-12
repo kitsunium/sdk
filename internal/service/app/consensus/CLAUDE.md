@@ -1029,6 +1029,20 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   D13 could not be written (#914,
   `TestTheD13SeriesArePublishedWithTheirLabels`,
   `TestThePinGaugesCountAndAgeEachPinAndResetOneThatEnded`).
+- Report a follower Ready on its apply alone and say nothing of how far
+  its log trails the leader's: a node 50 000 entries behind on a slow disk
+  answered Ready, and the only lag series were the leader's per peer.
+  `Health` reports, on a node that does not lead,
+  `ReplicationLagEntries` — the leader's last index as its last heartbeat
+  carried it (raft's `Status.LeaderLast`, protocol 4) less the node's
+  durable end, which is what the leader's match counts — and
+  `LeaderLastAppend`, since the last append with entries (raft's
+  `Status.Appended`, negative for none), and `observePeers` publishes
+  `consensus_replication_lag_entries`, 0 on the leader. Informative:
+  `isReady` does not refuse on it (R2-28). Nor read the lag from the last
+  index: entries held in memory behind a stalled fsync are no replication
+  (#919, `replicationLag`,
+  `TestAFollowerOnASlowDiskReportsItsReplicationLag`).
 - Bound an election in a test by a fixed number of split votes: a split
   is a draw, about one round in a hundred on the memory network, and a
   third round fails a two-round total every ten to twenty runs. Derive

@@ -2483,6 +2483,7 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_commit_latency_seconds`, `consensus_apply_latency_seconds` | histograms |
 | `consensus_fsync_latency_seconds`, `consensus_batch_entries`, `consensus_batch_bytes` | histograms |
 | `consensus_apply_lag_bytes`, `consensus_apply_lag_entries` | gauges |
+| `consensus_replication_lag_entries` | gauge: on a node that does not lead, how far its durable log trails the leader's last index as the leader's last heartbeat carried it; 0 on the leader (#919) |
 | `consensus_peer_match_lag_entries`, `consensus_peer_inflight`, `consensus_peer_unreachable` | gauges by peer |
 | `consensus_elections_started_total`, `consensus_prevotes_lost_total` | counters |
 | `consensus_snapshot_duration_seconds`, `consensus_snapshot_bytes`, `consensus_snapshot_installs_total` | histogram, histogram, counter |
@@ -2515,6 +2516,7 @@ thresholds, provisional like D16's numbers:
 | node stopped | any `consensus_stopped`, or the pushed stop reason, or 3 restarts in 10 min |
 | fsync slow | p99 of `consensus_fsync_latency_seconds` above 50 ms for 10 min |
 | apply lag | `consensus_apply_lag_bytes` above half of `MaxApplyLagBytes` for 5 min |
+| follower lag | `consensus_replication_lag_entries` above `PromoteLag` for 5 min on a follower or a learner: its log trails the leader's, a slow disk or a narrow link the apply lag does not see; informative, the node stays ready (R2-28, #919) |
 | no space | `consensus_nospace == 1`, or any `consensus_fs_free_bytes` under twice the reserve |
 | certificate | `consensus_tls_cert_expiry_seconds` under 7 days, or any reload failure |
 | peer unreachable | `consensus_peer_unreachable == 1` for 1 min |

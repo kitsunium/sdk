@@ -547,6 +547,8 @@ constants:
         value: "\"consensus_apply_lag_entries\""
       - name: mApplyLagBytes
         value: "\"consensus_apply_lag_bytes\""
+      - name: mReplicationLag
+        value: "\"consensus_replication_lag_entries\""
       - name: mPeerMatchLag
         value: "\"consensus_peer_match_lag_entries\""
       - name: mPeerInflight
@@ -1327,6 +1329,7 @@ files:
       - (*Node).applyReady
       - applyReady
       - (*Node).loopHealth
+      - replicationLag
       - isolationFlags
       - isolatedText
       - isolationCauses
@@ -2800,6 +2803,17 @@ functions:
     name: applyReady
     params: caughtUp bool, commit, applied uint64, moved, window time.Duration
     results: bool
+  - doc: |-
+      replicationLag is, on a node that does not lead, how far its durable log
+      trails the leader's last index as last heard, and how long ago it took
+      the leader's last append with entries, negative for none (#919). The
+      durable end, not the last index, is what the leader's match counts: a
+      follower whose disk is slow holds in memory entries it cannot yet
+      acknowledge, and the leader's Lag of it agrees with this within the
+      window in flight. The leader reports 0 and -1.
+    name: replicationLag
+    params: st *raft.StatusValue, now time.Time
+    results: uint64, time.Duration
   - doc: isolationFlags are the health facts of a voter's isolation causes.
     name: isolationFlags
     params: f raft.IsolationFlags
@@ -6352,6 +6366,20 @@ types:
       - doc: ApplyLagEntries is commit minus applied.
         name: ApplyLagEntries
         type: uint64
+      - doc: |-
+          ReplicationLagEntries is, on a node that does not lead, how far its
+          durable log trails the leader's last index as the leader's last
+          heartbeat carried it; 0 on the leader, and while no heartbeat of a
+          leader of protocol 4 reached it. It is informative: readiness does not
+          refuse on it (R2-28, #919).
+        name: ReplicationLagEntries
+        type: uint64
+      - doc: |-
+          LeaderLastAppend is, on a node that does not lead, how long ago it last
+          took an append with entries from the leader of its term; negative on the
+          leader, and while it took none from this one (#919).
+        name: LeaderLastAppend
+        type: time.Duration
       - doc: Peers is the leader's view of every peer, nil elsewhere.
         name: Peers
         type: "[]PeerHealthValue"
@@ -8570,8 +8598,9 @@ types:
         recv: n *Node
       - doc: |-
           observePeers publishes the leader's per-peer gauges, each peer's round
-          trips, the snapshot pins, the lost PreVotes and the failure tolerance, at
-          most every 100 ms, on the loop.
+          trips, the snapshot pins, the lost PreVotes, the failure tolerance and,
+          on a node that does not lead, its replication lag (0 on the leader,
+          #919), at most every 100 ms, on the loop.
         name: observePeers
         recv: n *Node
       - doc: |-

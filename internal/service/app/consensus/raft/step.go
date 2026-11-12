@@ -344,26 +344,41 @@ func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 	case core.MsgApp, core.MsgHeartbeat:
 		r.followWinner(now, m)
 	case core.MsgPreVoteResp:
-		if r.role == core.RolePreCandidate {
-			if v, ok := r.votes[m.From]; m.Reject && (!ok || v) {
-				// A refusal counts once per voter and campaign: a
-				// duplicate answer is not a second loss (D13).
-				r.preVotesLost++
-			}
-			r.votes[m.From] = !m.Reject
-			r.tallyVotes()
-		}
+		r.tallyPreVoteResp(m)
 	case core.MsgVoteResp:
-		if r.role == core.RoleCandidate {
-			r.votes[m.From] = !m.Reject
-			if r.facts&raftSelfVoteDurable != 0 {
-				r.tallyVotes()
-			}
-		}
+		r.tallyVoteResp(m)
 	case core.MsgReadIndex:
 		r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: m.From, Context: m.Context, Code: codeNotLeader})
 	default:
 		// Nothing else concerns a campaign: it is dropped.
+	}
+}
+
+// tallyPreVoteResp counts a pre-vote answer, while this node is still the
+// pre-candidate that asked for it.
+func (r *Raft) tallyPreVoteResp(m core.MessageValue) {
+	if r.role != core.RolePreCandidate {
+		return
+	}
+	if v, ok := r.votes[m.From]; m.Reject && (!ok || v) {
+		// A refusal counts once per voter and campaign: a
+		// duplicate answer is not a second loss (D13).
+		r.preVotesLost++
+	}
+	r.votes[m.From] = !m.Reject
+	r.tallyVotes()
+}
+
+// tallyVoteResp records a vote answer, while this node is still the
+// candidate that asked for it; the tally waits for its own vote to be
+// durable (D5b).
+func (r *Raft) tallyVoteResp(m core.MessageValue) {
+	if r.role != core.RoleCandidate {
+		return
+	}
+	r.votes[m.From] = !m.Reject
+	if r.facts&raftSelfVoteDurable != 0 {
+		r.tallyVotes()
 	}
 }
 
@@ -413,9 +428,22 @@ func (r *Raft) followAppend(now time.Time, m core.MessageValue) {
 	r.lastLeaderContact = now
 	r.extendHint(now, m.From)
 	r.resetElection(now)
-	if r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal) {
+	ok := r.handleAppend(m)
+	if ok && len(m.Entries) > 0 {
+		r.hearLeader(m.From).appended = now
+	}
+	if ok || r.mutated(mutSilenceEndsOnARefusal) {
 		r.maybeEndSilence(m)
 	}
+}
+
+// hearLeader is the record of the leader from of this term, started over
+// when the leader or the term changed.
+func (r *Raft) hearLeader(from core.NodeID) *leaderHeard {
+	if r.heard.from != from || r.heard.term != r.term {
+		r.heard = leaderHeard{from: from, term: r.term}
+	}
+	return &r.heard
 }
 
 // followHeartbeat records the leader's contact, commits what the heartbeat
@@ -427,6 +455,11 @@ func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 	r.resetElection(now)
 	if c := min(m.Commit, r.log.lastIndex()); c > r.log.committed {
 		r.commitTo(c)
+	}
+	if m.Flags&core.FlagProtocol4 != 0 && r.speaks() >= Protocol4 {
+		// The leader's last index, which a node of protocol 3 or below,
+		// and a leader of it, neither reads nor sends (#919).
+		r.hearLeader(m.From).last = m.RejectHint
 	}
 	resp := core.MessageValue{
 		Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract(),
@@ -707,21 +740,30 @@ func (r *Raft) firstNewEntry(m *core.MessageValue) (start int, prevChain uint32,
 		if !held || t != e.Position.Term || r.replacesFounding(e) {
 			return k, prevChain, true
 		}
-		if own := r.log.chain(e.Position.Index); own != e.ChainSum && e.Position.Index > r.log.committed {
-			// Another entry at a position this log holds uncommitted, which
-			// this log does not take: the append proves nothing from here,
-			// and acknowledged it would commit this log's own (#698). A
-			// founding entry over another member list is a divergence,
-			// named once the leader committed past it (heldOnDivergence).
-			if r.foundingContradicted(e) && r.heldOnDivergence(m, 1) {
-				return -1, prevChain, false
-			}
-			r.chainRefused(*m, e.Position.Index)
+		if r.contradictsHeld(m, e) {
 			return -1, prevChain, false
 		}
 		prevChain = r.log.chain(e.Position.Index)
 	}
 	return -1, prevChain, true
+}
+
+// contradictsHeld reports whether e, at a position this log holds under
+// the same term, is another entry than this log's while that position is
+// still uncommitted, refusing the append as firstNewEntry says: this log
+// does not take it, the append proves nothing from here, and acknowledged
+// it would commit this log's own (#698). A founding entry over another
+// member list is a divergence, named once the leader committed past it
+// (heldOnDivergence); any other is a broken chain (chainRefused).
+func (r *Raft) contradictsHeld(m *core.MessageValue, e *core.EntryValue) bool {
+	if own := r.log.chain(e.Position.Index); own == e.ChainSum || e.Position.Index <= r.log.committed {
+		return false
+	}
+	if r.foundingContradicted(e) && r.heldOnDivergence(m, 1) {
+		return true
+	}
+	r.chainRefused(*m, e.Position.Index)
+	return true
 }
 
 // foundingUnproven reports whether m's prefix is this node's entry 1,
@@ -761,10 +803,8 @@ func (r *Raft) foundingUnproven(m *core.MessageValue) bool {
 // list is never taken: founders given different lists stay refused.
 func (r *Raft) replacesFounding(e *core.EntryValue) bool {
 	i := e.Position.Index
-	if i != 1 || e.Position.Term != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 || r.log.chain(1) == e.ChainSum {
-		return false
-	}
-	if wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(0), e) != e.ChainSum {
+	if i != 1 || e.Position.Term != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 || r.log.chain(1) == e.ChainSum ||
+		wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(0), e) != e.ChainSum {
 		return false
 	}
 	theirs, ok := founding(e)
@@ -784,10 +824,8 @@ func (r *Raft) replacesFounding(e *core.EntryValue) bool {
 // it now stops BOOTSTRAP_REFUSED once a leader that committed past entry 1
 // shows it (#698's review).
 func (r *Raft) foundingContradicted(e *core.EntryValue) bool {
-	if e.Position.Index != 1 || e.Position.Term != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 {
-		return false
-	}
-	if wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(0), e) != e.ChainSum {
+	if e.Position.Index != 1 || e.Position.Term != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 ||
+		wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(0), e) != e.ChainSum {
 		return false
 	}
 	if _, ok := founding(e); !ok {

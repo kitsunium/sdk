@@ -32,6 +32,7 @@ const (
 	mBatchBytes       = "consensus_batch_bytes"
 	mApplyLagEntries  = "consensus_apply_lag_entries"
 	mApplyLagBytes    = "consensus_apply_lag_bytes"
+	mReplicationLag   = "consensus_replication_lag_entries"
 	mPeerMatchLag     = "consensus_peer_match_lag_entries"
 	mPeerInflight     = "consensus_peer_inflight"
 	mPeerUnreachable  = "consensus_peer_unreachable"
@@ -328,8 +329,9 @@ func (o *obs) observeRoleChange(old, cur *coreconsensus.StatusValue) {
 }
 
 // observePeers publishes the leader's per-peer gauges, each peer's round
-// trips, the snapshot pins, the lost PreVotes and the failure tolerance, at
-// most every 100 ms, on the loop.
+// trips, the snapshot pins, the lost PreVotes, the failure tolerance and,
+// on a node that does not lead, its replication lag (0 on the leader,
+// #919), at most every 100 ms, on the loop.
 func (n *Node) observePeers() {
 	o := n.obs
 	if o.meter == nil {
@@ -343,6 +345,8 @@ func (n *Node) observePeers() {
 	o.setGauge(mFailureTolerance, float64(n.r.FailureTolerance(now)))
 	st := n.r.Status()
 	o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
+	lag, _ := replicationLag(&st, now)
+	o.setGauge(mReplicationLag, float64(lag))
 	seen := map[coreconsensus.NodeID]bool{}
 	for _, p := range n.r.PeerStats() {
 		seen[p.ID] = true

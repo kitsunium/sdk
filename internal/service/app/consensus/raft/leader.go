@@ -136,7 +136,10 @@ func (r *Raft) broadcastHeartbeat(now time.Time) {
 		if r.mutated(mutHeartbeatUnclamped) {
 			commit = r.log.committed
 		}
-		r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id})
+		// RejectHint is the leader's last index, which a follower of
+		// protocol 4 reads beside FlagProtocol4 for its replication lag
+		// and one of protocol 3 or below ignores on a heartbeat (#919).
+		r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id, RejectHint: r.heartbeatLast()})
 		if pr.state == stateReplicate && pr.paused(r.cfg.MaxInflight, r.cfg.MaxInflightBytes) {
 			// A full window must not stall forever on a lost
 			// acknowledgement: an empty append at next (R2-07).
@@ -333,7 +336,7 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr.facts |= peerHeard
 	// The announcement follows the peer's last message: a member rolled
 	// back to a previous release stops carrying it at once.
-	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3) | announced(m.Flags)
+	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4) | announced(m.Flags)
 	switch m.Kind {
 	case core.MsgAppResp:
 		pr.noteSilence(m.Flags)
@@ -829,10 +832,7 @@ func (r *Raft) checkAnnounced(v uint32) errs.Code {
 	if v < Protocol2 {
 		return 0
 	}
-	want := peerHeard | peerProtocol2
-	if v >= Protocol3 {
-		want |= peerProtocol3
-	}
+	want := peerHeard | announcedBy[min(v, ProtocolMax)]
 	for _, m := range r.conf().Members {
 		if pr := r.prs[m.ID]; pr == nil || pr.facts&want != want {
 			return codeVersion
@@ -863,9 +863,18 @@ func (r *Raft) checkHeard(v uint32) errs.Code {
 	return 0
 }
 
+// announcedBy is, per protocol version up to ProtocolMax, the facts a
+// member's frames carry once it speaks that version: a table, so that
+// checkAnnounced stays under its inline budget as versions are added.
+var announcedBy = [ProtocolMax + 1]peerFacts{
+	Protocol2: peerProtocol2,
+	Protocol3: peerProtocol2 | peerProtocol3,
+	Protocol4: peerProtocol2 | peerProtocol3 | peerProtocol4,
+}
+
 // announcementOf is the announcement every frame of a node speaking
-// protocol version v carries: FlagProtocol2 from 2, and FlagProtocol3 beside
-// it from 3 (D18, #648).
+// protocol version v carries: FlagProtocol2 from 2, FlagProtocol3 beside
+// it from 3 and FlagProtocol4 beside both from 4 (D18, #648, #919).
 func announcementOf(v uint32) core.MessageFlags {
 	var f core.MessageFlags
 	if v >= Protocol2 {
@@ -874,7 +883,20 @@ func announcementOf(v uint32) core.MessageFlags {
 	if v >= Protocol3 {
 		f |= core.FlagProtocol3
 	}
+	if v >= Protocol4 {
+		f |= core.FlagProtocol4
+	}
 	return f
+}
+
+// heartbeatLast is the last index a heartbeat of this leader carries in
+// RejectHint: its own from protocol 4, 0 below, as a leader of the
+// previous release sends (#919).
+func (r *Raft) heartbeatLast() uint64 {
+	if r.speaks() < Protocol4 {
+		return 0
+	}
+	return r.log.lastIndex()
 }
 
 // announces is the announcement this node's own frames carry, as the facts
@@ -891,6 +913,9 @@ func announced(flags core.MessageFlags) peerFacts {
 	}
 	if flags&core.FlagProtocol3 != 0 {
 		f |= peerProtocol3
+	}
+	if flags&core.FlagProtocol4 != 0 {
+		f |= peerProtocol4
 	}
 	return f
 }

@@ -3923,6 +3923,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol4",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "FlagProtocol4",
+      "spelled": "MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "64",
+      "doc": "FlagProtocol4 marks a frame from a node that speaks protocol version\n4, which sets FlagProtocol2 and FlagProtocol3 beside it. A leader of\nprotocol 4 carries its last index in the RejectHint of every\nheartbeat, which a follower reads only beside this flag: a node of\nprotocol 3 or below ignores both, and a leader refuses to raise the\ncluster version to 4 while a member's last frame of the term lacks it\n(#919).\n",
+      "file": "core/app/consensus/message.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagTransfer",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -63816,8 +63829,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "HealthValue",
-      "spelled": "struct{Status coreconsensus.StatusValue; Flags HealthFlags; FailureTolerance int; ApplyLagEntries uint64; Peers []PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader coreconsensus.NodeID; StopReason coreconsensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64; SnapshotBytes int64; SnapshotLimit int64}",
-      "canonical": "struct{Status github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue; Flags github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags; FailureTolerance int; ApplyLagEntries uint64; Peers []github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; StopReason github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64; SnapshotBytes int64; SnapshotLimit int64}",
+      "spelled": "struct{Status coreconsensus.StatusValue; Flags HealthFlags; FailureTolerance int; ApplyLagEntries uint64; ReplicationLagEntries uint64; LeaderLastAppend time.Duration; Peers []PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader coreconsensus.NodeID; StopReason coreconsensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64; SnapshotBytes int64; SnapshotLimit int64}",
+      "canonical": "struct{Status github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue; Flags github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags; FailureTolerance int; ApplyLagEntries uint64; ReplicationLagEntries uint64; LeaderLastAppend time.Duration; Peers []github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; StopReason github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64; SnapshotBytes int64; SnapshotLimit int64}",
       "fields": [
         {
           "name": "Status",
@@ -63838,6 +63851,16 @@
           "name": "ApplyLagEntries",
           "type": "uint64",
           "doc": "ApplyLagEntries is commit minus applied.\n"
+        },
+        {
+          "name": "ReplicationLagEntries",
+          "type": "uint64",
+          "doc": "ReplicationLagEntries is, on a node that does not lead, how far its\ndurable log trails the leader's last index as the leader's last\nheartbeat carried it; 0 on the leader, and while no heartbeat of a\nleader of protocol 4 reached it. It is informative: readiness does not\nrefuse on it (R2-28, #919).\n"
+        },
+        {
+          "name": "LeaderLastAppend",
+          "type": "time.Duration",
+          "doc": "LeaderLastAppend is, on a node that does not lead, how long ago it last\ntook an append with entries from the leader of its term; negative on the\nleader, and while it took none from this one (#919).\n"
         },
         {
           "name": "Peers",
@@ -66345,14 +66368,27 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.Protocol4",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Protocol4",
+      "spelled": "uint32",
+      "canonical": "uint32",
+      "value": "4",
+      "doc": "Protocol4 is the protocol version whose heartbeats carry the leader's\nlast index, announced by FlagProtocol4 (#919).\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ProtocolMax",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "ProtocolMax",
       "spelled": "uint32",
       "canonical": "uint32",
-      "value": "3",
-      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\nVersion 2 adds the snapshot metadata's checksum, the admin payload's\nOrigin and the log identity's AdoptedFrom, each written only once the\ncommitted cluster version is 2 (lot S3). Version 3 adds the retired keys\nof the configuration, written only once it is 3 (#648).\n",
+      "value": "4",
+      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\nVersion 2 adds the snapshot metadata's checksum, the admin payload's\nOrigin and the log identity's AdoptedFrom, each written only once the\ncommitted cluster version is 2 (lot S3). Version 3 adds the retired keys\nof the configuration, written only once it is 3 (#648). Version 4 adds\nthe leader's last index to every heartbeat, which a follower reads\nbeside FlagProtocol4 at any cluster version (#919).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -67172,8 +67208,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "StatusValue",
-      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64}",
-      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64}",
+      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
+      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
       "fields": [
         {
           "name": "Role",
@@ -67236,6 +67272,16 @@
           "name": "PreVotesLost",
           "type": "uint64",
           "doc": "PreVotesLost is how many PreVote refusals this node's campaigns were\nanswered since it started, one per voter and campaign: a node whose\ncount climbs while the cluster has a leader keeps asking for an\nelection it cannot win (D13, consensus_prevotes_lost_total).\n"
+        },
+        {
+          "name": "LeaderLast",
+          "type": "uint64",
+          "doc": "LeaderLast is, on a node that does not lead, the leader's last index as\nits last heartbeat of this term carried it (FlagProtocol4), 0 while\nnone did: a leader of protocol 3 or below sends none (#919).\n"
+        },
+        {
+          "name": "Appended",
+          "type": "time.Time",
+          "doc": "Appended is, on a node that does not lead, the instant of the last\nappend with entries it took from the leader of this term, zero while\nit took none (#919).\n"
         }
       ],
       "doc": "StatusValue is the step function's part of a node's status. It is a copy:\nits memberships are cloned, so the caller may keep it.\n",

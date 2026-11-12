@@ -84,6 +84,16 @@ under coverage before touching `shard_count`.
   `TestTheSimulatorMeasuresEachPeersRoundTrip`). `Status.PreVotesLost`
   counts a refusal once per voter and campaign, a later term's refusal
   included (`TestAPreVoteRefusalCountsOncePerVoterAndCampaign`).
+- Read a heartbeat's `RejectHint` as the leader's last index without
+  `FlagProtocol4` beside it, or send one below protocol 4: a leader of
+  protocol 3 leaves it 0, and a follower of protocol 3 ignores it on a
+  heartbeat, so the field needs no raise (#919, `heartbeatLast`,
+  `hearLeader`). `Status.LeaderLast` and `Status.Appended` are read only
+  while the leader heard leads the node's term, and a raise to 4 waits for
+  every member to announce `FlagProtocol4` (`announcedBy`, a table so that
+  `checkAnnounced` stays inlined)
+  (`TestAFollowerHearsTheLeadersLastIndexOnlyBesideFlagProtocol4`,
+  `TestAMixedClusterOfProtocol3And4KeepsReplicatingAndRefusesTheRaise`).
 - Acknowledge a snapshot install past its index (review H1,
   `mutSnapshotAckLastIndex`).
 - Append, acknowledge or skip an entry kind `Known` refuses: report it in

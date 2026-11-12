@@ -344,6 +344,15 @@ The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol3`.
 
+<a name="FlagProtocol4"></a>
+```go
+const FlagProtocol4 coreconsensus.MessageFlags = 64
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol4`.
+
 <a name="FlagTransfer"></a>
 ```go
 const FlagTransfer coreconsensus.MessageFlags = 1
@@ -2083,40 +2092,50 @@ HealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consen
 ```go
 type HealthValue struct {
 	// Status is the node's view after its last turn.
-	Status             coreconsensus.StatusValue
+	Status                coreconsensus.StatusValue
 	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
 	// HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
-	Flags              HealthFlags
+	Flags                 HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
-	FailureTolerance   int
+	FailureTolerance      int
 	// ApplyLagEntries is commit minus applied.
-	ApplyLagEntries    uint64
+	ApplyLagEntries       uint64
+	// ReplicationLagEntries is, on a node that does not lead, how far its
+	// durable log trails the leader's last index as the leader's last
+	// heartbeat carried it; 0 on the leader, and while no heartbeat of a
+	// leader of protocol 4 reached it. It is informative: readiness does not
+	// refuse on it (R2-28, #919).
+	ReplicationLagEntries uint64
+	// LeaderLastAppend is, on a node that does not lead, how long ago it last
+	// took an append with entries from the leader of its term; negative on the
+	// leader, and while it took none from this one (#919).
+	LeaderLastAppend      time.Duration
 	// Peers is the leader's view of every peer, nil elsewhere.
-	Peers              []PeerHealthValue
+	Peers                 []PeerHealthValue
 	// ChainRefusals counts identical chain refusals of this follower at
 	// ChainRefusalIndex from ChainRefusalLeader; the node reports itself
 	// unready while it refuses (D4, R6-05).
-	ChainRefusals      int
-	ChainRefusalIndex  uint64
-	ChainRefusalLeader coreconsensus.NodeID
+	ChainRefusals         int
+	ChainRefusalIndex     uint64
+	ChainRefusalLeader    coreconsensus.NodeID
 	// StopReason says why the node stopped itself.
-	StopReason         coreconsensus.StopReasonValue
+	StopReason            coreconsensus.StopReasonValue
 	// DroppedFrames counts frames whose From differed from the
 	// authenticated peer (R7-05).
-	DroppedFrames      int64
+	DroppedFrames         int64
 	// LongTurns counts the loop turns longer than the drift budget, each of
 	// which dropped the lease (D9, R7-20).
-	LongTurns          int64
+	LongTurns             int64
 	// JoinsRateLimited counts JOINs refused by the one-per-slot rate.
-	JoinsRateLimited   int64
+	JoinsRateLimited      int64
 	// SnapshotBytes is the size of the newest snapshot this node holds,
 	// the larger of its encoded and decoded sizes; 0 with none.
-	SnapshotBytes      int64
+	SnapshotBytes         int64
 	// SnapshotLimit is the size a cut is held to now: this node's
 	// MaxSnapshotBytes, or the smallest a member announces when lower
 	// (R2-30).
-	SnapshotLimit      int64
+	SnapshotLimit         int64
 }
 ```
 

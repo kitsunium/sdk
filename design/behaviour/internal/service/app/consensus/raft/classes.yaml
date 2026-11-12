@@ -429,6 +429,10 @@ constants:
           carried FlagProtocol3.
         name: peerProtocol3
       - doc: |-
+          peerProtocol4 is set while the peer's last message of the term
+          carried FlagProtocol4.
+        name: peerProtocol4
+      - doc: |-
           peerSilent is set while the peer's last answer, to an append or a
           heartbeat, said it is silent (FlagTruncated, #636): it answers, but
           acknowledges no append, so it counts for no change that must commit
@@ -485,11 +489,13 @@ constants:
       Version 2 adds the snapshot metadata's checksum, the admin payload's
       Origin and the log identity's AdoptedFrom, each written only once the
       committed cluster version is 2 (lot S3). Version 3 adds the retired keys
-      of the configuration, written only once it is 3 (#648).
+      of the configuration, written only once it is 3 (#648). Version 4 adds
+      the leader's last index to every heartbeat, which a follower reads
+      beside FlagProtocol4 at any cluster version (#919).
     items:
       - name: ProtocolMax
         type: uint32
-        value: "3"
+        value: "4"
     name: ProtocolMax
   - doc: |-
       Protocol2 is the protocol version whose formats a node writes once the
@@ -508,6 +514,14 @@ constants:
         type: uint32
         value: "3"
     name: Protocol3
+  - doc: |-
+      Protocol4 is the protocol version whose heartbeats carry the leader's
+      last index, announced by FlagProtocol4 (#919).
+    items:
+      - name: Protocol4
+        type: uint32
+        value: "4"
+    name: Protocol4
   - doc: |-
       rttRounds is how many heartbeat rounds keep their send time for the
       round trips (Raft.sentRounds).
@@ -569,7 +583,9 @@ files:
       - (*Raft).checkClusterVersion
       - (*Raft).checkAnnounced
       - (*Raft).checkHeard
+      - announcedBy
       - announcementOf
+      - (*Raft).heartbeatLast
       - (*Raft).announces
       - announced
       - (*Raft).checkNoSpaceClear
@@ -712,6 +728,7 @@ files:
       - ProtocolMax
       - Protocol2
       - Protocol3
+      - Protocol4
       - raftFacts
       - Config
       - fwdEntry
@@ -834,6 +851,8 @@ files:
       - (*Raft).followWinner
       - (*Raft).stepFollower
       - (*Raft).followAppend
+      - leaderHeard
+      - (*Raft).hearLeader
       - (*Raft).followHeartbeat
       - (*Raft).heldOfTerm
       - (*Raft).reportSilence
@@ -860,8 +879,8 @@ files:
 functions:
   - doc: |-
       announcementOf is the announcement every frame of a node speaking
-      protocol version v carries: FlagProtocol2 from 2, and FlagProtocol3 beside
-      it from 3 (D18, #648).
+      protocol version v carries: FlagProtocol2 from 2, FlagProtocol3 beside
+      it from 3 and FlagProtocol4 beside both from 4 (D18, #648, #919).
     name: announcementOf
     params: v uint32
     results: core.MessageFlags
@@ -1846,6 +1865,11 @@ types:
       - name: now
         type: time.Time
       - doc: |-
+          heard is what this node last heard of the leader of its term, for the
+          replication lag Health reports (#919).
+        name: heard
+        type: leaderHeard
+      - doc: |-
           selfVoteSeq is the write that carries this candidate's own vote; its
           vote counts once that write is durable (D5b).
         name: selfVoteSeq
@@ -2343,6 +2367,13 @@ types:
         params: v uint32
         recv: r *Raft
         results: errs.Code
+      - doc: |-
+          heartbeatLast is the last index a heartbeat of this leader carries in
+          RejectHint: its own from protocol 4, 0 below, as a leader of the
+          previous release sends (#919).
+        name: heartbeatLast
+        recv: r *Raft
+        results: uint64
       - doc: |-
           announces is the announcement this node's own frames carry, as the facts
           a leader keeps of a peer that sent them.
@@ -3619,6 +3650,13 @@ types:
         params: now time.Time, m core.MessageValue
         recv: r *Raft
       - doc: |-
+          hearLeader is the record of the leader from of this term, started over
+          when the leader or the term changed.
+        name: hearLeader
+        params: from core.NodeID
+        recv: r *Raft
+        results: "*leaderHeard"
+      - doc: |-
           followHeartbeat records the leader's contact, commits what the heartbeat
           allows of the entries held, and answers the round.
         name: followHeartbeat
@@ -3940,6 +3978,18 @@ types:
           election it cannot win (D13, consensus_prevotes_lost_total).
         name: PreVotesLost
         type: uint64
+      - doc: |-
+          LeaderLast is, on a node that does not lead, the leader's last index as
+          its last heartbeat of this term carried it (FlagProtocol4), 0 while
+          none did: a leader of protocol 3 or below sends none (#919).
+        name: LeaderLast
+        type: uint64
+      - doc: |-
+          Appended is, on a node that does not lead, the instant of the last
+          append with entries it took from the leader of this term, zero while
+          it took none (#919).
+        name: Appended
+        type: time.Time
     kind: struct
     name: StatusValue
   - fields:
@@ -3961,3 +4011,33 @@ types:
         type: EngineValue
     kind: struct
     name: engineAt
+  - doc: |-
+      leaderHeard is what a node that does not lead last heard of the leader
+      of a term: the leader's last index, as a heartbeat of protocol 4
+      carried it, and the instant of the last append with entries it took
+      (#919). It is read only while from leads the node's term.
+    fields:
+      - name: from
+        type: core.NodeID
+      - name: term
+        type: uint64
+      - name: last
+        type: uint64
+      - name: appended
+        type: time.Time
+    kind: struct
+    name: leaderHeard
+vars:
+  - doc: |-
+      announcedBy is, per protocol version up to ProtocolMax, the facts a
+      member's frames carry once it speaks that version: a table, so that
+      checkAnnounced stays under its inline budget as versions are added.
+    items:
+      - name: announcedBy
+        value: |-
+          [ProtocolMax + 1]peerFacts{
+          	Protocol2: peerProtocol2,
+          	Protocol3: peerProtocol2 | peerProtocol3,
+          	Protocol4: peerProtocol2 | peerProtocol3 | peerProtocol4,
+          }
+    name: announcedBy
