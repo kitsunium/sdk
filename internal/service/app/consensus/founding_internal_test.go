@@ -47,7 +47,9 @@ func TestTheFoundingContractIsTheOneNewNodeValidates(t *testing.T) {
 // case: a founding InitialTiming with no minimum was written as it was, the
 // engine refused it, and every node ran generation 1 on its own
 // InitialTiming, which may differ from node to node (#421). Completed by
-// Bootstrap, it rules every node alike, whatever each one started with.
+// Bootstrap, it rules every node alike, whatever each one started with,
+// once entry 1 commits: Bootstrap leaves it uncommitted (#698), and a
+// contract acts at its commit (raft's TestTheFoundingContractRules).
 func TestAFoundingContractWithoutItsMinimumRulesEveryNode(t *testing.T) {
 	partial := coreconsensus.TimingContractSpec{Generation: 1, HeartbeatInterval: 10 * time.Millisecond}
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 5}, size: 3, timing: partial}
@@ -63,7 +65,14 @@ func TestAFoundingContractWithoutItsMinimumRulesEveryNode(t *testing.T) {
 	}
 	want := partial
 	clampTiming(&want)
+	deadline := time.Now().Add(10 * time.Second)
 	for _, tn := range c.nodes {
+		for tn.node.Status().Commit < 1 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if tn.node.Status().Commit < 1 {
+			t.Fatalf("node %d: entry 1 never committed", tn.id)
+		}
 		if got := tn.node.Status().Timing; got != want {
 			t.Fatalf("node %d runs generation 1 as %+v; the founding contract is %+v", tn.id, got, want)
 		}

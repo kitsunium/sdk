@@ -86,6 +86,11 @@ go_test(
         "wirebatch_internal_test.go",
         "withleaderbet_internal_test.go",
         "withoutvoucher_internal_test.go",
+        "zdiverged_internal_test.go",
+        "zfounding_internal_test.go",
+        "zfuzzstep_internal_test.go",
+        "zreplicationlag_internal_test.go",
+        "zseries_internal_test.go",
     ],
     embed = [":raft"],
     # The deterministic simulations take ~300 CPU-seconds under race and

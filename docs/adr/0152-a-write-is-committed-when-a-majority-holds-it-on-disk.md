@@ -1978,7 +1978,45 @@ one term — once before the loss, once after — and elect two leaders.
   is compared and written in NodeID order, so its order on the command line
   does not matter: entry 1 is byte-identical on every founder, as the chain
   requires (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M1). The founders also pass the same initial
-  timing contract, which entry 1 carries.
+  timing contract, which entry 1 carries. `Bootstrap` contacts no peer and
+  cannot check it: founders given different timings write different
+  entries at (1, 1). `Bootstrap` therefore leaves entry 1 uncommitted (hard
+  state `{Term: 1, Commit: 0}`): it commits as any entry does, once the
+  first leader, of term 2 at least, holds its own entry 1 on a majority. A
+  founder whose uncommitted entry 1 differs from the leader's takes the
+  leader's as any conflicting uncommitted entry, when it is a founding
+  entry over the same member list that its own sums verify; another list
+  is never taken: a founder given another member list names the
+  divergence once a leader that committed past entry 1 shows its own, and
+  stops `BOOTSTRAP_REFUSED` with its marker; before that the append is held
+  back, unanswered and uncounted, for `ElectionTimeoutMax`, then refused as
+  a broken chain. The chain past an entry a follower already holds is the
+  follower's own, never the one the append carries. So no two nodes ever
+  hold different committed entries at (1, 1), every founder runs the one
+  generation 1 contract the first leader proposed, and a founder's
+  `InitialTiming` that differs from it is overridden once it holds the
+  leader's entry 1. Until its entry 1 commits, a node that holds nothing
+  durably committed and no snapshot answers a heartbeat with contract
+  generation 0, which sizes no lease: it runs its own `InitialTiming`
+  then, and reporting generation 1 on it let a founder given a shorter
+  timing vote inside the leader's lease
+  (amendment of 2026-11-12, #698; written committed, each founder committed
+  its own entry 1, the odd ones refused every leader's appends for good,
+  and founders that all differed never committed anything). A data
+  directory founded before it may still hold its own entry 1 committed: a
+  follower whose committed entry differs from the one a leader's append
+  carries, that leader's sums verifying it, stops `BOOTSTRAP_REFUSED` with
+  its marker once that leader's commit passed the entry, which then lies on
+  a majority; before that the append goes unanswered and uncounted for
+  `ElectionTimeoutMax`, then is refused as a broken chain, so an odd leader
+  is deposed; a log that started holding entry 1 alone, committed, is
+  also judged on the chain of the entry after it. Founders of such a
+  directory that all passed different timings still commit nothing, and
+  nothing stops them: no leader commits past entry 1. **A cluster founded
+  by this release is not rolled back to an earlier one before its first
+  commit**: an earlier release keeps its own entry 1 on its term, appends
+  the leader's entry 2 over it and commits it, #698 with a broken chain.
+  Once entry 1 is committed by a leader, the rollback is as before.
   **`Bootstrap`, `Recover` and `RestoreSnapshot` require a non-zero SPKI for
   every member (R9-04).** An empty pin is refused, so no member is ever
   admitted on its slot alone. A RUNNING server

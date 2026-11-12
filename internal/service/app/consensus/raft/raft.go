@@ -295,6 +295,22 @@ type ReadyValue struct {
 	// follower refused for a broken chain, for D13's
 	// consensus_chain_refusals_total.
 	ChainRefusedBy []core.NodeID
+	// Diverged names an append of a leader that committed past an index
+	// this node holds, committed or its founding entry 1, and carried
+	// another entry there than this node's (#698): no majority holds this
+	// node's entry, and the driver stops it.
+	Diverged DivergenceValue
+}
+
+// DivergenceValue is an entry of this node's log, committed or its founding
+// entry 1, that the append of a leader which committed past it
+// contradicted; Index is 0 when there is none.
+type DivergenceValue struct {
+	// Index is the index, committed or 1, at or below which the leader's
+	// log differs from this node's.
+	Index uint64
+	// Leader is the leader whose append carried it.
+	Leader core.NodeID
 }
 
 // UnsupportedEntryValue is an entry a leader sent that this version cannot
@@ -457,6 +473,18 @@ type Raft struct {
 	refusedAt   uint64
 	refusedFrom core.NodeID
 	refusals    int
+	// divergedFrom, divergedTerm and divergedSince are the leader whose
+	// append first contradicted a committed entry in this term, and when:
+	// heldOnDivergence holds its refusals back for ElectionTimeoutMax (#698).
+	divergedFrom  core.NodeID
+	divergedTerm  uint64
+	divergedSince time.Time
+	// fiatFounding is set while the log holds entry 1 alone, of term 1,
+	// committed at the start: a data directory founded before Bootstrap
+	// left entry 1 uncommitted, whose entry 1 no majority may hold. Only
+	// there does foundingDivergence judge entry 1 on its successor's chain
+	// (#698's review). The first entry past 1 appended clears it.
+	fiatFounding bool
 	// guardRefusal is what #603's guard found when it refused the change
 	// the last Propose was handed: the voters that change would strand, nil
 	// when the guard did not refuse it (GuardRefusal, #773). Never
@@ -521,6 +549,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.log.applied = max(st.Applied, node.log.snapIndex)
 	node.log.applied = min(node.log.applied, node.log.committed)
 	node.applyCommitEffects(node.log.snapIndex+1, node.log.committed)
+	node.fiatFounding = node.log.snapIndex == 0 && node.log.lastIndex() == 1 && node.log.committed == 1 && node.log.matchTerm(1, 1)
 	node.hs = core.HardState{Term: node.term, Vote: node.vote, Commit: node.log.committed}
 	node.role = core.RoleFollower
 	if !node.isVoter(node.id) {
@@ -896,9 +925,11 @@ func (rd *ReadyValue) hasNotices() bool {
 
 // hasStateNotice reports whether the Ready tells the driver of a state: the
 // end of the silence or its lowered point, an entry this version cannot
-// apply, or a node that may not campaign and hears no leader.
+// apply, a node that may not campaign and hears no leader, or a committed
+// entry a majority does not hold (#698).
 func (rd *ReadyValue) hasStateNotice() bool {
-	return rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard
+	return rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard ||
+		rd.Diverged.Index != 0
 }
 
 // Ready returns the work of the turns since the last call and resets it.
@@ -1235,6 +1266,9 @@ func (r *Raft) truncateFrom(i uint64) {
 // appendEntries appends es to the log and to the Ready's write, noting what
 // each changes at append time.
 func (r *Raft) appendEntries(es []core.EntryValue) {
+	if n := len(es); n > 0 && es[n-1].Position.Index > 1 {
+		r.fiatFounding = false
+	}
 	for i := range es {
 		r.log.ents = append(r.log.ents, es[i])
 		r.log.window += int64(len(es[i].Data))

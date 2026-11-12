@@ -120,6 +120,67 @@ under coverage before touching `shard_count`.
   rejection was contact for CheckQuorum and the trigger of an immediate
   resend, and the refusing majority never campaigned (#508,
   `mutRefusedLeadHeard`, `checkRefusedLeaderIsNotHeard`).
+- Re-base an append on the commit without comparing the committed entries
+  it carries, or count at once the refusals of a leader whose entry 1
+  differs from this founder's committed one: founders given different
+  timings each commit their own entry 1, and the odd one refused every
+  leader's chain, three refusals before the majority's leader first
+  committed, cut off for the term with nothing said (#698).
+  `committedDivergence` compares the entries at or below the commit an
+  append carries, `foundingDivergence` the chain of the entry after index
+  1 (entry 1 alone, the one entry a data directory founded before #698's
+  fix holds committed by fiat), each only on a body
+  and a chain the leader's own sums verify; `heldOnDivergence` names it in
+  `Ready.Diverged` once the leader's commit passed it, and otherwise drops
+  the append unanswered and uncounted for `ElectionTimeoutMax`, then lets
+  the chain check refuse it (`TestAnAppendOfALeaderThatCommittedPastAnotherEntry1IsADivergence`,
+  `TestADivergenceNoCommitProvesIsHeldBackThenRefused`; no mutation, the
+  type is full).
+- Match a held entry 1 of term 1 on its term alone, or take the chain
+  past a held entry from the append rather than from this log: entry 1 is
+  the one position no leader created, every founder writing its own from
+  its InitialTiming, and a founder that kept its own refused every
+  append, or, from index 0, appended the leader's entry 2 on top of it,
+  its chain broken (#698). Bootstrap leaves entry 1 uncommitted, and
+  `replacesFounding` lets a leader's founding entry over the same members,
+  verified by its own sums, replace this node's while it is uncommitted;
+  `firstNewEntry` chains past a held entry on `log.chain`, and refuses as a
+  broken chain an append carrying another entry at a position held
+  uncommitted under the same term. Nor acknowledge an append whose prefix
+  is the uncommitted founding entry matched by its term alone: the
+  leader's heartbeat, clamped to that match, committed the founder's own
+  entry 1 while a majority committed the leader's. `foundingUnproven`
+  refuses it uncounted, hint 0, unless its first entry verifies chained on
+  this node's entry 1
+  (`TestAnUncommittedFoundingEntryGivesWayToTheLeaders`,
+  `TestAFoundingEntryIsReplacedOnlyByAVerifiedOneOfTheSameMembers`,
+  `TestTheSameFoundingEntryIsKept`,
+  `TestAnEntry1MatchedByItsTermAloneIsNeverCommitted`,
+  `TestAnotherEntry1ThisNodeKeepsIsNeverAcknowledged`; no mutation,
+  the type is full).
+- Judge entry 1 on its successor's chain alone (`foundingDivergence`) in
+  any log but one that started holding entry 1 alone, committed
+  (`fiatFounding`, what a data directory founded before Bootstrap left
+  entry 1 uncommitted holds): a node whose entry 1 a leader committed
+  stopped `BOOTSTRAP_REFUSED` on an entry 2 whose chain field rotted in
+  the leader's memory (#698's review,
+  `TestARottedChainPastALeaderCommittedEntry1IsNoDivergence`, its control
+  in the same test).
+- Refuse in silence a leader's verified founding entry 1 over another
+  member list while this node's own is uncommitted: the divergence stop
+  asked a committed entry, and such a founder refused every leader for
+  good. `foundingContradicted` hands it to `heldOnDivergence`, which names
+  it in `Ready.Diverged` once the leader committed past 1 and holds it
+  back for `ElectionTimeoutMax` otherwise (#698's review,
+  `TestAFounderOfAnotherMemberListStopsOnceTheLeaderCommitsPastEntry1`).
+- Report to a heartbeat any generation but 0 while the node holds nothing
+  durably committed and no snapshot: its engine base is then its own
+  InitialTiming, which no entry confirmed. A founder before its entry 1
+  commits reported generation 1 on that guess, the leader sized it with
+  its own generation 1, and a founder given a shorter timing granted a
+  vote inside the leader's lease (#698's review, `reportedContract`,
+  `TestAFounderBeforeItsEntry1CommitsSizesNoLease`, its control in the
+  same test).
 - Admit a `ChangeSnapshotLimit` from any origin but the member it names
   (the authenticated origin `validateAdmin` holds, a forwarder or this
   leader), of a limit of 0 or below, or of the limit already recorded: only

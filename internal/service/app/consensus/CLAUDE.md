@@ -713,6 +713,25 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   write the old cluster acknowledged, and a token of the predecessor whose
   term cannot be read any more is LINEAGE_MISMATCH (#509,
   `TestWaitAppliedComparesTheTermRecoverKept`).
+- Write entry 1 committed at `Bootstrap`: it contacts no peer, and entry 1
+  carries the founder's own `InitialTiming`, so founders given different
+  timings each committed their own entry 1 at (1, 1), Log Matching broken
+  by construction; the odd one refused every leader's chain for good, the
+  cluster one failure from no commit, and three timings never committed
+  anything. `writeFoundingEntry` leaves it uncommitted, the first leader
+  commits its own, and raft's `replacesFounding` has a founder holding
+  another one take it (#698, `TestBootstrapLeavesEntry1Uncommitted`,
+  `TestAFounderWithAnotherTimingTakesTheCommittedEntry1`,
+  `TestFoundersWithThreeTimingsCommitOneEntry1`). A founder given another
+  member list never takes the leader's entry 1: raft names the divergence
+  once a leader that committed past it shows its own (`foundingContradicted`),
+  and the node stops `BOOTSTRAP_REFUSED`; left uncommitted, it refused every
+  leader's chain for good, with nothing said (#698's review,
+  `TestAFounderOfAnotherMemberListStopsOnceTheOthersCommit`). A data directory founded
+  before holds its own entry 1 committed: raft names the divergence once a
+  leader that committed past entry 1 shows another one
+  (`ReadyValue.Diverged`), and `stopOnDivergence` stops the node
+  `BOOTSTRAP_REFUSED`, `LOG_CORRUPT` past index 1.
 - Write the founding contract raw: `foundingTiming` completes and refuses
   `InitialTiming` as NewNode does, so the contract that rules every node is
   the one NewNode validated (#523,

@@ -2858,7 +2858,7 @@
         "reason": "BOOTSTRAP_REFUSED",
         "public": "The cluster cannot be bootstrapped"
       },
-      "doc": "BootstrapRefused is returned when a listed peer already holds a history,\nor the founding member lists differ.\n",
+      "doc": "BootstrapRefused is returned when a listed peer already holds a history,\nor the founding member lists differ. A running founder stops with it\nonce a leader that committed past entry 1 shows another entry 1 than\nits own: the founders passed Bootstrap different initial timings, and\na majority founded the cluster on the other one (#698).\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -70692,6 +70692,30 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.DivergenceValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "DivergenceValue",
+      "spelled": "struct{Index uint64; Leader core.NodeID}",
+      "canonical": "struct{Index uint64; Leader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
+      "fields": [
+        {
+          "name": "Index",
+          "type": "uint64",
+          "doc": "Index is the committed index at or below which the leader's log\ndiffers from this node's.\n"
+        },
+        {
+          "name": "Leader",
+          "type": "core.NodeID",
+          "doc": "Leader is the leader whose append carried it.\n"
+        }
+      ],
+      "doc": "DivergenceValue is a committed entry of this node's log that the append\nof a leader which committed past it contradicted; Index is 0 when there\nis none.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.EngineValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -71508,8 +71532,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "ReadyValue",
-      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; ApplyRead ReadBackSpec; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; SilenceLowered uint64; LeaderUnheard bool; Fetch []FetchSpec; Membership []core.MemberValue; MembershipAt []uint64; LeaderHint core.MemberValue; LeaderAddress core.MemberValue; Unsupported UnsupportedEntryValue; ChainRefusedBy []core.NodeID}",
-      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; ApplyRead github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadBackSpec; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; SilenceLowered uint64; LeaderUnheard bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; MembershipAt []uint64; LeaderHint github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; LeaderAddress github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntryValue; ChainRefusedBy []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
+      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; ApplyRead ReadBackSpec; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; SilenceLowered uint64; LeaderUnheard bool; Fetch []FetchSpec; Membership []core.MemberValue; MembershipAt []uint64; LeaderHint core.MemberValue; LeaderAddress core.MemberValue; Unsupported UnsupportedEntryValue; ChainRefusedBy []core.NodeID; Diverged DivergenceValue}",
+      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; ApplyRead github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadBackSpec; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; SilenceLowered uint64; LeaderUnheard bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; MembershipAt []uint64; LeaderHint github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; LeaderAddress github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntryValue; ChainRefusedBy []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Diverged github.com/kitsunium/sdk/internal/service/app/consensus/raft.DivergenceValue}",
       "fields": [
         {
           "name": "Seq",
@@ -71630,6 +71654,11 @@
           "name": "ChainRefusedBy",
           "type": "[]core.NodeID",
           "doc": "ChainRefusedBy names, once per refusal, the leader whose append this\nfollower refused for a broken chain, for D13's\nconsensus_chain_refusals_total.\n"
+        },
+        {
+          "name": "Diverged",
+          "type": "DivergenceValue",
+          "doc": "Diverged names an append of a leader that committed past an index\nthis node holds committed, and carried another entry there than this\nnode's (#698): no majority holds this node's entry, and the driver\nstops it.\n"
         }
       ],
       "doc": "ReadyValue is what the driver must do after a turn: write, then send.\nNothing in AfterSync leaves before the write numbered Seq is durable\n(D5b).\n",

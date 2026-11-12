@@ -1381,7 +1381,7 @@ func (n *Node) handleReady() {
 	n.handedLag, n.handedReads = 0, 0
 	for n.r.HasReady() {
 		rd := new(n.r.Ready())
-		if n.stopOnUnsupported(rd) {
+		if n.stopOnUnsupported(rd) || n.stopOnDivergence(rd) {
 			return
 		}
 		n.handleOne(rd)
@@ -1511,6 +1511,34 @@ func (n *Node) stopOnUnsupported(rd *raft.ReadyValue) bool {
 	}
 	n.stop(unsupportedKind(u.Kind, u.Index), false)
 	return true
+}
+
+// stopOnDivergence stops the node when a Ready names an append of a leader
+// that committed past an index this node holds committed and carried
+// another entry there (#698), and reports whether it did: no majority holds
+// this node's entry. It stops BOOTSTRAP_REFUSED at the founding entry, the
+// founders having passed different member lists (or, in a data directory
+// founded before Bootstrap left entry 1 uncommitted, different initial
+// timings), LOG_CORRUPT past it.
+// That Ready is then not carried out at all.
+func (n *Node) stopOnDivergence(rd *raft.ReadyValue) bool {
+	d := rd.Diverged
+	if d.Index == 0 {
+		return false
+	}
+	n.stop(divergedErr(d), false)
+	return true
+}
+
+// divergedErr is the error a node stops with when a majority holds another
+// committed entry at d.Index than its own.
+func divergedErr(d raft.DivergenceValue) error {
+	fields := []errs.FieldValue{errs.String("index", u64s(d.Index)), errs.String("leader", u64s(uint64(d.Leader)))}
+	if d.Index == 1 {
+		return origin(coreconsensus.BootstrapRefused, append(fields,
+			errs.String("why", "a majority founded the cluster with another entry 1: the founders passed Bootstrap different member lists, or different initial timings before entry 1 was left uncommitted"))...)
+	}
+	return origin(coreconsensus.LogCorrupt, append(fields, errs.String("why", "a majority holds another committed entry at this index"))...)
 }
 
 // sendMessages sends raft's messages, but no entries to a learner the
