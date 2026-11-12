@@ -156,10 +156,11 @@ func (h *handle) Signal(sig coreproc.Signal) error {
 	return nil
 }
 
-// SignalGroup delivers sig to a Setpgid child's console process group as the
-// matching console control event (#933): SIGINT is CTRL_C_EVENT, SIGTERM,
-// SIGHUP and SIGQUIT are CTRL_BREAK_EVENT, so the group's handlers — a Go
-// child's os/signal included — get a real chance to exit. SIGKILL, and every
+// SignalGroup delivers sig to a Setpgid child's console process group as its
+// console control event (#933): SIGINT, SIGTERM, SIGHUP and SIGQUIT are each
+// CTRL_BREAK_EVENT, the one event Windows delivers to a single group, so the
+// group's handlers — a Go child's os/signal, which reads it as os.Interrupt,
+// included — get a real chance to exit. SIGKILL, and every
 // signal to a child without its own group, reach the leader alone through
 // Signal: CTRL_BREAK to the supervisor's own console group would reach the
 // supervisor.

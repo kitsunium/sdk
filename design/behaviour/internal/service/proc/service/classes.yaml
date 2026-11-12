@@ -1690,7 +1690,7 @@ functions:
   - doc: decodeUsage reads an exit's counters.
     name: decodeUsage
     params: r *reader, b []byte
-    results: "*coreproc.UsageValue"
+    results: coreproc.UsageValue
   - doc: "handoverHere is nil: Linux hands units over."
     name: handoverHere
     params: _ string

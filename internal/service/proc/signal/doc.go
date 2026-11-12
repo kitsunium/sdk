@@ -7,8 +7,9 @@
 // kernel32 (syscall.NewLazyDLL, ABI cited, no golang.org/x/sys):
 //
 //   - a process-group target (Target < -1) → GenerateConsoleCtrlEvent, the
-//     console control event that reaches every process in the group (CTRL_C for
-//     SIGINT, CTRL_BREAK otherwise — the only event that can target one group);
+//     console control event that reaches every process in the group: CTRL_BREAK
+//     for every signal, SIGINT included — the only event that can target one
+//     group, which a Go process reads as os.Interrupt;
 //   - a single-pid target (Target > 0) → OpenProcess + TerminateProcess, the
 //     reliable per-process delivery (Windows has no per-pid interrupt).
 //

@@ -27,7 +27,7 @@ sentinels — this package returns them and declares none.
 | `ipc_compliance.go` | the compile-time proof that `*Listener` satisfies `coreipc.Listener` and `*Dialer` satisfies `coreipc.Dialer` — a method renamed or retyped on either engine fails the build here, not in a caller holding the port |
 | `socket.go` (`!windows`) | the Unix socket: `listen` (dial-then-remove of a leftover socket — `nobodyListens`: refused or gone, nothing else —, `0600`), `socketAcceptor`, `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
 | `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName` (the account's SID in the name, #1318), `pipeSDDL`, `listenAs`, `taken`/`holder`/`ownerOf` (a name that exists judged by its owner: `IN_USE` or `ENDPOINT_SQUATTED`), `pipeAcceptor` (descriptor `O:<SID>D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused); `pipeConn` keeps its peer and, for a named one, a handle on its process (`newPipeConn`, `openPeerProcess` — a process younger than the connection refused —, closed by `Close`) |
-| `files.go` (`unix \|\| windows`), `files_unix.go`, `files_windows.go`, `files_other.go` | file passing (#936): `fdPassRefused`; `SCM_RIGHTS` on Unix (`fileConn`); a frame and `DuplicateHandle` out of the sender's process on Windows (`SendFiles`, `fileFrame`, `RecvFiles`, `take`); none elsewhere |
+| `files.go` (`unix \|\| windows`), `files_unix.go`, `files_windows.go`, `files_other.go` | file passing (#936): `fdPassRefused`; `SCM_RIGHTS` on Unix (`fileConn`); a frame and `DuplicateHandle` out of the sender's process on Windows, a socket by `WSADuplicateSocketW` and `WSASocketW` (`SendFiles`, `prepare`, `fileFrame`, `RecvFiles`, `readEntries`, `take`); none elsewhere |
 | `dir_unix.go` / `dir_other.go` | `prepareDir` (path audited before AND after the `Mkdir`), `checkDir` (path above, own entry, holder), `checkEntry` (mode, owner, not a link), `ownerOf`: on Unix; a refusal elsewhere |
 | `chain_unix.go` | `checkChain` over `pathchain.Resolve` of the socket directory's parent, `checkHolder`, `steerable` (the rule), `ours`, `pathUnsafe` — see §Why-this-shape |
 | `peer_linux.go` / `peer_other.go` (`!linux && !windows`) | `peerOf`: `SO_PEERCRED`, or an unverified peer |
@@ -122,14 +122,17 @@ The codes — `0.3.91.1`–`11`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   that fit) and none leaks into the process; the net package receives them
   close-on-exec. `TestPassFiles` (Linux) pins a file, the 64 against `max=4`
   with the descriptor count unchanged, and the unnamed peer;
-  `TestPassAListener` (`files_unix_internal_test.go`, every Unix) passes a bound
-  TCP listener, closes the sender's two descriptors, and has the receiver
-  accept a connection on it end to end — a message and its reply — where the
+  `TestHandOverAListener` (`files_handover_internal_test.go`,
+  every Unix and Windows) passes a bound TCP listener to a receiving process —
+  the test binary run again in the `SDK_IPC_HANDOVER_RECEIVER` role, taken out
+  of the inherited environment before it is set, starting nothing and dead
+  within 30 s — closes the sender's two descriptors, and has the receiver
+  accept a connection on it end to end — a ping and its pong — where the
   kernel names the peer; elsewhere (darwin, OpenBSD, illumos, Solaris) it
-  asserts the refusal and skips. The receiver there is the other end of the
-  socket in the same process, not a second one. **Windows (`files_windows.go`)**: a pipe carries bytes, so
-  the files travel in band, in a frame — `SDKF`, the count, the payload's
-  length, the handle values, the payload — and the receiver must call
+  asserts the refusal and skips. **Windows (`files_windows.go`)**: a pipe carries bytes, so
+  the files travel in band, in a frame — `SDK2`, the count, the payload's
+  length, the entries, each tagged a handle (its value) or a socket (its
+  `WSAPROTOCOL_INFOW`), the payload — and the receiver must call
   `RecvFiles` where the sender called `SendFiles` (anything else is refused,
   the stream then out of step). The sender duplicates each file into its own
   table (private, not inheritable); the receiver duplicates each value OUT of
@@ -145,11 +148,22 @@ The codes — `0.3.91.1`–`11`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   peer, a peer this account may not open) `RecvFiles` is `FD_PASS_REFUSED`
   and the sender keeps what it sent. A send whose write failed after a byte
   leaves the duplicates to the receiver rather than risk closing a handle
-  value this process reused. A TCP listener is not passed on Windows: Go's
-  net now hands a socket an `*os.File` there (`TestATCPListenerFileOnWindows`
-  records it), but this package's `DuplicateHandle` route for a socket is
-  not written, and no test passes one (Refs #936). None of this has run here
-  (e2e-cross's Windows lane runs it).
+  value this process reused. **A socket** — a TCP listener's `File()`, which Go
+  1.27 gives on Windows — is not a handle `DuplicateHandle` may copy: the
+  sender tells it by `getsockopt(SO_TYPE)`, prepares it for the peer's process
+  with `WSADuplicateSocketW` (the pid pinned by the process handle held since
+  the connection, refused without it) and sends the `WSAPROTOCOL_INFOW`; the
+  receiver makes its own with `WSASocketW(FROM_PROTOCOL_INFO)`, overlapped and
+  not inheritable, as the net package dups a socket within one process — both
+  bound from `ws2_32.dll` with `syscall.NewLazyDLL`, no `x/sys`. A socket past
+  `max` is made and closed here; one prepared for a frame that was never
+  written stays the peer's until it exits. Only `SDK2` is written; the first
+  layout, `SDKF` (v0.60.0, #1316: bare handle values), is still read so two
+  versions pass files during an upgrade (`TestAFirstLayoutFrameIsStillRead`;
+  ADR 0148's version rule: write the newest, read the one before for at least
+  one release), and any other magic or entry kind is `FD_PASS_REFUSED`
+  (`TestAFrameOfAnUnknownKindIsRefused`). None of the Windows
+  half has run here (e2e-cross's Windows lane runs it).
 - **A pipe name that exists is judged by its holder (#1318).** Named pipes
   share one machine-wide namespace, and the name used to be derived from the
   path alone, so another account could make it first and the listener read

@@ -7259,6 +7259,32 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.IntoGetter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "IntoGetter",
+      "spelled": "[T any] coredocstore.IntoGetter[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetter[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetter",
+      "doc": "IntoGetter is the public alias for the sibling of [Collection] that\ndecodes a document into a value the caller owns, without a context,\nwhich [Store] implements: GetInto — a read loop that keeps one value\ninstead of receiving a fresh one per read (#813).\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.IntoGetterContext",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "IntoGetterContext",
+      "spelled": "[T any] coredocstore.IntoGetterContext[T]",
+      "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetterContext[T]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetterContext",
+      "doc": "IntoGetterContext is the public alias for [IntoGetter] with a context on\nevery call, which [SQLStore] implements.\n",
+      "file": "docstore/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.KeyLister",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
@@ -7558,7 +7584,7 @@
       "spelled": "[T any] svcdocstore.SQLStore[T]",
       "canonical": "[T any] github.com/kitsunium/sdk/internal/service/data/docstore.SQLStore[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.SQLStore",
-      "doc": "SQLStore is the public alias for the document store over SQL: Get, List,\nFilter, Entries, Keys, Count, Lookup and Find read, and Documents,\nFindAfter and Range read a page at a time; Put, Insert, Replace, Update\nand Delete write, and their Stamped forms say what the version they make\nrecords; Versions, Version, RewriteVersions and VersionWeight, Trash,\nRestore, Purge and Tombstones as for [Store]; OnWrite and OnDelete announce once the write's\ntransaction commits; Reindex files the stored documents again. Every call\ntakes a context.\n",
+      "doc": "SQLStore is the public alias for the document store over SQL: Get,\nGetInto, List, Filter, Entries, Keys, Count, Lookup and Find read, and Documents,\nFindAfter and Range read a page at a time; Put, Insert, Replace, Update\nand Delete write, and their Stamped forms say what the version they make\nrecords; Versions, Version, RewriteVersions and VersionWeight, Trash,\nRestore, Purge and Tombstones as for [Store]; OnWrite and OnDelete announce once the write's\ntransaction commits; Reindex files the stored documents again. Every call\ntakes a context.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -7639,7 +7665,7 @@
       "spelled": "[T any] svcdocstore.Store[T]",
       "canonical": "[T any] github.com/kitsunium/sdk/internal/service/data/docstore.Store[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/docstore.Store",
-      "doc": "Store is the public alias for the document store: Get, List, Filter,\nEntries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and\nRange read a page at a time; Put, Insert, Replace, Update and\nDelete write, and their Stamped forms say what the version they make\nrecords; Versions and Version read a document's versions, RewriteVersions\nrewrites its former ones, VersionWeight says what they weigh; Trash,\nRestore, Purge and Tombstones keep its trash; OnWrite and OnDelete\nannounce; Fold and Close bring it to rest.\n",
+      "doc": "Store is the public alias for the document store: Get, GetInto, List,\nFilter, Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and\nRange read a page at a time; Put, Insert, Replace, Update and\nDelete write, and their Stamped forms say what the version they make\nrecords; Versions and Version read a document's versions, RewriteVersions\nrewrites its former ones, VersionWeight says what they weigh; Trash,\nRestore, Purge and Tombstones keep its trash; OnWrite and OnDelete\nannounce; Fold and Close bring it to rest.\n",
       "file": "docstore/gen_facade.go",
       "layer": "public",
       "family": "data"

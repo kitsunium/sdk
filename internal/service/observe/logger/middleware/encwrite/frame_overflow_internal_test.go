@@ -17,10 +17,10 @@ import (
 // construction rather than untested.
 const wordIsWide bool = math.MaxInt > math.MaxUint32
 
-// Test_frame_overflow drives the len(box) > MaxUint32 guard in frame. A real
-// 4 GiB allocation is infeasible, so it synthesises an oversized slice header
-// over a single live byte; frame only reads len(box), never the contents, so
-// no out-of-bounds access occurs on the failure path. The file is gated to the
+// Test_frame_overflow drives the box length > MaxUint32 guard in stampLength.
+// A real 4 GiB allocation is infeasible, so it synthesises an oversized slice
+// header over a single live byte; stampLength reads only the length on the
+// failure path, never the contents, so no out-of-bounds access occurs. The file is gated to the
 // non-race build because the race detector's checkptr rejects an unsafe.Slice
 // whose length straddles the backing allocation.
 func Test_frame_overflow(t *testing.T) {
@@ -42,14 +42,14 @@ func Test_frame_overflow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			//: synthesise an oversized slice header over a single live byte;
-			//: frame only reads len(box), never the contents, so no
-			//: out-of-bounds access occurs on the failure path.
+			//: stampLength only reads the length on the failure path, never
+			//: the contents, so no out-of-bounds access occurs.
 			ptr := unsafe.Pointer(new([1]byte))
-			box := unsafe.Slice((*byte)(ptr), tc.n)
-			_, err := frame(box)
+			framed := unsafe.Slice((*byte)(ptr), tc.n+uint64(lenPrefixBytes))
+			err := stampLength(framed)
 			//: a box longer than a uint32 can index must surface the framing sentinel.
 			if !errs.HasCode(err, coreencwrite.CodeFramingFailed) {
-				t.Fatalf("frame(%d) err=%v want CodeFramingFailed", tc.n, err)
+				t.Fatalf("stampLength(box of %d) err=%v want CodeFramingFailed", tc.n, err)
 			}
 		})
 	}

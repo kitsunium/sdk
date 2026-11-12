@@ -216,7 +216,7 @@ func (l *fileLog) runtimeMarker(reason string) string {
 // refuses the write cannot keep it from being written (#637).
 func (l *fileLog) markStopEach(code errs.Code, detail string) (dirErr, runErr error) {
 	reason := reasonOf(code)
-	body := []byte(fmt.Sprintf("boot=%s\n%s\n", bootID(), detail))
+	body := fmt.Appendf(nil, "boot=%s\n%s\n", bootID(), detail)
 	if code == coreconsensus.CodeStorageFailed {
 		if runErr = os.MkdirAll(l.runDir, 0o700); runErr == nil {
 			runErr = writeFileSync(l.runtimeMarker(reason), body)

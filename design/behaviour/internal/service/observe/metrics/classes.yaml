@@ -396,6 +396,8 @@ files:
       - otlpWriteFailure
       - otlpJSONExporter
       - EncodeOTLPJSON
+      - otlpArenaSize
+      - otlpCountPoints
       - otlpMetricList
       - appendOTLPSums
       - otlpSumPoints
@@ -703,6 +705,18 @@ functions:
     params: snap coremetrics.SnapshotValue
     results: doc []byte, err error
   - doc: |-
+      otlpArenaSize counts what the tree of snap takes from its arena: every
+      point's attributes, and one oneof value a point — a sum's asInt, a gauge's
+      asDouble, a histogram's sum.
+    name: otlpArenaSize
+    params: snap coremetrics.SnapshotValue
+    results: attrs, values int
+  - doc: otlpCountPoints adds each point's attributes, and one value a point.
+    name: otlpCountPoints
+    params: points []P, attrs, values int, attrsOf func(P) int
+    results: allAttrs, allValues int
+    typeParams: P any
+  - doc: |-
       otlpMetricList flattens the snapshot's three name-keyed maps into the single
       metrics[] array a ScopeMetrics carries.
 
@@ -720,32 +734,32 @@ functions:
       the OTel model's own economy, and the reason there is one point shape for two
       instruments.
     name: appendOTLPSums
-    params: list []otlpMetric, sums map[string]coremetrics.SumMetricValue, start, end otlp.Uint64
+    params: list []otlpMetric, sums map[string]coremetrics.SumMetricValue, start, end otlp.Uint64, arena *otlp.Arena
     results: metrics []otlpMetric, err error
   - doc: |-
       otlpSumPoints renders one sum name's series as NumberDataPoints carrying
       asInt, because a sum in this SDK is an int64 accumulator.
     name: otlpSumPoints
-    params: series []coremetrics.SumValue, start, end otlp.Uint64
+    params: series []coremetrics.SumValue, start, end otlp.Uint64, arena *otlp.Arena
     results: "[]otlpNumberDataPoint"
   - doc: |-
       appendOTLPGauges renders each gauge name as one Metric carrying a Gauge
       message. A Gauge has no aggregationTemporality field — a sampled reading
       covers no window — so there is nothing here to refuse.
     name: appendOTLPGauges
-    params: list []otlpMetric, gauges map[string]coremetrics.GaugeMetricValue, start, end otlp.Uint64
+    params: list []otlpMetric, gauges map[string]coremetrics.GaugeMetricValue, start, end otlp.Uint64, arena *otlp.Arena
     results: "[]otlpMetric"
   - doc: |-
       otlpGaugePoints renders one gauge name's series as NumberDataPoints carrying
       asDouble, because a gauge reading is a float64.
     name: otlpGaugePoints
-    params: series []coremetrics.GaugeValue, start, end otlp.Uint64
+    params: series []coremetrics.GaugeValue, start, end otlp.Uint64, arena *otlp.Arena
     results: "[]otlpNumberDataPoint"
   - doc: |-
       appendOTLPHistograms renders each histogram name as one Metric carrying a
       Histogram message of explicit-bucket data points.
     name: appendOTLPHistograms
-    params: list []otlpMetric, histograms map[string]coremetrics.HistogramMetricValue, start, end otlp.Uint64
+    params: list []otlpMetric, histograms map[string]coremetrics.HistogramMetricValue, start, end otlp.Uint64, arena *otlp.Arena
     results: metrics []otlpMetric, err error
   - doc: |-
       otlpHistogramPoints renders one histogram name's series, validating each
@@ -755,7 +769,7 @@ functions:
       bucketCounts is per bucket too, so unlike the Prometheus connector — which
       has to build a cumulative ladder as it walks — there is nothing to convert.
     name: otlpHistogramPoints
-    params: name string, series []coremetrics.HistogramValue, start, end otlp.Uint64
+    params: name string, series []coremetrics.HistogramValue, start, end otlp.Uint64, arena *otlp.Arena
     results: points []otlpHistogramDataPoint, err error
   - doc: |-
       otlpTemporality maps a Temporality onto its AggregationTemporality integer,
@@ -1350,19 +1364,19 @@ functions:
       Metric carrying an ExponentialHistogram message, refusing an unresolved
       temporality as every other family does.
     name: appendOTLPExponentials
-    params: list []otlpMetric, metrics map[string]coremetrics.ExponentialHistogramMetricValue, start, end otlp.Uint64
+    params: list []otlpMetric, metrics map[string]coremetrics.ExponentialHistogramMetricValue, start, end otlp.Uint64, arena *otlp.Arena
     results: extended []otlpMetric, err error
   - doc: |-
       otlpExponentialPoints renders one exponential name's series, the runs
       copied as decimal strings.
     name: otlpExponentialPoints
-    params: series []coremetrics.ExponentialHistogramValue, start, end otlp.Uint64
+    params: series []coremetrics.ExponentialHistogramValue, start, end otlp.Uint64, arena *otlp.Arena
     results: "[]otlpExponentialHistogramDataPoint"
   - doc: |-
       otlpOptionalSum is a histogram point's sum, nil — absent on the wire — for
       a source that keeps no total.
     name: otlpOptionalSum
-    params: sum float64, noSum bool
+    params: sum float64, noSum bool, arena *otlp.Arena
     results: "*otlp.Double"
   - doc: |-
       otlpExemplars renders a point's exemplars, the value as asInt on a sum

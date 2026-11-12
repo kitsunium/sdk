@@ -3,6 +3,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -10,10 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
+	"time"
+	"unsafe"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 )
@@ -292,24 +296,152 @@ func TestSandboxLandlock(t *testing.T) {
 	}
 }
 
-// TestSandboxSeccompErrno proves the filter in the child: mkdir is refused
-// with EPERM, and no directory is made in the witness directory.
+// seccompProbeEnv makes the test binary run as the probe child of
+// TestSandboxSeccompErrno: it makes the filtered calls under the directory the
+// variable names and reports their errno. The role half returns before
+// anything is spawned, and the parent hands the probe an environment of its
+// own making, so a probe never starts another.
+const seccompProbeEnv = "SDK_EXEC_SECCOMP_PROBE"
+
+// seccompProbeWait bounds the probe: two system calls, then its exit.
+const seccompProbeWait = 30 * time.Second
+
+// TestSandboxSeccompErrno proves the filter in the child: mkdir(2) and
+// mkdirat(2), as this architecture numbers them, fail with the errno the
+// filter returns — EPERM when SeccompValue.Errno is zero, the one it names
+// otherwise —, and no directory is made. The child is this test binary, which
+// makes the calls itself and reports each errno as a number: the verdict reads
+// the kernel's answer, not a message a userland mkdir(1) words its own way
+// (uutils' says "Permission denied" for EPERM). A witness probe makes the
+// same calls through the same spawn, without the filter, in a directory of
+// the test's: each must succeed, so a refusal the environment makes — a
+// directory it will not write — is told apart from the filter's, and the
+// filter alone is judged, on the exact errno.
 func TestSandboxSeccompErrno(t *testing.T) {
-	dir := t.TempDir()
-	sb := &coreproc.SandboxValue{Seccomp: &coreproc.SeccompValue{Default: coreproc.SeccompAllow, Syscalls: []string{"mkdir", "mkdirat"}, Action: coreproc.SeccompErrno}}
-	script := `if mkdir "$0/made" 2>"$0/err"; then echo made; else echo refused; fi > "$0/verdict"`
-	if _, err := sandboxed(t, sb, script, dir); err != nil {
-		t.Fatal(err)
+	//: the probe half: make the calls, report, leave.
+	if dir, ok := os.LookupEnv(seccompProbeEnv); ok {
+		runSeccompProbe(t, dir)
+		return
 	}
-	if got := readFile(t, filepath.Join(dir, "verdict")); got != "refused" {
-		t.Fatalf("mkdir under the filter was %q, want refused", got)
+	self, err := os.Executable()
+	if err != nil {
+		t.Skipf("no path to re-exec: %v", err)
 	}
-	if got := readFile(t, filepath.Join(dir, "err")); !strings.Contains(got, "not permitted") {
-		t.Errorf("mkdir's error is %q, want EPERM's", got)
+	type tc struct {
+		name  string
+		errno syscall.Errno
+		want  syscall.Errno
 	}
-	if _, err := os.Stat(filepath.Join(dir, "made")); !os.IsNotExist(err) {
-		t.Fatalf("the directory was made: %v", err)
+	tests := []tc{
+		{"EPERM by default", 0, syscall.EPERM},
+		{"the errno named", syscall.EROFS, syscall.EROFS},
 	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			//: the witness: no_new_privs as under the filter, and no filter.
+			witness := t.TempDir()
+			if got, want := seccompProbe(t, "the witness, without the filter,", self, &coreproc.SandboxValue{NoNewPrivileges: true}, witness), seccompReport(0); got != want {
+				t.Fatalf("without the filter the calls answered %q, want %q: the environment refuses them in %s, so the filter cannot be judged", got, want, witness)
+			}
+			for _, call := range seccompProbeCalls() {
+				if info, err := os.Stat(filepath.Join(witness, call)); err != nil || !info.IsDir() {
+					t.Fatalf("without the filter %s(2) reported a success and made no directory: %v", call, err)
+				}
+			}
+			dir := t.TempDir()
+			sb := &coreproc.SandboxValue{NoNewPrivileges: true, Seccomp: &coreproc.SeccompValue{
+				Default: coreproc.SeccompAllow, Syscalls: []string{"mkdir", "mkdirat"},
+				Action: coreproc.SeccompErrno, Errno: int(c.errno),
+			}}
+			if got, want := seccompProbe(t, "the probe under the filter", self, sb, dir), seccompReport(c.want); got != want {
+				t.Fatalf("the calls under the filter answered %q, want %q", got, want)
+			}
+			for _, call := range seccompProbeCalls() {
+				if _, err := os.Stat(filepath.Join(dir, call)); !os.IsNotExist(err) {
+					t.Fatalf("%s(2) made its directory under the filter: %v", call, err)
+				}
+			}
+		})
+	}
+}
+
+// seccompProbeCalls names the calls the probe makes, in its order: mkdir(2)
+// exists on amd64 alone, arm64 has mkdirat(2) only.
+func seccompProbeCalls() []string {
+	if _, ok := syscallNumbers()["mkdir"]; ok {
+		return []string{"mkdir", "mkdirat"}
+	}
+	return []string{"mkdirat"}
+}
+
+// seccompReport is the report of a probe whose every call answered errno, 0
+// for a success.
+func seccompReport(errno syscall.Errno) string {
+	lines := make([]string, 0, len(seccompProbeCalls()))
+	for _, call := range seccompProbeCalls() {
+		lines = append(lines, call+" "+strconv.Itoa(int(errno)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// seccompProbe runs this test binary as the probe under sb, bounded by
+// seccompProbeWait, and returns the report it wrote under dir; a failure
+// names the probe by role and quotes what it wrote on each stream.
+func seccompProbe(t *testing.T, role, self string, sb *coreproc.SandboxValue, dir string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	p, err := Start(t.Context(), coreproc.Spec{
+		Path: self, Args: []string{self, "-test.run=^TestSandboxSeccompErrno$", "-test.count=1"},
+		//: a race-enabled probe would sleep a second at its exit otherwise.
+		Env:     []string{seccompProbeEnv + "=" + dir, "GORACE=atexit_sleep_ms=0"},
+		Sandbox: sb, Stdio: coreproc.StdioCapture, Stdout: &stdout, Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("Start(%s) = %v", role, err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), seccompProbeWait)
+	defer cancel()
+	exit, err := p.(coreproc.ContextWaiter).WaitContext(ctx)
+	//: past its bound: killed, collected, and the test fails.
+	if errors.Is(err, context.DeadlineExceeded) {
+		_ = p.Signal(coreproc.Signal(syscall.SIGKILL))
+		_, _ = p.Wait()
+		t.Fatalf("%s ran past %v", role, seccompProbeWait)
+	}
+	report := readFile(t, filepath.Join(dir, "report"))
+	if err != nil || exit.Code != 0 {
+		t.Fatalf("%s exited %+v, %v in %s; it reported %q, wrote %q and %q", role, exit, err, dir, report, stdout.String(), stderr.String())
+	}
+	return report
+}
+
+// runSeccompProbe makes each call of seccompProbeCalls for dir/<call>, writes
+// each errno, 0 for a success, to dir/report — its standard output is the
+// testing package's — and exits 0 at once: what the testing package does
+// after a test would run under the filter too, and a coverage build's
+// teardown makes its directory with mkdirat(2), refused, then exits 2.
+func runSeccompProbe(t *testing.T, dir string) {
+	t.Helper()
+	atFDCWD := -100 // AT_FDCWD
+	numbers := syscallNumbers()
+	lines := make([]string, 0, len(seccompProbeCalls()))
+	for _, call := range seccompProbeCalls() {
+		path, err := syscall.BytePtrFromString(filepath.Join(dir, call))
+		if err != nil {
+			t.Fatalf("the probe's path: %v", err)
+		}
+		var errno syscall.Errno
+		if call == "mkdir" {
+			_, _, errno = syscall.Syscall(uintptr(numbers[call]), uintptr(unsafe.Pointer(path)), 0o700, 0)
+		} else {
+			_, _, errno = syscall.Syscall(uintptr(numbers[call]), uintptr(atFDCWD), uintptr(unsafe.Pointer(path)), 0o700)
+		}
+		lines = append(lines, call+" "+strconv.Itoa(int(errno)))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "report"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("writing the report: %v", err)
+	}
+	os.Exit(0)
 }
 
 // TestSandboxSeccompKill proves SeccompKill: the program that makes the call

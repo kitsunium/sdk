@@ -12,6 +12,13 @@ import (
 // exitOSErr is sysexits.h EX_OSERR (71), the exit status RelayFailed carries.
 const exitOSErr int = 71
 
+// The console control event a group receives (wincon.h) and the OpenProcess
+// terminate right (winnt.h).
+const (
+	ctrlBreakEvent   uintptr = 1
+	processTerminate uintptr = 0x0001
+)
+
 // kernel32 delivery entry points, bound lazily.
 var (
 	modKernel32 = syscall.NewLazyDLL("kernel32.dll")
@@ -20,13 +27,6 @@ var (
 	procOpenProcess              = modKernel32.NewProc("OpenProcess")
 	procTerminateProcess         = modKernel32.NewProc("TerminateProcess")
 	procCloseHandle              = modKernel32.NewProc("CloseHandle")
-)
-
-// Console control events (wincon.h) and the OpenProcess terminate right (winnt.h).
-const (
-	ctrlCEvent       uintptr = 0
-	ctrlBreakEvent   uintptr = 1
-	processTerminate uintptr = 0x0001
 )
 
 // Relay reads signals from src and forwards each to target until src is closed.
@@ -65,19 +65,14 @@ func deliver(target Target, sig coreproc.Signal) error {
 	return deliverPid(target, sig)
 }
 
-// deliverGroup sends a console control event to the process group -target. SIGINT
-// maps to CTRL_C, every other signal to CTRL_BREAK (the only event that can be
-// directed at one specific group rather than the whole console).
+// deliverGroup sends CTRL_BREAK to the process group -target, whatever the
+// signal, SIGINT included (#933): it is the only event Windows directs at one
+// group. CTRL_C to a group is accepted by GenerateConsoleCtrlEvent and received
+// by none of its processes, and a group created with CREATE_NEW_PROCESS_GROUP
+// ignores Ctrl-C anyway; a Go process reads CTRL_BREAK as os.Interrupt.
 func deliverGroup(target Target, sig coreproc.Signal) error {
-	//: SIGINT is the Ctrl-C interrupt; anything else is the Ctrl-Break.
-	event := ctrlBreakEvent
-	//: pick the Ctrl-C event for an interrupt so the child sees the right control.
-	if sig.Int() == int(syscall.SIGINT) {
-		//: an interrupt maps to CTRL_C_EVENT.
-		event = ctrlCEvent
-	}
-	//: GenerateConsoleCtrlEvent(event, pgid) reaches every group member.
-	r1, _, errno := procGenerateConsoleCtrlEvent.Call(event, uintptr(-int(target)))
+	//: GenerateConsoleCtrlEvent(CTRL_BREAK, pgid) reaches every group member.
+	r1, _, errno := procGenerateConsoleCtrlEvent.Call(ctrlBreakEvent, uintptr(-int(target)))
 	//: a zero return means the event could not be generated.
 	if r1 == 0 {
 		//: surface the Win32 cause through RELAY_FAILED.

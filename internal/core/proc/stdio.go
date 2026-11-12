@@ -21,8 +21,8 @@ const (
 	StdioCapture
 	// StdioPTY connects the child's stdin, stdout and stderr to the slave side of a
 	// new pseudo-terminal, which becomes its controlling terminal in a new session;
-	// the master is the handle's Terminal.TTY. Linux, darwin and FreeBSD; every
-	// other platform refuses it with UnsupportedPlatform before spawning.
+	// the master is the handle's Terminal.TTY. Linux, darwin, FreeBSD and OpenBSD;
+	// every other platform refuses it with UnsupportedPlatform before spawning.
 	StdioPTY
 )
 

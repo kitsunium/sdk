@@ -37,7 +37,7 @@ the build it came from.
 | `SIGTERM` / `SIGKILL` / `SIGINT` / `SIGHUP` / `SIGQUIT` | typed `Signal` constants |
 | `ResourceNoFile` / `ResourceCore` / `ResourceCPU` / `ResourceAS` | the common `Spec.Rlimits` keys |
 | `Start`, `MustStart` | spawn; a bare `Spec.Path` is searched in the child's PATH (Spec.Env's, else the parent's), `exec.ErrDot`/`ErrNotFound` wrapped in `SpawnFailed` |
-| `StdioPTY`, `PTYSize`, `Terminal` | a child on a pseudo-terminal; the master is `Terminal.TTY` (Linux, darwin, FreeBSD — ADR 0217) |
+| `StdioPTY`, `PTYSize`, `Terminal` | a child on a pseudo-terminal; the master is `Terminal.TTY` (Linux, darwin, FreeBSD, OpenBSD — ADR 0217, amended 2026-11-11) |
 | `ContextWaiter`, `Run`, `RunOptions`, `Result` | a wait bounded by a context; a one-shot run keeping the first `MaxOutputBytes` of each stream (#935) |
 | `EnvAllow`, `EnvDeny` | environment allow/deny lists, parent order kept, a repeated key keeping its last value |
 | `ReservedEnv`, `CodeReservedEnv` | the refusal of a `Spec.Env` key beginning `__KITSUNIUM_SDK_PROC_`, any case — the SDK's own spawn protocol, which the key would override (#726); re-exported so a consumer matches it with `errors.Is` |
@@ -48,7 +48,7 @@ the build it came from.
 | `Sandbox`, `Namespace`, `IDMap`, `Mount`, `MountKind`, `Capabilities`, `Landlock`, `LandlockRule`, `LandlockAccess`, `Seccomp`, `SeccompAction` + the `Namespace*` / `Mount*` / `Landlock*` / `Seccomp*` constants | `Spec.Sandbox` (#728): the core port's values, re-exported |
 | `LandlockABI` | forwards `exec.LandlockABI`: the kernel's Landlock ABI, `SandboxUnavailable` without it, `UnsupportedPlatform` off Linux amd64/arm64 |
 | `SandboxFailed`, `SandboxUnavailable`, `CodeSandboxFailed`, `CodeSandboxUnavailable` | a sandbox step failed in the child (the program never ran) / a part the kernel lacks, refused before the fork (#728) |
-| `Usage` | `ExitResult.Usage`: faults, block I/O, context switches, nil where the platform gives none (#1090) |
+| `Usage` | `ExitResult.Usage`: faults, block I/O, context switches, by value, `Known` false where the platform gives none (#1090, #1136) |
 | `FDPolicy`, `FDsSealed`, `FDsInherited` | `Spec.FDs`: the child's descriptor table sealed by default (#1089) |
 | `SetOOMScoreAdj` | the running process's own OOM-killer bias (Linux; `internal/service/proc/self`) |
 | `Self`, `Build`, `ParseBuild`; `Stats`, `Distribution`, `BuildInfo`, `Module` | the running process and the build it came from — one-line delegations to, and aliases of, `internal/service/proc/self` (`Self`, `Stats`, `Distribution`) and `internal/service/proc/buildinfo` (`Build`, `ParseBuild`, `BuildInfo`, `Module`; ADR 0100, ADR 0172) |
