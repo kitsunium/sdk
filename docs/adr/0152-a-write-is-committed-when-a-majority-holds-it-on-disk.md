@@ -4369,8 +4369,10 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
 - **A Windows backend for the segmented log**: `FlushFileBuffers` semantics
   and preallocation differ; refused with `proc.UnsupportedPlatform` until
   measured, as ADR 0052 D8 did for `LockFileEx`.
-- **zstd snapshots (R7-06, R7-00b)**, once `third-party/transform` adds
-  `DecompressBounded` in its own change, through a product-side adapter.
+- ~~**zstd snapshots (R7-06, R7-00b)**, once `third-party/transform` adds
+  `DecompressBounded` in its own change, through a product-side adapter.~~
+  Resolved on 2026-11-12 (#917): see the amendment "zstd snapshots, through
+  the vendor module's bounded decoder".
 - **`fallocate` for segments (R7-22): measured, opt-in, not the default**
   (amendment of 2026-11-12, [#922](https://github.com/kitsunium/sdk/issues/922)).
   `DataDirOptions.Preallocate` has two modes: `PreallocateZeroFill`, the
@@ -7226,6 +7228,42 @@ oldest were forgotten and their reads waited for a later one
   `consensus_read_rounds_total` counts the rounds raft opened for reads
   (`Raft.ReadRounds`), so the ratio of reads to rounds is visible beside
   `consensus_barrier_latency_seconds`, unchanged.
+
+## Amendment — zstd snapshots, through the vendor module's bounded decoder (2026-11-12, #917)
+
+D7 left zstd out of v1 because `third-party/transform`'s zstd had no
+`DecompressBounded` and no SDK package may import a vendor module, and the
+Deferred list waited for both halves. The vendor module now implements
+`core/data/transform.BoundedDecompressor` on zstd and s2 (ADR 0066, amendment
+of the same day): a frame announcing more than the chunk's declared length
+is refused from its header, a sized frame is decoded into a buffer of
+exactly that size that the decoder cannot outgrow, and anything else is
+read through a bounded stream — the output is bounded before it is
+allocated, as D7 requires of every snapshot codec.
+
+- **The adapter is the product's assignment.** Nothing in consensus changes,
+  and nothing in it imports the vendor: a product that imports
+  `third-party/transform` sets `Config.SnapshotCodec` to `transform.Zstd`,
+  the registered singleton, which is a `BoundedDecompressor`. The cut writes
+  `"zstd"` in `SnapshotMeta.Codec`; every node that links the module reads
+  it through the registry, whatever its own codec (D18 "Compression",
+  `snapshotCodec`); a node that does not stops `VERSION_UNSUPPORTED` on the
+  offer, unknown meaning stop. No wire change: the chunks, their SHA-256 and
+  the per-chunk bound of R2-11 are unchanged.
+- **Proved on both sides of the link.** `third-party/transform`'s
+  `TestAClusterInstallsAZstdSnapshot` installs a zstd snapshot on a lagging
+  follower of a three-node memory cluster; the consensus suite's
+  `TestAFollowerThatDoesNotLinkTheLeadersCodecStops`, a binary that cannot
+  link zstd, stops the follower `VERSION_UNSUPPORTED` on a leader cutting
+  under the name `"zstd"`.
+- **Measured** (`third-party/transform/BENCH.md` §Consensus snapshots, best
+  of three on a shared Apple M1 Pro): a 256 MiB JSON state cuts in 1.20 s
+  with zstd against 3.10 s with flate and installs in 1.35 s against 3.74 s,
+  for 44.22 MiB encoded against 42.61. The install is D16's backfill time
+  per node.
+- **Rolling it out** is the codec change #548 already proved: one node at a
+  time, every node linking the module before the first sets it, since a
+  node that does not link it stops on the first zstd snapshot it is offered.
 
 ## Revision history
 

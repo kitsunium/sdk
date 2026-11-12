@@ -296,6 +296,18 @@
       "layer": "thirdparty"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*S2Compressor).DecompressBounded",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "DecompressBounded",
+      "recv": "S2Compressor",
+      "spelled": "func(dst []byte, src []byte, max int64) (decoded []byte, err error)",
+      "canonical": "func(dst []byte, src []byte, max int64) (decoded []byte, err error)",
+      "doc": "DecompressBounded implements core/data/transform.BoundedDecompressor for\ns2: the block header declares the plaintext length, so a block declaring\nmore than max is refused from the header, before a byte is allocated or\ndecoded, with core/data/transform.DecompressedTooLarge. A negative max is\nread as zero. The compressor's own ceiling stays a backstop, refused\nDecompressionLimitExceeded as Decompress refuses. A refusal returns dst at\nits original length — never a partial payload.\n",
+      "file": "bounded.go",
+      "layer": "thirdparty"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/third-party/transform.(*S2Compressor).NewReader",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/third-party/transform",
@@ -439,6 +451,18 @@
       "canonical": "func(dst []byte, src []byte) (decoded []byte, err error)",
       "doc": "Decompress zstd-decodes src and appends the result to dst, refusing any\npayload whose plaintext would exceed the configured ceiling.\n\nThe ceiling counts the DECODED payload only, never len(dst)+payload, so a\ncaller reusing a large dst does not silently shrink its own decompression\nbudget: the library counts len(dst) into its budget, so the decode is handed\ndst's TAIL — a zero-length slice over its spare capacity — where the budget\nmeans exactly the payload. When the payload fits that capacity the decode\nlands in it, with no allocation and no copy; when it does not, the library\ngrows its own buffer and that is appended onto dst once. See BENCH.md\n§\"Decompression decodes into the tail\".\n\nA refusal returns dst at its original length — never a partial payload.\n",
       "file": "zstd.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/transform.(*ZstdCompressor).DecompressBounded",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/third-party/transform",
+      "name": "DecompressBounded",
+      "recv": "ZstdCompressor",
+      "spelled": "func(dst []byte, src []byte, max int64) (decoded []byte, err error)",
+      "canonical": "func(dst []byte, src []byte, max int64) (decoded []byte, err error)",
+      "doc": "DecompressBounded implements core/data/transform.BoundedDecompressor: it\ndecodes src and appends the result to dst under the CALLER's ceiling max,\nso a caller that expects a tighter bound than the compressor's own stops\nthe work at its bound instead of materialising the compressor's and\njudging afterwards.\n\nThe output is bounded before it is allocated. A frame whose header\nannounces more than max is refused from the header, before a byte is\ndecoded; a frame that announces its size is decoded into a buffer of\nexactly that size, which the decoder may not outgrow; any other input —\na frame without a size, a second frame — is read through the bounded\nstream, which hands over no byte past max. A negative max is read as\nzero, which admits an empty payload and nothing else.\n\nA payload over max fails with core/data/transform.DecompressedTooLarge.\nThe compressor's own ceiling stays a backstop: a max above it decodes no\nmore than it, refused DecompressionLimitExceeded as Decompress refuses. A\nrefusal returns dst at its original length — never a partial payload.\n",
+      "file": "bounded.go",
       "layer": "thirdparty"
     },
     {

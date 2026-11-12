@@ -374,6 +374,27 @@ packages:
                 type: error
             recv: pointer
           - doc: |-
+              DecompressBounded implements core/data/transform.BoundedDecompressor for
+              s2: the block header declares the plaintext length, so a block declaring
+              more than max is refused from the header, before a byte is allocated or
+              decoded, with core/data/transform.DecompressedTooLarge. A negative max is
+              read as zero. The compressor's own ceiling stays a backstop, refused
+              DecompressionLimitExceeded as Decompress refuses. A refusal returns dst at
+              its original length — never a partial payload.
+            in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+              - name: max
+                type: int64
+            name: DecompressBounded
+            out:
+              - name: decoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: pointer
+          - doc: |-
               NewReader implements core/data/transform.StreamingCompressor for s2: r's
               stream in the s2 FRAMING format — the one NewWriter writes — decoded under
               limit, a negative limit read as zero. It is not the block format Compress
@@ -473,6 +494,38 @@ packages:
               - name: src
                 type: "[]byte"
             name: Decompress
+            out:
+              - name: decoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: pointer
+          - doc: |-
+              DecompressBounded implements core/data/transform.BoundedDecompressor: it
+              decodes src and appends the result to dst under the CALLER's ceiling max,
+              so a caller that expects a tighter bound than the compressor's own stops
+              the work at its bound instead of materialising the compressor's and
+              judging afterwards.
+
+              The output is bounded before it is allocated. A frame whose header
+              announces more than max is refused from the header, before a byte is
+              decoded; a frame that announces its size is decoded into a buffer of
+              exactly that size, which the decoder may not outgrow; any other input —
+              a frame without a size, a second frame — is read through the bounded
+              stream, which hands over no byte past max. A negative max is read as
+              zero, which admits an empty payload and nothing else.
+
+              A payload over max fails with core/data/transform.DecompressedTooLarge.
+              The compressor's own ceiling stays a backstop: a max above it decodes no
+              more than it, refused DecompressionLimitExceeded as Decompress refuses. A
+              refusal returns dst at its original length — never a partial payload.
+            in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+              - name: max
+                type: int64
+            name: DecompressBounded
             out:
               - name: decoded
                 type: "[]byte"

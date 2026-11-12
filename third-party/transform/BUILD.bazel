@@ -11,6 +11,8 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "transform",
     srcs = [
+        "bounded.go",
+        "bounded_compliance.go",
         "doc.go",
         "errors.go",
         "gen_codes.go",
@@ -41,12 +43,15 @@ go_test(
     srcs = [
         "allocwindow_test.go",
         "bomb_external_test.go",
+        "bounded_external_test.go",
         "conformance_external_test.go",
         "decompress_alloc_test.go",
         "dictionary_external_test.go",
         "fuzz_external_test.go",
         "gen_api_test.go",
         "main_external_test.go",
+        "snapshot_bench_test.go",
+        "snapshot_external_test.go",
         "stream_external_test.go",
         "transform_bench_test.go",
         "transform_external_test.go",
@@ -55,8 +60,10 @@ go_test(
     data = glob(["testdata/**"]),
     embed = [":transform"],
     deps = [
+        "//internal/core/app/consensus",
         "//internal/core/data/transform",
         "//internal/kernel/errs",
+        "//internal/service/app/consensus",
         "//internal/service/data/transform",
         "@com_github_klauspost_compress//s2",
         "@com_github_klauspost_compress//zstd",

@@ -652,7 +652,12 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   version or codec, stop the node (D18), and a start over one is refused.
   A snapshot is decoded with the codec its metadata names (#513, #512,
   `TestASnapshotOfAnUnknownFormatStopsTheNode`,
-  `TestASnapshotIsReadWithTheCodecItWasWrittenWith`).
+  `TestASnapshotIsReadWithTheCodecItWasWrittenWith`). zstd is a product's
+  `SnapshotCodec`, `third-party/transform.Zstd`, which this module cannot
+  link: a follower that does not link it stops on a leader's zstd snapshot
+  (#917, `TestAFollowerThatDoesNotLinkTheLeadersCodecStops`, the leader's
+  codec flate under the name `"zstd"`), and one that does installs it
+  (`third-party/transform`'s `TestAClusterInstallsAZstdSnapshot`).
 - Refuse at the transport, unjudged, an offer whose metadata does not
   decode for its version, or skip such a `.meta` as one that rotted: the
   stop of #513 and #640 runs only on a metadata that decodes, and the

@@ -53,7 +53,7 @@ consumer-graph criterion, or it cites a measurement.
 | `NewZstdCompressor(level, maxDecompressedBytes)` | constructor; refuses a non-positive ceiling, clamps an unknown level |
 | `NewZstdCompressorWithDictionary(level, maxDecompressedBytes, dict)` | the same with a trained zstd dictionary, copied; refuses an empty or malformed one (`DictionaryInvalid`); not registered (#900, ADR 0066 amended) |
 | `NewS2Compressor(maxDecompressedBytes)` | constructor; refuses a non-positive ceiling |
-| `ZstdCompressor` / `S2Compressor` | the concrete types; `ZstdCompressor` also has `Close() error` and `DictionaryID() uint32` (0 without a dictionary); both implement `core/data/transform.StreamingCompressor` — `NewReader(r, limit)`, `NewWriter(w)` (ADR 0213) |
+| `ZstdCompressor` / `S2Compressor` | the concrete types; `ZstdCompressor` also has `Close() error` and `DictionaryID() uint32` (0 without a dictionary); both implement `core/data/transform.StreamingCompressor` — `NewReader(r, limit)`, `NewWriter(w)` (ADR 0213) — and `core/data/transform.BoundedDecompressor` — `DecompressBounded(dst, src, max)` (#917) |
 | `ZstdLevel` + `ZstdFastest` / `ZstdDefault` / `ZstdBetter` / `ZstdBest` | the four levels the library implements |
 | `ZstdAlgorithm` / `S2Algorithm` | the registry keys, `"zstd"` and `"s2"` |
 | `DefaultMaxDecompressedBytes` | 64 MiB — what the singletons are built with |
@@ -117,6 +117,53 @@ pokes the endpoint. `TestCorruptInputIsNotReportedAsABomb` pins both directions.
 
 A refusal returns `dst` at its original length — never a partial payload.
 
+### The caller's ceiling (`DecompressBounded`, #917)
+
+Both compressors implement `core/data/transform.BoundedDecompressor`, so a
+caller that expects less than the instance's ceiling — consensus decoding a
+1 MiB snapshot chunk under its declared length — stops the work at its bound
+(`bounded.go`). The instance's ceiling stays the backstop above it
+(`DECOMPRESSION_LIMIT_EXCEEDED`); past the caller's, the refusal is
+`DecompressedTooLarge`, `dst` handed back.
+
+- **zstd** reads the first frame's header (`zstd.Header`): a size announced
+  past `max` is refused before a byte is decoded; a size within it is decoded
+  by a second shared decoder built with `WithDecodeAllCapLimit`, into a tail of
+  exactly that capacity, which it cannot outgrow — a second frame, or a frame
+  whose announced size lies, hits that capacity and falls to the bounded
+  stream (`NewReader` under `max`), which grows `dst` 64 KiB at a time and
+  never past `max`; so does a frame that announces nothing (what `NewWriter`
+  writes).
+- **s2** reads the block header's length and refuses past `max` before
+  allocating, then decodes as `Decompress` does.
+
+`TestZstdDecompressBoundedRefusesABombBeforeAllocatingIt` measures what a
+refusal allocates (`runtime.MemStats.TotalAlloc`, not parallel): a 64 MiB bomb
+under a 1 MiB ceiling, refused from the header — 0 bytes —, with its size
+forged down to 4 KiB — 5.5 MiB, the decoder's window and the ceiling's worth —,
+and as a stream without a size — 10 MiB, the stream decoder's 8 MiB window and
+the ceiling: never the 64 MiB. `TestZstdDecompressBoundedHoldsTheCallersCeiling`
+holds the boundary (exactly `max` in, one byte less out, into a nil `dst`, a
+prefix and spare capacity, one frame and two), and the vendor conformance table
+runs the stdlib table's ceiling row over every registered engine.
+
+### Consensus snapshots in zstd (#917)
+
+Consensus links no vendor: a product imports this package and sets
+`Config.SnapshotCodec` to `transform.Zstd`, a `BoundedDecompressor`; the cut
+names `"zstd"` in `SnapshotMeta.Codec`, and every node that links this package
+reads it — the codec the metadata names, looked up in the registry (ADR 0152
+D18 "Compression"). `TestAClusterInstallsAZstdSnapshot`
+(`snapshot_external_test.go`) runs three nodes of `internal/service/app/consensus`
+on its memory doubles and installs a zstd snapshot on a lagging follower; the
+follower that does not link zstd stops `VERSION_UNSUPPORTED`, proved in the
+consensus suite, a binary that cannot link it
+(`TestAFollowerThatDoesNotLinkTheLeadersCodecStops`).
+`BenchmarkSnapshotCutAndInstall` measures the cut and the install of a 256 MiB
+state with flate and with zstd (`BENCH.md` §Consensus snapshots). The import of
+`internal/service/app/consensus` is a test's, beside the stdlib transform's:
+the module requires `internal` alone.
+
 ### Why 64 MiB and not the stdlib schemes' 256 MiB
 
 Arithmetic, not taste. DEFLATE's maximum expansion is roughly 1 032:1, so
@@ -137,7 +184,9 @@ only makes `Lookup("zstd")` succeed where it previously failed. And the specific
 risk this package could have carried was checked rather than waved away: a zstd
 `Encoder`/`Decoder` built at import time acquires **zero goroutines** and a few
 kilobytes of heap (measured: 8 272 B and 3 792 B), with the window buffers
-allocated lazily on first use.
+allocated lazily on first use. The capped decoder `DecompressBounded` decodes
+a sized frame with (#917) is a second `Decoder`: 3 792 B more, zero
+goroutines, measured on the singleton's options.
 
 Had construction spawned a `GOMAXPROCS`-sized goroutine pool at import, the
 answer would have been different — and the honest resolution would have been a
@@ -211,16 +260,16 @@ three that `transform_bench_test.go`'s import registers — read from
 malformed block refused with the engine's code and `dst` back, and the four
 stream rows of ADR 0213 (round trip, the caller's ceiling handed over then
 refused and sticky, a malformed or truncated stream refused, a closed stream
-refusing with `Close` idempotent). `registeredCodes` is the one per-engine
+refusing with `Close` idempotent), and the caller's ceiling on the block path
+(`DecompressBounded` admits exactly `max` and refuses one byte less, #917).
+`registeredCodes` is the one per-engine
 fact, and `TestEveryRegisteredEngineHasItsCode` fails an engine registered
 without one. It is a second copy because it cannot be the first: the
 `internal` test cannot import this module (a module cycle, and a layer below
 `third-party/` reaching it — `scripts/check-layer-deps.sh`), and a `_test` file
-is importable by nobody; one importable suite is #985's. Two stdlib rows do not
-transfer: the caller's ceiling on the block path (`DecompressBounded`, which
-these engines lack until #917 — their block ceiling is the instance's, held by
-`bomb_external_test.go`) and "the stream form is what `Compress` writes", which
-s2's framing format is not (`TestTheStreamFormsAgainstTheBlockForms`).
+is importable by nobody; one importable suite is #985's. One stdlib row does
+not transfer: "the stream form is what `Compress` writes", which s2's framing
+format is not (`TestTheStreamFormsAgainstTheBlockForms`).
 
 ## Dictionaries (#900)
 
@@ -279,8 +328,9 @@ without revisiting that ratio would make the guard bite legitimate traffic.
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `transform.go` | `DefaultMaxDecompressedBytes`, `checkLimit` |
+| `bounded.go` | the caller's ceiling (#917): `DecompressBounded` on both compressors, the zstd header check, the capped decode, the bounded-stream fallback |
 | `stream.go` | the stream form (ADR 0213): `NewReader` / `NewWriter` on both compressors, `boundedStream`, `encoderStream`, the s2 stream pools |
-| `zstd.go` | `Zstd` singleton, `ZstdCompressor`, `NewZstdCompressor`, `NewZstdCompressorWithDictionary`, `newZstd`, `ZstdLevel`, `encoderLevel`, `isLimitError`, `frameDictionaryID`, `joinTail` (the tail decode, #1163) |
+| `zstd.go` | `Zstd` singleton, `ZstdCompressor` (its shared encoder, decoder and capped decoder), `NewZstdCompressor`, `NewZstdCompressorWithDictionary`, `newZstd`, `ZstdLevel`, `encoderLevel`, `isLimitError`, `frameDictionaryID`, `joinTail` (the tail decode, #1163) |
 | `s2.go` | `S2` singleton, `S2Compressor`, `NewS2Compressor` |
 | `gen_codes.go` | `0.3.63.1`–`0.3.63.6`; `ZstdFailed`, `S2Failed`, `DecompressionLimitExceeded`, `LimitMisconfigured`, `DictionaryMismatch`, `DictionaryInvalid` — written by kit gen from `design/third-party/transform.yaml` (ADR 0164) |
 | `errors.go` | hand-written beside them: `zstdWrap`, `s2Wrap`, `dictionaryInvalidWrap` |

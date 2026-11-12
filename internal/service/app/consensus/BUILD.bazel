@@ -198,6 +198,7 @@ go_test(
         "silencedurable_internal_test.go",
         "silencelowered_internal_test.go",
         "silentload_internal_test.go",
+        "snapcodec_unlinked_internal_test.go",
         "snaplimit_internal_test.go",
         "space_internal_test.go",
         "spool_internal_test.go",
