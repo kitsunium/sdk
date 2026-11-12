@@ -24,7 +24,7 @@ statement.
 | Architecture       | arm64 |
 | Go toolchain       | go1.27.3 darwin/arm64, `GOMAXPROCS=10` (the `-10` suffix) |
 | Git branch         | `feat/sdk-lot-1-stream` |
-| Git commit         | on `91e14de7d` (issue #819) |
+| Git commit         | on `91e14de7d` (issue #819); the file engine's rows on `bb88ed73a` (issue #821) |
 | Generated (UTC)    | 2026-11-12 |
 | Bench wall-clock   | `-test.benchtime=1s`, single run each; about 20 s in all |
 
@@ -63,3 +63,48 @@ BenchmarkAppendKeyed/keyed-10       	  317780	      3415 ns/op	    8692 B/op	   
 - **The Append benchmarks run with `RetainBytes` at 64 MiB**, so a run of
   millions of iterations measures an append plus the retention it triggers,
   not the heap growing without end.
+
+## The file engine (#821)
+
+`NewFile` over `b.TempDir()` on the internal SSD, the wall clock, records of
+64 B. Same machine and the same load as above (load average 20 to 25 on 10
+cores, seven other build lanes); `-test.benchtime=1s`, Append single run,
+Read three runs (`-count=3`). `ns/record` is the elapsed time divided by the
+records appended.
+
+```
+BenchmarkAppendFile/1-10                  48   33932010 ns/op   0.00 MB/s   33932010 ns/record   22092 B/op   1 allocs/op
+BenchmarkAppendFile/16-10                 38   29950030 ns/op   0.03 MB/s    1871877 ns/record   29591 B/op   3 allocs/op
+BenchmarkAppendFile/256-10                38   30047237 ns/op   0.55 MB/s     117372 ns/record   71386 B/op   3 allocs/op
+BenchmarkReadFile/tail/backlog=1000-10       426441   2741 ns/op   373.52 MB/s   3712 B/op   3 allocs/op
+BenchmarkReadFile/tail/backlog=1000-10       431532   2920 ns/op   350.69 MB/s   3712 B/op   3 allocs/op
+BenchmarkReadFile/tail/backlog=1000-10       411595   2640 ns/op   387.81 MB/s   3712 B/op   3 allocs/op
+BenchmarkReadFile/tail/backlog=1000000-10    469184   2457 ns/op   416.75 MB/s   3712 B/op   3 allocs/op
+BenchmarkReadFile/tail/backlog=1000000-10    398796   2833 ns/op   361.44 MB/s   3712 B/op   3 allocs/op
+BenchmarkReadFile/tail/backlog=1000000-10    453739   2718 ns/op   376.74 MB/s   3712 B/op   3 allocs/op
+BenchmarkReadFile/spread/backlog=1000000-10   13501  81296 ns/op    12.60 MB/s   3712 B/op   3 allocs/op
+BenchmarkReadFile/spread/backlog=1000000-10  334910  25959 ns/op    39.45 MB/s   3712 B/op   3 allocs/op
+BenchmarkReadFile/spread/backlog=1000000-10  412430   4562 ns/op   224.45 MB/s   3712 B/op   3 allocs/op
+```
+
+(`spread/backlog=1000` ran as well; its three runs, 1761, 1775 and 2965 ns/op,
+read the same thousand records as `tail` does.)
+
+- **A batch shares its sync.** One record costs one `F_FULLFSYNC` (the
+  darwin `fdatasync`, ~30 ms on this loaded disk); 256 records cost two, so a
+  record of the 256 batch costs 117 µs against 33.9 ms alone — 1/289, inside
+  the 1/10 #821 asks. The device, not the engine, is the whole figure: the
+  three rows take the same 30 ms.
+- **The backlog costs a read nothing.** Reading 16 records within the
+  newest thousand takes 2.5 to 2.8 µs at a backlog of one thousand and of one
+  million: the index is a slice indexed by offset, and the segment read is
+  one `pread`. `spread` reads across the whole 104 MB of the million-record
+  log: its first run met pages the page cache had not kept on a machine
+  short of memory (81 µs, a device read), its third ran warm (4.6 µs). What
+  a deep read costs is the page cache's, not the index's.
+- **A Read is three allocations**: the payload slice and the run's one
+  buffer (seglog's `Range`), and the entries; the entries alias that buffer,
+  so nothing is copied twice.
+- **Linux is not measured here.** The figures are darwin's `F_FULLFSYNC`; a
+  Linux `fdatasync` is usually far cheaper, and the ratio between the rows is
+  what carries over.

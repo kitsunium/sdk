@@ -26,10 +26,11 @@ type streamFactory struct {
 }
 
 // everyStream is the table every conformance case ranges over: the memory
-// engine today; the file engine (#821) and the SQL engine (#822) join it.
+// engine and the file engine (#821); the SQL engine (#822) joins it.
 func everyStream() []streamFactory {
 	return []streamFactory{
 		{name: "memory", make: makeMemory},
+		{name: "file", make: makeFile},
 	}
 }
 
@@ -41,6 +42,12 @@ func makeMemory(t *testing.T, clk clock.Timed, policy corestream.PolicyValue) co
 		t.Fatalf("NewMemory() = %v, want nil", err)
 	}
 	return s
+}
+
+// makeFile builds the file engine over a directory of the test's own.
+func makeFile(t *testing.T, clk clock.Timed, policy corestream.PolicyValue) corestream.Stream {
+	t.Helper()
+	return openFile(t, t.TempDir(), clk, policy)
 }
 
 // forEachStream runs body as a parallel subtest over every engine, each with

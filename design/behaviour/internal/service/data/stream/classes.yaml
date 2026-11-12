@@ -1,5 +1,88 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - doc: worldWritable is the other-write bit.
+    items:
+      - name: worldWritable
+        type: fs.FileMode
+        value: "0o002"
+    name: worldWritable
+  - doc: |-
+      streamDirMode is the mode a stream directory, and each directory below
+      it, is created with when absent: owner-only.
+    items:
+      - name: streamDirMode
+        type: fs.FileMode
+        value: "0o700"
+    name: streamDirMode
+  - doc: "fileMode is the mode of the lock file and of every cursor: owner-only."
+    items:
+      - name: fileMode
+        type: fs.FileMode
+        value: "0o600"
+    name: fileMode
+  - doc: |-
+      cursorsDir is the directory under the stream directory that holds the
+      consumer groups' cursors.
+    items:
+      - name: cursorsDir
+        value: "\"cursors\""
+    name: cursorsDir
+  - doc: |-
+      lockName is the file under the stream directory whose lock the open engine
+      holds.
+    items:
+      - name: lockName
+        value: "\"lock\""
+    name: lockName
+  - doc: rebuildChunk is how many records a reopen reads with one Range.
+    items:
+      - name: rebuildChunk
+        value: "4096"
+    name: rebuildChunk
+  - doc: |-
+      compactAfter is how many offsets below the first retained one the index
+      keeps before it lets them go: a copy of the index every so often, rather
+      than one per trim.
+    items:
+      - name: compactAfter
+        value: "4096"
+    name: compactAfter
+  - doc: |-
+      The kind byte every record of a file stream carries in its segment: the
+      first record of a batch is a head, every other one a tail. Recovery groups
+      the records into batches by it, which is what keeps the newest batch out of
+      RetainBytes' reach after a restart as before one.
+    grouped: true
+    items:
+      - name: kindHead
+        type: uint8
+        value: "1"
+      - name: kindTail
+        type: uint8
+        value: "2"
+    name: kindHead
+  - doc: stampBytes is the size of the instant every record opens with.
+    items:
+      - name: stampBytes
+        value: "8"
+    name: stampBytes
+  - doc: |-
+      recordOverhead bounds what the encoding adds to a record's key and
+      payload: the instant and the key's length as a uvarint.
+    items:
+      - name: recordOverhead
+        value: stampBytes + binary.MaxVarintLen64
+    name: recordOverhead
+  - doc: |-
+      maxSegmentPayload is the largest payload kernel/fs/seglog takes in one
+      record: one gibibyte less its 28-byte header. A policy whose largest record
+      could not fit it is refused at construction, so an Append never fails half
+      way through a batch.
+    items:
+      - name: maxSegmentPayload
+        value: 1<<30 - 28
+    name: maxSegmentPayload
 files:
   - decls:
       - admit
@@ -8,6 +91,12 @@ files:
       - carve
       - copyEntries
     name: batch.go
+  - decls:
+      - worldWritable
+      - rootWritableByAnyone
+      - subWritableByAnyone
+      - reparsePoint
+    name: dirtrust_posix.go
   - decls: []
     name: doc.go
   - decls:
@@ -22,6 +111,93 @@ files:
       - misconfigured
       - unknownGroup
     name: errors.go
+  - decls:
+      - fileStream
+      - NewFile
+      - (*fileStream).open
+      - (*fileStream).openPart
+      - partitionDir
+      - lockDir
+      - checkPartitions
+      - abandon
+      - abandonLog
+      - abandonStream
+      - (*fileStream).Partitions
+      - (*fileStream).Append
+      - (*fileStream).write
+      - (*fileStream).syncBatch
+      - (*fileStream).release
+      - (*fileStream).stamp
+      - timeOf
+      - (*fileStream).usable
+      - (*fileStream).Close
+    name: file.go
+  - decls:
+      - cursorName
+      - encodeCursor
+      - (*fileStream).Commit
+      - (*fileStream).Committed
+    name: file_commit.go
+  - decls:
+      - _
+    name: file_compliance.go
+  - decls:
+      - streamDirMode
+      - fileMode
+      - cursorsDir
+      - lockName
+      - FileConfig
+      - prepareRoot
+      - prepareSub
+      - rootUnusableBecause
+      - subUnusableBecause
+      - indirectionOrFile
+      - directoryUnusable
+      - backendFailed
+    name: file_config.go
+  - decls:
+      - rebuildChunk
+      - compactAfter
+      - batchMark
+      - filePart
+      - (*filePart).next
+      - (*filePart).lastBatch
+      - (*filePart).between
+      - (*filePart).first
+      - (*filePart).bounded
+      - (*filePart).index
+      - (*filePart).claim
+      - (*filePart).compact
+      - (*filePart).offsetAt
+      - (*filePart).oldestStamp
+      - (*filePart).rebuild
+    name: file_part.go
+  - decls:
+      - (*fileStream).checkPartition
+      - (*fileStream).Read
+      - (*fileStream).firstOf
+      - decodeEntries
+      - (*fileStream).Bounds
+      - (*fileStream).OffsetAt
+      - (*fileStream).Wake
+    name: file_read.go
+  - decls:
+      - kindHead
+      - stampBytes
+      - recordOverhead
+      - maxSegmentPayload
+      - encodeRecord
+      - decodeRecord
+      - capped
+    name: file_record.go
+  - decls:
+      - (*fileStream).reserve
+      - (*fileStream).expireAll
+      - (*fileStream).untilExpiry
+      - (*fileStream).await
+      - (*fileStream).Trim
+      - (*fileStream).trim
+    name: file_retain.go
   - decls:
       - memPartition
       - (*memPartition).next
@@ -38,7 +214,7 @@ files:
       - (*memoryStream).Committed
     name: memory_commit.go
   - decls:
-      - _
+      - _#2
     name: memory_compliance.go
   - decls:
       - MemoryConfig
@@ -104,6 +280,30 @@ functions:
     params: entries []corestream.EntryValue
     results: "[]corestream.EntryValue"
   - doc: |-
+      rootWritableByAnyone reports whether an account outside the owner and group
+      can REPLACE an entry of the stream directory: other-write without the
+      sticky bit. A sticky world-writable directory — what /tmp is — is
+      accepted, since nothing lives at the root but the lock file and the
+      subdirectories, which only their owner may then unlink.
+    name: rootWritableByAnyone
+    params: _ string, info fs.FileInfo
+    results: why, observed string, unusable bool
+  - doc: |-
+      subWritableByAnyone reports whether an account outside the owner and group
+      can put an entry into a partition or the cursors' directory at all. There
+      an entry IS a segment or a cursor, so the sticky bit exempts nothing: it
+      stops an unlink, not a planted one.
+    name: subWritableByAnyone
+    params: _ string, info fs.FileInfo
+    results: why, observed string, unusable bool
+  - doc: |-
+      reparsePoint reports whether a directory entry is a reparse point. Only
+      Windows has them; a Unix indirection is a symbolic link, which the mode
+      already says.
+    name: reparsePoint
+    params: _ fs.FileInfo
+    results: bool
+  - doc: |-
       offsetField renders an offset as a field: in decimal, exactly, whatever
       its size.
     name: offsetField
@@ -149,6 +349,122 @@ functions:
     name: unknownGroup
     params: group string, partition int
     results: error
+  - name: NewFile
+    params: cfg FileConfig
+    results: s corestream.Stream, err error
+  - doc: partitionDir names partition p's directory.
+    name: partitionDir
+    params: p int
+    results: string
+  - doc: lockDir takes the exclusive lock on dir's lock file without waiting.
+    name: lockDir
+    params: dir string
+    results: "*os.File, error"
+  - doc: checkPartitions refuses a directory holding a partition at or past count.
+    name: checkPartitions
+    params: dir string, count int
+    results: error
+  - doc: |-
+      abandon drops the error of a release on a path that is already failing:
+      the refusal being returned is the one that matters.
+    name: abandon
+    params: error
+  - doc: abandonLog closes a log a refusal leaves behind.
+    name: abandonLog
+    params: log *seglog.Log
+  - doc: abandonStream releases what a refused NewFile opened.
+    name: abandonStream
+    params: m *fileStream
+  - doc: timeOf returns the instant of a stamp, in UTC.
+    name: timeOf
+    params: stamp int64
+    results: time.Time
+  - doc: |-
+      cursorName names group's cursor on partition under cursors/: a digest of
+      the group, so any group name is a safe file name of one length, and the
+      partition.
+    name: cursorName
+    params: group string, partition int
+    results: string
+  - doc: |-
+      encodeCursor is a cursor file's bytes: the offset, then the group itself,
+      so a digest collision is detected rather than read as the other group's.
+    name: encodeCursor
+    params: group string, next corestream.Offset
+    results: "[]byte"
+  - doc: |-
+      prepareRoot creates the stream directory, or checks it when it already
+      exists: the queue's root rule, a sticky world-writable directory
+      accepted.
+    name: prepareRoot
+    params: dir string
+    results: error
+  - doc: |-
+      prepareSub creates the directory name under dir owner-only when absent,
+      then checks what is there, whoever put it there: the queue's state rule,
+      one notch stricter than the root's, since its entries are the records or
+      the cursors themselves.
+
+      It is os.Mkdir and os.Lstat, never MkdirAll or Stat, which follow a
+      symbolic link: a subdirectory that is one is refused whatever it points
+      at, or the records would live wherever the link's author chose.
+    name: prepareSub
+    params: dir, name string
+    results: string, error
+  - doc: |-
+      rootUnusableBecause is the root rule: refused by shape, then when an
+      account outside the owner and group can REPLACE an entry.
+    name: rootUnusableBecause
+    params: dir string, info fs.FileInfo
+    results: why, observed string, unusable bool
+  - doc: |-
+      subUnusableBecause is the subdirectories' rule: refused by shape, then
+      when an account outside the owner and group can put an entry there at all.
+    name: subUnusableBecause
+    params: dir string, info fs.FileInfo
+    results: why, observed string, unusable bool
+  - doc: |-
+      indirectionOrFile refuses the two shapes no permission makes usable: a
+      symbolic link or another reparse point, and an entry that is not a
+      directory.
+    name: indirectionOrFile
+    params: info fs.FileInfo
+    results: why string, unusable bool
+  - doc: |-
+      directoryUnusable refuses the directory value for why, with what the
+      verdict was read from when there is one.
+    name: directoryUnusable
+    params: value, why, observed string
+    results: error
+  - doc: |-
+      backendFailed reports an operation on path the storage refused, cause
+      kept in the chain: under STREAM_BACKEND_FAILED for a standard library
+      cause, in the trail of an SDK one, whose code wins (rule 6).
+    name: backendFailed
+    params: op, path string, cause error
+    results: error
+  - doc: decodeEntries turns the payloads read from offset from on into entries.
+    name: decodeEntries
+    params: partition int, from corestream.Offset, payloads [][]byte
+    results: "[]corestream.EntryValue, error"
+  - doc: |-
+      encodeRecord appends to dst the segment payload of record, stamped at
+      stamp: the instant in Unix nanoseconds, the key's length, the key, the
+      payload.
+    name: encodeRecord
+    params: dst []byte, stamp int64, record corestream.RecordValue
+    results: "[]byte"
+  - doc: |-
+      decodeRecord reads what encodeRecord wrote. The key and the payload alias
+      payload, each capped at its end; an empty one is nil, as the memory engine
+      answers. ok is false for bytes encodeRecord cannot have written.
+    name: decodeRecord
+    params: payload []byte
+    results: stamp int64, record corestream.RecordValue, ok bool
+  - doc: capped returns b with its capacity cut at its length, nil when empty.
+    name: capped
+    params: b []byte
+    results: "[]byte"
   - name: NewMemory
     params: cfg MemoryConfig
     results: s corestream.Stream, err error
@@ -160,12 +476,28 @@ functions:
     name: newWakeSignal
     results: "*wakeSignal"
 imports:
+  binary: encoding/binary
+  bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   corestream: github.com/kitsunium/sdk/internal/core/data/stream
+  corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
+  errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
+  flock: github.com/kitsunium/sdk/internal/kernel/fs/flock
+  fs: io/fs
+  hex: encoding/hex
+  io: io
+  math: math
+  os: os
+  seglog: github.com/kitsunium/sdk/internal/kernel/fs/seglog
+  sha256: crypto/sha256
+  slices: slices
   sort: sort
   strconv: strconv
+  strings: strings
+  svcvfs: github.com/kitsunium/sdk/internal/service/data/vfs
   sync: sync
   time: time
 package:
@@ -174,6 +506,404 @@ package:
   name: stream
   purpose: Package stream holds the engines of core/data/stream's [Stream] port — memory, a directory of segments over kernel/fs/seglog, and a SQL table joined to the caller's transaction — and the subscriber that reads a stream on behalf of a consumer group (ADR 0231).
 types:
+  - doc: |-
+      fileStream is a stream kept in a directory: one kernel/fs/seglog log per
+      partition, and one file per consumer group's cursor.
+
+      # Durability
+
+      An Append is one seglog batch — its records, and a drop record when
+      retention moved — written under one Sync: two fdatasyncs whatever the
+      number of records, so a crash keeps all of the batch or none of it.
+
+      # Retention
+
+      Every bound is applied to the offset first, at once: a record past
+      RetainFor, beyond RetainBytes or below a Trim is unreadable from that
+      instant. The storage follows in whole segments: the Append or the Trim
+      that moves the first offset records it in its batch, and every sealed
+      segment holding only records below it is unlinked after that batch's sync
+      — at the next rotation for the segment being written. The age bound is
+      computed at read time, as the memory engine's is, and applied by the next
+      Append, Trim or backpressure wait.
+
+      # One engine per directory
+
+      A segmented log has one writer, so the engine holds an exclusive lock on
+      <Dir>/lock for its life (kernel/fs/flock): a second open of the directory,
+      in this process or another, is refused until Close. The Waker of the open
+      engine is therefore the directory's.
+    fields:
+      - name: clk
+        type: clock.Timed
+      - name: cursors
+        type: corevfs.FullFS
+      - name: lock
+        type: "*os.File"
+      - doc: wake is closed by every Append (corestream.Waker).
+        name: wake
+        type: "*wakeSignal"
+      - doc: |-
+          room is closed whenever records are released, which an Append
+          waiting under PolicyValue.MaxBytes waits for.
+        name: room
+        type: "*wakeSignal"
+      - name: parts
+        type: "[]*filePart"
+      - name: policy
+        type: corestream.PolicyValue
+      - doc: |-
+          mu guards the four below. It is taken before a partition's mu, never
+          after.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          held is the bytes every partition retains, the figure MaxBytes
+          bounds, the batches being written included.
+        name: held
+        type: int64
+      - doc: |-
+          last is the latest instant a batch was stamped with, in Unix
+          nanoseconds: AppendedAt never goes backwards, across a restart too.
+        name: last
+        type: int64
+      - doc: turn is the partition the next unkeyed batch goes to.
+        name: turn
+        type: int
+      - name: closed
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          open opens the cursors' filesystem and every partition's log, and indexes
+          what the logs hold.
+        name: open
+        params: dir string
+        recv: m *fileStream
+        results: error
+      - doc: openPart opens and indexes partition p's log, under p<p>/.
+        name: openPart
+        params: dir string, p int
+        recv: m *fileStream
+        results: "*filePart, error"
+      - doc: Partitions returns how many partitions the stream has.
+        name: Partitions
+        recv: m *fileStream
+        results: int
+      - doc: Append writes records to one partition as one batch, under one sync.
+        name: Append
+        params: |2
+
+          	ctx context.Context, records []corestream.RecordValue,
+        recv: m *fileStream
+        results: corestream.AppendValue, error
+      - doc: |-
+          write encodes records into part's log, syncs them as one batch with the
+          retention they move, and indexes them. The caller holds part.wmu.
+        name: write
+        params: |2
+
+          	part *filePart, partition int, records []corestream.RecordValue, size int64,
+        recv: m *fileStream
+        results: appended corestream.AppendValue, freed int64, err error
+      - doc: |-
+          syncBatch makes part's pending batch durable: with a drop record when claim
+          is past the log's first index, which also unlinks the sealed segments it
+          empties, with a plain sync otherwise.
+        name: syncBatch
+        params: part *filePart, claim corestream.Offset
+        recv: m *fileStream
+        results: error
+      - doc: |-
+          release gives back what an Append's retention freed and, when the
+          Append failed, the room it had reserved.
+        name: release
+        params: freed int64, failed bool, size int64
+        recv: m *fileStream
+      - doc: |-
+          stamp returns the instant, in Unix nanoseconds, the batch being appended
+          is stamped with: the clock's, or the last stamp when the clock went
+          backwards. The caller holds the partition's wmu, so a partition's batches
+          are stamped in their order.
+        name: stamp
+        recv: m *fileStream
+        results: int64
+      - doc: usable refuses a call on a closed stream. The caller holds no lock.
+        name: usable
+        recv: m *fileStream
+        results: error
+      - doc: |-
+          Close closes every partition's log and the cursors' filesystem, then
+          releases the directory's lock. It reports the first failure; a second
+          Close returns nil.
+        name: Close
+        recv: m *fileStream
+        results: error
+      - doc: |-
+          Commit records next as the offset group reads next on partition, in a
+          file of its own published atomically and durably (vfs.WriteAtomic).
+        name: Commit
+        params: |2
+
+          	_ context.Context, group string, partition int, next corestream.Offset,
+        recv: m *fileStream
+        results: error
+      - doc: Committed returns the offset group committed last on partition.
+        name: Committed
+        params: |2
+
+          	_ context.Context, group string, partition int,
+        recv: m *fileStream
+        results: corestream.Offset, error
+      - doc: checkPartition refuses a partition outside [0, Partitions()).
+        name: checkPartition
+        params: partition int
+        recv: m *fileStream
+        results: error
+      - doc: |-
+          Read returns up to maxEntries entries of partition from offset from on,
+          read from the segments with one read per contiguous run.
+        name: Read
+        params: |2
+
+          	_ context.Context, partition int, from corestream.Offset, maxEntries int,
+        recv: m *fileStream
+        results: "[]corestream.EntryValue, error"
+      - doc: firstOf returns part's first readable offset now.
+        name: firstOf
+        params: part *filePart
+        recv: m *fileStream
+        results: corestream.Offset
+      - doc: Bounds returns partition's first retained offset and its next one.
+        name: Bounds
+        params: _ context.Context, partition int
+        recv: m *fileStream
+        results: corestream.BoundsValue, error
+      - doc: |-
+          OffsetAt returns partition's first offset appended at or after t: a
+          search of the batches' instants, which the index keeps.
+        name: OffsetAt
+        params: |2
+
+          	_ context.Context, partition int, t time.Time,
+        recv: m *fileStream
+        results: corestream.Offset, error
+      - doc: Wake returns the channel the next Append closes.
+        name: Wake
+        recv: m *fileStream
+        results: <-chan struct{}
+      - doc: |-
+          reserve waits until size more bytes fit under PolicyValue.MaxBytes, then
+          counts them as held, and returns the partition the batch goes to: its
+          keys', or the next in turn for an unkeyed one. On a refusal nothing is
+          reserved.
+
+          Room appears only when records are released — by the age bound, by Trim,
+          by the byte bound of another Append — so it waits for whichever comes
+          first: a release (room), the oldest record reaching its age, the end of
+          BlockTimeout, or ctx. It is the memory engine's wait, on this engine's
+          index.
+        name: reserve
+        params: ctx context.Context, size int64, partition int, keyed bool
+        recv: m *fileStream
+        results: int, error
+      - doc: |-
+          expireAll claims, in every partition, the records past RetainFor at now,
+          and returns the bytes still held. The caller holds m.mu; the storage is
+          released by the partition's next Append or Trim.
+        name: expireAll
+        params: now time.Time
+        recv: m *fileStream
+        results: int64
+      - doc: |-
+          untilExpiry returns how long until the oldest retained record of any
+          partition expires, capped at limit. The caller holds m.mu.
+        name: untilExpiry
+        params: now time.Time, limit time.Duration
+        recv: m *fileStream
+        results: time.Duration
+      - doc: await waits for room, for wait on the stream's clock, or for ctx.
+        name: await
+        params: ctx context.Context, room <-chan struct{}, wait time.Duration
+        recv: m *fileStream
+        results: error
+      - doc: |-
+          Trim makes before the first offset partition retains: at once in the
+          index, durably by a drop record, and on the device by unlinking every
+          sealed segment that then holds nothing readable.
+        name: Trim
+        params: _ context.Context, partition int, before corestream.Offset
+        recv: m *fileStream
+        results: error
+      - doc: trim is Trim on part, whose wmu the caller holds.
+        name: trim
+        params: part *filePart, before corestream.Offset
+        recv: m *fileStream
+        results: freed int64, err error
+    name: fileStream
+  - fields:
+      - doc: |-
+          Clock stamps [corestream.EntryValue].AppendedAt, ages records for
+          [corestream.PolicyValue].RetainFor, and times the wait
+          [corestream.PolicyValue].BlockTimeout allows. The instants are kept
+          in the segments, so a stream reopened on another clock ages its
+          records by that one. Nil means clock.System.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          Dir is the stream directory: one segmented log per partition under
+          p<partition>/, the groups' cursors under cursors/. It is created
+          owner-only when absent, refused when it exists and an account
+          outside the owner and group could replace its entries, and its
+          subdirectories are refused besides when one is a symbolic link, not a
+          directory, or writable by such an account at all — the queue's rule
+          (on Windows, read from the access-control list). One engine at a time
+          opens a directory: a second, in this process or another, is refused
+          while the first is open.
+        name: Dir
+        type: string
+      - doc: |-
+          Policy is what the stream enforces; its zero value works. Its
+          Partitions cannot shrink across a reopen: a directory holding a
+          partition the policy no longer counts is refused.
+        name: Policy
+        type: corestream.PolicyValue
+    kind: struct
+    name: FileConfig
+  - doc: batchMark is where one batch starts and the instant it was stamped with.
+    fields:
+      - name: first
+        type: corestream.Offset
+      - name: stamp
+        type: int64
+    kind: struct
+    name: batchMark
+  - doc: |-
+      filePart is one partition of a file stream: its segmented log, and the
+      index of what the log holds that retention, OffsetAt and the byte bounds
+      read without touching the disk.
+    fields:
+      - name: log
+        type: "*seglog.Log"
+      - doc: |-
+          broken is the write failure that stopped this partition. A batch a
+          failure cut short may still be pending in the log, so nothing is ever
+          appended after it. Guarded by wmu.
+        name: broken
+        type: error
+      - doc: |-
+          scratch is the encoding buffer of the batch being written. Guarded by
+          wmu.
+        name: scratch
+        type: "[]byte"
+      - doc: |-
+          prefix[i] is the bytes, keys and payloads, of the records from base up
+          to base+i excluded; len(prefix)-1 records are indexed.
+        name: prefix
+        type: "[]int64"
+      - doc: |-
+          batches holds every indexed batch from the one holding base on, in
+          offset order, which is also the order of their instants.
+        name: batches
+        type: "[]batchMark"
+      - doc: base is the offset prefix[0] stands for.
+        name: base
+        type: corestream.Offset
+      - doc: |-
+          kept is the first offset retention, Trim or the byte bound have
+          claimed for good; the age bound may claim more at read time.
+        name: kept
+        type: corestream.Offset
+      - doc: |-
+          mu guards the index. Readers hold it shared and never across a disk
+          write: an Append updates the index after its sync.
+        name: mu
+        type: sync.RWMutex
+      - doc: |-
+          wmu serialises the partition's writers, Append and Trim, across their
+          write and sync.
+        name: wmu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: |-
+          next returns the offset the partition's next record takes. The caller
+          holds mu, or wmu.
+        name: next
+        recv: p *filePart
+        results: corestream.Offset
+      - doc: |-
+          lastBatch returns the first offset of the newest batch, next when there
+          is none. The caller holds mu, or wmu.
+        name: lastBatch
+        recv: p *filePart
+        results: corestream.Offset
+      - doc: |-
+          between returns the bytes of the records from lo up to hi excluded, both
+          within [base, next]. The caller holds mu, or wmu.
+        name: between
+        params: lo, hi corestream.Offset
+        recv: p *filePart
+        results: int64
+      - doc: |-
+          first returns the first offset still readable at now: that of the oldest
+          batch still younger than retainFor, next when every one is older, never
+          below kept. Zero retainFor keeps every record. The caller holds mu, or wmu.
+        name: first
+        params: now time.Time, retainFor time.Duration
+        recv: p *filePart
+        results: corestream.Offset
+      - doc: |-
+          bounded returns the first offset the byte bound keeps when size more bytes
+          follow next: the lowest offset from lo on whose suffix fits retainBytes,
+          never past limit — the newest batch, which its own Append never trims.
+          Zero retainBytes is unbounded. The caller holds mu, or wmu.
+        name: bounded
+        params: lo, limit corestream.Offset, size, retainBytes int64
+        recv: p *filePart
+        results: corestream.Offset
+      - doc: |-
+          index records a batch of sizes, stamped at stamp, as the records from next
+          on, and claims everything below claim. It returns the bytes the claim
+          released. The caller holds mu exclusively, and wmu.
+        name: index
+        params: stamp int64, sizes []int64, claim corestream.Offset
+        recv: p *filePart
+        results: freed int64
+      - doc: |-
+          claim makes to the first offset retained for good and returns the bytes it
+          released; at or below kept it changes nothing. The caller holds mu
+          exclusively.
+        name: claim
+        params: to corestream.Offset
+        recv: p *filePart
+        results: freed int64
+      - doc: compact lets the index forget what lies far enough below kept.
+        name: compact
+        recv: p *filePart
+      - doc: |-
+          offsetAt returns the first offset at or past from whose batch was stamped
+          at or after t, next when none was. The caller holds mu.
+        name: offsetAt
+        params: from corestream.Offset, t time.Time
+        recv: p *filePart
+        results: corestream.Offset
+      - doc: |-
+          oldestStamp returns the instant of the batch holding offset from, and
+          false when from is next. The caller holds mu.
+        name: oldestStamp
+        params: from corestream.Offset
+        recv: p *filePart
+        results: int64, bool
+      - doc: |-
+          rebuild reads the whole log once and indexes it: every record's size,
+          every batch's first offset and instant. A batch whose head a Trim dropped
+          starts at the log's first record, a tail. It returns the latest instant
+          seen, so the engine's stamps keep never going backwards across a restart.
+        name: rebuild
+        recv: p *filePart
+        results: latest int64, err error
+    name: filePart
   - doc: |-
       memPartition is one partition of a memory stream: its retained entries, in
       offset order, and the offset of the first of them.
@@ -430,6 +1160,30 @@ types:
     name: wakeSignal
 vars:
   - doc: |-
+      The file engine answers the port, four of its siblings and io.Closer;
+      Compactor is #824's.
+    grouped: true
+    items:
+      - name: _
+        type: corestream.Stream
+        value: (*fileStream)(nil)
+      - name: _
+        type: corestream.Waker
+        value: (*fileStream)(nil)
+      - name: _
+        type: corestream.Seeker
+        value: (*fileStream)(nil)
+      - name: _
+        type: corestream.Trimmer
+        value: (*fileStream)(nil)
+      - name: _
+        type: corestream.Committer
+        value: (*fileStream)(nil)
+      - name: _
+        type: io.Closer
+        value: (*fileStream)(nil)
+    name: _
+  - doc: |-
       The memory engine answers the port and four of its siblings; Compactor is
       left to the engines that keep segments or rows to rewrite (#824).
     grouped: true
@@ -449,4 +1203,4 @@ vars:
       - name: _
         type: corestream.Committer
         value: (*memoryStream)(nil)
-    name: _
+    name: _#2

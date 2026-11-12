@@ -9,9 +9,9 @@ from an offset of the reader's own; the values that travel through it; the
 policy every engine enforces; the one key-to-partition placement every engine
 applies; and every error code of the domain, its engines' included (ADR 0160).
 No engine lives here: the memory engine and the conformance suite every
-engine runs are `internal/service/data/stream`'s (#819); the file engine over
-`kernel/fs/seglog` (#821), the SQL engine (#822) and the subscriber (#823)
-arrive there one milestone each.
+engine runs are `internal/service/data/stream`'s (#819), and so is the file
+engine over `kernel/fs/seglog` (#821); the SQL engine (#822) and the
+subscriber (#823) arrive there one milestone each.
 
 ## Contents
 

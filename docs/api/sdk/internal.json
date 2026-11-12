@@ -82382,6 +82382,35 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.FileConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "FileConfig",
+      "spelled": "struct{Clock clock.Timed; Dir string; Policy corestream.PolicyValue}",
+      "canonical": "struct{Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Dir string; Policy github.com/kitsunium/sdk/internal/core/data/stream.PolicyValue}",
+      "fields": [
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock stamps [corestream.EntryValue].AppendedAt, ages records for\n[corestream.PolicyValue].RetainFor, and times the wait\n[corestream.PolicyValue].BlockTimeout allows. The instants are kept\nin the segments, so a stream reopened on another clock ages its\nrecords by that one. Nil means clock.System.\n"
+        },
+        {
+          "name": "Dir",
+          "type": "string",
+          "doc": "Dir is the stream directory: one segmented log per partition under\np<partition>/, the groups' cursors under cursors/. It is created\nowner-only when absent, refused when it exists and an account\noutside the owner and group could replace its entries, and its\nsubdirectories are refused besides when one is a symbolic link, not a\ndirectory, or writable by such an account at all — the queue's rule\n(on Windows, read from the access-control list). One engine at a time\nopens a directory: a second, in this process or another, is refused\nwhile the first is open.\n"
+        },
+        {
+          "name": "Policy",
+          "type": "corestream.PolicyValue",
+          "doc": "Policy is what the stream enforces; its zero value works. Its\nPartitions cannot shrink across a reopen: a directory holding a\npartition the policy no longer counts is refused.\n"
+        }
+      ],
+      "doc": "FileConfig configures [NewFile]: the directory that holds the stream, the\nclock that stamps and ages its records, and the policy it enforces.\n",
+      "file": "service/data/stream/file_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.MemoryConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/data/stream",
@@ -82402,6 +82431,18 @@
       ],
       "doc": "MemoryConfig configures [NewMemory]: the policy it enforces and the clock\nthat stamps every batch and times every wait.\n",
       "file": "service/data/stream/memory_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.NewFile",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "NewFile",
+      "spelled": "func(cfg FileConfig) (s corestream.Stream, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/data/stream.FileConfig) (s github.com/kitsunium/sdk/internal/core/data/stream.Stream, err error)",
+      "doc": "NewFile opens the stream kept in cfg.Dir, creating it when absent, and\nrecovers it: every partition's segmented log, the batches and instants\nits records carry, and the retention they were under.\n\nIt refuses a policy it cannot honour with the core's Validate, as every\nengine does, and a MaxRecordBytes above what one segment record holds; a\ndirectory it cannot trust, or one another engine holds open, with\nStreamDirectoryUnusable; a directory holding more partitions than the\npolicy counts with StreamMisconfigured; and a segment it cannot trust with\nthe segmented log's own refusal under StreamBackendFailed. The stream it\nreturns also answers [corestream.Waker], [corestream.Seeker],\n[corestream.Trimmer], [corestream.Committer] and io.Closer; Close releases\nthe directory.\n",
+      "file": "service/data/stream/file.go",
       "layer": "service",
       "family": "data"
     },

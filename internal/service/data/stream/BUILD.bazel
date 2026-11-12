@@ -6,8 +6,18 @@ go_library(
     name = "stream",
     srcs = [
         "batch.go",
+        "dirtrust_posix.go",
+        "dirtrust_windows.go",
         "doc.go",
         "errors.go",
+        "file.go",
+        "file_commit.go",
+        "file_compliance.go",
+        "file_config.go",
+        "file_part.go",
+        "file_read.go",
+        "file_record.go",
+        "file_retain.go",
         "memory.go",
         "memory_commit.go",
         "memory_compliance.go",
@@ -23,9 +33,18 @@ go_library(
     ],
     deps = [
         "//internal/core/data/stream",
+        "//internal/core/data/vfs",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
-    ],
+        "//internal/kernel/fs/flock",
+        "//internal/kernel/fs/seglog",
+        "//internal/service/data/vfs",
+    ] + select({
+        "@rules_go//go/platform:windows": [
+            "//internal/kernel/fs/winacl",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 alias(
@@ -41,6 +60,8 @@ go_test(
     name = "stream_test",
     srcs = [
         "conformance_external_test.go",
+        "death_external_test.go",
+        "file_external_test.go",
         "gen_api_test.go",
         "harness_external_test.go",
         "memory_external_test.go",

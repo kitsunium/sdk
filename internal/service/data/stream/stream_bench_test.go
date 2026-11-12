@@ -1,6 +1,7 @@
 package stream_test
 
 import (
+	"io"
 	"strconv"
 	"testing"
 
@@ -118,5 +119,82 @@ func BenchmarkAppendKeyed(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// benchFile opens the file engine over a directory of the benchmark's own,
+// on the wall clock: every Append below is synced to the device.
+func benchFile(b *testing.B, policy corestream.PolicyValue) corestream.Stream {
+	b.Helper()
+	requireFileEngine(b)
+	s, err := svcstream.NewFile(svcstream.FileConfig{Dir: b.TempDir(), Policy: policy})
+	if err != nil {
+		b.Fatalf("NewFile() = %v", err)
+	}
+	b.Cleanup(func() {
+		if closeErr := s.(io.Closer).Close(); closeErr != nil {
+			b.Errorf("Close() = %v", closeErr)
+		}
+	})
+	return s
+}
+
+// BenchmarkAppendFile measures one durable batch of 1, 16 or 256 records of
+// 64 B on the file engine: the encoding, one seglog batch and its two
+// fdatasyncs (one for a batch of one record). Per record, the 256 batch is
+// what one sync shared by many records costs.
+func BenchmarkAppendFile(b *testing.B) {
+	for _, count := range []int{1, 16, 256} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			s := benchFile(b, corestream.PolicyValue{RetainBytes: benchRetainBytes})
+			records := benchBatch(count, 64)
+			b.SetBytes(int64(count * 64))
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := s.Append(b.Context(), records); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*count), "ns/record")
+		})
+	}
+}
+
+// BenchmarkReadFile measures a read of 16 entries of 64 B from a partition
+// holding a backlog of 1 000 or 1 000 000 records. "tail" reads within the
+// newest 1 000 records at both sizes, so the two touch as many pages and
+// differ only by the index they search: the claim that a backlog costs a
+// read nothing. "spread" reads across the whole backlog, where a page the
+// page cache let go is a read of the device.
+func BenchmarkReadFile(b *testing.B) {
+	const batch, window = 16, 1_000
+	for _, backlog := range []int{1_000, 1_000_000} {
+		s := benchFile(b, corestream.PolicyValue{})
+		for written := 0; written < backlog; {
+			count := min(4096, backlog-written)
+			if _, err := s.Append(b.Context(), benchBatch(count, 64)); err != nil {
+				b.Fatal(err)
+			}
+			written += count
+		}
+		for _, shape := range []string{"tail", "spread"} {
+			b.Run(shape+"/backlog="+strconv.Itoa(backlog), func(b *testing.B) {
+				base, span := corestream.Offset(backlog-window), corestream.Offset(window-batch)
+				step := corestream.Offset(11)
+				if shape == "spread" {
+					base, span, step = 0, corestream.Offset(backlog-batch), corestream.Offset(backlog/97)|1
+				}
+				b.SetBytes(batch * 64)
+				b.ReportAllocs()
+				at := corestream.Offset(0)
+				for b.Loop() {
+					entries, err := s.Read(b.Context(), 0, base+at, batch)
+					if err != nil || len(entries) != batch {
+						b.Fatalf("Read() = %d entries, %v", len(entries), err)
+					}
+					at = (at + step) % span
+				}
+			})
+		}
 	}
 }

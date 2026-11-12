@@ -697,6 +697,29 @@ packages:
       declared in the core at this path (ADR 0160).
     functions:
       - doc: |-
+          NewFile opens the stream kept in cfg.Dir, creating it when absent, and
+          recovers it: every partition's segmented log, the batches and instants
+          its records carry, and the retention they were under.
+
+          It refuses a policy it cannot honour with the core's Validate, as every
+          engine does, and a MaxRecordBytes above what one segment record holds; a
+          directory it cannot trust, or one another engine holds open, with
+          StreamDirectoryUnusable; a directory holding more partitions than the
+          policy counts with StreamMisconfigured; and a segment it cannot trust with
+          the segmented log's own refusal under StreamBackendFailed. The stream it
+          returns also answers [corestream.Waker], [corestream.Seeker],
+          [corestream.Trimmer], [corestream.Committer] and io.Closer; Close releases
+          the directory.
+        in:
+          - name: cfg
+            type: FileConfig
+        name: NewFile
+        out:
+          - name: s
+            type: corestream.Stream
+          - name: err
+            type: error
+      - doc: |-
           NewMemory returns a stream whose partitions live in the heap of this
           process: the test double of every durable engine.
 
@@ -720,6 +743,38 @@ packages:
       corestream: github.com/kitsunium/sdk/internal/core/data/stream
     path: github.com/kitsunium/sdk/internal/service/data/stream
     types:
+      - doc: |-
+          FileConfig configures [NewFile]: the directory that holds the stream, the
+          clock that stamps and ages its records, and the policy it enforces.
+        name: FileConfig
+        struct:
+          fields:
+            - doc: |-
+                Clock stamps [corestream.EntryValue].AppendedAt, ages records for
+                [corestream.PolicyValue].RetainFor, and times the wait
+                [corestream.PolicyValue].BlockTimeout allows. The instants are kept
+                in the segments, so a stream reopened on another clock ages its
+                records by that one. Nil means clock.System.
+              name: Clock
+              type: clock.Timed
+            - doc: |-
+                Dir is the stream directory: one segmented log per partition under
+                p<partition>/, the groups' cursors under cursors/. It is created
+                owner-only when absent, refused when it exists and an account
+                outside the owner and group could replace its entries, and its
+                subdirectories are refused besides when one is a symbolic link, not a
+                directory, or writable by such an account at all — the queue's rule
+                (on Windows, read from the access-control list). One engine at a time
+                opens a directory: a second, in this process or another, is refused
+                while the first is open.
+              name: Dir
+              type: string
+            - doc: |-
+                Policy is what the stream enforces; its zero value works. Its
+                Partitions cannot shrink across a reopen: a directory holding a
+                partition the policy no longer counts is refused.
+              name: Policy
+              type: corestream.PolicyValue
       - doc: |-
           MemoryConfig configures [NewMemory]: the policy it enforces and the clock
           that stamps every batch and times every wait.
