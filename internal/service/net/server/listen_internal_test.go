@@ -341,9 +341,10 @@ func Test_listen(t *testing.T) {
 			//: the OS refuses this one, which is a different error from the two
 			//: above and must stay distinguishable — a family the engine does not
 			//: serve is a wiring mistake, an address already in use is an
-			//: operational one, and an operator needs to know which.
+			//: operational one, and an operator needs to know which — said as
+			//: such, AddressInUse, since #1330.
 			name: "an address already in use", network: "tcp", target: addrAlreadyBound,
-			wantCode: corenet.CodeListenFailed,
+			wantCode: corenet.CodeAddressInUse,
 		},
 		{
 			name: "an address that does not resolve", network: "tcp", addr: "256.0.0.1:0",
@@ -358,7 +359,7 @@ func Test_listen(t *testing.T) {
 			cfg = testIdentity(t).ServerConfig()
 		}
 
-		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr}, cfg, false, false, 1)
+		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr}, cfg, socketSpec{attempts: 1})
 
 		if c.wantCode != 0 {
 			if !errs.HasCode(err, c.wantCode) {

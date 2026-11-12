@@ -18,16 +18,29 @@ finishes in milliseconds instead of burning its whole budget — **1.808 ms for
 published**, measured in `BENCH.md` and gated by
 `TestDrainWithOpenStreamsFinishesInMilliseconds`, which runs both.
 
+## On a loop group (#858)
+
+`NewLoopHandler` is the event stream on the loop engine: no goroutine a stream, the
+keep-alive comments on the loop's timer, the drain's `retry:` field the last thing
+a client reads. It is a `corenet.HTTP1Handler` and `corenet.HTTP1Streamer`, handed to
+`http1.HandleLoop` by the program; it does not import `http1` (no member of
+`service/net` imports another). The head, the frames and the comment are what
+`Stream` writes on the goroutine engine, so a client cannot tell the two apart.
+`KeepAlive`, `WithoutKeepAlive` and `Retry` mean what they mean there; `WriteTimeout`
+is refused: the loop's `OutputCap` is what bounds a stream that stopped reading.
+
 ## Contents
 
 | File | Surface |
 |---|---|
 | `sse.go` | `Stream` — `New`, `Send`, `Comment`, `Done`, `LastEventID`, `Close`; the keep-alive and watcher goroutines; the flush probe; `retain` and the two constants that bound the encode buffer |
+| `loop.go` | #858: `NewLoopHandler`, `LoopHandler` (the `HTTP1Handler` and `HTTP1Streamer` the http1 adapter serves), `LoopStreamValue`, and the port `LoopSource` in `gen_ports.go`; the lane's frame buffer |
 | `options.go` | `Option` — `KeepAlive`, `WithoutKeepAlive`, `WriteTimeout`, `Retry`; `resolve` and the ADR 0031 clamp/refuse split |
 | `frame.go` | the encoder — `AppendEvent` (an event's wire form; `pkg/v1/net/sse.AppendEvent` forwards to it) and `AppendComment` (the keep-alive frame), the one-pass terminator scan (`appendData` and its two forward cursors), `validateComment` |
 | `frame_external_test.go`, `frame_bench_test.go` | the encoder's tests and benchmarks, including the exhaustive equivalence corpus judged against `splitIndexAny`, the oracle |
 | `sse_alloc_internal_test.go` | the malloc-total gates under the "a steady-state send allocates nothing" claim (deliberately NOT `testing.AllocsPerRun` — its integer division reports 0.0 for anything allocating less than once per call) — `//go:build !race`, so the race-off alloc lane is its ONLY lane (see §Verification) |
 | `allocwindow_test.go` | `mallocsOver`, the allocation window the gates count with: the allocations made on the window's own call stack, never the process's, and its negative control — one copy of the SDK's instrument, held identical to the others by `check-alloc-lane-coverage.sh` |
+| `loop_external_test.go`, `loop_engine_linux_test.go`, `loop_memory_linux_test.go` | #858: the head and frames over the http1 adapter on a fake loop; on epoll, io_uring and the portable backend, 1 000 events to a net/http client and a drain's retry field; (race off) 10 000 streams under 512 B of Go heap each and every one drained |
 | `BENCH.md` | what a stream costs open, per frame, and to drain — see §Cost |
 
 The frame as a value — `corenet.SSEEventValue` and its `Validate`, the rules a
@@ -115,6 +128,15 @@ share.
   default and turns a real-time stream into a batch delivered at close. Both it
   and `Cache-Control` are set only when the caller left them empty;
   `Content-Type` is imposed, because the media type *is* the protocol handshake.
+
+## The loop's stream
+
+A stream on the loop answers with a response delimited by close (RFC 9112 §6.3
+item 8): `Connection: close`, no `Content-Length`, no chunk, so ADR 0186 §D6's
+refusal of every transfer coding stands. The handler then writes through
+`corenet.HTTP1StreamValue`, the `LoopIO`'s own copying `Write`: a slow reader meets
+`LoopOutputFull`, past which `LoopStreamValue.Send` returns the refusal and the keep-alive
+ends the stream.
 
 ## Last-Event-ID
 

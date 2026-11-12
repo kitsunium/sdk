@@ -252,6 +252,17 @@ sequences:
     steps:
       - return: applyFrom(os.LookupEnv, os.ReadFile, debug.SetMemoryLimit)
         to: applyFrom
+  - of: Derive
+    participants:
+      - id: caller
+        kind: actor
+      - id: Derive
+        kind: self
+      - id: deriveWith
+        kind: internal
+    steps:
+      - return: deriveWith(defaultConfig(), os.LookupEnv, os.ReadFile)
+        to: deriveWith
   - of: applyFrom
     participants:
       - id: caller

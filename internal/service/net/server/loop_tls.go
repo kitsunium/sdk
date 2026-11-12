@@ -11,9 +11,15 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// alpnHTTP1 is the one protocol the http1 codec's TLS path offers: the
-// profile is HTTP/1.1 only (ADR 0187 §D5).
-var alpnHTTP1 = []string{"http/1.1"}
+// The ALPN lists a TLS codec group offers when Protocols names none.
+var (
+	// alpnHTTP1 is the one protocol the http1 codec's TLS path offers: the
+	// profile is HTTP/1.1 only (ADR 0187 §D5).
+	alpnHTTP1 = []string{"http/1.1"}
+	// alpnBoth is what the h2 adapter's offers: h2 first, as an HTTP
+	// group's (ADR 0195 §D1).
+	alpnBoth = []string{"h2", "http/1.1"}
+)
 
 // codecUnwrapper is what the http1 adapter exposes (http1.LoopHandler.Unwrap):
 // the HTTP1Handler it serves, so a loop group knows its handler speaks the
@@ -48,9 +54,10 @@ func (g *StreamGroup) loopTLSRefusal() error {
 // nothing, an explicit native backend — TLS runs on the portable backend
 // alone — and a loop middleware are refused with LoopTLSUnsupported, the
 // option named; nothing is served without TLS or elsewhere instead. A
-// Protocols list that is not HTTP/1.1 alone, and an identity whose
-// NextProtos names h2 or nothing the codec serves, are refused with
-// ProtocolsRefused, as an HTTP group's would be (ADR 0195).
+// Protocols list naming a version the codec does not serve — h2 for the
+// http1 adapter —, and an identity whose NextProtos names such a version or
+// nothing the codec serves, are refused with ProtocolsRefused, as an HTTP
+// group's would be (ADR 0195). The h2 adapter serves both (#964).
 func (g *StreamGroup) tlsCodecRefusal() error {
 	//: by the first contradiction.
 	switch {
@@ -69,9 +76,9 @@ func (g *StreamGroup) tlsCodecRefusal() error {
 			//: refused, the reason named.
 			return g.protocolsErr(reason)
 		}
-		//: the identity's ALPN against the one version the codec serves —
-		//: the Protocols list's too, which codecProtocols kept to it.
-		alpn, reason := offered(g.identity.ServerConfig().NextProtos, alpnHTTP1)
+		//: the identity's ALPN against the versions the codec serves — the
+		//: Protocols list's, which codecProtocols judged, or its default.
+		alpn, reason := offered(g.identity.ServerConfig().NextProtos, g.codecVersions())
 		//: a version the codec does not serve, or none it does.
 		if reason != "" {
 			//: refused, the reason named.
@@ -84,10 +91,37 @@ func (g *StreamGroup) tlsCodecRefusal() error {
 	}
 }
 
+// multiVersion reports whether the group's handler is an adapter serving more
+// than HTTP/1.1 — the h2 adapter, a corenet.LoopHTTPCodec.
+func (g *StreamGroup) multiVersion() bool {
+	_, ok := g.loopHandler.(corenet.LoopHTTPCodec)
+	//: the h2 adapter.
+	return ok
+}
+
+// codecVersions is the versions a TLS codec group serves, in the order its
+// ALPN offers them: the Protocols list when set, which codecProtocols judged;
+// otherwise h2 then HTTP/1.1 for the h2 adapter, HTTP/1.1 for the http1 one.
+func (g *StreamGroup) codecVersions() []string {
+	//: as given.
+	if g.kinds.has(corenet.OptionProtocols) {
+		//: judged already.
+		return g.protos
+	}
+	//: the h2 adapter's default, an HTTP group's.
+	if g.multiVersion() {
+		//: both, h2 first.
+		return alpnBoth
+	}
+	//: the http1 codec's one version.
+	return alpnHTTP1
+}
+
 // codecProtocols returns why the group's Protocols list cannot be served by
-// the codec, or "" when it is unset or names HTTP/1.1 alone: the list is
-// judged as an HTTP group's with TLS (checkProtocols), then h2, which the
-// codec does not serve, is refused rather than dropped from it.
+// the codec, or "" when it is unset or names what the codec serves: the list
+// is judged as an HTTP group's with TLS (checkProtocols), then h2, which the
+// http1 codec does not serve, is refused rather than dropped from it; the h2
+// adapter serves it.
 func (g *StreamGroup) codecProtocols() string {
 	//: unset: HTTP/1.1, the codec's one version.
 	if !g.kinds.has(corenet.OptionProtocols) {
@@ -99,8 +133,9 @@ func (g *StreamGroup) codecProtocols() string {
 		//: refused by what is wrong with it.
 		return reason
 	}
-	//: h2 named, alone or beside HTTP/1.1: the codec serves HTTP/1.1 alone.
-	if slices.Contains(g.protos, protoH2) {
+	//: h2 named, alone or beside HTTP/1.1, to the http1 codec, which serves
+	//: HTTP/1.1 alone.
+	if !g.multiVersion() && slices.Contains(g.protos, protoH2) {
 		//: refused, the identifier named.
 		return protoH2
 	}
@@ -115,9 +150,9 @@ func (g *StreamGroup) tlsErr(option string) error {
 		errs.String("group", g.name), errs.String("option", option))
 }
 
-// loopLayers wraps a TLS codec group's listeners in TLS, offering HTTP/1.1
-// alone, never below TLS 1.2 (tlsFloor); any other loop group's are returned
-// as they are.
+// loopLayers wraps a TLS codec group's listeners in TLS, offering the
+// group's ALPN list, never below TLS 1.2 (tlsFloor); any other loop group's
+// are returned as they are.
 func (g *StreamGroup) loopLayers(lns []stdnet.Listener) []stdnet.Listener {
 	//: plaintext.
 	if !g.tlsCodec() {
@@ -147,16 +182,16 @@ func (g *StreamGroup) loopBackend() corenet.LoopBackend {
 
 // tlsCodecHonours reports the kinds a TLS codec group honours beyond the
 // loop's own: TLS, its handshake bound, and Protocols, which tlsCodecRefusal
-// keeps to HTTP/1.1 alone.
+// keeps to the versions the codec serves.
 func tlsCodecHonours(k corenet.OptionKind) bool {
 	//: the TLS path's three.
 	return k == corenet.OptionTLS || k == corenet.OptionHandshakeTimeout || k == corenet.OptionProtocols
 }
 
 // codecTLS is the configuration of a TLS codec group's listeners: the
-// identity's, offering HTTP/1.1 alone — the identity's NextProtos and the
-// Protocols list kept to it at Start by tlsCodecRefusal — a fresh value each
-// call; loopLayers floors it (tlsFloor).
+// identity's, offering the group's ALPN list — the identity's NextProtos and
+// the Protocols list kept to what the codec serves at Start by
+// tlsCodecRefusal — a fresh value each call; loopLayers floors it (tlsFloor).
 func (g *StreamGroup) codecTLS() *tls.Config {
 	cfg := g.identity.ServerConfig()
 	cfg.NextProtos = g.httpProtos.alpn

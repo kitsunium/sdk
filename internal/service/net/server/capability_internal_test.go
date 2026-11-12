@@ -99,7 +99,7 @@ func TestCapabilities_unknownTokenLeavesNone(t *testing.T) {
 // every platform, the portable backend included.
 func TestCapabilities_optInRefused(t *testing.T) {
 	t.Parallel()
-	for _, c := range []corenet.Capability{corenet.CapabilityURingSendZC, corenet.CapabilityEpoll, "nope"} {
+	for _, c := range []corenet.Capability{corenet.CapabilityURingBundle, corenet.CapabilityEpoll, "nope"} {
 		srv := newServer(envOf(map[string]string{corenet.EnvEngine: "portable"}))
 		srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(corenet.LoopValue{Capabilities: []corenet.Capability{c}})).HandleLoop(&loopLineH{})
 		err := srv.Start(t.Context())

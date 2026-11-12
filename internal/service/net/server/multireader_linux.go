@@ -26,11 +26,18 @@ const (
 	// groSegmentBytes is the size of the UDP_GRO control message's payload: the
 	// segment size, a C int.
 	groSegmentBytes int = 4
+	// soRxqOvfl is SO_RXQ_OVFL, the socket option that has the kernel attach to
+	// each message read the number of datagrams it dropped for want of room in
+	// the receive buffer, as a SOL_SOCKET control message of the same type
+	// (include/uapi/asm-generic/socket.h; Linux 2.6.33).
+	soRxqOvfl = 40
+	// rxqBytes is the size of that message's payload: a 32-bit count.
+	rxqBytes int = 4
 	// groControlSpace is the control room a GRO read gives each message: the
-	// UDP_GRO message's 24 bytes and room beside it for those a caller may have
-	// asked of the socket itself — IP_PKTINFO (32), IPV6_PKTINFO (40), a
-	// timestamp (32 to 64) —, so a foreign control message never cuts the one
-	// the reader needs (MSG_CTRUNC). 64 slots of it are 16 KiB.
+	// UDP_GRO message's 24 bytes, SO_RXQ_OVFL's 24 (#973), and room beside them
+	// for those a caller may have asked of the socket itself — IP_PKTINFO (32),
+	// IPV6_PKTINFO (40), a timestamp (32 to 64) —, so a foreign control message
+	// never cuts the one the reader needs (MSG_CTRUNC). 64 slots of it are 16 KiB.
 	groControlSpace int = 256
 )
 
@@ -59,6 +66,18 @@ type multiReader struct {
 	// without it — a control message the caller asked of the socket is then
 	// not read, and its MSG_CTRUNC means nothing to the reader.
 	controlSpace int
+	// rxq records that SO_RXQ_OVFL was switched on at construction, so each
+	// message carries the kernel's drop count and controlSpace holds its room.
+	rxq bool
+	// drops is the shared counter the kernel's drops are added to, by what each
+	// message's count grew since the last: the kernel's counter is 32 bits and
+	// wraps, and this one does not. lastOvfl is the last count this socket saw.
+	drops    *atomic.Uint64
+	lastOvfl uint32
+	// dstFamily is the family of the destination message the socket asked for
+	// (#972), AF_INET or AF_INET6, zero when it asked for none: fill reads the
+	// message and controlSpace holds its room.
+	dstFamily int
 	// wired records the slot count the arrays were built for.
 	wired int
 	// gro records that UDP_GRO was switched on at construction, so slots must
@@ -101,6 +120,23 @@ func (r *multiReader) enableGRO() bool {
 	r.gro = r.setGRO(true) == nil
 	//: whatever the kernel decided.
 	return r.gro
+}
+
+// enableRxqOvfl switches SO_RXQ_OVFL on and reports whether the kernel took it.
+// From then on every message read carries the socket's drop count, which fill
+// adds to drops. It runs before the first read, so the control room is sized
+// for it.
+func (r *multiReader) enableRxqOvfl(drops *atomic.Uint64) error {
+	var serr error
+	cerr := r.raw.Control(func(fd uintptr) {
+		serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, soRxqOvfl, 1)
+	})
+	//: the socket's failure first, then the kernel's answer.
+	if err := cmp.Or(cerr, serr); err != nil {
+		return err
+	}
+	r.rxq, r.drops = true, drops
+	return nil
 }
 
 // setGRO sets UDP_GRO on the socket.
@@ -180,9 +216,10 @@ func (r *multiReader) wire(slots []datagram) {
 		return
 	}
 	count := len(slots)
-	//: GRO's room, unless a test set its own; none without GRO.
-	if r.controlSpace <= 0 && r.gro {
-		r.controlSpace = groControlSpace
+	//: GRO's room, unless a test set its own; the drop count's and the
+	//: destination's alone without GRO, none with neither.
+	if r.controlSpace <= 0 {
+		r.controlSpace = r.neededControl()
 	}
 	//: all four are indexed in lockstep with slots, never appended to.
 	r.headers = make([]mmsghdr, count)
@@ -204,6 +241,27 @@ func (r *multiReader) wire(slots []datagram) {
 	r.bind()
 	r.wired = count
 	r.prepare()
+}
+
+// neededControl is the control room one message needs: GRO's, which holds the
+// rest beside it, or the drop count's and the destination's alone.
+func (r *multiReader) neededControl() int {
+	//: GRO's room holds every other control message too.
+	if r.gro {
+		//: 256 bytes a message.
+		return groControlSpace
+	}
+	space := 0
+	//: the kernel's drop count, when it was asked for.
+	if r.rxq {
+		space += syscall.CmsgSpace(rxqBytes)
+	}
+	//: the destination, in the larger of its two forms.
+	if r.dstFamily != 0 {
+		space += syscall.CmsgSpace(in6PktinfoBytes)
+	}
+	//: what the asked-for messages take.
+	return space
 }
 
 // bind builds, once, the functions the descriptor runs: recvmmsg parked on the
@@ -343,10 +401,10 @@ func (r *multiReader) fill(slots []datagram, received int) {
 		slot := &slots[i]
 		slot.n = int(r.headers[i].length)
 		slot.seg = 0
-		//: GRO's control message, read as the kernel laid it out.
+		slot.local = localAddress{}
+		//: the control messages, read as the kernel laid them out.
 		if r.controlSpace > 0 {
-			used := min(int(hdr.Controllen), r.controlSpace)
-			slot.seg = groSegment(r.oob[i*r.controlSpace : i*r.controlSpace+used])
+			r.readControl(i, slot)
 		}
 		//: control data cut short before the segment size: the message
 		//: cannot be split, nothing more to read from it.
@@ -364,28 +422,83 @@ func (r *multiReader) fill(slots []datagram, received int) {
 	}
 }
 
-// groSegment returns the segment size a UDP_GRO control message reports in
-// control, or zero when it carries none: the message is then one datagram.
-func groSegment(control []byte) int {
+// readControl reads message i's control data: GRO's segment size into slot, and
+// the kernel's drop count when it was asked for.
+func (r *multiReader) readControl(i int, slot *datagram) {
+	used := min(int(r.headers[i].hdr.Controllen), r.controlSpace)
+	control := r.oob[i*r.controlSpace : i*r.controlSpace+used]
+	slot.seg = groSegment(control)
+	//: the drop count, when it was asked for.
+	if r.rxq {
+		r.countDrops(control)
+	}
+	//: the datagram's own destination, when it was asked for.
+	if r.dstFamily != 0 {
+		slot.local = pktinfoOf(control, r.dstFamily)
+	}
+}
+
+// countDrops adds to the shared counter what the kernel's drop count grew by
+// since the last message of this socket, read from control.
+func (r *multiReader) countDrops(control []byte) {
+	count, ok := rxqOverflow(control)
+	//: a message with no count: nothing new is known.
+	if !ok {
+		return
+	}
+	//: modular, so the kernel's 32-bit wrap costs nothing.
+	r.drops.Add(uint64(count - r.lastOvfl))
+	r.lastOvfl = count
+}
+
+// rxqOverflow returns the SO_RXQ_OVFL count control carries, and whether it
+// carries one.
+func rxqOverflow(control []byte) (count uint32, ok bool) {
+	payload := controlMessage(control, syscall.SOL_SOCKET, soRxqOvfl, rxqBytes)
+	//: no count on this message.
+	if payload == nil {
+		//: nothing new is known.
+		return 0, false
+	}
+	//: the count, a u32 in host order.
+	return *(*uint32)(unsafe.Pointer(&payload[0])), true
+}
+
+// controlMessage returns the payload of the first control message of level and
+// typ at least size bytes long, or nil. The buffer is walked as the kernel laid
+// it out, never assumed: a length that does not cover its own header, or runs
+// past the buffer, ends the walk.
+func controlMessage(control []byte, level, typ int32, size int) []byte {
 	header := syscall.CmsgLen(0)
-	//: walk every control message: UDP_GRO is the only one asked for, but the
-	//: buffer is read as the kernel lays it out, never assumed.
+	//: every message of the buffer, until one matches.
 	for off := 0; off+header <= len(control); {
 		cmsg := (*syscall.Cmsghdr)(unsafe.Pointer(&control[off]))
 		length := int(cmsg.Len)
-		//: a length that does not cover its own header, or runs past the
-		//: buffer, ends the walk rather than reading past it.
+		//: malformed: the walk ends rather than reading past the buffer.
 		if length < header || off+length > len(control) {
-			//: malformed: no segment size.
-			return 0
+			//: none found.
+			return nil
 		}
-		//: the segment size, a C int in host order.
-		if cmsg.Level == syscall.IPPROTO_UDP && cmsg.Type == udpGRO && length >= header+groSegmentBytes {
-			//: the size every datagram of the message has but the last.
-			return int(*(*int32)(unsafe.Pointer(&control[off+header])))
+		//: the message asked for, large enough to read.
+		if cmsg.Level == level && cmsg.Type == typ && length >= header+size {
+			//: its payload.
+			return control[off+header : off+length]
 		}
 		off += syscall.CmsgSpace(length - header)
 	}
+	//: no such message.
+	return nil
+}
+
+// groSegment returns the segment size a UDP_GRO control message reports in
+// control, or zero when it carries none: the message is then one datagram.
+func groSegment(control []byte) int {
+	payload := controlMessage(control, syscall.IPPROTO_UDP, udpGRO, groSegmentBytes)
 	//: no UDP_GRO message: one datagram.
-	return 0
+	if payload == nil {
+		//: one datagram.
+		return 0
+	}
+	//: the size every datagram of the message has but the last, a C int.
+	return int(*(*int32)(unsafe.Pointer(&payload[0])))
 }

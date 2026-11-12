@@ -1,0 +1,431 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: ErrorTypeProtocol counts an error answered PROTOCOL_ERROR, an unspecific protocol violation.
+        name: ErrorTypeProtocol
+        type: ErrorType
+        value: iota + 1
+      - doc: ErrorTypeInternal counts an error answered INTERNAL_ERROR, the endpoint's own failure.
+        name: ErrorTypeInternal
+      - doc: ErrorTypeFlowControl counts an error answered FLOW_CONTROL_ERROR, a window overrun or overflowed.
+        name: ErrorTypeFlowControl
+      - doc: ErrorTypeSettingsTimeout counts an error answered SETTINGS_TIMEOUT, a SETTINGS frame unanswered in time.
+        name: ErrorTypeSettingsTimeout
+      - doc: ErrorTypeStreamClosed counts an error answered STREAM_CLOSED, a frame on a closed stream.
+        name: ErrorTypeStreamClosed
+      - doc: ErrorTypeFrameSize counts an error answered FRAME_SIZE_ERROR, a frame of the wrong length.
+        name: ErrorTypeFrameSize
+      - doc: ErrorTypeRefusedStream counts an error answered REFUSED_STREAM, a stream past the open-stream bound.
+        name: ErrorTypeRefusedStream
+      - doc: ErrorTypeCancel counts an error answered CANCEL, a stream the endpoint no longer wanted.
+        name: ErrorTypeCancel
+      - doc: ErrorTypeCompression counts an error answered COMPRESSION_ERROR, a field block HPACK refused.
+        name: ErrorTypeCompression
+      - doc: ErrorTypeConnect counts an error answered CONNECT_ERROR, a CONNECT request's failure.
+        name: ErrorTypeConnect
+      - doc: ErrorTypeEnhanceYourCalm counts an error answered ENHANCE_YOUR_CALM, a flood the codec cut short.
+        name: ErrorTypeEnhanceYourCalm
+      - doc: ErrorTypeInadequateSecurity counts an error answered INADEQUATE_SECURITY, a transport below the minimum.
+        name: ErrorTypeInadequateSecurity
+      - doc: ErrorTypeHTTP11Required counts an error answered HTTP_1_1_REQUIRED, a request HTTP/1.1 must carry.
+        name: ErrorTypeHTTP11Required
+      - doc: |-
+          ErrorTypeHeaderList counts a header list past the group's bound: answered 431
+          or refused, it is no RFC 9113 error code.
+        name: ErrorTypeHeaderList
+      - doc: |-
+          ErrorTypePingTimeout counts a connection closed because a PING sent on its
+          silence went unanswered (ADR 0195 §D3).
+        name: ErrorTypePingTimeout
+      - doc: ErrorTypeOther counts an error the engine named outside this vocabulary.
+        name: ErrorTypeOther
+    name: ErrorTypeProtocol
+  - doc: ErrorTypes bounds the ErrorType values, the length of a table indexed by one.
+    items:
+      - name: ErrorTypes
+        type: int
+        value: "17"
+    name: ErrorTypes
+  - doc: FrameHeaderLen is the length of an HTTP/2 frame header, RFC 9113 §4.1.
+    items:
+      - name: FrameHeaderLen
+        type: int
+        value: "9"
+    name: FrameHeaderLen
+  - grouped: true
+    items:
+      - doc: |-
+          DefaultMaxStreams is how many streams a connection may hold open: a zero
+          LimitsValue.MaxStreams selects it.
+        name: DefaultMaxStreams
+        type: int
+        value: "100"
+      - doc: |-
+          DefaultMaxFrame is the largest frame the codec accepts by default, and the
+          protocol's minimum: a zero LimitsValue.MaxFrame selects it.
+        name: DefaultMaxFrame
+        type: int
+        value: "16384"
+      - doc: MaxFrameLimit is the largest frame the protocol can spell, RFC 9113 §4.2.
+        name: MaxFrameLimit
+        type: int
+        value: 1<<24 - 1
+      - doc: |-
+          DefaultHeaderTable is the HPACK dynamic table the server advertises by
+          default, RFC 7541 §4.2's own size.
+        name: DefaultHeaderTable
+        type: int
+        value: "4096"
+      - doc: |-
+          MaxHeaderTable is the largest HEADER_TABLE_SIZE a configuration may ask for:
+          the table's entries are measured with 16 bits.
+        name: MaxHeaderTable
+        type: int
+        value: 1<<16 - 1
+      - doc: |-
+          NoDynamicTable, as LimitsValue.HeaderTable, advertises a table of size zero:
+          a zero field is never inert (ADR 0031), so -1 says it.
+        name: NoDynamicTable
+        type: int
+        value: "-1"
+      - doc: DefaultReceivePerStream is the window one stream's body may hold unread.
+        name: DefaultReceivePerStream
+        type: int
+        value: 256 << 10
+      - doc: |-
+          DefaultMaxHeaderList is the header list a request may carry, RFC 9113 §6.5.2's
+          measure: the bound of http1's head (ADR 0186).
+        name: DefaultMaxHeaderList
+        type: int
+        value: "8192"
+      - doc: DefaultWindow is the protocol's initial flow-control window, RFC 9113 §6.9.2.
+        name: DefaultWindow
+        type: int
+        value: "65535"
+      - doc: MaxWindow is the largest flow-control window, RFC 9113 §6.9.1.
+        name: MaxWindow
+        type: int
+        value: 1<<31 - 1
+      - doc: perConnFactor is ReceivePerConn's default, in multiples of ReceivePerStream.
+        name: perConnFactor
+        type: int
+        value: "4"
+    name: DefaultMaxStreams
+  - grouped: true
+    items:
+      - doc: FrameData carries a stream's content, RFC 9113 §6.1.
+        name: FrameData
+        type: FrameType
+        value: iota
+      - doc: FrameHeaders opens a stream and carries its field block, §6.2.
+        name: FrameHeaders
+      - doc: FramePriority is the deprecated priority signal, §6.3; ignored.
+        name: FramePriority
+      - doc: FrameRSTStream ends a stream at once, §6.4.
+        name: FrameRSTStream
+      - doc: FrameSettings carries or acknowledges a connection's settings, §6.5.
+        name: FrameSettings
+      - doc: FramePushPromise reserves a server-initiated stream, §6.6.
+        name: FramePushPromise
+      - doc: FramePing measures the round trip and checks liveness, §6.7.
+        name: FramePing
+      - doc: FrameGoAway ends a connection gracefully or with an error, §6.8.
+        name: FrameGoAway
+      - doc: FrameWindowUpdate grants flow-control credit, §6.9.
+        name: FrameWindowUpdate
+      - doc: FrameContinuation extends a field block past one frame, §6.10.
+        name: FrameContinuation
+    name: FrameData
+  - grouped: true
+    items:
+      - doc: FlagAck acknowledges a SETTINGS or a PING frame.
+        name: FlagAck
+        type: FrameFlags
+        value: "0x1"
+      - doc: FlagEndStream marks the last frame of a stream on DATA and HEADERS.
+        name: FlagEndStream
+        type: FrameFlags
+        value: "0x1"
+      - doc: FlagEndHeaders marks the last frame of a field block.
+        name: FlagEndHeaders
+        type: FrameFlags
+        value: "0x4"
+      - doc: FlagPadded marks a frame carrying a pad length and padding.
+        name: FlagPadded
+        type: FrameFlags
+        value: "0x8"
+      - doc: FlagPriority marks a HEADERS frame carrying a priority field.
+        name: FlagPriority
+        type: FrameFlags
+        value: "0x20"
+    name: FlagAck
+  - grouped: true
+    items:
+      - doc: ErrCodeNoError is no error, a graceful shutdown or a discarded stream.
+        name: ErrCodeNoError
+        type: ErrCode
+        value: iota
+      - doc: ErrCodeProtocol is an unspecific protocol violation.
+        name: ErrCodeProtocol
+      - doc: ErrCodeInternal is an unexpected internal failure of the endpoint.
+        name: ErrCodeInternal
+      - doc: ErrCodeFlowControl is a flow-control violation.
+        name: ErrCodeFlowControl
+      - doc: ErrCodeSettingsTimeout is a SETTINGS frame unanswered in time.
+        name: ErrCodeSettingsTimeout
+      - doc: ErrCodeStreamClosed is a frame received on a closed stream.
+        name: ErrCodeStreamClosed
+      - doc: ErrCodeFrameSize is a frame of the wrong size.
+        name: ErrCodeFrameSize
+      - doc: ErrCodeRefusedStream is a stream refused before any processing.
+        name: ErrCodeRefusedStream
+      - doc: ErrCodeCancel is a stream no longer wanted.
+        name: ErrCodeCancel
+      - doc: |-
+          ErrCodeCompression is a field block the connection's compression state
+          cannot survive.
+        name: ErrCodeCompression
+      - doc: ErrCodeConnect is a CONNECT tunnel's failure.
+        name: ErrCodeConnect
+      - doc: ErrCodeEnhanceYourCalm is a peer exhibiting excessive load.
+        name: ErrCodeEnhanceYourCalm
+      - doc: ErrCodeInadequateSecurity is a transport below the minimum.
+        name: ErrCodeInadequateSecurity
+      - doc: ErrCodeHTTP11Required asks the client to retry over HTTP/1.1.
+        name: ErrCodeHTTP11Required
+    name: ErrCodeNoError
+  - grouped: true
+    items:
+      - doc: SettingHeaderTableSize bounds the peer's HPACK dynamic table.
+        name: SettingHeaderTableSize
+        type: SettingID
+        value: "0x1"
+      - doc: SettingEnablePush says whether the peer may push.
+        name: SettingEnablePush
+        type: SettingID
+        value: "0x2"
+      - doc: SettingMaxConcurrentStreams bounds the peer's open streams.
+        name: SettingMaxConcurrentStreams
+        type: SettingID
+        value: "0x3"
+      - doc: SettingInitialWindowSize is the peer's initial stream window.
+        name: SettingInitialWindowSize
+        type: SettingID
+        value: "0x4"
+      - doc: SettingMaxFrameSize is the largest frame the peer accepts.
+        name: SettingMaxFrameSize
+        type: SettingID
+        value: "0x5"
+      - doc: SettingMaxHeaderListSize bounds the header list the peer accepts.
+        name: SettingMaxHeaderListSize
+        type: SettingID
+        value: "0x6"
+      - doc: SettingEnableConnectProtocol enables RFC 8441's extended CONNECT.
+        name: SettingEnableConnectProtocol
+        type: SettingID
+        value: "0x8"
+    name: SettingHeaderTableSize
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - ErrorTypeProtocol
+      - ErrorTypes
+      - errorTypeNames
+      - ErrorType
+      - ErrorType.String
+      - ErrorType.MarshalText
+      - ErrorTypeOf
+      - ErrorCountValue
+    name: error_type.go
+  - decls:
+      - FrameHeaderLen
+      - DefaultMaxStreams
+      - FrameData
+      - FlagAck
+      - ErrCodeNoError
+      - SettingHeaderTableSize
+      - errCodeNames
+      - FrameType
+      - FrameFlags
+      - ErrCode
+      - ErrCode.String
+      - SettingID
+      - SettingValue
+      - FrameValue
+      - LimitsValue
+      - LimitsValue.Resolve
+      - limitCheck
+      - limitChecks
+      - LimitsValue.withDefaults
+      - cmpOr
+    name: values.go
+functions:
+  - name: ErrorTypeOf
+    params: code ErrCode
+    results: ErrorType
+  - doc: limitChecks lists r's fields with their bounds.
+    name: limitChecks
+    params: r *LimitsValue
+    results: "[5]limitCheck"
+  - doc: cmpOr returns v unless it is zero, then def.
+    name: cmpOr
+    params: v, def int
+    results: int
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  strconv: strconv
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/net/http2
+  name: http2
+  purpose: "Package http2 is the contract of the SDK's HTTP/2 codec (ADR 0221): the values both engines read — the frame header, the settings, the bounds of ADR 0195 §D3 as a value — and the sentinels and codes its refusals carry, range 0.3.109.*, declared here at the engine's path (ADR 0160)."
+types:
+  - kind: named
+    methods:
+      - name: String
+        recv: t ErrorType
+        results: string
+      - name: MarshalText
+        recv: t ErrorType
+        results: "[]byte, error"
+    name: ErrorType
+    underlying: uint8
+  - fields:
+      - doc: Type is the error counted.
+        name: Type
+        type: ErrorType
+      - doc: Count is how many times it was.
+        name: Count
+        type: uint64
+    kind: struct
+    name: ErrorCountValue
+  - kind: named
+    name: FrameType
+    underlying: uint8
+  - kind: named
+    name: FrameFlags
+    underlying: uint8
+  - kind: named
+    methods:
+      - name: String
+        recv: c ErrCode
+        results: string
+    name: ErrCode
+    underlying: uint32
+  - kind: named
+    name: SettingID
+    underlying: uint16
+  - fields:
+      - doc: ID identifies the parameter.
+        name: ID
+        type: SettingID
+      - doc: Val is the parameter's value.
+        name: Val
+        type: uint32
+    kind: struct
+    name: SettingValue
+  - fields:
+      - doc: Type is the frame's type.
+        name: Type
+        type: FrameType
+      - doc: Flags is the frame's flags byte.
+        name: Flags
+        type: FrameFlags
+      - doc: |-
+          StreamID is the stream the frame belongs to, the reserved top bit
+          cleared; zero is the connection itself.
+        name: StreamID
+        type: uint32
+      - doc: Length is the frame's payload length, in bytes.
+        name: Length
+        type: int
+    kind: struct
+    name: FrameValue
+  - fields:
+      - doc: |-
+          MaxStreams is how many streams a connection may hold open at once: the
+          next one is refused with REFUSED_STREAM. Zero selects DefaultMaxStreams.
+        name: MaxStreams
+        type: int
+      - doc: |-
+          ReceivePerStream is the window one stream's body may hold unread. Zero
+          selects DefaultReceivePerStream.
+        name: ReceivePerStream
+        type: int
+      - doc: |-
+          ReceivePerConn is the window all of a connection's streams share. Zero
+          selects four ReceivePerStream, so a handler that never reads its body
+          does not stop the others.
+        name: ReceivePerConn
+        type: int
+      - doc: |-
+          MaxFrame is the largest frame the codec accepts, between
+          DefaultMaxFrame and MaxFrameLimit. Zero selects DefaultMaxFrame.
+        name: MaxFrame
+        type: int
+      - doc: |-
+          HeaderTable is the HPACK dynamic table the server advertises, at most
+          MaxHeaderTable. Zero selects DefaultHeaderTable; NoDynamicTable
+          advertises none.
+        name: HeaderTable
+        type: int
+      - doc: |-
+          MaxHeaderList bounds a request's header list as RFC 9113 §6.5.2 counts
+          it, the name and value of each field plus 32. Zero selects
+          DefaultMaxHeaderList.
+        name: MaxHeaderList
+        type: int
+    kind: struct
+    methods:
+      - name: Resolve
+        recv: v LimitsValue
+        results: LimitsValue, error
+      - doc: |-
+          withDefaults replaces each zero field of v with its default, and the
+          NoDynamicTable sentinel with the size it advertises: zero.
+        name: withDefaults
+        recv: v LimitsValue
+        results: LimitsValue
+    name: LimitsValue
+  - doc: limitCheck is one field's bound for Resolve.
+    fields:
+      - doc: name is the field, as a refusal names it.
+        name: name
+        type: string
+      - doc: value is the field's resolved value.
+        name: value
+        type: int
+      - doc: low and high are its inclusive bounds.
+        name: low
+        type: int
+      - doc: low and high are its inclusive bounds.
+        name: high
+        type: int
+    kind: struct
+    name: limitCheck
+vars:
+  - doc: errorTypeNames are the types' names, by value; the zero value names none.
+    items:
+      - name: errorTypeNames
+        value: |-
+          [ErrorTypes]string{
+          	"other", "protocol", "internal", "flow_control", "settings_timeout", "stream_closed",
+          	"frame_size", "refused_stream", "cancel", "compression", "connect",
+          	"enhance_your_calm", "inadequate_security", "http_1_1_required",
+          	"header_list", "ping_timeout", "other",
+          }
+    name: errorTypeNames
+  - doc: errCodeNames names each code as the RFC does, by value.
+    items:
+      - name: errCodeNames
+        value: |-
+          [...]string{
+          	"NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "FLOW_CONTROL_ERROR",
+          	"SETTINGS_TIMEOUT", "STREAM_CLOSED", "FRAME_SIZE_ERROR", "REFUSED_STREAM",
+          	"CANCEL", "COMPRESSION_ERROR", "CONNECT_ERROR", "ENHANCE_YOUR_CALM",
+          	"INADEQUATE_SECURITY", "HTTP_1_1_REQUIRED",
+          }
+    name: errCodeNames

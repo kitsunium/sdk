@@ -52,16 +52,19 @@ func hexTable() [byteValues]byte {
 	return t
 }
 
-// canonical computes req.Path and req.Query from req.Target once the head is
-// whole, since an absolute-form target is judged against the Host field. It
-// refuses a target two readers could resolve to two resources: a dot-segment,
-// an empty segment, a backslash, an invalid escape, an encoded slash, dot,
-// backslash or NUL (RefusalTargetPath); a form the profile does not serve
-// (RefusalTargetForm); an absolute-form authority that is not the Host's
-// (RefusalTargetHost). Nothing is decoded and nothing allocates: both slices
-// alias the target, never a package value, so a link that writes into
-// req.Path writes into this request's bytes only.
-func canonical(req *corenet.HTTP1RequestValue) Refusal {
+// Canonical computes req.Path and req.Query from req.Target and judges the
+// target, once its Method and Host are set: what Parse does with a request
+// line's target, for a codec that framed the request some other way (ADR 0191
+// §D3, ADR 0221). Both slices alias Target. It refuses a target two readers
+// could resolve apart (RefusalTargetPath), a form the profile does not serve
+// (RefusalTargetForm), an absolute-form authority that is not the Host's
+// (RefusalTargetHost), and an empty target (RefusalTarget).
+func Canonical(req *corenet.HTTP1RequestValue) Refusal {
+	//: an empty target names nothing; Parse has already refused one.
+	if len(req.Target) == 0 {
+		//: refused.
+		return RefusalTarget
+	}
 	t := req.Target
 	//: by the target's first byte, which the four forms differ by.
 	switch {

@@ -917,3 +917,17 @@ which and why they differ; nothing else in this file moves between runs.
 - The engine underneath the loopback rows — `internal/service/net/server/BENCH.md`
 - SDK-wide rule 9 (every benchmark package ships its numbers) and rule 12
   (every `!race` test names its lane) — root `CLAUDE.md`
+
+## On the loop (#859)
+
+`BenchmarkWSLoopReceive4KiB` is one masked 4 KiB binary frame read on an open
+connection through the http1 adapter on a counting `LoopIO`: the header parsed, the
+payload unmasked in place, the message handed to the program with no copy. Measured
+on 2026-11-10, AMD EPYC 7351P (linux/amd64, busy VM, `GOMAXPROCS=4`), go1.27.3,
+`-benchtime=300ms -count=3`, median. `TestLoopWS_tenThousandIdleConnections`: 423 B of
+Go heap a connection on epoll, 432 B on io_uring (budget 512 B), no goroutine a
+connection, a ping from each answered.
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| `WSLoopReceive4KiB` | 419 | 0 | 0 |

@@ -320,20 +320,20 @@ func (a *pipeAcceptor) create(first bool) (syscall.Handle, error) {
 // accept waits for a client on the pending instance, puts the next instance
 // in its place, and returns the connection with the client's account. A
 // client that came and went before the wait saw it is skipped.
-func (a *pipeAcceptor) accept() (net.Conn, coreipc.PeerValue, error) {
+func (a *pipeAcceptor) accept() (conn net.Conn, peer coreipc.PeerValue, groups []int, err error) {
 	a.acceptMu.Lock()
 	defer a.acceptMu.Unlock()
 	for {
-		h, err := a.connectNext()
+		h, connectErr := a.connectNext()
 		switch {
-		case errors.Is(err, errorNoData):
+		case errors.Is(connectErr, errorNoData):
 			continue
-		case err != nil:
-			return nil, coreipc.PeerValue{}, err
+		case connectErr != nil:
+			return nil, coreipc.PeerValue{}, nil, connectErr
 		}
 		connected := connectedNow()
-		peer := clientPeer(h)
-		return newPipeConn(h, a.name, peer, connected), peer, nil
+		peer = clientPeer(h)
+		return newPipeConn(h, a.name, peer, connected), peer, nil, nil
 	}
 }
 
@@ -452,7 +452,8 @@ func (a *pipeAcceptor) Addr() net.Addr { return a.name }
 
 // admits is the Windows admission: this account, or a client whose account
 // could not be read — the DACL, which grants this account only, admitted it.
-func (l *Listener) admits(p coreipc.PeerValue) error {
+// No group is read here: the lists admit nobody more on Windows.
+func (l *Listener) admits(p coreipc.PeerValue, _ []int) error {
 	if !p.Verified || p.SID == l.selfSID {
 		return nil
 	}

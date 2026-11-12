@@ -4,6 +4,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
 
 // Option configures a Server.
@@ -34,6 +35,25 @@ func WithDrainGrace(d time.Duration) Option {
 	//: the option is applied by the constructor, in declaration order.
 	return func(s *Server) {
 		s.drainGrace = d
+	}
+}
+
+// WithLogger gives the server the logger that carries what net/http reports
+// through http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream
+// error, a superfluous WriteHeader, a failed accept — which would otherwise
+// reach the process's standard logger: plain text on stderr, outside the
+// structured stream (#846, ADR 0030). Each line becomes one warn record with
+// source=net/http and the group's name, the lines after the first — a panic's
+// stack — in a detail attribute clipped at 2048 bytes.
+//
+// At most ten records a second are written, across the server's HTTP groups;
+// State counts the rest in SuppressedLogs. Without a logger, or with a nil one,
+// nothing is written, and every line is counted there the same way: net/http's
+// own log is never stderr's.
+func WithLogger(l corelogger.Logger) Option {
+	//: the option is applied by the constructor, in declaration order.
+	return func(s *Server) {
+		s.logger = l
 	}
 }
 
@@ -141,6 +161,140 @@ func MaxHeaderBytes(n int) GroupOption {
 	}
 }
 
+// MaxBodyBytes bounds the request body a group serves through net/http (#845).
+// A declared Content-Length past n is answered 413 Request Entity Too Large on
+// the head, before the handler runs and before any body byte is read; a body of
+// no declared length is bounded as it is read, and the handler's read ends in
+// net/http's *http.MaxBytesError, with the connection closed after the reply.
+//
+// Zero, the default, selects 1 MiB, the http1 profile's own bound and the
+// framework's; -1 states no bound; any other negative value fails Start with
+// OptionValueInvalid (ADR 0031: zero is a default, never inert). State reports
+// the bound in ListenerStateValue.MaxBodyBytes. A group that does not serve
+// HTTP through net/http refuses it at Start: a loop group with
+// LoopOptionUnsupported, a datagram group with PacketOptionUnsupported.
+func MaxBodyBytes(n int64) GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: value is judged at Start.
+	return func(g *StreamGroup) {
+		g.http.maxBodyBytes = n
+		g.kinds.add(corenet.OptionMaxBodyBytes)
+	}
+}
+
+// ProxyProtocol makes a TCP group read the PROXY protocol header of a balancer
+// in v's Trusted ranges before it serves the connection (#841): the announced
+// client is what RemoteAddr reports, so PreHandshake's budgets, the access log
+// and every handler see the real peer. Any other peer, a header that is missing,
+// malformed or past its Timeout, is closed and counted in State's ProxyRefused,
+// before a byte of TLS. An empty Trusted, a range that does not parse or a
+// negative Timeout fails Start with OptionValueInvalid, and a group with a Unix
+// socket does, too, as the trust is by address. A loop group refuses it with
+// LoopOptionUnsupported, a datagram group with PacketOptionUnsupported.
+func ProxyProtocol(v corenet.ProxyProtocolValue) GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: value is judged at Start.
+	return func(g *StreamGroup) {
+		g.proxyProtocol = v
+		g.kinds.add(corenet.OptionProxyProtocol)
+	}
+}
+
+// Steer chooses how a datagram group spreads over its shards (#977): the zero
+// value, SteerHash, is the kernel's hash; SteerCPU attaches, once the group's
+// SO_REUSEPORT sockets are bound, a classic BPF program handing each datagram
+// to shard cpu mod n, the softirq's CPU. A refused attach — EPERM under a
+// seccomp filter, EINVAL before Linux 4.5 — leaves the hash spread and the row
+// reads absent; off Linux the row reads unprobed; with one socket there is
+// nothing to steer. KITSUNIUM_NET_DISABLE=reuseport-cbpf keeps the hash. A
+// stream group refuses it with LoopOptionUnsupported.
+func Steer(v corenet.SteerValue) GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: value is judged at Start.
+	return func(g *StreamGroup) {
+		g.steer = v
+		g.kinds.add(corenet.OptionSteer)
+	}
+}
+
+// KeepAlive sets the idle time before the first TCP keepalive probe of a group's
+// accepted sockets, and the interval between probes (#971): zero is the
+// standard library's 15 s, negative sets no keepalive. Every stream engine
+// honours it; a datagram group refuses it with PacketOptionUnsupported. A
+// non-TCP socket has no such option and is left alone. KITSUNIUM_NET_DISABLE=
+// tcp-keepalive turns it off.
+func KeepAlive(d time.Duration) GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.timeouts.KeepAlive = corenet.DurationValue(d)
+		g.kinds.add(corenet.OptionKeepAlive)
+	}
+}
+
+// UserTimeout sets TCP_USER_TIMEOUT on a group's TCP listeners, whose accepted
+// sockets inherit it (#971): the time sent output may stay unacknowledged
+// before the kernel closes the connection with an error, in whole
+// milliseconds. Zero is the group's WriteTimeout when one is set, otherwise
+// none. Linux only: elsewhere it is not set. KITSUNIUM_NET_DISABLE=
+// tcp-user-timeout turns it off. A datagram group refuses it.
+func UserTimeout(d time.Duration) GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.timeouts.UserTimeout = corenet.DurationValue(d)
+		g.kinds.add(corenet.OptionUserTimeout)
+	}
+}
+
+// Backlog sets the depth the kernel queues established connections at before
+// the group's accept loop takes them (#978): a burst of connects past it is
+// dropped by the kernel and retried by the peer, so a group that expects a
+// burst — ADR 0203 measured 50 000 at once — sizes it. Zero, the default,
+// keeps the standard library's, the host's somaxconn; the kernel clamps a
+// larger value to it, and State reports the depth applied in
+// ListenerStateValue.Backlog, with a DegradedReason when the clamp bit. A
+// negative value fails Start with OptionValueInvalid. Both engines honour it,
+// the loop's accepted sockets sharing the listener's queue; Windows keeps the
+// platform's own and says so. A datagram group refuses it with
+// PacketOptionUnsupported.
+func Backlog(n int) GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: value is judged at Start.
+	return func(g *StreamGroup) {
+		g.limits.Backlog = n
+		g.kinds.add(corenet.OptionBacklog)
+	}
+}
+
+// ReceiveBuffer asks the kernel for a receive buffer of n bytes on the group's
+// sockets, before bind (SO_RCVBUF), where a burst can overrun the default: a
+// datagram group's, and a stream group's listeners, whose accepted sockets
+// inherit it, on both engines (#973); an adopted socket takes it too. Zero
+// keeps the kernel's default. Linux doubles the value and clamps it to
+// rmem_max, the BSDs and darwin keep the size the socket had when the value
+// is past their ceiling; State reports what the socket holds in
+// ListenerStateValue.ReceiveBuffer, and neither is a fault. A negative value
+// fails Start with OptionValueInvalid.
+func ReceiveBuffer(n int) GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: value is judged at Start.
+	return func(g *StreamGroup) {
+		g.limits.ReceiveBuffer = n
+		g.kinds.add(corenet.OptionReceiveBuffer)
+	}
+}
+
+// SendBuffer asks the kernel for a send buffer of n bytes, as ReceiveBuffer
+// asks for a receive one (SO_SNDBUF, wmem_max), reported in
+// ListenerStateValue.SendBuffer.
+func SendBuffer(n int) GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: value is judged at Start.
+	return func(g *StreamGroup) {
+		g.limits.SendBuffer = n
+		g.kinds.add(corenet.OptionSendBuffer)
+	}
+}
+
 // HandshakeTimeout bounds the TLS negotiation on a group's listeners.
 //
 // Unset does NOT mean unbounded here, unlike the other three: the handshake is
@@ -218,11 +372,52 @@ func BatchReplies() GroupOption {
 // contend on one accept queue. Zero selects one per core; one disables sharding.
 // Where the platform or the socket family cannot shard, the count collapses to
 // one and State reports why rather than staying silent.
+// On a datagram group the sockets each get their own read loop (#977);
+// without the option a datagram group has one, and a count above one on a
+// Unix datagram socket is refused with PacketOptionUnsupported.
+// On a loop group only Shards(0) is honoured, one SO_REUSEPORT listener per
+// loop, each loop accepting on its own (#856); any other count, or an address
+// of a Unix socket, is refused with LoopOptionUnsupported, and
+// KITSUNIUM_NET_DISABLE=reuseport-loops serves one shared listener.
+//
+// Before an address's shards are opened with SO_REUSEPORT, a plain bind
+// without it probes the address and is closed at once: an address another
+// socket holds — another process's shards included — fails Start with
+// AddressInUse, naming it, as a single listener's bind does (#1330). The probe
+// leaves a window: a process binding the address with SO_REUSEPORT between the
+// probe and the shards joins them and takes part of their connections, which
+// is what ShareAddress asks for on purpose. An address asked with port 0 draws
+// a port nobody holds and is not probed. On Linux the probe is refused by any
+// listener on the port a plain bind conflicts with, the wildcard address's
+// included; on the BSDs and darwin, where the bind sets SO_REUSEADDR, a
+// listener on the wildcard address does not stop one on a precise address,
+// and the probe refuses what a single listener's bind refuses, no more.
 func Shards(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.limits.Shards = n
 		g.kinds.add(corenet.OptionShards)
+	}
+}
+
+// ShareAddress lets another process bind the group's addresses and share their
+// connections, for a progressive restart: the new process starts on the
+// address the old one still serves, then the old one drains (ADR 0196 §D4).
+// Every socket of the group's addresses is bound with SO_REUSEPORT, a single
+// listener's included, and the probe Shards makes before sharding is skipped;
+// the kernel admits a second process only if it shares too, under the same
+// effective user on Linux. State reports such a listener Shared. Without the
+// option an address another process holds fails Start with AddressInUse.
+// Every engine honours it on an IP address where the platform has
+// SO_REUSEPORT; a group with a Unix socket's address is refused with
+// LoopOptionUnsupported, a datagram group with PacketOptionUnsupported, and a
+// platform without SO_REUSEPORT — Windows, which holds its addresses with
+// SO_EXCLUSIVEADDRUSE, Solaris and illumos — with UnsupportedPlatform.
+func ShareAddress() GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: platform and the addresses are judged at Start.
+	return func(g *StreamGroup) {
+		g.kinds.add(corenet.OptionShareAddress)
 	}
 }
 

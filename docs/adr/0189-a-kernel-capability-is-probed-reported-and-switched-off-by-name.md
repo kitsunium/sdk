@@ -9,6 +9,8 @@
   honoured is refused, never folded back). It can be revisited while the SDK
   is v0 ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
 - **Deciders**: SDK maintainers, owner
+- **Amended 2026-11-10** (#856, #857): class A-code gains `reuseport-loops` (opted into by `Shards(0)` on a loop group), `loop-affinity` (by `LoopValue.Affinity`), `so-incoming-cpu` (by `Capabilities`, with Affinity and per-loop listeners) and `tcp-notsent-lowat` (by `Capabilities` or `LoopValue.NotsentLowat`); class B gains `tcp-fastopen`. A row whose opt-in is another option — `reuseport-loops`, and `reuseport-cbpf`, a datagram group's Steer — is refused in `LoopValue.Capabilities` with `LoopCapabilityRefused`. A LoopValue field out of range is `LoopValueInvalid` (`0.2.11.88`).
+- **Amended 2026-11-11** (#979, #980): `busy-poll` joins class A-code, its window `LoopValue.BusyPoll` and `BusyPollBudget`; `uring-zcrx` stays class B with its 6.15 floor, its probe stage, `LoopValue.ZCRX` and its area designed; see the two amendments at the end.
 - **Amends**: [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md)
   §D1 (the registry gains the kernel capabilities) and §Deferred (the optional
   capabilities join it here); [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
@@ -181,6 +183,55 @@ replaced by the opt-in.
   `SINGLE_ISSUER` for not knowing `SQ_REWIND`.
 - **`REGISTER_QUERY`.** Deferred: see D3.
 
+## Amendment 2026-11-10 (kitsunium/sdk#971): three socket options on the listener
+
+Three rows join the registry, each a listener option Linux copies into every
+accepted socket (the inheritance `tcp-nodelay` already rests on), set once per
+TCP listener before any accept and read back with `getsockopt` into the
+leaf's report:
+
+- **`tcp-keepalive`, class A-kernel**: `SO_KEEPALIVE` with `TCP_KEEPIDLE` and
+  `TCP_KEEPINTVL` of `Config.KeepAlive` (zero is 15 s, the standard library's,
+  so both engines agree; negative sets nothing, the row `available`) and
+  `TCP_KEEPCNT` 9. A peer that vanished no longer keeps its slot, its buffer
+  and its armed recv on a group with no `IdleTimeout`. **A default change**:
+  every loop group's accepted sockets now carry keepalive.
+- **`tcp-user-timeout`, class A-kernel**: `TCP_USER_TIMEOUT` (18, Linux
+  2.6.37, absent from package syscall, declared in-tree) of
+  `Config.UserTimeout`, in whole milliseconds, rounded up; zero sets nothing,
+  the row `available`. Output the kernel cannot deliver ends the connection
+  with an error instead of the whole `tcp_retries2` sequence.
+- **`tcp-defer-accept`, from class B to class A-code**: opt-in through
+  `LoopValue.Capabilities`; `TCP_DEFER_ACCEPT` of `Config.ReadTimeout` in whole
+  seconds, rounded up (the kernel rounds it to its retransmission schedule), so
+  a peer that connects and sends nothing takes no slot until it does or the
+  bound runs out. Opted into with no read bound, the row reads `unprobed`.
+
+A Unix listener takes none of them, and `TCP_NODELAY` is no longer tried on it:
+the options are set on TCP listeners only, and a group with none reads each row
+`unprobed`, reason "no TCP listener". What the loop leaf does not do, and the
+rest of #971 asks of `net/server`: `TimeoutsValue.KeepAlive` and `UserTimeout`
+as the public values behind `Config.KeepAlive` and `Config.UserTimeout`, the
+rows in the operator's registry (`operator.go`) so that
+`KITSUNIUM_NET_DISABLE=tcp-keepalive` is a known token, and the goroutine and
+portable engines' keepalive and `TCP_USER_TIMEOUT`.
+
+## Amendment 2026-11-10 (kitsunium/sdk#974): Unix listeners
+
+`net/loop` refuses a unixpacket listener at `Start` with `LoopOptionUnsupported`
+naming `network=unixpacket` (both backends read a connection as a stream into a
+buffer that cuts a longer record without a flag), and a Unix listener no longer
+tries `TCP_NODELAY` or the rows above. The loop's `LoopIO` is also a `LoopPeer`
+(ADR 0039's sibling, ADR 0148): `Peer(ref)` returns the connecting process's
+uid, gid and pid, `Verified`, from `SO_PEERCRED` on a process descriptor — epoll's,
+and io_uring's once a Unix listener keeps the group in the process table
+(`uring-direct` then reads `unprobed`). Not built: reading a direct descriptor's
+credentials with `IORING_OP_URING_CMD`/`SOCKET_URING_OP_GETSOCKOPT` (6.7) and the
+`uring-sock-getsockopt` row (class A-kernel) that would switch it, so a mixed
+group pays the process table for its TCP connections too; `net/server`'s
+`loopRefusal` and its false `tcp-nodelay` row on a Unix listener; the portable
+backend's `Peer`.
+
 ## Deferred
 
 - Each class B capability, with its ADR and its BENCH.md threshold.
@@ -202,3 +253,164 @@ replaced by the opt-in.
   `internal/service/net/server/` (`operator.go`, `loop_engine_linux.go`,
   `loop_portable.go`, `stall.go`), `scripts/ci/check-net-default-change.sh`,
   `.github/workflows/net-kernel-gate.yml`.
+
+## Amended 2026-11-10 — a datagram socket's drop count (kitsunium/sdk#973)
+
+`udp-rxq-ovfl` joins class A-kernel: SO_RXQ_OVFL, set on every batched UDP socket
+before its first read unless `KITSUNIUM_NET_DISABLE` names it, has the kernel
+attach to each message the socket's cumulative count of what it refused to queue.
+`DatagramStateValue.KernelDrops` sums the growth of that count (modular: the
+kernel's counter is 32 bits and wraps) and `DatagramStateValue.Capabilities`
+carries the row; the reader's control room holds that message beside GRO's. The
+count is the kernel's, of what it did not queue: under UDP GRO a coalesced message
+is one drop whatever datagrams it carried, so it stands below the datagrams lost.
+L3 reports it as `kernel-drops/op` beside `lost/op` and refuses a round in which
+it passes the loss (a check on the two, no threshold). Elsewhere than Linux the
+row reads absent.
+
+## Amendment 2026-11-10 (#971, the goroutine and portable halves)
+
+`TimeoutsValue.KeepAlive` and `TimeoutsValue.UserTimeout` carry the rows' values
+to the engines that are not the loop: the options `KeepAlive` and `UserTimeout`
+(zero the standard library's 15 s and the write bound, respectively). The
+goroutine engine and the portable backend set keepalive through the listener's
+`ListenConfig` and per accepted connection, `TCP_USER_TIMEOUT` on the listener
+before bind, and `KITSUNIUM_NET_DISABLE=tcp-keepalive` and `tcp-user-timeout`
+switch them off there as they do on the loop.
+
+## Amendment 2026-11-11 (#852): uring-multishot-recvmsg
+
+`uring-multishot-recvmsg` (`CapabilityURingRecvmsg`) joins class A-kernel,
+after `udp-pktinfo` in the registry: a datagram lane of a group
+`PacketGroup.HandleLoop` serves is on io_uring once its probe passed — the ring,
+RECVMSG, SENDMSG, ASYNC_CANCEL and POLL_ADD in REGISTER_PROBE, the provided-buffer
+ring, then a loopback multishot RECVMSG that must come back with a buffer and
+F_MORE. The row is `DatagramStateValue.Capabilities`', present only once such a
+group started: on when every lane serves on io_uring, absent naming the first
+refused stage (`setup`, `probe`, `buf_ring`, `recvmsg`, `arena`, `socket`,
+`eventfd`, `dup`) and raising no fault, unprobed where the platform has no lane
+(stage `arch`), disabled under `KITSUNIUM_NET_DISABLE=uring-multishot-recvmsg`,
+`uring-pbuf`, or an engine capped below io_uring — never probed then.
+
+## Amendment 2026-11-11 (#969): uring-send-zc is class A-code
+
+`uring-send-zc` leaves class B for class A-code before its threshold is
+measured, opt-in only, so the code path exists for the gate to measure it: a
+group that names it in `LoopValue.Capabilities` probes, after the bundle probe,
+REGISTER_PROBE for `IORING_OP_SEND_ZC` (47, Linux 6.0), then one zero-copy send
+of a datagram on loopback on a ring of its own, which must complete with
+`IORING_CQE_F_MORE` and then its notification (`IORING_CQE_F_NOTIF`, 1 << 3);
+`failStage=send_zc` plays a refusal. On, a flight of at least
+`LoopValue.SendZCMin` bytes (zero selects 16 KiB, a negative value
+`LoopValueInvalid`) leaves zero-copy, every send of it, a short one's rest
+included; a shorter flight leaves by `IORING_OP_SEND` as before. The send and
+its notification are two operations of the slot (`ops`), and `zcPend` counts
+the notifications a flight still waits for: a flight sent whole is held — its
+slab chunk not freed, `fSending` kept, the slot not closed — until the last
+one, in whichever order the two CQEs come; a send's CQE without `F_MORE` takes
+its notification back. One flight at a time a connection, as before: the next
+waits for the previous one's notification, which on TCP may come only with the
+peer's ACK. Not built: registered buffers (`IORING_REGISTER_BUFFERS2` sparse
+over the slab's arenas, the issue's `IORING_RECVSEND_FIXED_BUF`) — each send
+pins its pages —, and the gate: `BenchmarkLoadL1/pair=loop:loop-sendzc` at
+64 KiB bodies, its BENCH.md rows and the `tools/netgate` threshold that would
+move the row on to class A-kernel. Off and refused stay as for every class
+A-code row: `KITSUNIUM_NET_DISABLE=uring-send-zc` reads disabled and never
+probes, an opted-in row the kernel refuses reads missing, a capability fault.
+
+## Amendment 2026-11-11 (#979): busy-poll joins class A-code
+
+`busy-poll` leaves class B for class A-code: opted into through
+`LoopValue.Capabilities`, switched off by `KITSUNIUM_NET_DISABLE=busy-poll`, never
+on by default. Two `LoopValue` fields carry it: `BusyPoll`, the window (zero 50 µs,
+the value of `Documentation/networking/napi.rst`'s examples, held until the gate
+below measures another; negative or past one second `LoopValueInvalid`), and
+`BusyPollBudget`, epoll's packets a poll (zero the kernel's; past 65535
+`LoopValueInvalid`, past 64 the kernel's `EPERM` without `CAP_NET_ADMIN`, the row
+then missing).
+
+- **Floor.** Both levers are Linux 6.9 — not 6.8, which the issue named:
+  `IORING_REGISTER_NAPI` = 27 with `struct io_uring_napi` (16 bytes; 6.13 renames
+  `pad[0]` `opcode` and half of `resv` `op_param`, zero for the dynamic tracking
+  asked here), and `EPIOCSPARAMS` = `_IOW(0x8A, 1, struct epoll_params)` (8 bytes),
+  whose direction bits differ on powerpc and mips (`busypoll_ioc*_linux.go`).
+  `TestURingABI_napi` and `TestBusyPoll_epollABI` freeze them.
+- **Probe (§D3).** A stage after the receive bundle's: a zero window registered on
+  a throwaway ring (`EINVAL` before 6.9, reason `register_napi: …`), zero
+  parameters set on a throwaway epoll instance (`ENOTTY`, reason `epiocsparams: …`);
+  `failStage: "busy_poll"` plays both. A switched-off row issues neither call.
+- **Engine.** io_uring registers the window with `prefer_busy_poll` on ring 0 of
+  each loop, the ring its thread waits on: a ring nobody waits on never polls. It
+  is never unregistered — the ring's close frees it. epoll sets the window, the
+  budget and `prefer_busy_poll` on each loop's own instance. `SO_BUSY_POLL` (46) is
+  not set: it governs blocking reads and `poll(2)`, not these waits. The portable
+  and goroutine engines cannot reach the runtime's own epoll: the row reads
+  unprobed there.
+- **Report.** On, the reason states that only sockets the kernel gave a NAPI id are
+  polled — none on loopback nor a veth without GRO. `SO_INCOMING_NAPI_ID` is not
+  read: on io_uring the connections are direct descriptors no `getsockopt` reaches.
+- **Gate, not built.** The row leaves class A-code only through a
+  `net:default-change` pull request citing a paired `BenchmarkSparseKeepAlive`,
+  loop against loop with busy-poll, on the veth lane with GRO switched on
+  (`ethtool -K … gro on`, which `scripts/ci/net-veth.sh` does not do yet), ADR
+  0190's paired ratio: the request's p99 at most 0.85 of the plain loop's and
+  cpu-ns/req at most 1.30 times it, both on the upper bound of the interval. No such
+  row exists; `internal/service/net/loop/BENCH.md` says so.
+
+## Amendment 2026-11-11 (#980): uring-zcrx's floor, its probe stage and its area
+
+`uring-zcrx` stays class B — `LoopValue.Capabilities` refuses it — but no longer
+gives the generic sentence: its row names the stage that stops it. What can be
+checked on the SDK's hosts is built; the receive path is designed here and not
+built, since no host of the SDK's has run it.
+
+- **Floor.** Linux 6.15: `IORING_OP_RECV_ZC` = 58, `IORING_REGISTER_ZCRX_IFQ` = 32,
+  `struct io_uring_zcrx_ifq_reg` (96 bytes: `if_idx`, `if_rxq`, `rq_entries`,
+  `flags`, `area_ptr`, `region_ptr`, `offsets`, `zcrx_id`), `struct
+  io_uring_zcrx_area_reg` (48), `struct io_uring_zcrx_rqe` (16: `off`, `len`),
+  `struct io_uring_zcrx_cqe` (16, a CQE's second half), `struct
+  io_uring_region_desc` (64), `IORING_ZCRX_AREA_SHIFT` = 48, `IORING_SETUP_CQE32` =
+  1<<11. `TestURingABI_zcrx` freezes them, the 32-byte CQE included; they were
+  written from the 6.15 header, which the SDK's hosts (6.12) do not carry. A
+  `dma-buf` area (`IORING_ZCRX_AREA_DMABUF`, 6.16) is out of scope.
+- **Prerequisites.** The receiving ring carries `DEFER_TASKRUN` and `CQE32`: in this
+  loop, ring 0 of each loop under the `uring-defer-taskrun` opt-in, its CQ stride
+  32 bytes, the secondaries keeping 16. The host carries a driver with the queue
+  API and header/data split (bnxt and gve at 6.15), header split switched on
+  (`ethtool -G <if> tcp-data-split on`), one receive queue steered to the group's
+  port by an ntuple rule the operator sets, and `CAP_NET_ADMIN`.
+- **Configuration.** `LoopValue.ZCRX` (`ZCRXValue`: `Interface`, `Queue`,
+  `AreaBytes`, 4 MiB by default, rounded up to pages); a zero `Interface` keeps the
+  row off (ADR 0031); a negative field is `LoopValueInvalid`.
+- **Probe (§D3), stage `zcrx`, after `busy_poll`, on loop 0 only** (two loops would
+  register one queue at once): `REGISTER_PROBE` on a throwaway ring for opcode 58 —
+  absent, `kernel: IORING_OP_RECV_ZC unsupported (before 6.15)`; present with no
+  interface — available, `available: no interface configured`; an interface named —
+  the queue registered on a throwaway ring set up `SINGLE_ISSUER|DEFER_TASKRUN|CQE32`
+  on the loop's locked thread, with an area of `AreaBytes` and a refill ring of 128
+  entries in one page, both mapped there, then closed: absent with the kernel's
+  answer (`ENODEV`, `EPERM`, `EINVAL`, `EOPNOTSUPP`), or available, `accepted on a
+  throwaway ring`. Registering restarts the NIC queue, and so does the release:
+  naming a queue is the operator's request for that. Each reason ends with the
+  class B sentence; epoll and the portable backend read unprobed. The suite plays
+  the stages past the opcode (`zcrxKernel`, `zcrxErrno`, `failStage: "zcrx"`); on
+  6.12 the register's own call only meets `EINVAL`, an opcode the kernel lacks.
+- **The area and the refill ring (designed, not built).** One area a loop, mapped
+  outside the Go heap as the slab's arenas are (ADR 0186 §D7) and registered on ring
+  0 with its refill ring. Each connection of ring 0 arms a multishot `RECV_ZC`; a
+  completion's `off` names its area above bit 48 and its offset below, `res` its
+  length, and `OnData` receives those bytes of the area. They stay valid until
+  `OnBatchEnd`, after which the loop writes one `rqe {off, len}` a completion into
+  the refill ring and publishes its tail, as `returnBuffers` hands bids back today;
+  a refill ring full defers the rest to the next batch. A packet that missed the
+  steered queue reaches the same area through the kernel's copy fallback, so the
+  adapter sees one path. The secondaries and epoll keep provided buffers, and the
+  row's reason names which rings receive without a copy.
+- **Promotion.** The row joins class A-code only through a pull request labelled
+  `net:default-change` citing a `BenchmarkLoadL1/pair=loop:loop-zcrx` row of ADR
+  0190's paired gate, run on a host of the class above, that reports cpu-ns/req and
+  the receiver's copied bytes a request: the zcrx side's cpu-ns/req at most 0.85 of
+  the plain loop's on the interval's upper bound, and its copied bytes a request at
+  most a tenth of the plain loop's. Out of reach today: CI's veth (no queue API),
+  Docker (no `CAP_NET_ADMIN`), the secondaries (no `DEFER_TASKRUN`), every kernel
+  before 6.15 — this VM's 6.12 among them.

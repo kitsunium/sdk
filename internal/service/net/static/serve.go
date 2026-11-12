@@ -2,6 +2,7 @@ package static
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"io/fs"
 	"mime"
@@ -9,6 +10,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
 // sniffBytes is how much of a file http.DetectContentType reads to guess a
@@ -29,6 +32,15 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, name string,
 	if contentType, pinned := pinnedType(path.Ext(name)); pinned {
 		header.Set("Content-Type", contentType)
 	}
+	//: the sidecar the client admits, in the file's place; a client that admits
+	//: neither reads on.
+	if h.precompressed {
+		header.Add("Vary", "Accept-Encoding")
+		//: served and done.
+		if h.serveSidecar(w, r, name, file) {
+			return
+		}
+	}
 	//: the common case: ranges, conditional requests, HEAD, all of it.
 	if content, seekable := file.(io.ReadSeeker); seekable {
 		http.ServeContent(w, r, name, info.ModTime(), content)
@@ -36,6 +48,78 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, name string,
 	}
 	//: a tree whose files cannot seek, an archive's: whole, never ranged.
 	stream(w, r, name, file, info)
+}
+
+// serveSidecar serves name.br or name.gz in name's place when the tree holds it,
+// a regular file, and the client admits its coding, typed as the identity file
+// is; it reports whether it answered. brotli first: where both exist it is the
+// smaller. The file's own type is read from it, sniffing at most 512 bytes, when
+// its name says nothing: the sidecar's bytes would type as gzip.
+func (h *Handler) serveSidecar(w http.ResponseWriter, r *http.Request, name string, identity fs.File) bool {
+	header := w.Header()
+	accept := r.Header.Get("Accept-Encoding")
+	//: the codings a sidecar exists for, best first.
+	for _, sidecar := range sidecarCodings {
+		//: this client does not admit it.
+		if !corenet.AcceptsEncoding(accept, sidecar.token) {
+			continue
+		}
+		file, info, found := open(h.fsys, name+sidecar.suffix)
+		//: no such sidecar, or one the tree cannot open.
+		if found != present {
+			continue
+		}
+		defer closeQuietly(file)
+		content, seekable := file.(io.ReadSeeker)
+		//: a directory or a device in the sidecar's place, or one that cannot
+		//: be ranged: the file itself is served.
+		if !info.Mode().IsRegular() || !seekable {
+			continue
+		}
+		//: the file's type, not the coding's.
+		if contentType, known := typeOf(header, name, identity); known {
+			header.Set("Content-Type", contentType)
+		}
+		header.Set("Content-Encoding", sidecar.token)
+		http.ServeContent(w, r, name, info.ModTime(), content)
+		//: answered.
+		return true
+	}
+	//: the file itself.
+	return false
+}
+
+// sidecarCodings are the codings a sidecar can carry, in the order they are
+// preferred.
+var sidecarCodings = [...]struct {
+	token, suffix string
+}{
+	{token: "br", suffix: ".br"},
+	{token: "gzip", suffix: ".gz"},
+}
+
+// typeOf returns the identity file's Content-Type: the one already set, its
+// name's, or sniffed from its first bytes; known is false when none reads.
+func typeOf(header http.Header, name string, identity fs.File) (contentType string, known bool) {
+	//: set already: by pinnedType.
+	if contentType = header.Get("Content-Type"); contentType != "" {
+		//: as set.
+		return contentType, true
+	}
+	//: the host's table.
+	if contentType = mime.TypeByExtension(path.Ext(name)); contentType != "" {
+		//: from the name.
+		return contentType, true
+	}
+	var head [sniffBytes]byte
+	n, err := io.ReadFull(identity, head[:])
+	//: nothing readable: net/http will say nothing either.
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		//: unknown.
+		return "", false
+	}
+	//: the identity file's bytes.
+	return http.DetectContentType(head[:n]), true
 }
 
 // stream answers with a file that cannot seek: the whole body with a 200, its

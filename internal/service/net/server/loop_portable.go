@@ -27,6 +27,12 @@ const (
 	// sent nothing yet, as the native backends' drainQuiet: its request may be
 	// on the way, and a close before it is read resets the peer.
 	portableQuiet time.Duration = time.Second
+	// portableLinger bounds how long a connection its handler closed keeps
+	// reading, its writing side shut, before the close: a close with input
+	// unread sends a reset, and Windows discards on a reset what its peer had
+	// received and not yet read — a 413 refusing a body on its head would
+	// never be read (#844). net/http lingers as long for the same reason.
+	portableLinger time.Duration = 500 * time.Millisecond
 	// portableEvents bounds the events one batch takes.
 	portableEvents int = 512
 	// portablePostCap is the portable backend's post queue.
@@ -74,11 +80,17 @@ type portableConn struct {
 	ack chan struct{}
 	// kick wakes the writer.
 	kick chan struct{}
-	// mu guards out, flight and closing, shared with the writer.
+	// mu guards out, flight, closing and linger, shared with the writer.
 	mu      sync.Mutex
 	out     []byte
 	flight  int
 	closing bool
+	// linger says the close is the handler's own, the peer still sending:
+	// the writer shuts its side and lets the reader end it (lingerClose).
+	linger bool
+	// lingering is set by the writer once it shut its side: the reader's
+	// bytes from then on are the peer's leftovers, dropped.
+	lingering atomic.Bool
 	// The handler goroutine's own state.
 	open     bool
 	spill    []byte
@@ -87,7 +99,9 @@ type portableConn struct {
 	deadline time.Time
 	// heardAt is when the peer's first byte came, zero until then: the drain
 	// leaves a connection that has sent nothing open for portableQuiet.
-	heardAt   time.Time
+	heardAt time.Time
+	// drained says the drain has told the handler about this connection.
+	drained   bool
 	pressure  bool
 	wantWrite bool
 	peerDone  bool
@@ -95,6 +109,10 @@ type portableConn struct {
 	reasonSet bool
 	// compact lists the connection on its loop's compaction list.
 	compact bool
+	// peer is who the kernel named when the connection opened; Verified says
+	// whether it named anyone (#974). Reading it costs an allocation, so it is
+	// read once, at open, and Peer only returns it.
+	peer corenet.LoopPeerValue
 }
 
 // portableGroup is the portable backend (ADR 0186 §D3, §D7): the default
@@ -117,8 +135,12 @@ type portableGroup struct {
 	// connection has the netpoller's TCP_NODELAY cleared (ADR 0189).
 	caps       []corenet.CapabilityValue
 	noDelayOff bool
-	lanes      []*portableLoop
-	lns        []stdnet.Listener
+	// keepAlive is the accepted sockets' keepalive, as TimeoutsValue reads it and
+	// the operator's switch off: negative sets none, zero leaves the standard
+	// library's; positive is applied per connection (#971).
+	keepAlive time.Duration
+	lanes     []*portableLoop
+	lns       []stdnet.Listener
 	// owned are the listeners the group duplicated from server's and closes
 	// itself, once its drain took their queue (takeQueues); one it could not
 	// duplicate is server's, closed with the others after the grace.
@@ -183,7 +205,13 @@ type portableLoop struct {
 	accepted atomic.Uint64
 	closed   atomic.Uint64
 	batches  atomic.Uint64
-	readers  sync.WaitGroup
+	// bytesIn, bytesOut, outputRefused, spillClosed, timeouts and idleClosed are
+	// the lane's traffic and refusals, read by State (#975). pendingOutput is
+	// the bytes queued by Write and not yet sent, a gauge: the writer takes each
+	// flight off it, and at its end what it left behind.
+	bytesIn, bytesOut, outputRefused, spillClosed, timeouts, idleClosed atomic.Uint64
+	pendingOutput                                                       atomic.Int64
+	readers                                                             sync.WaitGroup
 	// batchAcks are the readers waiting on the current batch.
 	batchAcks []chan struct{}
 	dirty     []int32
@@ -212,8 +240,9 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 	g := &portableGroup{
 		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
 		degraded: degraded, loopsSource: src, procs: runtime.GOMAXPROCS(0),
-		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
+		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(lns, plan)),
 		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
+		keepAlive:  portableKeepAlive(group, plan),
 	}
 	//: a TLS codec group negotiates each connection first.
 	if group.tlsCodec() {
@@ -247,12 +276,18 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 
 // portableNoDelay is the portable backend's tcp-nodelay row: the netpoller
 // sets TCP_NODELAY on every connection it accepts, cleared once the operator
-// switched it off.
-func portableNoDelay(plan loopPlan) corenet.CapabilityValue {
+// switched it off, and unprobed on a group with no TCP listener.
+func portableNoDelay(lns []stdnet.Listener, plan loopPlan) corenet.CapabilityValue {
 	row := corenet.CapabilityValue{Name: corenet.CapabilityTCPNoDelay, Class: classKernel, Status: statusOn, Reason: "the netpoller's default"}
 	//: switched off: cleared per connection.
 	if slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay) {
 		row.Status, row.Reason = statusDisabled, plan.disabledBy
+		//: disabled.
+		return row
+	}
+	//: no TCP listener: nothing to set, and nothing missing.
+	if !slices.ContainsFunc(lns, isTCPListener) {
+		row.Status, row.Reason = statusUnprobed, unixSocketReason
 	}
 	//: the row.
 	return row
@@ -525,8 +560,8 @@ func (pl *portableLoop) handle(ev *portableEvent) {
 func (pl *portableLoop) handleData(ev *portableEvent) {
 	pc := pl.lookupSlot(ev.slot, ev.gen)
 	pl.batchAcks = append(pl.batchAcks, pl.conns[ev.slot].ack)
-	//: a connection closed since.
-	if pc == nil || !pc.open {
+	//: a connection closed since, or lingering after its handler's close.
+	if pc == nil || !pc.open || pc.lingering.Load() {
 		//: dropped.
 		return
 	}
@@ -580,6 +615,10 @@ func (pl *portableLoop) open(c stdnet.Conn) {
 	if tc, ok := c.(*stdnet.TCPConn); ok && pl.g.noDelayOff {
 		swallowErr(tc.SetNoDelay(false))
 	}
+	//: an accepted TCP socket, on this portable lane, the option's.
+	if tc, ok := c.(*stdnet.TCPConn); ok {
+		applyAcceptedKeepAlive(tc, pl.g.keepAlive)
+	}
 	var slot int32
 	//: a released slot first.
 	if n := len(pl.free); n > 0 {
@@ -598,6 +637,7 @@ func (pl *portableLoop) open(c stdnet.Conn) {
 	pc := &portableConn{
 		conn: c, gen: gen, ack: make(chan struct{}, 1), kick: make(chan struct{}, 1), open: true, lastIO: time.Now(),
 		pressure: pl.g.soft > 0 && pl.g.live() > int64(pl.g.soft),
+		peer:     portablePeer(c),
 	}
 	pl.conns[slot] = pc
 	pl.accepted.Add(1)
@@ -635,6 +675,8 @@ func (pl *portableLoop) reader(slot int32, pc *portableConn) {
 
 // writer sends pc's output, one flight at a time.
 func (pl *portableLoop) writer(slot int32, pc *portableConn) {
+	//: whatever the writer leaves queued is no longer pending anywhere.
+	defer pl.dropOutput(pc)
 	//: until closing with nothing left, or a failure.
 	for range pc.kick {
 		//: everything queued, then the close if asked.
@@ -643,31 +685,69 @@ func (pl *portableLoop) writer(slot int32, pc *portableConn) {
 			out := pc.out
 			pc.flight = len(out)
 			pc.out = nil
-			closing := pc.closing
+			closing, linger := pc.closing, pc.linger
 			pc.mu.Unlock()
 			//: nothing to send.
 			if len(out) == 0 {
 				//: a close waits only for the output.
 				if closing {
+					//: the handler's own close, its peer still sending: the
+					//: reader ends it.
+					if linger && lingerClose(pc) {
+						//: done.
+						return
+					}
 					swallowErr(pc.conn.Close())
 					//: done.
 					return
 				}
 				break
 			}
-			_, err := pc.conn.Write(out)
+			n, err := pc.conn.Write(out)
 			pc.mu.Lock()
 			pc.flight = 0
 			pc.mu.Unlock()
-			//: the socket failed: the reader reports the end.
+			pl.bytesOut.Add(uint64(n))
+			pl.pendingOutput.Add(-int64(len(out)))
+			//: the socket failed. The reader reports the end while it still
+			//: reads; one that ended on a clean EOF is gone, and the connection
+			//: would stay open with nothing to send it and nobody to read it, so
+			//: the writer posts the end itself. The lane takes the first end only.
 			if err != nil {
 				swallowErr(pc.conn.Close())
+				pl.events <- portableEvent{kind: pevEnd, slot: slot, gen: pc.gen, err: err}
 				//: done.
 				return
 			}
 			pl.events <- portableEvent{kind: pevSent, slot: slot, gen: pc.gen}
 		}
 	}
+}
+
+// lingerClose shuts pc's writing side once its output left, and bounds the
+// reader by portableLinger: the reader ends the connection at the peer's close
+// or at the bound, and its end finishes it, so the answer is read before any
+// reset (portableLinger). It reports false where the connection has no half
+// close, or the half close failed: the caller closes at once.
+func lingerClose(pc *portableConn) bool {
+	cw, ok := pc.conn.(interface{ CloseWrite() error })
+	//: no half close on this connection.
+	if !ok {
+		//: closed at once.
+		return false
+	}
+	pc.lingering.Store(true)
+	//: shut, then bounded.
+	return cw.CloseWrite() == nil && pc.conn.SetReadDeadline(time.Now().Add(portableLinger)) == nil
+}
+
+// dropOutput takes what the writer left behind off the pending gauge.
+func (pl *portableLoop) dropOutput(pc *portableConn) {
+	pc.mu.Lock()
+	left := len(pc.out)
+	pc.out = nil
+	pc.mu.Unlock()
+	pl.pendingOutput.Add(-int64(left))
 }
 
 // lookupSlot returns slot's connection when gen is still its generation.
@@ -705,6 +785,7 @@ func (pc *portableConn) heard(now time.Time) {
 
 // deliver hands data to the handler behind any spill.
 func (pl *portableLoop) deliver(slot int32, pc *portableConn, data []byte) {
+	pl.bytesIn.Add(uint64(len(data)))
 	pc.heard(time.Now())
 	ref := corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}
 	buf := data
@@ -713,6 +794,7 @@ func (pl *portableLoop) deliver(slot int32, pc *portableConn, data []byte) {
 	if len(pc.spill) > pc.spillOff {
 		//: the cap bounds what is unconsumed.
 		if len(pc.spill)-pc.spillOff+len(data) > pl.spillCap {
+			pl.spillClosed.Add(1)
 			pl.finish(slot, pc, corenet.LoopSpillFull)
 			//: closed.
 			return
@@ -738,6 +820,7 @@ func (pl *portableLoop) deliver(slot int32, pc *portableConn, data []byte) {
 		tail := buf[n:]
 		//: past the cap.
 		if len(tail) > pl.spillCap {
+			pl.spillClosed.Add(1)
 			pl.finish(slot, pc, corenet.LoopSpillFull)
 			//: closed.
 			return
@@ -817,6 +900,7 @@ func (pl *portableLoop) timer(slot int32, pc *portableConn, now time.Time) {
 	//: idle past the bound with nothing to send.
 	if pl.idle > 0 && now.Sub(pc.lastIO) >= pl.idle && pl.pending(pc) == 0 {
 		pc.reasonSet, pc.closeErr = true, os.ErrDeadlineExceeded
+		pl.idleClosed.Add(1)
 		pl.finish(slot, pc, os.ErrDeadlineExceeded)
 		//: closed.
 		return
@@ -824,6 +908,7 @@ func (pl *portableLoop) timer(slot int32, pc *portableConn, now time.Time) {
 	//: the handler's deadline.
 	if !pc.deadline.IsZero() && !now.Before(pc.deadline) {
 		pc.deadline = time.Time{}
+		pl.timeouts.Add(1)
 		pl.h.OnTimeout(pl, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen})
 	}
 	//: a deadline still to come may come before the tick.
@@ -852,6 +937,12 @@ func (pl *portableLoop) closeSettled() {
 		//: mid-request ones, ones waiting on a worker, fresh ones not yet
 		//: heard nor quiet: they finish first.
 		if pl.drainable(int32(slot), pc, now) {
+			//: the handler's last word, once; the connection closes next batch.
+			if d, ok := pl.h.(corenet.LoopDrainer); ok && !pc.drained {
+				pc.drained = true
+				d.OnDrain(pl, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen})
+				continue
+			}
 			pc.reasonSet, pc.closeErr = true, corenet.ServerClosed
 			pl.markDirty(int32(slot))
 		}
@@ -894,15 +985,8 @@ func (pl *portableLoop) settle(slot int32) {
 		//: nothing to settle.
 		return
 	}
-	pc.mu.Lock()
-	empty := len(pc.out) == 0 && pc.flight == 0
-	//: a close waits for the output; the writer closes after it.
-	if pc.reasonSet || pc.peerDone {
-		pc.closing = true
-	}
-	pc.mu.Unlock()
-	//: nothing left and closing: finished now.
-	if empty && (pc.reasonSet || pc.peerDone) {
+	//: nothing left and closing: finished now, unless the writer lingers.
+	if markClosing(pc) {
 		pl.finish(slot, pc, pc.closeErr)
 		//: finished.
 		return
@@ -912,6 +996,22 @@ func (pl *portableLoop) settle(slot int32) {
 	case pc.kick <- struct{}{}:
 	default:
 	}
+}
+
+// markClosing records, under the writer's lock, whether pc closes and
+// whether its writer lingers (lingerClose), and reports whether it finishes
+// now: closing, nothing left to send, and no linger.
+func markClosing(pc *portableConn) bool {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	closing := pc.reasonSet || pc.peerDone
+	//: a close waits for the output; the writer closes after it.
+	if closing {
+		pc.closing = true
+		pc.linger = pc.reasonSet && pc.closeErr == nil && !pc.peerDone
+	}
+	//: finished now, or the writer's.
+	return closing && !pc.linger && len(pc.out) == 0 && pc.flight == 0
 }
 
 // compactListed moves the consumed head of every spill listed in the batch
@@ -1039,10 +1139,12 @@ func (pl *portableLoop) Write(ref corenet.LoopConnRef, p []byte) error {
 	if len(pc.out)+pc.flight+len(p) > pl.outCap {
 		pc.mu.Unlock()
 		pc.wantWrite = true
+		pl.outputRefused.Add(1)
 		//: refused.
 		return corenet.LoopOutputFull
 	}
 	pc.out = append(pc.out, p...)
+	pl.pendingOutput.Add(int64(len(p)))
 	pc.mu.Unlock()
 	pl.markDirty(slot)
 	//: queued.
@@ -1090,6 +1192,20 @@ func (pl *portableLoop) Pressure(ref corenet.LoopConnRef) bool {
 	_, pc := pl.lookup(ref)
 	//: a stale reference is under none.
 	return pc != nil && pc.pressure
+}
+
+// Peer implements corenet.LoopPeer: who the kernel named when the connection
+// opened (ADR 0148, #974). It answers false for a stale reference, a TCP
+// connection, and wherever nothing could verify the peer.
+func (pl *portableLoop) Peer(ref corenet.LoopConnRef) (corenet.LoopPeerValue, bool) {
+	_, pc := pl.lookup(ref)
+	//: stale, or nobody the kernel named.
+	if pc == nil || !pc.peer.Verified {
+		//: says nothing it cannot verify.
+		return corenet.LoopPeerValue{}, false
+	}
+	//: as read at open.
+	return pc.peer, true
 }
 
 // Loop implements corenet.LoopIO: the lane's index.
@@ -1191,6 +1307,10 @@ func (e portableEngine) State() corenet.LoopStateValue {
 		rings = append(rings, corenet.LoopRingStateValue{
 			Conns: pl.live.Load(), Accepted: pl.accepted.Load(), Closed: pl.closed.Load(),
 			Batches: pl.batches.Load(), Evicted: 0,
+			BytesIn: pl.bytesIn.Load(), BytesOut: pl.bytesOut.Load(),
+			OutputRefused: pl.outputRefused.Load(), SpillClosed: pl.spillClosed.Load(),
+			Timeouts: pl.timeouts.Load(), IdleClosed: pl.idleClosed.Load(),
+			PendingOutput: pl.pendingOutput.Load(),
 		})
 	}
 	//: as many loops as lanes, one ring each.

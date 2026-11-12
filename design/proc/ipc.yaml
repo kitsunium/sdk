@@ -249,7 +249,7 @@ packages:
           - code: CodeListenFailed
             doc: ListenFailed reports a listen the kernel refused.
             name: ListenFailed
-            private: "service/proc/ipc: net.Listen or the chmod after it failed; the cause is in the chain"
+            private: "service/proc/ipc: the socket, its bind, the chown or chmod after it, or the listen failed; the cause is in the chain"
             public: The private socket could not be opened
             reason: LISTEN_FAILED
           - code: CodePeerRefused
@@ -440,10 +440,22 @@ packages:
           PATH to it: a component above it that anybody could have planted or
           created, or can replace, is refused (PATH_UNSAFE, chain_unix.go), since
           every lookup follows a link planted at a parent.
+        - THE SOCKET'S MODE, which connect(2) checks for write: 0600 when the
+          lists name nobody but this account and root; 0660 and the group when
+          they name one group and no other user, so the kernel admits that
+          group's members, supplementary ones included, and nobody else; 0666
+          when they name another user or several groups, under the directory
+          that gates them — refused where the kernel names no peer and anybody
+          may search the directory. The mode and the group are set between
+          bind(2) and listen(2), before any connection can complete (#1092).
         - THE PEER'S CREDENTIALS, where the kernel gives them: SO_PEERCRED on
           Linux, LOCAL_PEERCRED on FreeBSD and DragonFly, LOCAL_PEEREID on NetBSD.
           There the listener refuses a peer whose UID is neither its own nor
-          allowed, whatever the directory says, and a peer the kernel did not name.
+          allowed and none of whose groups is allowed — its effective group, and
+          on Linux (SO_PEERGROUPS) and FreeBSD and DragonFly (the xucred's list)
+          its supplementary groups as the kernel recorded them when it
+          connected —, whatever the directory says, and a peer the kernel did
+          not name.
           On darwin, OpenBSD, illumos and Solaris Peer.Verified is false and the
           directory is the only gate — stated, not papered over.
         - AT DIAL, the directory may be the listener's account's: its entry rules
@@ -523,9 +535,10 @@ packages:
       lock domain binds LockFileEx and GetNamedSecurityInfoW — golang.org/x/sys
       is banned SDK-wide (ADR 0018).
 
-      Package ipc — the Unix socket: a 0700 directory, a 0600 socket, a leftover
-      removed only when nobody answers on it and it is ours, and the peer the
-      kernel names where it does.
+      Package ipc — the Unix socket: a 0700 directory, a socket 0600 unless the
+      lists name other accounts (0660 and the group, or 0666), its mode set
+      before it listens, a leftover removed only when nobody answers on it and
+      it is ours, and the peer the kernel names where it does.
     functions:
       - doc: |-
           NewListener opens the private socket at cfg.Path. A socket already there is
@@ -534,7 +547,13 @@ packages:
           queue, a timeout — since its owner may be alive. One the kernel refuses
           the connection on (ECONNREFUSED), or that vanished meanwhile, is a
           leftover of a dead process and is removed — provided it is a socket this
-          account owns. The socket file is made 0600. On Windows the
+          account owns. The socket file is made 0600, or — when cfg's lists name
+          other accounts — 0660 and the one group they name, or 0666 where they
+          name another user or several groups; a group the socket cannot be
+          given (this account is not in it) is LISTEN_FAILED, and so is
+          DIRECTORY_UNSAFE a 0666 socket in a directory anybody may search
+          where the kernel names no peer. The mode is set before the socket
+          listens. On Windows the
           named pipe is created with FILE_FLAG_FIRST_PIPE_INSTANCE: a name that
           exists is IN_USE when this account owns it, ENDPOINT_SQUATTED when
           another account does or its DACL admits no instance of this account.
@@ -617,18 +636,24 @@ packages:
               type: string
             - doc: |-
                 AllowUIDs and AllowGIDs admit peers besides this process's own user:
-                an on-call group declared at deployment, say. They are enforced where
-                the kernel names the peer (Peer.Verified); the directory must still
-                let those accounts reach the socket, which is the deployment's to
+                an on-call group declared at deployment, say. The listener opens the
+                socket file to them — 0660 and the group for one group, 0666 for
+                another user or several groups — and, where the kernel names the
+                peer (Peer.Verified), admits a peer by its user, its effective group
+                or one of its supplementary groups. The directory must still let
+                those accounts reach the socket, which is the deployment's to
                 arrange — this package never widens a directory. Windows has no UID:
                 there the pipe's DACL admits this account only, and the lists admit
                 nobody more.
               name: AllowUIDs
             - doc: |-
                 AllowUIDs and AllowGIDs admit peers besides this process's own user:
-                an on-call group declared at deployment, say. They are enforced where
-                the kernel names the peer (Peer.Verified); the directory must still
-                let those accounts reach the socket, which is the deployment's to
+                an on-call group declared at deployment, say. The listener opens the
+                socket file to them — 0660 and the group for one group, 0666 for
+                another user or several groups — and, where the kernel names the
+                peer (Peer.Verified), admits a peer by its user, its effective group
+                or one of its supplementary groups. The directory must still let
+                those accounts reach the socket, which is the deployment's to
                 arrange — this package never widens a directory. Windows has no UID:
                 there the pipe's DACL admits this account only, and the lists admit
                 nobody more.
@@ -711,16 +736,21 @@ packages:
           owns and nobody else may write to — created 0700 when missing, refused
           otherwise ([CodeDirectoryUnsafe]) — and the socket file is 0600.
           Connecting needs search permission on the directory, so only its owner
-          (and root) get through. On Windows the endpoint is a named pipe named
+          (and root) get through. The accounts Config.AllowUIDs / AllowGIDs name
+          get the socket opened to them — 0660 and the group for one group,
+          0666 for another user or several groups —, the directory, which the
+          deployment opens to them, staying the first gate. On Windows the endpoint is a named pipe named
           after this account and the path, whose own DACL grants this account
           only, which refuses remote clients and which nobody can join once it
           exists; a name another account took first is refused as squatted
           ([CodeEndpointSquatted]), never mistaken for a daemon of ours.
         - The PEER'S CREDENTIALS, where the kernel gives them: on Linux,
           SO_PEERCRED names the peer's user, group and process, and a peer that is
-          neither this account nor in Config.AllowUIDs / AllowGIDs is closed
-          before Accept returns it — and so, since #1093, do FreeBSD, DragonFly
-          and NetBSD, where an unnamed peer is refused too. On Windows each end
+          neither this account nor in Config.AllowUIDs / AllowGIDs — by its
+          user, its effective group or a supplementary group the kernel
+          recorded — is closed before Accept returns it — and so, since #1093,
+          do FreeBSD, DragonFly and NetBSD (the effective group alone there),
+          where an unnamed peer is refused too. On Windows each end
           reads the other's account from its process token ([Peer].SID) and
           refuses another one. On darwin, OpenBSD, illumos and Solaris
           [Peer].Verified is false and the directory is the only gate.

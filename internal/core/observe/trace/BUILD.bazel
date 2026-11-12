@@ -25,6 +25,7 @@ go_library(
         "state_value.go",
         "status_value.go",
         "trace_state_entry.go",
+        "traceparent_bytes.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/observe/trace",
     visibility = [

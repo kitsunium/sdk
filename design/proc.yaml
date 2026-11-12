@@ -3985,6 +3985,14 @@ packages:
           - type: coreproc.MemoryLimitValue
           - type: error
       - doc: |-
+          Derive is what Apply would install, read and derived the same way, and
+          installs nothing: a caller that sizes memory outside the Go heap — a
+          network loop's slab (#809) — reads the allowance without touching the
+          runtime's limit.
+        name: Derive
+        out:
+          - type: coreproc.MemoryLimitValue
+      - doc: |-
           Watch applies the limit as ApplyWith does, reports it to onChange, then
           re-derives it every period on clk until ctx ends — and installs and reports
           again only when the derivation changed: an orchestrator's resize, a

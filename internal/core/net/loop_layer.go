@@ -76,3 +76,11 @@ func (l LoopLayer) OnStart(lanes int) {
 		s.OnStart(lanes)
 	}
 }
+
+// OnDrain forwards to the wrapped handler when it is a LoopDrainer.
+func (l LoopLayer) OnDrain(io LoopIO, ref LoopConnRef) {
+	//: found per drain, not per request: a drain is rare.
+	if d, ok := l.next.(LoopDrainer); ok {
+		d.OnDrain(io, ref)
+	}
+}

@@ -2,9 +2,15 @@ package http1
 
 import (
 	"bytes"
+	"io/fs"
 	"slices"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -14,12 +20,61 @@ const statusUnauthorized int = 401
 // bearerScheme is the authentication scheme Bearer reads, lowercase.
 const bearerScheme string = "bearer"
 
+// traceFieldName is the field Trace reads, in the case every comparison folds to.
+const traceFieldName string = "traceparent"
+
+const (
+	// statusTooManyRequests answers a request a limiter refused.
+	statusTooManyRequests int = 429
+	// routeKeyLen is the width of a number used as a rate key.
+	routeKeyLen int = 8
+	// byteBits is how many bits a byte holds.
+	byteBits int = 8
+	// corsOriginField is the field a browser names its page's origin in;
+	// lowercase, as the codec's comparison folds it.
+	corsOriginField string = "origin"
+	// corsRequestMethodField asks a preflight's question.
+	corsRequestMethodField string = "access-control-request-method"
+	// requestIDFieldName is the field RequestID reads, in the case every
+	// comparison folds to.
+	requestIDFieldName string = "x-request-id"
+	// mintedIDLen is the length of a minted identifier: a 64-bit number in hex.
+	mintedIDLen int = 16
+	// lowerHex are a minted identifier's digits.
+	lowerHex string = "0123456789abcdef"
+	// nibbleBits is how many bits one hexadecimal digit spells.
+	nibbleBits int = 4
+	// nibbleMask keeps one digit's bits.
+	nibbleMask uint64 = 0xf
+	// laneShift places the lane above a request's counter (HTTP1RequestValue.ID).
+	laneShift int = 48
+	// counterMask keeps a request's counter below its lane.
+	counterMask uint64 = 1<<laneShift - 1
+)
+
+const (
+	// rateKeyNone is the zero RateKey, refused.
+	rateKeyNone rateKeyKind = iota
+	// rateKeySubject keys on HTTP1RequestValue.Auth.
+	rateKeySubject
+	// rateKeyRoute keys on HTTP1RequestValue.Route.
+	rateKeyRoute
+	// rateKeyLane keys on HTTP1RequestValue.Lane.
+	rateKeyLane
+	// rateKeyField keys on a request field.
+	rateKeyField
+)
+
 var (
 	// wwwAuthenticate is the field a 401 from Bearer carries, with no spare
 	// capacity, so a handler appending to it copies it.
 	wwwAuthenticate = slices.Clip([]byte("WWW-Authenticate: Bearer\r\n"))
 	// credentialFields are the request fields Log never records, lowercase.
 	credentialFields = [...]string{"authorization", "proxy-authorization", "cookie"}
+	// traceLineStart opens the field line Trace writes on an answer.
+	traceLineStart = []byte("traceparent: ")
+	// traceLineEnd closes it.
+	traceLineEnd = []byte("\r\n")
 )
 
 // RouteValue is one route of a router link: an identifier the application
@@ -67,6 +122,13 @@ func newLink(next corenet.HTTP1Handler) link {
 	b, _ := next.(corenet.HTTP1Batcher)
 	//: both, from the one handler.
 	return link{next: next, batcher: b}
+}
+
+// wrapped returns the handler the link wraps, so the adapter can reach what a
+// chain ends in.
+func (l *link) wrapped() corenet.HTTP1Handler {
+	//: the next handler of the chain.
+	return l.next
 }
 
 // endBatch ends the next handler's batch when it is a batcher.
@@ -151,7 +213,7 @@ type RouteLayer struct {
 
 // ServeHTTP1 implements corenet.HTTP1Handler.
 func (l *RouteLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
-	req.Route = 0
+	req.Route, req.RoutePrefix = 0, 0
 	//: the first route that matches.
 	for i := range l.routes {
 		r := &l.routes[i]
@@ -159,6 +221,10 @@ func (l *RouteLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTT
 		if (len(r.method) == 0 || bytes.Equal(r.method, req.Method)) &&
 			(bytes.Equal(r.path, req.Path) || (r.prefix && prefixOf(r.path, req.Path))) {
 			req.Route = r.id
+			//: a prefix route says how far it reached, for a file tree's name.
+			if r.prefix {
+				req.RoutePrefix = len(r.path)
+			}
 			break
 		}
 	}
@@ -340,41 +406,198 @@ func (l *HeadersLayer) EndBatch(lane int) {
 }
 
 // Log returns the access-log link of an http1 chain: once the next handler
-// has answered, it hands l one corenet.HTTP1AccessValue — lane, route,
-// method, canonical path, status, body length, whether the request was
-// authenticated and whether its answer was deferred — with the request's
-// fields named in allow, at most corenet.HTTP1MaxAccessFields of them. It
-// never logs the query, the body or a credential: Authorization,
-// Proxy-Authorization and Cookie in allow are refused with
-// corenet.HTTP1Misconfigured, as are a nil l, an empty or repeated name and a
-// name that is not a token.
-func Log(l corenet.HTTP1AccessLogger, allow ...string) (corenet.Middleware[corenet.HTTP1Handler], error) {
+// has answered, it hands l one corenet.HTTP1AccessValue — lane, route, method,
+// canonical path, status, body length, whether the request was authenticated,
+// the request's ID and its RequestID and the Elapsed time from the batch's
+// start — with the fields LogAllow names. A deferred answer has a second
+// record when it completes, Completed set, carrying its status and the time
+// since it was deferred; a Pending answer has only the first, its status zero,
+// a worker's answer being the handler's own to log. LogSlowerThan keeps the
+// slow records, LogSample one in n, and with both, every slow one and one in n
+// of the rest. It never logs the query, the body or a credential: Authorization,
+// Proxy-Authorization and Cookie in LogAllow are refused with
+// corenet.HTTP1Misconfigured, as are a nil l, an empty or repeated name, a name
+// that is not a token, more names than corenet.HTTP1MaxAccessFields, a threshold
+// that is not positive, a sample of zero or below and a nil clock.
+func Log(l corenet.HTTP1AccessLogger, opts ...LogOption) (corenet.Middleware[corenet.HTTP1Handler], error) {
 	//: a link that logs nowhere.
 	if l == nil {
 		//: refused.
 		return nil, misconfigured("Log", "logger")
 	}
-	//: the record has a fixed number of slots.
-	if len(allow) > corenet.HTTP1MaxAccessFields {
-		//: refused.
-		return nil, misconfigured("Log", "allow")
+	cfg, err := newLogConfig(opts)
+	//: an option the link cannot honour.
+	if err != nil {
+		//: refused, the option named.
+		return nil, err
 	}
-	names := make([][]byte, 0, len(allow))
-	//: each name checked once, here.
-	for i, name := range allow {
-		//: not a token, a credential, or a repeat.
-		if !token(name) || credential(name) || repeated(name, allow[:i]) {
-			//: refused, the name given.
-			return nil, misconfigured("Log", name)
-		}
-		names = append(names, []byte(name))
-	}
-	kept := slices.Clone(allow)
 	//: one layer per handler it wraps.
 	return func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
 		//: the names are shared, read only.
-		return &LogLayer{link: newLink(next), l: l, allow: kept, names: names}
+		return &LogLayer{link: newLink(next), l: l, cfg: cfg}
 	}, nil
+}
+
+// LogOption tunes the Log link: the value LogAllow, LogSlowerThan, LogSample or
+// LogClock returns, judged when the link is built.
+type LogOption struct {
+	// apply folds the option into the link's configuration, or refuses it.
+	apply func(*logConfig) error
+}
+
+// LogAllow names request fields a record carries, at most
+// corenet.HTTP1MaxAccessFields in all; a credential is refused.
+func LogAllow(names ...string) LogOption {
+	kept := slices.Clone(names)
+	//: accumulated, so LogAllow may be given more than once.
+	return LogOption{apply: func(c *logConfig) error {
+		c.allow = append(c.allow, kept...)
+		//: the names are judged together, once every one is known.
+		return nil
+	}}
+}
+
+// LogSlowerThan keeps only the records whose Elapsed reaches d, which must be
+// positive.
+func LogSlowerThan(d time.Duration) LogOption {
+	//: judged when the link is built.
+	return LogOption{apply: func(c *logConfig) error {
+		//: zero would keep everything, and a negative one means nothing.
+		if d <= 0 {
+			//: refused.
+			return misconfigured("Log", "slower")
+		}
+		c.slower = d
+		//: kept.
+		return nil
+	}}
+}
+
+// LogSample keeps one record in n, by the request's counter, so the same
+// request answers alike on both of a deferred answer's records. n must be
+// positive.
+func LogSample(n int) LogOption {
+	//: judged when the link is built.
+	return LogOption{apply: func(c *logConfig) error {
+		//: zero would divide by nothing.
+		if n <= 0 {
+			//: refused.
+			return misconfigured("Log", "sample")
+		}
+		c.sample = uint64(n)
+		//: kept.
+		return nil
+	}}
+}
+
+// LogClock is the clock the link reads for Elapsed; clock.System by default.
+func LogClock(c clock.Clock) LogOption {
+	//: judged when the link is built.
+	return LogOption{apply: func(cfg *logConfig) error {
+		//: a clock is what every record reads.
+		if c == nil {
+			//: refused.
+			return misconfigured("Log", "clock")
+		}
+		cfg.clk = c
+		//: kept.
+		return nil
+	}}
+}
+
+// CORS returns the cross-origin link of an http1 chain: it answers a preflight
+// itself — OPTIONS with Origin and Access-Control-Request-Method, 204, the policy's
+// fields — before any link after it, so a Bearer link never sees a preflight, and
+// gives every other answer the policy's fields. An origin compared byte for byte
+// and not listed receives no CORS field and is still served, the browser being
+// what enforces it. A value the policy refuses is corenet.CORSMisconfigured.
+func CORS(cfg corenet.CORSValue) (corenet.Middleware[corenet.HTTP1Handler], error) {
+	policy, err := corenet.NewCORSPolicy(cfg)
+	//: an origin, method, field or age it cannot honour: refused here, not per request.
+	if err != nil {
+		//: as the policy refused it.
+		return nil, err
+	}
+	//: one layer per handler it wraps.
+	return func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+		//: the policy is shared, read only.
+		return &CORSLayer{link: newLink(next), policy: policy}
+	}, nil
+}
+
+// CORSLayer is the link CORS builds: the layer it wraps around the next
+// handler.
+type CORSLayer struct {
+	link
+	// policy is the built cross-origin policy.
+	policy *corenet.CORSPolicy
+}
+
+// ServeHTTP1 implements corenet.HTTP1Handler.
+func (l *CORSLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+	origin, _ := req.Field(corsOriginField)
+	//: a preflight is answered here: nothing behind this link has its credentials.
+	if len(origin) > 0 && bytes.Equal(req.Method, methodOptions) {
+		//: the question only a preflight asks.
+		if method, ok := req.Field(corsRequestMethodField); ok {
+			res.Status = statusNoContent
+			res.CORS = l.policy.Preflight(origin, method).Lines
+			//: answered.
+			return
+		}
+	}
+	res.CORS = l.policy.Actual(origin).Lines
+	l.next.ServeHTTP1(req, res)
+}
+
+// EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
+// batch when the next handler is a batcher, so a chain defers answers as
+// its handler does.
+func (l *CORSLayer) EndBatch(lane int) {
+	l.endBatch(lane)
+}
+
+// logConfig is every option of a link, checked.
+type logConfig struct {
+	// allow are the field names a record carries, as given; names their bytes.
+	allow []string
+	names [][]byte
+	// slower is the slow threshold, zero when unset.
+	slower time.Duration
+	// sample keeps one record in sample, zero when unset.
+	sample uint64
+	// clk is the clock read.
+	clk clock.Clock
+}
+
+// newLogConfig folds and checks opts.
+func newLogConfig(opts []LogOption) (*logConfig, error) {
+	cfg := &logConfig{clk: clock.System}
+	//: each option in turn, the last of a kind winning.
+	for _, o := range opts {
+		//: a refused value is named.
+		if err := o.apply(cfg); err != nil {
+			//: refused.
+			return nil, err
+		}
+	}
+	//: the record has a fixed number of slots.
+	if len(cfg.allow) > corenet.HTTP1MaxAccessFields {
+		//: refused.
+		return nil, misconfigured("Log", "allow")
+	}
+	cfg.names = make([][]byte, 0, len(cfg.allow))
+	//: each name checked once, here.
+	for i, name := range cfg.allow {
+		//: not a token, a credential, or a repeat.
+		if !token(name) || credential(name) || repeated(name, cfg.allow[:i]) {
+			//: refused, the name given.
+			return nil, misconfigured("Log", name)
+		}
+		cfg.names = append(cfg.names, []byte(name))
+	}
+	//: checked.
+	return cfg, nil
 }
 
 // credential reports whether name is a field Log never records.
@@ -411,37 +634,514 @@ type LogLayer struct {
 	link
 	// l receives the records.
 	l corenet.HTTP1AccessLogger
-	// allow are the field names a record carries, as given.
-	allow []string
-	// names are allow's bytes, a record's field names.
-	names [][]byte
+	// cfg holds the link's options, read only.
+	cfg *logConfig
+	// lanes holds each lane's batch stamp and deferred records.
+	lanes laneTable[logLane]
+}
+
+// logLane is what the link keeps per lane, between the requests of a batch.
+type logLane struct {
+	// start is when the batch's first request reached the link.
+	start time.Time
+	// started says whether start is this batch's.
+	started bool
+	// deferred are the batch's deferred answers still to complete.
+	deferred []deferredAccess
+}
+
+// deferredAccess is a deferred answer's first record, kept for its second.
+type deferredAccess struct {
+	// rec is the first record: its slices live until the batch's end.
+	rec corenet.HTTP1AccessValue
+	// at is when the answer was deferred.
+	at time.Time
+	// res is the deferred answer, valid until EndBatch returns.
+	res *corenet.HTTP1ResponseValue
 }
 
 // ServeHTTP1 implements corenet.HTTP1Handler.
 func (l *LogLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+	lane := l.lanes.get(req.Lane)
+	//: the first request of a batch stamps it: the others start from it.
+	if !lane.started {
+		lane.start, lane.started = l.cfg.clk.Now(), true
+	}
 	l.next.ServeHTTP1(req, res)
+	now := l.cfg.clk.Now()
 	rec := corenet.HTTP1AccessValue{
 		Lane: req.Lane, Route: req.Route, Method: req.Method, Path: req.Path,
-		BodyLen: len(res.Body), Authenticated: req.Authenticated, Deferred: res.Defer,
+		BodyLen: len(res.Body), Authenticated: req.Authenticated, Stage: stageOf(res),
+		TraceID: req.Trace.TraceID, RequestID: req.RequestID, ID: req.ID,
+		Proto: req.Proto, Stream: req.Stream,
+		Elapsed: corenet.DurationValue(now.Sub(lane.start)),
 	}
-	//: a deferred answer has no status yet; zero is 200 otherwise.
-	if !res.Defer {
+	//: an answer the batch's end or a worker fills has no status yet; zero is
+	//: 200 otherwise.
+	if !res.Defer && !res.Pending {
 		rec.Status = orDefault(res.Status, statusOK)
 	}
 	//: the allowed fields the request carried, in the link's order.
-	for i, name := range l.allow {
+	for i, name := range l.cfg.allow {
 		//: a field absent from the request takes no slot.
 		if v, ok := req.Field(name); ok {
-			rec.Fields[rec.NFields] = corenet.HTTP1FieldValue{Name: l.names[i], Value: v}
+			rec.Fields[rec.NFields] = corenet.HTTP1FieldValue{Name: l.cfg.names[i], Value: v}
 			rec.NFields++
 		}
 	}
-	l.l.LogHTTP1(rec)
+	//: kept for the completion record, by value: the request moves on.
+	if res.Defer {
+		lane.deferred = append(lane.deferred, deferredAccess{rec: rec, at: now, res: res})
+	}
+	l.emit(&rec)
+}
+
+// stageOf names what a record says about the answer res holds.
+func stageOf(res *corenet.HTTP1ResponseValue) corenet.HTTP1AccessStage {
+	//: the two ways an answer leaves ServeHTTP1 unwritten.
+	switch {
+	case res.Defer:
+		//: completed at the batch's end.
+		return corenet.HTTP1AccessDeferred
+	case res.Pending:
+		//: the worker's to answer.
+		return corenet.HTTP1AccessPending
+	}
+	//: written now.
+	return corenet.HTTP1AccessAnswered
+}
+
+// emit hands rec to the logger when the link's filters keep it.
+func (l *LogLayer) emit(rec *corenet.HTTP1AccessValue) {
+	//: judged per record, so a slow completion is logged though its first was not.
+	if l.keep(rec) {
+		l.l.LogHTTP1(*rec)
+	}
+}
+
+// keep reports whether a record passes the link's filters: every slow one, and
+// one in n of the rest; with neither filter, every record.
+func (l *LogLayer) keep(rec *corenet.HTTP1AccessValue) bool {
+	slow := l.cfg.slower > 0 && rec.Elapsed.Duration() >= l.cfg.slower
+	sampled := l.cfg.sample > 0 && (rec.ID&counterMask)%l.cfg.sample == 0
+	//: no filter at all keeps everything; otherwise either filter admits it.
+	return (l.cfg.slower == 0 && l.cfg.sample == 0) || slow || sampled
+}
+
+// EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
+// batch when the next handler is a batcher, so a chain defers answers as
+// its handler does, then gives each answer deferred in the batch its
+// completion record.
+func (l *LogLayer) EndBatch(lane int) {
+	l.finishBatch(lane)
+}
+
+// finishBatch ends the next handler's batch, then writes the batch's deferred
+// answers their completion records and forgets its stamp.
+func (l *LogLayer) finishBatch(lane int) {
+	l.endBatch(lane)
+	ln := l.lanes.get(lane)
+	ln.started = false
+	//: every deferred answer of the batch now holds what it will send.
+	if len(ln.deferred) == 0 {
+		//: nothing to complete.
+		return
+	}
+	now := l.cfg.clk.Now()
+	//: in the order they were deferred.
+	for i := range ln.deferred {
+		d := &ln.deferred[i]
+		d.rec.Stage = corenet.HTTP1AccessCompleted
+		d.rec.BodyLen = len(d.res.Body)
+		d.rec.Status = completionStatus(d.res)
+		d.rec.Elapsed = corenet.DurationValue(now.Sub(d.at))
+		l.emit(&d.rec)
+		d.res = nil
+	}
+	ln.deferred = ln.deferred[:0]
+}
+
+// completionStatus is the status a deferred answer leaves with: the 500 the
+// adapter writes for one left deferred, or the handler's, zero meaning 200.
+func completionStatus(res *corenet.HTTP1ResponseValue) int {
+	//: left deferred past EndBatch: the adapter answers 500.
+	if res.Defer {
+		//: the status the wire will carry.
+		return statusInternal
+	}
+	//: what the handler set.
+	return orDefault(res.Status, statusOK)
+}
+
+// Trace returns the link of an http1 chain that reads a request's W3C
+// traceparent, once, parsed with no allocation, into HTTP1RequestValue.Trace —
+// a malformed one is left invalid and the request served (§4.3) — and writes
+// a version-00 traceparent of the same trace on the answer when the request
+// had one, as HTTP1ResponseValue.TraceLine: a Pending answer, written from the
+// worker's own response value, does not carry it. It samples and exports
+// nothing: what to do with the value is the handler's.
+func Trace() corenet.Middleware[corenet.HTTP1Handler] {
+	//: one layer per handler it wraps.
+	return func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+		//: the batcher found once, never per batch.
+		return &TraceLayer{link: newLink(next)}
+	}
+}
+
+// TraceLayer is the link Trace builds: the layer it wraps around the next
+// handler.
+type TraceLayer struct {
+	link
+}
+
+// ServeHTTP1 implements corenet.HTTP1Handler.
+func (l *TraceLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+	//: a request carrying the field: read once, an invalid value left invalid.
+	if value, ok := req.Field(traceFieldName); ok {
+		req.Trace, _ = coretrace.ParseTraceParentBytes(value)
+	}
+	//: the answer names the trace the request joined.
+	if req.Trace.IsValid() {
+		line := append(res.TraceLine[:0], traceLineStart...)
+		line = coretrace.AppendTraceParent(line, req.Trace)
+		addHeader(res, append(line, traceLineEnd...))
+	}
+	l.next.ServeHTTP1(req, res)
 }
 
 // EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
 // batch when the next handler is a batcher, so a chain defers answers as
 // its handler does.
-func (l *LogLayer) EndBatch(lane int) {
+func (l *TraceLayer) EndBatch(lane int) {
 	l.endBatch(lane)
+}
+
+// RequestIDOption tunes the RequestID link: RequestIDMint is the one option a
+// link is built with.
+type RequestIDOption struct {
+	// mint makes the link mint every identifier.
+	mint bool
+}
+
+// RequestIDMint makes the RequestID link mint every identifier and read nothing
+// the client sent: for an edge that must not trust a caller's id.
+func RequestIDMint() RequestIDOption {
+	//: the one option.
+	return RequestIDOption{mint: true}
+}
+
+// RequestID returns the link of an http1 chain that gives every request a
+// correlation identifier: the X-Request-Id field the client sent, when it is 1
+// to corenet.HTTP1MaxRequestID bytes of visible ASCII, and otherwise — absent,
+// longer or holding any other byte — one minted from HTTP1RequestValue.ID as
+// sixteen lowercase hexadecimal digits, the request being served either way.
+// It copies the identifier into HTTP1RequestValue.RequestID, by value, and onto
+// the answer, which the codec writes as X-Request-Id after the handler's Header,
+// a deferred or a pending one included. The access record of a Log link in the
+// same chain carries it. RequestIDMint makes it mint always.
+func RequestID(opts ...RequestIDOption) corenet.Middleware[corenet.HTTP1Handler] {
+	mint := false
+	//: one option of consequence: any of them asking is enough.
+	for _, o := range opts {
+		mint = mint || o.mint
+	}
+	//: one layer per handler it wraps.
+	return func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+		//: the batcher found once, never per batch.
+		return &RequestIDLayer{link: newLink(next), mint: mint}
+	}
+}
+
+// RequestIDLayer is the link RequestID builds: the layer it wraps around the
+// next handler.
+type RequestIDLayer struct {
+	link
+	// mint makes the layer ignore the client's identifier.
+	mint bool
+}
+
+// ServeHTTP1 implements corenet.HTTP1Handler.
+func (l *RequestIDLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+	//: the client's, when one is asked for and valid; anything else is replaced.
+	if !l.accepted(req) {
+		mintRequestID(req)
+	}
+	res.RequestID = req.RequestID
+	l.next.ServeHTTP1(req, res)
+}
+
+// accepted copies the client's identifier into req, and reports whether there
+// was one the link may keep.
+func (l *RequestIDLayer) accepted(req *corenet.HTTP1RequestValue) bool {
+	//: an edge reads nothing of what the client sent.
+	if l.mint {
+		//: minted.
+		return false
+	}
+	v, ok := req.Field(requestIDFieldName)
+	//: Set is the gate: empty, too long or an invisible byte stays absent.
+	return ok && req.RequestID.Set(v)
+}
+
+// mintRequestID writes req.ID as sixteen lowercase hexadecimal digits into
+// req.RequestID, the digits of the value being the only input: no clock, no
+// randomness, nothing shared between lanes.
+func mintRequestID(req *corenet.HTTP1RequestValue) {
+	var digits [mintedIDLen]byte
+	v := req.ID
+	//: from the last digit to the first.
+	for i := mintedIDLen - 1; i >= 0; i-- {
+		digits[i] = lowerHex[v&nibbleMask]
+		v >>= nibbleBits
+	}
+	//: sixteen visible bytes: always accepted.
+	req.RequestID.Set(digits[:])
+}
+
+// EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
+// batch when the next handler is a batcher, so a chain defers answers as
+// its handler does.
+func (l *RequestIDLayer) EndBatch(lane int) {
+	l.endBatch(lane)
+}
+
+// rateKeyKind names what a RateKey keys on.
+type rateKeyKind uint8
+
+// rateLane is what RateLimit keeps per lane.
+type rateLane struct {
+	// key is the scratch a route's or a lane's key is written into, in the state
+	// so its slice costs nothing on the interface call.
+	key [routeKeyLen]byte
+	// now is the clock's reading of this batch, in nanoseconds since the epoch.
+	now int64
+	// fresh says whether now is this batch's.
+	fresh bool
+}
+
+// RateKey is what the RateLimit link keys a request on, built by RateKeySubject,
+// RateKeyRoute, RateKeyLane or RateKeyField; the zero RateKey is refused.
+type RateKey struct {
+	// kind is the kind of key, zero for none.
+	kind rateKeyKind
+	// field is the request field RateKeyField names.
+	field string
+}
+
+// RateKeySubject keys requests on the subject a Bearer link in the chain verified.
+func RateKeySubject() RateKey {
+	//: a key on the Auth value.
+	return RateKey{kind: rateKeySubject}
+}
+
+// RateKeyRoute keys requests on the route a Routes link in the chain matched.
+func RateKeyRoute() RateKey {
+	//: a key on the route.
+	return RateKey{kind: rateKeyRoute}
+}
+
+// RateKeyLane keys requests on the lane that serves them.
+func RateKeyLane() RateKey {
+	//: a key on the lane.
+	return RateKey{kind: rateKeyLane}
+}
+
+// RateKeyField keys requests on the value of the request field name. A field
+// is only as trustworthy as whatever sets it in front of this server.
+func RateKeyField(name string) RateKey {
+	//: a key on a field.
+	return RateKey{kind: rateKeyField, field: name}
+}
+
+// RateOption tunes the RateLimit link: the value RateExempt or RateClock returns,
+// judged when the link is built.
+type RateOption struct {
+	// apply folds the option into the link's configuration, or refuses it.
+	apply func(*rateConfig) error
+}
+
+// rateConfig is every option of a RateLimit link, checked.
+type rateConfig struct {
+	// exempt are the routes never judged.
+	exempt []int
+	// clk is the clock read once per batch.
+	clk clock.Clock
+}
+
+// RateExempt names routes the RateLimit link never judges.
+func RateExempt(ids ...int) RateOption {
+	kept := slices.Clone(ids)
+	//: judged when the link is built.
+	return RateOption{apply: func(c *rateConfig) error {
+		//: each named route.
+		for _, id := range kept {
+			//: zero is "no route": exempting it would exempt every unrouted request.
+			if id <= 0 {
+				//: refused.
+				return misconfigured("RateLimit", "exempt")
+			}
+		}
+		c.exempt = append(c.exempt, kept...)
+		//: kept.
+		return nil
+	}}
+}
+
+// RateClock is the clock the RateLimit link reads, once per batch; clock.System by default.
+func RateClock(c clock.Clock) RateOption {
+	//: judged when the link is built.
+	return RateOption{apply: func(cfg *rateConfig) error {
+		//: a clock is what every batch reads.
+		if c == nil {
+			//: refused.
+			return misconfigured("RateLimit", "clock")
+		}
+		cfg.clk = c
+		//: kept.
+		return nil
+	}}
+}
+
+// RateLimit returns the link of an http1 chain that refuses a request past its
+// key's budget, by l: a 429 with Retry-After and Connection: close, going no
+// further. It belongs after the links that give the key — Bearer for a subject,
+// Routes for a route — and before the handler. RateExempt names routes it never
+// judges. A nil limiter, a RateKey built by none of RateKeySubject, RateKeyRoute,
+// RateKeyLane or RateKeyField, and an option it cannot honour are refused with
+// corenet.HTTP1Misconfigured. A request carrying no key — no subject or no such
+// field — takes the empty key, and every such request shares one bucket.
+func RateLimit(l corenet.HTTP1Limiter, key RateKey, opts ...RateOption) (corenet.Middleware[corenet.HTTP1Handler], error) {
+	//: a link that limits by nothing.
+	if l == nil {
+		//: refused.
+		return nil, misconfigured("RateLimit", "limiter")
+	}
+	//: a key the link cannot read.
+	if key.kind == rateKeyNone || (key.kind == rateKeyField && !token(key.field)) {
+		//: refused.
+		return nil, misconfigured("RateLimit", "key")
+	}
+	cfg := &rateConfig{clk: clock.System}
+	//: each option in turn.
+	for _, o := range opts {
+		//: a refused value is named.
+		if err := o.apply(cfg); err != nil {
+			//: refused.
+			return nil, err
+		}
+	}
+	//: one layer per handler it wraps.
+	return func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+		//: the configuration is shared, read only.
+		return &RateLimitLayer{link: newLink(next), l: l, key: key, cfg: cfg, epoch: cfg.clk.Now()}
+	}, nil
+}
+
+// RateLimitLayer is the link RateLimit builds: the layer it wraps around the next
+// handler.
+type RateLimitLayer struct {
+	link
+	// l decides.
+	l corenet.HTTP1Limiter
+	// key says what a request is keyed on.
+	key RateKey
+	// cfg holds the link's options, read only.
+	cfg *rateConfig
+	// epoch is the link's zero instant: now is a monotonic count from it.
+	epoch time.Time
+	// lanes holds each lane's batch stamp and scratch.
+	lanes laneTable[rateLane]
+}
+
+// ServeHTTP1 implements corenet.HTTP1Handler.
+func (l *RateLimitLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+	//: an exempt route is never judged.
+	if slices.Contains(l.cfg.exempt, req.Route) {
+		l.next.ServeHTTP1(req, res)
+		//: not judged.
+		return
+	}
+	lane := l.lanes.get(req.Lane)
+	//: the first request of a batch reads the clock: the others share it.
+	if !lane.fresh {
+		lane.now, lane.fresh = l.cfg.clk.Now().Sub(l.epoch).Nanoseconds(), true
+	}
+	ok, after := l.l.Allow(l.keyOf(req, lane), lane.now)
+	//: over budget: refused here, and no handler runs.
+	if !ok {
+		res.Status, res.RetryAfter, res.Close = statusTooManyRequests, after, true
+		//: refused.
+		return
+	}
+	l.next.ServeHTTP1(req, res)
+}
+
+// keyOf returns the bytes req is keyed on: a subject's or a field's own bytes, or
+// the lane's scratch for a number.
+func (l *RateLimitLayer) keyOf(req *corenet.HTTP1RequestValue, lane *rateLane) []byte {
+	//: by what the link was built to key on.
+	switch l.key.kind {
+	case rateKeySubject:
+		//: empty for an unauthenticated request.
+		return req.Auth.Subject()
+	case rateKeyField:
+		v, _ := req.Field(l.key.field)
+		//: empty when absent.
+		return v
+	case rateKeyRoute:
+		//: the route number, in the lane's scratch.
+		return appendBE(&lane.key, uint64(req.Route))
+	default:
+		//: the lane, the only other kind construction lets through.
+		return appendBE(&lane.key, uint64(req.Lane))
+	}
+}
+
+// appendBE writes v big-endian into buf and returns it as a slice.
+func appendBE(buf *[routeKeyLen]byte, v uint64) []byte {
+	//: from the low byte up.
+	for i := routeKeyLen - 1; i >= 0; i-- {
+		buf[i] = byte(v)
+		v >>= byteBits
+	}
+	//: the whole array.
+	return buf[:]
+}
+
+// EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
+// batch when the next handler is a batcher, so a chain defers answers as
+// its handler does.
+func (l *RateLimitLayer) EndBatch(lane int) {
+	l.finishRateBatch(lane)
+}
+
+// finishRateBatch ends the next handler's batch and forgets the batch's stamp.
+func (l *RateLimitLayer) finishRateBatch(lane int) {
+	l.endBatch(lane)
+	l.lanes.get(lane).fresh = false
+}
+
+// FilesLayer is the link Files builds: the layer it wraps around the next
+// handler.
+type FilesLayer struct {
+	link
+	// route is the route it serves; tag its jobs' top bits.
+	route int
+	tag   uint64
+	// fsys is the tree.
+	fsys fs.FS
+	// immutable and spa are the static tree's policies.
+	immutable func(name string) bool
+	spa       bool
+	// base holds every answer's fields; allow base and a 405's.
+	base  []byte
+	allow []byte
+	// nextWorker and nextCanceller are what the handler behind it answers
+	// jobs with, nil when it does not.
+	nextWorker    corenet.HTTP1Worker
+	nextCanceller jobCanceller
+	// lanes holds each lane's job table, built on its first request, replaced
+	// and never written in place under mu; a lane reads it without the lock.
+	lanes atomic.Pointer[[]*filesLane]
+	mu    sync.Mutex
 }

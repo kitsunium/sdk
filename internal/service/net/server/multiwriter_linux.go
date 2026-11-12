@@ -84,6 +84,9 @@ type pendingReply struct {
 	name syscall.RawSockaddrInet6
 	// namelen is the length of name the kernel reads.
 	namelen uint32
+	// source is the address the reply leaves from, zero for the kernel's
+	// choice (#972).
+	source localAddress
 }
 
 // addr is the peer e was queued for, as WriteTo takes it: the fallback of a
@@ -131,6 +134,9 @@ type multiWriter struct {
 	counters *datagramCounters
 	// onGSOOff is called once GSO is switched off on this socket.
 	onGSOOff func()
+	// pin sends one reply from a named source, off the batched path; nil on a
+	// socket whose reads name no destination (#972).
+	pin *pinWriter
 	// send is sendmmsg; a test swaps it to answer what a device would.
 	send func(fd uintptr, headers []mmsghdr) (sent int, errno syscall.Errno)
 	// gso is on until the device refuses a GSO send for want of checksum
@@ -219,7 +225,7 @@ func newMultiWriter(pc stdnet.PacketConn, sc rawConnProvider, counters *datagram
 		pc: pc, raw: raw, family: family, counters: counters, onGSOOff: onGSOOff, send: sendmmsg,
 		arena: make([]byte, replyArena), queue: make([]pendingReply, 0, replyQueue),
 		headers: make([]mmsghdr, replyQueue), iovecs: make([]syscall.Iovec, replyQueue),
-		spans: make([]replySpan, replyQueue), controlSpace: syscall.CmsgSpace(segmentSizeBytes),
+		spans: make([]replySpan, replyQueue), controlSpace: syscall.CmsgSpace(segmentSizeBytes) + syscall.CmsgSpace(in6PktinfoBytes),
 	}
 	w.oob = make([]byte, replyQueue*w.controlSpace)
 	w.gso.Store(gso)
@@ -259,6 +265,12 @@ func (w *multiWriter) begin() {
 // since the handler has returned. Outside one, or for a peer this sink cannot
 // address, it is one WriteTo.
 func (w *multiWriter) reply(b []byte, to stdnet.Addr) (n int, err error) {
+	//: the kernel's choice of source.
+	return w.replyFrom(b, to, localAddress{})
+}
+
+// replyFrom implements datagramSink: as reply, leaving from source.
+func (w *multiWriter) replyFrom(b []byte, to stdnet.Addr, source localAddress) (n int, err error) {
 	w.mu.Lock()
 	var entry pendingReply
 	//: no batch open, a reply larger than the arena, or a peer without a
@@ -266,8 +278,9 @@ func (w *multiWriter) reply(b []byte, to stdnet.Addr) (n int, err error) {
 	if !w.open || len(b) > len(w.arena) || !w.encode(to, &entry) {
 		w.mu.Unlock()
 		//: the write's own answer.
-		return w.pc.WriteTo(b, to)
+		return w.writeNow(b, to, source)
 	}
+	entry.source = source
 	//: the queue or the arena is full: send what is queued to make room.
 	if len(w.queue) == cap(w.queue) || w.used+len(b) > len(w.arena) {
 		w.flushLocked()
@@ -286,25 +299,32 @@ func (w *multiWriter) reply(b []byte, to stdnet.Addr) (n int, err error) {
 // IPv6 socket, as a mapped address; a zoned IPv6 peer is left to WriteTo, which
 // resolves its zone.
 func (w *multiWriter) encode(to stdnet.Addr, entry *pendingReply) bool {
+	//: the shared encoding, into this reply's own fields.
+	return encodeSockaddr(w.family, to, &entry.name, &entry.namelen)
+}
+
+// encodeSockaddr writes to's sockaddr for a socket of family into name, and
+// reports whether it could, as multiWriter.encode says.
+func encodeSockaddr(family int, to stdnet.Addr, name *syscall.RawSockaddrInet6, namelen *uint32) bool {
 	udp, ok := to.(*stdnet.UDPAddr)
 	//: only UDP peers, unzoned.
 	if !ok || udp == nil || udp.Zone != "" {
 		//: WriteTo's.
 		return false
 	}
-	port := (*[2]byte)(unsafe.Pointer(&entry.name.Port))
+	port := (*[2]byte)(unsafe.Pointer(&name.Port))
 	port[0], port[1] = byte(udp.Port>>portByteShift), byte(udp.Port)
 	//: an IPv6 socket writes every peer as sockaddr_in6.
-	if w.family == syscall.AF_INET6 {
+	if family == syscall.AF_INET6 {
 		ip := udp.IP.To16()
 		//: not an IP address at all.
 		if ip == nil {
 			//: WriteTo's.
 			return false
 		}
-		entry.name.Family = syscall.AF_INET6
-		copy(entry.name.Addr[:], ip)
-		entry.namelen = syscall.SizeofSockaddrInet6
+		name.Family = syscall.AF_INET6
+		copy(name.Addr[:], ip)
+		*namelen = syscall.SizeofSockaddrInet6
 		//: addressed.
 		return true
 	}
@@ -314,10 +334,10 @@ func (w *multiWriter) encode(to stdnet.Addr, entry *pendingReply) bool {
 		//: WriteTo's, which reports it.
 		return false
 	}
-	sa4 := (*syscall.RawSockaddrInet4)(unsafe.Pointer(&entry.name))
+	sa4 := (*syscall.RawSockaddrInet4)(unsafe.Pointer(name))
 	sa4.Family = syscall.AF_INET
 	copy(sa4.Addr[:], ip)
-	entry.namelen = syscall.SizeofSockaddrInet4
+	*namelen = syscall.SizeofSockaddrInet4
 	//: addressed.
 	return true
 }
@@ -373,6 +393,13 @@ func (w *multiWriter) build(start int) int {
 	return messages
 }
 
+// joins reports whether next may be a segment of e's GSO message: same peer,
+// same source, no larger than e, and not empty.
+func (e *pendingReply) joins(next *pendingReply) bool {
+	//: one message goes to one peer from one source, each segment at most e's.
+	return next.name == e.name && next.namelen == e.namelen && next.source == e.source && next.size <= e.size && next.size != 0
+}
+
 // runFrom returns how many replies from e one GSO message carries.
 func (w *multiWriter) runFrom(e int) int {
 	first := &w.queue[e]
@@ -381,8 +408,9 @@ func (w *multiWriter) runFrom(e int) int {
 	//: the next reply joins while it goes to the same peer, no larger.
 	for run < limit && e+run < len(w.queue) {
 		next := &w.queue[e+run]
-		//: another peer, or a larger datagram, starts a new message.
-		if next.name != first.name || next.namelen != first.namelen || next.size > first.size || next.size == 0 {
+		//: another peer, another source, or a larger datagram, starts a new
+		//: message.
+		if !first.joins(next) {
 			break
 		}
 		run++
@@ -409,20 +437,38 @@ func (w *multiWriter) layout(m, first, count, total int) {
 	setKernelLen(&hdr.Iovlen, 1)
 	hdr.Flags = 0
 	w.spans[m] = replySpan{first: first, count: count}
-	//: one datagram: no segment size to send.
-	if count == 1 {
+	control := w.oob[m*w.controlSpace : (m+1)*w.controlSpace]
+	used := w.writeControl(control, entry, count)
+	//: no control message at all.
+	if used == 0 {
 		hdr.Control = nil
 		setKernelLen(&hdr.Controllen, 0)
 		return
 	}
-	control := w.oob[m*w.controlSpace : (m+1)*w.controlSpace]
-	cmsg := (*syscall.Cmsghdr)(unsafe.Pointer(&control[0]))
-	cmsg.Level = syscall.IPPROTO_UDP
-	cmsg.Type = udpSegment
-	cmsg.SetLen(syscall.CmsgLen(segmentSizeBytes))
-	*(*uint16)(unsafe.Pointer(&control[syscall.CmsgLen(0)])) = uint16(entry.size)
 	hdr.Control = &control[0]
-	setKernelLen(&hdr.Controllen, w.controlSpace)
+	setKernelLen(&hdr.Controllen, used)
+}
+
+// writeControl writes a message's control data: UDP_SEGMENT when it carries
+// several datagrams, the source when its reply names one (#972). It returns the
+// bytes it wrote.
+func (w *multiWriter) writeControl(control []byte, entry *pendingReply, count int) int {
+	used := 0
+	//: several datagrams: the kernel cuts them at this size.
+	if count > 1 {
+		cmsg := (*syscall.Cmsghdr)(unsafe.Pointer(&control[0]))
+		cmsg.Level = syscall.IPPROTO_UDP
+		cmsg.Type = udpSegment
+		cmsg.SetLen(syscall.CmsgLen(segmentSizeBytes))
+		*(*uint16)(unsafe.Pointer(&control[syscall.CmsgLen(0)])) = uint16(entry.size)
+		used = syscall.CmsgSpace(segmentSizeBytes)
+	}
+	//: the source the datagrams leave from.
+	if entry.source.sourceLen != 0 {
+		used += writePktinfo(control[used:], w.family, entry.source)
+	}
+	//: what was written.
+	return used
 }
 
 // sendAll sends messages [0, messages) built from the queue, resuming from the
@@ -472,11 +518,28 @@ func (w *multiWriter) refused(k, messages int, errno syscall.Errno) (resume int,
 	case span.count > 1:
 		//: judged by what GSO's errnos mean.
 		return w.gsoRefused(span, errno)
+	//: a source this socket may not send from: sent again from the kernel's
+	//: choice.
+	case errno == syscall.EINVAL && w.queue[span.first].source.sourceLen != 0:
+		w.unpinned(span.first)
+		//: passed, left or counted.
+		return 0, false
 	//: any other refusal drops this message's reply, counted.
 	default:
 		w.counters.replyFailures.Add(uint64(span.count))
 		//: passed.
 		return 0, false
+	}
+}
+
+// unpinned sends reply i with the kernel's choice of source: a destination the
+// socket read may not be one it may send from (a broadcast address on a
+// dual-stack socket). A failure is counted as any queued reply's.
+func (w *multiWriter) unpinned(i int) {
+	entry := &w.queue[i]
+	//: counted, as any queued reply's that does not leave.
+	if _, err := w.pc.WriteTo(w.arena[entry.off:entry.off+entry.size], entry.addr()); err != nil {
+		w.counters.replyFailures.Add(1)
 	}
 }
 
@@ -574,7 +637,7 @@ func (w *multiWriter) writeEach(first, last int) int {
 	for i := first; i < last; i++ {
 		entry := &w.queue[i]
 		//: the write's own answer, counted when it fails.
-		if _, err := w.pc.WriteTo(w.arena[entry.off:entry.off+entry.size], entry.addr()); err != nil {
+		if _, err := w.writeNow(w.arena[entry.off:entry.off+entry.size], entry.addr(), entry.source); err != nil {
 			w.counters.replyFailures.Add(1)
 			continue
 		}
@@ -582,6 +645,18 @@ func (w *multiWriter) writeEach(first, last int) int {
 	}
 	//: how many left.
 	return left
+}
+
+// writeNow sends one reply off the batch, from source when it names one and the
+// socket can.
+func (w *multiWriter) writeNow(b []byte, to stdnet.Addr, source localAddress) (n int, err error) {
+	//: a source to pin, on a socket that can.
+	if source.sourceLen != 0 && w.pin != nil {
+		//: the send's own answer.
+		return w.pin.send(b, to, source)
+	}
+	//: the kernel's choice.
+	return w.pc.WriteTo(b, to)
 }
 
 // fail counts the replies of messages [k, messages) as failed.

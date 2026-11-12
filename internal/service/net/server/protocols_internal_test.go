@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	corehttp2 "github.com/kitsunium/sdk/internal/core/net/http2"
+
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
@@ -75,13 +77,13 @@ func TestHTTPAdapter_protocols(t *testing.T) {
 	if hs.Protocols == nil || !hs.Protocols.HTTP1() || !hs.Protocols.HTTP2() || hs.Protocols.UnencryptedHTTP2() {
 		t.Fatalf("Protocols %v", hs.Protocols)
 	}
-	want := http2Config(corenet.DurationValue(3*time.Second), 0)
-	if hs.HTTP2 == nil || hs.HTTP2.MaxConcurrentStreams != want.MaxConcurrentStreams ||
+	want := http2Config(corenet.DurationValue(3*time.Second), 0, corehttp2.LimitsValue{MaxStreams: 100, ReceivePerStream: 256 << 10, ReceivePerConn: 1 << 20, MaxFrame: 16 << 10, HeaderTable: 4 << 10}, nil)
+	if hs.HTTP2 == nil || hs.HTTP2.CountError == nil || hs.HTTP2.MaxConcurrentStreams != want.MaxConcurrentStreams ||
 		hs.HTTP2.MaxReadFrameSize != want.MaxReadFrameSize ||
 		hs.HTTP2.MaxDecoderHeaderTableSize != want.MaxDecoderHeaderTableSize ||
 		hs.HTTP2.MaxEncoderHeaderTableSize != want.MaxEncoderHeaderTableSize ||
-		hs.HTTP2.MaxReceiveBufferPerStream != h2ReceivePerStream ||
-		hs.HTTP2.MaxReceiveBufferPerConnection != h2ReceivePerConn ||
+		hs.HTTP2.MaxReceiveBufferPerStream != corehttp2.DefaultReceivePerStream ||
+		hs.HTTP2.MaxReceiveBufferPerConnection != 4*corehttp2.DefaultReceivePerStream ||
 		hs.HTTP2.WriteByteTimeout != 3*time.Second {
 		t.Fatalf("HTTP2 %+v, want %+v", hs.HTTP2, want)
 	}

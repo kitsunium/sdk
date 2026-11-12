@@ -75,6 +75,13 @@ func (w *queuedSink) reply(b []byte, to stdnet.Addr) (n int, err error) {
 	return len(b), nil
 }
 
+// replyFrom implements datagramSink: this sink has no descriptor to name a
+// source on, so the reply is queued as any other.
+func (w *queuedSink) replyFrom(b []byte, to stdnet.Addr, _ localAddress) (n int, err error) {
+	//: the kernel's choice.
+	return w.reply(b, to)
+}
+
 // flush implements datagramSink: it sends what the batch queued and closes it.
 func (w *queuedSink) flush() {
 	w.mu.Lock()

@@ -17,7 +17,7 @@ import (
 const (
 	// epollAcceptBurst is the most connections one listener readiness
 	// accepts before the loop serves the events already in hand.
-	epollAcceptBurst int = 128
+	epollAcceptBurst int = acceptBurst
 	// readChunk is the most bytes one read asks for.
 	readChunk int = 16 << 10
 	// minRead is the least room in the read arena worth a read: below it the
@@ -46,6 +46,10 @@ const (
 	epollExclusive uint32 = 1 << 28
 	// siocinq is SIOCINQ, FIONREAD on a socket (asm-generic/ioctls.h).
 	siocinq uintptr = 0x541B
+	// sendfileStep is the most bytes one sendfile asks for before the loop goes
+	// back to its other connections, a file on a fast peer no reason to stay
+	// on the one connection.
+	sendfileStep int64 = 1 << 20
 	// connEvents are a connection's events while it reads.
 	connEvents uint32 = syscall.EPOLLIN | syscall.EPOLLRDHUP
 )
@@ -67,10 +71,12 @@ type epollLoop struct {
 	r    *ring
 	epfd int
 	evfd int
-	// lfds are the listeners, shared with the group's other loops; set is
-	// the group's hold on them through the drain.
-	lfds []int
-	set  *listenerSet
+	// lfds are the listeners, shared with the group's other loops; owners
+	// says which of them this loop accepts on (a SO_REUSEPORT shard belongs
+	// to one loop, #856); set is the group's hold on them through the drain.
+	lfds   []int
+	owners []int
+	set    *listenerSet
 	// queueDone is, per listener, that the loop took its queue as the group
 	// drains and handed it back; taken how many connections it took from it.
 	queueDone []bool
@@ -99,6 +105,8 @@ type epollLoop struct {
 	// excl is EPOLLEXCLUSIVE when the group registers its listeners with it,
 	// zero when the operator switched it off or the kernel lacks it.
 	excl uint32
+	// busy is busy-poll on this loop's instance (#979).
+	busy epollBusy
 }
 
 // startEpoll starts g's loops on epoll.
@@ -113,23 +121,25 @@ func startEpoll(g *Group, cfg *Config) error {
 	sw := newSwitches(cfg)
 	g.caps = newReport(sw, "epoll")
 	excl := probeExclusive(sw, &g.caps)
-	//: listeners: TCP_NODELAY set before any accept, so every accepted
-	//: socket inherits it; a socket that refuses it still serves.
-	for _, l := range cfg.Listeners {
-		noDelay(l.FD, sw)
-		runner.lfds = append(runner.lfds, l.FD)
-	}
+	busy := probeBusyPollEpoll(cfg, sw, &g.caps, &g.sz)
+	//: listeners: TCP_NODELAY and the listener options set before any
+	//: accept, so every accepted socket inherits them; a socket that refuses
+	//: one still serves.
+	lfds, rows := listenerRows(cfg, sw)
+	runner.lfds = lfds
+	g.caps.apply(rows)
 	//: each loop takes each listener's queue once, as the group drains.
-	runner.set = newListenerSet(runner.lfds, g.sz.loops)
+	owners := ownersOf(cfg.Listeners)
+	runner.set = newListenerSet(runner.lfds, takersOfShards(owners, g.sz.loops, 1))
 	ready := make(chan error, g.sz.loops)
 	//: one thread per loop, each building its own epoll instance after it
 	//: locked itself to its thread.
 	for i := range g.sz.loops {
-		lp := newLoop(g, *cfg, i, mmapAnon)
+		lp := newLoop(g, *cfg, i, mmapAnon, syscall.Munmap)
 		el := &epollLoop{
-			lp: lp, lfds: runner.lfds, set: runner.set,
-			queueDone: make([]bool, len(runner.lfds)), taken: make([]int, len(runner.lfds)),
-			epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl,
+			lp: lp, lfds: runner.lfds, owners: owners, set: runner.set,
+			queueDone: doneOutside(owners, i), taken: make([]int, len(runner.lfds)),
+			epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl, busy: busy,
 		}
 		runner.loops = append(runner.loops, el)
 		g.loops = append(g.loops, lp)
@@ -159,6 +169,8 @@ func startEpoll(g *Group, cfg *Config) error {
 		//: refused.
 		return first
 	}
+	reportAffinity(&g.caps, g.loops)
+	reportBusyEpoll(&g.caps, runner.loops)
 	g.backend = backendEpoll
 	//: running.
 	return nil
@@ -255,6 +267,7 @@ func (el *epollLoop) setup() error {
 		return unavailable("epoll_create1", err)
 	}
 	el.epfd = epfd
+	el.busy.apply(epfd)
 	evfd, _, errno := syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
 	//: no eventfd.
 	if errno != 0 {
@@ -301,6 +314,10 @@ func (el *epollLoop) armListeners() {
 	//: each listener, tagged by index; one the kernel refuses stays out of
 	//: this loop's set, and the group's other loops still accept on it.
 	for i, fd := range el.lfds {
+		//: another loop's shard.
+		if !ownedBy(el.owners, i, el.lp.index) {
+			continue
+		}
 		swallowErr(el.ctl(syscall.EPOLL_CTL_ADD, fd, syscall.EPOLLIN|el.excl, tagListen-int32(i), 0))
 	}
 	el.armed = true
@@ -314,7 +331,11 @@ func (el *epollLoop) disarmListeners() {
 		return
 	}
 	//: each listener; one that was never in the set has nothing to remove.
-	for _, fd := range el.lfds {
+	for i, fd := range el.lfds {
+		//: another loop's shard was never in this set.
+		if !ownedBy(el.owners, i, el.lp.index) {
+			continue
+		}
 		swallowErr(syscall.EpollCtl(el.epfd, syscall.EPOLL_CTL_DEL, fd, nil))
 	}
 	el.armed = false
@@ -326,6 +347,7 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 	runtime.LockOSThread()
 	el.tid = syscall.Gettid()
 	el.lp.threadOK = threadCheck(el.tid)
+	el.lp.pin()
 	//: everything the loop owns is built on its own thread.
 	if err := el.setup(); err != nil {
 		el.teardown()
@@ -342,6 +364,7 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 		el.handle(n)
 		el.control()
 		el.r.wheel.advance(lp.tick, el.r.expire)
+		lp.shrinkSlab()
 		el.pace()
 		lp.h.OnBatchEnd(lp)
 		lp.endBatch()
@@ -358,11 +381,11 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 }
 
 // wait blocks for the next batch of events, a tick at most while anything is
-// timed.
+// timed or the slab has arenas to give back (#809).
 func (el *epollLoop) wait() int {
 	timeout := int(tickEvery / time.Millisecond)
-	//: nothing to time: sleep until an event.
-	if el.r.live == 0 && el.armed && !el.lp.draining {
+	//: nothing to time, nothing to unmap: sleep until an event.
+	if el.r.live == 0 && el.armed && !el.lp.draining && !el.lp.slab.reclaimable() {
 		timeout = -1
 	}
 	n, err := syscall.EpollWait(el.epfd, el.events, timeout)
@@ -656,9 +679,10 @@ func (el *epollLoop) flush(r *ring, slot int32) {
 			return
 		}
 		data := lp.slab.data(c.out)
-		//: everything left.
+		//: the output has left: a file follows it, or nothing.
 		if len(data) == 0 {
-			//: done.
+			el.afterOutput(r, slot)
+			//: done; a file resumes by EPOLLOUT or the next batch's settle.
 			return
 		}
 		n, err := syscall.Write(int(c.fd), data)
@@ -667,6 +691,7 @@ func (el *epollLoop) flush(r *ring, slot int32) {
 		//: some or all of it left.
 		case n > 0:
 			c.out.off += int32(n)
+			r.wrote(n)
 			//: the chunk is drained: it goes back to the slab at once, since
 			//: no handler holds the output.
 			if c.out.off == c.out.len {
@@ -691,6 +716,79 @@ func (el *epollLoop) flush(r *ring, slot int32) {
 	}
 }
 
+// afterOutput sends slot's file when one follows its output, a step at a time
+// until the socket is full or a step is spent; bytes written after the file's
+// last step go out with the settle that follows.
+func (el *epollLoop) afterOutput(r *ring, slot int32) {
+	//: until the step ends; an interrupted one is taken again.
+	for r.conns[slot].fileFD >= 0 && r.conns[slot].state != stDead && el.sendFile(r, slot) {
+	}
+}
+
+// sendFile sends the next step of slot's file and reports whether to go on: an
+// interruption only. A socket full, or a step spent, arms EPOLLOUT; a peer or
+// file failure closes the connection.
+func (el *epollLoop) sendFile(r *ring, slot int32) bool {
+	c := &r.conns[slot]
+	off := c.fileOff
+	n, err := syscall.Sendfile(int(c.fd), int(c.fileFD), &off, int(min(c.fileLeft, sendfileStep)))
+	//: by outcome.
+	switch {
+	//: some of it left.
+	case n > 0:
+		c.fileOff, c.fileLeft = off, c.fileLeft-int64(n)
+		r.st.bytesOut += uint64(n)
+		c.lastIO = el.lp.tick
+		//: the last byte is gone.
+		if c.fileLeft == 0 {
+			r.fileDone(slot)
+			//: any output behind it goes out with the next settle.
+			return false
+		}
+	//: interrupted: again.
+	case err == syscall.EINTR:
+		//: resumed at once.
+		return true
+	//: the file ended before its length: the head has already promised it.
+	case err == nil:
+		r.fail(slot, rFile, 0)
+		//: closed.
+		return false
+	//: the socket is full: EPOLLOUT resumes it.
+	case err == syscall.EAGAIN:
+	//: the socket or the file failed.
+	default:
+		r.fail(slot, rErrno, errnoOf(err))
+		//: closed.
+		return false
+	}
+	c.flags |= fSending
+	swallowErr(el.ctl(syscall.EPOLL_CTL_MOD, int(c.fd), el.outEvents(c), slot, c.gen))
+	//: resumed by EPOLLOUT: another connection's turn.
+	return false
+}
+
+// beginFile implements fileSender: the epoll backend needs only its own
+// duplicate of fd.
+func (el *epollLoop) beginFile(r *ring, slot int32, fd int) error {
+	dup, err := dupCloexec(fd)
+	//: out of descriptors.
+	if err != nil {
+		//: refused, nothing queued.
+		return corenet.LoopFileRefused
+	}
+	r.conns[slot].fileFD = int32(dup)
+	//: held.
+	return nil
+}
+
+// endFile implements fileSender: the duplicate closes; epoll held nothing else.
+func (el *epollLoop) endFile(r *ring, slot int32) {
+	c := &r.conns[slot]
+	swallowErr(syscall.Close(int(c.fileFD)))
+	c.fileFD, c.fileOff, c.fileLeft = -1, 0, 0
+}
+
 // shutdown implements driver: the descriptor leaves the set and closes, and
 // the slot is free at once, since epoll holds nothing in flight.
 func (el *epollLoop) shutdown(r *ring, slot int32) {
@@ -699,11 +797,19 @@ func (el *epollLoop) shutdown(r *ring, slot int32) {
 	//: explicit, and a close that fails leaves nothing to retry.
 	swallowErr(syscall.EpollCtl(el.epfd, syscall.EPOLL_CTL_DEL, fd, nil))
 	swallowErr(syscall.Close(fd))
+	r.dropFile(slot)
 	r.release(slot)
 	//: a close is the moment a paused listener may accept again.
 	if !el.armed && !el.lp.draining {
 		el.armListeners()
 	}
+}
+
+// peer implements peerer: epoll's connections are process descriptors, so the
+// socket is asked for its SO_PEERCRED.
+func (el *epollLoop) peer(r *ring, slot int32) (corenet.LoopPeerValue, bool) {
+	//: epoll's connections are process descriptors.
+	return peerOf(int(r.conns[slot].fd))
 }
 
 // unread implements driver: SIOCINQ, the bytes the socket holds unread.
@@ -822,10 +928,7 @@ func (el *epollLoop) teardown() {
 		swallowErr(syscall.Munmap(el.arena))
 	}
 	//: every mapping of the slab; the loop is gone either way.
-	for _, m := range lp.slab.mapped {
-		swallowErr(syscall.Munmap(m))
-	}
-	lp.slab.mapped = nil
+	lp.slab.release()
 }
 
 // errnoOf extracts the errno of a syscall error, EIO when it is none.

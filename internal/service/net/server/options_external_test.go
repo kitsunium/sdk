@@ -43,6 +43,8 @@ const (
 // to be a real exec — and doing it here rather than as a test function is what
 // keeps the suite free of a test that skips itself on every ordinary run.
 func TestMain(m *testing.M) {
+	//: a holder of share_external_test.go ends here; so does a holder's child.
+	runHolderIfAsked()
 	//: the markers are only ever set by the two adoption tests below.
 	if addr := os.Getenv(childAddrEnv); addr != "" {
 		os.Exit(serveInheritedSocket(addr))

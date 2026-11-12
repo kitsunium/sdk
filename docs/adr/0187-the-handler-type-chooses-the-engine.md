@@ -277,3 +277,56 @@ Each is a separate record:
 - Impl: `internal/core/net/` (`EngineValue`, the kinds, the sentinels),
   `internal/service/net/server/` (the kind set, `Plaintext`, `Name`,
   `Engine`, the refusals), `pkg/v1/net/server/`, `design/net.yaml`.
+
+## Amended 2026-11-10 — the socket buffers (kitsunium/sdk#973)
+
+`ReceiveBuffer(n)` and `SendBuffer(n)` are group options of kinds
+`OptionReceiveBuffer` and `OptionSendBuffer`, honoured by a datagram group, by a
+stream group's listeners on both engines (their accepted sockets inherit them)
+and by an adopted socket. They are asked of the kernel before bind, as SO_RCVBUF
+and SO_SNDBUF, and read back into `ListenerStateValue.ReceiveBuffer` and
+`SendBuffer`, for a socket of the group and for a socket it adopted: what is
+asked and what is held differ on every platform (Linux doubles and clamps to
+rmem_max and wmem_max, the BSDs and darwin answer ENOBUFS past their ceiling and
+keep the size they had), and the difference is reported, never a fault and never
+a Start failure; a negative size is `OptionValueInvalid`. A datagram group that
+only adopts starts: the address check counted its adopted sockets as stream groups' did.
+
+## Amended 2026-11-09 — the request body's bound (kitsunium/sdk#845)
+
+`MaxBodyBytes(n)` is a group option of kind `OptionMaxBodyBytes`, honoured by an
+HTTP group that `net/http` serves. Zero selects 1 MiB, the http1 profile's and
+the framework's bound; `-1` states none; anything below `-1` fails `Start` with
+`OptionValueInvalid` (`0.2.11.68`) naming the option. A `Content-Length` past the
+bound is answered 413 with `Connection: close` on the head, before the handler
+runs and before a body byte is read; a body of unknown length is read through
+`http.MaxBytesReader`, so the handler's read ends in `*http.MaxBytesError` and
+the handler answers it, as `http.MaxBytesHandler` does. `State` reports the bound
+in `ListenerStateValue.MaxBodyBytes`. A loop group refuses the option with
+`LoopOptionUnsupported` (its bound is `HTTP1LimitsValue.Body`), a datagram group
+with `PacketOptionUnsupported`. The framework's engine states `-1`: each
+endpoint bounds its own body. Visible change: an HTTP group that set nothing
+refuses a body past 1 MiB, where it had no bound.
+
+## Amended 2026-11-09 — the accept queue's depth (kitsunium/sdk#978)
+
+`Backlog(n)` is a group option of kind `OptionBacklog`, and
+`LimitsValue.Backlog`, declared and never applied until now, is what it sets.
+A stream group's listener is bound through the standard library, then listen(2)
+is called again on the bound socket with the depth asked (every Unix; a second
+call sets the backlog anew), on both engines; the loop's accepted sockets share
+that queue. Zero keeps the host's somaxconn and reports it; a depth past it is
+clamped by the kernel and reported as the host's value, with the listener
+`Degraded` and a reason naming somaxconn; Windows keeps `SOMAXCONN_HINT`'s and
+says so; a negative depth fails `Start` with `OptionValueInvalid`; a datagram
+group refuses the option with `PacketOptionUnsupported`. `State` reports the
+depth applied in `ListenerStateValue.Backlog`.
+
+Measured at the group's level (2026-11-11): a `Backlog(1)` group whose accept
+path is held completes at most two connects past what the engine takes off the
+queue itself, on every engine; `Backlog(0)` reports the host's somaxconn; the
+ADR 0196 drain with `Backlog(8)` and 384 peers dialled at once serves every peer
+on io_uring and epoll. The portable backend is not held to that drain: past
+eight `SYN_RECV` requests the kernel answers with SYN cookies, and a final ACK
+that finds the queue full is dropped while the peer believes itself connected —
+the kernel's trade with a queue this short, not the option's defect.

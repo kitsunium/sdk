@@ -57,6 +57,68 @@ workflows:
                 when: r.rows[i].Name == c && r.rows[i].Status != statusDisabled
           key: i
           range: r.rows
+  - of: (*tally).listener
+    steps:
+      - set: t.anyTCP
+        value: "true"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: sw.disabled(o.name) || o.skip != ""
+            - bind: err
+              eval: o.apply(fd)
+            - switch:
+                cases:
+                  - case: err != nil
+                    do:
+                      - set: t.rows[i]
+                        value: "listenerRow{name: o.name, status: statusAbsent, reason: \"setsockopt \" + o.what + \": \" + err.Error()}"
+                  - case: t.rows[i].status != statusAbsent
+                    do:
+                      - set: t.rows[i]
+                        value: "listenerRow{name: o.name, status: statusOn}"
+          key: i
+          range: t.opts
+          value: o
+  - of: (*slab).reclaimable
+    steps:
+      - loop:
+          do:
+            - bind: c
+              eval: "&s.classes[i]"
+            - opt:
+                do:
+                  - return: "true"
+                when: len(c.free) >= 2*c.perArena && c.idleArenas() >= 2
+          key: i
+          range: s.classes
+      - return: "false"
+  - of: (*uLoop).plainWait
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: fan
+                when: rr.used() > 0 || armedAny(rr.armed)
+          key: _
+          range: ul.rings[1:]
+          value: rr
+      - return: "kernelTimespec{nsec: max(fan.nsec, int64(tickEvery))}"
+  - of: armedAny
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: n > 0
+          key: _
+          range: armed
+          value: "n"
+      - return: "false"
   - of: (*uLoop).opens
     steps:
       - loop:

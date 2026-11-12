@@ -10,7 +10,32 @@ import (
 
 // internalError is the whole answer to a response the writer refused or a
 // handler left deferred: a 500 with no body, and the connection closed.
-const internalError string = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+const internalError string = "HTTP/1.1 500 Internal Server Error\r\n" + internalErrorTail
+
+// internalErrorTail is what follows the status line of that answer.
+const internalErrorTail string = "Content-Length: 0\r\nConnection: close\r\n\r\n"
+
+const (
+	// _ is a connection reading on, the zero mode.
+	_ connMode = iota
+	// connClosing closes after the batch's answer: nothing more is read.
+	connClosing
+	// connStreaming is answering with a Stream: nothing more is read, and what is
+	// written next is the handler's.
+	connStreaming
+	// connUpgraded is past a 101: every later byte is HTTP1Upgrader's.
+	connUpgraded
+)
+
+// What one turn of OnData decided.
+const (
+	// stepMore reads on: more of the buffer can be used.
+	stepMore stepKind = iota
+	// stepWait stops: the rest waits in the spill for its next bytes.
+	stepWait
+	// stepClose stops: the connection closes and nothing more is read.
+	stepClose
+)
 
 // HandleLoop adapts h to the loop engine: the corenet.LoopHandler a group
 // serves with StreamGroup.HandleLoop. p frames every request, so its limits
@@ -33,14 +58,99 @@ const internalError string = "HTTP/1.1 500 Internal Server Error\r\nContent-Leng
 // connection closed, and so is a deferred answer EndBatch left deferred. An
 // answer the connection's output refuses (LoopOutputFull: OutputCap is the
 // most a connection's answers to one batch may hold) closes the connection
-// rather than wait. A request the spill cannot hold whole (LoopValue.SpillCap
-// below p's head and body bounds) closes it too, with LoopSpillFull.
+// rather than wait. A group's SpillCap and p's bounds agree at Start
+// (CheckSpill): a default body bound is capped at what the spill holds beside
+// the head, so a body past it is answered 413 on the head instead of closing
+// with LoopSpillFull, and an explicit bound past it fails Start. A head past
+// SpillCap closes with LoopSpillFull. When h is a corenet.HTTP1BodyReader the
+// spill holds only heads: each chunk goes to OnBody as it arrives, and the
+// request is served when the last has.
 func HandleLoop(h corenet.HTTP1Handler, p Parser) *LoopHandler {
-	b, _ := h.(corenet.HTTP1Batcher)
-	w, _ := h.(corenet.HTTP1Worker)
-	//: the batcher and the worker are found once, never per batch.
-	return &LoopHandler{h: h, batcher: b, worker: w, p: p, holdCap: defaultHoldCap}
+	//: everything else is found once, in newLoopHandler.
+	return newLoopHandler(h, p)
 }
+
+// newLoopHandler finds h's optional capabilities once, never per batch.
+func newLoopHandler(h corenet.HTTP1Handler, p Parser) *LoopHandler {
+	b, _ := h.(corenet.HTTP1Batcher)
+	w := findWorker(h)
+	r, _ := h.(corenet.HTTP1BodyReader)
+	ab, _ := h.(corenet.HTTP1BodyAborter)
+	//: the batcher, the worker, the body reader and the stream port.
+	streamer := findStreamer(h)
+	up, _ := streamer.(corenet.HTTP1Upgrader)
+	return &LoopHandler{h: h, batcher: b, worker: w, reader: r, aborter: ab, streamer: streamer, upgrader: up, canceller: findCanceller(h), p: p, holdCap: defaultHoldCap}
+}
+
+// findStreamer walks a chain of links down to the handler that speaks the
+// stream port, so a stream may run behind Routes, Bearer or Log. The chain was
+// built once, here it is read once.
+func findStreamer(h corenet.HTTP1Handler) corenet.HTTP1Streamer {
+	//: down the chain, every link unwrapped.
+	for {
+		//: the first handler that streams.
+		if s, ok := h.(corenet.HTTP1Streamer); ok {
+			//: found.
+			return s
+		}
+		l, ok := h.(interface{ wrapped() corenet.HTTP1Handler })
+		//: a handler that wraps nothing: no streamer.
+		if !ok {
+			//: none.
+			return nil
+		}
+		h = l.wrapped()
+	}
+}
+
+// findWorker walks a chain of links down to the handler that takes a pending
+// answer's job, so a Files link or a worker sits behind Routes, Bearer or Log.
+func findWorker(h corenet.HTTP1Handler) corenet.HTTP1Worker {
+	//: down the chain, every link unwrapped.
+	for {
+		//: the first handler that works.
+		if w, ok := h.(corenet.HTTP1Worker); ok {
+			//: found.
+			return w
+		}
+		l, ok := h.(interface{ wrapped() corenet.HTTP1Handler })
+		//: a handler that wraps nothing: no worker.
+		if !ok {
+			//: none.
+			return nil
+		}
+		h = l.wrapped()
+	}
+}
+
+// strayFile answers a file set outside a worker's answer: a 500, its reader
+// closed, the connection closing. Only a worker's answer may hold one.
+func strayFile(res *corenet.HTTP1ResponseValue, closing bool) bool {
+	//: as the handler left it.
+	if res.File.R == nil || res.Pending {
+		//: nothing to refuse.
+		return closing
+	}
+	closeFileReader(res.File.R)
+	res.File = corenet.HTTP1FileValue{}
+	res.Status, res.Body, res.Header = statusInternal, nil, nil
+	res.Close = true
+	//: refused.
+	return true
+}
+
+// holds reports whether an answer of the connection must wait in order behind
+// a pending answer or a file still leaving.
+func (f *connFlag) holds(res *corenet.HTTP1ResponseValue) bool {
+	//: pending, held answers ahead, or a file not yet gone.
+	return res.Pending || len(f.held) > 0 || f.file.active()
+}
+
+// stepKind is what one turn of OnData decided.
+type stepKind uint8
+
+// connMode is how a connection's input is ending.
+type connMode uint8
 
 // LoopHandler serves the restricted HTTP/1.1 profile on a loop group: the
 // corenet.LoopHandler HandleLoop returns. Its state is per lane — a request
@@ -58,6 +168,18 @@ type LoopHandler struct {
 	// worker is h as an HTTP1Worker, nil when it is not one: what a Pending
 	// answer is offloaded to (R3).
 	worker corenet.HTTP1Worker
+	// upgrader is what an Upgrade answer hands the connection's bytes to; nil
+	// when there is none.
+	upgrader corenet.HTTP1Upgrader
+	// streamer is what a Stream answer speaks to: h itself, or the handler a
+	// chain of links ends in; nil when there is none.
+	streamer corenet.HTTP1Streamer
+	// canceller gives back a job no worker will run, nil when no link holds one.
+	canceller jobCanceller
+	// reader is h as an HTTP1BodyReader, nil when it takes bodies whole; aborter
+	// is h as an HTTP1BodyAborter.
+	reader  corenet.HTTP1BodyReader
+	aborter corenet.HTTP1BodyAborter
 	// holdCap bounds what one connection holds back behind a pending answer:
 	// the group's OutputCap, given at OnOutbound.
 	holdCap int
@@ -92,6 +214,18 @@ type loopState struct {
 	conns [][]connFlag
 	// served counts the requests the batch handed to the handler.
 	served int
+	// marked counts the requests an embedding adapter served in the batch
+	// (MarkServed): the batch ends for them too.
+	marked int
+	// requests counts the lane's requests served since Start, added at each
+	// batch's end, read by HTTPCounts from any goroutine.
+	requests atomic.Uint64
+	// opened are the connections whose stream's head this batch wrote: told of
+	// their stream once it has left the adapter.
+	opened []corenet.LoopConnRef
+	// count numbers the lane's requests, from one: HTTP1RequestValue.ID's
+	// counter.
+	count uint64
 	// outbound is the lane's outbound to its worker, nil when nothing
 	// offloads.
 	outbound corenet.LoopOutbound
@@ -112,11 +246,26 @@ type loopState struct {
 	held []byte
 	// unavailable is the 503 a pending answer refused by a full queue gets.
 	unavailable corenet.HTTP1ResponseValue
+	// copyRetry are the connections whose copied file's next chunk the worker's
+	// full queue refused: sent again at the batch's end.
+	copyRetry []corenet.LoopConnRef
 	// readyEpoch numbers the batches' ready lists, from one.
 	readyEpoch uint64
 	// headStub and plainStub are the requests a held deferred answer is
 	// written with: HEAD, or no method.
 	headStub, plainStub corenet.HTTP1RequestValue
+}
+
+// dataCall is one OnData call's connection, what step and the body's two
+// helpers read of it.
+type dataCall struct {
+	// io and ref are the callback's.
+	io  corenet.LoopIO
+	ref corenet.LoopConnRef
+	// st is the lane's state, f the connection's flag, loop the lane.
+	st   *loopState
+	f    *connFlag
+	loop int
 }
 
 // item is one answer of a batch.
@@ -139,19 +288,36 @@ type item struct {
 type connFlag struct {
 	// gen is the generation of the connection the flag describes.
 	gen uint32
-	// closing is set once an answer that closes the connection is queued:
-	// nothing more is read from it.
-	closing bool
+	// mode is how the connection's input ends: read on, closed after the batch's
+	// answer, or carried by a streamed response. In the last two nothing more is
+	// read.
+	mode connMode
 	// dead is set once a write was refused or the close was asked: nothing
 	// more is written to it.
 	dead bool
+	// upgradePending says the 101 is still in the batch's output: bytes after it
+	// wait for it to have left.
+	upgradePending bool
 	// readyAt is the lane's readyEpoch the connection was last queued in,
 	// so it is queued once a batch.
 	readyAt uint64
+	// file is a file answer whose body is still leaving (native or copy path):
+	// every later answer waits behind it, in request order. It is allocated by
+	// the slot's first file answer and kept for the slot's later connections,
+	// as head and request are: a connection that never sends a file pays a
+	// pointer, not the body's 48 bytes (the 512 B idle budget of #859).
+	file *fileBody
 	// held are the answers held behind a pending one, in request order (R3).
 	held []heldItem
 	// buf holds the held answers' bytes.
 	buf []byte
+	// bodyLeft is the bytes still to come of a body the handler reads as it
+	// arrives (#844); zero when none is arriving.
+	bodyLeft int64
+	// head holds that request's head, and request the value framed from it:
+	// both outlive OnData, and both are reused for the slot's next connection.
+	head    []byte
+	request *corenet.HTTP1RequestValue
 }
 
 // OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.
@@ -159,12 +325,26 @@ func (a *LoopHandler) OnOpen(io corenet.LoopIO, ref corenet.LoopConnRef) {
 	a.state(io.Loop()).flag(ref).reset(ref.Gen)
 }
 
+// endInput says nothing more is read from the connection; a stream keeps its
+// own, stronger, ending.
+func (f *connFlag) endInput() {
+	//: a stream's mode is the one that says what to do on close.
+	if f.mode != connStreaming {
+		f.mode = connClosing
+	}
+}
+
 // reset makes f a new connection's, of generation gen, keeping the backing
 // of its held answers and their buffer, so a slot's churn reallocates
 // neither.
 func (f *connFlag) reset(gen uint32) {
-	held, buf := f.held[:0], f.buf[:0]
-	*f = connFlag{gen: gen, held: held, buf: buf}
+	held, buf, head := f.held[:0], f.buf[:0], f.head[:0]
+	file := f.file
+	//: the body kept for reuse, emptied.
+	if file != nil {
+		*file = fileBody{}
+	}
+	*f = connFlag{gen: gen, held: held, buf: buf, head: head, request: f.request, file: file}
 }
 
 // OnData implements corenet.LoopHandler. It frames every whole request at the
@@ -177,49 +357,88 @@ func (a *LoopHandler) OnData(io corenet.LoopIO, ref corenet.LoopConnRef, buf []b
 	st := a.state(loop)
 	f := st.flag(ref)
 	//: a connection whose last answer closes it reads nothing more.
-	if f.gen == ref.Gen && f.closing {
+	if f.gen == ref.Gen && (f.mode == connClosing || f.mode == connStreaming) {
 		//: everything is dropped with the connection.
 		return len(buf)
 	}
 	used := 0
+	c := dataCall{io: io, ref: ref, st: st, f: f, loop: loop}
 	//: every whole request at the start of what is left.
 	for used < len(buf) {
-		n, r := a.p.Parse(buf[used:], &st.req)
-		//: refused: answered by the codec, and the connection closed.
-		if r != RefusalNone {
-			off := len(st.out)
-			st.out = AppendRefusal(st.out, r)
-			st.items = append(st.items, item{ref: ref, off: off, end: len(st.out), closing: true})
-			f.closing = true
-			//: the rest is never read.
-			return len(buf)
-		}
-		//: a request still incomplete waits for its next bytes.
-		if n == 0 {
-			break
-		}
+		n, next := a.step(c, buf[used:])
 		used += n
-		//: the answer closes the connection: nothing past it is read.
-		if a.serve(io, ref, st, loop) {
-			f.closing = true
-			//: the rest is never read.
+		//: what the bytes decided.
+		switch next {
+		//: the answer closes the connection: the rest is never read.
+		case stepClose:
+			f.endInput()
 			return len(buf)
+		//: a partial request stays in the spill for its next bytes.
+		case stepWait:
+			return used
+		case stepMore:
 		}
 	}
 	//: the whole requests; a partial one stays in the spill.
 	return used
 }
 
+// step frames, or feeds, at the start of buf, and reports the bytes it took and
+// what to do next: a body still arriving takes the bytes before any next
+// request, and a request is answered once whole, or read as it arrives when the
+// handler takes its body so.
+func (a *LoopHandler) step(c dataCall, buf []byte) (int, stepKind) {
+	//: past a 101: the bytes are the upgraded protocol's, once its head has left.
+	if c.f.mode == connUpgraded {
+		return a.feedUpgraded(c, buf)
+	}
+	//: the rest of a body the handler reads as it arrives.
+	if c.f.bodyLeft > 0 {
+		return a.feedBody(c, buf)
+	}
+	st := c.st
+	n, r := a.p.Parse(buf, &st.req)
+	//: refused: answered by the codec, and the connection closed.
+	if r != RefusalNone {
+		off := len(st.out)
+		st.out = AppendRefusal(st.out, r)
+		st.items = append(st.items, item{ref: c.ref, off: off, end: len(st.out), closing: true})
+		return 0, stepClose
+	}
+	//: the handler takes this body as it arrives: the head moves aside.
+	if a.reader != nil && st.req.HeadLen > 0 && st.req.ContentLength > 0 {
+		return a.openBody(c, buf), stepMore
+	}
+	//: a request still incomplete waits for its next bytes.
+	if n == 0 {
+		return 0, stepWait
+	}
+	//: the answer closes the connection: nothing past it is read.
+	if a.serve(c.io, c.ref, st, c.loop) {
+		return n, stepClose
+	}
+	return n, stepMore
+}
+
 // serve hands the request framed into st.req to the handler and queues its
 // answer, and reports whether the connection closes after it.
 func (a *LoopHandler) serve(io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, loop int) bool {
-	st.req.Lane = loop
+	st.req.Lane, st.req.Conn = loop, ref
+	st.count++
+	st.req.ID = uint64(loop)<<laneShift | st.count&counterMask
 	res := st.take()
 	st.served++
 	a.h.ServeHTTP1(&st.req, res)
 	closing := st.req.Close || res.Close || io.Pressure(ref)
-	//: pending, or behind a pending answer: held, in order (R3).
-	if f := st.flag(ref); res.Pending || len(f.held) > 0 {
+	//: a stream or an upgrade: the head goes out with the batch, and the handler
+	//: writes on.
+	if res.Stream || res.Upgrade {
+		//: nothing more of this connection is framed as HTTP.
+		return a.openStream(ref, st, res)
+	}
+	closing = strayFile(res, closing)
+	//: pending, or behind a pending answer or a file still leaving: held, in order (R3).
+	if f := st.flag(ref); f.holds(res) {
 		//: whether the connection closes after it.
 		return a.hold(st, &answer{io: io, ref: ref, f: f, res: res, closing: closing})
 	}
@@ -236,7 +455,7 @@ func (a *LoopHandler) serve(io corenet.LoopIO, ref corenet.LoopConnRef, st *loop
 	out, err := AppendResponse(st.out, &st.req, res, closing)
 	//: a response the writer refuses is answered 500, and the connection closed.
 	if err != nil {
-		out = append(st.out, internalError...)
+		out = appendInternalError(st.out, res)
 		closing = true
 	}
 	st.out = out
@@ -248,39 +467,121 @@ func (a *LoopHandler) serve(io corenet.LoopIO, ref corenet.LoopConnRef, st *loop
 
 // OnTimeout implements corenet.LoopHandler. The adapter arms no deadline, so a
 // timeout it did not ask for closes the connection.
-func (*LoopHandler) OnTimeout(io corenet.LoopIO, ref corenet.LoopConnRef) {
+func (a *LoopHandler) OnTimeout(io corenet.LoopIO, ref corenet.LoopConnRef) {
+	a.timeout(io, ref)
+}
+
+// timeout tells a stream's handler of its deadline, or closes the connection.
+func (a *LoopHandler) timeout(io corenet.LoopIO, ref corenet.LoopConnRef) {
+	//: a stream's own timer.
+	if f := a.state(io.Loop()).peek(ref); f != nil && (f.mode == connStreaming || f.mode == connUpgraded) {
+		a.streamer.OnStreamTimeout(corenet.HTTP1StreamValue{IO: io, Ref: ref})
+		//: told.
+		return
+	}
+	//: a copied file's chunk that waited past its stall: the file goes first,
+	//: whether or not the connection does.
+	if f := a.state(io.Loop()).peek(ref); f != nil && f.file.active() && f.file.flags&bodyNative == 0 {
+		a.endCopy(io, ref, a.state(io.Loop()), f, true)
+		//: given up on.
+		return
+	}
 	//: a stale reference is the only refusal, and means already closed.
 	swallowErr(io.Close(ref))
 }
 
 // OnWritable implements corenet.LoopHandler. Nothing waits on it: an answer
 // the output refuses closes its connection.
-func (*LoopHandler) OnWritable(io corenet.LoopIO, ref corenet.LoopConnRef) {
-	//: nothing waits on it; the arguments are the port's.
-	_, _ = io, ref
+func (a *LoopHandler) OnWritable(io corenet.LoopIO, ref corenet.LoopConnRef) {
+	//: a file still leaving is the only thing that waits on room.
+	a.writable(io, ref)
 }
 
-// OnBatchEnd implements corenet.LoopHandler. When the batch served a request,
-// it calls the handler's EndBatch if it has one, then writes the batch's
-// answers in order and closes the connections whose answer asked to.
+// writable resumes a file body once its connection has room or its native send
+// is over.
+func (a *LoopHandler) writable(io corenet.LoopIO, ref corenet.LoopConnRef) {
+	st := a.state(io.Loop())
+	f := st.peek(ref)
+	//: a file still leaving is the only thing that waits on room.
+	if f != nil && f.file.active() {
+		a.fileWritable(io, ref, st, f)
+	}
+}
+
+// OnBatchEnd implements corenet.LoopHandler. When the batch served a request —
+// its own, or one MarkServed reported —, it calls the handler's EndBatch if it
+// has one, once, then writes the batch's answers in order and closes the
+// connections whose answer asked to.
 func (a *LoopHandler) OnBatchEnd(io corenet.LoopIO) {
 	loop := io.Loop()
 	st := a.state(loop)
-	//: a batch with no answer, and no held one ready, has nothing to end.
-	if len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 && len(st.dropped) == 0 {
+	//: a batch with no answer, no held one ready and nothing served beside it
+	//: has nothing to end.
+	if st.idle() {
 		//: nothing queued.
 		return
 	}
 	//: the handler's batched work completes its deferred answers.
-	if st.served > 0 && a.batcher != nil {
+	if st.endServed() && a.batcher != nil {
 		a.batcher.EndBatch(loop)
 	}
 	st.completeHeld()
 	st.complete()
 	st.flush(io)
 	//: the held answers come after the batch's own, which precede them.
-	st.flushReady(io)
-	st.items, st.out, st.served = st.items[:0], st.out[:0], 0
+	a.flushReady(io, st)
+	a.retryCopies(io, st)
+	st.items, st.out = st.items[:0], st.out[:0]
+	a.announceStreams(io, st)
+}
+
+// endServed counts the batch's own requests into the lane's total, forgets
+// the batch's counts, and reports whether the batch served any request, its
+// own or an embedding adapter's.
+func (st *loopState) endServed() bool {
+	ended := st.served+st.marked > 0
+	//: one atomic add a batch, never one a request.
+	if st.served > 0 {
+		st.requests.Add(uint64(st.served))
+	}
+	st.served, st.marked = 0, 0
+	//: whether the batch ends for the handler.
+	return ended
+}
+
+// idle reports whether the lane's batch has nothing to end: no answer, no held
+// one ready, nothing served beside it.
+func (st *loopState) idle() bool {
+	//: every queue the batch's end drains, and the requests served.
+	return st.served+st.marked == 0 && len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 &&
+		len(st.dropped) == 0 && len(st.opened) == 0 && len(st.copyRetry) == 0
+}
+
+// MarkServed tells the adapter that an adapter embedding it, serving another
+// version on the same lane, served a request of lane's current batch: the
+// next OnBatchEnd then calls the handler's EndBatch even when no HTTP/1.1
+// request was served, and the embedding adapter does not call it, so a batch
+// that served both versions ends once, as HTTP1Batcher's contract says. It is
+// called on the lane's thread, before OnBatchEnd.
+func (a *LoopHandler) MarkServed(lane int) {
+	a.state(lane).marked++
+}
+
+// HTTPCounts implements corenet.LoopHTTPCounter: the HTTP/1.1 requests the
+// adapter served, each lane's added at its batch's end; no HTTP/2.
+func (a *LoopHandler) HTTPCounts() corenet.HTTPCountsValue {
+	var v corenet.HTTPCountsValue
+	//: every lane built so far.
+	if p := a.loops.Load(); p != nil {
+		//: a lane not yet seen has served nothing.
+		for _, st := range *p {
+			if st != nil {
+				v.HTTP1Requests += st.requests.Load()
+			}
+		}
+	}
+	//: the sum.
+	return v
 }
 
 // Unwrap returns the HTTP1Handler the adapter serves: what tells a loop group
@@ -310,7 +611,7 @@ func (a *LoopHandler) OnClose(io corenet.LoopIO, ref corenet.LoopConnRef, err er
 	//: why it closed changes nothing here.
 	swallowErr(err)
 	//: the lane's own.
-	a.closed(io, ref)
+	a.closed(io, ref, err)
 }
 
 // complete writes the batch's answers again into spare, in request order,
@@ -343,7 +644,7 @@ func (st *loopState) complete() {
 		next, err := AppendResponse(out, &st.stub, res, it.closing)
 		//: left deferred, or refused by the writer: 500, and closed.
 		if res.Defer || err != nil {
-			next = append(out, internalError...)
+			next = appendInternalError(out, res)
 			it.closing = true
 		}
 		it.closing = it.closing || res.Close

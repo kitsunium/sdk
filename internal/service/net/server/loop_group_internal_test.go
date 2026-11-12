@@ -122,6 +122,9 @@ func loopBackends() []corenet.LoopBackend {
 	if runtime.GOOS == "linux" {
 		return []corenet.LoopBackend{corenet.LoopBackendAuto, corenet.LoopBackendEpoll, corenet.LoopBackendPortable}
 	}
+	if nativePoller == corenet.CapabilityKqueue {
+		return []corenet.LoopBackend{corenet.LoopBackendAuto, corenet.LoopBackendKqueue, corenet.LoopBackendPortable}
+	}
 	return []corenet.LoopBackend{corenet.LoopBackendAuto, corenet.LoopBackendPortable}
 }
 
@@ -189,7 +192,9 @@ func TestLoopGroup_serves(t *testing.T) {
 					t.Fatalf("backend %v degraded %v, want %v", ls.Backend, ls.Degraded, b)
 				}
 			case runtime.GOOS != "linux":
-				// Off Linux the portable backend is the best there is.
+				// Elsewhere the portable backend: the best there is, or, on
+				// darwin and the BSDs, auto's choice while kqueue is opt-in
+				// (ADR 0222 §D6).
 				if ls.Backend != corenet.LoopBackendPortable || ls.Degraded {
 					t.Fatalf("auto = %v degraded %v", ls.Backend, ls.Degraded)
 				}
@@ -288,7 +293,9 @@ func TestLoopGroup_refusals(t *testing.T) {
 		{name: "IdleTimeout and MaxConns are the engine's", opts: []GroupOption{IdleTimeout(time.Minute), MaxConns(10)}},
 		//: the kind set: an option given with its zero value is given (ADR 0187).
 		{name: "ReadTimeout(0) is given", opts: []GroupOption{ReadTimeout(0)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "ReadTimeout"},
-		{name: "Shards(0) is given", opts: []GroupOption{Shards(0)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Shards"},
+		{name: "Shards(0) is the engine's, one listener per loop", opts: []GroupOption{Shards(0)}},
+		{name: "Shards(1) is not zero", opts: []GroupOption{Shards(1)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Shards"},
+		{name: "Shards(0) on a Unix socket", opts: []GroupOption{Listen("unix", t.TempDir()+"/s"), Shards(0)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Shards"},
 		{name: "TLS with a zero identity is given", opts: []GroupOption{TLS(corenet.IdentityValue{})}, want: corenet.CodeLoopTLSUnsupported},
 		{name: "Use with no middleware is given", also: func(g *StreamGroup) { g.Use() }, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Use"},
 		//: the three options every engine honours.

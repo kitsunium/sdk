@@ -8,6 +8,7 @@ import (
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/net/loop"
 )
 
 const (
@@ -31,7 +32,7 @@ var packetNetworks = map[string]struct{}{
 // (exclusiveApplies) — a multicast one never — and is bound once: a datagram
 // socket leaves no connection behind it to wait out; the report says whether
 // it holds its address.
-func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.PacketConn, rep bindReport, err error) {
+func listenPacket(ctx context.Context, addr corenet.AddressValue, spec socketSpec) (pc stdnet.PacketConn, rep bindReport, err error) {
 	//: reject an unserved family before touching the OS.
 	if _, ok := packetNetworks[addr.Network]; !ok {
 		//: refuse rather than bind something the read loop cannot serve.
@@ -50,7 +51,7 @@ func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.Pac
 			errs.String("address", addr.String()))
 	}
 	//: SO_EXCLUSIVEADDRUSE where it applies, before bind.
-	cfg := stdnet.ListenConfig{Control: listenControl(false)}
+	cfg := stdnet.ListenConfig{Control: listenControl(spec.reuse != reuseNone, spec)}
 	bound, wait, lerr := bindRetrying(ctx, 1, addrInUse, func() (stdnet.PacketConn, error) {
 		//: one attempt.
 		return cfg.ListenPacket(ctx, addr.Network, addr.Addr)
@@ -58,11 +59,12 @@ func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.Pac
 	rep.wait = wait
 	//: the OS refused the bind — in use, permission, bad interface.
 	if lerr != nil {
-		//: surface the address that could not be bound.
-		return nil, rep, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
-			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
+		//: surface the address that could not be bound, AddressInUse when held.
+		return nil, rep, bindRefusal(addr, lerr)
 	}
+	rep.shared = spec.reuse == reuseShared
 	rep.exclusive = exclusiveOf(packetSocket(bound))
+	rep.receiveBuffer, rep.sendBuffer = socketBuffers(packetSocket(bound))
 	//: the socket is bound and ready to read.
 	return bound, rep, nil
 }
@@ -83,6 +85,10 @@ type boundPacketConn struct {
 	// doneOnce guards the close.
 	done     chan struct{}
 	doneOnce sync.Once
+	// laneIndex is the socket's lane in a group HandleLoop serves; lane its
+	// io_uring lane when one serves it (#852), nil on the batched reader.
+	laneIndex int
+	lane      loop.PacketLane
 }
 
 // finish closes done, once: the read loop has ended.
@@ -102,6 +108,12 @@ type handoverSource interface {
 // handover prepares the socket for whoever reads it next and reports whether
 // its read loop is draining: wait on done before closing it.
 func (b *boundPacketConn) handover() bool {
+	//: an io_uring lane drains on its own thread.
+	if b.lane != nil {
+		b.lane.Handover()
+		//: wait on done.
+		return true
+	}
 	h, ok := b.source.(handoverSource)
 	//: a source without GRO coalesced nothing.
 	if !ok {
@@ -114,6 +126,10 @@ func (b *boundPacketConn) handover() bool {
 
 // stopGRO switches GRO off on the socket, without a drain.
 func (b *boundPacketConn) stopGRO() {
+	//: an io_uring lane stops reading first.
+	if b.lane != nil {
+		b.lane.Stop()
+	}
 	//: only a source that can coalesce has GRO to switch off.
 	if h, ok := b.source.(handoverSource); ok {
 		h.stopGRO()
@@ -122,6 +138,10 @@ func (b *boundPacketConn) stopGRO() {
 
 // Close releases the socket, which is what ends its read loop.
 func (b *boundPacketConn) Close() error {
+	//: an io_uring lane holds a descriptor of its own: stopped first.
+	if b.lane != nil {
+		b.lane.Stop()
+	}
 	//: closing is the only signal that reliably interrupts a blocking read.
 	return b.pc.Close()
 }

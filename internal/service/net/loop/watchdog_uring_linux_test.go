@@ -17,7 +17,7 @@ func TestWatchdog_otherRingAccepts(t *testing.T) {
 	t.Cleanup(func() { closeFDs([]int{lfd}) })
 	_ = dial(t, addr)
 	waitFor(t, "a connection in the queue", func() bool { return listenerQueue(lfd) > 0 })
-	set := newListenerSet([]int{lfd}, 2)
+	set := newListenerSet([]int{lfd}, func(int) int { return 2 })
 	u, step, errno := openURing(probeEntries, 0)
 	if errno != 0 {
 		t.Skipf("io_uring %s: %v", step, errno)

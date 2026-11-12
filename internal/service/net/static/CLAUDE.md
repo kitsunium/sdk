@@ -23,7 +23,7 @@ Stdlib only. Written against `net/http`'s own interfaces, so it works in any
 | `static.go` | the four exported header constants, `Config`, `Handler`, `NewHandler` (the facade's `New`), `ServeHTTP`, `cleanName`, `serveName` / `serveDirectory` / `fallback` (the three ways a name is answered), the relative directory redirect, `notFound` / `failed` |
 | `lookup.go` | `open` — one lookup, three outcomes (`present`, `absent`, `broken`); `nameRefused`, the 404-versus-500 split |
 | `lookup_unix.go` / `lookup_windows.go` / `lookup_other.go` | `platformNameRefused` — the kernel's own refusals of a NAME: `ENOTDIR` and `ENAMETOOLONG` on Unix; `ERROR_INVALID_NAME`, `ERROR_BAD_PATHNAME`, `ERROR_FILENAME_EXCED_RANGE`, `ERROR_DIRECTORY` on Windows (as `syscall.Errno` literals — `syscall` exports none of them) |
-| `serve.go` | `serveFile` (caching, pinned type, `http.ServeContent`), `stream` (a file that cannot seek), `pinnedType` |
+| `serve.go` | `serveFile` (caching, pinned type, `http.ServeContent`), `stream` (a file that cannot seek), `pinnedType`, `serveSidecar` and `typeOf` (#853, `Config.Precompressed`) |
 | `config.go` | what `NewHandler` refuses: `headerValueSafe`, `referrerPolicyKnown`, `misconfigured` |
 
 ## Why-this-shape
@@ -73,6 +73,14 @@ Stdlib only. Written against `net/http`'s own interfaces, so it works in any
   `Seek`, so `http.ServeContent` cannot take them; `stream` sends the whole file
   with its stat's length and no ranges, reading the first 512 bytes before the
   status so a file that cannot be read at all is still a 500.
+- **A sidecar is the file's coded form, or nothing.** `Config.Precompressed` serves
+  `name.br` then `name.gz` when the tree holds it, regular, seekable and admitted
+  by `Accept-Encoding` — `corenet.AcceptsEncoding` — under the identity file's type,
+  because the sidecar's own bytes would sniff as gzip; `Vary: Accept-Encoding` on
+  every response of the option, identity included. Range and conditional requests
+  apply to the coded bytes, as `http.ServeContent` serves them (Last-Modified is
+  the sidecar's; no ETag family is minted, the package sends none). A directory
+  in the sidecar's place, or a client that admits neither, gets the file itself.
 - **`NewHandler` reads nothing.** A tree that appears after the handler is built — a
   dev build still running — is served once it is there.
 

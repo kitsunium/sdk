@@ -3,10 +3,7 @@ package app
 import (
 	"context"
 	"io"
-	"net"
 	"net/http"
-	"net/netip"
-	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -75,8 +72,10 @@ func ClearCookie(ctx context.Context, name string) {
 }
 
 // ClientIP returns the address of the client of the request ctx serves: the
-// connection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of
-// X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
+// connection's peer, or — only when <PRODUCT>_TRUST_PROXY=on, and the peer is one
+// of the proxies <PRODUCT>_TRUSTED_PROXIES lists — the first address of
+// X-Forwarded-For, read from its right, outside that list. A peer outside the list
+// is the client, whatever header it sends. It is "" outside an HTTP request.
 func ClientIP(ctx context.Context) string {
 	if rs := responseStateOf(ctx); rs != nil {
 		return rs.clientIP
@@ -140,7 +139,7 @@ func responseStateOf(ctx context.Context) *responseState {
 
 // withResponseState returns ctx carrying the response state of r.
 func withResponseState(ctx context.Context, a *App, r *http.Request) (context.Context, *responseState) {
-	rs := &responseState{clientIP: clientAddr(r, a.cfg.trustProxy), userAgent: clipRunes(r.UserAgent(), maxUserAgent)}
+	rs := &responseState{clientIP: clientAddr(r, a.cfg.trustedProxies), userAgent: clipRunes(r.UserAgent(), maxUserAgent)}
 	return context.WithValue(ctx, responseKey{}, rs), rs
 }
 
@@ -204,35 +203,6 @@ func harden(c *http.Cookie, dev bool) *http.Cookie {
 		h.Secure = true
 	}
 	return &h
-}
-
-// clientAddr is the client of r: the connection's peer, or — behind a proxy
-// the operator trusts — the last address of X-Forwarded-For, the one that
-// proxy appended. Every address before it came from the client and may be
-// forged: a client that sends "X-Forwarded-For: 6.6.6.6" arrives as
-// "6.6.6.6, <its real address>". A forwarded value that is not an address
-// is ignored.
-func clientAddr(r *http.Request, trustProxy bool) string {
-	if trustProxy {
-		if values := r.Header.Values("X-Forwarded-For"); len(values) > 0 {
-			// The last hop is the one the proxy added; an empty one names no
-			// client, and the connection's address is used instead.
-			hops := strings.Join(values, ",")
-			if last := strings.TrimSpace(hops[strings.LastIndexByte(hops, ',')+1:]); last != "" {
-				if ip, err := netip.ParseAddr(last); err == nil {
-					return ip.Unmap().String()
-				}
-			}
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	if ip, err := netip.ParseAddr(host); err == nil {
-		return ip.Unmap().String()
-	}
-	return host
 }
 
 // clipRunes bounds s to n runes.

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -129,7 +130,7 @@ func Test_Server_admit(t *testing.T) {
 		//: occupy slots with handlers that stay in them for the test's duration.
 		for range c.occupy {
 			go func() {
-				swallowErr(srv.admit(t.Context(), limiter,
+				swallowErr(srv.admit(t.Context(), limiter, new(atomic.Uint64),
 					&conn{Conn: &fakeSocket{}},
 					corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
 						held <- struct{}{}
@@ -147,7 +148,7 @@ func Test_Server_admit(t *testing.T) {
 		}
 
 		var ran bool
-		err := srv.admit(t.Context(), limiter, &conn{Conn: &fakeSocket{}},
+		err := srv.admit(t.Context(), limiter, new(atomic.Uint64), &conn{Conn: &fakeSocket{}},
 			corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
 				ran = true
 				return c.handlerErr
@@ -224,7 +225,7 @@ func Test_Server_admit_ReleasesItsSlot(t *testing.T) {
 		//: strictly sequential, so every slot is free again before the next
 		//: connection asks for one — a leak wedges the group well before the end.
 		for i := range c.rounds {
-			if err := srv.admit(t.Context(), limiter, &conn{Conn: &fakeSocket{}}, handler); err != nil {
+			if err := srv.admit(t.Context(), limiter, new(atomic.Uint64), &conn{Conn: &fakeSocket{}}, handler); err != nil {
 				t.Fatalf("connection %d of %d was refused under a ceiling of %d: %v — "+
 					"a slot leaked", i, c.rounds, c.ceiling, err)
 			}
@@ -325,7 +326,7 @@ func Test_Server_admit_HijackedConnectionKeepsItsSlot(t *testing.T) {
 		awaitNoActiveConns(t, srv)
 
 		var ran bool
-		err := srv.admit(t.Context(), group.limiter, &conn{Conn: &fakeSocket{}},
+		err := srv.admit(t.Context(), group.limiter, new(atomic.Uint64), &conn{Conn: &fakeSocket{}},
 			corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
 				ran = true
 				return nil

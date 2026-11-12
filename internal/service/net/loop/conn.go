@@ -34,6 +34,18 @@ const (
 	fHeard
 	// fCompact puts the slot on its ring's compaction list.
 	fCompact
+	// fDrained is a connection whose handler the drain has told once.
+	fDrained
+)
+
+// The bits of connCtl.fileBits, io_uring's file state.
+const (
+	// ffEOF is a read that returned nothing.
+	ffEOF uint8 = 1 << iota
+	// ffFull is a splice the socket refused for room.
+	ffFull
+	// ffPoll is the POLLOUT that waits for it.
+	ffPoll
 )
 
 // The reasons a connection is closed, mapped to the preallocated error
@@ -52,6 +64,8 @@ const (
 	rErrno
 	// rEvict is an idle connection evicted under hard pressure.
 	rEvict
+	// rFile is a file body that ended before its declared length.
+	rFile
 )
 
 // connCtl is one connection slot's control state. It holds no pointer, so the
@@ -87,6 +101,32 @@ type connCtl struct {
 	lruNext int32
 	// dirtyNext links the ring's dirty list.
 	dirtyNext int32
+	// fileFD is the file being sent, the engine's own duplicate; -1 when none.
+	fileFD int32
+	// pipeR and pipeW are the pipe the file crosses on io_uring, a connection's
+	// own, -1 when none; pipeHeld how many bytes the pipe holds.
+	pipeR, pipeW int32
+	pipeHeld     int32
+	// fileOps counts the file's operations in flight on io_uring.
+	fileOps uint8
+	// fileBits holds ffEOF, ffFull and ffPoll.
+	fileBits uint8
+	// zcFlight marks a flight sent zero-copy, every send of it (#969);
+	// zcPend counts its sends whose notification has not come: the flight's
+	// chunk is the kernel's until it reaches zero.
+	zcFlight bool
+	zcPend   uint8
+	// fileErr is the errno a file operation failed with, zero when none.
+	fileErr int32
+	// fileOff is the next byte of the file to send, fileLeft how many are left.
+	fileOff  int64
+	fileLeft int64
+}
+
+// sending reports whether the slot holds output, sent or not, or a file.
+func (c *connCtl) sending() bool {
+	//: bytes, or a file behind them.
+	return c.pending() > 0 || c.fileFD >= 0
 }
 
 // pending is how many output bytes the slot holds, sent or not.
@@ -99,7 +139,7 @@ func (c *connCtl) pending() int {
 func emptyConn(gen uint32) connCtl {
 	//: every chunk released, every link cut.
 	return connCtl{
-		gen: gen, fd: -1, state: stFree, reason: rNone,
+		gen: gen, fd: -1, fileFD: -1, pipeR: -1, pipeW: -1, state: stFree, reason: rNone,
 		spill: chunkRef{idx: noChunk}, out: chunkRef{idx: noChunk}, flight: chunkRef{idx: noChunk},
 		lruPrev: noLink, lruNext: noLink, dirtyNext: noLink,
 	}

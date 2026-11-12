@@ -252,12 +252,16 @@ func TestClientAddress(t *testing.T) {
 		// The client forged a first hop; the trusted proxy appended the
 		// address it really came from, and that is the one kept.
 		{"on", "6.6.6.6, 203.0.113.9", "203.0.113.9"},
+		// A proxy behind the proxy is walked past, to the first address
+		// outside the list.
+		{"on", "203.0.113.9, 127.0.0.2", "203.0.113.9"},
 		{"on", "not-an-ip", "127.0.0.1"},
 		{"on", "", "127.0.0.1"},
 		{"on", "::ffff:198.51.100.4", "198.51.100.4"},
 	} {
 		t.Run(c.trust+"/"+c.forwarded, func(t *testing.T) {
 			t.Setenv("SHOP_TRUST_PROXY", c.trust)
+			t.Setenv("SHOP_TRUSTED_PROXIES", "127.0.0.0/8")
 			a := start(t)
 			token := signIn(t, a, "acc_ip", "ip@x.dev", "Ip")
 			headers := []string{"Cookie", "sid=" + token, "User-Agent", strings.Repeat("é", 300)}
