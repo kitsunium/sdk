@@ -191,15 +191,43 @@ func BenchmarkPutDisk(b *testing.B) {
 // decode outside it.
 func BenchmarkGet(b *testing.B) {
 	store := filledStore(b, nil, 10_000)
+	keys := benchKeys(10_000)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
-		v, err := store.Get(benchDoc(i % 10_000).ID)
+		v, err := store.Get(keys[i%len(keys)])
 		if err != nil {
 			b.Fatalf("Get() = %v", err)
 		}
 		benchSink = v
 	}
+}
+
+// BenchmarkGetInto measures the same reads as BenchmarkGet into one value the
+// loop keeps (#813): the fresh T Get returns is the difference.
+func BenchmarkGetInto(b *testing.B) {
+	store := filledStore(b, nil, 10_000)
+	keys := benchKeys(10_000)
+	var dst account
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		if err := store.GetInto(keys[i%len(keys)], &dst); err != nil {
+			b.Fatalf("GetInto() = %v", err)
+		}
+	}
+	benchSink = dst
+}
+
+// benchKeys are the keys of benchDoc(0) to benchDoc(n-1), formatted once, so
+// a read benchmark counts the store's allocations and not fmt.Sprintf's.
+func benchKeys(n int) []string {
+	keys := make([]string, n)
+	//: in the order benchDoc numbers them.
+	for i := range keys {
+		keys[i] = benchDoc(i).ID
+	}
+	return keys
 }
 
 // BenchmarkGet_Parallel measures reads from every P at once: the readers'

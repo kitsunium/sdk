@@ -658,6 +658,46 @@ sequences:
           when: "!found"
       - return: s.decode(raw)
         to: s.decode
+  - of: (*Store).GetInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).GetInto
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: s.mu.RUnlock
+        kind: value
+      - id: kerrs
+        kind: package
+      - id: decodeInto
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: T
+      - set: "*dst"
+        value: zero
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: raw, found
+        eval: s.docs[key]
+      - bind: closed
+        eval: s.closed
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - opt:
+          do:
+            - return: kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+              to: kerrs
+          when: closed
+      - opt:
+          do:
+            - return: kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+              to: kerrs
+          when: "!found"
+      - return: decodeInto(s.path, raw, dst)
+        to: decodeInto
   - of: (*Store).List
     participants:
       - id: caller
@@ -930,26 +970,49 @@ sequences:
         kind: actor
       - id: decodeAs
         kind: self
-      - id: json
-        kind: stdlib
+      - id: decodeInto
+        kind: internal
     steps:
       - var:
           name: v
           type: T
       - opt:
           do:
+            - return: v, err
+          init:
+            bind: err
+            eval: decodeInto(store, raw, &v)
+            to: decodeInto
+          when: err != nil
+      - return: v, nil
+  - of: decodeInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeInto
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: kerrs
+        kind: package
+    steps:
+      - opt:
+          do:
             - var:
                 name: zero
                 type: T
+            - set: "*dst"
+              value: zero
             - return: |-
-                zero, kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
+                kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
                 			kerrs.String("store", store), kerrs.String("cause", jsonCause(err, reflect.TypeFor[T]())))
+              to: kerrs
           init:
             bind: err
-            eval: json.Unmarshal(raw, &v)
+            eval: json.Unmarshal(raw, dst)
             to: json
           when: err != nil
-      - return: v, nil
+      - return: nil
   - of: (*Store).decodeAll
     participants:
       - id: caller
@@ -4916,6 +4979,49 @@ sequences:
           when: err != nil
       - return: decodeAs[T](s.table, raw)
         to: decodeAs
+  - of: (*SQLStore).GetInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).GetInto
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.getDoc, []byte(key)).Scan
+        kind: value
+      - id: kerrs
+        kind: package
+      - id: s.failed
+        kind: internal
+      - id: decodeInto
+        kind: internal
+    steps:
+      - var:
+          name: zero
+          type: T
+      - set: "*dst"
+        value: zero
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - var:
+          name: raw
+          type: "[]byte"
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.getDoc, []byte(key)).Scan(&raw)
+        to: ex.QueryRowContext(ctx, s.stmts.getDoc, []byte(key)).Scan
+      - opt:
+          do:
+            - return: kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+              to: kerrs
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: s.failed("read a document", err)
+              to: s.failed
+          when: err != nil
+      - return: decodeInto(s.table, raw, dst)
+        to: decodeInto
   - of: (*SQLStore).List
     participants:
       - id: caller

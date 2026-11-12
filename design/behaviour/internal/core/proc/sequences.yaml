@@ -1,7 +1,7 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
-  - of: ExitValue.Success
+  - of: (*ExitValue).Success
     steps:
       - return: "!e.Signaled && e.Code == 0"
   - of: Controller.String

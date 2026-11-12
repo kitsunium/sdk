@@ -352,8 +352,8 @@ constants:
       - doc: |-
           StdioPTY connects the child's stdin, stdout and stderr to the slave side of a
           new pseudo-terminal, which becomes its controlling terminal in a new session;
-          the master is the handle's Terminal.TTY. Linux, darwin and FreeBSD; every
-          other platform refuses it with UnsupportedPlatform before spawning.
+          the master is the handle's Terminal.TTY. Linux, darwin, FreeBSD and OpenBSD;
+          every other platform refuses it with UnsupportedPlatform before spawning.
         name: StdioPTY
     name: StdioInherit
 files:
@@ -365,7 +365,7 @@ files:
   - decls:
       - ExitValue
       - UsageValue
-      - ExitValue.Success
+      - (*ExitValue).Success
     name: exit.go
   - decls:
       - Controller
@@ -561,17 +561,25 @@ types:
       - doc: |-
           Usage is the rest of wait4's resource accounting — page faults, block I/O
           and context switches — read from the same rusage as UserTime and MaxRSS.
-          It is nil where the platform does not supply it (illumos, Solaris and
+          It is carried by value, so building an ExitValue allocates nothing and
+          one an observer keeps is never changed by a later collection. Its Known
+          is false where the platform does not supply it (illumos, Solaris and
           Windows).
         name: Usage
-        type: "*UsageValue"
+        type: UsageValue
     kind: struct
     methods:
       - name: Success
-        recv: e ExitValue
+        recv: e *ExitValue
         results: bool
     name: ExitValue
   - fields:
+      - doc: |-
+          Known reports whether the platform filled the counters. It is false on
+          illumos, Solaris and Windows, where every counter reads zero, so a usage
+          nobody measured is never read as an idle process.
+        name: Known
+        type: bool
       - doc: MinorFaults counts the page faults served without I/O (ru_minflt).
         name: MinorFaults
         type: uint64

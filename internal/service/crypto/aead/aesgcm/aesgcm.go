@@ -53,26 +53,74 @@ func (aesGCM) Seal(key corecrypto.Key, plaintext, aad []byte) (box []byte, err e
 		//: surface it as the typed InvalidKey.
 		return nil, gerr
 	}
-	//: a fixed-size buffer for the fresh random nonce — one per Seal, never reused.
-	var nonce [nonceLen]byte
-	//: fill it from crypto/rand; a fault here is a host entropy problem.
-	if _, rerr := rand.Read(nonce[:]); rerr != nil {
+	//: pre-size the box: header + nonce + ciphertext + GCM tag.
+	dst := make([]byte, 0, len(plaintext)+nonceLen+gcmTagLen+headerLen)
+	box, err = sealTo(gcm, dst, plaintext, aad)
+	//: no box on an entropy fault, as before Bind existed.
+	if err != nil {
+		//: the typed EntropyFailed.
+		return nil, err
+	}
+	//: the one framing Bind's sealer writes too.
+	return box, nil
+}
+
+// Bind implements core/crypto.Binder: the GCM mode built once from key, for a
+// Sealer that seals under it many times (#813). The copy of the key the cipher
+// was built from is cleared before Bind returns; the cipher's round keys live
+// as long as the Sealer.
+func (aesGCM) Bind(key corecrypto.Key) (sealer corecrypto.Sealer, err error) {
+	raw := key.Bytes()
+	//: the key bytes are only needed to expand the schedule.
+	defer clear(raw)
+	gcm, gerr := newGCM(raw)
+	//: a refused key binds nothing.
+	if gerr != nil {
+		//: the typed InvalidKey.
+		return nil, gerr
+	}
+	//: the bound cipher.
+	return boundGCM{gcm: gcm}, nil
+}
+
+// boundGCM is the Sealer Bind returns: one GCM mode, safe for concurrent use
+// as crypto/cipher's GCM is.
+type boundGCM struct {
+	// gcm is the mode built from the bound key.
+	gcm cipher.AEAD
+}
+
+// SealTo appends the self-framed box of plaintext under the bound key to dst.
+func (b boundGCM) SealTo(dst, plaintext, aad []byte) (box []byte, err error) {
+	//: the framing Seal writes.
+	return sealTo(b.gcm, dst, plaintext, aad)
+}
+
+// sealTo appends the box — the version, algID, a fresh nonce, then
+// ciphertext||tag — to dst, or returns dst unextended with EntropyFailed when
+// crypto/rand fails. The nonce is drawn straight into its place in the box: a
+// nonce array of its own would escape through the cipher.AEAD interface call,
+// one allocation per box.
+func sealTo(gcm cipher.AEAD, dst, plaintext, aad []byte) (box []byte, err error) {
+	start := len(dst)
+	//: the self-describing header, so Open needs no algorithm argument, then
+	//: room for the nonce, which travels in the clear (standard for GCM).
+	box = append(dst, corecrypto.Version, algID)
+	box = append(box, make([]byte, nonceLen)...)
+	nonce := box[start+headerLen : start+headerLen+nonceLen]
+	//: a fresh random nonce, one per box, never reused; a fault here is a
+	//: host entropy problem.
+	if _, rerr := rand.Read(nonce); rerr != nil {
 		//: wrap the cause as the typed EntropyFailed sentinel.
-		return nil, errs.Wrap(rerr, errs.WrapParams{
+		return dst, errs.Wrap(rerr, errs.WrapParams{
 			Code:    corecrypto.CodeEntropyFailed,
 			Reason:  "ENTROPY_FAILED",
 			Public:  "Could not gather entropy for encryption",
 			Private: "service/crypto/aead/aesgcm.Seal: crypto/rand.Read failed while generating a nonce",
 		})
 	}
-	//: pre-size the box: header + nonce + ciphertext + GCM tag.
-	box = make([]byte, 0, len(plaintext)+nonceLen+gcmTagLen+headerLen)
-	//: write the self-describing header so Open needs no algorithm argument.
-	box = append(box, corecrypto.Version, algID)
-	//: the nonce travels in the clear (standard for GCM) ahead of the tag.
-	box = append(box, nonce[:]...)
-	//: gcm.Seal appends ciphertext||tag onto the header+nonce prefix.
-	return gcm.Seal(box, nonce[:], plaintext, aad), nil
+	//: gcm.Seal appends ciphertext||tag after the nonce, which it only reads.
+	return gcm.Seal(box, nonce, plaintext, aad), nil
 }
 
 // Open validates the framing, decrypts, and verifies aad. Every failure returns

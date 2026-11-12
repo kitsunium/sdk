@@ -229,6 +229,100 @@ sequences:
               value: AppendString(dst, m.Version)
           when: m.Version != ""
       - return: append(dst, '}')
+  - of: NewArena
+    steps:
+      - return: "&Arena{pairs: make([]KeyValue, 0, max(attrs, 0)), capacity: max(attrs, 0) + max(values, 0)}"
+  - of: (*Arena).Attrs
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(attrs) == 0
+      - bind: start
+        eval: len(a.pairs)
+      - loop:
+          do:
+            - set: a.pairs
+              value: append(a.pairs, a.keyValue(attr))
+          key: _
+          range: attrs
+          value: attr
+      - return: a.pairs[start:len(a.pairs):len(a.pairs)]
+  - of: (*Arena).keyValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Arena).keyValue
+        kind: self
+      - id: grow
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: coreotel.AttrKindString
+              do:
+                - set: a.strings
+                  to: grow
+                  value: grow(a.strings, a.capacity)
+                - set: a.strings
+                  value: append(a.strings, attr.Str())
+                - return: "KeyValue{Key: attr.Key, Value: AnyValue{StringValue: &a.strings[len(a.strings)-1]}}"
+            - case: coreotel.AttrKindBool
+              do:
+                - set: a.bools
+                  to: grow
+                  value: grow(a.bools, a.capacity)
+                - set: a.bools
+                  value: append(a.bools, attr.Bool())
+                - return: "KeyValue{Key: attr.Key, Value: AnyValue{BoolValue: &a.bools[len(a.bools)-1]}}"
+            - case: coreotel.AttrKindInt64
+              do:
+                - return: "KeyValue{Key: attr.Key, Value: AnyValue{IntValue: a.Int64(attr.Int64())}}"
+            - case: coreotel.AttrKindFloat64
+              do:
+                - return: "KeyValue{Key: attr.Key, Value: AnyValue{DoubleValue: a.Double(attr.Float64())}}"
+            - default: true
+              do:
+                - return: "KeyValue{Key: attr.Key}"
+          "on": attr.Kind()
+  - of: (*Arena).Int64
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Arena).Int64
+        kind: self
+      - id: grow
+        kind: internal
+    steps:
+      - set: a.ints
+        to: grow
+        value: grow(a.ints, a.capacity)
+      - set: a.ints
+        value: append(a.ints, Int64(v))
+      - return: "&a.ints[len(a.ints)-1]"
+  - of: (*Arena).Double
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Arena).Double
+        kind: self
+      - id: grow
+        kind: internal
+    steps:
+      - set: a.doubles
+        to: grow
+        value: grow(a.doubles, a.capacity)
+      - set: a.doubles
+        value: append(a.doubles, Double(v))
+      - return: "&a.doubles[len(a.doubles)-1]"
+  - of: grow
+    steps:
+      - opt:
+          do:
+            - set: values
+              value: make([]T, 0, max(capacity, 1))
+          when: values == nil
+      - return: values
   - of: Attrs
     participants:
       - id: caller

@@ -31,7 +31,7 @@ func fullModel() model {
 		sandboxFields: []errs.FieldValue{errs.String("step", "mounts"), errs.String("errno", "EPERM")},
 		mainExit: coreproc.ExitValue{
 			Code: 3, Signal: 9, Signaled: true, UserTime: time.Millisecond, SystemTime: 2 * time.Millisecond, MaxRSS: 4096, CoreDumped: true,
-			Usage: &coreproc.UsageValue{MinorFaults: 1, MajorFaults: 2, InBlock: 3, OutBlock: 4, VoluntaryCtxSw: 5, InvoluntaryCtxSw: 6},
+			Usage: coreproc.UsageValue{Known: true, MinorFaults: 1, MajorFaults: 2, InBlock: 3, OutBlock: 4, VoluntaryCtxSw: 5, InvoluntaryCtxSw: 6},
 		},
 		seq: [timerCount]uint64{4, 5, 6}, generation: 41, notifyRefused: 2, reloadBegin: 99,
 		storeSeq: 5, storeRefused: 1, storeDiscarded: 2, watchdogPeriod: 3 * time.Second,

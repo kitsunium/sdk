@@ -64,16 +64,20 @@ var (
 	docSink []byte
 )
 
-// benchTree builds a payload of n points, as an encoder would per export.
+// benchTree builds a payload of n points, as the metrics encoder builds its
+// own per export: every point's attributes and value from one arena sized for
+// the export (#813), where each point took a KeyValue slice and a pointer per
+// value before.
 func benchTree(n int) benchRequest {
 	now := time.Unix(1_700_000_000, 0)
 	points := make([]benchPoint, n)
+	arena := otlp.NewArena(3*n, n)
 	for i := range points {
 		points[i] = benchPoint{
 			Start: otlp.UnixNano(now),
 			End:   otlp.UnixNano(now),
-			AsInt: new(otlp.Int64(int64(i))),
-			Attributes: otlp.Attrs([]coreotel.AttrValue{
+			AsInt: arena.Int64(int64(i)),
+			Attributes: arena.Attrs([]coreotel.AttrValue{
 				coreotel.String("http.request.method", "GET"),
 				coreotel.String("http.route", "/v1/orders/{id}"),
 				coreotel.Int64("http.response.status_code", 200),

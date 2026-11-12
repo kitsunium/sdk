@@ -48,6 +48,7 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `otlp.go` | `DefaultTimeout` / `DefaultMaxResponseBytes` / `DocumentTerminator` |
 | `scalar.go` | `Int64` / `Uint64` (decimal strings) and `Double` (a number as `kernel/jsonenc.AppendFloat` spells it — encoding/json's `1000000`, `1e-7`, `1e+21`, #1039 — or `"NaN"` / `"Infinity"` / `"-Infinity"` on its `ok == false` branch) with their `MarshalJSON`, and the unexported renderings their `AppendJSON` share |
+| `arena.go` | `Arena` / `NewArena` — the attribute sets and oneof values of one export from a few slices sized once (`Attrs`, `Int64`, `Double`), exactly what `Attrs` / `KeyValueOf` build; each set capped at its own end; a pointer into a slice that later grows keeps the old array alive, so an undersized arena costs allocations, never a wrong value (#813) |
 | `append.go` | the appenders both signals render their trees with: `AppendString` (encoding/json's string escaping with HTML escaping off), `AppendKey` (a member name, its comma decided by the `{` before it), `AppendBool`, `AppendNull`, `AppendKeyValues`, and `AppendJSON` on `Int64` / `Uint64` / `Double` / `AnyValue` / `KeyValue` / `ResourceMessage` / `ScopeMessage` — `Marshal`'s bytes, without reflection and without a slice per scalar |
 | `key_value.go` | `KeyValue` + `Attrs` + `KeyValueOf` — the shared attribute model (`internal/core/observe/otel`) as `common.v1.KeyValue` |
 | `any_value.go` | `AnyValue` — the four scalar cases of the oneof, presence kept at the zero |
@@ -62,6 +63,7 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 | `wire_external_test.go` | scalars, attributes, messages, the marshal, the caller's code on a fault, the unset instant, the stream under concurrency |
 | `sender_external_test.go` | the three verdicts for two stand-in signals, every success shape, every endpoint refusal, the transport fault, header precedence, the defaults |
 | `append_external_test.go` | the appenders against `Marshal`, encoding/json the oracle: every string escape class (and a fuzz target seeded with them), the scalars at their extremes, every message and omission, the member comma |
+| `arena_external_test.go` | the arena against `Attrs`, value for value and byte for byte through `Marshal`, at capacities 0, 1 and 64, every kind and the invalid one; a set capped at its own end |
 | `marshal_bench_test.go` / `BENCH.md` | the cost of one document through `Marshal` and through the appenders, and a pooled-buffer CONTROL kept beside them — measured not to pay |
 
 ## Why each signal still keeps four small things

@@ -327,8 +327,9 @@ type FileReceiver interface {
 	// RecvFiles reads one message into buf and the descriptors attached to it,
 	// at most max (refused at zero), each close-on-exec — not inheritable on
 	// Windows — and wrapped as an *os.File the caller owns and closes.
-	// Descriptors beyond max are closed by the kernel on Unix and in the
-	// sender's process on Windows, never leaked into this process;
+	// Descriptors beyond max are closed by the kernel on Unix and on Windows in
+	// the sender's process — a socket, already the peer's, closed here —, never
+	// leaked into this process;
 	// FDPassRefused with the reason "truncated" says so, beside the files that
 	// fit.
 	RecvFiles(buf []byte, max int) (n int, files []*os.File, err error)
@@ -342,12 +343,12 @@ type FileReceiver interface {
 func (FileReceiver) RecvFiles(buf []byte, max int) (n int, files []*os.File, err error)
 ```
 
-RecvFiles reads one message into buf and the descriptors attached to it, at most max (refused at zero), each close-on-exec — not inheritable on Windows — and wrapped as an \*os.File the caller owns and closes. Descriptors beyond max are closed by the kernel on Unix and in the sender's process on Windows, never leaked into this process; FDPassRefused with the reason "truncated" says so, beside the files that fit.
+RecvFiles reads one message into buf and the descriptors attached to it, at most max (refused at zero), each close-on-exec — not inheritable on Windows — and wrapped as an \*os.File the caller owns and closes. Descriptors beyond max are closed by the kernel on Unix and on Windows in the sender's process — a socket, already the peer's, closed here —, never leaked into this process; FDPassRefused with the reason "truncated" says so, beside the files that fit.
 
 <a name="FileSender"></a>
 ## type [FileSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
-FileSender passes open files to the peer's process (SCM\_RIGHTS on Unix, DuplicateHandle on Windows); assert it on Conn.Conn. Only to a peer the kernel named.
+FileSender passes open files to the peer's process (SCM\_RIGHTS on Unix; DuplicateHandle on Windows, WSADuplicateSocketW for a socket, a TCP listener's file among them); assert it on Conn.Conn. Only to a peer the kernel named.
 
 ```go
 type FileSender = coreipc.FileSender
