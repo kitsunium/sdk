@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-12T02:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -21,16 +21,46 @@ asynchronous, the entries handed by index read back from the disk model
 and a restart loading the committed commands past `recent` without their
 payloads, as the driver does (`TestSimBoundedApply*`, #663, #664).
 
+`walkthrough_internal_test.go` is D15's datadriven reader (#1112),
+stdlib only: `TestDataDriven` runs every `testdata/*.txt`, each a list of
+commands to the step function — `add-nodes`, `campaign`, `tick`,
+`propose`, `step` (a message written in the script), `read-index`,
+`transfer`, `install-snapshot`, `process-ready`, `storage-done`,
+`deliver-msgs`, `stabilize`, `raft-state`, `raft-log` — each followed by
+`----` and what it printed: the Ready's fields, the messages delivered or
+dropped, the writes made durable. A difference fails naming the file, the
+command's line and the first line that differs, with a line diff, and
+`go test -run TestDataDriven ./raft/ -rewrite` writes the expectations back
+(the flag after the package: before it, `go test` reads it as its own). A
+change of the step function that moves a script is read in its diff before
+it is rewritten. Each script is named after its rule and sits beside the
+Go check that pins it, not instead of it: D15's five schedules
+(`figure-8-commits-no-older-term-by-count`,
+`same-term-vote-kept-on-step-down`, `heartbeat-commit-clamped-to-match`,
+`learner-answers-a-vote`, `transfer-flag-at-another-term-is-refused`) and
+eleven more (the ack after its sync, the election restriction, the live
+leader's refusal, TimeoutNow's term, the verified prefix, an install's
+acknowledgement, an older term's append, a forward delivered twice, a
+silent node, a read index, an election and its first commit).
+
 Bazel deals top-level tests to shards by their index, so a new test file
 whose name sorts before a seed suite's (`checks_*`, `lincheck_*`, `sim_*`,
 `unapplied_*`, every file calling `seedPart` or `eachSeed`) moves its seed
 parts to other shards: name it after them, or measure the shards again.
 `strictsilent_*` sorted before `unapplied_*` and put
 `TestSimBoundedApplyP2` beside `TestChecksPassUnmutated` and two more seed
-parts, a shard past 60 s under coverage (#790's PR).
+parts, a shard past 60 s under coverage (#790's PR). The datadriven reader
+was measured so (#1112): the sums per shard of a `-race -covermode=atomic
+-json` run, its subtests counted, on a machine shared with seven other
+suites, put the slowest of 27 at 95.7 s, `TestChecksPassUnmutated` beside
+`TestSimSafetyUnderFaultsP05`. Named `datadriven_*`, the issue's name, it
+sorted after `checks_*` and before the seed parts and made that shard
+136.1 s, `TestSimSafetyUnderFaultsP04` and `TestSimBoundedApplyP3` moved
+beside it; named `walkthrough_*`, after every seed suite, it leaves each
+shard as it was (95.7 s, the reader itself 0.14 s).
 
 The suites cost ~300 CPU-seconds under race and coverage against a 60 s cap
-per target, so `raft_test` has 26 shards and Bazel deals them TOP-LEVEL tests:
+per target, so `raft_test` has 27 shards and Bazel deals them TOP-LEVEL tests:
 a seed suite is split into top-level parts (`seedPart`) and a loop of seeds
 runs them as parallel subtests (`eachSeed`) — never fewer seeds (#126, #304).
 A new heavy suite follows the same shape; measure every shard side by side

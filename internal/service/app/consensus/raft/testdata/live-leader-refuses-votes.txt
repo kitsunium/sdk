@@ -1,0 +1,33 @@
+# D5's vote-side CheckQuorum, R1-18 (mutLiveLeaderPreVoteOnly): a follower
+# that hears its leader drops a vote and a PreVote of a higher term
+# unanswered, and the refusal moves no term.
+add-nodes 1 voters=1,2,3 term=2
+----
+ok
+
+step 1 type=MsgHeartbeat from=2 term=2
+----
+ok
+
+process-ready 1
+----
+> 1 handling Ready
+  Messages:
+    1->2 MsgHeartbeatResp term=2
+  Membership 1@0 2@0 3@0
+
+step 1 type=MsgPreVote from=3 term=3
+----
+ok
+
+step 1 type=MsgVote from=3 term=3
+----
+ok
+
+process-ready 1
+----
+ok
+
+raft-state
+----
+1: follower term=2 vote=0 lead=2 commit=0 stable=0 last=0

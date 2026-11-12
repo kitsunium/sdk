@@ -1,0 +1,45 @@
+# D15, "a learner that does not answer votes": a learner never campaigns, but
+# it answers a vote request, granted after its vote is durable, for a
+# candidate whose newer configuration may count it a voter.
+add-nodes 4 voters=1,2,3 learners=4 term=1
+----
+ok
+
+raft-state
+----
+1: follower term=1 vote=0 lead=0 commit=0 stable=0 last=0
+2: follower term=1 vote=0 lead=0 commit=0 stable=0 last=0
+3: follower term=1 vote=0 lead=0 commit=0 stable=0 last=0
+4: learner term=1 vote=0 lead=0 commit=0 stable=0 last=0
+
+step 4 type=MsgPreVote from=1 term=2
+----
+ok
+
+process-ready 4
+----
+> 4 handling Ready
+  Messages:
+    4->1 MsgPreVoteResp term=2
+  Membership 1@0 2@0 3@0 4(learner)@0
+
+step 4 type=MsgVote from=1 term=2
+----
+ok
+
+process-ready 4
+----
+> 4 handling Ready
+  seq=1
+  HardState term=2 vote=1 commit=0
+  AfterSync:
+    4->1 MsgVoteResp term=2
+
+storage-done 4
+----
+> 4 storage done seq=1 through 0/0
+
+deliver-msgs 1 drop
+----
+  dropped 4->1 MsgPreVoteResp term=2
+  dropped 4->1 MsgVoteResp term=2

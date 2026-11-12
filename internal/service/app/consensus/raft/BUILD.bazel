@@ -80,6 +80,7 @@ go_test(
         "votersilent_internal_test.go",
         "votewindowraise_internal_test.go",
         "voucheraddress_internal_test.go",
+        "walkthrough_internal_test.go",
         "wholelogsilence_internal_test.go",
         "wholelogsilencepoint_internal_test.go",
         "wholelogsilencerestart_internal_test.go",
@@ -92,6 +93,7 @@ go_test(
         "zreplicationlag_internal_test.go",
         "zseries_internal_test.go",
     ],
+    data = glob(["testdata/**"]),
     embed = [":raft"],
     # The deterministic simulations take ~300 CPU-seconds under race and
     # coverage, and .bazelrc caps every target at 60 s (#126). rules_go

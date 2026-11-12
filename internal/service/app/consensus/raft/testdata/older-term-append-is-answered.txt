@@ -1,0 +1,31 @@
+# R1-18: an append or a heartbeat of an older term is refused with this
+# node's term, so its stale leader steps down; a vote of an older term is
+# dropped unanswered.
+add-nodes 1 voters=1,2,3 term=3
+----
+ok
+
+step 1 type=MsgApp from=2 term=2 logterm=0 index=0
+----
+ok
+
+step 1 type=MsgHeartbeat from=2 term=2
+----
+ok
+
+step 1 type=MsgVote from=3 term=2
+----
+ok
+
+process-ready 1
+----
+> 1 handling Ready
+  seq=1
+  AfterSync:
+    1->2 MsgAppResp term=3 reject
+    1->2 MsgAppResp term=3 reject
+  Membership 1@0 2@0 3@0
+
+raft-state
+----
+1: follower term=3 vote=0 lead=0 commit=0 stable=0 last=0
