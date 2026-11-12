@@ -2870,6 +2870,47 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.Preallocate",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "Preallocate",
+      "spelled": "svcconsensus.Preallocate",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PreallocateFallocate",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "PreallocateFallocate",
+      "spelled": "svcconsensus.Preallocate",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateFallocate",
+      "doc": "How a new log segment is preallocated.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PreallocateZeroFill",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "PreallocateZeroFill",
+      "spelled": "svcconsensus.Preallocate",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateZeroFill",
+      "doc": "How a new log segment is preallocated.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PreconditionSpec",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",

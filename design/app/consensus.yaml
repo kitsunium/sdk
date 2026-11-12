@@ -2281,6 +2281,20 @@ packages:
         name: TruncateAndStaySilent
         type: QuarantineExit
         value: "2"
+      - doc: |-
+          PreallocateZeroFill writes zeros over a new segment's full size, then
+          syncs it. It is the zero value and the default (D4).
+        name: PreallocateZeroFill
+        type: Preallocate
+        value: "0"
+      - doc: |-
+          PreallocateFallocate reserves a new segment's full size with
+          fallocate(2) on Linux, its blocks unwritten extents that read as zeros,
+          then syncs it: no zero is written. A filesystem or a platform without
+          it opens the log in PreallocateZeroFill, with one line logged (#922).
+        name: PreallocateFallocate
+        type: Preallocate
+        value: "1"
     doc: |-
       Package consensus is the Raft engine of ADR 0152 and everything it ships
       around the step function of package raft: the event loop that drives it,
@@ -2849,14 +2863,23 @@ packages:
             - name: Logger
               type: corelogger.Logger
       - doc: |-
-          DataDirOptions tunes NewDataDirWith: the size of a log segment and the
-          boot-scoped directory of the second STORAGE_FAILED marker.
+          DataDirOptions tunes NewDataDirWith: the size of a log segment, how a
+          new one is preallocated, and the boot-scoped directory of the second
+          STORAGE_FAILED marker.
         name: DataDirOptions
         struct:
           fields:
             - doc: SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
               name: SegmentBytes
               type: int64
+            - doc: |-
+                Preallocate is how a new segment is given its fixed size: zeros
+                written (PreallocateZeroFill, the zero value) or fallocate(2)
+                (PreallocateFallocate). Either way the segment occupies its whole
+                size, as the no-space guard counts it. Another value is refused
+                CONSENSUS_MISCONFIGURED.
+              name: Preallocate
+              type: Preallocate
             - doc: |-
                 RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
                 marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
@@ -3612,6 +3635,11 @@ packages:
                 or a MemoryTransport's in tests.
               name: Ask
               type: func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+      - doc: |-
+          Preallocate is how the file log gives a new segment its fixed size
+          before it holds a record (D4, #922).
+        name: Preallocate
+        underlying: uint8
       - doc: |-
           RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
           Recover refuses, before it writes anything, an invalid operator, a
@@ -5323,6 +5351,8 @@ packages:
             target: svcconsensus.DataDir
           - name: DataDirOptions
             target: svcconsensus.DataDirOptions
+          - name: Preallocate
+            target: svcconsensus.Preallocate
           - name: ReportValue
             target: svcconsensus.ReportValue
           - name: QuarantineExit
@@ -5352,6 +5382,16 @@ packages:
             type: svcconsensus.QuarantineExit
             value: "2"
         doc: The two exits of ClearQuarantine.
+      - const:
+          - name: PreallocateZeroFill
+            reexport: svcconsensus.PreallocateZeroFill
+            type: svcconsensus.Preallocate
+            value: "0"
+          - name: PreallocateFallocate
+            reexport: svcconsensus.PreallocateFallocate
+            type: svcconsensus.Preallocate
+            value: "1"
+        doc: How a new log segment is preallocated.
       - func:
           doc: NewDataDir takes the directory lock first, then recovers the log.
           forward: svcconsensus.NewDataDir

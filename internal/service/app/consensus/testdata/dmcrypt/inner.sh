@@ -4,16 +4,27 @@ set -euo pipefail
 trap 'echo "ERROR line $LINENO: $BASH_COMMAND" >&2' ERR
 iters="$1"
 negative="${2:-0}"
+fs="${3:-ext4}"
+prealloc="${4:-zerofill}"
+suite="${5:-}"
 apt-get update -qq >/dev/null 2>&1
-apt-get install -y -qq cryptsetup-bin dmsetup e2fsprogs procps >/dev/null 2>&1
+apt-get install -y -qq cryptsetup-bin dmsetup e2fsprogs xfsprogs procps >/dev/null 2>&1
+# Every run of the test binary preallocates segments this way (#922).
+export CONSENSUS_PREALLOCATE="$prealloc" DMCRYPT_FS="$fs"
 
 # A previous run killed mid-way leaves its mappings in the VM: drop them.
 umount -l /mnt 2>/dev/null || true
 dmsetup remove kcons-cut 2>/dev/null || true
 cryptsetup close kcons-crypt 2>/dev/null || true
 
-img=/tmp/disk.img
-truncate -s 8G "$img"
+# DMCRYPT_IMG and DMCRYPT_IMG_SIZE place the image elsewhere: run.sh with
+# DMCRYPT_RAM=1 puts it on a tmpfs, so a run writes nothing to the host.
+img="${DMCRYPT_IMG:-/tmp/disk.img}"
+truncate -s "${DMCRYPT_IMG_SIZE:-8G}" "$img"
+# A host whose /dev is a snapshot taken at container start (a real Linux
+# host, not Docker Desktop's VM) has no node for a loop device made since.
+nextloop="$(losetup -f)"
+[ -e "$nextloop" ] || mknod "$nextloop" b 7 "${nextloop#/dev/loop}"
 loop="$(losetup -f --show "$img")"
 cleanup() {
 	umount -l /mnt 2>/dev/null || true
@@ -31,13 +42,45 @@ cut="0 $sectors error"
 dmsetup create --noudevsync kcons-cut --table "$linear"
 # No udev in the container: the node is made by hand.
 dmsetup mknodes kcons-cut
-mkfs.ext4 -q /dev/mapper/kcons-cut
+case "$fs" in
+ext4) mkfs.ext4 -q /dev/mapper/kcons-cut ;;
+xfs) mkfs.xfs -q -f /dev/mapper/kcons-cut ;;
+*) echo "unknown filesystem $fs" >&2 && exit 2 ;;
+esac
 mkdir -p /mnt
 mount /dev/mapper/kcons-cut /mnt
-echo "SETUP $(cryptsetup status kcons-crypt | grep -E 'cipher|keysize' | tr -s ' ' | tr '\n' ' ')"
+echo "SETUP fs=$fs preallocate=$prealloc $(cryptsetup status kcons-crypt | grep -E 'cipher|keysize' | tr -s ' ' | tr '\n' ' ')"
 
 export DMCRYPT_DIR=/mnt
+# The device the bench counts the bytes of: the cut device's dm-N (its
+# node was made by hand, so it is no link to /dev/dm-N).
+DMCRYPT_STATDEV="dm-$(dmsetup info -c --noheadings -o minor kcons-cut | tr -d ' ')"
+export DMCRYPT_STATDEV
 [ "$negative" = 1 ] || /work/consensus.test -test.run '^TestDMCryptBench$' -test.count=1 | grep '^BENCH'
+if [ "$negative" != 1 ]; then
+	# G1's preallocation row (#922): both modes, alternated twice so a
+	# change of the host's load does not land on one mode only.
+	for mode in zerofill fallocate zerofill fallocate; do
+		CONSENSUS_PREALLOCATE="$mode" /work/consensus.test -test.run '^TestDMCryptPreallocBench$' -test.count=1 \
+			>/tmp/prealloc.log 2>&1 || { tail -20 /tmp/prealloc.log; exit 1; }
+		grep '^PREALLOC' /tmp/prealloc.log
+		rm -rf /mnt/prealloc-*
+	done
+fi
+if [ -n "$suite" ]; then
+	# The file log's suite and its fuzz seeds, on this filesystem, in this
+	# mode: their temporary directories are on it.
+	mkdir -p /mnt/suite
+	if TMPDIR=/mnt/suite /work/consensus.test -test.run "$suite" -test.count=1 -test.v >/tmp/suite.log 2>&1; then
+		echo "SUITE ok fs=$fs preallocate=$prealloc passed=$(grep -c '^--- PASS' /tmp/suite.log) skipped=$(grep -c '^--- SKIP' /tmp/suite.log)"
+	else
+		echo "SUITE FAILED fs=$fs preallocate=$prealloc"
+		grep -E '^(--- FAIL|FAIL|panic)' /tmp/suite.log | head -20
+		tail -20 /tmp/suite.log
+		exit 1
+	fi
+	rm -rf /mnt/suite
+fi
 
 pass=0
 for i in $(seq 1 "$iters"); do

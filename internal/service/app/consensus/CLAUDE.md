@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-11T12:00:00Z -->
+<!-- updated: 2026-11-12T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -43,7 +43,7 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt`: `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go` and the package's copy of `allocwindow_test.go`, nothing else of the suite |
 | bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`); numbers in `BENCH.md` |
-| dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
+| dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922) and power cuts through LUKS, on ext4 or xfs; with `fallocate` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`); results in `testdata/dmcrypt/RESULTS.md` |
 
 Under Bazel `consensus_test` has 24 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
@@ -705,6 +705,18 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `abandonTmp` removes it; `cutFailed` waits one second, doubling to a
   minute (#520, `TestAFailedZeroFillLeavesNoPartialSegment`,
   `TestAFailedCutWaitsBeforeTheNext`).
+- Refuse an open because fallocate is missing, or preallocate a segment
+  any other way than at its full size. `DataDirOptions.Preallocate =
+  PreallocateFallocate` is probed at open (`resolvePreallocate`, a 4 KiB
+  `fallocate-probe.tmp` reserved and removed, after the markers and before
+  recovery): a filesystem that answers EOPNOTSUPP, or a platform other than
+  Linux, opens in `PreallocateZeroFill` and logs one line, through the log
+  of the node the `DataDir` serves (`fileLog.bindWarn`, the log having no
+  logger of its own). A fallocated segment occupies its whole size as a
+  zero-filled one does, so `space.go`'s accounting holds, and an unwritten
+  extent reads as zeros, the hole recovery already classifies (#922,
+  `TestAFilesystemWithoutFallocateOpensTheLogInZeroFill`,
+  `TestAFallocatedLogRecoversAsAZeroFilledOne`).
 - Let the log grow past `MaxLogBytes` less `LogReserveBytes`, or the
   filesystem under `LogReserveBytes`, without the no-space alarm:
   `guardSpace` proposes it at each tick and each completed write, the node

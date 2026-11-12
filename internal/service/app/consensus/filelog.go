@@ -291,6 +291,13 @@ type fileLog struct {
 	// fill replaces zeroFrom when a test sets it, to fail as a full disk
 	// does; nil otherwise.
 	fill func(f *os.File, off, size int64) error
+	// prealloc is how the segments are preallocated, set at open by
+	// resolvePreallocate: PreallocateFallocate only where the filesystem
+	// answered the probe (#922).
+	prealloc Preallocate
+	// preallocWhy is why the log zero-fills although fallocate was asked
+	// for, until bindWarn logs it, once; empty otherwise. Under mu.
+	preallocWhy string
 	// afterEntries is handed each batch Entries returns, under mu, before
 	// it returns it: a test counts what a reader of the log holds at once
 	// (#700). Only a test sets it, before the reads it counts.
@@ -353,6 +360,9 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 		l.refuse = err
 		return l, nil
 	}
+	// Resolved before recovery, which prepares the next segment, and after
+	// the markers: a refused log modifies nothing, not even by a probe.
+	l.resolvePreallocate(dd.opts.Preallocate)
 	if err := l.recover(); err != nil {
 		if errs.HasCode(err, coreconsensus.CodeLogQuarantined) {
 			l.refuse = err
@@ -1291,12 +1301,16 @@ func (l *fileLog) segmentFile(n uint64, size int64, tmp string) (*os.File, error
 	return f, nil
 }
 
-// zeroFill is the function that zero-fills a segment: zeroFrom, unless a
+// zeroFill is the function that zero-fills a segment: zeroFrom, or
+// fallocateFill when the log preallocates with fallocate (#922), unless a
 // test set fill to fail as a full disk does. It is read on the writer's
 // path, before any goroutine it hands it to starts.
 func (l *fileLog) zeroFill() func(f *os.File, off, size int64) error {
 	if l.fill != nil {
 		return l.fill
+	}
+	if l.prealloc == PreallocateFallocate {
+		return fallocateFill
 	}
 	return zeroFrom
 }

@@ -620,9 +620,13 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
     the term ends.
 
 **Durability, as the kernel gives it (R1-09, R7-22).** On Linux,
-`segment_linux.go` calls `fdatasync(2)`. `fallocate(2)` stays OFF: segments
-are zero-filled. If it is adopted later, recovery must know unwritten extents,
-which read as zeros although nothing was written there. On darwin,
+`segment_linux.go` calls `fdatasync(2)`. `fallocate(2)` stays OFF by
+default: segments are zero-filled. `DataDirOptions.Preallocate =
+PreallocateFallocate` opts in where it was measured not to cost
+(amendment of 2026-11-12, [#922](https://github.com/kitsunium/sdk/issues/922)):
+recovery already reads an unwritten extent as the zeros it reads, the hole
+`classifyTail` classifies, and the verdict per filesystem is in Deferred.
+On darwin,
 `os.File.Sync` issues `F_FULLFSYNC`, which is stronger than `fdatasync`, and
 slower (R8-06). Elsewhere, `os.File.Sync` is the fallback, and it is stated
 as the weaker or slower path it is on each platform. A segment has a fixed size, 64 MiB (provisional),
@@ -4317,9 +4321,45 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
   measured, as ADR 0052 D8 did for `LockFileEx`.
 - **zstd snapshots (R7-06, R7-00b)**, once `third-party/transform` adds
   `DecompressBounded` in its own change, through a product-side adapter.
-- **`fallocate` for segments (R7-22)**, once recovery knows unwritten
-  extents and a measurement shows `fdatasync` after it publishes no
-  metadata.
+- **`fallocate` for segments (R7-22): measured, opt-in, not the default**
+  (amendment of 2026-11-12, [#922](https://github.com/kitsunium/sdk/issues/922)).
+  `DataDirOptions.Preallocate` has two modes: `PreallocateZeroFill`, the
+  zero value, and `PreallocateFallocate`, `fallocate(2)` mode 0 over a new
+  segment's full size (`FALLOC_FL_ZERO_RANGE` first over any bytes it
+  already holds). The segment keeps its fixed size and occupies it whole,
+  so the no-space guard's accounting is unchanged, and its unwritten
+  extents read as zeros, the hole recovery classifies already. An open
+  probes it: a filesystem that answers EOPNOTSUPP, or a platform other than
+  Linux, opens in ZeroFill with one line logged, never a refusal; the
+  Windows backend stays deferred above. G1's row, `Append` 64 × 256 B +
+  `Sync` on 64 MiB segments (`TestDMCryptPreallocBench`, the dm-crypt lane
+  on a loop device in RAM, in Docker Desktop's VM on an Apple-silicon Mac,
+  under the load of seven other builds), then on Linux (amendment below):
+
+  | Host | Filesystem | Mode | `Sync` p50 | p99 | device bytes per segment |
+  |---|---|---|---|---|---|
+  | Docker Desktop, Apple silicon | ext4 | ZeroFill | 372 µs, 636 µs | 16.5 ms, 26.9 ms | 161.8 MB |
+  | Docker Desktop, Apple silicon | ext4 | Fallocate | 990 µs | 18.0 ms | 141.3 MB |
+  | devbox, Linux 6.12 amd64 | ext4 | ZeroFill | 2.28 ms, 2.35 ms | 3.8 ms, 5.7 ms | 161.9 MB |
+  | devbox, Linux 6.12 amd64 | ext4 | Fallocate | 3.71 ms, 4.28 ms | 7.3 ms, 13.3 ms | 141.2 MB |
+  | devbox, Linux 6.12 amd64 | xfs | ZeroFill | 2.46 ms, 2.41 ms | 9.2 ms, 9.8 ms | 161.8 MB |
+  | devbox, Linux 6.12 amd64 | xfs | Fallocate | 4.41 ms, 4.42 ms | 12.5 ms, 14.1 ms | 100.5 MB |
+
+  Each segment holds 67.1 MB of records. The devbox rows are the dm-crypt
+  lane (`run.sh 12 0 ext4 fallocate` and `run.sh 12 0 xfs fallocate`), LUKS2
+  `aes-xts-plain64` over a loop device whose image is a file on the host's
+  ext4 disk, the modes alternated twice, 10 081 syncs a row; the file log's
+  suite (41 tests and fuzz seeds, `FuzzParseRecord`, `FuzzClassifyTail`,
+  `FuzzScanSegment` among them) passed on both filesystems with every log
+  fallocated, and so did 12 of 12 power cuts on each (`testdata/dmcrypt/
+  RESULTS.md`). On ext4 `fallocate` saves 13 % of the bytes, on xfs 38 %,
+  not the 64 MiB of zeros: each `fdatasync` after a write into an unwritten
+  extent commits the extent's conversion through the journal, which is the
+  risk this item named, and the median `Sync` is 1.6 to 1.8 times
+  ZeroFill's on ext4 and 1.8 times on xfs, its p99 higher on both.
+  **Verdict, measured on ext4 and xfs: not adopted; ZeroFill stays the
+  default on both.** The OVH VPS of D16 are measured under their real load
+  before any filesystem adopts it.
 
 ## Amendment — the published names follow the SDK's roles (2026-10-13, v0 breaking changes)
 

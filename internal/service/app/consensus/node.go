@@ -555,6 +555,11 @@ func (n *Node) bindTransport() error {
 	if wb, ok := cfg.Transport.(bindWarner); ok {
 		wb.bindWarn(n.obs.warn)
 	}
+	// The file log's line, when it zero-fills although fallocate was asked
+	// for (#922): the log has no logger of its own.
+	if wb, ok := cfg.Log.(bindWarner); ok {
+		wb.bindWarn(n.obs.warn)
+	}
 	return nil
 }
 

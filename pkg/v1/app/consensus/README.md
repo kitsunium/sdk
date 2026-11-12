@@ -205,6 +205,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(PeerFlags\) Has\(x PeerFlags\) bool](<#PeerFlags.Has>)
 - [type PeerHealthValue](<#PeerHealthValue>)
 - [type PositionValue](<#PositionValue>)
+- [type Preallocate](<#Preallocate>)
 - [type PreconditionSpec](<#PreconditionSpec>)
 - [type QuarantineExit](<#QuarantineExit>)
 - [type QuarantineOptions](<#QuarantineOptions>)
@@ -644,6 +645,24 @@ const PeerVoter svcconsensus.PeerFlags = 1
 The facts a PeerHealthValue carries, read with PeerFlags.Has.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerVoter`.
+
+<a name="PreallocateFallocate"></a>
+```go
+const PreallocateFallocate svcconsensus.Preallocate = 1
+```
+
+How a new log segment is preallocated.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateFallocate`.
+
+<a name="PreallocateZeroFill"></a>
+```go
+const PreallocateZeroFill svcconsensus.Preallocate = 0
+```
+
+How a new log segment is preallocated.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateZeroFill`.
 
 <a name="ReadIndex"></a>
 ```go
@@ -1772,6 +1791,12 @@ DataDirOptions is an alias of `github.com/kitsunium/sdk/internal/service/app/con
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
+	// Preallocate is how a new segment is given its fixed size: zeros
+	// written (PreallocateZeroFill, the zero value) or fallocate(2)
+	// (PreallocateFallocate). Either way the segment occupies its whole
+	// size, as the no-space guard counts it. Another value is refused
+	// CONSENSUS_MISCONFIGURED.
+	Preallocate  Preallocate
 	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
 	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
 	// kitsunium-consensus in the temporary directory elsewhere. It must
@@ -3418,6 +3443,21 @@ type PositionValue struct {
 	// Index is the entry's place in the log, from 1.
 	Index uint64
 }
+```
+
+<a name="Preallocate"></a>
+## type [Preallocate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type Preallocate = svcconsensus.Preallocate
+```
+
+Preallocate is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate`, declared as:
+
+```go
+type Preallocate uint8
 ```
 
 <a name="PreconditionSpec"></a>

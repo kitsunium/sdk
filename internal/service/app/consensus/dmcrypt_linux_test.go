@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,94 @@ func TestDMCryptBench(t *testing.T) {
 		fmt.Printf("BENCH %s n=%d p50=%v p90=%v p99=%v max=%v entries_per_s=%.0f\n", shape.name, shape.n,
 			pct(lat, 0.50), pct(lat, 0.90), pct(lat, 0.99), pct(lat, 1), eps)
 	}
+}
+
+// devWritten is the bytes the device DMCRYPT_STATDEV names (a block device
+// under /sys/block) was sent, journal and metadata included: the seventh
+// field of its stat, in 512-byte sectors. It is -1 without the variable.
+func devWritten(t *testing.T) int64 {
+	dev := os.Getenv("DMCRYPT_STATDEV")
+	if dev == "" {
+		return -1
+	}
+	b, err := os.ReadFile("/sys/block/" + dev + "/stat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := strings.Fields(string(b))
+	if len(f) < 7 {
+		t.Fatalf("stat of %s: %q", dev, b)
+	}
+	n, err := strconv.ParseInt(f[6], 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n * 512
+}
+
+// TestDMCryptPreallocBench is G1's row "Append 64 x 256 B + Sync" per
+// filesystem and per Preallocate (#922): 64 MiB segments, the default,
+// filled until three more were published, each Sync timed, and what the
+// device was sent per segment. The segment prepared at the open is
+// finished before the count starts, and the one the last publication
+// prepared before it stops, so each published segment counts its own
+// preallocation once. The mode is CONSENSUS_PREALLOCATE's.
+func TestDMCryptPreallocBench(t *testing.T) {
+	dir := dmDir(t)
+	mode := "zerofill"
+	if preallocEverywhere {
+		mode = "fallocate"
+	}
+	d, err := NewDataDir(dir + "/prealloc-" + mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	l := d.d.log
+	if preallocEverywhere && l.prealloc != PreallocateFallocate {
+		t.Fatalf("fallocate asked for, the log zero-fills: %s", l.preallocWhy)
+	}
+	waitPrepared := func() {
+		if p := l.prep; p != nil {
+			<-p.done
+		}
+	}
+	waitPrepared()
+	_, last := l.Bounds()
+	data := make([]byte, 256)
+	start := l.segs[len(l.segs)-1].n
+	before := devWritten(t)
+	var lat []time.Duration
+	var dataBytes int64
+	for l.segs[len(l.segs)-1].n < start+3 {
+		es := make([]coreconsensus.EntryValue, 64)
+		for i := range es {
+			last++
+			es[i] = coreconsensus.EntryValue{
+				Position: coreconsensus.PositionValue{Term: 1, Index: last},
+				Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data,
+			}
+		}
+		if err := l.Append(es, nil); err != nil {
+			t.Fatal(err)
+		}
+		dataBytes += int64(len(l.pending))
+		t0 := time.Now()
+		if err := l.Sync(); err != nil {
+			t.Fatal(err)
+		}
+		lat = append(lat, time.Since(t0))
+	}
+	waitPrepared()
+	segs := int64(l.segs[len(l.segs)-1].n - start)
+	written := devWritten(t)
+	perSeg := int64(-1)
+	if before >= 0 {
+		perSeg = (written - before) / segs
+	}
+	fmt.Printf("PREALLOC fs=%s mode=%s syncs=%d segments=%d p50=%v p90=%v p99=%v max=%v device_bytes_per_segment=%d record_bytes_per_segment=%d\n",
+		os.Getenv("DMCRYPT_FS"), mode, len(lat), segs, pct(lat, 0.50), pct(lat, 0.90), pct(lat, 0.99), pct(lat, 1),
+		perSeg, dataBytes/segs)
 }
 
 // TestDMCryptWriter appends batches until it is killed, and prints the last

@@ -28,11 +28,33 @@ const (
 	markerStopPrefix = "STOP-"
 )
 
-// DataDirOptions tunes NewDataDirWith: the size of a log segment and the
-// boot-scoped directory of the second STORAGE_FAILED marker.
+const (
+	// PreallocateZeroFill writes zeros over a new segment's full size, then
+	// syncs it. It is the zero value and the default (D4).
+	PreallocateZeroFill Preallocate = iota
+	// PreallocateFallocate reserves a new segment's full size with
+	// fallocate(2) on Linux, its blocks unwritten extents that read as zeros,
+	// then syncs it: no zero is written. A filesystem or a platform without
+	// it opens the log in PreallocateZeroFill, with one line logged (#922).
+	PreallocateFallocate
+)
+
+// Preallocate is how the file log gives a new segment its fixed size
+// before it holds a record (D4, #922).
+type Preallocate uint8
+
+// DataDirOptions tunes NewDataDirWith: the size of a log segment, how a
+// new one is preallocated, and the boot-scoped directory of the second
+// STORAGE_FAILED marker.
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
+	// Preallocate is how a new segment is given its fixed size: zeros
+	// written (PreallocateZeroFill, the zero value) or fallocate(2)
+	// (PreallocateFallocate). Either way the segment occupies its whole
+	// size, as the no-space guard counts it. Another value is refused
+	// CONSENSUS_MISCONFIGURED.
+	Preallocate Preallocate
 	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
 	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
 	// kitsunium-consensus in the temporary directory elsewhere. It must
@@ -78,6 +100,9 @@ func NewDataDir(dir string) (DataDir, error) { return NewDataDirWith(dir, DataDi
 func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	if err := refuseUnmarked(dir); err != nil {
 		return DataDir{}, err
+	}
+	if opts.Preallocate > PreallocateFallocate {
+		return DataDir{}, misconfigured("Preallocate", "not a Preallocate mode")
 	}
 	// The directory lock is the first thing taken (D11), and there is none to
 	// take where the kernel has no flock(2) — illumos and Solaris (ADR 0144):

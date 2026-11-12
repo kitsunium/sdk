@@ -1475,6 +1475,10 @@ sequences:
           when: err != nil
       - opt:
           do:
+            - return: DataDir{}, misconfigured("Preallocate", "not a Preallocate mode")
+          when: opts.Preallocate > PreallocateFallocate
+      - opt:
+          do:
             - return: DataDir{}, coreproc.UnsupportedPlatform
           when: "!flock.Native"
       - opt:
@@ -2573,6 +2577,8 @@ sequences:
         kind: internal
       - id: l.storageFailedThisBoot
         kind: internal
+      - id: l.resolvePreallocate
+        kind: internal
       - id: l.recover
         kind: internal
     steps:
@@ -2622,6 +2628,8 @@ sequences:
             eval: l.storageFailedThisBoot()
             to: l.storageFailedThisBoot
           when: err != nil
+      - eval: l.resolvePreallocate(dd.opts.Preallocate)
+        to: l.resolvePreallocate
       - opt:
           do:
             - opt:
@@ -4027,6 +4035,10 @@ sequences:
           do:
             - return: l.fill
           when: l.fill != nil
+      - opt:
+          do:
+            - return: fallocateFill
+          when: l.prealloc == PreallocateFallocate
       - return: zeroFrom
   - of: abandonTmp
     participants:
@@ -9529,6 +9541,14 @@ sequences:
           init:
             bind: wb, ok
             eval: cfg.Transport.(bindWarner)
+          when: ok
+      - opt:
+          do:
+            - eval: wb.bindWarn(n.obs.warn)
+              to: wb.bindWarn
+          init:
+            bind: wb, ok
+            eval: cfg.Log.(bindWarner)
           when: ok
       - return: nil
   - of: (*Node).load
@@ -19241,6 +19261,197 @@ sequences:
           when: err != nil
       - return: newTCPTransport(&cfg, p.id)
         to: newTCPTransport
+  - of: (*fileLog).resolvePreallocate
+    steps:
+      - opt:
+          do:
+            - set: mode
+              value: PreallocateFallocate
+          when: preallocEverywhere
+      - set: l.prealloc
+        value: PreallocateZeroFill
+      - opt:
+          do:
+            - return: ""
+          when: mode != PreallocateFallocate
+      - opt:
+          do:
+            - set: l.preallocWhy
+              value: why
+            - return: ""
+          init:
+            bind: why
+            eval: probePreallocate(l.logDir())
+          when: why != ""
+      - set: l.prealloc
+        value: PreallocateFallocate
+  - of: (*fileLog).bindWarn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).bindWarn
+        kind: self
+      - id: l.mu.Lock
+        kind: value
+      - id: l.mu.Unlock
+        kind: value
+    steps:
+      - eval: l.mu.Lock()
+        to: l.mu.Lock
+      - bind: why
+        eval: l.preallocWhy
+      - set: l.preallocWhy
+        value: "\"\""
+      - eval: l.mu.Unlock()
+        to: l.mu.Unlock
+      - opt:
+          do:
+            - eval: |-
+                warn("consensus: the file log zero-fills its segments, fallocate is not available",
+                			lstr("dir", l.dir), lstr("why", why))
+          when: why != ""
+  - of: fallocateFill
+    participants:
+      - id: caller
+        kind: actor
+      - id: fallocateFill
+        kind: self
+      - id: fallocateRange
+        kind: internal
+      - id: zeroFrom
+        kind: internal
+      - id: datasync
+        kind: internal
+    steps:
+      - bind: ok, err
+        eval: fallocateRange(f, off, size)
+        to: fallocateRange
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: zeroFrom(f, off, size)
+              to: zeroFrom
+          when: "!ok"
+      - return: datasync(f)
+        to: datasync
+  - of: fallocateProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: fallocateProbe
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: fallocateRange
+        kind: internal
+      - id: abandon
+        kind: internal
+    steps:
+      - bind: path
+        eval: filepath.Join(dir, fallocateProbeName)
+        to: filepath
+      - bind: f, err
+        eval: os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+        to: os
+      - opt:
+          do:
+            - return: "\"probe: \" + err.Error()"
+          when: err != nil
+      - bind: ok, err
+        eval: fallocateRange(f, 0, 4096)
+        to: fallocateRange
+      - eval: abandon(f.Close())
+        to: abandon
+      - eval: abandon(os.Remove(path))
+        to: abandon
+      - switch:
+          cases:
+            - case: err != nil
+              do:
+                - return: "\"probe: \" + err.Error()"
+            - case: "!ok"
+              do:
+                - return: "\"the filesystem answers EOPNOTSUPP\""
+      - return: "\"\""
+  - of: fallocateRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: fallocateRange
+        kind: self
+      - id: f.Stat
+        kind: value
+      - id: fallocate
+        kind: internal
+      - id: zeroRange
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: true, nil
+          when: off >= size
+      - bind: st, err
+        eval: f.Stat()
+        to: f.Stat
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - opt:
+          do:
+            - bind: zok, err
+              eval: fallocate(f, fallocZeroRange, off, end-off)
+              to: fallocate
+            - opt:
+                do:
+                  - return: false, err
+                when: err != nil
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: false, err
+                      init:
+                        bind: err
+                        eval: zeroRange(f, off, end)
+                        to: zeroRange
+                      when: err != nil
+                when: "!zok"
+          init:
+            bind: end
+            eval: min(st.Size(), size)
+          when: end > off
+      - return: fallocate(f, 0, off, size-off)
+        to: fallocate
+  - of: fallocate
+    participants:
+      - id: caller
+        kind: actor
+      - id: fallocate
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - set: err
+              to: syscall
+              value: syscall.Fallocate(int(f.Fd()), mode, off, n)
+            - opt:
+                do:
+                  - break: true
+                when: "!errors.Is(err, syscall.EINTR)"
+          forever: true
+      - opt:
+          do:
+            - return: false, nil
+          when: errors.Is(err, syscall.EOPNOTSUPP) || errors.Is(err, syscall.ENOSYS)
+      - return: err == nil, err
   - of: newFifo
     steps:
       - return: "&fifo[T]{signal: make(chan struct{}, 1)}"

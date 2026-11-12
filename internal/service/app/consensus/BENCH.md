@@ -57,3 +57,33 @@ is D15's budget (`Entries of 64 x 256 B: 1 pread, <= 2 allocs/op`).
 - **The bytes are the same**: one buffer of the records' aligned length
   against a buffer per record; the 512 B more of `per-entry/64` are its 64
   headers.
+
+## Preallocation of a segment (G1, #922)
+
+ADR 0152 G1's row `Append 64 x 256 B + Sync`, in both modes of
+`DataDirOptions.Preallocate`, is measured per filesystem by the dm-crypt
+lane, not by `go test -bench`: it needs Linux, a block device whose bytes it
+can count and a filesystem it formats (`testdata/dmcrypt/run.sh 12 0 <ext4|xfs>
+fallocate`, `TestDMCryptPreallocBench`). 64 MiB segments, filled until three
+more were published, the modes alternated so the host's load does not land on
+one only; "device bytes" is what the dm device was sent per segment, journal
+included, against 67.1 MB of records. The lane's raw lines are in
+`testdata/dmcrypt/RESULTS.md`.
+
+| Filesystem | Mode | syncs | `Sync` p50 | p90 | p99 | device bytes per segment |
+|---|---|---|---|---|---|---|
+| ext4 | ZeroFill | 10 081 | 372 µs | 2.46 ms | 16.5 ms | 161 842 517 |
+| ext4 | Fallocate | 10 081 | 990 µs | 5.05 ms | 18.0 ms | 141 275 136 |
+| ext4 | ZeroFill | 10 081 | 636 µs | 6.16 ms | 26.9 ms | 161 839 786 |
+| xfs | both | — | not measured | | | |
+
+Taken 2026-11-12 at a9714f4b3 (#1110) plus this change, Docker Desktop's
+Linux VM on an Apple-silicon Mac (debian:stable-slim, LUKS2 aes-xts-plain64
+over a loop device on a tmpfs), under the load of seven other builds. The
+run stopped there: the host's disk filled, and xfs and the fourth row were
+not reached.
+
+- **ext4**: `fallocate` writes 13 % fewer bytes, not the 64 MiB of zeros,
+  since each `fdatasync` after a write into an unwritten extent journals its
+  conversion, and the median `Sync` is 1.6 to 2.7 times the zero-filled
+  one's. Not adopted: ZeroFill stays the default (ADR 0152, Deferred).

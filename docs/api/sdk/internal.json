@@ -68541,8 +68541,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "DataDirOptions",
-      "spelled": "struct{SegmentBytes int64; RuntimeDir string}",
-      "canonical": "struct{SegmentBytes int64; RuntimeDir string}",
+      "spelled": "struct{SegmentBytes int64; Preallocate Preallocate; RuntimeDir string}",
+      "canonical": "struct{SegmentBytes int64; Preallocate github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate; RuntimeDir string}",
       "fields": [
         {
           "name": "SegmentBytes",
@@ -68550,12 +68550,17 @@
           "doc": "SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.\n"
         },
         {
+          "name": "Preallocate",
+          "type": "Preallocate",
+          "doc": "Preallocate is how a new segment is given its fixed size: zeros\nwritten (PreallocateZeroFill, the zero value) or fallocate(2)\n(PreallocateFallocate). Either way the segment occupies its whole\nsize, as the no-space guard counts it. Another value is refused\nCONSENSUS_MISCONFIGURED.\n"
+        },
+        {
           "name": "RuntimeDir",
           "type": "string",
           "doc": "RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED\nmarker (R9-05); empty is /run/kitsunium-consensus on Linux, and\nkitsunium-consensus in the temporary directory elsewhere. It must\noutlive the process within the boot and be gone at the next one: a\nhost tmpfs, or systemd's RuntimeDirectory= with\nRuntimeDirectoryPreserve=yes. The process must be able to create it\nand write in it: NewDataDirWith refuses CONSENSUS_MISCONFIGURED\notherwise, naming the path.\n"
         }
       ],
-      "doc": "DataDirOptions tunes NewDataDirWith: the size of a log segment and the\nboot-scoped directory of the second STORAGE_FAILED marker.\n",
+      "doc": "DataDirOptions tunes NewDataDirWith: the size of a log segment, how a\nnew one is preallocated, and the boot-scoped directory of the second\nSTORAGE_FAILED marker.\n",
       "file": "service/app/consensus/datadir.go",
       "layer": "service",
       "family": "app"
@@ -69971,6 +69976,44 @@
       "value": "1",
       "doc": "PeerVoter is set for a voter, clear for a learner.\n",
       "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "Preallocate",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "Preallocate is how the file log gives a new segment its fixed size\nbefore it holds a record (D4, #922).\n",
+      "file": "service/app/consensus/datadir.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateFallocate",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PreallocateFallocate",
+      "spelled": "Preallocate",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
+      "value": "1",
+      "doc": "PreallocateFallocate reserves a new segment's full size with\nfallocate(2) on Linux, its blocks unwritten extents that read as zeros,\nthen syncs it: no zero is written. A filesystem or a platform without\nit opens the log in PreallocateZeroFill, with one line logged (#922).\n",
+      "file": "service/app/consensus/datadir.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateZeroFill",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PreallocateZeroFill",
+      "spelled": "Preallocate",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
+      "value": "0",
+      "doc": "PreallocateZeroFill writes zeros over a new segment's full size, then\nsyncs it. It is the zero value and the default (D4).\n",
+      "file": "service/app/consensus/datadir.go",
       "layer": "service",
       "family": "app"
     },

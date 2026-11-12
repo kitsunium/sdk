@@ -58,6 +58,7 @@ var (
 	_ membershipSetter                 = (*MemoryTransport)(nil)
 	_ bindWarner                       = (*TCPTransport)(nil)
 	_ bindWarner                       = (*MemoryTransport)(nil)
+	_ bindWarner                       = (*fileLog)(nil)
 	// The transport hands the node an offer it could not decode, which
 	// stops it when its leader made it (#665).
 	_ undecodableBinder = (*TCPTransport)(nil)

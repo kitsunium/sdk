@@ -56,6 +56,21 @@ constants:
         name: markerStopPrefix
         value: "\"STOP-\""
     name: fileLock
+  - grouped: true
+    items:
+      - doc: |-
+          PreallocateZeroFill writes zeros over a new segment's full size, then
+          syncs it. It is the zero value and the default (D4).
+        name: PreallocateZeroFill
+        type: Preallocate
+        value: iota
+      - doc: |-
+          PreallocateFallocate reserves a new segment's full size with
+          fallocate(2) on Linux, its blocks unwritten extents that read as zeros,
+          then syncs it: no zero is written. A filesystem or a platform without
+          it opens the log in PreallocateZeroFill, with one line logged (#922).
+        name: PreallocateFallocate
+    name: PreallocateZeroFill
   - doc: |-
       The stamp's encoding: the node's identity and its log's lineage, in the
       data directory's STAMP file.
@@ -662,6 +677,20 @@ constants:
         type: uint64
         value: "4096"
     name: offlineBatchBytes
+  - doc: |-
+      fallocZeroRange is FALLOC_FL_ZERO_RANGE of linux/falloc.h, which the
+      syscall package does not name.
+    items:
+      - name: fallocZeroRange
+        value: "0x10"
+    name: fallocZeroRange
+  - doc: |-
+      fallocateProbeName is the file an open's probe reserves and removes; a
+      crash leaves a .tmp, which recovery deletes as it deletes every one.
+    items:
+      - name: fallocateProbeName
+        value: "\"fallocate-probe.tmp\""
+    name: fallocateProbeName
   - grouped: true
     items:
       - doc: |-
@@ -967,6 +996,8 @@ files:
     name: consensus_compliance.go
   - decls:
       - fileLock
+      - PreallocateZeroFill
+      - Preallocate
       - DataDirOptions
       - dataDir
       - DataDir
@@ -1707,6 +1738,20 @@ files:
       - (*PEMIdentity).ReloadFailures
       - NewTCPTransportFromPEM
     name: pem.go
+  - decls:
+      - preallocEverywhere
+      - probePreallocate
+      - (*fileLog).resolvePreallocate
+      - (*fileLog).bindWarn
+      - fallocateFill
+    name: prealloc.go
+  - decls:
+      - fallocZeroRange
+      - fallocateProbeName
+      - fallocateProbe
+      - fallocateRange
+      - fallocate
+    name: prealloc_linux.go
   - decls:
       - fifo
       - newFifo
@@ -3332,6 +3377,36 @@ functions:
     params: certFile, keyFile, caFile string, cfgIn *TransportConfig
     results: "*TCPTransport, error"
   - doc: |-
+      fallocateFill is zeroFrom's counterpart in PreallocateFallocate: f's
+      range from off to size is reserved and reads as zeros, then synced. A
+      filesystem that stops answering to fallocate after the open's probe gets
+      the zeros written instead.
+    name: fallocateFill
+    params: f *os.File, off, size int64
+    results: error
+  - doc: |-
+      fallocateProbe reserves 4 KiB of a fresh file in dir with fallocate(2)
+      and removes it: the reason the filesystem cannot, empty when it can.
+    name: fallocateProbe
+    params: dir string
+    results: string
+  - doc: |-
+      fallocateRange makes f's range from off to size read as zeros with
+      fallocate(2), its blocks reserved and the file at least size long: mode 0
+      over the range, after FALLOC_FL_ZERO_RANGE over whatever bytes the file
+      already holds in it (a segment's .tmp is created empty, so it has none).
+      ok is false when the filesystem answers EOPNOTSUPP to mode 0; bytes it
+      holds that ZERO_RANGE cannot zero are written over with zeros.
+    name: fallocateRange
+    params: f *os.File, off, size int64
+    results: ok bool, err error
+  - doc: |-
+      fallocate is fallocate(2), retried on EINTR; ok is false when the
+      filesystem does not support mode.
+    name: fallocate
+    params: f *os.File, mode uint32, off, n int64
+    results: ok bool, err error
+  - doc: |-
       newFifo returns an empty queue whose signal holds at most one pending
       wake-up: a consumer that drains with take after each wake-up misses none.
     name: newFifo
@@ -3562,8 +3637,8 @@ functions:
     results: error
   - doc: |-
       datasync makes a segment's written bytes durable with fdatasync(2): the
-      segment is zero-filled at its full size, so there is no size to publish
-      (D4, R1-09).
+      segment is zero-filled or fallocated at its full size and synced before
+      it is published, so there is no size to publish (D4, R1-09, #922).
     name: datasync
     params: f *os.File
     results: error
@@ -4059,10 +4134,21 @@ types:
         recv: c *Config
         results: int64
     name: Config
+  - kind: named
+    name: Preallocate
+    underlying: uint8
   - fields:
       - doc: SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
         name: SegmentBytes
         type: int64
+      - doc: |-
+          Preallocate is how a new segment is given its fixed size: zeros
+          written (PreallocateZeroFill, the zero value) or fallocate(2)
+          (PreallocateFallocate). Either way the segment occupies its whole
+          size, as the no-space guard counts it. Another value is refused
+          CONSENSUS_MISCONFIGURED.
+        name: Preallocate
+        type: Preallocate
       - doc: |-
           RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
           marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
@@ -4729,6 +4815,17 @@ types:
         name: fill
         type: func(f *os.File, off, size int64) error
       - doc: |-
+          prealloc is how the segments are preallocated, set at open by
+          resolvePreallocate: PreallocateFallocate only where the filesystem
+          answered the probe (#922).
+        name: prealloc
+        type: Preallocate
+      - doc: |-
+          preallocWhy is why the log zero-fills although fallocate was asked
+          for, until bindWarn logs it, once; empty otherwise. Under mu.
+        name: preallocWhy
+        type: string
+      - doc: |-
           afterEntries is handed each batch Entries returns, under mu, before
           it returns it: a test counts what a reader of the log holds at once
           (#700). Only a test sets it, before the reads it counts.
@@ -5001,7 +5098,8 @@ types:
         recv: l *fileLog
         results: "*os.File, error"
       - doc: |-
-          zeroFill is the function that zero-fills a segment: zeroFrom, unless a
+          zeroFill is the function that zero-fills a segment: zeroFrom, or
+          fallocateFill when the log preallocates with fallocate (#922), unless a
           test set fill to fail as a full disk does. It is read on the writer's
           path, before any goroutine it hands it to starts.
         name: zeroFill
@@ -5300,6 +5398,21 @@ types:
         name: endSilence
         recv: l *fileLog
         results: error
+      - doc: |-
+          resolvePreallocate sets how the log preallocates its segments: the mode
+          asked for, or PreallocateZeroFill when fallocate is asked for and the
+          filesystem or the platform answers it cannot. That is never a refusal:
+          the reason is kept for the one line bindWarn logs (#922). It runs before
+          recovery prepares the next segment.
+        name: resolvePreallocate
+        params: mode Preallocate
+        recv: l *fileLog
+      - doc: |-
+          bindWarn implements bindWarner: a log that asked for fallocate and
+          zero-fills says so once, through the log of the first node it serves.
+        name: bindWarn
+        params: warn func(msg string, attrs ...corelogger.AttrValue)
+        recv: l *fileLog
       - doc: |-
           segmentBytes is the size the shipped log creates its segments at, the
           unit its logBytes grows and shrinks by, which refuseCeilings judges the
@@ -10681,6 +10794,9 @@ vars:
       - name: _
         type: bindWarner
         value: (*MemoryTransport)(nil)
+      - name: _
+        type: bindWarner
+        value: (*fileLog)(nil)
       - doc: |-
           The transport hands the node an offer it could not decode, which
           stops it when its leader made it (#665).
@@ -10782,6 +10898,24 @@ vars:
         name: latencyBuckets
         value: "[]float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}"
     name: peerGauges
+  - doc: |-
+      preallocEverywhere opens every log in PreallocateFallocate, whatever its
+      options say. Only a test binary sets it, run with
+      CONSENSUS_PREALLOCATE=fallocate, so the whole suite runs on fallocated
+      segments (#922); it is read by openFileLog alone.
+    items:
+      - name: preallocEverywhere
+        type: bool
+    name: preallocEverywhere
+  - doc: |-
+      probePreallocate answers why fallocate(2) cannot reserve a segment in
+      dir, empty when it can: fallocateProbe, unless a test replaces it to
+      answer as a filesystem without fallocate does. Only an open's own
+      goroutine reads it.
+    items:
+      - name: probePreallocate
+        value: fallocateProbe
+    name: probePreallocate
   - doc: |-
       castagnoli is the CRC-32C table every checksum of the log, the stamp and
       the snapshot stream is computed with: built once, read concurrently.
