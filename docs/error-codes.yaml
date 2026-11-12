@@ -1497,6 +1497,42 @@ codes:
     const: CodeInvalidSubject
     hex: "0x00_02_25_08"
     package: internal/core/security/secret
+  - code: "0.2.38.1"
+    const: CodeStreamMisconfigured
+    hex: "0x00_02_26_01"
+    package: internal/core/data/stream
+  - code: "0.2.38.2"
+    const: CodeRecordTooLarge
+    hex: "0x00_02_26_02"
+    package: internal/core/data/stream
+  - code: "0.2.38.3"
+    const: CodeOffsetTrimmed
+    hex: "0x00_02_26_03"
+    package: internal/core/data/stream
+  - code: "0.2.38.4"
+    const: CodeOffsetAhead
+    hex: "0x00_02_26_04"
+    package: internal/core/data/stream
+  - code: "0.2.38.5"
+    const: CodeUnknownPartition
+    hex: "0x00_02_26_05"
+    package: internal/core/data/stream
+  - code: "0.2.38.6"
+    const: CodeInvalidBatchSize
+    hex: "0x00_02_26_06"
+    package: internal/core/data/stream
+  - code: "0.2.38.7"
+    const: CodeStreamFull
+    hex: "0x00_02_26_07"
+    package: internal/core/data/stream
+  - code: "0.2.38.8"
+    const: CodeUnknownGroup
+    hex: "0x00_02_26_08"
+    package: internal/core/data/stream
+  - code: "0.2.38.9"
+    const: CodePartitionsMixed
+    hex: "0x00_02_26_09"
+    package: internal/core/data/stream
   - code: "0.2.56.1"
     const: CodeTriggerUnknown
     hex: "0x00_02_38_01"
@@ -3293,6 +3329,22 @@ codes:
     const: CodeBatchTooLarge
     hex: "0x00_03_5D_03"
     package: internal/core/app/forward
+  - code: "0.3.94.1"
+    const: CodeStreamBackendFailed
+    hex: "0x00_03_5E_01"
+    package: internal/core/data/stream
+  - code: "0.3.94.2"
+    const: CodeStreamDirectoryUnusable
+    hex: "0x00_03_5E_02"
+    package: internal/core/data/stream
+  - code: "0.3.94.3"
+    const: CodeSQLStreamMisconfigured
+    hex: "0x00_03_5E_03"
+    package: internal/core/data/stream
+  - code: "0.3.94.4"
+    const: CodeSubscriberMisconfigured
+    hex: "0x00_03_5E_04"
+    package: internal/core/data/stream
   - code: "0.3.95.1"
     const: CodeRedisCacheCommandFailed
     hex: "0x00_03_5F_01"

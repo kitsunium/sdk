@@ -18,7 +18,8 @@ a value becomes and the places those bytes are kept — rather than what the
 data is for: the bytes a value is written as (`codec`) and the same bytes made
 smaller (`transform`), the tables of the caller's database (`sql`) and the
 documents kept above them or on a filesystem (`docstore`), the messages one
-process leaves for another (`queue`), the copies kept close (`cache`) and the
+process leaves for another (`queue`) and the log every reader reads at its
+own pace (`stream`), the copies kept close (`cache`) and the
 files a value is published to (`vfs`).
 
 Every codec is under `codec/`: the sixteen format packages and their 24
@@ -45,6 +46,7 @@ the family, `security/secret` publishes its records through `vfs`, and
 | `codec/jsonpatch/` | two JSON documents' difference as RFC 6902 operations — not a Format (ADR 0143) | none — no port | `0.3.90.*` | `pkg/v1/data/codec/jsonpatch` |
 | `docstore/` | typed, keyed JSON documents with unique and multi-valued indexes, persisted as one overlay entry per write through `vfs` (ADR 0110), or in two tables of the caller's database through `sql` (ADR 0139), with a document's versions kept in its own write (ADR 0143) | `core/data/docstore` — `Collection` and `Versioned` (the file engine), `CollectionContext` and `VersionedContext` (the SQL engine), `Announcer` (both) — ADR 0160 §1 | `0.3.80.*`, declared in `core/data/docstore` | `pkg/v1/data/docstore` |
 | `queue/` | the file broker (its state a directory, through `vfs`), the SQL broker (one table of the caller's database, through `sql`) and the memory broker, and the `Consume` loop that sleeps on the `Waker` sibling (ADR 0054, ADR 0104, ADR 0151) | `core/data/queue` | `0.3.53.*`, declared in `core/data/queue` | `pkg/v1/data/queue` |
+| `stream/` | the engines of the partitioned log — memory, a directory of segments over `kernel/fs/seglog`, a SQL table joined to the caller's transaction — and the subscriber, one milestone each of #890; today its package comment alone, the path ADR 0160 declares `0.3.94.*` at (ADR 0231) | `core/data/stream` | `0.3.94.*`, declared in `core/data/stream` | `pkg/v1/data/stream` (#825) |
 | `sql/` | the transaction manager — savepoints, the pool policy, `Join` and `Defer` — and the migration runner under a lock that dies with its holder, SQLite's on the database file's write lock (ADR 0055, ADR 0139, ADR 0140) | `core/data/sql` | `0.3.54.*`, declared in `core/data/sql` | `pkg/v1/data/sql` |
 | `transform/` | the stdlib compressors — gzip, raw DEFLATE (`flate`) and the RFC 1950 `zlib` envelope — and the bounded decompression (ADR 0014) | `core/data/transform` | `0.3.26.*`, declared in `core/data/transform` | `pkg/v1/data/transform`, and `pkg/v1/data/codec`'s compression frame through it |
 | `vfs/` | `NewOS`, confined by `os.Root`, and `NewMem`, with the five-step atomic publication (ADR 0056) | `core/data/vfs` | `0.3.55.*`, declared in `core/data/vfs` | `pkg/v1/data/vfs` |

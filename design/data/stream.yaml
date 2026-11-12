@@ -1,0 +1,698 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/stream
+packages:
+  - codes:
+      - const:
+          - doc: |-
+              CodeStreamMisconfigured identifies a PolicyValue field, or a call's
+              argument, an engine cannot honour, refused before anything is written.
+            name: CodeStreamMisconfigured
+            note: "range: 0.2.38.0 - 0.2.38.255"
+            value: "0x00_02_26_01"
+          - doc: |-
+              CodeRecordTooLarge identifies an Append holding a record whose key and
+              payload together exceed PolicyValue.MaxRecordBytes.
+            name: CodeRecordTooLarge
+            value: "0x00_02_26_02"
+          - doc: |-
+              CodeOffsetTrimmed identifies a read from an offset below the first one
+              its partition still retains.
+            name: CodeOffsetTrimmed
+            value: "0x00_02_26_03"
+          - doc: |-
+              CodeOffsetAhead identifies an offset past the next one its partition
+              will assign.
+            name: CodeOffsetAhead
+            value: "0x00_02_26_04"
+          - doc: |-
+              CodeUnknownPartition identifies a partition outside [0, Partitions()).
+            name: CodeUnknownPartition
+            value: "0x00_02_26_05"
+          - doc: |-
+              CodeInvalidBatchSize identifies an Append of no record, or a Read asked
+              for a non-positive number of entries.
+            name: CodeInvalidBatchSize
+            value: "0x00_02_26_06"
+          - doc: |-
+              CodeStreamFull identifies an Append refused because the stream held
+              PolicyValue.MaxBytes for longer than PolicyValue.BlockTimeout.
+            name: CodeStreamFull
+            value: "0x00_02_26_07"
+          - doc: |-
+              CodeUnknownGroup identifies a Committed for a group that never committed
+              an offset on that partition.
+            name: CodeUnknownGroup
+            value: "0x00_02_26_08"
+          - doc: |-
+              CodePartitionsMixed identifies an Append whose records' keys hash to more
+              than one partition: a batch is appended to one partition, under one sync.
+            name: CodePartitionsMixed
+            value: "0x00_02_26_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeStreamBackendFailed identifies an operation a durable engine depends
+              on that its storage refused: a filesystem call the operating system
+              refused, or a statement the SQL engine's database did not complete.
+            name: CodeStreamBackendFailed
+            note: |-
+              range: 0.3.94.0 - 0.3.94.255 — the engines' and the subscriber's own
+              codes, allocated by the service layer (LL = 3) and declared here as ADR
+              0160 requires: every code is declared by the core, at its engine's path.
+            value: "0x00_03_5E_01"
+          - doc: |-
+              CodeStreamDirectoryUnusable identifies a stream directory that cannot be
+              prepared, is not a directory, or is writable by accounts that must not be
+              able to inject or remove records.
+            name: CodeStreamDirectoryUnusable
+            value: "0x00_03_5E_02"
+          - doc: |-
+              CodeSQLStreamMisconfigured identifies an SQL engine configuration refused
+              at construction: no transactor, one it cannot join a transaction of, a
+              dialect it cannot spell, or a table name it cannot interpolate safely.
+            name: CodeSQLStreamMisconfigured
+            value: "0x00_03_5E_03"
+          - doc: |-
+              CodeSubscriberMisconfigured identifies a subscriber configuration the
+              engine refuses: no handler, no group, or a handler whose author has not
+              asserted that it is idempotent.
+            name: CodeSubscriberMisconfigured
+            value: "0x00_03_5E_04"
+        type: errs.Code
+    constants:
+      - doc: |-
+          DefaultMaxRecordBytes bounds one record when [PolicyValue.MaxRecordBytes]
+          is left at zero: one mebibyte, the queue's DefaultMaxMessageBytes and
+          Kafka's default message.max.bytes.
+        name: DefaultMaxRecordBytes
+        type: int
+        value: 1 << 20
+      - doc: |-
+          DefaultSegmentBytes is a segment's size when [PolicyValue.SegmentBytes] is
+          left at zero: 64 MiB, kernel/fs/seglog's and the consensus log's.
+        name: DefaultSegmentBytes
+        type: int64
+        value: 64 << 20
+    doc: |-
+      Package stream declares the SDK's durable, partitioned, offset-addressed
+      log: the [Stream] a producer appends records to and any number of readers
+      read at their own pace, each record kept until its retention ends rather
+      than until somebody acknowledges it (ADR 0231).
+
+      It is the left-hand column of a frontier core/data/queue draws on its right
+      (ADR 0054). A queue removes a message at its acknowledgement, leases it to
+      one consumer at a time, keeps no order past the first retry and
+      dead-letters what fails; a stream keeps every record for its retention,
+      lets every reader name the offset it reads from, keeps the order of each
+      partition, and leaves a failing record where it is — the reader that cannot
+      handle it parks, and every other reader goes on.
+
+      	value, err := s.Append(ctx, []stream.RecordValue{{Key: order, Payload: body}})
+      	entries, err := s.Read(ctx, value.Partition, from, 100)
+
+      A record's partition is its key's, by [PartitionOf] — FNV-1a modulo the
+      partition count —, the same on every engine, so a key's records are read in
+      the order they were appended wherever they are kept. Ordering holds within a
+      partition and nowhere else.
+
+      The port is FROZEN at four methods (ADR 0039); every other capability is a
+      sibling reached by type assertion: [Waker], [Seeker], [Trimmer],
+      [Compactor] and [Committer].
+
+      Package stream — range 0.2.38.* (ADR 0231 core/data/stream block), and the
+      engines' and the subscriber's 0.3.94.* (ADR 0231 service/data/stream block,
+      declared here as ADR 0160 requires).
+
+      Package stream — hosts the stream policy every engine is configured with,
+      and the guard every engine runs so that all of them refuse identical inputs
+      identically (ADR 0031).
+    functions:
+      - doc: |-
+          PartitionOf returns the partition a record keyed key is appended to among
+          partitions: the 32-bit FNV-1a hash of the key modulo partitions. It is the
+          one placement every engine applies, so a key lands on the same partition in
+          memory, on a directory and in a table.
+
+          A partitions below one is read as one. An empty key has no partition of its
+          own: an engine spreads unkeyed batches round-robin and does not ask; asked
+          anyway, PartitionOf answers the hash of no bytes.
+        in:
+          - name: key
+            type: "[]byte"
+          - name: partitions
+            type: int
+        name: PartitionOf
+        out:
+          - type: int
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/stream
+    ports:
+      - doc: |-
+          Stream is one named, partitioned log: producers append batches of records to
+          it, and readers read each partition from an offset of their own choosing.
+          Implementations MUST be safe for concurrent use by multiple goroutines AND,
+          where the implementation is durable, by every process that opens the same
+          storage.
+
+          IFACE-PLUGIN: the concrete engines stay unexported behind their constructors
+          in internal/service/data/stream.
+
+          The interface is FROZEN at these four methods. A published alias makes it
+          structural for every downstream implementation, and a fifth method would
+          break each one at compile time with no deprecation window (ADR 0039). A new
+          capability arrives as a sibling reached by type assertion — [Waker],
+          [Seeker], [Trimmer], [Compactor] and [Committer] are the ones that ship.
+
+          # Why the READER owns its offset
+
+          Because a stream has many readers and each reads at its own pace: the
+          record is not consumed by being read, so nothing about a read can live in
+          the record. A reader that wants its position to survive it keeps it through
+          [Committer]; a reader that does not — a replay, an audit, a backfill — just
+          reads from wherever it likes.
+        methods:
+          - doc: |-
+              Append writes records to one partition as one batch and returns where
+              they landed.
+
+              The partition is the records' keys': [PartitionOf] of the first keyed
+              record, every other keyed record required to hash to the same partition
+              ([PartitionsMixed] otherwise, nothing written), and an unkeyed record
+              following the batch. A batch with no key at all goes to the partitions in
+              turn. The records take consecutive offsets in their order.
+
+              When it returns nil, a durable implementation has flushed the whole batch
+              to its device under one sync: a crash one instruction later loses none of
+              it, and a crash before loses all of it, never a part. An implementation
+              that joins the transaction ctx carries (ADR 0151) has instead made the
+              batch part of that transaction.
+
+              An empty batch is [InvalidBatchSize]; a record whose key and payload
+              together exceed [PolicyValue.MaxRecordBytes] is [RecordTooLarge], the
+              whole batch refused. A stream holding [PolicyValue.MaxBytes] waits up to
+              [PolicyValue.BlockTimeout] for retention to make room, then refuses with
+              [StreamFull]; ctx ends the wait earlier with its own cause.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: records
+                type: "[]RecordValue"
+            name: Append
+            out:
+              - type: AppendValue
+              - type: error
+          - doc: |-
+              Read returns up to max entries of partition, from offset from on, in
+              offset order. It does NOT block waiting for records: a read at the
+              partition's next offset yields an empty slice and a nil error, and
+              waiting is the caller's ([Waker] tells it when to look again).
+
+              from below the partition's first retained offset is [OffsetTrimmed] —
+              the records are gone, and silently starting later would hide the gap; one
+              past the next offset is [OffsetAhead]. A partition outside
+              [0, Partitions()) is [UnknownPartition], and a non-positive max is
+              [InvalidBatchSize].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: partition
+                type: int
+              - name: from
+                type: Offset
+              - name: max
+                type: int
+            name: Read
+            out:
+              - type: "[]EntryValue"
+              - type: error
+          - doc: |-
+              Bounds returns the first offset partition still retains and the next one
+              it will assign. A partition outside [0, Partitions()) is
+              [UnknownPartition].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: partition
+                type: int
+            name: Bounds
+            out:
+              - type: BoundsValue
+              - type: error
+          - doc: |-
+              Partitions returns how many partitions the stream has, at least one. It
+              never changes for the life of a stream: a key's partition is its hash
+              modulo this number, and changing it would move every key.
+            name: Partitions
+            out:
+              - type: int
+        name: Stream
+      - doc: |-
+          Waker lets an idle reader sleep until there may be records to read.
+
+          It is a SIBLING of [Stream] for the reason queue's Waker is: an engine that
+          cannot see its own appends — or whose appends come from another process —
+          has no honest answer to give. A reader asks by type assertion and polls when
+          the answer is no, so an engine that omits it loses latency, never records.
+
+          A wake is a HINT: a signal may come with nothing new on the reader's
+          partition, and records appended by another process close no signal, so a
+          reader that uses it still polls at the cadence that bounds the second case.
+        methods:
+          - doc: |-
+              Wake returns a channel closed by the next Append through this stream value
+              in this process, to any partition. Call it BEFORE the Read that may come
+              back empty: an append landing between that Read and the wait closes the
+              channel already handed out, so it is not missed.
+            name: Wake
+            out:
+              - type: <-chan struct{}
+        name: Waker
+      - doc: |-
+          Seeker finds an offset by time: where a reader that wants "everything since
+          nine o'clock" starts.
+
+          It is a sibling because an engine over a store that keeps no append instant
+          cannot implement it.
+        methods:
+          - doc: |-
+              OffsetAt returns the first offset of partition whose [EntryValue.AppendedAt]
+              is at or after t: the partition's first retained offset when t precedes
+              every record it retains, its next offset when t follows every one. A
+              partition outside [0, Partitions()) is [UnknownPartition].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: partition
+                type: int
+              - name: t
+                type: time.Time
+            name: OffsetAt
+            out:
+              - type: Offset
+              - type: error
+        name: Seeker
+      - doc: |-
+          Trimmer drops a partition's prefix before its retention would: the
+          operator's lever, and the one a reader uses once every record below an
+          offset is known to be useless.
+
+          It is a sibling because an engine over a store whose retention is its own
+          cannot honour it.
+        methods:
+          - doc: |-
+              Trim makes before the first offset partition retains: every record below
+              it becomes unreadable at once ([OffsetTrimmed]) and its storage is
+              released when the engine can — a file engine releases whole segments only.
+              A before at or below the first offset changes nothing; one past the next
+              offset is [OffsetAhead]; a partition outside [0, Partitions()) is
+              [UnknownPartition]. Offsets are never reused: the next offset does not
+              move.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: partition
+                type: int
+              - name: before
+                type: Offset
+            name: Trim
+            out:
+              - type: error
+        name: Trimmer
+      - doc: |-
+          Compactor rewrites a partition so that it keeps, of every key, only its
+          last record: the shape of a changelog read from the start to rebuild a
+          state, with no need to keep every intermediate value.
+
+          It is a sibling because compaction is a policy only some engines afford;
+          the record shape it relies on — a keyed record with an empty payload being
+          a tombstone — and how long a tombstone survives are decided with its
+          engines (ADR 0231 defers them to kitsunium/sdk#824).
+        methods:
+          - doc: |-
+              Compact removes from partition every keyed record a later record of the
+              same key supersedes, keeping every survivor at its offset: offsets are
+              never renumbered, so a reader's position stays meaningful. Unkeyed records
+              are left as they are. A partition outside [0, Partitions()) is
+              [UnknownPartition].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: partition
+                type: int
+            name: Compact
+            out:
+              - type: error
+        name: Compactor
+      - doc: |-
+          Committer keeps, per consumer group and partition, the offset the group
+          reads next: the durable cursor that lets a group's reader stop and another
+          one resume where it was.
+
+          It is a sibling because keeping cursors is a capability of the engine's
+          storage: an engine that keeps them in the same store as the records lets a
+          handler commit its offset in its own transaction (exactly-once in effect,
+          ADR 0231 and kitsunium/sdk#823), which is the reason they are kept there and
+          not beside it.
+        methods:
+          - doc: |-
+              Commit records next as the offset group reads next on partition,
+              replacing whatever the group committed there before — moving it back is
+              legitimate: it is a replay. next past the partition's next offset is
+              [OffsetAhead]; below its first retained offset it is kept, and the
+              group's next Read reports [OffsetTrimmed]. An empty group is
+              [StreamMisconfigured]; a partition outside [0, Partitions()) is
+              [UnknownPartition].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: group
+                type: string
+              - name: partition
+                type: int
+              - name: next
+                type: Offset
+            name: Commit
+            out:
+              - type: error
+          - doc: |-
+              Committed returns the offset group committed last on partition.
+
+              A group that never committed there is [UnknownGroup] — never a zero
+              offset, because "start at the beginning" and "start at the end" are both
+              legitimate first positions and only the reader knows which it wants.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: group
+                type: string
+              - name: partition
+                type: int
+            name: Committed
+            out:
+              - type: Offset
+              - type: error
+        name: Committer
+    sentinels:
+      - var:
+          - code: CodeStreamMisconfigured
+            doc: |-
+              StreamMisconfigured refuses a PolicyValue an engine cannot honour — a
+              negative bound, a BlockTimeout with no MaxBytes, a MaxBytes below one
+              record — and an argument a call cannot honour, such as an empty group
+              name. The "field" field names which value.
+            exit: CONFIG
+            name: StreamMisconfigured
+            private: "core/data/stream: a policy field or an argument has no usable value; the field names which"
+            public: The stream policy is not one this engine can honour
+            reason: STREAM_MISCONFIGURED
+          - code: CodeRecordTooLarge
+            doc: |-
+              RecordTooLarge refuses an Append holding a record above the policy's
+              bound, at the producer that can still make it smaller. Its fields carry
+              the two sizes and the record's index in the batch, never its bytes.
+            exit: CONFIG
+            http: 413
+            name: RecordTooLarge
+            private: "core/data/stream: a record larger than PolicyValue.MaxRecordBytes; the fields carry both sizes, never the bytes"
+            public: The record exceeds the stream's configured maximum size
+            reason: RECORD_TOO_LARGE
+          - code: CodeOffsetTrimmed
+            doc: |-
+              OffsetTrimmed refuses a read below the first offset the partition retains:
+              the records were trimmed by retention, Trim or compaction of a whole
+              prefix. It is a refusal and not a silent skip because a reader that
+              resumed later than it asked has lost records without knowing; its fields
+              name the offset asked and the first retained, so the reader decides.
+            exit: DATAERR
+            http: 409
+            name: OffsetTrimmed
+            private: "core/data/stream: read below the first retained offset; the fields carry both offsets"
+            public: The requested records are no longer retained
+            reason: OFFSET_TRIMMED
+          - code: CodeOffsetAhead
+            doc: |-
+              OffsetAhead refuses an offset past the partition's next one: a read, a
+              commit or a trim naming a record that does not exist yet. It is usually a
+              cursor carried over from another stream, or from before a rebuild.
+            exit: DATAERR
+            http: 409
+            name: OffsetAhead
+            private: "core/data/stream: offset past the partition's next offset; the fields carry both offsets"
+            public: The requested offset is past the end of the stream
+            reason: OFFSET_AHEAD
+          - code: CodeUnknownPartition
+            doc: UnknownPartition refuses a partition outside [0, Partitions()).
+            exit: DATAERR
+            http: 400
+            name: UnknownPartition
+            private: "core/data/stream: partition outside [0, Partitions()); the fields carry it and the count"
+            public: The stream has no such partition
+            reason: UNKNOWN_PARTITION
+          - code: CodeInvalidBatchSize
+            doc: |-
+              InvalidBatchSize refuses an Append of no record and a Read asked for a
+              non-positive number of entries, rather than an empty answer forever from
+              a loop that processes nothing.
+            exit: CONFIG
+            name: InvalidBatchSize
+            private: "core/data/stream: empty Append or non-positive Read max"
+            public: The batch size is not a positive number
+            reason: INVALID_BATCH_SIZE
+          - code: CodeStreamFull
+            doc: |-
+              StreamFull refuses an Append that waited PolicyValue.BlockTimeout for
+              room under PolicyValue.MaxBytes and found none: the readers, or the
+              retention, are behind. It is the producer's backpressure, and nothing was
+              written.
+            exit: TEMPFAIL
+            http: 503
+            name: StreamFull
+            private: "core/data/stream: MaxBytes held for BlockTimeout; nothing was written"
+            public: The stream is full
+            reason: STREAM_FULL
+          - code: CodeUnknownGroup
+            doc: |-
+              UnknownGroup answers a Committed for a group that never committed an
+              offset on that partition: where it starts is the reader's decision.
+            exit: NOINPUT
+            http: 404
+            name: UnknownGroup
+            private: "core/data/stream: no offset committed by this group on this partition"
+            public: The consumer group has no committed offset
+            reason: UNKNOWN_GROUP
+          - code: CodePartitionsMixed
+            doc: |-
+              PartitionsMixed refuses an Append whose keyed records hash to more than
+              one partition: a batch is one partition's, written under one sync, and
+              splitting it would make a crash keep half of it. The producer groups its
+              records by PartitionOf first.
+            exit: DATAERR
+            http: 400
+            name: PartitionsMixed
+            private: "core/data/stream: a batch's keys name more than one partition; nothing was written"
+            public: The batch's records belong to different partitions
+            reason: PARTITIONS_MIXED
+          - code: CodeStreamBackendFailed
+            doc: |-
+              StreamBackendFailed reports an operation a durable engine depends on that
+              its storage refused. The fields name the operation; the cause is wrapped.
+            exit: IOERR
+            name: StreamBackendFailed
+            private: "service/data/stream: the engine's storage refused an operation; the fields name it"
+            public: The stream's storage failed
+            reason: STREAM_BACKEND_FAILED
+          - code: CodeStreamDirectoryUnusable
+            doc: |-
+              StreamDirectoryUnusable refuses a stream directory that cannot be
+              prepared, is not a directory, or is writable by another account.
+            exit: CONFIG
+            name: StreamDirectoryUnusable
+            private: "service/data/stream: the stream directory cannot be prepared or is writable by others"
+            public: The stream directory cannot be used
+            reason: STREAM_DIRECTORY_UNUSABLE
+          - code: CodeSQLStreamMisconfigured
+            doc: |-
+              SQLStreamMisconfigured refuses an SQL engine configuration at
+              construction; the "field" field names which value.
+            exit: CONFIG
+            name: SQLStreamMisconfigured
+            private: "service/data/stream: SQL engine configuration refused at construction; the field names which"
+            public: The SQL stream configuration is not usable
+            reason: SQL_STREAM_MISCONFIGURED
+          - code: CodeSubscriberMisconfigured
+            doc: |-
+              SubscriberMisconfigured refuses a subscriber configuration: no handler,
+              no group, or a handler not asserted idempotent; the "field" field names
+              which value.
+            exit: CONFIG
+            name: SubscriberMisconfigured
+            private: "service/data/stream: subscriber configuration refused; the field names which"
+            public: The stream subscriber configuration is not usable
+            reason: SUBSCRIBER_MISCONFIGURED
+    types:
+      - doc: |-
+          AppendValue is where [Stream.Append] put a batch: its partition and the
+          offsets of its first and last records, the batch's records holding every
+          offset between them in order.
+        name: AppendValue
+        struct:
+          fields:
+            - doc: Partition is the partition the whole batch was appended to.
+              name: Partition
+              type: int
+            - doc: First is the offset of the batch's first record.
+              name: First
+              type: Offset
+            - doc: Last is the offset of the batch's last record.
+              name: Last
+              type: Offset
+      - doc: |-
+          BoundsValue is a partition's retained range: records from First up to Next
+          excluded. The partition holds none when First equals Next.
+        name: BoundsValue
+        struct:
+          fields:
+            - doc: |-
+                First is the lowest offset still readable. Retention, Trim and the
+                compaction of a whole prefix raise it; nothing lowers it.
+              name: First
+              type: Offset
+            - doc: Next is the offset the partition's next record will take.
+              name: Next
+              type: Offset
+      - doc: |-
+          EntryValue is one record as a partition keeps it: where it is, when it
+          arrived, and what it holds.
+        name: EntryValue
+        struct:
+          fields:
+            - doc: |-
+                AppendedAt is the engine's clock when the batch holding the record was
+                appended; every record of one batch carries the same instant. It is
+                what [Seeker.OffsetAt] and retention by age read.
+              name: AppendedAt
+              type: time.Time
+            - doc: Record is the record as it was appended.
+              name: Record
+              type: RecordValue
+            - doc: Partition is the partition the record was appended to.
+              name: Partition
+              type: int
+            - doc: Offset is the record's position in its partition, unique and never reused.
+              name: Offset
+              type: Offset
+      - doc: |-
+          Offset is a record's position in its partition: assigned by the engine at
+          [Stream.Append], consecutive within a partition from zero, and never reused
+          — a trimmed offset stays trimmed and the next one keeps counting.
+        name: Offset
+        underlying: uint64
+      - doc: |-
+          PolicyValue is what an engine enforces on a stream: how many partitions,
+          how large a record, how long and how much it keeps, how much it may hold
+          before producers wait, and how large a segment a file engine writes.
+
+          # Its zero value WORKS, and that is the decision
+
+          A stream's zero policy is one partition, records of up to
+          [DefaultMaxRecordBytes], kept forever, never full, in segments of
+          [DefaultSegmentBytes]. Every zero here has one reading (ADR 0031's clamp
+          branch): unlike the queue's visibility timeout, no field has two opposite
+          readings of zero, so none is refused at zero. What is refused is a
+          negative value — it is not a bound, and the caller who wrote it meant
+          something —, a [PolicyValue.BlockTimeout] with no [PolicyValue.MaxBytes]
+          to wait under, and a MaxBytes below one record, under which no Append
+          could ever succeed.
+        methods:
+          - doc: |-
+              Validate reports whether the policy is one an engine can honour, and
+              refuses it BY FIELD ([StreamMisconfigured], the "field" field naming
+              which) when it is not.
+
+              It lives in core so that the memory, file and SQL engines refuse
+              identical inputs identically, which is what makes the first usable as a
+              test double for the other two.
+            name: Validate
+            out:
+              - type: error
+            recv: value
+          - doc: |-
+              Normalized returns the policy with its clamped fields resolved, so that
+              every engine reads the same numbers rather than each applying the same
+              default. It does NOT validate: call [PolicyValue.Validate] first, at
+              construction.
+            name: Normalized
+            out:
+              - type: PolicyValue
+            recv: value
+        name: PolicyValue
+        struct:
+          fields:
+            - doc: |-
+                Partitions is how many partitions the stream has, fixed for its life.
+                Zero means one; negative is refused.
+              name: Partitions
+              type: int
+            - doc: |-
+                MaxRecordBytes bounds one record, its key and payload together. A
+                larger record is refused at [Stream.Append] with [RecordTooLarge]. Zero
+                means [DefaultMaxRecordBytes]; negative is refused.
+              name: MaxRecordBytes
+              type: int
+            - doc: |-
+                RetainFor is how long a record is kept, measured from its
+                [EntryValue.AppendedAt]: older records are trimmed by the engine, a
+                file engine dropping whole segments only. Zero keeps every record for
+                good; negative is refused.
+              name: RetainFor
+              type: time.Duration
+            - doc: |-
+                RetainBytes is how many bytes of records a partition keeps: above it
+                the engine trims the oldest. Zero is unbounded; negative is refused.
+              name: RetainBytes
+              type: int64
+            - doc: |-
+                MaxBytes is how many bytes of records the stream may hold before
+                [Stream.Append] waits for room — the producers' backpressure, for a
+                stream whose retention is bounded by its readers rather than by time.
+                Zero is unbounded; negative is refused, and so is a positive value
+                below the normalized MaxRecordBytes, under which no record could fit.
+              name: MaxBytes
+              type: int64
+            - doc: |-
+                BlockTimeout is how long an Append waits for room under MaxBytes before
+                it is refused with [StreamFull]. Zero refuses at once. Negative is
+                refused, and so is a positive value with no MaxBytes, which would wait
+                for nothing.
+              name: BlockTimeout
+              type: time.Duration
+            - doc: |-
+                SegmentBytes is the size of the segments a file engine writes, and the
+                unit its retention releases. Zero means [DefaultSegmentBytes]; negative
+                is refused. Engines that keep no segments ignore it.
+              name: SegmentBytes
+              type: int64
+      - doc: |-
+          RecordValue is what a producer appends: a key that places it, and the
+          bytes it carries.
+        name: RecordValue
+        struct:
+          fields:
+            - doc: |-
+                Key places the record: records of one key go to one partition
+                ([PartitionOf]) and are read in the order they were appended. It may
+                be empty, for a record whose order relative to others does not matter.
+              name: Key
+              type: "[]byte"
+            - doc: Payload is the record's bytes. It may be empty.
+              name: Payload
+              type: "[]byte"
+  - doc: |-
+      Package stream holds the engines of core/data/stream's [Stream] port —
+      memory, a directory of segments over kernel/fs/seglog, and a SQL table
+      joined to the caller's transaction — and the subscriber that reads a stream
+      on behalf of a consumer group (ADR 0231). The engines arrive one per
+      milestone of kitsunium/sdk#890; their error codes, 0.3.94.*, are already
+      declared in the core at this path (ADR 0160).
+    path: github.com/kitsunium/sdk/internal/service/data/stream

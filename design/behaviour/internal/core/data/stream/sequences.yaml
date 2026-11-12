@@ -1,0 +1,85 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: PartitionOf
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: partitions <= 1
+      - bind: hash
+        eval: fnvOffset32
+      - loop:
+          do:
+            - op: ^=
+              set: hash
+              value: uint32(b)
+            - op: "*="
+              set: hash
+              value: fnvPrime32
+          key: _
+          range: key
+          value: b
+      - return: int(uint64(hash) % uint64(partitions))
+  - of: PolicyValue.Validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: PolicyValue.Validate
+        kind: self
+      - id: p.firstNegative
+        kind: internal
+      - id: refused
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refused(field, value)
+              to: refused
+          init:
+            bind: field, value, ok
+            eval: p.firstNegative()
+            to: p.firstNegative
+          when: "!ok"
+      - opt:
+          do:
+            - return: refused("BlockTimeout", int64(p.BlockTimeout))
+              to: refused
+          when: p.BlockTimeout > 0 && p.MaxBytes == 0
+      - opt:
+          do:
+            - return: refused("MaxBytes", p.MaxBytes)
+              to: refused
+          when: p.MaxBytes > 0 && p.MaxBytes < int64(p.Normalized().MaxRecordBytes)
+      - return: nil
+  - of: refused
+    participants:
+      - id: caller
+        kind: actor
+      - id: refused
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(StreamMisconfigured, errs.WrapParams{},
+          		errs.String("field", field), errs.Int64("value", value))
+        to: errs
+  - of: PolicyValue.Normalized
+    steps:
+      - opt:
+          do:
+            - set: p.Partitions
+              value: "1"
+          when: p.Partitions == 0
+      - opt:
+          do:
+            - set: p.MaxRecordBytes
+              value: DefaultMaxRecordBytes
+          when: p.MaxRecordBytes == 0
+      - opt:
+          do:
+            - set: p.SegmentBytes
+              value: DefaultSegmentBytes
+          when: p.SegmentBytes == 0
+      - return: p

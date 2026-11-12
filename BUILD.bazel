@@ -91,6 +91,7 @@ filegroup(
         "//internal/core/data/docstore:audit_srcs",
         "//internal/core/data/queue:audit_srcs",
         "//internal/core/data/sql:audit_srcs",
+        "//internal/core/data/stream:audit_srcs",
         "//internal/core/data/transform:audit_srcs",
         "//internal/core/data/vfs:audit_srcs",
         "//internal/core/net:audit_srcs",

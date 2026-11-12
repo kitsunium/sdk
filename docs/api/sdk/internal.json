@@ -378,6 +378,14 @@
       "doc": "Package sql — range 0.2.24.* (ADR 0055 core/data/sql block), and the\ntransaction manager's, health probe's and migration runner's 0.3.54.* (ADR\n0055 service/data/sql block, declared here since ADR 0160).\n\nPackage sql — declares the sentinel *errs.Error port outcomes, and the run\noutcomes of the transaction manager, the health probe and the migration\nrunner in internal/service/data/sql (ADR 0160: every code is declared in the\ncore, at the service's path). Each var's name equals its errs.Define Reason\nin SCREAMING_SNAKE form.\n\n# Public never carries infrastructure\n\nDriver errors are the SDK's worst leak risk: a failed connection reports the\nhost, the port, the user and sometimes the password; a failed statement\nreports the statement. Every Public below is a fixed literal that names the\nCLASS of failure and nothing else, and no call site in this domain ever puts\na DSN or a SQL fragment into one. Where the detail matters it goes in a\nPrivate or a field, both of which are log-only; and the run outcomes the\nservice emits travel beside the driver's own error under errors.Join —\nreachable from a log, never from errs.PublicOf (ADR 0055 §D9).\n\nPackage sql declares the SDK's relational-database domain: a small set of\nPORTS above database/sql. It is deliberately NOT an ORM, and that refusal is\nthe design, not an omission — see ADR 0055.\n\n# What this domain is\n\nFour things, and nothing else:\n\n  - [Executor] — the read/write surface a query runs against. *sql.DB,\n    *sql.Tx and *sql.Conn all satisfy it AS THEY ARE, with no adapter.\n  - [Transactor] — the transaction manager: it owns Begin, Commit and\n    Rollback, and it never hands any of the three to the code running\n    inside the transaction.\n  - [Checker] — a bounded liveness probe.\n  - [Migrator] — an ordered, versioned, mutually-exclusive schema runner.\n\n# What this domain refuses to be\n\nNo entity mapping, no query builder, no lazy loading, no identity map, no\nchange tracking, no repository generation, no schema reflection. A framework\nthat needs those integrates a library that provides them; it does not grow\nthem (ADR 0055 §D1). The SDK's job here is the part every application needs\nand nobody enjoys writing correctly: transaction ownership, savepoints,\npool policy, and a migration runner that two processes can start at once.\n\nIt also ships NO DRIVER. pgx, go-sql-driver/mysql and the sqlite bindings\nare connectors to a third-party system, so they belong under third-party/\nby the same rule that put the AWS writers there (ADR 0012). The consumer\nimports the driver it wants and hands this domain a *sql.DB.\n\n# The ports do not hide database/sql\n\n[Executor] speaks *sql.Rows, *sql.Row and sql.Result — the stdlib's own\ntypes, not re-declared equivalents. Re-declaring them would be the first\nstep of the ORM this domain refuses to become: once Rows is ours, scanning\nis ours, and once scanning is ours, mapping is a small step. Organising the\nstdlib is the whole ambition.\n\n# There is no registry\n\nLike proc (ADR 0016), resilience (ADR 0026), net (ADR 0029), scheduler\n(ADR 0041), token (ADR 0042), session (ADR 0045) and lifecycle (ADR 0050),\nthis domain has no name->implementation registry. There is one Transactor\nand one Migrator; a registry would have one entry and would add a way to\nselect a database engine from a configuration string — which is precisely\nthe mistake [Dialect] exists to prevent, since a dialect the SDK cannot\nspell must be refused at construction and not resolved at runtime.\n\nPackage sql — hosts Dialect, the closed set of SQL engines this domain can\nspell, the vocabulary each one spells statements with, and the two refusals\nthat keep the set closed.\n\nPackage sql — hosts the four ports themselves. Kept apart from sql.go so\nthe package's contract is one file: what a caller may implement, and what\nthe SDK promises to accept.\n\nPackage sql — hosts MigrationValue and the Step both of its halves are.\n\nPackage sql — hosts TxOptionsValue, the per-transaction options a\nTransactor honours.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "stream",
+      "dir": "core/data/stream",
+      "layer": "core",
+      "family": "data",
+      "doc": "Package stream declares the SDK's durable, partitioned, offset-addressed\nlog: the [Stream] a producer appends records to and any number of readers\nread at their own pace, each record kept until its retention ends rather\nthan until somebody acknowledges it (ADR 0231).\n\nIt is the left-hand column of a frontier core/data/queue draws on its right\n(ADR 0054). A queue removes a message at its acknowledgement, leases it to\none consumer at a time, keeps no order past the first retry and\ndead-letters what fails; a stream keeps every record for its retention,\nlets every reader name the offset it reads from, keeps the order of each\npartition, and leaves a failing record where it is — the reader that cannot\nhandle it parks, and every other reader goes on.\n\n\tvalue, err := s.Append(ctx, []stream.RecordValue{{Key: order, Payload: body}})\n\tentries, err := s.Read(ctx, value.Partition, from, 100)\n\nA record's partition is its key's, by [PartitionOf] — FNV-1a modulo the\npartition count —, the same on every engine, so a key's records are read in\nthe order they were appended wherever they are kept. Ordering holds within a\npartition and nowhere else.\n\nThe port is FROZEN at four methods (ADR 0039); every other capability is a\nsibling reached by type assertion: [Waker], [Seeker], [Trimmer],\n[Compactor] and [Committer].\n\nPackage stream — range 0.2.38.* (ADR 0231 core/data/stream block), and the\nengines' and the subscriber's 0.3.94.* (ADR 0231 service/data/stream block,\ndeclared here as ADR 0160 requires).\n\nPackage stream — hosts the stream policy every engine is configured with,\nand the guard every engine runs so that all of them refuse identical inputs\nidentically (ADR 0031).\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/internal/core/data/transform",
       "name": "transform",
       "dir": "core/data/transform",
@@ -1328,6 +1336,14 @@
       "layer": "service",
       "family": "data",
       "doc": "Package sql — hosts Config, the parameters every port in this package is\nbuilt from, and the pool policy it applies.\n\nPackage sql — hosts the only place in this domain that renders\ndialect-specific SQL. Every statement it sends is built here, spelled with\nthe vocabulary core/data/sql's Dialect owns: the bind markers, the quoting and the\nrow-lock clauses.\n\nPackage sql — hosts the scope-bound Executor handed to a TxFunc, and the\ntwo guards that stand between a stale handle and a live transaction.\n\nPackage sql — hosts the liveness probe and the budget that bounds it.\n\nPackage sql — hosts the transactor's two ADR 0039 siblings: where a\nstatement issued under a context runs, and what waits for a commit.\n\nPackage sql — hosts the migration runner: the order, the version table, the\ndry run, and the two directions.\n\nPackage sql — hosts MigrateConfig, the migration runner's parameters, and\nthe validation that turns a caller's slice into an ordered plan.\n\nPackage sql — hosts the migration lock of an engine with no advisory lock:\nSQLite's own write lock on the database file, held for the whole run.\n\nPackage sql — hosts the migration lock: why it is the engine's own advisory\nlock, and why it lives on a connection of its own.\n\nPackage sql — hosts the validated, sorted, clamped form of a MigrateConfig.\n\nPackage sql — hosts the version table: its portable shape, the reads and\nthe two writes that keep it in step with the schema.\n\nPackage sql — hosts the validated, clamped form of a Config.\n\nPackage sql — hosts the three rendered statements of one savepoint.\n\nPackage sql — hosts the one context key this package stores under.\n\nPackage sql implements the relational-database ports declared in\ninternal/core/data/sql (ADR 0055): the transaction manager, the pool policy, the\nhealth check and the migration runner.\n\nIt ships NO DRIVER and imports none. A driver is a connector to a\nthird-party system, so pgx / go-sql-driver / the sqlite bindings belong\nunder third-party/ by the rule that put the AWS writers there (ADR 0012).\nThe caller opens its own *sql.DB and hands it over.\n\nIt is also NOT an ORM, has no query builder, no entity mapping and no lazy\nloading, and never will (ADR 0055 §D1).\n\n# Transaction ownership is structural\n\n[NewTransactor] hands the unit of work a core/data/sql.Executor — three methods,\nnone of which is Commit or Rollback. A function that receives a transaction\ntherefore cannot end it: the mistake does not compile. The manager commits\nwhen the function returns nil and rolls back otherwise, and it is the only\nthing that ever does either.\n\n# Nesting is a savepoint, and the traps are handled rather than avoided\n\ndatabase/sql has no nested transactions. A [core/data/sql.Transactor.Transact]\nwhose context already carries a transaction from THIS manager opens a\nSAVEPOINT instead:\n\n  - The savepoint NAME is generated by the SDK from a counter that never\n    resets inside one transaction. It is never caller-supplied, because an\n    identifier cannot be a bound parameter; and it is never reused, because\n    a repeated name shadows rather than replaces, so RELEASE would release\n    the wrong one.\n  - The three statements are IDENTICAL on postgres, mysql and sqlite, which\n    is why those three are the supported set. Engines that spell nesting\n    differently are refused BY NAME at ParseDialect (ADR 0055 §D4).\n  - Non-zero [core/data/sql.TxOptionsValue] on a nested call is REFUSED: a\n    savepoint cannot change isolation or read-only mode, and silently\n    downgrading a caller's Serializable is worse than saying no.\n\n# What a failed sub-transaction does\n\nIt rolls back to its savepoint and returns the error to the caller of the\ninner Transact — verbatim, so errors.Is still answers. The OUTER\ntransaction survives, and that is not optimism: ROLLBACK TO SAVEPOINT is\nexactly the statement that clears PostgreSQL's aborted state (SQLSTATE\n25P02), so a caller who CATCHES the inner error has a usable transaction to\ncontinue in. A caller who does not catch it propagates it, and the outer\nscope rolls back in turn — the common case, and the safe default.\n\nIf the ROLLBACK TO SAVEPOINT statement itself fails, the transaction is\nPOISONED: every later operation is refused with [coresql.TxPoisoned], the\ncommit never happens, and the whole transaction is rolled back. The\nengine's state is unknown at that point, and committing work the SDK\nbelieves it undid is the one outcome worse than failing.\n\n# Joining a transaction, and holding what waits for its commit\n\nThe manager is also a core/data/sql Joiner, Deferrer and Aborter (ADR 0139). Join answers\nthe executor of the innermost scope of the transaction a context carries for\nTHIS manager — a retired one, which refuses, when that scope has returned,\nand never the pool in its place — or the pool when the context carries none.\nDefer holds a function until that transaction commits; each held function\ncarries the id of the scope that held it, a failed savepoint drops what was\nheld at or above its own id, and the root runs what is left after its COMMIT.\nOnAbort is the complement: a failed savepoint runs, newest first, what was\nheld for an abort at or above its own id once its ROLLBACK TO SAVEPOINT ran,\na root that does not commit runs what is left after its ROLLBACK — a panic\nincluded —, and a root that commits drops it.\n\n# SQLite's migrations\n\nSQLite has no advisory lock, and its runner holds the database file's write\nlock instead (ADR 0140): the run is ONE transaction that takes the lock with\na write that writes nothing, and each migration is a savepoint of it.\n\n# A partially applied migration, and what MySQL does to the guarantee\n\nEach migration runs in ITS OWN transaction, and the version-table row is\nwritten by that SAME transaction on that SAME executor. On PostgreSQL and\nSQLite — where DDL is transactional — that is a real guarantee: a migration\nthat fails rolls back both halves, the database sits exactly at version\nn-1, and re-running is safe.\n\nOn MySQL and MariaDB it is NOT, and the difference is not one this package\ncan close. DDL causes an IMPLICIT COMMIT: the server has already committed\nthe schema change before the runner's transaction reaches COMMIT. A\nmigration whose second statement fails therefore leaves the first\nstatement's ALTER TABLE applied and committed, while the version row — in\nthe same transaction — is rolled back. The database is then in a state no\nversion number describes.\n\nNo client-side code can make MySQL's DDL transactional, so this package\ndoes three things instead of pretending: it says so (here, in the package\nCLAUDE.md, in pkg/v1/data/sql's doc and in MigrationFailed's Private), it stops\nat the first failure rather than continuing, and it reports the version and\nthe direction so the migration to inspect by hand is named.\n\nThe operational rule that follows is the CONSUMER's: one DDL statement per\nmigration on MySQL, which makes the failure atomic by construction. This\npackage cannot enforce it — it does not parse SQL — and does not pretend to.\nSee ADR 0055 D8.\n\n# Nothing here waits on the wall clock\n\nEvery budget — the health-check probe, the migration-lock retry — is read\nfrom an injected kernel/clock.Timed, so the suite advances a ManualClock\ninstead of sleeping.\n\nPackage sql — hosts Statements, the one helper that turns SQL text into a\nmigration step.\n\nPackage sql — hosts the transaction manager: the root transaction, the\nnested savepoint, and the single rule about who is allowed to commit.\n\nPackage sql — hosts the per-context transaction chain: which transactor\nopened a transaction, and how a nested call finds its own.\n\nPackage sql — hosts the per-transaction state every scope of one\ntransaction shares, and the context chain that finds it.\n\nPackage sql — hosts Withheld, a driver's error carried beside a verdict and\nkept out of every rendering.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "stream",
+      "dir": "service/data/stream",
+      "layer": "service",
+      "family": "data",
+      "doc": "Package stream holds the engines of core/data/stream's [Stream] port —\nmemory, a directory of segments over kernel/fs/seglog, and a SQL table\njoined to the caller's transaction — and the subscriber that reads a stream\non behalf of a consumer group (ADR 0231). The engines arrive one per\nmilestone of kitsunium/sdk#890; their error codes, 0.3.94.*, are already\ndeclared in the core at this path (ADR 0160).\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/data/transform",
@@ -27521,6 +27537,873 @@
       },
       "doc": "VersionTableInvalid refuses a version-table name that is not a bare SQL\nidentifier. A table name cannot be a bound parameter, so it is\ninterpolated — which makes validating it the only thing between a\nconfiguration string and an injection.\n",
       "file": "core/data/sql/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.AppendValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "AppendValue",
+      "spelled": "struct{Partition int; First Offset; Last Offset}",
+      "canonical": "struct{Partition int; First github.com/kitsunium/sdk/internal/core/data/stream.Offset; Last github.com/kitsunium/sdk/internal/core/data/stream.Offset}",
+      "fields": [
+        {
+          "name": "Partition",
+          "type": "int",
+          "doc": "Partition is the partition the whole batch was appended to.\n"
+        },
+        {
+          "name": "First",
+          "type": "Offset",
+          "doc": "First is the offset of the batch's first record.\n"
+        },
+        {
+          "name": "Last",
+          "type": "Offset",
+          "doc": "Last is the offset of the batch's last record.\n"
+        }
+      ],
+      "doc": "AppendValue is where [Stream.Append] put a batch: its partition and the\noffsets of its first and last records, the batch's records holding every\noffset between them in order.\n",
+      "file": "core/data/stream/record.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.BoundsValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "BoundsValue",
+      "spelled": "struct{First Offset; Next Offset}",
+      "canonical": "struct{First github.com/kitsunium/sdk/internal/core/data/stream.Offset; Next github.com/kitsunium/sdk/internal/core/data/stream.Offset}",
+      "fields": [
+        {
+          "name": "First",
+          "type": "Offset",
+          "doc": "First is the lowest offset still readable. Retention, Trim and the\ncompaction of a whole prefix raise it; nothing lowers it.\n"
+        },
+        {
+          "name": "Next",
+          "type": "Offset",
+          "doc": "Next is the offset the partition's next record will take.\n"
+        }
+      ],
+      "doc": "BoundsValue is a partition's retained range: records from First up to Next\nexcluded. The partition holds none when First equals Next.\n",
+      "file": "core/data/stream/record.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeInvalidBatchSize",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeInvalidBatchSize",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140806",
+      "code": {
+        "value": "0.2.38.6"
+      },
+      "doc": "CodeInvalidBatchSize identifies an Append of no record, or a Read asked\nfor a non-positive number of entries.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeOffsetAhead",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeOffsetAhead",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140804",
+      "code": {
+        "value": "0.2.38.4"
+      },
+      "doc": "CodeOffsetAhead identifies an offset past the next one its partition\nwill assign.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeOffsetTrimmed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeOffsetTrimmed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140803",
+      "code": {
+        "value": "0.2.38.3"
+      },
+      "doc": "CodeOffsetTrimmed identifies a read from an offset below the first one\nits partition still retains.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodePartitionsMixed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodePartitionsMixed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140809",
+      "code": {
+        "value": "0.2.38.9"
+      },
+      "doc": "CodePartitionsMixed identifies an Append whose records' keys hash to more\nthan one partition: a batch is appended to one partition, under one sync.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeRecordTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeRecordTooLarge",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140802",
+      "code": {
+        "value": "0.2.38.2"
+      },
+      "doc": "CodeRecordTooLarge identifies an Append holding a record whose key and\npayload together exceed PolicyValue.MaxRecordBytes.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeSQLStreamMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeSQLStreamMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220675",
+      "code": {
+        "value": "0.3.94.3"
+      },
+      "doc": "CodeSQLStreamMisconfigured identifies an SQL engine configuration refused\nat construction: no transactor, one it cannot join a transaction of, a\ndialect it cannot spell, or a table name it cannot interpolate safely.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeStreamBackendFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeStreamBackendFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220673",
+      "code": {
+        "value": "0.3.94.1"
+      },
+      "doc": "CodeStreamBackendFailed identifies an operation a durable engine depends\non that its storage refused: a filesystem call the operating system\nrefused, or a statement the SQL engine's database did not complete.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeStreamDirectoryUnusable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeStreamDirectoryUnusable",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220674",
+      "code": {
+        "value": "0.3.94.2"
+      },
+      "doc": "CodeStreamDirectoryUnusable identifies a stream directory that cannot be\nprepared, is not a directory, or is writable by accounts that must not be\nable to inject or remove records.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeStreamFull",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeStreamFull",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140807",
+      "code": {
+        "value": "0.2.38.7"
+      },
+      "doc": "CodeStreamFull identifies an Append refused because the stream held\nPolicyValue.MaxBytes for longer than PolicyValue.BlockTimeout.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeStreamMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeStreamMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140801",
+      "code": {
+        "value": "0.2.38.1"
+      },
+      "doc": "CodeStreamMisconfigured identifies a PolicyValue field, or a call's\nargument, an engine cannot honour, refused before anything is written.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeSubscriberMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeSubscriberMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220676",
+      "code": {
+        "value": "0.3.94.4"
+      },
+      "doc": "CodeSubscriberMisconfigured identifies a subscriber configuration the\nengine refuses: no handler, no group, or a handler whose author has not\nasserted that it is idempotent.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeUnknownGroup",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeUnknownGroup",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140808",
+      "code": {
+        "value": "0.2.38.8"
+      },
+      "doc": "CodeUnknownGroup identifies a Committed for a group that never committed\nan offset on that partition.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.CodeUnknownPartition",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "CodeUnknownPartition",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "140805",
+      "code": {
+        "value": "0.2.38.5"
+      },
+      "doc": "CodeUnknownPartition identifies a partition outside [0, Partitions()).\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Committer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Committer",
+      "spelled": "interface{Commit(ctx context.Context, group string, partition int, next Offset) error; Committed(ctx context.Context, group string, partition int) (Offset, error)}",
+      "canonical": "interface{Commit(ctx context.Context, group string, partition int, next github.com/kitsunium/sdk/internal/core/data/stream.Offset) error; Committed(ctx context.Context, group string, partition int) (github.com/kitsunium/sdk/internal/core/data/stream.Offset, error)}",
+      "doc": "Committer keeps, per consumer group and partition, the offset the group\nreads next: the durable cursor that lets a group's reader stop and another\none resume where it was.\n\nIt is a sibling because keeping cursors is a capability of the engine's\nstorage: an engine that keeps them in the same store as the records lets a\nhandler commit its offset in its own transaction (exactly-once in effect,\nADR 0231 and kitsunium/sdk#823), which is the reason they are kept there and\nnot beside it.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Committer.Commit",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Commit",
+      "recv": "Committer",
+      "spelled": "func(ctx context.Context, group string, partition int, next Offset) error",
+      "canonical": "func(ctx context.Context, group string, partition int, next github.com/kitsunium/sdk/internal/core/data/stream.Offset) error",
+      "doc": "Commit records next as the offset group reads next on partition,\nreplacing whatever the group committed there before — moving it back is\nlegitimate: it is a replay. next past the partition's next offset is\n[OffsetAhead]; below its first retained offset it is kept, and the\ngroup's next Read reports [OffsetTrimmed]. An empty group is\n[StreamMisconfigured]; a partition outside [0, Partitions()) is\n[UnknownPartition].\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Committer.Committed",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Committed",
+      "recv": "Committer",
+      "spelled": "func(ctx context.Context, group string, partition int) (Offset, error)",
+      "canonical": "func(ctx context.Context, group string, partition int) (github.com/kitsunium/sdk/internal/core/data/stream.Offset, error)",
+      "doc": "Committed returns the offset group committed last on partition.\n\nA group that never committed there is [UnknownGroup] — never a zero\noffset, because \"start at the beginning\" and \"start at the end\" are both\nlegitimate first positions and only the reader knows which it wants.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Compactor",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Compactor",
+      "spelled": "interface{Compact(ctx context.Context, partition int) error}",
+      "canonical": "interface{Compact(ctx context.Context, partition int) error}",
+      "doc": "Compactor rewrites a partition so that it keeps, of every key, only its\nlast record: the shape of a changelog read from the start to rebuild a\nstate, with no need to keep every intermediate value.\n\nIt is a sibling because compaction is a policy only some engines afford;\nthe record shape it relies on — a keyed record with an empty payload being\na tombstone — and how long a tombstone survives are decided with its\nengines (ADR 0231 defers them to kitsunium/sdk#824).\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Compactor.Compact",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Compact",
+      "recv": "Compactor",
+      "spelled": "func(ctx context.Context, partition int) error",
+      "canonical": "func(ctx context.Context, partition int) error",
+      "doc": "Compact removes from partition every keyed record a later record of the\nsame key supersedes, keeping every survivor at its offset: offsets are\nnever renumbered, so a reader's position stays meaningful. Unkeyed records\nare left as they are. A partition outside [0, Partitions()) is\n[UnknownPartition].\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.DefaultMaxRecordBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "DefaultMaxRecordBytes",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "1048576",
+      "doc": "DefaultMaxRecordBytes bounds one record when [PolicyValue.MaxRecordBytes]\nis left at zero: one mebibyte, the queue's DefaultMaxMessageBytes and\nKafka's default message.max.bytes.\n",
+      "file": "core/data/stream/policy.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.DefaultSegmentBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "DefaultSegmentBytes",
+      "spelled": "int64",
+      "canonical": "int64",
+      "value": "67108864",
+      "doc": "DefaultSegmentBytes is a segment's size when [PolicyValue.SegmentBytes] is\nleft at zero: 64 MiB, kernel/fs/seglog's and the consensus log's.\n",
+      "file": "core/data/stream/policy.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.EntryValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "EntryValue",
+      "spelled": "struct{AppendedAt time.Time; Record RecordValue; Partition int; Offset Offset}",
+      "canonical": "struct{AppendedAt time.Time; Record github.com/kitsunium/sdk/internal/core/data/stream.RecordValue; Partition int; Offset github.com/kitsunium/sdk/internal/core/data/stream.Offset}",
+      "fields": [
+        {
+          "name": "AppendedAt",
+          "type": "time.Time",
+          "doc": "AppendedAt is the engine's clock when the batch holding the record was\nappended; every record of one batch carries the same instant. It is\nwhat [Seeker.OffsetAt] and retention by age read.\n"
+        },
+        {
+          "name": "Record",
+          "type": "RecordValue",
+          "doc": "Record is the record as it was appended.\n"
+        },
+        {
+          "name": "Partition",
+          "type": "int",
+          "doc": "Partition is the partition the record was appended to.\n"
+        },
+        {
+          "name": "Offset",
+          "type": "Offset",
+          "doc": "Offset is the record's position in its partition, unique and never reused.\n"
+        }
+      ],
+      "doc": "EntryValue is one record as a partition keeps it: where it is, when it\narrived, and what it holds.\n",
+      "file": "core/data/stream/record.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.InvalidBatchSize",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "InvalidBatchSize",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.6",
+        "reason": "INVALID_BATCH_SIZE",
+        "public": "The batch size is not a positive number"
+      },
+      "doc": "InvalidBatchSize refuses an Append of no record and a Read asked for a\nnon-positive number of entries, rather than an empty answer forever from\na loop that processes nothing.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Offset",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Offset",
+      "spelled": "uint64",
+      "canonical": "uint64",
+      "doc": "Offset is a record's position in its partition: assigned by the engine at\n[Stream.Append], consecutive within a partition from zero, and never reused\n— a trimmed offset stays trimmed and the next one keeps counting.\n",
+      "file": "core/data/stream/record.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.OffsetAhead",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "OffsetAhead",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.4",
+        "reason": "OFFSET_AHEAD",
+        "public": "The requested offset is past the end of the stream"
+      },
+      "doc": "OffsetAhead refuses an offset past the partition's next one: a read, a\ncommit or a trim naming a record that does not exist yet. It is usually a\ncursor carried over from another stream, or from before a rebuild.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.OffsetTrimmed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "OffsetTrimmed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.3",
+        "reason": "OFFSET_TRIMMED",
+        "public": "The requested records are no longer retained"
+      },
+      "doc": "OffsetTrimmed refuses a read below the first offset the partition retains:\nthe records were trimmed by retention, Trim or compaction of a whole\nprefix. It is a refusal and not a silent skip because a reader that\nresumed later than it asked has lost records without knowing; its fields\nname the offset asked and the first retained, so the reader decides.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.PartitionOf",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "PartitionOf",
+      "spelled": "func(key []byte, partitions int) int",
+      "canonical": "func(key []byte, partitions int) int",
+      "doc": "PartitionOf returns the partition a record keyed key is appended to among\npartitions: the 32-bit FNV-1a hash of the key modulo partitions. It is the\none placement every engine applies, so a key lands on the same partition in\nmemory, on a directory and in a table.\n\nA partitions below one is read as one. An empty key has no partition of its\nown: an engine spreads unkeyed batches round-robin and does not ask; asked\nanyway, PartitionOf answers the hash of no bytes.\n",
+      "file": "core/data/stream/partition.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.PartitionsMixed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "PartitionsMixed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.9",
+        "reason": "PARTITIONS_MIXED",
+        "public": "The batch's records belong to different partitions"
+      },
+      "doc": "PartitionsMixed refuses an Append whose keyed records hash to more than\none partition: a batch is one partition's, written under one sync, and\nsplitting it would make a crash keep half of it. The producer groups its\nrecords by PartitionOf first.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.PolicyValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "PolicyValue",
+      "spelled": "struct{Partitions int; MaxRecordBytes int; RetainFor time.Duration; RetainBytes int64; MaxBytes int64; BlockTimeout time.Duration; SegmentBytes int64}",
+      "canonical": "struct{Partitions int; MaxRecordBytes int; RetainFor time.Duration; RetainBytes int64; MaxBytes int64; BlockTimeout time.Duration; SegmentBytes int64}",
+      "fields": [
+        {
+          "name": "Partitions",
+          "type": "int",
+          "doc": "Partitions is how many partitions the stream has, fixed for its life.\nZero means one; negative is refused.\n"
+        },
+        {
+          "name": "MaxRecordBytes",
+          "type": "int",
+          "doc": "MaxRecordBytes bounds one record, its key and payload together. A\nlarger record is refused at [Stream.Append] with [RecordTooLarge]. Zero\nmeans [DefaultMaxRecordBytes]; negative is refused.\n"
+        },
+        {
+          "name": "RetainFor",
+          "type": "time.Duration",
+          "doc": "RetainFor is how long a record is kept, measured from its\n[EntryValue.AppendedAt]: older records are trimmed by the engine, a\nfile engine dropping whole segments only. Zero keeps every record for\ngood; negative is refused.\n"
+        },
+        {
+          "name": "RetainBytes",
+          "type": "int64",
+          "doc": "RetainBytes is how many bytes of records a partition keeps: above it\nthe engine trims the oldest. Zero is unbounded; negative is refused.\n"
+        },
+        {
+          "name": "MaxBytes",
+          "type": "int64",
+          "doc": "MaxBytes is how many bytes of records the stream may hold before\n[Stream.Append] waits for room — the producers' backpressure, for a\nstream whose retention is bounded by its readers rather than by time.\nZero is unbounded; negative is refused, and so is a positive value\nbelow the normalized MaxRecordBytes, under which no record could fit.\n"
+        },
+        {
+          "name": "BlockTimeout",
+          "type": "time.Duration",
+          "doc": "BlockTimeout is how long an Append waits for room under MaxBytes before\nit is refused with [StreamFull]. Zero refuses at once. Negative is\nrefused, and so is a positive value with no MaxBytes, which would wait\nfor nothing.\n"
+        },
+        {
+          "name": "SegmentBytes",
+          "type": "int64",
+          "doc": "SegmentBytes is the size of the segments a file engine writes, and the\nunit its retention releases. Zero means [DefaultSegmentBytes]; negative\nis refused. Engines that keep no segments ignore it.\n"
+        }
+      ],
+      "doc": "PolicyValue is what an engine enforces on a stream: how many partitions,\nhow large a record, how long and how much it keeps, how much it may hold\nbefore producers wait, and how large a segment a file engine writes.\n\n# Its zero value WORKS, and that is the decision\n\nA stream's zero policy is one partition, records of up to\n[DefaultMaxRecordBytes], kept forever, never full, in segments of\n[DefaultSegmentBytes]. Every zero here has one reading (ADR 0031's clamp\nbranch): unlike the queue's visibility timeout, no field has two opposite\nreadings of zero, so none is refused at zero. What is refused is a\nnegative value — it is not a bound, and the caller who wrote it meant\nsomething —, a [PolicyValue.BlockTimeout] with no [PolicyValue.MaxBytes]\nto wait under, and a MaxBytes below one record, under which no Append\ncould ever succeed.\n",
+      "file": "core/data/stream/policy.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.PolicyValue.Normalized",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Normalized",
+      "recv": "PolicyValue",
+      "spelled": "func() PolicyValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/data/stream.PolicyValue",
+      "doc": "Normalized returns the policy with its clamped fields resolved, so that\nevery engine reads the same numbers rather than each applying the same\ndefault. It does NOT validate: call [PolicyValue.Validate] first, at\nconstruction.\n",
+      "file": "core/data/stream/policy.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.PolicyValue.Validate",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Validate",
+      "recv": "PolicyValue",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Validate reports whether the policy is one an engine can honour, and\nrefuses it BY FIELD ([StreamMisconfigured], the \"field\" field naming\nwhich) when it is not.\n\nIt lives in core so that the memory, file and SQL engines refuse\nidentical inputs identically, which is what makes the first usable as a\ntest double for the other two.\n",
+      "file": "core/data/stream/policy.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.RecordTooLarge",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "RecordTooLarge",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.2",
+        "reason": "RECORD_TOO_LARGE",
+        "public": "The record exceeds the stream's configured maximum size"
+      },
+      "doc": "RecordTooLarge refuses an Append holding a record above the policy's\nbound, at the producer that can still make it smaller. Its fields carry\nthe two sizes and the record's index in the batch, never its bytes.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.RecordValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "RecordValue",
+      "spelled": "struct{Key []byte; Payload []byte}",
+      "canonical": "struct{Key []byte; Payload []byte}",
+      "fields": [
+        {
+          "name": "Key",
+          "type": "[]byte",
+          "doc": "Key places the record: records of one key go to one partition\n([PartitionOf]) and are read in the order they were appended. It may\nbe empty, for a record whose order relative to others does not matter.\n"
+        },
+        {
+          "name": "Payload",
+          "type": "[]byte",
+          "doc": "Payload is the record's bytes. It may be empty.\n"
+        }
+      ],
+      "doc": "RecordValue is what a producer appends: a key that places it, and the\nbytes it carries.\n",
+      "file": "core/data/stream/record.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.SQLStreamMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "SQLStreamMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.94.3",
+        "reason": "SQL_STREAM_MISCONFIGURED",
+        "public": "The SQL stream configuration is not usable"
+      },
+      "doc": "SQLStreamMisconfigured refuses an SQL engine configuration at\nconstruction; the \"field\" field names which value.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Seeker",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Seeker",
+      "spelled": "interface{OffsetAt(ctx context.Context, partition int, t time.Time) (Offset, error)}",
+      "canonical": "interface{OffsetAt(ctx context.Context, partition int, t time.Time) (github.com/kitsunium/sdk/internal/core/data/stream.Offset, error)}",
+      "doc": "Seeker finds an offset by time: where a reader that wants \"everything since\nnine o'clock\" starts.\n\nIt is a sibling because an engine over a store that keeps no append instant\ncannot implement it.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Seeker.OffsetAt",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "OffsetAt",
+      "recv": "Seeker",
+      "spelled": "func(ctx context.Context, partition int, t time.Time) (Offset, error)",
+      "canonical": "func(ctx context.Context, partition int, t time.Time) (github.com/kitsunium/sdk/internal/core/data/stream.Offset, error)",
+      "doc": "OffsetAt returns the first offset of partition whose [EntryValue.AppendedAt]\nis at or after t: the partition's first retained offset when t precedes\nevery record it retains, its next offset when t follows every one. A\npartition outside [0, Partitions()) is [UnknownPartition].\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Stream",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Stream",
+      "spelled": "interface{Append(ctx context.Context, records []RecordValue) (AppendValue, error); Bounds(ctx context.Context, partition int) (BoundsValue, error); Partitions() int; Read(ctx context.Context, partition int, from Offset, max int) ([]EntryValue, error)}",
+      "canonical": "interface{Append(ctx context.Context, records []github.com/kitsunium/sdk/internal/core/data/stream.RecordValue) (github.com/kitsunium/sdk/internal/core/data/stream.AppendValue, error); Bounds(ctx context.Context, partition int) (github.com/kitsunium/sdk/internal/core/data/stream.BoundsValue, error); Partitions() int; Read(ctx context.Context, partition int, from github.com/kitsunium/sdk/internal/core/data/stream.Offset, max int) ([]github.com/kitsunium/sdk/internal/core/data/stream.EntryValue, error)}",
+      "doc": "Stream is one named, partitioned log: producers append batches of records to\nit, and readers read each partition from an offset of their own choosing.\nImplementations MUST be safe for concurrent use by multiple goroutines AND,\nwhere the implementation is durable, by every process that opens the same\nstorage.\n\nIFACE-PLUGIN: the concrete engines stay unexported behind their constructors\nin internal/service/data/stream.\n\nThe interface is FROZEN at these four methods. A published alias makes it\nstructural for every downstream implementation, and a fifth method would\nbreak each one at compile time with no deprecation window (ADR 0039). A new\ncapability arrives as a sibling reached by type assertion — [Waker],\n[Seeker], [Trimmer], [Compactor] and [Committer] are the ones that ship.\n\n# Why the READER owns its offset\n\nBecause a stream has many readers and each reads at its own pace: the\nrecord is not consumed by being read, so nothing about a read can live in\nthe record. A reader that wants its position to survive it keeps it through\n[Committer]; a reader that does not — a replay, an audit, a backfill — just\nreads from wherever it likes.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Stream.Append",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Append",
+      "recv": "Stream",
+      "spelled": "func(ctx context.Context, records []RecordValue) (AppendValue, error)",
+      "canonical": "func(ctx context.Context, records []github.com/kitsunium/sdk/internal/core/data/stream.RecordValue) (github.com/kitsunium/sdk/internal/core/data/stream.AppendValue, error)",
+      "doc": "Append writes records to one partition as one batch and returns where\nthey landed.\n\nThe partition is the records' keys': [PartitionOf] of the first keyed\nrecord, every other keyed record required to hash to the same partition\n([PartitionsMixed] otherwise, nothing written), and an unkeyed record\nfollowing the batch. A batch with no key at all goes to the partitions in\nturn. The records take consecutive offsets in their order.\n\nWhen it returns nil, a durable implementation has flushed the whole batch\nto its device under one sync: a crash one instruction later loses none of\nit, and a crash before loses all of it, never a part. An implementation\nthat joins the transaction ctx carries (ADR 0151) has instead made the\nbatch part of that transaction.\n\nAn empty batch is [InvalidBatchSize]; a record whose key and payload\ntogether exceed [PolicyValue.MaxRecordBytes] is [RecordTooLarge], the\nwhole batch refused. A stream holding [PolicyValue.MaxBytes] waits up to\n[PolicyValue.BlockTimeout] for retention to make room, then refuses with\n[StreamFull]; ctx ends the wait earlier with its own cause.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Stream.Bounds",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Bounds",
+      "recv": "Stream",
+      "spelled": "func(ctx context.Context, partition int) (BoundsValue, error)",
+      "canonical": "func(ctx context.Context, partition int) (github.com/kitsunium/sdk/internal/core/data/stream.BoundsValue, error)",
+      "doc": "Bounds returns the first offset partition still retains and the next one\nit will assign. A partition outside [0, Partitions()) is\n[UnknownPartition].\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Stream.Partitions",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Partitions",
+      "recv": "Stream",
+      "spelled": "func() int",
+      "canonical": "func() int",
+      "doc": "Partitions returns how many partitions the stream has, at least one. It\nnever changes for the life of a stream: a key's partition is its hash\nmodulo this number, and changing it would move every key.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Stream.Read",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Read",
+      "recv": "Stream",
+      "spelled": "func(ctx context.Context, partition int, from Offset, max int) ([]EntryValue, error)",
+      "canonical": "func(ctx context.Context, partition int, from github.com/kitsunium/sdk/internal/core/data/stream.Offset, max int) ([]github.com/kitsunium/sdk/internal/core/data/stream.EntryValue, error)",
+      "doc": "Read returns up to max entries of partition, from offset from on, in\noffset order. It does NOT block waiting for records: a read at the\npartition's next offset yields an empty slice and a nil error, and\nwaiting is the caller's ([Waker] tells it when to look again).\n\nfrom below the partition's first retained offset is [OffsetTrimmed] —\nthe records are gone, and silently starting later would hide the gap; one\npast the next offset is [OffsetAhead]. A partition outside\n[0, Partitions()) is [UnknownPartition], and a non-positive max is\n[InvalidBatchSize].\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.StreamBackendFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "StreamBackendFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.94.1",
+        "reason": "STREAM_BACKEND_FAILED",
+        "public": "The stream's storage failed"
+      },
+      "doc": "StreamBackendFailed reports an operation a durable engine depends on that\nits storage refused. The fields name the operation; the cause is wrapped.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.StreamDirectoryUnusable",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "StreamDirectoryUnusable",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.94.2",
+        "reason": "STREAM_DIRECTORY_UNUSABLE",
+        "public": "The stream directory cannot be used"
+      },
+      "doc": "StreamDirectoryUnusable refuses a stream directory that cannot be\nprepared, is not a directory, or is writable by another account.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.StreamFull",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "StreamFull",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.7",
+        "reason": "STREAM_FULL",
+        "public": "The stream is full"
+      },
+      "doc": "StreamFull refuses an Append that waited PolicyValue.BlockTimeout for\nroom under PolicyValue.MaxBytes and found none: the readers, or the\nretention, are behind. It is the producer's backpressure, and nothing was\nwritten.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.StreamMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "StreamMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.1",
+        "reason": "STREAM_MISCONFIGURED",
+        "public": "The stream policy is not one this engine can honour"
+      },
+      "doc": "StreamMisconfigured refuses a PolicyValue an engine cannot honour — a\nnegative bound, a BlockTimeout with no MaxBytes, a MaxBytes below one\nrecord — and an argument a call cannot honour, such as an empty group\nname. The \"field\" field names which value.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.SubscriberMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "SubscriberMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.94.4",
+        "reason": "SUBSCRIBER_MISCONFIGURED",
+        "public": "The stream subscriber configuration is not usable"
+      },
+      "doc": "SubscriberMisconfigured refuses a subscriber configuration: no handler,\nno group, or a handler not asserted idempotent; the \"field\" field names\nwhich value.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Trimmer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Trimmer",
+      "spelled": "interface{Trim(ctx context.Context, partition int, before Offset) error}",
+      "canonical": "interface{Trim(ctx context.Context, partition int, before github.com/kitsunium/sdk/internal/core/data/stream.Offset) error}",
+      "doc": "Trimmer drops a partition's prefix before its retention would: the\noperator's lever, and the one a reader uses once every record below an\noffset is known to be useless.\n\nIt is a sibling because an engine over a store whose retention is its own\ncannot honour it.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Trimmer.Trim",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Trim",
+      "recv": "Trimmer",
+      "spelled": "func(ctx context.Context, partition int, before Offset) error",
+      "canonical": "func(ctx context.Context, partition int, before github.com/kitsunium/sdk/internal/core/data/stream.Offset) error",
+      "doc": "Trim makes before the first offset partition retains: every record below\nit becomes unreadable at once ([OffsetTrimmed]) and its storage is\nreleased when the engine can — a file engine releases whole segments only.\nA before at or below the first offset changes nothing; one past the next\noffset is [OffsetAhead]; a partition outside [0, Partitions()) is\n[UnknownPartition]. Offsets are never reused: the next offset does not\nmove.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.UnknownGroup",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "UnknownGroup",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.8",
+        "reason": "UNKNOWN_GROUP",
+        "public": "The consumer group has no committed offset"
+      },
+      "doc": "UnknownGroup answers a Committed for a group that never committed an\noffset on that partition: where it starts is the reader's decision.\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.UnknownPartition",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "UnknownPartition",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.38.5",
+        "reason": "UNKNOWN_PARTITION",
+        "public": "The stream has no such partition"
+      },
+      "doc": "UnknownPartition refuses a partition outside [0, Partitions()).\n",
+      "file": "core/data/stream/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Waker",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Waker",
+      "spelled": "interface{Wake() <-chan struct{}}",
+      "canonical": "interface{Wake() <-chan struct{}}",
+      "doc": "Waker lets an idle reader sleep until there may be records to read.\n\nIt is a SIBLING of [Stream] for the reason queue's Waker is: an engine that\ncannot see its own appends — or whose appends come from another process —\nhas no honest answer to give. A reader asks by type assertion and polls when\nthe answer is no, so an engine that omits it loses latency, never records.\n\nA wake is a HINT: a signal may come with nothing new on the reader's\npartition, and records appended by another process close no signal, so a\nreader that uses it still polls at the cadence that bounds the second case.\n",
+      "file": "core/data/stream/gen_ports.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/stream.Waker.Wake",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/stream",
+      "name": "Wake",
+      "recv": "Waker",
+      "spelled": "func() <-chan struct{}",
+      "canonical": "func() <-chan struct{}",
+      "doc": "Wake returns a channel closed by the next Append through this stream value\nin this process, to any partition. Call it BEFORE the Read that may come\nback empty: an append landing between that Read and the wait closes the\nchannel already handed out, so it is not missed.\n",
+      "file": "core/data/stream/gen_ports.go",
       "layer": "core",
       "family": "data"
     },

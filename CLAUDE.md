@@ -28,6 +28,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `sql` | data | Ports over `database/sql`, never an ORM or a driver: structural transaction ownership, savepoints, migrations under a lock that dies with its holder, checksummed when built from statements; a retrying root transactor, a statement budget, read-only transactions on a replica, a statement observer under the pool | 0055, 0139, 0140 |
 | `docstore` | data | Typed keyed JSON documents with indexes, versions and a trash, replaced on the revision they were read at — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143, 0178, 0209 |
 | `queue` | data | Durable at-least-once queue over a directory, a SQL table joined to the caller's transaction, or memory; retried — with a jitter on request — and dead-lettered with its cause's codes, its trail's included, a dead letter and a live message movable between brokers as they lie; a message held until one instant, a retry after the handler's delay, a publication once per key over a window; a message's age bounded, a backlog counted, purged, published and acknowledged in batches, dead letters paged, replayed and purged in bulk and kept for a retention, a handler that acknowledges in its own transaction, five priority levels served strictly | 0054, 0104, 0151, 0178, 0183 |
+| `stream` | data | A durable, partitioned, offset-addressed log read by independent consumer groups, each record kept until its retention ends — the port, its siblings and its policy; the engines follow (#890) | 0231 |
 | `cache` | data | The kernel LRU+TTL primitive and the domain above it: tag invalidation, in-process stampede protection, L1/L2 chaining; a Valkey far tier under `third-party/` | 0025, 0049, 0211 |
 | `vfs` | data | `io/fs` reading unchanged and atomic publication, with how far "atomic" reaches stated, a batch under one directory flush; an S3 filesystem under `third-party/` | 0056, 0211 |
 | `config` | app | Environment, file and `fs.FS` layering, typed decode, a schema (required keys, defaults, unknown keys refused), provenance, a poll watcher | 0028, 0061, 0097 |
@@ -75,7 +76,7 @@ internal/
 │                               form, jcs, json, jsonpatch, jsonschema,
 │                               msgpack, multipart, ndjson, pem,
 │                               strictjson, tlv, toml, xml, yaml},
-│                        docstore, queue, sql, transform, vfs},
+│                        docstore, queue, sql, stream, transform, vfs},
 │                  observe/{logger, logger/{level, writer},
 │                           logger/middleware/{async, encwrite, failover,
 │                           multi, recover, route, sample, tee},
@@ -144,6 +145,9 @@ internal/
                              loop waiting on the Waker sibling; the SQL
                              broker joins the context's transaction —
                              ADR 0151;
+                           stream — the engines of the partitioned log, to
+                             come (#890); a package comment until the
+                             first — ADR 0231;
                            sql — transaction manager + savepoints + pool
                              policy + Join/Defer siblings + migration
                              runner, SQLite's on the database file's write
@@ -701,5 +705,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0221 — an HTTP/2 connection is frames, HPACK and a state machine on bytes, accepted on 2026-11-09 for kitsunium/sdk#959 and #960, revisable while v0 (ADR 0040): amends ADR 0186 §D6 and §Deferred — the frame layer (`ParseFrameHeader`, the `Append` family) and an in-house HPACK on `[]byte` in `internal/service/net/http2`, its values and codes `0.3.109.*` in `internal/core/net/http2` (`FrameValue`, `LimitsValue` — ADR 0195 §D3's numbers —, `ErrCode`); `Decoder` a pointer-free value over caller-given table memory, a list ceiling charged before any copy or insert (RFC 7541 §7.3's bomb), two refusal classes by whether the table survives; `Encoder` static-table names and never-indexed literals; one connection's streams, windows and SETTINGS as a pointer-free state machine; `pkg/v1/net/http2` comes with the adapter (#961) — `docs/adr/0221-an-http2-connection-is-frames-hpack-and-a-state-machine-on-bytes.md`
 - ADR 0222 — a loop runs on kqueue on darwin and the BSDs, beside epoll, accepted on 2026-11-11 (kitsunium/sdk#976), revisable while v0 (ADR 0040): resolves ADR 0186 §D5's deferral — `LoopBackendKqueue` and the engine token `kqueue` at epoll's rank, switched off apart; a level-triggered driver on the shared core, a staged probe, the Linux-only rows absent; kqueue opt-in (`LoopBackendKqueue`) until the paired gate holds, `auto` portable there (amended the same day); the backend-neutral conformance cases, the drain and the idle-memory bound on kqueue; the macos-15 paired gate next — `docs/adr/0222-a-loop-runs-on-kqueue-on-darwin-and-the-bsds-beside-epoll.md`
 - ADR 0230 — a segmented log is a kernel primitive that writes, and never decides, accepted on 2026-11-12 (kitsunium/sdk#820): `kernel/fs/seglog` (`0.1.8.*`), the consensus file log's mechanism without its vocabulary; amends ADR 0159 — `docs/adr/0230-a-segmented-log-is-a-kernel-primitive-that-writes-and-never-decides.md`
+- ADR 0231 — a record is kept until its retention ends, and every group reads it at its own pace, accepted on 2026-11-12 (kitsunium/sdk#818, milestone 1 of #890): the `data/stream` domain, `Stream` frozen at four methods with five siblings, `0.2.38.*` and `0.3.94.*`, no engine yet — `docs/adr/0231-a-record-is-kept-until-its-retention-ends-and-every-group-reads-it-at-its-own-pace.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

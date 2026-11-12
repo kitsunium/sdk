@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/data/stream
+  name: stream
+  purpose: Package stream holds the engines of core/data/stream's [Stream] port — memory, a directory of segments over kernel/fs/seglog, and a SQL table joined to the caller's transaction — and the subscriber that reads a stream on behalf of a consumer group (ADR 0231).
+types: []

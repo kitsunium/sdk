@@ -1,0 +1,29 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: PolicyValue.firstNegative
+    steps:
+      - bind: fields
+        eval: |-
+          [...]struct {
+          		name  string
+          		value int64
+          	}{
+          		{"Partitions", int64(p.Partitions)},
+          		{"MaxRecordBytes", int64(p.MaxRecordBytes)},
+          		{"RetainFor", int64(p.RetainFor)},
+          		{"RetainBytes", p.RetainBytes},
+          		{"MaxBytes", p.MaxBytes},
+          		{"BlockTimeout", int64(p.BlockTimeout)},
+          		{"SegmentBytes", p.SegmentBytes},
+          	}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: f.name, f.value, false
+                when: f.value < 0
+          key: _
+          range: fields
+          value: f
+      - return: "\"\", 0, true"

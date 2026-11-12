@@ -1,0 +1,188 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The 32-bit FNV-1a parameters (hash/fnv's), inlined so that placing a key
+      costs no allocation and no hash.Hash32 interface value.
+    grouped: true
+    items:
+      - name: fnvOffset32
+        type: uint32
+        value: "2166136261"
+      - name: fnvPrime32
+        type: uint32
+        value: "16777619"
+    name: fnvOffset32
+  - doc: |-
+      DefaultMaxRecordBytes bounds one record when [PolicyValue.MaxRecordBytes]
+      is left at zero: one mebibyte, the queue's DefaultMaxMessageBytes and
+      Kafka's default message.max.bytes.
+    items:
+      - name: DefaultMaxRecordBytes
+        type: int
+        value: 1 << 20
+    name: DefaultMaxRecordBytes
+  - doc: |-
+      DefaultSegmentBytes is a segment's size when [PolicyValue.SegmentBytes] is
+      left at zero: 64 MiB, kernel/fs/seglog's and the consensus log's.
+    items:
+      - name: DefaultSegmentBytes
+        type: int64
+        value: 64 << 20
+    name: DefaultSegmentBytes
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - fnvOffset32
+      - PartitionOf
+    name: partition.go
+  - decls:
+      - DefaultMaxRecordBytes
+      - DefaultSegmentBytes
+      - PolicyValue
+      - PolicyValue.Validate
+      - PolicyValue.firstNegative
+      - refused
+      - PolicyValue.Normalized
+    name: policy.go
+  - decls:
+      - Offset
+      - RecordValue
+      - EntryValue
+      - AppendValue
+      - BoundsValue
+    name: record.go
+functions:
+  - name: PartitionOf
+    params: key []byte, partitions int
+    results: int
+  - doc: refused builds the StreamMisconfigured refusal of one field.
+    name: refused
+    params: field string, value int64
+    results: error
+imports:
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/core/data/stream
+  name: stream
+  purpose: "Package stream declares the SDK's durable, partitioned, offset-addressed log: the [Stream] a producer appends records to and any number of readers read at their own pace, each record kept until its retention ends rather than until somebody acknowledges it (ADR 0231)."
+types:
+  - fields:
+      - doc: |-
+          Partitions is how many partitions the stream has, fixed for its life.
+          Zero means one; negative is refused.
+        name: Partitions
+        type: int
+      - doc: |-
+          MaxRecordBytes bounds one record, its key and payload together. A
+          larger record is refused at [Stream.Append] with [RecordTooLarge]. Zero
+          means [DefaultMaxRecordBytes]; negative is refused.
+        name: MaxRecordBytes
+        type: int
+      - doc: |-
+          RetainFor is how long a record is kept, measured from its
+          [EntryValue.AppendedAt]: older records are trimmed by the engine, a
+          file engine dropping whole segments only. Zero keeps every record for
+          good; negative is refused.
+        name: RetainFor
+        type: time.Duration
+      - doc: |-
+          RetainBytes is how many bytes of records a partition keeps: above it
+          the engine trims the oldest. Zero is unbounded; negative is refused.
+        name: RetainBytes
+        type: int64
+      - doc: |-
+          MaxBytes is how many bytes of records the stream may hold before
+          [Stream.Append] waits for room — the producers' backpressure, for a
+          stream whose retention is bounded by its readers rather than by time.
+          Zero is unbounded; negative is refused, and so is a positive value
+          below the normalized MaxRecordBytes, under which no record could fit.
+        name: MaxBytes
+        type: int64
+      - doc: |-
+          BlockTimeout is how long an Append waits for room under MaxBytes before
+          it is refused with [StreamFull]. Zero refuses at once. Negative is
+          refused, and so is a positive value with no MaxBytes, which would wait
+          for nothing.
+        name: BlockTimeout
+        type: time.Duration
+      - doc: |-
+          SegmentBytes is the size of the segments a file engine writes, and the
+          unit its retention releases. Zero means [DefaultSegmentBytes]; negative
+          is refused. Engines that keep no segments ignore it.
+        name: SegmentBytes
+        type: int64
+    kind: struct
+    methods:
+      - name: Validate
+        recv: p PolicyValue
+        results: error
+      - doc: |-
+          firstNegative returns the first field holding a negative value, its value,
+          and false; or true when none does.
+        name: firstNegative
+        recv: p PolicyValue
+        results: field string, value int64, ok bool
+      - name: Normalized
+        recv: p PolicyValue
+        results: PolicyValue
+    name: PolicyValue
+  - kind: named
+    name: Offset
+    underlying: uint64
+  - fields:
+      - doc: |-
+          Key places the record: records of one key go to one partition
+          ([PartitionOf]) and are read in the order they were appended. It may
+          be empty, for a record whose order relative to others does not matter.
+        name: Key
+        type: "[]byte"
+      - doc: Payload is the record's bytes. It may be empty.
+        name: Payload
+        type: "[]byte"
+    kind: struct
+    name: RecordValue
+  - fields:
+      - doc: |-
+          AppendedAt is the engine's clock when the batch holding the record was
+          appended; every record of one batch carries the same instant. It is
+          what [Seeker.OffsetAt] and retention by age read.
+        name: AppendedAt
+        type: time.Time
+      - doc: Record is the record as it was appended.
+        name: Record
+        type: RecordValue
+      - doc: Partition is the partition the record was appended to.
+        name: Partition
+        type: int
+      - doc: Offset is the record's position in its partition, unique and never reused.
+        name: Offset
+        type: Offset
+    kind: struct
+    name: EntryValue
+  - fields:
+      - doc: Partition is the partition the whole batch was appended to.
+        name: Partition
+        type: int
+      - doc: First is the offset of the batch's first record.
+        name: First
+        type: Offset
+      - doc: Last is the offset of the batch's last record.
+        name: Last
+        type: Offset
+    kind: struct
+    name: AppendValue
+  - fields:
+      - doc: |-
+          First is the lowest offset still readable. Retention, Trim and the
+          compaction of a whole prefix raise it; nothing lowers it.
+        name: First
+        type: Offset
+      - doc: Next is the offset the partition's next record will take.
+        name: Next
+        type: Offset
+    kind: struct
+    name: BoundsValue

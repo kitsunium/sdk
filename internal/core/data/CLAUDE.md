@@ -19,7 +19,8 @@ a value becomes and the places those bytes are kept — rather than what the
 data is for: the bytes a value is written as (`codec`) and the same bytes made
 smaller (`transform`), the tables of the caller's database (`sql`) and the
 documents kept above them or on a filesystem (`docstore`), the messages one
-process leaves for another (`queue`), the copies kept close (`cache`) and the
+process leaves for another (`queue`) and the log every reader reads at its
+own pace (`stream`), the copies kept close (`cache`) and the
 files a value is published to (`vfs`).
 
 Every wire format read or written for its own sake is a codec and lives under
@@ -53,6 +54,7 @@ the service codec at the same path.
 | `codec/` | the `Codec` / `StreamingCodec` / `BoundedStreamingCodec` / `Sniffer` / `Encoder` / `Decoder` / `Appender` ports, the process-wide registry and the `Format` value (ADR 0003); `codec/scratch/` beneath it holds the codec-payload recycling threshold every engine shares, and `codec/<format>/` the codes and sentinels of each service package at the same path — eighteen of them, codes only (ADR 0160 §2) | `0.2.2.*`; each `codec/<format>/` its service range, `0.3.<PP>.*` | `internal/service/data/codec/*` |
 | `docstore/` | the `Collection[T]` port for the file engine and `CollectionContext[T]`, the same calls each taking a context, for the SQL engine, with `Versioned[T]` / `VersionedContext[T]` as their siblings and `Announcer` (`OnWrite` / `OnDelete`) shared by both; `EntryValue`, `VersionValue`, `StampValue`, and the index declaration `IndexSpec[T]` with `Unique` / `Index` (ADR 0110, ADR 0139, ADR 0143, ADR 0160) | `0.3.80.*` | `internal/service/data/docstore` |
 | `queue/` | the `Broker` port frozen at four methods, the `Handler` FUNC port, the message, delivery, lease, receipt and dead-letter values, `PolicyValue`, and nineteen ADR 0039 siblings — those that act on a whole queue among them (ADR 0054 and ADR 0151, amended 2026-11-02); at-least-once in the type (ADR 0054, ADR 0104, ADR 0151) | `0.2.23.*`; the brokers' and the consumer engine's `0.3.53.*` | `internal/service/data/queue` |
+| `stream/` | the `Stream` port frozen at four methods (`Append`, `Read`, `Bounds`, `Partitions`) with `Waker` / `Seeker` / `Trimmer` / `Compactor` / `Committer` as ADR 0039 siblings, `Offset`, the record, entry, append and bounds values, `PolicyValue` (its zero works) and `PartitionOf`; the left-hand column of the queue's frontier (ADR 0231) | `0.2.38.*`; the engines' and the subscriber's `0.3.94.*` | `internal/service/data/stream` (no engine yet — #819, #821, #822) |
 | `sql/` | the `Executor` / `Transactor` / `Checker` / `Migrator` ports over the stdlib's own `*sql.Rows` and `sql.Result`, the `Preparer`, `Joiner`, `Deferrer` and `Aborter` siblings, and the closed `Dialect` set (ADR 0055, ADR 0139) | `0.2.24.*`; the transaction manager's, health probe's and migration runner's `0.3.54.*` | `internal/service/data/sql` |
 | `transform/` | the `Compressor` port and the registry mapping an `Algorithm` to it (ADR 0014) | `0.2.5.*`; the stdlib schemes' `0.3.26.*` | `internal/service/data/transform` |
 | `vfs/` | `FS`, an alias of `io/fs.FS`, `WritableFS` frozen at four write verbs, the `AtomicWriter` sibling, and the lexical path and permission guards (ADR 0056) | `0.2.25.*`; the concrete filesystems' `0.3.55.*` | `internal/service/data/vfs` |
