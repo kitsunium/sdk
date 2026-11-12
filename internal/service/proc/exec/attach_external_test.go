@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,10 +23,18 @@ import (
 )
 
 // startSleeping starts a child of the test, through the SDK's spawn, that
-// sleeps until killed; the test's cleanup kills and reaps it.
+// sleeps until killed; the test's cleanup kills and reaps it. The child is
+// sleep itself, found on PATH, never a shell that execs it: a signal sent
+// before a shell's exec is caught by OpenBSD's ksh, which then exits 143
+// instead of dying from it (#1347), so the process signalled is the one that
+// must die from the signal.
 func startSleeping(t *testing.T) coreproc.Process {
 	t.Helper()
-	p, err := svcexec.Start(t.Context(), coreproc.Spec{Path: shellPath, Args: []string{"sh", "-c", "exec sleep 30"}})
+	sleep, err := osexec.LookPath("sleep")
+	if err != nil {
+		t.Fatalf("LookPath(sleep) = %v", err)
+	}
+	p, err := svcexec.Start(t.Context(), coreproc.Spec{Path: sleep, Args: []string{"sleep", "30"}})
 	if err != nil {
 		t.Fatalf("Start = %v", spawnDetail(err))
 	}
@@ -89,9 +98,9 @@ func TestAttachStop(t *testing.T) {
 		t.Fatalf("Stop = %v", sErr)
 	}
 	exit, wErr := child.Wait()
-	//: the signal ends the child: killed outright, or the shell that was still
-	//: starting reports it as its own status, 128+15 (OpenBSD's ksh).
-	if wErr != nil || !((exit.Signaled && exit.Signal == coreproc.Signal(syscall.SIGTERM)) || (!exit.Signaled && exit.Code == 143)) {
+	//: the child is sleep itself, no shell between (#1347): it dies from the
+	//: signal, never reports it as an exit status of its own.
+	if wErr != nil || !exit.Signaled || exit.Signal != coreproc.Signal(syscall.SIGTERM) {
 		t.Errorf("the child's exit = %+v, %v, want SIGTERM", exit, wErr)
 	}
 }

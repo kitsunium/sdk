@@ -4,7 +4,7 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — the first `FullFS` outside `internal/service/data/vfs`: an S3 bucket (`third-party/aws/vfs/s3`), whose `PutObject` is the atomic publication, no rename faked
-- **Amended**: 2026-11-02 — a publication's mode, the link shortcuts, a directory flush, and step 5 shared between the publications into one directory; 2026-11-03 — a batch published under one directory flush, `AtomicBatchWriter` (see the dated sections at the end)
+- **Amended**: 2026-11-02 — a publication's mode, the link shortcuts, a directory flush, and step 5 shared between the publications into one directory; 2026-11-03 — a batch published under one directory flush, `AtomicBatchWriter`; 2026-11-12 — the temporary's name in one allocation, and an idle directory flushed in place (see the dated sections at the end)
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (refuse or clamp, never inert), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse where the mechanic does not exist), [ADR 0045](0045-sdk-session-domain.md) (the file store this domain generalises), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (a zero value must not be the dangerous one)
 
 ## Context
@@ -521,3 +521,31 @@ Decided:
 
 The queue's file broker publishes `PublishMany` through it (ADR 0054,
 amended 2026-11-03).
+
+## Amendment (2026-11-12): the temporary's name, and an idle directory's flush (kitsunium/sdk#813)
+
+A publication on the disk engine made 32 allocations: `os.Root`'s
+confinement 18, which stays (decision above, ADR 0083), the temporary's name
+5, and the directory's commit group 8 even when no other publication shared
+it. Both of the latter go; no step of the five moves, and no guarantee.
+
+1. **The temporary's name is `.vfs-<seed><counter>.tmp`**, sixteen hex
+   digits each: eight random bytes drawn once per process, then a counter
+   unique within the process, written on the stack — one allocation, no
+   entropy call a publication. It stays beside its target (step 1) and is
+   created with `O_EXCL` through the root, so an existing entry of that name
+   — a file, a link — is refused and never opened. Since another process
+   that reads the directory can guess the next name and plant it, a name
+   found taken falls back to sixteen random bytes, which nobody can plant
+   ahead; three names taken end the publication with `PUBLISH_FAILED` over
+   `fs.ErrExist`, nothing created, the destination untouched.
+2. **A publication that finds its directory idle flushes it on its own
+   goroutine**, through `concur/commit`'s idle path (ADR 0207, amended
+   2026-11-12), and the directory's entry is kept for the next directory
+   rather than rebuilt. Step 5's guarantee is unchanged: the flush begins
+   after the publication's rename and returns before its verdict, which is
+   that flush's; the publications arriving meanwhile still share the next
+   flush, never the running one.
+3. **Measured**: 32 → 20 allocations (`os.Root` 18, the name 1, one tiny),
+   the time unchanged (2.85 → 2.79 ms, p = 0.49); held at 19 on the caller's
+   stack by a race-off gate in the alloc lane (`alloc_external_test.go`).

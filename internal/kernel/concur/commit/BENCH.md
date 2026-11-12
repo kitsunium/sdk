@@ -68,7 +68,11 @@ BenchmarkDo_Uncontended-8         	  186500	      2009 ns/op	     392 B/op	     
 - **`Do_Uncontended`** (~1.6–2.0 µs, 6 allocations at `-cpu=1`) is the floor: a
   batch, its two channels, the leading goroutine and its context. A `Group`
   around work cheaper than that is a loss; around an fsync (tens of µs to ms)
-  it is noise.
+  it is noise. It is the BATCHED floor: the benchmark's context can end
+  (`b.Context()`), so it never takes the idle path of #813 — a caller whose
+  context cannot end, on an idle group, flushes in place with no allocation
+  for an item of size zero, held by the `allocs: 0` budget `TestPerfAllocsDoIdle`
+  (`gen_perf_test.go`, the race-off lane), not timed here.
 
 ## What is deliberately not measured
 

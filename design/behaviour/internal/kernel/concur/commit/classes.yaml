@@ -1,5 +1,17 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: "inlineNone: no flush runs on a caller's goroutine."
+        name: inlineNone
+        type: inlineState
+        value: iota
+      - doc: "inlineBehind: one runs, and a batch already waits on it."
+        name: inlineBehind
+      - doc: "inlineLatest: one runs, and it is the group's most recent flush."
+        name: inlineLatest
+    name: inlineNone
 files:
   - decls:
       - batch
@@ -9,8 +21,15 @@ files:
     name: batch.go
   - decls:
       - Group
+      - inlineState
+      - inlineNone
       - New
       - (*Group).Do
+      - (*Group).startInline
+      - (*Group).runInline
+      - (*Group).endInline
+      - (*Group).last
+      - settled
       - (*Group).join
       - (*Group).lead
       - (*Group).seal
@@ -33,6 +52,12 @@ functions:
     params: flush func(ctx context.Context, items []T) error, cfg Config
     results: "*Group[T]"
     typeParams: T any
+  - doc: |-
+      settled reports whether done — a batch's, or nil before the first — is
+      closed, i.e. whether no flush of it is still running.
+    name: settled
+    params: done <-chan struct{}
+    results: bool
 imports:
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
@@ -93,7 +118,7 @@ types:
         type: Config
       - name: clk
         type: clock.Waiter
-      - doc: mu guards pending, tail and closed.
+      - doc: mu guards pending, tail, inlineDone, inline and closed.
         name: mu
         type: sync.Mutex
       - doc: pending is the batch accepting items; nil when none is.
@@ -104,6 +129,18 @@ types:
           after; nil before the first.
         name: tail
         type: <-chan struct{}
+      - doc: |-
+          inlineDone is closed when the running inline flush returns; made only
+          when a batch or Close has to wait for it, so an inline flush nobody
+          waits on costs no channel.
+        name: inlineDone
+        type: chan struct{}
+      - doc: |-
+          inline says whether a flush runs on its caller's goroutine (Do's idle
+          path), and whether it is still the most recent flush — no batch started
+          after it —, in which case the next batch waits on it, not on tail.
+        name: inline
+        type: inlineState
       - doc: closed is set by Close.
         name: closed
         type: bool
@@ -113,6 +150,34 @@ types:
         params: ctx context.Context, item T
         recv: g *Group[T]
         results: error
+      - doc: |-
+          startInline claims the group for a flush on the caller's goroutine, and
+          reports whether it did: only when the group is open and idle — no batch
+          gathering, none flushing, no other inline flush —, so the flush carries this
+          caller's item alone and runs after every flush before it.
+        name: startInline
+        recv: g *Group[T]
+        results: bool
+      - doc: |-
+          runInline flushes item on the caller's goroutine and releases the group
+          whatever the flush does, a panic included, which reaches this caller — the
+          flush's only participant.
+        name: runInline
+        params: ctx context.Context, item T
+        recv: g *Group[T]
+        results: error
+      - doc: |-
+          endInline releases the group after an inline flush and wakes what waits on
+          it: the batch gathered meanwhile, or Close.
+        name: endInline
+        recv: g *Group[T]
+      - doc: |-
+          last returns what the next batch, or Close, waits on: the inline flush
+          while it is the most recent flush — its channel made on the first need —,
+          else the most recent batch's done. g.mu is held.
+        name: last
+        recv: g *Group[T]
+        results: <-chan struct{}
       - doc: |-
           join appends item to the pending batch, starting one — and the goroutine
           that will flush it — when none is pending.
@@ -135,6 +200,12 @@ types:
         recv: g *Group[T]
     name: Group
     typeParams: T any
+  - doc: |-
+      inlineState is where a Group stands with a flush run on its caller's
+      goroutine.
+    kind: named
+    name: inlineState
+    underlying: uint8
   - fields:
       - doc: |-
           MaxItems seals a batch once it holds this many items: a full batch is
