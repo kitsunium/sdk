@@ -9782,7 +9782,7 @@ sequences:
           		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
           		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](), readq: newFifo[*readWait](),
           		waiters: map[uint64]*proposal{}, forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
-          		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
+          		watchers: map[chan coreconsensus.StatusValue]struct{}{}, confWatchers: map[chan coreconsensus.MembershipValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
           	}
       - bind: ident
         eval: stamp.Log
@@ -11164,6 +11164,8 @@ sequences:
         kind: actor
       - id: (*Node).sweep
         kind: self
+      - id: s.boundSilence
+        kind: internal
       - id: n.clk.Now
         kind: value
       - id: n.dropForward
@@ -11175,6 +11177,14 @@ sequences:
     steps:
       - bind: grace
         eval: 2 * n.r.Status().Timing.ElectionTimeoutMax
+      - opt:
+          do:
+            - eval: s.boundSilence(grace)
+              to: s.boundSilence
+          init:
+            bind: s, ok
+            eval: n.cfg.Transport.(silenceBounder)
+          when: ok
       - bind: now
         eval: n.clk.Now()
         to: n.clk.Now
@@ -12169,6 +12179,8 @@ sequences:
         kind: value
       - id: n.progress.noteApplied
         kind: internal
+      - id: n.publishConf
+        kind: internal
       - id: n.status.Load
         kind: value
       - id: n.status.Store
@@ -12198,6 +12210,8 @@ sequences:
           	}
       - eval: n.progress.noteApplied(s.Commit, s.Applied, n.clk.Now())
         to: n.progress.noteApplied
+      - eval: n.publishConf(&st.Conf)
+        to: n.publishConf
       - bind: old
         eval: n.status.Load()
         to: n.status.Load
@@ -12225,6 +12239,54 @@ sequences:
           range: n.watchers
       - eval: n.watchMu.Unlock()
         to: n.watchMu.Unlock
+  - of: (*Node).publishConf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).publishConf
+        kind: self
+      - id: n.conf.Load
+        kind: value
+      - id: n.conf.Store
+        kind: value
+      - id: n.watchMu.Lock
+        kind: value
+      - id: n.watchMu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: old
+            eval: n.conf.Load()
+            to: n.conf.Load
+          when: old != nil && sameMembership(old, conf)
+      - bind: c
+        eval: "*conf"
+      - eval: n.conf.Store(&c)
+        to: n.conf.Store
+      - eval: n.watchMu.Lock()
+        to: n.watchMu.Lock
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ch
+                  - default: true
+            - select:
+                cases:
+                  - comm: ch <- c.Clone()
+                  - default: true
+          key: ch
+          range: n.confWatchers
+      - eval: n.watchMu.Unlock()
+        to: n.watchMu.Unlock
+  - of: sameMembership
+    steps:
+      - return: |-
+          a.Index == b.Index && slices.Equal(a.Members, b.Members) &&
+          		slices.Equal(a.Retired, b.Retired) && slices.Equal(a.RetiredKeys, b.RetiredKeys)
   - of: (*Node).reader
     participants:
       - id: caller
@@ -13088,15 +13150,60 @@ sequences:
           	}()
       - return: ch
   - of: (*Node).Membership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).Membership
+        kind: self
+      - id: n.conf.Load
+        kind: value
+      - id: m.Clone
+        kind: value
     steps:
-      - var:
-          name: m
-          type: coreconsensus.MembershipValue
       - opt:
           do:
-            - return: coreconsensus.MembershipValue{}
-          when: "!n.exec(func() { m = n.r.Status().Conf })"
-      - return: m
+            - return: m.Clone()
+              to: m.Clone
+          init:
+            bind: m
+            eval: n.conf.Load()
+            to: n.conf.Load
+          when: m != nil
+      - return: coreconsensus.MembershipValue{}
+  - of: (*Node).WatchMembership
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).WatchMembership
+        kind: self
+      - id: n.watchMu.Lock
+        kind: value
+      - id: n.watchMu.Unlock
+        kind: value
+    steps:
+      - bind: ch
+        eval: make(chan coreconsensus.MembershipValue, 1)
+      - eval: n.watchMu.Lock()
+        to: n.watchMu.Lock
+      - send:
+          chan: ch
+          value: n.Membership()
+      - set: n.confWatchers[ch]
+        value: struct{}{}
+      - eval: n.watchMu.Unlock()
+        to: n.watchMu.Unlock
+      - go: |-
+          func() {
+          		select {
+          		case <-ctx.Done():
+          		case <-n.loopDone:
+          		}
+          		n.watchMu.Lock()
+          		delete(n.confWatchers, ch)
+          		close(ch)
+          		n.watchMu.Unlock()
+          	}()
+      - return: ch
   - of: (*Node).probeLeader
     participants:
       - id: caller
@@ -14096,7 +14203,7 @@ sequences:
             - return: ""
           when: o.meter == nil
       - bind: k
-        eval: key(name, nil)
+        eval: key(name, attrs)
         to: key
       - eval: o.mu.Lock()
         to: o.mu.Lock
@@ -14106,7 +14213,7 @@ sequences:
           do:
             - set: c
               to: o.meter.Counter
-              value: o.meter.Counter(name, o.group)
+              value: o.meter.Counter(name, append([]coreotel.AttrValue{o.group}, attrs...)...)
             - set: o.count[k]
               value: c
           when: "!ok"
@@ -14549,6 +14656,8 @@ sequences:
         kind: internal
       - id: ct.CertExpiry
         kind: internal
+      - id: la.linksAborted
+        kind: internal
     steps:
       - bind: o
         eval: n.obs
@@ -14631,6 +14740,19 @@ sequences:
               		PeerCertExpiry() map[coreconsensus.NodeID]time.Time
               		ReloadFailures() int
               	})
+          when: ok
+      - opt:
+          do:
+            - bind: timedOut, silenced
+              eval: la.linksAborted()
+              to: la.linksAborted
+            - eval: o.addTo(mLinksAborted, &o.seenTimedOut, timedOut, coreotel.String("reason", "user_timeout"))
+              to: o.addTo
+            - eval: o.addTo(mLinksAborted, &o.seenSilenced, silenced, coreotel.String("reason", "read_silence"))
+              to: o.addTo
+          init:
+            bind: la, ok
+            eval: n.cfg.Transport.(linkAborter)
           when: ok
   - of: (*Node).ReadCommitted
     participants:
@@ -20133,6 +20255,382 @@ sequences:
             - return: false, nil
           when: errors.Is(err, syscall.EOPNOTSUPP) || errors.Is(err, syscall.ENOSYS)
       - return: err == nil, err
+  - of: Preflight
+    participants:
+      - id: caller
+        kind: actor
+      - id: Preflight
+        kind: self
+      - id: preflight
+        kind: internal
+    steps:
+      - return: preflight(dir, opts, datasync)
+        to: preflight
+  - of: preflight
+    participants:
+      - id: caller
+        kind: actor
+      - id: preflight
+        kind: self
+      - id: completePreflight
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: preflightLock
+        kind: internal
+      - id: measureSyncs
+        kind: internal
+      - id: judgePreflight
+        kind: internal
+      - id: warnVerdicts
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: PreflightValue{}, err
+          init:
+            bind: err
+            eval: completePreflight(&opts)
+            to: completePreflight
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: PreflightValue{}, storageFailed("stat", serr)
+                when: serr != nil && !errors.Is(serr, os.ErrNotExist)
+            - return: PreflightValue{}, misconfigured("dir", "not an existing directory")
+          init:
+            bind: fi, serr
+            eval: os.Stat(dir)
+            to: os
+          when: serr != nil || !fi.IsDir()
+      - bind: unlock, err
+        eval: preflightLock(dir)
+        to: preflightLock
+      - opt:
+          do:
+            - return: PreflightValue{}, err
+          when: err != nil
+      - defer: |-
+          func() {
+          		if uerr := unlock(); uerr != nil && err == nil {
+          			err = uerr
+          		}
+          	}()
+      - bind: lat, err
+        eval: measureSyncs(scratchDir(dir), opts, sync)
+        to: measureSyncs
+      - opt:
+          do:
+            - return: PreflightValue{}, err
+          when: err != nil
+      - set: v
+        value: |-
+          PreflightValue{
+          		FreeBytes: fsFree(dir), Flock: flock.Native, UserTimeout: unackedBound,
+          	}
+      - set: v.FsyncP50, v.FsyncP99, v.FsyncMax
+        value: nearestRank(lat, 50), nearestRank(lat, 99), lat[len(lat)-1]
+      - set: v.Verdicts
+        to: judgePreflight
+        value: judgePreflight(v, opts)
+      - eval: warnVerdicts(opts.Logger, v)
+        to: warnVerdicts
+      - return: v, nil
+  - of: completePreflight
+    participants:
+      - id: caller
+        kind: actor
+      - id: completePreflight
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: opts.Syncs < 0 || opts.Syncs > preflightMaxSyncs
+              do:
+                - return: misconfigured("PreflightOptions.Syncs", "negative or above 65536")
+                  to: misconfigured
+            - case: opts.RecordBytes < 0
+              do:
+                - return: misconfigured("PreflightOptions.RecordBytes", "negative")
+                  to: misconfigured
+            - case: opts.LogReserveBytes < 0
+              do:
+                - return: misconfigured("PreflightOptions.LogReserveBytes", "negative")
+                  to: misconfigured
+      - opt:
+          do:
+            - set: opts.Syncs
+              value: preflightSyncs
+          when: opts.Syncs == 0
+      - opt:
+          do:
+            - set: opts.RecordBytes
+              value: preflightRecordBytes
+          when: opts.RecordBytes == 0
+      - opt:
+          do:
+            - set: opts.LogReserveBytes
+              value: preflightReserve
+          when: opts.LogReserveBytes == 0
+      - opt:
+          do:
+            - return: misconfigured("PreflightOptions.RecordBytes", "Syncs records of it above DefaultSegmentBytes")
+              to: misconfigured
+          when: int64(opts.Syncs)*int64(opts.RecordBytes) > DefaultSegmentBytes
+      - opt:
+          do:
+            - set: opts.Clock
+              value: clock.System
+          when: opts.Clock == nil
+      - return: nil
+  - of: preflightLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: preflightLock
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: flock
+        kind: package
+    steps:
+      - bind: none
+        eval:
+          closure:
+            results: error
+            steps:
+              - return: nil
+      - opt:
+          do:
+            - return: none, nil
+          when: "!flock.Native"
+      - bind: lf, err
+        eval: os.OpenFile(filepath.Join(dir, fileLock), os.O_RDWR, 0)
+        to: os
+      - switch:
+          cases:
+            - case: errors.Is(err, os.ErrNotExist)
+              do:
+                - return: none, nil
+            - case: err != nil
+              do:
+                - return: nil, storageFailed("lock", err)
+      - bind: held, err
+        eval: flock.TryLock(lf)
+        to: flock
+      - opt:
+          do:
+            - return: nil, alsoFailed(storageFailed("lock", err), "close", lf.Close())
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, alsoFailed(origin(coreconsensus.DataDirLocked, errs.String("dir", dir)), "close", lf.Close())
+          when: "!held"
+      - return: |-
+          func() error {
+          		err := flock.Unlock(lf)
+          		if err != nil {
+          			err = storageFailed("unlock", err)
+          		}
+          		if cerr := lf.Close(); cerr != nil && err == nil {
+          			err = storageFailed("close lock", cerr)
+          		}
+          		return err
+          	}, nil
+  - of: scratchDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: scratchDir
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: logDir
+        eval: filepath.Join(dir, "log")
+        to: filepath
+      - opt:
+          do:
+            - return: logDir
+          init:
+            bind: fi, err
+            eval: os.Stat(logDir)
+            to: os
+          when: err == nil && fi.IsDir()
+      - return: dir
+  - of: measureSyncs
+    participants:
+      - id: caller
+        kind: actor
+      - id: measureSyncs
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: f.WriteAt
+        kind: value
+      - id: f.Sync
+        kind: value
+      - id: opts.Clock.Now
+        kind: value
+      - id: opts.Clock.Since
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - var:
+          name: nonce
+          type: "[8]byte"
+      - set: _, _
+        to: rand
+        value: rand.Read(nonce[:])
+      - bind: path
+        eval: filepath.Join(dir, "preflight-"+hex.EncodeToString(nonce[:])+".tmp")
+        to: filepath
+      - bind: f, err
+        eval: os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+        to: os
+      - opt:
+          do:
+            - return: nil, storageFailed("preflight create", err)
+          when: err != nil
+      - defer: |-
+          func() {
+          		if cerr := f.Close(); cerr != nil && err == nil {
+          			err = storageFailed("preflight close", cerr)
+          		}
+          		if rerr := os.Remove(path); rerr != nil && err == nil {
+          			err = storageFailed("preflight remove", rerr)
+          		}
+          	}()
+      - bind: rec
+        eval: make([]byte, opts.RecordBytes)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, storageFailed("preflight zero-fill", err)
+                init:
+                  bind: _, err
+                  eval: f.WriteAt(rec, int64(i)*int64(len(rec)))
+                  to: f.WriteAt
+                when: err != nil
+          key: i
+          range: opts.Syncs
+      - opt:
+          do:
+            - return: nil, storageFailed("preflight zero-fill", err)
+          init:
+            bind: err
+            eval: f.Sync()
+            to: f.Sync
+          when: err != nil
+      - loop:
+          do:
+            - set: rec[i]
+              value: byte(i) | 1
+          key: i
+          range: rec
+      - set: lat
+        value: make([]time.Duration, opts.Syncs)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, storageFailed("write", err)
+                init:
+                  bind: _, err
+                  eval: f.WriteAt(rec, int64(i)*int64(len(rec)))
+                  to: f.WriteAt
+                when: err != nil
+            - bind: start
+              eval: opts.Clock.Now()
+              to: opts.Clock.Now
+            - opt:
+                do:
+                  - return: nil, storageFailed("fdatasync", err)
+                init:
+                  bind: err
+                  eval: sync(f)
+                when: err != nil
+            - set: lat[i]
+              to: opts.Clock.Since
+              value: opts.Clock.Since(start)
+          key: i
+          range: opts.Syncs
+      - eval: slices.Sort(lat)
+        to: slices
+      - return: lat, nil
+  - of: nearestRank
+    steps:
+      - bind: r
+        eval: (p*len(sorted) + 99) / 100
+      - return: sorted[max(r, 1)-1]
+  - of: judgePreflight
+    steps:
+      - var:
+          name: out
+          type: "[]PreflightVerdict"
+      - opt:
+          do:
+            - set: out
+              value: "append(out, PreflightVerdict{Field: verdictElectionField, Rule: verdictElectionRule})"
+          when: |-
+            opts.Timing != (coreconsensus.TimingContractSpec{}) &&
+            		opts.Timing.ElectionTimeoutMin <= preflightElectionFactor*v.FsyncP99
+      - opt:
+          do:
+            - set: out
+              value: "append(out, PreflightVerdict{Field: verdictReserveField, Rule: verdictReserveRule})"
+          when: v.FreeBytes >= 0 && v.FreeBytes < opts.LogReserveBytes
+      - opt:
+          do:
+            - set: out
+              value: "append(out, PreflightVerdict{Field: verdictFlockField, Rule: verdictFlockRule})"
+          when: "!v.Flock"
+      - opt:
+          do:
+            - set: out
+              value: "append(out, PreflightVerdict{Field: verdictUnackedField, Rule: verdictUnackedRule})"
+          when: "!v.UserTimeout"
+      - return: out
+  - of: warnVerdicts
+    participants:
+      - id: caller
+        kind: actor
+      - id: warnVerdicts
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: log.Log
+        kind: value
+    steps:
+      - bind: ctx
+        eval: context.Background()
+        to: context
+      - opt:
+          do:
+            - return: ""
+          when: log == nil || len(v.Verdicts) == 0 || !log.Enabled(ctx, level.Warn)
+      - loop:
+          do:
+            - eval: |-
+                log.Log(ctx, level.Warn, "consensus preflight: "+vd.Field+" "+vd.Rule,
+                			lstr("field", vd.Field), lstr("fsync_p99", v.FsyncP99.String()),
+                			lstr("free_bytes", strconv.FormatInt(v.FreeBytes, 10)))
+              to: log.Log
+          key: _
+          range: v.Verdicts
+          value: vd
   - of: newFifo
     steps:
       - return: "&fifo[T]{signal: make(chan struct{}, 1)}"
@@ -24003,11 +24501,29 @@ sequences:
                 			lattr("length", uint64(ln)+4), lattr("bound", uint64(limit)), lattr("refused", uint64(refused)))
           when: warn != nil
   - of: (*TCPTransport).deliverTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).deliverTo
+        kind: self
+      - id: time
+        kind: stdlib
     steps:
       - lock:
           mutex: t.mu
       - bind: _, still
         eval: t.bySPKI[spki]
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: t.heard
+                    value: map[[32]byte]time.Time{}
+                when: t.heard == nil
+            - set: t.heard[spki]
+              to: time
+              value: time.Now()
+          when: still
       - return: t.deliver, still
   - of: (*TCPTransport).laneBound
     steps:
@@ -24288,6 +24804,11 @@ sequences:
           do:
             - return: nil, err
           when: err != nil
+      - opt:
+          do:
+            - set: raw
+              value: t.wrapDialled(raw)
+          when: t.wrapDialled != nil
       - bind: c
         eval: tls.Client(raw, t.id.ClientConfig(verify))
         to: tls
@@ -24576,6 +25097,8 @@ sequences:
             - set: l.conn
               value: nil
           when: l.conn != nil
+      - set: l.unanswered
+        value: time.Time{}
   - of: takeBatch
     participants:
       - id: caller
@@ -24648,6 +25171,8 @@ sequences:
         kind: internal
       - id: t.reportUnreachable
         kind: internal
+      - id: time
+        kind: stdlib
     steps:
       - eval: t.retire(k, link)
         to: t.retire
@@ -24684,7 +25209,14 @@ sequences:
               to: t.reportUnreachable
             - eval: t.sendBack(k, batch)
               to: t.sendBack
+            - return: ""
           when: err != nil
+      - opt:
+          do:
+            - set: link.unanswered
+              to: time
+              value: time.Now()
+          when: link.unanswered.IsZero()
   - of: (*TCPTransport).retire
     participants:
       - id: caller
@@ -24693,6 +25225,8 @@ sequences:
         kind: self
       - id: link.close
         kind: internal
+      - id: t.silenced.Add
+        kind: value
     steps:
       - opt:
           do:
@@ -24702,7 +25236,78 @@ sequences:
           do:
             - eval: link.close()
               to: link.close
+            - return: ""
           when: t.cfg.Clock.Since(link.created) > t.cfg.MaxConnectionAge || !t.stillAdmitted(k.to, link)
+      - opt:
+          do:
+            - eval: t.silenced.Add(1)
+              to: t.silenced.Add
+            - eval: link.close()
+              to: link.close
+          when: t.silent(link)
+  - of: (*TCPTransport).silent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).silent
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - bind: bound
+        eval: time.Duration(t.silence.Load())
+        to: time
+      - opt:
+          do:
+            - return: "false"
+          when: bound <= 0 || link.unanswered.IsZero()
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: heard
+        eval: t.heard[link.pin]
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - set: link.unanswered
+              value: time.Time{}
+            - return: "false"
+          when: heard.After(link.unanswered)
+      - return: time.Since(link.unanswered) >= bound
+  - of: (*TCPTransport).boundSilence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).boundSilence
+        kind: self
+      - id: t.silence.Load
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: cur
+              eval: t.silence.Load()
+              to: t.silence.Load
+            - opt:
+                do:
+                  - return: ""
+                when: int64(d) <= cur || t.silence.CompareAndSwap(cur, int64(d))
+          forever: true
+  - of: (*TCPTransport).linksAborted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).linksAborted
+        kind: self
+      - id: t.timedOut.Load
+        kind: value
+    steps:
+      - return: t.timedOut.Load(), t.silenced.Load()
+        to: t.timedOut.Load
   - of: (*TCPTransport).writeBatch
     participants:
       - id: caller
@@ -24833,6 +25438,8 @@ sequences:
         kind: internal
       - id: io
         kind: stdlib
+      - id: t.timedOut.Add
+        kind: value
       - id: abandon
         kind: internal
     steps:
@@ -24847,11 +25454,15 @@ sequences:
             eval: t.linkPeer(c.ConnectionState(), k.to, pin)
             to: t.linkPeer
           when: ok
-      - bind: _, err
-        eval: io.Copy(io.Discard, c)
-        to: io
-      - eval: abandon(err)
-        to: abandon
+      - opt:
+          do:
+            - eval: t.timedOut.Add(1)
+              to: t.timedOut.Add
+          init:
+            bind: _, err
+            eval: io.Copy(io.Discard, c)
+            to: io
+          when: kernelTimedOut(err)
       - eval: abandon(c.NetConn().Close())
         to: abandon
   - of: (*TCPTransport).stillAdmitted
@@ -24960,6 +25571,17 @@ sequences:
         value: byID, bySPKI
       - eval: t.reserveAddresses(byID)
         to: t.reserveAddresses
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: delete(t.heard, spki)
+                init:
+                  bind: _, ok
+                  eval: bySPKI[spki]
+                when: "!ok"
+          key: spki
+          range: t.heard
       - loop:
           do:
             - opt:
@@ -26545,6 +27167,9 @@ sequences:
   - of: (*TCPTransport).maxFrameBytes
     steps:
       - return: t.cfg.MaxFrameBytes
+  - of: kernelTimedOut
+    steps:
+      - return: err != nil && errors.Is(err, errTimedOut)
   - of: boundUnacknowledged
     participants:
       - id: caller

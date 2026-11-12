@@ -6,7 +6,9 @@
 The consensus **domain** (ADR 0152): every value a port speaks — node and
 cluster identities, positions, entries, messages, snapshots, membership — and
 the frozen ports `Replicated`, `StateMachine`, `LogStore`, `SnapshotStore`,
-`Transport` and their siblings. The engine, its storage and its transport
+`Transport` and their siblings — `LeadershipWatcher` and, beside it,
+`MembershipWatcher` (#915), the configuration pushed apart from `StatusValue`,
+which stays frozen. The engine, its storage and its transport
 live in `internal/service/app/consensus`; the facade is `pkg/v1/app/consensus`.
 
 Code ranges: `0.2.57.*` (the domain's outcomes) and `0.3.92.*` (the shipped

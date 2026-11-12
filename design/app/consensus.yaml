@@ -979,6 +979,22 @@ packages:
               - type: <-chan StatusValue
         name: LeadershipWatcher
       - doc: |-
+          MembershipWatcher is the sibling of a node that notifies configuration
+          changes: a learner added, promoted, a member removed or moved. The
+          configuration is its own value, apart from StatusValue.
+        methods:
+          - doc: |-
+              WatchMembership returns its OWN channel, of capacity one, holding the
+              latest configuration; it is unsubscribed and closed when ctx ends or the
+              node closes.
+            in:
+              - name: ctx
+                type: context.Context
+            name: WatchMembership
+            out:
+              - type: <-chan MembershipValue
+        name: MembershipWatcher
+      - doc: |-
           JoinReasonBinder is the sibling of a transport that carries the reason of
           a refused JOIN back to the joiner. A node that finds it binds this join
           callback in place of Bind's: the reason is what the JoinAuthorizer chose
@@ -3465,10 +3481,23 @@ packages:
             out:
               - type: <-chan coreconsensus.StatusValue
             recv: pointer
-          - doc: Membership returns the configuration the node last appended.
+          - doc: |-
+              Membership returns the configuration the node last appended, as its last
+              turn published it; it never waits for the event loop.
             name: Membership
             out:
               - type: coreconsensus.MembershipValue
+            recv: pointer
+          - doc: |-
+              WatchMembership implements MembershipWatcher. Each call launches one
+              goroutine that closes the returned channel and ends when ctx ends or the
+              node's event loop stops.
+            in:
+              - name: ctx
+                type: context.Context
+            name: WatchMembership
+            out:
+              - type: <-chan coreconsensus.MembershipValue
             recv: pointer
           - doc: |-
               Propose replicates data and returns, once the entry is applied locally,
@@ -5786,6 +5815,8 @@ packages:
             target: coreconsensus.BatchSender
           - name: LeadershipWatcher
             target: coreconsensus.LeadershipWatcher
+          - name: MembershipWatcher
+            target: coreconsensus.MembershipWatcher
           - blank: true
             name: HealthValue
             target: svcconsensus.HealthValue

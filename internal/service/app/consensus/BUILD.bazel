@@ -156,6 +156,7 @@ go_test(
         "logfloor_internal_test.go",
         "logtight_internal_test.go",
         "lostframe_internal_test.go",
+        "membershipwatch_internal_test.go",
         "metabitflip_internal_test.go",
         "metav2_internal_test.go",
         "movedall_internal_test.go",

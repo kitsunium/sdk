@@ -103,6 +103,10 @@ type Node struct {
 	aq *fifo[applyItem]
 
 	status atomic.Pointer[coreconsensus.StatusValue]
+	// conf is the configuration the last turn published, read by Membership
+	// without entering the loop (#915). The loop never changes a value it
+	// stored: a new configuration is a new pointer.
+	conf atomic.Pointer[coreconsensus.MembershipValue]
 
 	am          sync.Mutex
 	applied     uint64
@@ -205,6 +209,8 @@ type Node struct {
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
+	// confWatchers are WatchMembership's channels, under watchMu (#915).
+	confWatchers map[chan coreconsensus.MembershipValue]struct{}
 
 	stopMu     sync.Mutex
 	stopReason *coreconsensus.StopReasonValue
@@ -487,7 +493,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](), readq: newFifo[*readWait](),
 		waiters: map[uint64]*proposal{}, forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
-		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
+		watchers: map[chan coreconsensus.StatusValue]struct{}{}, confWatchers: map[chan coreconsensus.MembershipValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	ident := stamp.Log
 	n.ident.Store(&ident)
@@ -2035,6 +2041,7 @@ func (n *Node) publish() {
 		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
 	n.progress.noteApplied(s.Commit, s.Applied, n.clk.Now())
+	n.publishConf(&st.Conf)
 	old := n.status.Load()
 	if old != nil && *old == *s {
 		return
@@ -2053,6 +2060,36 @@ func (n *Node) publish() {
 		}
 	}
 	n.watchMu.Unlock()
+}
+
+// publishConf stores the configuration a turn ended with, when it differs
+// from the one last published, and wakes every membership watcher with a
+// copy of its own, replacing a value the watcher has not read yet (#915).
+// conf is the step function's clone, which nothing else holds.
+func (n *Node) publishConf(conf *coreconsensus.MembershipValue) {
+	if old := n.conf.Load(); old != nil && sameMembership(old, conf) {
+		return
+	}
+	c := *conf
+	n.conf.Store(&c)
+	n.watchMu.Lock()
+	for ch := range n.confWatchers {
+		select {
+		case <-ch:
+		default:
+		}
+		select {
+		case ch <- c.Clone():
+		default:
+		}
+	}
+	n.watchMu.Unlock()
+}
+
+// sameMembership reports whether a and b are the same configuration.
+func sameMembership(a, b *coreconsensus.MembershipValue) bool {
+	return a.Index == b.Index && slices.Equal(a.Members, b.Members) &&
+		slices.Equal(a.Retired, b.Retired) && slices.Equal(a.RetiredKeys, b.RetiredKeys)
 }
 
 type fetchDone struct {
@@ -2588,11 +2625,35 @@ func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue {
 	return ch
 }
 
-// Membership returns the configuration the node last appended.
+// Membership returns the configuration the node last appended, as its last
+// turn published it; it never waits for the event loop.
 func (n *Node) Membership() coreconsensus.MembershipValue {
-	var m coreconsensus.MembershipValue
-	if !n.exec(func() { m = n.r.Status().Conf }) {
-		return coreconsensus.MembershipValue{}
+	if m := n.conf.Load(); m != nil {
+		return m.Clone()
 	}
-	return m
+	return coreconsensus.MembershipValue{}
+}
+
+// WatchMembership implements MembershipWatcher. Each call launches one
+// goroutine that closes the returned channel and ends when ctx ends or the
+// node's event loop stops.
+func (n *Node) WatchMembership(ctx context.Context) <-chan coreconsensus.MembershipValue {
+	ch := make(chan coreconsensus.MembershipValue, 1)
+	n.watchMu.Lock()
+	// The first value is read under the lock publishConf wakes the watchers
+	// under: a configuration published meanwhile replaces it, never precedes it.
+	ch <- n.Membership()
+	n.confWatchers[ch] = struct{}{}
+	n.watchMu.Unlock()
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-n.loopDone:
+		}
+		n.watchMu.Lock()
+		delete(n.confWatchers, ch)
+		close(ch)
+		n.watchMu.Unlock()
+	}()
+	return ch
 }

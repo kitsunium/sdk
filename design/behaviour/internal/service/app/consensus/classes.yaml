@@ -611,6 +611,8 @@ constants:
         value: "\"consensus_tls_peer_cert_expiry_seconds\""
       - name: mReloadFailures
         value: "\"consensus_tls_reload_failures_total\""
+      - name: mLinksAborted
+        value: "\"consensus_links_aborted_total\""
     name: mRole
   - doc: |-
       departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads
@@ -744,6 +746,49 @@ constants:
       - name: fallocateProbeName
         value: "\"fallocate-probe.tmp\""
     name: fallocateProbeName
+  - doc: |-
+      Preflight's defaults and bounds (ADR 0152 D16): 256 syncs of a 4 KiB
+      record, a record about the size of a small batch; the scratch file never
+      grows past one segment of the default size.
+    grouped: true
+    items:
+      - name: preflightSyncs
+        value: "256"
+      - name: preflightRecordBytes
+        value: "4096"
+      - name: preflightMaxSyncs
+        value: 1 << 16
+      - doc: preflightReserve is Config's default LogReserveBytes.
+        name: preflightReserve
+        type: int64
+        value: 256 << 20
+      - doc: |-
+          preflightElectionFactor is the CLAUDE.md timing rule: a campaign is
+          two durable writes, and an ElectionTimeoutMin not above three times
+          the fdatasync p99 stayed leaderless through 41 terms (#598).
+        name: preflightElectionFactor
+        value: "3"
+    name: preflightSyncs
+  - doc: The verdicts' fields and rules, spelled as Config spells the field.
+    grouped: true
+    items:
+      - name: verdictElectionField
+        value: "\"InitialTiming.ElectionTimeoutMin\""
+      - name: verdictElectionRule
+        value: "\"not above three times the fdatasync p99: a campaign is two durable writes, and elections over slower syncs stayed leaderless (#598)\""
+      - name: verdictReserveField
+        value: "\"LogReserveBytes\""
+      - name: verdictReserveRule
+        value: "\"the filesystem's free bytes are under the log's reserve: the no-space alarm rises at once\""
+      - name: verdictFlockField
+        value: "\"DataDir\""
+      - name: verdictFlockRule
+        value: "\"no native flock(2) on this platform: NewDataDir refuses UNSUPPORTED_PLATFORM (ADR 0144)\""
+      - name: verdictUnackedField
+        value: "\"Transport\""
+      - name: verdictUnackedRule
+        value: "\"no kernel bound on unacknowledged bytes on this platform: a dead stream is closed by the read-silence bound alone (#1116)\""
+    name: verdictElectionField
   - grouped: true
     items:
       - doc: |-
@@ -995,6 +1040,20 @@ constants:
         type: int
         value: "0x12"
     name: tcpUserTimeout
+  - doc: |-
+      errTimedOut is the error a read or write on a connection the kernel
+      aborted under TCP_USER_TIMEOUT returns.
+    items:
+      - name: errTimedOut
+        value: syscall.ETIMEDOUT
+    name: errTimedOut
+  - doc: |-
+      unackedBound reports that boundUnacknowledged sets a kernel bound here
+      (TCP_USER_TIMEOUT), which Preflight reports as UserTimeout.
+    items:
+      - name: unackedBound
+        value: "true"
+    name: unackedBound
 files:
   - decls:
       - applyItem
@@ -1523,6 +1582,7 @@ files:
       - (*Node).queuedControl
       - (*Node).checkTurn
       - (*Node).sweep
+      - silenceBounder
       - (*Node).sweepReads
       - (*Node).sweepWaiters
       - (*Node).dropForward
@@ -1557,6 +1617,8 @@ files:
       - (*Node).preferPause
       - (*Node).preferLeader
       - (*Node).publish
+      - (*Node).publishConf
+      - sameMembership
       - fetchDone
       - (*Node).reader
       - (*Node).fetch
@@ -1586,6 +1648,7 @@ files:
       - (*Node).Status
       - (*Node).Watch
       - (*Node).Membership
+      - (*Node).WatchMembership
     name: node.go
   - decls:
       - leaderContact
@@ -1667,6 +1730,7 @@ files:
       - (*Node).observePeer
       - (*obs).resetDeparted
       - (*Node).observeResources
+      - linkAborter
     name: observe.go
   - decls:
       - (*Node).ReadCommitted
@@ -1859,6 +1923,22 @@ files:
       - fallocateRange
       - fallocate
     name: prealloc_linux.go
+  - decls:
+      - preflightSyncs
+      - verdictElectionField
+      - PreflightOptions
+      - PreflightValue
+      - PreflightVerdict
+      - Preflight
+      - preflight
+      - completePreflight
+      - preflightLock
+      - scratchDir
+      - measureSyncs
+      - nearestRank
+      - judgePreflight
+      - warnVerdicts
+    name: preflight.go
   - decls:
       - fifo
       - newFifo
@@ -2056,6 +2136,9 @@ files:
       - queuedFrame
       - (*TCPTransport).sendBatch
       - (*TCPTransport).retire
+      - (*TCPTransport).silent
+      - (*TCPTransport).boundSilence
+      - (*TCPTransport).linksAborted
       - (*TCPTransport).writeBatch
       - (*TCPTransport).redial
       - linkConn
@@ -2119,7 +2202,12 @@ files:
       - (*TCPTransport).maxFrameBytes
     name: tcp.go
   - decls:
+      - kernelTimedOut
+    name: unacked.go
+  - decls:
       - tcpUserTimeout
+      - errTimedOut
+      - unackedBound
       - boundUnacknowledged
     name: unacked_linux.go
 functions:
@@ -3046,6 +3134,10 @@ functions:
     name: lowerSilenceIn
     params: log coreconsensus.LogStore, index uint64
     results: error
+  - doc: sameMembership reports whether a and b are the same configuration.
+    name: sameMembership
+    params: a, b *coreconsensus.MembershipValue
+    results: bool
   - doc: |-
       needsSync reports whether a Ready must be durable before its completion:
       all but one that only carries a commit, which is written lazily (raft's
@@ -3542,6 +3634,54 @@ functions:
     name: fallocate
     params: f *os.File, mode uint32, off, n int64
     results: ok bool, err error
+  - name: Preflight
+    params: dir string, opts PreflightOptions
+    results: PreflightValue, error
+  - doc: |-
+      preflight is Preflight with the sync it times, which a test replaces to
+      drive the measurement on a ManualClock.
+    name: preflight
+    params: dir string, opts PreflightOptions, sync func(*os.File) error
+    results: v PreflightValue, err error
+  - doc: completePreflight gives opts its defaults and refuses its bounds.
+    name: completePreflight
+    params: opts *PreflightOptions
+    results: error
+  - doc: |-
+      preflightLock takes dir's LOCK as NewDataDir does, refusing
+      DATA_DIR_LOCKED while another holder has it, and returns its release.
+      A directory with no LOCK was never opened by a node, and none can hold
+      it: nothing is taken, and nothing is created there. No lock is taken
+      where the platform has none (ADR 0144).
+    name: preflightLock
+    params: dir string
+    results: func() error, error
+  - doc: |-
+      scratchDir is where the scratch file goes: the log directory of dir when
+      it exists, the disk the log trusts, else dir itself.
+    name: scratchDir
+    params: dir string
+    results: string
+  - doc: |-
+      measureSyncs writes opts.Syncs records into a fresh scratch file in dir,
+      zero-filled and synced first as a segment is, each record followed by
+      sync, and returns the latencies, sorted. The file is removed whatever
+      happened; a failed removal is a storage failure too, since it would leave
+      a file behind.
+    name: measureSyncs
+    params: dir string, opts PreflightOptions, sync func(*os.File) error
+    results: lat []time.Duration, err error
+  - doc: nearestRank is the p-th percentile of sorted by nearest rank.
+    name: nearestRank
+    params: sorted []time.Duration, p int
+    results: time.Duration
+  - doc: judgePreflight lists the rules v breaks.
+    name: judgePreflight
+    params: v PreflightValue, opts PreflightOptions
+    results: "[]PreflightVerdict"
+  - doc: warnVerdicts logs each verdict at Warn, with the measurement it rests on.
+    name: warnVerdicts
+    params: log corelogger.Logger, v PreflightValue
   - doc: |-
       newFifo returns an empty queue whose signal holds at most one pending
       wake-up: a consumer that drains with take after each wake-up misses none.
@@ -4048,6 +4188,13 @@ functions:
     name: joinAnswerReason
     params: b []byte
     results: reason string, ok bool
+  - doc: |-
+      kernelTimedOut reports whether err is the kernel aborting a connection
+      whose bytes stayed unacknowledged: the bound boundUnacknowledged sets,
+      or the platform's own retransmission limit where it sets none (#1116).
+    name: kernelTimedOut
+    params: err error
+    results: bool
   - doc: |-
       boundUnacknowledged makes the kernel abort c once bytes written on it
       stay unacknowledged for d (TCP_USER_TIMEOUT): the next write then fails,
@@ -6954,6 +7101,12 @@ types:
         type: "*fifo[applyItem]"
       - name: status
         type: atomic.Pointer[coreconsensus.StatusValue]
+      - doc: |-
+          conf is the configuration the last turn published, read by Membership
+          without entering the loop (#915). The loop never changes a value it
+          stored: a new configuration is a new pointer.
+        name: conf
+        type: atomic.Pointer[coreconsensus.MembershipValue]
       - name: am
         type: sync.Mutex
       - name: applied
@@ -7112,6 +7265,9 @@ types:
         type: sync.Mutex
       - name: watchers
         type: map[chan coreconsensus.StatusValue]struct{}
+      - doc: confWatchers are WatchMembership's channels, under watchMu (#915).
+        name: confWatchers
+        type: map[chan coreconsensus.MembershipValue]struct{}
       - name: stopMu
         type: sync.Mutex
       - name: stopReason
@@ -7904,7 +8060,9 @@ types:
           unanswered two maximum election timeouts after it was sent is answered
           OUTCOME_UNKNOWN: the leader may have appended it, and a resend is only
           deduplicated while the leader still remembers the first. What a caller
-          gave up on is dropped. Reads are swept by sweepReads.
+          gave up on is dropped. Reads are swept by sweepReads. The transport's
+          sender links get the same two maximum election timeouts as their bound
+          on read silence (#1116).
         name: sweep
         recv: n *Node
       - doc: |-
@@ -8149,6 +8307,14 @@ types:
         name: publish
         recv: n *Node
       - doc: |-
+          publishConf stores the configuration a turn ended with, when it differs
+          from the one last published, and wakes every membership watcher with a
+          copy of its own, replacing a value the watcher has not read yet (#915).
+          conf is the step function's clone, which nothing else holds.
+        name: publishConf
+        params: conf *coreconsensus.MembershipValue
+        recv: n *Node
+      - doc: |-
           reader serves the step function's reads below its in-memory window, on
           its own goroutine, never the storage actor's, whose queue holds writes
           only (D4, R8-06).
@@ -8324,6 +8490,10 @@ types:
       - name: Membership
         recv: n *Node
         results: coreconsensus.MembershipValue
+      - name: WatchMembership
+        params: ctx context.Context
+        recv: n *Node
+        results: <-chan coreconsensus.MembershipValue
       - doc: |-
           probeLeader sends a read to the leader at most every half minimum
           election timeout while this node follows one, so that its answer keeps
@@ -9439,6 +9609,15 @@ types:
         results: uint64
     name: tailLoad
   - doc: |-
+      silenceBounder is a transport whose sender links a node bounds by read
+      silence (TCPTransport.boundSilence, #1116).
+    kind: named
+    name: silenceBounder
+    underlying: |-
+      interface {
+      	boundSilence(d time.Duration)
+      }
+  - doc: |-
       joinReleaser is a transport that keeps a JOIN answer's members admitted
       apart from the engine's configuration until the joiner is admitted
       (#552).
@@ -9752,23 +9931,31 @@ types:
         type: map[coreconsensus.NodeID]uint64
       - doc: |-
           seenTails, seenReloads, seenRounds and seenPreVotes are the running
-          totals already added to their counters.
+          totals already added to their counters, as seenTimedOut and
+          seenSilenced are consensus_links_aborted_total's by reason.
         name: seenTails
         type: int64
       - doc: |-
           seenTails, seenReloads, seenRounds and seenPreVotes are the running
-          totals already added to their counters.
+          totals already added to their counters, as seenTimedOut and
+          seenSilenced are consensus_links_aborted_total's by reason.
         name: seenReloads
         type: int64
       - doc: |-
           seenTails, seenReloads, seenRounds and seenPreVotes are the running
-          totals already added to their counters.
+          totals already added to their counters, as seenTimedOut and
+          seenSilenced are consensus_links_aborted_total's by reason.
         name: seenRounds
         type: int64
       - doc: |-
           seenTails, seenReloads, seenRounds and seenPreVotes are the running
-          totals already added to their counters.
+          totals already added to their counters, as seenTimedOut and
+          seenSilenced are consensus_links_aborted_total's by reason.
         name: seenPreVotes
+        type: int64
+      - name: seenTimedOut
+        type: int64
+      - name: seenSilenced
         type: int64
     kind: struct
     methods:
@@ -9785,11 +9972,11 @@ types:
         params: name string, attrs ...coreotel.AttrValue
         recv: o *obs
       - doc: |-
-          addTo brings a counter up to a running total kept elsewhere. The series
-          exists from the first call, at 0, so an alert on its increase has a
-          series to read before the first event.
+          addTo brings a counter series up to a running total kept elsewhere. The
+          series exists from the first call, at 0, so an alert on its increase has
+          a series to read before the first event.
         name: addTo
-        params: name string, seen *int64, total int64
+        params: name string, seen *int64, total int64, attrs ...coreotel.AttrValue
         recv: o *obs
       - doc: |-
           record adds one observation to a histogram series, creating it on first
@@ -9839,6 +10026,15 @@ types:
     underlying: |-
       interface {
       	bindWarn(warn func(msg string, attrs ...corelogger.AttrValue))
+      }
+  - doc: |-
+      linkAborter is a transport that counts the sender links it aborted for
+      bytes left unacknowledged and for read silence (#1116).
+    kind: named
+    name: linkAborter
+    underlying: |-
+      interface {
+      	linksAborted() (userTimeout, readSilence int64)
       }
   - doc: |-
       snapshotReader is OpenSnapshot's reader: a chunk reader whose end is
@@ -10156,6 +10352,66 @@ types:
         recv: p *PEMIdentity
         results: int
     name: PEMIdentity
+  - fields:
+      - doc: |-
+          Syncs is the number of records written, each synced; 0 is 256. It is
+          refused negative or above 65536.
+        name: Syncs
+        type: int
+      - doc: |-
+          RecordBytes is the size of one record; 0 is 4096. It is refused
+          negative, and Syncs records of it above DefaultSegmentBytes.
+        name: RecordBytes
+        type: int
+      - doc: |-
+          Timing is the contract judged against the measurement; the zero value
+          judges nothing (ADR 0031).
+        name: Timing
+        type: coreconsensus.TimingContractSpec
+      - doc: |-
+          LogReserveBytes is the reserve the free space is judged against; 0 is
+          Config's default, 256 MiB.
+        name: LogReserveBytes
+        type: int64
+      - doc: Clock times each sync; nil is clock.System.
+        name: Clock
+        type: clock.Timed
+      - doc: Logger receives each verdict at Warn; nil logs nothing.
+        name: Logger
+        type: corelogger.Logger
+    kind: struct
+    name: PreflightOptions
+  - fields:
+      - name: FsyncP50
+        type: time.Duration
+      - name: FsyncP99
+        type: time.Duration
+      - name: FsyncMax
+        type: time.Duration
+      - doc: FreeBytes is what an unprivileged writer may still use there, -1 when unknown.
+        name: FreeBytes
+        type: int64
+      - doc: Flock is false where the platform has no flock(2), and NewDataDir refuses (ADR 0144).
+        name: Flock
+        type: bool
+      - doc: |-
+          UserTimeout is false where the transport sets no kernel bound on
+          unacknowledged bytes (the BSDs, illumos, Solaris): a dead stream is
+          closed by the read-silence bound alone (#1116).
+        name: UserTimeout
+        type: bool
+      - doc: Verdicts lists each rule broken, empty when none is.
+        name: Verdicts
+        type: "[]PreflightVerdict"
+    kind: struct
+    name: PreflightValue
+  - fields:
+      - name: Field
+        type: string
+      - name: Rule
+        type: string
+    kind: struct
+    name: PreflightVerdict
   - doc: |-
       fifo is a queue a producer never blocks on: the event loop pushes to the
       storage actor and the apply goroutine without ever waiting for them (D5b).
@@ -10645,6 +10901,35 @@ types:
           (#748).
         name: sentBack
         type: atomic.Int64
+      - doc: |-
+          silence is the read-silence bound of the sender links, in
+          nanoseconds: a link written on while nothing was read from its peer
+          for that long is closed and dialled again at its next batch (retire,
+          #1116). 0, until a node sets it (boundSilence), bounds nothing.
+        name: silence
+        type: atomic.Int64
+      - doc: |-
+          heard is, per member key, when a frame of that member was last read,
+          on any connection, under mu.
+        name: heard
+        type: map[[32]byte]time.Time
+      - doc: |-
+          timedOut and silenced count the sender links aborted for bytes left
+          unacknowledged, by the kernel's bound (boundUnacknowledged), and for
+          read silence (#1116).
+        name: timedOut
+        type: atomic.Int64
+      - doc: |-
+          timedOut and silenced count the sender links aborted for bytes left
+          unacknowledged, by the kernel's bound (boundUnacknowledged), and for
+          read silence (#1116).
+        name: silenced
+        type: atomic.Int64
+      - doc: |-
+          wrapDialled wraps each connection the transport dials, under its TLS;
+          nil outside the package's own tests.
+        name: wrapDialled
+        type: func(net.Conn) net.Conn
     kind: struct
     methods:
       - name: Addr
@@ -10860,7 +11145,9 @@ types:
           reset it, or the kernel aborted it under the user timeout
           (boundUnacknowledged) — and the batch, an election's vote among others,
           would otherwise wait for Raft's next round. A failed dial or write is
-          reported as before, whether the back link carried the batch or not.
+          reported as before, whether the back link carried the batch or not. A
+          batch written starts the link's wait for its peer (unanswered), which
+          retire bounds.
         name: sendBatch
         params: k outKey, link *senderLink, batch []outFrame
         recv: t *TCPTransport
@@ -10869,10 +11156,37 @@ types:
           retired by age, every frame of it flushed, so the next batch dials a
           fresh one; or its key is no longer the member's — denied, replaced or
           gone — or its certificate expired, so nothing more is written on it and
-          the redial checks the current pin (#551).
+          the redial checks the current pin (#551); or it was written on while
+          its peer stayed silent for the read-silence bound (silent).
         name: retire
         params: k outKey, link *senderLink
         recv: t *TCPTransport
+      - doc: |-
+          silent reports whether nothing was read from the link's peer, on any
+          connection, for the read-silence bound since a batch was written on the
+          link (#1116). A peer answers what this node sends it, a heartbeat or a
+          vote, within an election timeout: one silent for two of them while
+          written to is behind a stream that died quietly, which the kernel bound
+          does not cover where the platform has none (the BSDs, illumos) or
+          before it fires. A peer heard since the wait began ends the wait: the
+          next batch starts a new one.
+        name: silent
+        params: link *senderLink
+        recv: t *TCPTransport
+        results: bool
+      - doc: |-
+          boundSilence raises the read-silence bound of the sender links to d: a
+          node sets it to twice its maximum election timeout at each sweep, and a
+          transport the groups of several nodes share keeps the longest (#1116).
+        name: boundSilence
+        params: d time.Duration
+        recv: t *TCPTransport
+      - doc: |-
+          linksAborted returns how many sender links the kernel aborted for bytes
+          left unacknowledged and how many the read-silence bound closed (#1116).
+        name: linksAborted
+        recv: t *TCPTransport
+        results: userTimeout, readSilence int64
       - doc: |-
           writeBatch writes the batch on the link's connection and flushes it,
           under one write deadline.
@@ -11161,6 +11475,12 @@ types:
         type: "[32]byte"
       - name: notAfter
         type: time.Time
+      - doc: |-
+          unanswered is when the first batch written on the connection since
+          its peer was last heard went out; zero while nothing awaits an
+          answer (#1116).
+        name: unanswered
+        type: time.Time
     kind: struct
     methods:
       - doc: |-
@@ -11265,6 +11585,12 @@ vars:
       - name: _
         type: coreconsensus.BatchSender
         value: (*TCPTransport)(nil)
+      - doc: |-
+          A product finds the membership watch by type assertion on its node
+          (ADR 0039, #915).
+        name: _
+        type: coreconsensus.MembershipWatcher
+        value: (*Node)(nil)
       - name: _
         type: |-
           interface {

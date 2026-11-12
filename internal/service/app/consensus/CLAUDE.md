@@ -1070,6 +1070,18 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   index: entries held in memory behind a stalled fsync are no replication
   (#919, `replicationLag`,
   `TestAFollowerOnASlowDiskReportsItsReplicationLag`).
+- Answer `Membership()` on the event loop, or leave a product to poll it
+  for a configuration change: each poll was a closure run between protocol
+  turns, competing with the heartbeats for the loop whose turn length is
+  the lease's drift budget, and `Status` carries no configuration. The
+  loop publishes the configuration at the end of each turn that changed it
+  (`publishConf`, from `publish`, compared with `sameMembership` so an
+  unchanged one costs no allocation), `Membership()` reads that copy, and
+  `WatchMembership` pushes a clone of it to each watcher under Watch's
+  contract — own channel, capacity one, latest value, closed on ctx or the
+  loop's end (#915, `TestWatchMembershipDeliversEveryChange`,
+  `TestMembershipDoesNotEnterTheLoop`). Read in a turn, it is the
+  configuration as the previous turn ended.
 - Bound an election in a test by a fixed number of split votes: a split
   is a draw, about one round in a hundred on the memory network, and a
   third round fails a two-round total every ten to twenty runs. Derive

@@ -21,6 +21,9 @@ var (
 	_ coreconsensus.Transport     = (*TCPTransport)(nil)
 	_ coreconsensus.Transport     = (*MemoryTransport)(nil)
 	_ coreconsensus.BatchSender   = (*TCPTransport)(nil)
+	// A product finds the membership watch by type assertion on its node
+	// (ADR 0039, #915).
+	_ coreconsensus.MembershipWatcher = (*Node)(nil)
 
 	_ interface {
 		compactPrefixAt(through, term uint64) error

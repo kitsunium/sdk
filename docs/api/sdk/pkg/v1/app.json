@@ -2082,6 +2082,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.MembershipWatcher",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "MembershipWatcher",
+      "spelled": "coreconsensus.MembershipWatcher",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MembershipWatcher",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/app/consensus.MembershipWatcher",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.MemoryLog",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",

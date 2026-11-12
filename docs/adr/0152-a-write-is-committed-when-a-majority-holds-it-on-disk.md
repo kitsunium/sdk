@@ -2565,7 +2565,14 @@ notifies leadership changes, so the product does not poll for them. **Each
 `Watch(ctx)` call returns its OWN channel (R7-11), unsubscribed and closed
 when `ctx` ends (R8-36).** It has capacity one and holds
 the latest value: the loop replaces an unread value without blocking. Every
-channel is closed on `Close` (R3-19). Through `trace` (ADR 0051): one span
+channel is closed on `Close` (R3-19). A `MembershipWatcher` sibling does the
+same for the configuration, under the same channel contract:
+`WatchMembership(ctx)` pushes the `Membership` the loop publishes at the end
+of the turn that changed it — an `AddLearner`, a `Promote`, a `Remove`, an
+`UpdateAddress` — and `Membership()` reads that published value without
+entering the loop, so a product that routes clients or feeds a registry
+neither polls nor takes a loop turn from the heartbeats (#915). `Status`
+stays frozen: the configuration is its own value. Through `trace` (ADR 0051): one span
 per `Propose` from submission to local apply, with events at append, commit
 and apply; the trace context travels in the forwarding frame only — never in
 the log, which must not grow with telemetry. Through `logger`: role and term
@@ -2622,6 +2629,7 @@ type (
 	Transport            = coreconsensus.Transport
 	UnreachableReporter  = coreconsensus.UnreachableReporter
 	LeadershipWatcher    = coreconsensus.LeadershipWatcher // Watch(ctx) <-chan Status, unsubscribed when ctx ends (R2-28, R8-36)
+	MembershipWatcher    = coreconsensus.MembershipWatcher // WatchMembership(ctx) <-chan Membership, same contract (#915)
 
 	Health     = svcconsensus.Health   // includes Stopped, StopReason
 	ReadMode   = svcconsensus.ReadMode // ReadIndex (zero value) | ReadLease
@@ -3247,7 +3255,7 @@ it proposes, so the product's audit and the log agree (R2-36):
   is validated before proposing and again in `Apply`. Each operation has its
   mutation test (D15);
 - `SaveSnapshot`, `Status`, `Health`, `Membership`, and the
-  `LeadershipWatcher` sibling.
+  `LeadershipWatcher` and `MembershipWatcher` siblings.
 Every one of them can be submitted on ANY node: the engine forwards it to
 the leader over the control connection, and its outcome follows D6 (Q8,
 R3-03). Every call is logged at `Warn` with its `Operator` (R3-14).

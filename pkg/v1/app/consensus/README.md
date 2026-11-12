@@ -140,6 +140,8 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(MembershipValue\) IsRetiredKey\(spki \[32\]byte\) bool](<#MembershipValue.IsRetiredKey>)
   - [func \(MembershipValue\) Member\(id NodeID\) \(MemberValue, bool\)](<#MembershipValue.Member>)
   - [func \(MembershipValue\) Voters\(\) \[\]NodeID](<#MembershipValue.Voters>)
+- [type MembershipWatcher](<#MembershipWatcher>)
+  - [func \(MembershipWatcher\) WatchMembership\(ctx context.Context\) \<-chan MembershipValue](<#MembershipWatcher.WatchMembership>)
 - [type MemoryLog](<#MemoryLog>)
   - [func \(\*MemoryLog\) Append\(entries \[\]coreconsensus.EntryValue, hs \*coreconsensus.HardState\) error](<#MemoryLog.Append>)
   - [func \(\*MemoryLog\) Bounds\(\) \(first uint64, last uint64\)](<#MemoryLog.Bounds>)
@@ -196,6 +198,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*Node\) UpdateAddress\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID, addr string\) error](<#Node.UpdateAddress>)
   - [func \(\*Node\) WaitApplied\(ctx context.Context, t coreconsensus.TokenValue\) error](<#Node.WaitApplied>)
   - [func \(\*Node\) Watch\(ctx context.Context\) \<-chan coreconsensus.StatusValue](<#Node.Watch>)
+  - [func \(\*Node\) WatchMembership\(ctx context.Context\) \<-chan coreconsensus.MembershipValue](<#Node.WatchMembership>)
 - [type NodeID](<#NodeID>)
   - [func \(NodeID\) String\(\) string](<#NodeID.String>)
 - [type Operator](<#Operator>)
@@ -2780,6 +2783,35 @@ func (MembershipValue) Voters() []NodeID
 
 Voters returns the ids of the voters, in membership order.
 
+<a name="MembershipWatcher"></a>
+## type [MembershipWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type MembershipWatcher = coreconsensus.MembershipWatcher
+```
+
+MembershipWatcher is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.MembershipWatcher`, declared as:
+
+```go
+type MembershipWatcher interface {
+	// WatchMembership returns its OWN channel, of capacity one, holding the
+	// latest configuration; it is unsubscribed and closed when ctx ends or the
+	// node closes.
+	WatchMembership(ctx context.Context) <-chan MembershipValue
+}
+```
+
+<a name="MembershipWatcher.WatchMembership"></a>
+### func \(MembershipWatcher\) [WatchMembership](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
+
+```go
+func (MembershipWatcher) WatchMembership(ctx context.Context) <-chan MembershipValue
+```
+
+WatchMembership returns its OWN channel, of capacity one, holding the latest configuration; it is unsubscribed and closed when ctx ends or the node closes.
+
 <a name="MemoryLog"></a>
 ## type [MemoryLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
@@ -3248,7 +3280,7 @@ Health returns the node's verdict, computed on the event loop.
 func (*Node) Membership() coreconsensus.MembershipValue
 ```
 
-Membership returns the configuration the node last appended.
+Membership returns the configuration the node last appended, as its last turn published it; it never waits for the event loop.
 
 <a name="Node.Promote"></a>
 ### func \(Node\) [Promote](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -3366,6 +3398,15 @@ func (*Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue
 ```
 
 Watch implements LeadershipWatcher. Each call launches one goroutine that closes the returned channel and ends when ctx ends or the node's event loop stops.
+
+<a name="Node.WatchMembership"></a>
+### func \(Node\) [WatchMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)
+
+```go
+func (*Node) WatchMembership(ctx context.Context) <-chan coreconsensus.MembershipValue
+```
+
+WatchMembership implements MembershipWatcher. Each call launches one goroutine that closes the returned channel and ends when ctx ends or the node's event loop stops.
 
 <a name="NodeID"></a>
 ## type [NodeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)

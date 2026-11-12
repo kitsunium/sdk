@@ -4884,6 +4884,31 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.MembershipWatcher",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "MembershipWatcher",
+      "spelled": "interface{WatchMembership(ctx context.Context) <-chan MembershipValue}",
+      "canonical": "interface{WatchMembership(ctx context.Context) <-chan github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue}",
+      "doc": "MembershipWatcher is the sibling of a node that notifies configuration\nchanges: a learner added, promoted, a member removed or moved. The\nconfiguration is its own value, apart from StatusValue.\n",
+      "file": "core/app/consensus/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.MembershipWatcher.WatchMembership",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "WatchMembership",
+      "recv": "MembershipWatcher",
+      "spelled": "func(ctx context.Context) <-chan MembershipValue",
+      "canonical": "func(ctx context.Context) <-chan github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue",
+      "doc": "WatchMembership returns its OWN channel, of capacity one, holding the\nlatest configuration; it is unsubscribed and closed when ctx ends or the\nnode closes.\n",
+      "file": "core/app/consensus/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -64615,7 +64640,7 @@
       "recv": "Node",
       "spelled": "func() coreconsensus.MembershipValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue",
-      "doc": "Membership returns the configuration the node last appended.\n",
+      "doc": "Membership returns the configuration the node last appended, as its last\nturn published it; it never waits for the event loop.\n",
       "file": "service/app/consensus/node.go",
       "layer": "service",
       "family": "app"
@@ -64785,6 +64810,19 @@
       "spelled": "func(ctx context.Context) <-chan coreconsensus.StatusValue",
       "canonical": "func(ctx context.Context) <-chan github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue",
       "doc": "Watch implements LeadershipWatcher. Each call launches one goroutine that\ncloses the returned channel and ends when ctx ends or the node's event\nloop stops.\n",
+      "file": "service/app/consensus/node.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*Node).WatchMembership",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "WatchMembership",
+      "recv": "Node",
+      "spelled": "func(ctx context.Context) <-chan coreconsensus.MembershipValue",
+      "canonical": "func(ctx context.Context) <-chan github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue",
+      "doc": "WatchMembership implements MembershipWatcher. Each call launches one\ngoroutine that closes the returned channel and ends when ctx ends or the\nnode's event loop stops.\n",
       "file": "service/app/consensus/node.go",
       "layer": "service",
       "family": "app"
