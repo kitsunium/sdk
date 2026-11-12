@@ -2033,6 +2033,8 @@ sequences:
           when: r.mutated(mutReadNoRound)
       - eval: r.broadcastHeartbeat(r.now)
         to: r.broadcastHeartbeat
+      - op: ++
+        set: r.readRounds
       - bind: id
         eval: r.nextRound
       - loop:
@@ -3956,6 +3958,9 @@ sequences:
             - return: 0, time.Time{}, false
           when: r.role != core.RoleLeader || pr == nil
       - return: pr.match, pr.lastHeard, true
+  - of: (*Raft).ReadRounds
+    steps:
+      - return: r.readRounds
   - of: (*Raft).LeaseValid
     steps:
       - opt:

@@ -748,6 +748,7 @@ files:
       - StatusValue
       - (*Raft).Status
       - (*Raft).Progress
+      - (*Raft).ReadRounds
       - (*Raft).LeaseValid
       - (*Raft).DropLease
       - (*Raft).HasReady
@@ -1839,6 +1840,9 @@ types:
       - name: campaignTerm
         type: uint64
       - name: nextRound
+        type: uint64
+      - doc: readRounds counts the rounds flushReads opened for reads (#1108).
+        name: readRounds
         type: uint64
       - name: rounds
         type: "[]*round"
@@ -3132,6 +3136,9 @@ types:
         params: id core.NodeID
         recv: r *Raft
         results: match uint64, lastHeard time.Time, ok bool
+      - name: ReadRounds
+        recv: r *Raft
+        results: uint64
       - name: LeaseValid
         params: now time.Time
         recv: r *Raft

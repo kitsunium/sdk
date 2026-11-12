@@ -450,7 +450,9 @@ type Raft struct {
 	campaignIssuer core.NodeID
 	campaignTerm   uint64
 
-	nextRound    uint64
+	nextRound uint64
+	// readRounds counts the rounds flushReads opened for reads (#1108).
+	readRounds   uint64
 	rounds       []*round
 	pendingReads []readReq
 	waitingReads []readReq
@@ -879,6 +881,10 @@ func (r *Raft) Progress(id core.NodeID) (match uint64, lastHeard time.Time, ok b
 	}
 	return pr.match, pr.lastHeard, true
 }
+
+// ReadRounds counts the heartbeat rounds opened to confirm reads since the
+// node started: every read pending when a round opens shares it (D9).
+func (r *Raft) ReadRounds() uint64 { return r.readRounds }
 
 // LeaseValid reports whether the leader's lease holds at now (D9).
 func (r *Raft) LeaseValid(now time.Time) bool {

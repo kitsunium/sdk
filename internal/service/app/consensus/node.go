@@ -92,6 +92,12 @@ type Node struct {
 	stopc  chan struct{}
 	hard   atomic.Bool
 
+	// readq holds the Barriers queued for the loop: one turn registers
+	// every read queued, so they share one heartbeat round (#1108).
+	readq *fifo[*readWait]
+	// readBatch is the loop's buffer for the reads one turn takes.
+	readBatch []*readWait
+
 	sq *fifo[storeReq]
 	aq *fifo[applyItem]
 
@@ -453,7 +459,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		cfg: *cfg, clk: cfg.Clock, stamp: *stamp,
 		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
-		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
+		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](), readq: newFifo[*readWait](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
 		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
@@ -1119,7 +1125,7 @@ func (n *Node) loop() {
 // The select stays whole: every case is one call into its handler, and the
 // runtime's uniform choice among the ready inputs is the loop's fairness.
 // Splitting it to lower its cyclomatic count would let the outer inputs
-// starve the inner ones (KTN-FUNC-CYCLO counts the dispatch as eight
+// starve the inner ones (KTN-FUNC-CYCLO counts the dispatch as nine
 // decisions: kodflow/ktn-linter#727).
 func (n *Node) turn(tick clock.Ticker, props *[]*proposal) (time.Time, bool) {
 	select {
@@ -1139,6 +1145,8 @@ func (n *Node) turn(tick clock.Ticker, props *[]*proposal) (time.Time, bool) {
 		return n.onExec(f, ok)
 	case f, ok := <-n.fetchc:
 		return n.onFetched(&f, ok)
+	case _, ok := <-n.readq.signal:
+		return n.onReads(ok)
 	}
 }
 
@@ -1212,6 +1220,30 @@ func (n *Node) onExec(f func(), ok bool) (time.Time, bool) {
 	}
 	turn := n.clk.Now()
 	f()
+	return turn, true
+}
+
+// onReads registers every Barrier queued since the last turn and asks raft
+// to confirm them all, then handles the Ready once: flushReads opens ONE
+// round for the whole batch, after every read of it is registered, so no
+// read rides a round opened before it was queued (D9, #1108). Under a valid
+// lease raft answers the batch at once, with no round.
+func (n *Node) onReads(ok bool) (time.Time, bool) {
+	if !ok {
+		return time.Time{}, false
+	}
+	turn := n.clk.Now()
+	noLease := n.cfg.Reads != ReadLease
+	n.readBatch = n.readq.take(n.readBatch)
+	for _, w := range n.readBatch {
+		ctx := n.nextID()
+		w.sentAt = n.clk.Now()
+		w.askedAt = w.sentAt
+		n.reads[ctx] = w
+		n.r.ReadIndex(w.sentAt, ctx, noLease)
+	}
+	clear(n.readBatch)
+	n.handleReady()
 	return turn, true
 }
 
@@ -1413,6 +1445,7 @@ func (n *Node) handleReady() {
 	}
 	n.awaitApply(lag+n.handedLag, reading || n.handedReads > 0)
 	n.leadershipChanged()
+	n.obs.addTo(mReadRounds, &n.obs.seenRounds, int64(n.r.ReadRounds()))
 	n.publish()
 }
 
@@ -2358,6 +2391,9 @@ func (n *Node) failAllOnStop() {
 	}
 	for ctx, w := range n.reads {
 		delete(n.reads, ctx)
+		w.done <- readResult{code: coreconsensus.CodeNodeStopped}
+	}
+	for _, w := range n.readq.take(nil) {
 		w.done <- readResult{code: coreconsensus.CodeNodeStopped}
 	}
 	for {

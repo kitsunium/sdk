@@ -547,6 +547,7 @@ packages:
           - doc: |-
               Barrier returns once the local state machine reflects every write
               committed before the call, with the token of the applied index.
+              Reads queued in one turn share one round.
             in:
               - name: ctx
                 type: context.Context
@@ -3438,6 +3439,7 @@ packages:
           - doc: |-
               Barrier returns once the local state machine reflects every write
               committed before the call (D9).
+              Reads queued in one turn share one round.
             in:
               - name: ctx
                 type: context.Context
@@ -4808,6 +4810,13 @@ packages:
                 type: time.Time
               - name: ok
                 type: bool
+            recv: pointer
+          - doc: |-
+              ReadRounds counts the heartbeat rounds opened to confirm reads since the
+              node started: every read pending when a round opens shares it (D9).
+            name: ReadRounds
+            out:
+              - type: uint64
             recv: pointer
           - doc: LeaseValid reports whether the leader's lease holds at now (D9).
             in:

@@ -1410,3 +1410,15 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   filter or delay through `Send`, which a promoted `SendShared` would
   bypass; a transport without it is sent `AppendMessage`'s frames as before
   (`TestATransportWithoutTheSiblingIsSentWholeFrames`).
+- Hand the loop a `Barrier` through `exec`, or handle the Ready per read:
+  each closure ran in its own turn and flushed its read alone, so N
+  concurrent reads cost N heartbeat broadcasts (#1108). `Barrier` queues
+  on `readq`; `onReads` registers every read queued, asks raft for each,
+  then handles the Ready once, and `flushReads` opens one round after the
+  whole batch is registered, so no read rides an older round. A read
+  queued after the loop's last turn is answered by `failAllOnStop` or by
+  `awaitRead`'s wait on `loopDone`. `consensus_read_rounds_total`
+  (`Raft.ReadRounds`) counts the rounds
+  (`TestBarriersQueuedInOneTurnShareOneRound`,
+  `TestLeasedBarriersOpenNoRound`,
+  `TestABarrierQueuedAfterTheLoopEndedIsAnswered`).

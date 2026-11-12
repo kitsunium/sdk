@@ -166,6 +166,7 @@ go_test(
         "promoteadmission_internal_test.go",
         "protocol2_internal_test.go",
         "raisedlimit_internal_test.go",
+        "readbatch_internal_test.go",
         "readctx_internal_test.go",
         "receive_alloc_internal_test.go",
         "recover_install_internal_test.go",

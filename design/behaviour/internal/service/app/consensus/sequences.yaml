@@ -9701,7 +9701,7 @@ sequences:
           		cfg: *cfg, clk: cfg.Clock, stamp: *stamp,
           		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
           		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
-          		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
+          		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](), readq: newFifo[*readWait](),
           		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
           		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
           		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
@@ -10663,6 +10663,8 @@ sequences:
         kind: internal
       - id: n.onFetched
         kind: internal
+      - id: n.onReads
+        kind: internal
     steps:
       - select:
           cases:
@@ -10697,6 +10699,10 @@ sequences:
               do:
                 - return: n.onFetched(&f, ok)
                   to: n.onFetched
+            - comm: _, ok := <-n.readq.signal
+              do:
+                - return: n.onReads(ok)
+                  to: n.onReads
   - of: (*Node).onTick
     participants:
       - id: caller
@@ -10867,6 +10873,56 @@ sequences:
         eval: n.clk.Now()
         to: n.clk.Now
       - eval: f()
+      - return: turn, true
+  - of: (*Node).onReads
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).onReads
+        kind: self
+      - id: n.clk.Now
+        kind: value
+      - id: n.readq.take
+        kind: internal
+      - id: n.nextID
+        kind: internal
+      - id: n.r.ReadIndex
+        kind: value
+      - id: n.handleReady
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: "!ok"
+      - bind: turn
+        eval: n.clk.Now()
+        to: n.clk.Now
+      - bind: noLease
+        eval: n.cfg.Reads != ReadLease
+      - set: n.readBatch
+        to: n.readq.take
+        value: n.readq.take(n.readBatch)
+      - loop:
+          do:
+            - bind: ctx
+              eval: n.nextID()
+              to: n.nextID
+            - set: w.sentAt
+              to: n.clk.Now
+              value: n.clk.Now()
+            - set: w.askedAt
+              value: w.sentAt
+            - set: n.reads[ctx]
+              value: w
+            - eval: n.r.ReadIndex(w.sentAt, ctx, noLease)
+              to: n.r.ReadIndex
+          key: _
+          range: n.readBatch
+          value: w
+      - eval: clear(n.readBatch)
+      - eval: n.handleReady()
+        to: n.handleReady
       - return: turn, true
   - of: (*Node).onFetched
     participants:
@@ -11181,6 +11237,8 @@ sequences:
         kind: internal
       - id: n.leadershipChanged
         kind: internal
+      - id: n.obs.addTo
+        kind: internal
       - id: n.publish
         kind: internal
     steps:
@@ -11205,6 +11263,8 @@ sequences:
         to: n.awaitApply
       - eval: n.leadershipChanged()
         to: n.leadershipChanged
+      - eval: n.obs.addTo(mReadRounds, &n.obs.seenRounds, int64(n.r.ReadRounds()))
+        to: n.obs.addTo
       - eval: n.publish()
         to: n.publish
   - of: (*Node).applyOverloaded
@@ -12666,6 +12726,14 @@ sequences:
                 value: "readResult{code: coreconsensus.CodeNodeStopped}"
           key: ctx
           range: n.reads
+          value: w
+      - loop:
+          do:
+            - send:
+                chan: w.done
+                value: "readResult{code: coreconsensus.CodeNodeStopped}"
+          key: _
+          range: n.readq.take(nil)
           value: w
       - loop:
           do:
@@ -18954,8 +19022,10 @@ sequences:
         kind: self
       - id: n.clk.Now
         kind: value
-      - id: w.gone.Store
-        kind: value
+      - id: n.readq.push
+        kind: internal
+      - id: n.awaitRead
+        kind: internal
       - id: n.am.Lock
         kind: value
       - id: n.token
@@ -18982,29 +19052,19 @@ sequences:
               value: "\"lease\""
           when: "!noLease"
       - defer: func() { n.obs.record(mBarrierLatency, n.clk.Since(start).Seconds(), coreotel.String("mode", mode)) }()
+      - eval: n.readq.push(w)
+        to: n.readq.push
+      - bind: res, ok
+        eval: n.awaitRead(ctx, w)
+        to: n.awaitRead
       - opt:
           do:
+            - opt:
+                do:
+                  - return: coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
+                when: ctx.Err() != nil
             - return: coreconsensus.TokenValue{}, n.stoppedErr()
-          when: |-
-            !n.exec(func() {
-            		ctx := n.nextID()
-            		w.sentAt = n.clk.Now()
-            		w.askedAt = w.sentAt
-            		n.reads[ctx] = w
-            		n.r.ReadIndex(w.sentAt, ctx, noLease)
-            		n.handleReady()
-            	})
-      - var:
-          name: res
-          type: readResult
-      - select:
-          cases:
-            - comm: res = <-w.done
-            - comm: <-ctx.Done()
-              do:
-                - eval: w.gone.Store(true)
-                  to: w.gone.Store
-                - return: coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
+          when: "!ok"
       - switch:
           cases:
             - case: "0"
@@ -19031,6 +19091,35 @@ sequences:
       - eval: n.am.Unlock()
         to: n.am.Unlock
       - return: tok, nil
+  - of: (*Node).awaitRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).awaitRead
+        kind: self
+      - id: w.gone.Store
+        kind: value
+    steps:
+      - select:
+          cases:
+            - comm: res := <-w.done
+              do:
+                - return: res, true
+            - comm: <-ctx.Done()
+              do:
+                - eval: w.gone.Store(true)
+                  to: w.gone.Store
+                - return: readResult{}, false
+            - comm: <-n.loopDone
+              do:
+                - select:
+                    cases:
+                      - comm: res := <-w.done
+                        do:
+                          - return: res, true
+                      - default: true
+                        do:
+                          - return: readResult{}, false
   - of: (*Node).WaitApplied
     participants:
       - id: caller

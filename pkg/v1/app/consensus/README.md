@@ -3162,7 +3162,7 @@ AddLearner adds a non-voting member that receives the log (D8).
 func (*Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error)
 ```
 
-Barrier returns once the local state machine reflects every write committed before the call (D9).
+Barrier returns once the local state machine reflects every write committed before the call (D9). Reads queued in one turn share one round.
 
 <a name="Node.ClearNoSpace"></a>
 ### func \(Node\) [ClearNoSpace](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -3633,6 +3633,7 @@ Replicated is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.
 type Replicated interface {
 	// Barrier returns once the local state machine reflects every write
 	// committed before the call, with the token of the applied index.
+	// Reads queued in one turn share one round.
 	Barrier(ctx context.Context) (TokenValue, error)
 	// Propose replicates data and returns, once the entry is applied
 	// locally, its lineage-scoped token and the value Apply returned.
@@ -3658,7 +3659,7 @@ type Replicated interface {
 func (Replicated) Barrier(ctx context.Context) (TokenValue, error)
 ```
 
-Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index.
+Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index. Reads queued in one turn share one round.
 
 <a name="Replicated.Propose"></a>
 ### func \(Replicated\) [Propose](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)

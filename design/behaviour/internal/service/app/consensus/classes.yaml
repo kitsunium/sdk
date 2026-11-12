@@ -562,6 +562,8 @@ constants:
         value: "\"consensus_frames_dropped_total\""
       - name: mBarrierLatency
         value: "\"consensus_barrier_latency_seconds\""
+      - name: mReadRounds
+        value: "\"consensus_read_rounds_total\""
       - name: mProposalsFailed
         value: "\"consensus_proposals_failed_total\""
       - name: mProposalsPending
@@ -1490,6 +1492,7 @@ files:
       - (*Node).onStored
       - (*Node).onProposal
       - (*Node).onExec
+      - (*Node).onReads
       - (*Node).onFetched
       - (*Node).storageDone
       - (*Node).batchProposals
@@ -1789,6 +1792,7 @@ files:
       - (*Node).forwardAnswered
       - ProposeAs
       - (*Node).Barrier
+      - (*Node).awaitRead
       - (*Node).WaitApplied
       - (*Node).appliedAs
       - (*Node).appliedTermAt
@@ -6887,6 +6891,14 @@ types:
         type: chan struct{}
       - name: hard
         type: atomic.Bool
+      - doc: |-
+          readq holds the Barriers queued for the loop: one turn registers
+          every read queued, so they share one heartbeat round (#1108).
+        name: readq
+        type: "*fifo[*readWait]"
+      - doc: readBatch is the loop's buffer for the reads one turn takes.
+        name: readBatch
+        type: "[]*readWait"
       - name: sq
         type: "*fifo[storeReq]"
       - name: aq
@@ -7713,7 +7725,7 @@ types:
           The select stays whole: every case is one call into its handler, and the
           runtime's uniform choice among the ready inputs is the loop's fairness.
           Splitting it to lower its cyclomatic count would let the outer inputs
-          starve the inner ones (KTN-FUNC-CYCLO counts the dispatch as eight
+          starve the inner ones (KTN-FUNC-CYCLO counts the dispatch as nine
           decisions: kodflow/ktn-linter#727).
         name: turn
         params: tick clock.Ticker, props *[]*proposal
@@ -7749,6 +7761,16 @@ types:
       - doc: onExec runs a closure exec queued for the loop.
         name: onExec
         params: f func(), ok bool
+        recv: n *Node
+        results: time.Time, bool
+      - doc: |-
+          onReads registers every Barrier queued since the last turn and asks raft
+          to confirm them all, then handles the Ready once: flushReads opens ONE
+          round for the whole batch, after every read of it is registered, so no
+          read rides a round opened before it was queued (D9, #1108). Under a valid
+          lease raft answers the batch at once, with no round.
+        name: onReads
+        params: ok bool
         recv: n *Node
         results: time.Time, bool
       - doc: onFetched hands raft the entries the reader fetched below its window.
@@ -8631,6 +8653,14 @@ types:
         params: ctx context.Context
         recv: n *Node
         results: coreconsensus.TokenValue, error
+      - doc: |-
+          awaitRead waits for the loop's answer to w. It reports false when ctx
+          ended first, or when the loop ended without answering: a read queued after
+          the loop's last turn is answered by no one.
+        name: awaitRead
+        params: ctx context.Context, w *readWait
+        recv: n *Node
+        results: readResult, bool
       - name: WaitApplied
         params: ctx context.Context, t coreconsensus.TokenValue
         recv: n *Node
@@ -9605,14 +9635,19 @@ types:
         name: certsPub
         type: map[coreconsensus.NodeID]bool
       - doc: |-
-          seenTails and seenReloads are the running totals already added to
-          their counters.
+          seenTails, seenReloads and seenRounds are the running totals already
+          added to their counters.
         name: seenTails
         type: int64
       - doc: |-
-          seenTails and seenReloads are the running totals already added to
-          their counters.
+          seenTails, seenReloads and seenRounds are the running totals already
+          added to their counters.
         name: seenReloads
+        type: int64
+      - doc: |-
+          seenTails, seenReloads and seenRounds are the running totals already
+          added to their counters.
+        name: seenRounds
         type: int64
     kind: struct
     methods:

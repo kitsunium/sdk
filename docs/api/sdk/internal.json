@@ -5533,7 +5533,7 @@
       "recv": "Replicated",
       "spelled": "func(ctx context.Context) (TokenValue, error)",
       "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, error)",
-      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call, with the token of the applied index.\n",
+      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call, with the token of the applied index.\nReads queued in one turn share one round.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -64549,7 +64549,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context) (coreconsensus.TokenValue, error)",
       "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, error)",
-      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call (D9).\n",
+      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call (D9).\nReads queued in one turn share one round.\n",
       "file": "service/app/consensus/ops.go",
       "layer": "service",
       "family": "app"
@@ -66424,6 +66424,19 @@
       "canonical": "func(now time.Time, ctx uint64, noLease bool)",
       "doc": "ReadIndex asks for a linearizable read point under ctx. noLease forces a\nconfirmation round.\n",
       "file": "service/app/consensus/raft/leader.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).ReadRounds",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "ReadRounds",
+      "recv": "Raft",
+      "spelled": "func() uint64",
+      "canonical": "func() uint64",
+      "doc": "ReadRounds counts the heartbeat rounds opened to confirm reads since the\nnode started: every read pending when a round opens shares it (D9).\n",
+      "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
     },

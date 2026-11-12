@@ -372,6 +372,7 @@ func ProposeAs[R any](ctx context.Context, r coreconsensus.Replicated, data []by
 
 // Barrier returns once the local state machine reflects every write
 // committed before the call (D9).
+// Reads queued in one turn share one round.
 func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	if n.stopped.Load() {
 		return coreconsensus.TokenValue{}, n.stoppedErr()
@@ -384,22 +385,15 @@ func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 		mode = "lease"
 	}
 	defer func() { n.obs.record(mBarrierLatency, n.clk.Since(start).Seconds(), coreotel.String("mode", mode)) }()
-	if !n.exec(func() {
-		ctx := n.nextID()
-		w.sentAt = n.clk.Now()
-		w.askedAt = w.sentAt
-		n.reads[ctx] = w
-		n.r.ReadIndex(w.sentAt, ctx, noLease)
-		n.handleReady()
-	}) {
+	// The loop registers every read queued before its turn and opens one
+	// round for them all (onReads, #1108).
+	n.readq.push(w)
+	res, ok := n.awaitRead(ctx, w)
+	if !ok {
+		if ctx.Err() != nil {
+			return coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
+		}
 		return coreconsensus.TokenValue{}, n.stoppedErr()
-	}
-	var res readResult
-	select {
-	case res = <-w.done:
-	case <-ctx.Done():
-		w.gone.Store(true)
-		return coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
 	}
 	switch res.code {
 	case 0:
@@ -418,6 +412,26 @@ func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	tok := n.token(coreconsensus.PositionValue{Term: n.appliedTerm, Index: n.applied})
 	n.am.Unlock()
 	return tok, nil
+}
+
+// awaitRead waits for the loop's answer to w. It reports false when ctx
+// ended first, or when the loop ended without answering: a read queued after
+// the loop's last turn is answered by no one.
+func (n *Node) awaitRead(ctx context.Context, w *readWait) (readResult, bool) {
+	select {
+	case res := <-w.done:
+		return res, true
+	case <-ctx.Done():
+		w.gone.Store(true)
+		return readResult{}, false
+	case <-n.loopDone:
+		select {
+		case res := <-w.done:
+			return res, true
+		default:
+			return readResult{}, false
+		}
+	}
 }
 
 // WaitApplied returns once the local node has applied t, the entry of t's

@@ -2489,6 +2489,7 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_log_bytes`, `consensus_log_quota_bytes`, `consensus_nospace` | gauges |
 | `consensus_tail_truncated_total`, `consensus_frames_dropped_total` | counters by reason |
 | `consensus_barrier_latency_seconds` | histogram by mode |
+| `consensus_read_rounds_total` | counter: heartbeat rounds opened to confirm reads (#1108) |
 | `consensus_failure_tolerance` | gauge: how many voters can fail now with a majority left |
 | `consensus_tls_cert_expiry_seconds` | gauge per identity |
 | `consensus_has_leader`, `consensus_peer_last_contact_seconds`, `consensus_peer_rtt_seconds` | gauge, gauge by peer, histogram by peer (R2-28) |
@@ -7161,6 +7162,38 @@ header and the fixed fields, up to the entry count — names one
   `//internal/service/app/consensus:consensus_alloc_test`).
 - **Not measured here.** `consensus_loop_turn_seconds` p99 at 1 000
   proposals/s waits for the bench lane of #911.
+
+## Amendment — the Barriers queued in one loop turn share one round (2026-11-12, #1108)
+
+D9 says concurrent reads share a round, and the step function did: its
+`flushReads` opens ONE round for every read pending. The driver did not
+let them be pending together. Every `Barrier` handed the loop its own
+closure through `exec`, the loop ran one closure a turn, and the closure
+handled its Ready at once, so N concurrent reads cost N heartbeat
+broadcasts, N loop turns and N publications, and past 64 rounds the
+oldest were forgotten and their reads waited for a later one
+([#1108](https://github.com/kitsunium/sdk/issues/1108)).
+
+- **The driver.** `Barrier` queues its wait on a queue of its own
+  (`readq`, the shape of the storage actor's), and the loop's turn takes
+  them all at once (`onReads`): it registers every read, asks raft for
+  each, then handles the Ready once, so `flushReads` opens one round for
+  the batch. The round is opened after the whole batch is registered, so
+  no read rides a round opened before it was queued
+  (`TestLinearizableUnderFaults`, and `mutReadNoRound` still caught by
+  `TestMutationsAreCaught`). A read queued after the loop's last turn is
+  answered NODE_STOPPED, by the stop's drain or by the wait on `loopDone`.
+- **The lease path is unchanged.** Under a valid lease `serveLeaseRead`
+  answers the batch at once, with no round.
+- **Out of scope.** A follower still sends one `MsgReadIndex` per read: it
+  is one message, not a broadcast.
+- **Measured.** 256 Barriers queued behind a held loop on an idle leader,
+  its ManualClock stopped, send one heartbeat per peer and open one read
+  round (`TestBarriersQueuedInOneTurnShareOneRound`); under `ReadLease`
+  with a valid lease, none (`TestLeasedBarriersOpenNoRound`).
+  `consensus_read_rounds_total` counts the rounds raft opened for reads
+  (`Raft.ReadRounds`), so the ratio of reads to rounds is visible beside
+  `consensus_barrier_latency_seconds`, unchanged.
 
 ## Revision history
 

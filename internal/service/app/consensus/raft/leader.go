@@ -1572,6 +1572,7 @@ func (r *Raft) flushReads() {
 		return
 	}
 	r.broadcastHeartbeat(r.now)
+	r.readRounds++
 	id := r.nextRound
 	for _, q := range r.pendingReads {
 		q.round, q.index = id, r.log.committed

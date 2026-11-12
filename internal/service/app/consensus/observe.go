@@ -43,6 +43,7 @@ const (
 	mNoSpace          = "consensus_nospace"
 	mFramesDropped    = "consensus_frames_dropped_total"
 	mBarrierLatency   = "consensus_barrier_latency_seconds"
+	mReadRounds       = "consensus_read_rounds_total"
 	mProposalsFailed  = "consensus_proposals_failed_total"
 	mProposalsPending = "consensus_proposals_pending"
 	mClusterVersion   = "consensus_cluster_version"
@@ -95,9 +96,9 @@ type obs struct {
 	// published: a series is never deleted, so a peer that left is reset
 	// rather than left at its last value (#532).
 	peersPub, certsPub map[coreconsensus.NodeID]bool
-	// seenTails and seenReloads are the running totals already added to
-	// their counters.
-	seenTails, seenReloads int64
+	// seenTails, seenReloads and seenRounds are the running totals already
+	// added to their counters.
+	seenTails, seenReloads, seenRounds int64
 }
 
 // newObs binds a node's instruments to its configured Meter, Tracer and
