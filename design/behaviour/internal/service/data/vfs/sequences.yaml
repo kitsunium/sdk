@@ -1123,6 +1123,13 @@ sequences:
       - return: entry.group.Do(context.Background(), struct{}{})
         to: entry.group.Do
   - of: (*dirFlushes).join
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dirFlushes).join
+        kind: self
+      - id: d.bind
+        kind: internal
     steps:
       - lock:
           mutex: d.mu
@@ -1131,16 +1138,41 @@ sequences:
       - opt:
           do:
             - set: entry
-              value: |-
-                &dirFlush{group: commit.New(func(context.Context, []struct{}) error {
-                			//: one fsync for the whole batch.
-                			return d.flush(dir)
-                		}, commit.Config{})}
+              to: d.bind
+              value: d.bind(dir)
             - set: d.groups[dir]
               value: entry
           when: "!open"
       - op: ++
         set: entry.waiting
+      - return: entry
+  - of: (*dirFlushes).bind
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dirFlushes).bind
+        kind: self
+      - id: commit
+        kind: package
+    steps:
+      - bind: entry
+        eval: d.spare
+      - set: d.spare
+        value: nil
+      - opt:
+          do:
+            - set: entry
+              value: "&dirFlush{}"
+            - set: entry.group
+              to: commit
+              value: |-
+                commit.New(func(context.Context, []struct{}) error {
+                			//: one fsync for the whole batch, of the directory bound now.
+                			return d.flush(entry.dir)
+                		}, commit.Config{})
+          when: entry == nil
+      - set: entry.dir
+        value: dir
       - return: entry
   - of: (*dirFlushes).leave
     steps:
@@ -1151,7 +1183,33 @@ sequences:
       - opt:
           do:
             - eval: delete(d.groups, dir)
+            - set: d.spare
+              value: entry
           when: entry.waiting == 0
+  - of: drawTempSeed
+    participants:
+      - id: caller
+        kind: actor
+      - id: drawTempSeed
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: hex
+        kind: stdlib
+    steps:
+      - var:
+          name: raw
+          type: "[tempSeedBytes]byte"
+      - opt:
+          do:
+            - return: "\"\", randErr"
+          init:
+            bind: _, randErr
+            eval: rand.Read(raw[:])
+            to: rand
+          when: randErr != nil
+      - return: hex.EncodeToString(raw[:]), nil
+        to: hex
   - of: (*osFS).WriteAtomic
     participants:
       - id: caller
@@ -1290,9 +1348,7 @@ sequences:
         kind: actor
       - id: stage
         kind: self
-      - id: path
-        kind: stdlib
-      - id: tempPath
+      - id: createTemp
         kind: internal
       - id: failPublish
         kind: internal
@@ -1301,24 +1357,16 @@ sequences:
       - id: discard
         kind: internal
     steps:
-      - bind: dir
-        eval: path.Dir(name)
-        to: path
-      - bind: tempName, nameErr
-        eval: tempPath(dir)
-        to: tempPath
-      - opt:
-          do:
-            - return: failPublish(nameErr, kerrs.String("path", name))
-              to: failPublish
-          when: nameErr != nil
-      - bind: file, createErr
-        eval: ops.create(tempName, perm)
+      - bind: temp, createErr
+        eval: createTemp(ops, path.Dir(name), perm)
+        to: createTemp
       - opt:
           do:
             - return: failPublish(createErr, kerrs.String("path", name))
               to: failPublish
           when: createErr != nil
+      - bind: file, tempName
+        eval: temp.file, temp.name
       - opt:
           do:
             - return: discard(ops, tempName, name, writeErr)
@@ -1468,15 +1516,79 @@ sequences:
         eval: ops.remove(tempName)
       - return: failPublish(cmp.Or(cause, removeErr), kerrs.String("path", name))
         to: failPublish
+  - of: createTemp
+    participants:
+      - id: caller
+        kind: actor
+      - id: createTemp
+        kind: self
+      - id: tempPath
+        kind: internal
+      - id: randomTempPath
+        kind: internal
+    steps:
+      - bind: name, err
+        eval: tempPath(dir)
+        to: tempPath
+      - loop:
+          cond: err == nil
+          do:
+            - bind: file, createErr
+              eval: ops.create(name, perm)
+            - opt:
+                do:
+                  - return: "tempHandle{file: file, name: name}, createErr"
+                when: "!errors.Is(createErr, fs.ErrExist) || attempt == tempAttempts"
+            - set: name, err
+              to: randomTempPath
+              value: randomTempPath(dir)
+          init: attempt := 1
+          post: attempt++
+      - return: tempHandle{}, err
   - of: tempPath
     participants:
       - id: caller
         kind: actor
       - id: tempPath
         kind: self
+      - id: appendTempDir
+        kind: internal
+      - id: appendTempCounter
+        kind: internal
+    steps:
+      - bind: seed, seedErr
+        eval: tempSeed()
+      - opt:
+          do:
+            - return: "\"\", seedErr"
+          when: seedErr != nil
+      - var:
+          name: room
+          type: "[tempNameRoom]byte"
+      - bind: buf
+        eval: appendTempDir(room[:0], dir)
+        to: appendTempDir
+      - set: buf
+        value: append(buf, tempPrefix...)
+      - set: buf
+        value: append(buf, seed...)
+      - set: buf
+        to: appendTempCounter
+        value: appendTempCounter(buf, tempCounter.Add(1))
+      - set: buf
+        value: append(buf, tempSuffix...)
+      - return: string(buf), nil
+  - of: randomTempPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: randomTempPath
+        kind: self
       - id: rand
         kind: stdlib
-      - id: path
+      - id: appendTempDir
+        kind: internal
+      - id: hex
         kind: stdlib
     steps:
       - var:
@@ -1489,8 +1601,42 @@ sequences:
           do:
             - return: "\"\", randErr"
           when: randErr != nil
-      - return: path.Join(dir, tempPrefix+hex.EncodeToString(raw[:])+tempSuffix), nil
-        to: path
+      - bind: buf
+        eval: appendTempDir(nil, dir)
+        to: appendTempDir
+      - set: buf
+        value: append(buf, tempPrefix...)
+      - set: buf
+        to: hex
+        value: hex.AppendEncode(buf, raw[:])
+      - set: buf
+        value: append(buf, tempSuffix...)
+      - return: string(buf), nil
+  - of: appendTempDir
+    steps:
+      - opt:
+          do:
+            - return: buf
+          when: dir == "."
+      - return: append(append(buf, dir...), '/')
+  - of: appendTempCounter
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTempCounter
+        kind: self
+      - id: binary.BigEndian.PutUint64
+        kind: value
+      - id: hex
+        kind: stdlib
+    steps:
+      - var:
+          name: raw
+          type: "[tempCounterBytes]byte"
+      - eval: binary.BigEndian.PutUint64(raw[:], n)
+        to: binary.BigEndian.PutUint64
+      - return: hex.AppendEncode(buf, raw[:])
+        to: hex
   - of: (*osFS).nativeOps
     steps:
       - return: |-

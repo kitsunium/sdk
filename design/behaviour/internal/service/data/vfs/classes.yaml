@@ -31,7 +31,8 @@ constants:
         value: "\".tmp\""
     name: tempPrefix
   - doc: |-
-      tempNameBytes is the entropy in a temporary's name. Sixteen bytes makes a
+      tempNameBytes is the entropy in a random temporary's name — the name a
+      publication falls back to when its first one is taken. Sixteen bytes makes a
       collision with a concurrent publisher in the same directory not worth
       reasoning about, and O_EXCL turns the impossible case into an error rather
       than a silent overwrite.
@@ -40,6 +41,39 @@ constants:
         type: int
         value: "16"
     name: tempNameBytes
+  - doc: |-
+      tempSeedBytes is the entropy drawn once per process for the ordinary name:
+      eight bytes, so a process cannot guess another's names, beside a counter
+      that keeps the process's own names apart.
+    items:
+      - name: tempSeedBytes
+        type: int
+        value: "8"
+    name: tempSeedBytes
+  - doc: |-
+      tempAttempts bounds the names one publication tries: the ordinary one, then
+      random ones while each is taken. A name is taken only when something else
+      created it — a process that read this one's names in the directory and
+      planted the next — and a random name cannot be planted ahead.
+    items:
+      - name: tempAttempts
+        type: int
+        value: "3"
+    name: tempAttempts
+  - doc: |-
+      tempNameRoom is the stack buffer a name is built in: the base name and a
+      directory of most of the rest; a longer directory grows it on the heap.
+    items:
+      - name: tempNameRoom
+        type: int
+        value: "128"
+    name: tempNameRoom
+  - doc: tempCounterBytes is the width of the counter in a name, before its hex.
+    items:
+      - name: tempCounterBytes
+        type: int
+        value: "8"
+    name: tempCounterBytes
   - doc: |-
       platformNative reports that this GOOS has every mechanic the disk filesystem
       requires. NewOS reads it and refuses where it is false, rather than building
@@ -146,11 +180,19 @@ files:
       - newDirFlushes
       - (*dirFlushes).sync
       - (*dirFlushes).join
+      - (*dirFlushes).bind
       - (*dirFlushes).leave
     name: os_dirflush.go
   - decls:
       - tempPrefix
       - tempNameBytes
+      - tempSeedBytes
+      - tempAttempts
+      - tempNameRoom
+      - tempCounterBytes
+      - tempCounter
+      - drawTempSeed
+      - tempHandle
       - tempFile
       - atomicOps
       - (*osFS).WriteAtomic
@@ -164,7 +206,11 @@ files:
       - (*osFS).SyncDir
       - failDirSync
       - discard
+      - createTemp
       - tempPath
+      - randomTempPath
+      - appendTempDir
+      - appendTempCounter
       - (*osFS).nativeOps
       - (*osFS).syncDir
     name: os_publish.go
@@ -224,6 +270,9 @@ functions:
     name: newDirFlushes
     params: flush func(dir string) error
     results: "*dirFlushes"
+  - doc: drawTempSeed draws the process's seed and hex-encodes it.
+    name: drawTempSeed
+    results: string, error
   - doc: |-
       publish runs the five steps over ops. It is deliberately free of any
       reference to os.Root, so the test that proves its guarantee can substitute
@@ -281,7 +330,17 @@ functions:
     params: ops atomicOps, tempName, name string, cause error
     results: error
   - doc: |-
-      tempPath returns an unused name in dir.
+      createTemp creates a temporary in dir, exclusively, and returns it with its
+      name: the ordinary name first, then a random one while the name tried is
+      taken, up to tempAttempts names. Any other refusal ends it at once.
+    name: createTemp
+    params: ops atomicOps, dir string, perm fs.FileMode
+    results: tempHandle, error
+  - doc: |-
+      tempPath returns the ordinary name of a new temporary in dir:
+      dir/.vfs-<the process's seed><the counter>.tmp, sixteen hex digits each,
+      built on the stack and allocated once (#813). O_EXCL is still what makes it
+      unused: createTemp falls back to a random name if it is taken.
 
       Returning a name in DIR and nowhere else is the same-filesystem guarantee:
       a rename between two entries of one directory cannot cross a device, so
@@ -291,6 +350,25 @@ functions:
     name: tempPath
     params: dir string
     results: name string, err error
+  - doc: |-
+      randomTempPath returns a name of sixteen random bytes in dir — the name a
+      publication falls back to when its ordinary one is taken.
+    name: randomTempPath
+    params: dir string
+    results: name string, err error
+  - doc: |-
+      appendTempDir appends dir and a separator, or nothing for ".": a
+      root-level target's temporary is a bare base name, as path.Join made it.
+      dir is path.Dir of a validated relative name, so it is clean, never "/".
+    name: appendTempDir
+    params: buf []byte, dir string
+    results: "[]byte"
+  - doc: |-
+      appendTempCounter appends n as the hex of its tempCounterBytes big-endian
+      bytes: fixed width, zero-padded, encoded from the stack.
+    name: appendTempCounter
+    params: buf []byte, n uint64
+    results: "[]byte"
   - doc: |-
       syncDirHandle flushes a directory's own entries to the device.
 
@@ -348,6 +426,8 @@ functions:
     params: cause error, fields ...kerrs.FieldValue
     results: error
 imports:
+  atomic: sync/atomic
+  binary: encoding/binary
   cmp: cmp
   commit: github.com/kitsunium/sdk/internal/kernel/concur/commit
   context: context
@@ -923,7 +1003,11 @@ types:
       each of their renames. Every participant receives that flush's verdict.
 
       A directory's group lives while a publication waits on it and is dropped
-      with the last one, so the map holds the directories in use and no others.
+      with the last one, so the map holds the directories in use and no others;
+      the entry dropped is kept as the next directory's (spare), so a publication
+      that finds its directory idle builds no group (#813). Alone on its
+      directory, it then flushes on its own goroutine through the group's idle
+      path — the same fsync, begun after its rename, with no batch built.
     fields:
       - doc: "flush is the mechanic one batch runs: the directory's fsync."
         name: flush
@@ -931,6 +1015,11 @@ types:
       - doc: groups holds one group per directory a publication is waiting on.
         name: groups
         type: map[string]*dirFlush
+      - doc: |-
+          spare is the entry the last directory to fall idle left, rebound to
+          the next directory a publication finds idle; nil while none is.
+        name: spare
+        type: "*dirFlush"
       - name: mu
         type: sync.Mutex
     kind: struct
@@ -951,20 +1040,45 @@ types:
         recv: d *dirFlushes
         results: "*dirFlush"
       - doc: |-
+          bind returns an idle entry for dir: the spare when one is kept, else a new
+          entry and its group. d.mu is held.
+        name: bind
+        params: dir string
+        recv: d *dirFlushes
+        results: "*dirFlush"
+      - doc: |-
           leave uncounts one publication and drops dir's group with the last one: no
           batch of it is left, since every participant has had its verdict.
         name: leave
         params: dir string, entry *dirFlush
         recv: d *dirFlushes
     name: dirFlushes
-  - doc: dirFlush is one directory's group and how many publications wait on it.
+  - doc: |-
+      dirFlush is one directory's group, the directory it flushes and how many
+      publications wait on it.
     fields:
       - name: group
         type: "*commit.Group[struct{}]"
+      - doc: |-
+          dir is set under dirFlushes.mu when the entry is bound to a directory,
+          before any Do on group, and read by the group's flush: a spare is
+          rebound only once every publication through it has had its verdict.
+        name: dir
+        type: string
       - name: waiting
         type: int
     kind: struct
     name: dirFlush
+  - doc: |-
+      tempHandle is a temporary just created: the handle publish drives, and the
+      name it has in the directory.
+    fields:
+      - name: file
+        type: tempFile
+      - name: name
+        type: string
+    kind: struct
+    name: tempHandle
   - doc: |-
       tempFile is the narrow view of a freshly created temporary that [publish]
       drives. *os.File satisfies it; nothing else in the SDK does.
@@ -1009,3 +1123,22 @@ types:
         type: func(dir string) error
     kind: struct
     name: atomicOps
+vars:
+  - grouped: true
+    items:
+      - doc: |-
+          tempCounter numbers this process's temporaries: unique within the
+          process, whatever filesystem and directory, so two publications never
+          draw one name.
+        name: tempCounter
+        type: atomic.Uint64
+      - doc: |-
+          tempSeed is the process's hex-encoded seed, drawn on the first
+          publication (#813): the ordinary name costs one allocation and no
+          entropy call, where sixteen random bytes per publication cost the
+          entropy, the encoding and path.Join's four. crypto/rand.Read does not
+          fail since Go 1.24; were it to, every publication would report it, as
+          the random names did.
+        name: tempSeed
+        value: sync.OnceValues(drawTempSeed)
+    name: tempCounter

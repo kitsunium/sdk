@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-02T22:00:00Z -->
+<!-- updated: 2026-11-12T19:00:00Z -->
 # internal/kernel/concur/commit/
 
 ## Purpose
@@ -22,7 +22,10 @@ carried its item has run, and gets its error — what a durable write needs.
 | `commit.go` | `Group[T]` + `New` / `Do` / `Close`, and the join / lead / seal path |
 | `batch.go` | `batch[T]` — one flush's items, the channels that order and publish it, the verdict |
 | `config.go` | `Config` — `MaxItems` / `MaxWait` / `Clock` |
+| `idle_external_test.go` | the idle path: on the caller's goroutine only for a ctx that cannot end and no `MaxWait`; inline and batched flushes never overlap; a panic leaves the group idle (#813) |
+| `perf_fixtures_test.go` | race off: the `DoIdle` fixture of the `allocs: 0` budget kit's `gen_perf_test.go` holds |
 | `gen_codes.go` | `CodeCommitClosed` (`0.1.4.1`) and `Closed`, written by kit gen from `design/kernel/concur.yaml` |
+| `gen_perf_test.go` | race off, written by kit gen from `design/sdk.yaml`'s budgets: the idle `Do`'s `allocs: 0` (#813) |
 
 ## How a batch runs
 
@@ -47,6 +50,16 @@ carried its item has run, and gets its error — what a durable write needs.
 - **A panic in the flush** is recovered on the leading goroutine and re-raised
   in every participant, so it is neither lost nor a process crash nobody
   waiting can see.
+- **An idle `Do` flushes in place** (#813, ADR 0207 amended 2026-11-12): a
+  caller whose `ctx` can never end (`Done() == nil`), on a group with no
+  `MaxWait` and nothing gathering or flushing, runs the flush on its own
+  goroutine over its item alone — no batch, no channel, no goroutine; zero
+  allocations for an item of size zero (`allocs: 0`, fixture `DoIdle` in
+  `perf_fixtures_test.go`). While it runs it is the group's last flush
+  (`inline`, an `inlineState`: none, behind a batch, latest): the callers arriving meanwhile gather into a
+  batch whose `after` is a channel made only then (`last`, `inlineDone`),
+  and `Close` waits on it too. A cancellable `ctx` or a gathering window
+  keeps the batched path.
 - **`Close`** refuses every later `Do` with `Closed` and returns once the last
   batch started has been flushed.
 
@@ -74,9 +87,11 @@ where the domain is changed:
 
 ## Do NOT
 
-- Run the flush on a caller's goroutine. The caller who arrived first is the
-  one most likely to leave first, and its cancellation must not decide whether
-  the others' items are written.
+- Run a SHARED flush on a caller's goroutine. The caller who arrived first is
+  the one most likely to leave first, and its cancellation must not decide
+  whether the others' items are written. The idle path is the one exception,
+  and only because it has no others and no cancellation: do not widen it to a
+  cancellable `ctx`, nor let a caller join a flush running inline.
 - Drop a departed caller's item. It may already be in the flush; "not written"
   could not be promised.
 - Add a domain word (`Sync`, `Journal`, `File`) to the API — the flush is the

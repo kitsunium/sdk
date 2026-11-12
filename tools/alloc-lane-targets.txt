@@ -189,6 +189,15 @@
 # 4 KiB and 4 MiB.
 //third-party/transform:transform_test
 
+# internal/service/data/vfs — an uncontended publication on the disk engine
+# (kitsunium/sdk#813, alloc_external_test.go, //go:build !race): at most 22
+# allocations on the caller's stack, 19 here — os.Root's confinement 18, the
+# temporary's name 1 — and 22 on CI's linux/386 runner, whose os.Root makes
+# three more —, its directory flushed on its own goroutine through
+# the commit group's idle path. 32 before #813. Hand-written, not a design
+# budget: kit's gate counts 60 000 calls, and each pays two fsyncs.
+//internal/service/data/vfs:vfs_test
+
 # BEGIN kit gen from design/sdk.yaml: the packages whose budgets name a fixture,
 # whose gen_perf_test.go runs race off here alone. DO NOT EDIT to the line
 # below: kit gen writes it from the design.
@@ -197,6 +206,7 @@
 //internal/kernel/collections/heap:heap_test
 //internal/kernel/collections/ring:ring_test
 //internal/kernel/concur/buffer:buffer_test
+//internal/kernel/concur/commit:commit_test
 //internal/kernel/concur/pool:pool_test
 //internal/kernel/concur/recycler:recycler_test
 //internal/kernel/concur/sema:sema_test
