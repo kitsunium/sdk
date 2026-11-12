@@ -190,6 +190,9 @@ codes:
     - range: 0.1.7
       owner: internal/kernel/concur/sema
       note: ADR 0216, the weighted semaphore (#812)
+    - range: 0.1.8
+      owner: internal/kernel/fs/seglog
+      note: ADR 0230, the segmented log (#820)
     - range: 0.2.2
       owner: internal/core/data/codec
     - range: 0.2.3

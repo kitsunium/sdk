@@ -137,6 +137,7 @@ filegroup(
         "//internal/kernel/concur/sema:audit_srcs",
         "//internal/kernel/concur/snapshot:audit_srcs",
         "//internal/kernel/errs:audit_srcs",
+        "//internal/kernel/fs/seglog:audit_srcs",
         "//internal/service/app/cli:audit_srcs",
         "//internal/service/app/health:audit_srcs",
         "//internal/service/app/lifecycle:audit_srcs",

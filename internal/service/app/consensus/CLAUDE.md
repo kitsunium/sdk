@@ -94,6 +94,10 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestARequestedCutWhoseSyncFailsStopsTheNode`,
   `TestAnInstallWhoseSyncFailsStopsTheNode`).
 - Truncate a hole before every segment is classified (R8-02, R9-03).
+- Fix a rule of `filelog.go`'s framing, batch protocol or recovery without
+  fixing it in `internal/kernel/fs/seglog` too: the kernel primitive is its
+  extraction (ADR 0230, #820), and the two hold the same rules until the log
+  is migrated onto it.
 - Serve a log recovery read without syncing it first: a process killed
   between a batch's write and its fdatasync leaves the batch in the page
   cache, and a same-boot restart would acknowledge it from there.

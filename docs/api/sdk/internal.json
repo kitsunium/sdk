@@ -818,6 +818,14 @@
       "doc": "Package pathchain resolves a path one component at a time and reports what\neach component IS, instead of only what the whole path finally names.\n\n# The question os.Stat cannot be asked\n\nos.Stat answers \"what is at the end of this path\". os.Lstat answers the same\nquestion without following the LAST component. Neither can say whether the\npath arrived where it did by going through somebody else's redirection, and\nthat is the question a program asks when the path names a resource whose\nidentity is a security property — a lock file, a state directory, a socket.\n\nO_NOFOLLOW has the same limit and it is a kernel limit, not a Go one: it\ngoverns the final component only. A link planted at a PARENT component is\ntraversed by every open, whatever flags it carries.\n\n# What this package does instead\n\n[Resolve] walks the path from the filesystem root, holding an open directory\nhandle at every step, and asks each component's own directory what that\ncomponent is — lstat relative to a descriptor, never a fresh lookup of a\npath string. It returns one [StepValue] per component, in order, each\ncarrying the mode of the directory it was found in.\n\nIt does not refuse anything. A refusal needs a policy, a policy needs a\ndomain, and this package has neither; what it has is the measurement a\npolicy cannot be written without. The two callers this was built for want\nopposite verdicts on the same shape — /var/run being a symbolic link is a\ndistribution's decision, /tmp/myapp being one may be an attack — and the\ndifference is in StepValue.Container, not in the link.\n\n# What it rests on, and what that costs\n\nThe directory handles are [os.Root], whose Unix implementation is\nopenat(dirfd, name, O_NOFOLLOW|O_CLOEXEC|O_DIRECTORY) and whose Windows\nimplementation passes O_NOFOLLOW_ANY — read in go1.27's src/os/root_unix.go\nand src/os/root_windows.go rather than assumed. That matters because\nsyscall.Openat, the obvious primitive, exists in go1.27's syscall package\nfor linux, aix and wasip1 ONLY: darwin reaches the kernel through libc\ntrampolines that are internal to the standard library and does not even\ndefine SYS_OPENAT, so a hand-rolled walk would have served five kernels and\nsilently skipped the sixth. os.Root is the standard library's own openat\nwalk and it is available on every platform the SDK builds for.\n\nThe cost of borrowing it is that os.Root resolves a symbolic link whose\ntarget stays inside the root and refuses one whose target leaves it, and\nneither behaviour is what a walk wants. So this package never asks os.Root\nto traverse an indirection: it detects one with Lstat, reads it with\nReadlink, and restarts the walk itself at the target. os.Root is used for\nexactly one thing — descending into a component already known to be a real\ndirectory.\n\nPackage pathchain — the walk's POSITION: one open directory handle per\ncomponent already entered, so every question is asked of a descriptor this\nprocess holds rather than of a path string that could resolve elsewhere.\n\nPackage pathchain — one COMPONENT of a resolved path, described rather than\ntraversed, with the mode of the directory it was found in beside it.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "seglog",
+      "dir": "kernel/fs/seglog",
+      "layer": "kernel",
+      "family": "fs",
+      "doc": "Package seglog is a durable, append-only log of records addressed by a\ncontiguous uint64 index, kept in a directory of fixed-size, zero-filled\nsegment files: the segmented log the consensus file log wrote for itself\n(ADR 0152 D4), extracted without its vocabulary so that any engine needing\nan ordered, crash-recovering sequence of byte payloads builds on it rather\nthan rewriting it (ADR 0159, ADR 0230).\n\n# The record\n\nEvery record is 8-byte aligned and little-endian:\n\n\tlength u32 | crc32c u32 | version u8 | kind u8 | end u8 | tag u8 |\n\tbatch u64 | index u64 | payload | zero padding\n\nlength counts the bytes after the crc, padding excluded, and the crc is the\nCRC-32C of those bytes. The tag is the caller's kind byte, stored and given\nback, never read. Every segment opens with a checkpoint record — the index its\nfirst entry takes, the log's first index and its batch sequence number — and\na full segment is closed by a seal record before the next one is published.\n\n# One batch, two syncs\n\n[Log.Append] only buffers. [Log.Sync] writes the pending batch, its last\nrecord flagged end-of-batch, in two steps: every record but the last, made\ndurable, then the last one, made durable. A valid end record therefore proves\nits whole batch was durable before it, and batch k+1 is written only once\nbatch k is, so a valid record of a later batch proves every earlier one. A\nfailed write or sync is final: the log refuses every later call with Failed,\nbecause what a failed fsync left on the disk is not knowable.\n\n# Recovery classifies before it repairs\n\n[Open] reads every segment and classifies every hole BEFORE it changes a byte.\nA hole in the last segment whose batch never completed — no valid end record,\nno valid record of a later batch after it — is a torn tail: never synced, so\nnever acknowledged; it is zeroed and synced, and the log continues before it.\nAny other hole is damage to synced data and Open refuses with Damaged, the\nfiles left as they were; a record a newer layout wrote is refused with\nVersionUnsupported, never skipped. What a damaged log means — quarantine,\nrepair, a rebuild from elsewhere — is the caller's decision.\n\n# Dropping a prefix\n\n[Log.DropBefore] records the log's new first index durably, then unlinks the\nwhole sealed segments that hold only entries below it and syncs the\ndirectory. Nothing is rewritten: retention is by whole segments, and an entry\nbelow the first index that still sits in a retained segment is unreadable.\n\n# What it is not\n\nIt holds one directory exclusively and takes no lock on it: a caller that may\nbe started twice over the same directory locks it first (flock). It knows\nnothing of terms, votes, offsets in a partition or consumers; those are its\ncallers' (ADR 0230). One writer at a time, any number of readers: an appended\nentry is readable before it is synced.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/internal/kernel/fs/winacl",
       "name": "winacl",
       "dir": "kernel/fs/winacl",
@@ -65958,6 +65966,411 @@
       ],
       "doc": "StepValue describes one component of a resolved path: what that component\nIS, and who could have put it there.\n\nThe second half is the reason this type exists. Knowing that a component is\na symbolic link answers almost nothing on its own, because the answer is\n\"yes\" for /tmp on macOS, for /var/run on most Linux distributions, and for\nC:\\Users\\All Users on Windows — all of them legitimate, all of them planted\nby the operating system's installer. What separates those from an attack is\nnot the link, it is the DIRECTORY THE LINK LIVES IN: a link in a directory\nonly root can write was put there by root, and a link in a world-writable\ndirectory was put there by anybody at all.\n\nSo every step carries Container, the mode of the directory the component was\nlooked up in, read by fstat on a handle this package held open rather than\nby a second path lookup that could resolve somewhere else.\n",
       "file": "kernel/fs/pathchain/step.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.Closed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Closed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.1.8.7",
+        "reason": "CLOSED",
+        "public": "The log is closed"
+      },
+      "doc": "Closed is returned by every call on a log after Close.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.CodeClosed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "CodeClosed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "67591",
+      "code": {
+        "value": "0.1.8.7"
+      },
+      "doc": "CodeClosed identifies a call on a closed log.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.CodeDamaged",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "CodeDamaged",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "67585",
+      "code": {
+        "value": "0.1.8.1"
+      },
+      "doc": "CodeDamaged identifies a log whose segments hold damage that is not a torn tail.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.CodeDropped",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "CodeDropped",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "67588",
+      "code": {
+        "value": "0.1.8.4"
+      },
+      "doc": "CodeDropped identifies a read below the log's first index.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.CodeFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "CodeFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "67590",
+      "code": {
+        "value": "0.1.8.6"
+      },
+      "doc": "CodeFailed identifies a write, a sync or a read the filesystem refused.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.CodeOutOfRange",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "CodeOutOfRange",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "67589",
+      "code": {
+        "value": "0.1.8.5"
+      },
+      "doc": "CodeOutOfRange identifies a read at or past the log's next index.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.CodeOutOfSequence",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "CodeOutOfSequence",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "67587",
+      "code": {
+        "value": "0.1.8.3"
+      },
+      "doc": "CodeOutOfSequence identifies an Append whose index is not the log's next.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.CodeTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "CodeTooLarge",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "67592",
+      "code": {
+        "value": "0.1.8.8"
+      },
+      "doc": "CodeTooLarge identifies a payload larger than one record carries.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.CodeVersionUnsupported",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "CodeVersionUnsupported",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "67586",
+      "code": {
+        "value": "0.1.8.2"
+      },
+      "doc": "CodeVersionUnsupported identifies a record a newer layout wrote.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.Damaged",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Damaged",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.1.8.1",
+        "reason": "DAMAGED",
+        "public": "The log holds damage that is not a torn tail"
+      },
+      "doc": "Damaged is returned by Open for a log whose segments hold damage that is\nnot a torn tail — a hole before a valid record of a later batch, a bad\nrecord inside a batch whose end record is valid, a hole in an earlier\nsegment, a checkpoint that does not continue the log — and by a read whose\nrecord no longer matches what the log recorded. Its fields name the\nsegment, the offset and why; nothing was changed.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.DefaultSegmentBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "DefaultSegmentBytes",
+      "spelled": "int64",
+      "canonical": "int64",
+      "value": "67108864",
+      "doc": "DefaultSegmentBytes is a segment's size when Open is given none: 64 MiB, the\nconsensus log's.\n",
+      "file": "kernel/fs/seglog/record.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.Dropped",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Dropped",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.1.8.4",
+        "reason": "DROPPED",
+        "public": "The record was dropped from the log"
+      },
+      "doc": "Dropped is returned by Read, Range and Kind for an index below the log's first.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.Failed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Failed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.1.8.6",
+        "reason": "FAILED",
+        "public": "The log's storage failed"
+      },
+      "doc": "Failed is returned when the filesystem refused a write, a sync, a read or a\ndirectory operation; its fields name the operation and the cause. After a\nfailed write or sync the log refuses every later call with it.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.Log",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Log",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "Log is a segmented log opened by Open. One writer at a time — Append, Sync,\nDropBefore and Close serialise — and any number of readers, which never wait\nfor a sync's disk I/O. The zero value is NOT usable.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).Append",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Append",
+      "recv": "Log",
+      "spelled": "func(index uint64, kind uint8, payload []byte) error",
+      "canonical": "func(index uint64, kind uint8, payload []byte) error",
+      "doc": "Append adds a record to the pending batch: payload, copied, at index, with\nthe caller's kind byte. index must be the log's next (OutOfSequence\notherwise) and payload at most 1 GiB less a record's header (TooLarge). The\nrecord is readable at once and durable only once Sync returns nil.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).Bounds",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Bounds",
+      "recv": "Log",
+      "spelled": "func() (first uint64, next uint64)",
+      "canonical": "func() (first uint64, next uint64)",
+      "doc": "Bounds returns the log's first index and its next: the records held are\nfirst through next-1, none when they are equal. A fresh log holds none at\nindex 0.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).Close",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Close",
+      "recv": "Log",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Close closes every segment and reports the first failure; a batch still\npending is discarded, never written. Every later call returns Closed; a\nsecond Close returns nil.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).DropBefore",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "DropBefore",
+      "recv": "Log",
+      "spelled": "func(index uint64) error",
+      "canonical": "func(index uint64) error",
+      "doc": "DropBefore makes index the log's first: the records below it become\nunreadable at once, a drop record is added to the pending batch and the batch\nis synced, as Sync syncs it, after which the sealed segments that hold only\nrecords below index are unlinked and the directory synced. An index past\nthe next empties the log and makes it the next too, so the next Append\ntakes it. An index at or below the first changes nothing.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).Kind",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Kind",
+      "recv": "Log",
+      "spelled": "func(index uint64) (uint8, error)",
+      "canonical": "func(index uint64) (uint8, error)",
+      "doc": "Kind returns the caller's kind byte of the record at index, from memory,\nwith Read's errors for an index outside the log.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).Range",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Range",
+      "recv": "Log",
+      "spelled": "func(lo uint64, hi uint64, maxBytes int, dst [][]byte) ([][]byte, error)",
+      "canonical": "func(lo uint64, hi uint64, maxBytes int, dst [][]byte) ([][]byte, error)",
+      "doc": "Range appends to dst the payloads at lo up to hi excluded, and returns it:\nalways the first, then as long as the payloads appended stay within\nmaxBytes. Contiguous records of one segment are read with one read. The\npayloads are the caller's and may share one backing array. Errors are\nRead's, for lo and hi; an empty range returns dst.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).Read",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Read",
+      "recv": "Log",
+      "spelled": "func(index uint64) ([]byte, error)",
+      "canonical": "func(index uint64) ([]byte, error)",
+      "doc": "Read returns a copy of the payload at index: Dropped below the first index,\nOutOfRange at or past the next, Damaged when the record on disk no longer\nmatches the one the log recorded.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.(*Log).Sync",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Sync",
+      "recv": "Log",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Sync makes the pending batch durable: written after the log's last record,\nevery record but the last synced, then the last one, flagged end-of-batch,\nsynced. A full segment is sealed and the next one published between two\nbatches, never inside one. Whole segments a DropBefore left behind are then\nunlinked. A failure is final: the log refuses every later call. With nothing\npending it returns at once.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.Open",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "Open",
+      "spelled": "func(dir string, segBytes int64) (*Log, error)",
+      "canonical": "func(dir string, segBytes int64) (*github.com/kitsunium/sdk/internal/kernel/fs/seglog.Log, error)",
+      "doc": "Open opens, and recovers, the log kept in dir, creating the directory (mode\n0700) and its first segment when there is none. segBytes is the size of a\nsegment, DefaultSegmentBytes when it is zero or negative; a batch larger\nthan a segment gets a segment of its own size. Open refuses with Damaged or\nVersionUnsupported a log it cannot trust, having changed nothing, and with\nFailed a directory the filesystem refuses; a torn tail it repairs. Before it\nreturns, every segment and the directory are synced, so nothing it reports\nrests on pages a disk did not hold.\n",
+      "file": "kernel/fs/seglog/log.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.OutOfRange",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "OutOfRange",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.1.8.5",
+        "reason": "OUT_OF_RANGE",
+        "public": "The record is past the end of the log"
+      },
+      "doc": "OutOfRange is returned by Read, Range and Kind for an index at or past the log's next.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.OutOfSequence",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "OutOfSequence",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.1.8.3",
+        "reason": "OUT_OF_SEQUENCE",
+        "public": "The record's index does not follow the log's last"
+      },
+      "doc": "OutOfSequence is returned by Append for an index that is not the log's next:\nthe log's indexes are contiguous.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.TooLarge",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "TooLarge",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.1.8.8",
+        "reason": "TOO_LARGE",
+        "public": "The record is too large for the log"
+      },
+      "doc": "TooLarge is returned by Append for a payload above 1 GiB less a record's header.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
+      "layer": "kernel",
+      "family": "fs"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/fs/seglog.VersionUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+      "name": "VersionUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.1.8.2",
+        "reason": "VERSION_UNSUPPORTED",
+        "public": "The log holds a record of a newer layout"
+      },
+      "doc": "VersionUnsupported is returned by Open for a record whose crc holds but\nwhose version or kind this build does not read: a newer build wrote it,\nsynced it and may have acknowledged it, so it is never taken for a hole.\n",
+      "file": "kernel/fs/seglog/gen_codes.go",
       "layer": "kernel",
       "family": "fs"
     },

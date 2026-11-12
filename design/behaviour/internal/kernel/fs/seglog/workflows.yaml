@@ -1,0 +1,112 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*Log).cut
+    steps:
+      - bind: n, size
+        eval: 0, 0
+      - loop:
+          cond: i < hi
+          do:
+            - op: +=
+              set: size
+              value: int(l.slots[i-l.first].size)
+            - opt:
+                do:
+                  - break: true
+                when: n > 0 && size > maxBytes
+            - op: ++
+              set: "n"
+          init: i := lo
+          post: i++
+      - return: "n"
+  - of: (*Log).run
+    steps:
+      - bind: s
+        eval: l.slots[i]
+      - bind: end
+        eval: s.off + int64(recordLen(int(s.size)))
+      - bind: "n"
+        eval: "1"
+      - loop:
+          cond: n < maxRun
+          do:
+            - bind: t
+              eval: l.slots[i+uint64(n)]
+            - opt:
+                do:
+                  - break: true
+                when: t.pending || t.seg != s.seg || t.off != end
+            - op: +=
+              set: end
+              value: int64(recordLen(int(t.size)))
+            - op: ++
+              set: "n"
+      - return: "n"
+  - of: (*Log).segment
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: s
+                when: s.n == n
+          key: _
+          range: l.segs
+          value: s
+      - return: nil
+  - of: allZero
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: x != 0
+          key: _
+          range: b
+          value: x
+      - return: "true"
+  - of: checkLayouts
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: s.layout
+                when: s.layout != nil
+          key: _
+          range: segs
+          value: s
+      - return: nil
+  - of: (*batchSeq).follow
+    steps:
+      - loop:
+          do:
+            - bind: r
+              eval: "&recs[i]"
+            - opt:
+                do:
+                  - return: r.off
+                when: q.any && !continuesBatch(&q.prev, r)
+            - set: q.prev, q.any
+              value: "*r, true"
+          key: i
+          range: recs
+      - return: "-1"
+  - of: judgeAfterHole
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "\"valid record of another batch after a hole\""
+                when: r.batch != torn
+            - opt:
+                do:
+                  - return: "\"damage inside a batch whose end record is valid\""
+                when: r.end
+          key: _
+          range: after
+          value: r
+      - return: "\"\""
