@@ -874,6 +874,14 @@
       "doc": "Package consensus is the Raft engine of ADR 0152 and everything it ships\naround the step function of package raft: the event loop that drives it,\nthe storage actor that makes a write durable before any reply that depends\non it leaves, the apply goroutine, and snapshots cut, sent and installed in\nchecksummed chunks.\n\nA [Node] is built by [NewNode] over a [Config]: a state machine, a log, a\nsnapshot store and a transport. The shipped storage is a [DataDir] — a\nlock, a stamp, the segmented [fileLog], the [fileSnapshots] and the stop\nmarkers — and the shipped transport is the mutual-TLS [TCPTransport];\n[MemoryLog], [MemorySnapshots] and [MemoryNetwork] stand in for them in\ntests.\n\nA failed write or sync stops the node with STORAGE_FAILED and is never\nretried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],\n[Inspect] and [ClearQuarantine] work on a stopped node's directory only.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "multi",
+      "dir": "service/app/consensus/multi",
+      "layer": "service",
+      "family": "app",
+      "doc": "Package multi packs many small commands into one consensus entry and splits\ntheir results, on top of the Replicated port and with no change to the\nengine (ADR 0152 D6, D19, #926). A [Packer] packs the commands its callers\npropose at one moment into one length-prefixed body and issues ONE\nPropose; a [MultiMachine] on every node splits that body and applies the\ncommands in order through its inner BatchingStateMachine, as one batch,\nand the Packer answers each caller with the entry's token, the command's\nindex in it and its own result.\n\nAn entry carries a header, a slot, a checksum and an apply result\nwhatever its size: for commands of a few dozen bytes, the entry count,\nnot the bytes, bounds a leader's turn and a follower's parse.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "raft",
       "dir": "service/app/consensus/raft",
@@ -65728,6 +65736,224 @@
       "value": "1",
       "doc": "WipeAndRejoin wipes the directory; the operator then Removes the old\nNodeID and Inits under a NEW one (R4-03). A voter's incarnation is\nnever swapped in place. A wipe that does not finish leaves the stop\nmarker STOP-WIPE, which refuses a start, Init, Redraw, Recover,\nRestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs\nagain and completes it.\n",
       "file": "service/app/consensus/offline.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.Config",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "Config",
+      "spelled": "struct{MaxCommands int; MaxBytes int; MaxInFlight int}",
+      "canonical": "struct{MaxCommands int; MaxBytes int; MaxInFlight int}",
+      "fields": [
+        {
+          "name": "MaxCommands",
+          "type": "int",
+          "doc": "MaxCommands is the most commands one entry carries.\n"
+        },
+        {
+          "name": "MaxBytes",
+          "type": "int",
+          "doc": "MaxBytes is the largest packed body; it must not exceed the node's\nMaxEntryBytes, or a full entry is refused ENTRY_TOO_LARGE.\n"
+        },
+        {
+          "name": "MaxInFlight",
+          "type": "int",
+          "doc": "MaxInFlight is the most packed entries proposed and not yet answered;\nthe commands proposed while every one is in flight leave together in\nthe next.\n"
+        }
+      ],
+      "doc": "Config bounds what a Packer packs into one entry. A zero bound takes its\ndefault.\n",
+      "file": "service/app/consensus/multi/packer.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.DefaultMaxBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "DefaultMaxBytes",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "1048576",
+      "doc": "DefaultMaxBytes is the largest packed body when Config.MaxBytes is zero:\nthe engine's default MaxEntryBytes.\n",
+      "file": "service/app/consensus/multi/packer.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.DefaultMaxCommands",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "DefaultMaxCommands",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "4096",
+      "doc": "DefaultMaxCommands is the commands one entry carries when\nConfig.MaxCommands is zero.\n",
+      "file": "service/app/consensus/multi/packer.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.DefaultMaxInFlight",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "DefaultMaxInFlight",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "1",
+      "doc": "DefaultMaxInFlight is the packed entries in flight at once when\nConfig.MaxInFlight is zero: one, so every command proposed while an\nentry is in flight waits for it and leaves in the next.\n",
+      "file": "service/app/consensus/multi/packer.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.MultiMachine",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "MultiMachine",
+      "spelled": "struct{Inner coreconsensus.BatchingStateMachine}",
+      "canonical": "struct{Inner github.com/kitsunium/sdk/internal/core/app/consensus.BatchingStateMachine}",
+      "fields": [
+        {
+          "name": "Inner",
+          "type": "coreconsensus.BatchingStateMachine",
+          "doc": "Inner applies the commands.\n"
+        }
+      ],
+      "doc": "MultiMachine is the state machine of a node whose commands a Packer packs:\nit splits each entry's body into its commands and applies them in order, as\none batch, through Inner. The result of an entry is a []any holding one\nresult per command, in the order the Packer packed them, which the Packer\nhands back to each caller; a body that does not parse is answered\nFRAME_INVALID, the same on every node, and Inner sees none of it.\n\nEvery command proposed to a node running a MultiMachine must come through a\nPacker: a body proposed whole does not parse. A sub-entry is a copy of its\nentry whose Data is the command and whose BodySum is the command's own\nCRC-32C; ChainSum is zero. Inner may keep a sub-entry's Data: it is a slice\nof the entry's payload, capped at the command's end. Apply and ApplyBatch\nrun on the apply goroutine, one call at a time, as the engine calls them; a\nMultiMachine is not shared between nodes. It forwards no sibling port of\nInner's: a node running it keeps its state in memory.\n",
+      "file": "service/app/consensus/multi/machine.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*MultiMachine).Apply",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "Apply",
+      "recv": "MultiMachine",
+      "spelled": "func(e coreconsensus.EntryValue) any",
+      "canonical": "func(e github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) any",
+      "doc": "Apply splits e's body and applies its commands through Inner in one\nbatch; the result is their results, in order, or FRAME_INVALID.\n",
+      "file": "service/app/consensus/multi/machine.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*MultiMachine).ApplyBatch",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "ApplyBatch",
+      "recv": "MultiMachine",
+      "spelled": "func(es []coreconsensus.EntryValue, results []any)",
+      "canonical": "func(es []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, results []any)",
+      "doc": "ApplyBatch splits every entry of es and applies all their commands through\nONE call of Inner.ApplyBatch, then writes into results each entry's\nsub-results, a []any of one result per command, or FRAME_INVALID.\n",
+      "file": "service/app/consensus/multi/machine.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*MultiMachine).Restore",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "Restore",
+      "recv": "MultiMachine",
+      "spelled": "func(r io.Reader, meta coreconsensus.SnapshotMetaValue) error",
+      "canonical": "func(r io.Reader, meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
+      "doc": "Restore replaces Inner's state with a snapshot's.\n",
+      "file": "service/app/consensus/multi/machine.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*MultiMachine).Snapshot",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "Snapshot",
+      "recv": "MultiMachine",
+      "spelled": "func() (coreconsensus.Snapshot, error)",
+      "canonical": "func() (github.com/kitsunium/sdk/internal/core/app/consensus.Snapshot, error)",
+      "doc": "Snapshot captures Inner's state.\n",
+      "file": "service/app/consensus/multi/machine.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.NewPacker",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "NewPacker",
+      "spelled": "func(r coreconsensus.Replicated, cfg Config) *Packer",
+      "canonical": "func(r github.com/kitsunium/sdk/internal/core/app/consensus.Replicated, cfg github.com/kitsunium/sdk/internal/service/app/consensus/multi.Config) *github.com/kitsunium/sdk/internal/service/app/consensus/multi.Packer",
+      "doc": "NewPacker starts a Packer proposing through r, bounded by cfg.\n",
+      "file": "service/app/consensus/multi/packer.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.Packer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "Packer",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "Packer packs the commands its callers propose at one moment into one entry\nand proposes it with ONE Propose, then answers each caller with its own\nresult. There is no linger timer (ADR 0152 D6): a command proposed while\nfewer than MaxInFlight entries are in flight leaves at once, and those\nproposed while every one is in flight leave together in the next. The\nnode's state machine must be a MultiMachine. A Packer is safe for\nconcurrent use; Close stops it.\n",
+      "file": "service/app/consensus/multi/packer.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*Packer).Close",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "Close",
+      "recv": "Packer",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Close stops the Packer: a command still queued is answered NODE_STOPPED,\nthe entries in flight are waited for within ctx. When ctx ends first, their\nProposes are cancelled, their callers answered OUTCOME_UNKNOWN, and\nClose returns OUTCOME_UNKNOWN. A second Close waits for the first.\n",
+      "file": "service/app/consensus/multi/packer.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*Packer).Propose",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "Propose",
+      "recv": "Packer",
+      "spelled": "func(ctx context.Context, cmd []byte) (ResultValue, error)",
+      "canonical": "func(ctx context.Context, cmd []byte) (github.com/kitsunium/sdk/internal/service/app/consensus/multi.ResultValue, error)",
+      "doc": "Propose packs cmd with the commands proposed beside it and returns once\ntheir entry is applied locally, with the entry's token, the command's index\nin it and its own result. A command whose packed body would exceed MaxBytes\nalone is ENTRY_TOO_LARGE. A ctx that ends before the command is packed\nanswers ctx.Err(), the command never proposed; once it is packed, the\nanswer is OUTCOME_UNKNOWN, as Propose's. The errors of the entry's Propose\nreach every caller packed in it; a result that is not one per command is\nRESULT_TYPE_MISMATCH, the entry committed and its token returned. A Packer\nclosed answers NODE_STOPPED. The caller may reuse cmd once Propose returns.\n",
+      "file": "service/app/consensus/multi/packer.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.ResultValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+      "name": "ResultValue",
+      "spelled": "struct{Token coreconsensus.TokenValue; Sub int; Value any}",
+      "canonical": "struct{Token github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue; Sub int; Value any}",
+      "fields": [
+        {
+          "name": "Token",
+          "type": "coreconsensus.TokenValue",
+          "doc": "Token is the packed entry's token, shared by every command in it.\n"
+        },
+        {
+          "name": "Sub",
+          "type": "int",
+          "doc": "Sub is the command's index in the entry, in packing order.\n"
+        },
+        {
+          "name": "Value",
+          "type": "any",
+          "doc": "Value is the result Inner's ApplyBatch wrote for the command.\n"
+        }
+      ],
+      "doc": "ResultValue is what a Packer answers one caller: the token of the entry its\ncommand was packed into, the command's index in that entry, and the result\nInner returned for it.\n",
+      "file": "service/app/consensus/multi/packer.go",
       "layer": "service",
       "family": "app"
     },

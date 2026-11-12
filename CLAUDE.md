@@ -216,7 +216,9 @@ internal/
                            consensus — the Raft engine (step function in
                              raft/, wire layouts in wire/), segmented
                              file log, snapshot store, data directory and
-                             offline operations, mTLS transport — ADR 0152;
+                             offline operations, mTLS transport, and
+                             multi/, a packer of many commands into one
+                             entry — ADR 0152;
                            lock — in-process leases + file locker over
                              flock(2) or LockFileEx + keepalive;
                            id — uuidv4, uuidv7, ulid, snowflake, nanoid,

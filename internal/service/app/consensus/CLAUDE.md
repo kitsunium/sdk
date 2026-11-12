@@ -1422,3 +1422,7 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   (`TestBarriersQueuedInOneTurnShareOneRound`,
   `TestLeasedBarriersOpenNoRound`,
   `TestABarrierQueuedAfterTheLoopEndedIsAnswered`).
+- Pack commands into one entry inside the engine: a product of many tiny
+  commands packs them with `multi/`'s `Packer` and `MultiMachine`, on top of
+  `Replicated`, and the log, wire and apply code stay as they are (#926,
+  `multi/CLAUDE.md`, `multi/BENCH.md`).

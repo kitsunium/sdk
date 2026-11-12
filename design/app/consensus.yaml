@@ -4032,6 +4032,197 @@ packages:
         struct:
           unexported: true
   - constants:
+      - blockDoc: The defaults a zero bound of Config clamps to.
+        doc: |-
+          DefaultMaxCommands is the commands one entry carries when
+          Config.MaxCommands is zero.
+        name: DefaultMaxCommands
+        type: int
+        value: "4096"
+      - blockDoc: The defaults a zero bound of Config clamps to.
+        doc: |-
+          DefaultMaxBytes is the largest packed body when Config.MaxBytes is zero:
+          the engine's default MaxEntryBytes.
+        name: DefaultMaxBytes
+        type: int
+        value: 1 << 20
+      - blockDoc: The defaults a zero bound of Config clamps to.
+        doc: |-
+          DefaultMaxInFlight is the packed entries in flight at once when
+          Config.MaxInFlight is zero: one, so every command proposed while an
+          entry is in flight waits for it and leaves in the next.
+        name: DefaultMaxInFlight
+        type: int
+        value: "1"
+    doc: |-
+      Package multi packs many small commands into one consensus entry and splits
+      their results, on top of the Replicated port and with no change to the
+      engine (ADR 0152 D6, D19, #926). A [Packer] packs the commands its callers
+      propose at one moment into one length-prefixed body and issues ONE
+      Propose; a [MultiMachine] on every node splits that body and applies the
+      commands in order through its inner BatchingStateMachine, as one batch,
+      and the Packer answers each caller with the entry's token, the command's
+      index in it and its own result.
+
+      An entry carries a header, a slot, a checksum and an apply result
+      whatever its size: for commands of a few dozen bytes, the entry count,
+      not the bytes, bounds a leader's turn and a follower's parse.
+    functions:
+      - doc: NewPacker starts a Packer proposing through r, bounded by cfg.
+        in:
+          - name: r
+            type: coreconsensus.Replicated
+          - name: cfg
+            type: Config
+        name: NewPacker
+        out:
+          - type: "*Packer"
+    imports:
+      coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+    path: github.com/kitsunium/sdk/internal/service/app/consensus/multi
+    types:
+      - doc: |-
+          Config bounds what a Packer packs into one entry. A zero bound takes its
+          default.
+        name: Config
+        struct:
+          fields:
+            - doc: MaxCommands is the most commands one entry carries.
+              name: MaxCommands
+              type: int
+            - doc: |-
+                MaxBytes is the largest packed body; it must not exceed the node's
+                MaxEntryBytes, or a full entry is refused ENTRY_TOO_LARGE.
+              name: MaxBytes
+              type: int
+            - doc: |-
+                MaxInFlight is the most packed entries proposed and not yet answered;
+                the commands proposed while every one is in flight leave together in
+                the next.
+              name: MaxInFlight
+              type: int
+      - doc: |-
+          MultiMachine is the state machine of a node whose commands a Packer packs:
+          it splits each entry's body into its commands and applies them in order, as
+          one batch, through Inner. The result of an entry is a []any holding one
+          result per command, in the order the Packer packed them, which the Packer
+          hands back to each caller; a body that does not parse is answered
+          FRAME_INVALID, the same on every node, and Inner sees none of it.
+
+          Every command proposed to a node running a MultiMachine must come through a
+          Packer: a body proposed whole does not parse. A sub-entry is a copy of its
+          entry whose Data is the command and whose BodySum is the command's own
+          CRC-32C; ChainSum is zero. Inner may keep a sub-entry's Data: it is a slice
+          of the entry's payload, capped at the command's end. Apply and ApplyBatch
+          run on the apply goroutine, one call at a time, as the engine calls them; a
+          MultiMachine is not shared between nodes. It forwards no sibling port of
+          Inner's: a node running it keeps its state in memory.
+        methods:
+          - doc: |-
+              Apply splits e's body and applies its commands through Inner in one
+              batch; the result is their results, in order, or FRAME_INVALID.
+            in:
+              - name: e
+                type: coreconsensus.EntryValue
+            name: Apply
+            out:
+              - type: any
+            recv: pointer
+          - doc: |-
+              ApplyBatch splits every entry of es and applies all their commands through
+              ONE call of Inner.ApplyBatch, then writes into results each entry's
+              sub-results, a []any of one result per command, or FRAME_INVALID.
+            in:
+              - name: es
+                type: "[]coreconsensus.EntryValue"
+              - name: results
+                type: "[]any"
+            name: ApplyBatch
+            recv: pointer
+          - doc: Snapshot captures Inner's state.
+            name: Snapshot
+            out:
+              - type: coreconsensus.Snapshot
+              - type: error
+            recv: pointer
+          - doc: Restore replaces Inner's state with a snapshot's.
+            in:
+              - name: r
+                type: io.Reader
+              - name: meta
+                type: coreconsensus.SnapshotMetaValue
+            name: Restore
+            out:
+              - type: error
+            recv: pointer
+        name: MultiMachine
+        struct:
+          fields:
+            - doc: Inner applies the commands.
+              name: Inner
+              type: coreconsensus.BatchingStateMachine
+          unexported: true
+      - doc: |-
+          Packer packs the commands its callers propose at one moment into one entry
+          and proposes it with ONE Propose, then answers each caller with its own
+          result. There is no linger timer (ADR 0152 D6): a command proposed while
+          fewer than MaxInFlight entries are in flight leaves at once, and those
+          proposed while every one is in flight leave together in the next. The
+          node's state machine must be a MultiMachine. A Packer is safe for
+          concurrent use; Close stops it.
+        methods:
+          - doc: |-
+              Propose packs cmd with the commands proposed beside it and returns once
+              their entry is applied locally, with the entry's token, the command's index
+              in it and its own result. A command whose packed body would exceed MaxBytes
+              alone is ENTRY_TOO_LARGE. A ctx that ends before the command is packed
+              answers ctx.Err(), the command never proposed; once it is packed, the
+              answer is OUTCOME_UNKNOWN, as Propose's. The errors of the entry's Propose
+              reach every caller packed in it; a result that is not one per command is
+              RESULT_TYPE_MISMATCH, the entry committed and its token returned. A Packer
+              closed answers NODE_STOPPED. The caller may reuse cmd once Propose returns.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: cmd
+                type: "[]byte"
+            name: Propose
+            out:
+              - type: ResultValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              Close stops the Packer: a command still queued is answered NODE_STOPPED,
+              the entries in flight are waited for within ctx. When ctx ends first, their
+              Proposes are cancelled, their callers answered OUTCOME_UNKNOWN, and
+              Close returns OUTCOME_UNKNOWN. A second Close waits for the first.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Packer
+        struct:
+          unexported: true
+      - doc: |-
+          ResultValue is what a Packer answers one caller: the token of the entry its
+          command was packed into, the command's index in that entry, and the result
+          Inner returned for it.
+        name: ResultValue
+        struct:
+          fields:
+            - doc: Token is the packed entry's token, shared by every command in it.
+              name: Token
+              type: coreconsensus.TokenValue
+            - doc: Sub is the command's index in the entry, in packing order.
+              name: Sub
+              type: int
+            - doc: Value is the result Inner's ApplyBatch wrote for the command.
+              name: Value
+              type: any
+  - constants:
       - blockDoc: The facts a PeerStatValue carries.
         doc: StatVoter is set for a voter, clear for a learner.
         name: StatVoter

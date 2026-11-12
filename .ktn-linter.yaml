@@ -1582,6 +1582,16 @@ rules:
   # finding (KTN-STRUCT-ROLE-COMPATALIAS). Scoped to the one file.
   KTN-STRUCT-ROLE:
     exclude:
+      # service/app/consensus/multi.Machine is the state machine of ADR 0152
+      # D3, the role every engine of the domain names its applier by —
+      # coreconsensus.StateMachine, BatchingStateMachine, machine.SQL — and
+      # the word the Packer's contract is written in ("the node's state
+      # machine must be a Machine"). The suffix the rule infers would read
+      # multi.MachineService and name the applier differently from the port it
+      # implements, the docstore.Store argument below (#926). Scoped to the
+      # one file.
+      - "**/internal/service/app/consensus/multi/machine.go"
+      - "internal/service/app/consensus/multi/machine.go"
       # kernel/jsonenc.Object is a value — two words, copied by every member
       # method, and a stale copy is a snapshot — but the rule infers "Service"
       # from its methods and unexported fields. "Object" is JSON's word for what
