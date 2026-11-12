@@ -114,6 +114,8 @@ sequences:
         kind: internal
       - id: s.planBatch
         kind: internal
+      - id: s.feedBatch
+        kind: internal
       - id: s.publishGroup
         kind: internal
       - id: s.mu.Lock
@@ -148,6 +150,14 @@ sequences:
           do:
             - return: false, planErr
           when: planErr != nil
+      - opt:
+          do:
+            - return: false, feedErr
+          init:
+            bind: feedErr
+            eval: s.feedBatch(plan)
+            to: s.feedBatch
+          when: feedErr != nil
       - bind: groupErr
         eval: s.publishGroup(plan)
         to: s.publishGroup
@@ -479,6 +489,201 @@ sequences:
       - set: s.lingering
         value: nil
       - return: nil
+  - of: changeFeed.on
+    steps:
+      - return: f.stream != nil
+  - of: changeFeed.record
+    participants:
+      - id: caller
+        kind: actor
+      - id: changeFeed.record
+        kind: self
+      - id: json
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - set: change.Document
+              value: raw
+          when: f.withDocument && change.Op != coredocstore.ChangeDelete
+      - bind: payload, err
+        eval: json.Marshal(change)
+        to: json
+      - opt:
+          do:
+            - return: |-
+                corestream.RecordValue{}, kerrs.Wrap(coredocstore.ChangeFeedFailed, kerrs.WrapParams{},
+                			kerrs.String("store", store), kerrs.String("op", string(change.Op)), kerrs.String("cause", encodeCause(err)))
+          when: err != nil
+      - return: "corestream.RecordValue{Key: []byte(change.Key), Payload: payload}, nil"
+  - of: changeFeed.append
+    participants:
+      - id: caller
+        kind: actor
+      - id: changeFeed.append
+        kind: self
+      - id: f.stream.Append
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: _, err
+        eval: f.stream.Append(ctx, records)
+        to: f.stream.Append
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: |-
+          errors.Join(
+          		kerrs.Wrap(coredocstore.ChangeFeedFailed, kerrs.WrapParams{}, kerrs.String("store", store), kerrs.String("op", op)),
+          		err)
+        to: errors
+  - of: validateChanges
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateChanges
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("ChangesWithDocument", "set without Changes")
+              to: misconfigured
+          when: withDocument && stream == nil
+      - return: nil
+  - of: (*Store).changeVersion
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: op == coredocstore.ChangeDelete || s.keep == 0
+      - opt:
+          do:
+            - return: "1"
+          when: record == nil
+      - return: record.Current.Number
+  - of: (*Store).feed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).feed
+        kind: self
+      - id: s.changes.record
+        kind: internal
+      - id: s.changes.append
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!s.changes.on()"
+      - bind: rec, err
+        eval: "s.changes.record(s.path, coredocstore.ChangeValue{At: s.now(), Key: key, Op: op, Version: s.changeVersion(op, record)}, raw)"
+        to: s.changes.record
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: s.changes.append(context.Background(), s.path, string(op), []corestream.RecordValue{rec})
+        to: s.changes.append
+  - of: (*Store).feedBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).feedBatch
+        kind: self
+      - id: s.now
+        kind: internal
+      - id: s.changes.record
+        kind: internal
+      - id: s.changes.append
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!s.changes.on()"
+      - bind: now
+        eval: s.now()
+        to: s.now
+      - loop:
+          do:
+            - bind: op
+              eval: coredocstore.ChangePut
+            - opt:
+                do:
+                  - set: op
+                    value: coredocstore.ChangeDelete
+                when: k.deleted
+            - bind: rec, err
+              eval: "s.changes.record(s.path, coredocstore.ChangeValue{At: now, Key: k.key, Op: op, Version: s.changeVersion(op, k.versions)}, k.raw)"
+              to: s.changes.record
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
+                  - return: appendErr
+                init:
+                  bind: appendErr
+                  eval: s.changes.append(context.Background(), s.path, "batch", []corestream.RecordValue{rec})
+                  to: s.changes.append
+                when: appendErr != nil
+          key: _
+          range: plan.keys
+          value: k
+      - return: nil
+  - of: (*Store).ChangeStream
+    steps:
+      - return: s.changes.stream, s.changes.on()
+  - of: (*SQLStore).feedIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).feedIn
+        kind: self
+      - id: s.readHead
+        kind: internal
+      - id: s.changes.record
+        kind: internal
+      - id: s.changes.append
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!s.changes.on()"
+      - var:
+          name: version
+          type: uint64
+      - opt:
+          do:
+            - bind: head, _, err
+              eval: s.readHead(ctx, ex, key)
+              to: s.readHead
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: version
+              value: head
+          when: op != coredocstore.ChangeDelete && s.keep > 0
+      - bind: rec, err
+        eval: "s.changes.record(s.table, coredocstore.ChangeValue{At: s.clock.Now().UTC(), Key: key, Op: op, Version: version}, raw)"
+        to: s.changes.record
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: s.changes.append(ctx, s.table, string(op), []corestream.RecordValue{rec})
+        to: s.changes.append
+  - of: (*SQLStore).ChangeStream
+    steps:
+      - return: s.changes.stream, s.changes.on()
   - of: (*Config).validate
     participants:
       - id: caller
@@ -490,6 +695,8 @@ sequences:
       - id: c.validatePath
         kind: internal
       - id: validateVersions
+        kind: internal
+      - id: validateChanges
         kind: internal
       - id: validateIndexes
         kind: internal
@@ -515,6 +722,14 @@ sequences:
             eval: validateVersions(c.Versions, c.Held != nil)
             to: validateVersions
           when: versionsErr != nil
+      - opt:
+          do:
+            - return: changesErr
+          init:
+            bind: changesErr
+            eval: validateChanges(c.Changes, c.ChangesWithDocument)
+            to: validateChanges
+          when: changesErr != nil
       - return: validateIndexes(indexes)
         to: validateIndexes
   - of: validateVersions
@@ -2540,6 +2755,7 @@ sequences:
           		versionsPath: cfg.Path + versionsSuffix,
           		foldAt:       cfg.FoldAt,
           		keep:         cfg.Versions,
+          		changes:      changeFeed{stream: cfg.Changes, withDocument: cfg.ChangesWithDocument},
           	}
       - opt:
           do:
@@ -3531,6 +3747,8 @@ sequences:
         kind: internal
       - id: validateVersions
         kind: internal
+      - id: validateChanges
+        kind: internal
       - id: validateSQLIndexes
         kind: internal
     steps:
@@ -3565,6 +3783,14 @@ sequences:
             eval: validateVersions(c.Versions, c.Held != nil)
             to: validateVersions
           when: versionsErr != nil
+      - opt:
+          do:
+            - return: txParts{}, changesErr
+          init:
+            bind: changesErr
+            eval: validateChanges(c.Changes, c.ChangesWithDocument)
+            to: validateChanges
+          when: changesErr != nil
       - opt:
           do:
             - return: txParts{}, ixErr
@@ -4923,6 +5149,7 @@ sequences:
           		indexes:  indexes,
           		own:      ownTxOptions(cfg.Dialect),
           		keep:     cfg.Versions,
+          		changes:  changeFeed{stream: cfg.Changes, withDocument: cfg.ChangesWithDocument},
           	}
       - opt:
           do:
@@ -5592,6 +5819,8 @@ sequences:
         kind: internal
       - id: s.insertVersionRows
         kind: internal
+      - id: s.feedIn
+        kind: internal
     steps:
       - var:
           name: raw
@@ -5632,8 +5861,16 @@ sequences:
                   to: ex.ExecContext
                 when: err != nil
           when: len(s.indexes) > 0
-      - return: "s.insertVersionRows(ctx, ex, key, []versionRow{{at: new(s.clock.Now().UTC()), doc: raw, num: uint64(tombstoneNum)}})"
-        to: s.insertVersionRows
+      - opt:
+          do:
+            - return: insertErr
+          init:
+            bind: insertErr
+            eval: "s.insertVersionRows(ctx, ex, key, []versionRow{{at: new(s.clock.Now().UTC()), doc: raw, num: uint64(tombstoneNum)}})"
+            to: s.insertVersionRows
+          when: insertErr != nil
+      - return: s.feedIn(ctx, ex, coredocstore.ChangeTrash, key, raw)
+        to: s.feedIn
   - of: (*SQLStore).restore
     participants:
       - id: caller
@@ -5657,6 +5894,8 @@ sequences:
       - id: ex.ExecContext
         kind: value
       - id: s.failed
+        kind: internal
+      - id: s.feedIn
         kind: internal
     steps:
       - bind: num, raw, found, err
@@ -5717,7 +5956,8 @@ sequences:
             eval: ex.ExecContext(ctx, s.stmts.dropTombstone, []byte(key))
             to: ex.ExecContext
           when: execErr != nil
-      - return: nil
+      - return: s.feedIn(ctx, ex, coredocstore.ChangeRestore, key, raw)
+        to: s.feedIn
   - of: (*SQLStore).purge
     participants:
       - id: caller
@@ -5731,6 +5971,8 @@ sequences:
       - id: ex.ExecContext
         kind: value
       - id: s.failed
+        kind: internal
+      - id: s.feedIn
         kind: internal
     steps:
       - bind: num, _, found, err
@@ -5754,7 +5996,8 @@ sequences:
             eval: ex.ExecContext(ctx, s.stmts.dropVersions, []byte(key))
             to: ex.ExecContext
           when: execErr != nil
-      - return: nil
+      - return: s.feedIn(ctx, ex, coredocstore.ChangeDelete, key, nil)
+        to: s.feedIn
   - of: (*SQLStore).firstVersion
     participants:
       - id: caller
@@ -6481,11 +6724,17 @@ sequences:
         kind: self
       - id: s.keyTaken
         kind: internal
-      - id: s.insertVersionRows
+      - id: versionRowsOf
+        kind: internal
+      - id: s.putTrashed
         kind: internal
       - id: s.insertRow
         kind: internal
       - id: s.fileIndexes
+        kind: internal
+      - id: s.insertVersionRows
+        kind: internal
+      - id: s.feedIn
         kind: internal
     steps:
       - opt:
@@ -6497,27 +6746,12 @@ sequences:
             to: s.keyTaken
           when: err != nil
       - bind: rows
-        eval: make([]versionRow, 0, len(given)+1)
-      - loop:
-          do:
-            - bind: row
-              eval: "versionRow{at: knownInstant(v.At), meta: v.Meta, num: v.Number}"
-            - opt:
-                do:
-                  - set: row.doc
-                    value: v.JSON
-                when: i > 0
-            - set: rows
-              value: append(rows, row)
-          key: i
-          range: given
-          value: v
+        eval: versionRowsOf(given)
+        to: versionRowsOf
       - opt:
           do:
-            - set: rows
-              value: "append(rows, versionRow{at: new(trashedAt.UTC()), doc: p.raw, num: uint64(tombstoneNum)})"
-            - return: s.insertVersionRows(ctx, ex, p.key, rows)
-              to: s.insertVersionRows
+            - return: "s.putTrashed(ctx, ex, p, append(rows, versionRow{at: new(trashedAt.UTC()), doc: p.raw, num: uint64(tombstoneNum)}))"
+              to: s.putTrashed
           when: "!trashedAt.IsZero()"
       - opt:
           do:
@@ -6535,8 +6769,37 @@ sequences:
             eval: s.fileIndexes(ctx, ex, p, false)
             to: s.fileIndexes
           when: fileErr != nil
-      - return: s.insertVersionRows(ctx, ex, p.key, rows)
-        to: s.insertVersionRows
+      - opt:
+          do:
+            - return: insertErr
+          init:
+            bind: insertErr
+            eval: s.insertVersionRows(ctx, ex, p.key, rows)
+            to: s.insertVersionRows
+          when: insertErr != nil
+      - return: s.feedIn(ctx, ex, coredocstore.ChangePut, p.key, p.raw)
+        to: s.feedIn
+  - of: (*SQLStore).putTrashed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLStore).putTrashed
+        kind: self
+      - id: s.insertVersionRows
+        kind: internal
+      - id: s.feedIn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: insertErr
+          init:
+            bind: insertErr
+            eval: s.insertVersionRows(ctx, ex, p.key, rows)
+            to: s.insertVersionRows
+          when: insertErr != nil
+      - return: s.feedIn(ctx, ex, coredocstore.ChangeTrash, p.key, p.raw)
+        to: s.feedIn
   - of: (*SQLStore).keyTaken
     participants:
       - id: caller
@@ -6766,6 +7029,8 @@ sequences:
         kind: internal
       - id: s.keepVersions
         kind: internal
+      - id: s.feedIn
+        kind: internal
     steps:
       - bind: existed, old, writeErr
         eval: s.writeDocument(ctx, ex, p, mode)
@@ -6781,6 +7046,12 @@ sequences:
             - set: writeErr
               to: s.keepVersions
               value: "s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: old, raw: p.raw, key: p.key, existed: existed, inPlace: stamp.InPlace})"
+          when: writeErr == nil
+      - opt:
+          do:
+            - set: writeErr
+              to: s.feedIn
+              value: s.feedIn(ctx, ex, coredocstore.ChangePut, p.key, p.raw)
           when: writeErr == nil
       - return: writeErr
   - of: (*SQLStore).run
@@ -6925,7 +7196,7 @@ sequences:
       - return: rows, nil
   - of: (*SQLStore).several
     steps:
-      - return: len(s.indexes) > 0 || s.keep > 0
+      - return: len(s.indexes) > 0 || s.keep > 0 || s.changes.on()
   - of: (*SQLStore).writeDocument
     participants:
       - id: caller
@@ -7186,6 +7457,8 @@ sequences:
         kind: internal
       - id: s.fileIndexes
         kind: internal
+      - id: s.keepVersions
+        kind: internal
     steps:
       - var:
           name: zero
@@ -7245,7 +7518,15 @@ sequences:
             eval: s.fileIndexes(ctx, ex, p, true)
             to: s.fileIndexes
           when: fileErr != nil
-      - return: "v, s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: raw, raw: p.raw, key: key, existed: true, inPlace: stamp.InPlace})"
+      - opt:
+          do:
+            - return: zero, versionsErr
+          init:
+            bind: versionsErr
+            eval: "s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: raw, raw: p.raw, key: key, existed: true, inPlace: stamp.InPlace})"
+            to: s.keepVersions
+          when: versionsErr != nil
+      - return: v, s.feedIn(ctx, ex, coredocstore.ChangePut, key, p.raw)
   - of: (*SQLStore).remove
     participants:
       - id: caller
@@ -7257,6 +7538,8 @@ sequences:
       - id: s.affected
         kind: internal
       - id: s.failed
+        kind: internal
+      - id: s.feedIn
         kind: internal
     steps:
       - bind: result, execErr
@@ -7294,7 +7577,8 @@ sequences:
                   to: ex.ExecContext
                 when: err != nil
           when: s.keep > 0
-      - return: nil
+      - return: s.feedIn(ctx, ex, coredocstore.ChangeDelete, key, nil)
+        to: s.feedIn
   - of: (*SQLStore).fileIndexes
     participants:
       - id: caller
@@ -7599,6 +7883,8 @@ sequences:
         kind: internal
       - id: notTrashed
         kind: internal
+      - id: s.feed
+        kind: internal
       - id: s.persist
         kind: internal
       - id: s.mu.Lock
@@ -7633,6 +7919,14 @@ sequences:
             eval: s.trashedRecord(key)
             to: s.trashedRecord
           when: "!trashed"
+      - opt:
+          do:
+            - return: feedErr
+          init:
+            bind: feedErr
+            eval: s.feed(coredocstore.ChangeDelete, key, nil, nil)
+            to: s.feed
+          when: feedErr != nil
       - bind: persistErr
         eval: s.persist(key, nil, true, nil)
         to: s.persist
@@ -7708,6 +8002,8 @@ sequences:
         kind: actor
       - id: (*Store).trash
         kind: self
+      - id: s.feed
+        kind: internal
       - id: s.persist
         kind: internal
       - id: s.mu.Lock
@@ -7756,6 +8052,14 @@ sequences:
           		Former:  former,
           		Current: head,
           	}
+      - opt:
+          do:
+            - return: false, feedErr
+          init:
+            bind: feedErr
+            eval: s.feed(coredocstore.ChangeTrash, key, next.Trashed.Document, next)
+            to: s.feed
+          when: feedErr != nil
       - bind: persistErr
         eval: s.persist(key, nil, true, next)
         to: s.persist
@@ -7790,6 +8094,8 @@ sequences:
       - id: s.indexKeys
         kind: internal
       - id: s.uniqueTaken
+        kind: internal
+      - id: s.feed
         kind: internal
       - id: s.persist
         kind: internal
@@ -7845,6 +8151,14 @@ sequences:
           when: taken
       - bind: next
         eval: "&versionsRecord{Current: record.Current, Former: record.Former}"
+      - opt:
+          do:
+            - return: false, feedErr
+          init:
+            bind: feedErr
+            eval: s.feed(coredocstore.ChangeRestore, key, raw, next)
+            to: s.feed
+          when: feedErr != nil
       - bind: persistErr
         eval: s.persist(key, raw, false, next)
         to: s.persist
@@ -8425,25 +8739,7 @@ sequences:
         kind: self
       - id: s.preparedDocument
         kind: internal
-      - id: recordOf
-        kind: internal
-      - id: trashedAt.IsZero
-        kind: value
-      - id: s.uniqueTaken
-        kind: internal
-      - id: s.persistDocument
-        kind: internal
-      - id: s.mu.Lock
-        kind: value
-      - id: s.file
-        kind: internal
-      - id: s.setVersions
-        kind: internal
-      - id: s.markPending
-        kind: internal
-      - id: s.mu.Unlock
-        kind: value
-      - id: s.maybeFold
+      - id: s.putLocked
         kind: internal
     steps:
       - opt:
@@ -8469,6 +8765,25 @@ sequences:
           do:
             - return: false, kerrs.Wrap(coredocstore.DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.path))
           when: stored || s.versions[key] != nil
+      - return: s.putLocked(key, &doc, trashedAt)
+        to: s.putLocked
+  - of: (*Store).putLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).putLocked
+        kind: self
+      - id: recordOf
+        kind: internal
+      - id: trashedAt.IsZero
+        kind: value
+      - id: s.uniqueTaken
+        kind: internal
+      - id: s.feed
+        kind: internal
+      - id: s.commitDocument
+        kind: internal
+    steps:
       - bind: record
         eval: recordOf(doc.given)
         to: recordOf
@@ -8488,6 +8803,44 @@ sequences:
             eval: s.uniqueTaken(key, doc.keys)
             to: s.uniqueTaken
           when: "!trashed && taken"
+      - opt:
+          do:
+            - return: false, feedErr
+          init:
+            bind: feedErr
+            eval: s.feed(putOp(trashed), key, doc.raw, record)
+            to: s.feed
+          when: feedErr != nil
+      - return: s.commitDocument(key, doc, trashed, record)
+        to: s.commitDocument
+  - of: putOp
+    steps:
+      - opt:
+          do:
+            - return: coredocstore.ChangeTrash
+          when: trashed
+      - return: coredocstore.ChangePut
+  - of: (*Store).commitDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).commitDocument
+        kind: self
+      - id: s.persistDocument
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.file
+        kind: internal
+      - id: s.setVersions
+        kind: internal
+      - id: s.markPending
+        kind: internal
+      - id: s.mu.Unlock
+        kind: value
+      - id: s.maybeFold
+        kind: internal
+    steps:
       - bind: persistErr
         eval: s.persistDocument(key, doc.raw, trashed, record)
         to: s.persistDocument
@@ -8972,6 +9325,8 @@ sequences:
         kind: internal
       - id: s.nextVersions
         kind: internal
+      - id: s.feed
+        kind: internal
       - id: s.persist
         kind: internal
       - id: s.mu.Lock
@@ -8998,6 +9353,14 @@ sequences:
       - bind: versions
         eval: s.nextVersions(p.key, p.raw, stamp)
         to: s.nextVersions
+      - opt:
+          do:
+            - return: false, feedErr
+          init:
+            bind: feedErr
+            eval: s.feed(coredocstore.ChangePut, p.key, p.raw, versions)
+            to: s.feed
+          when: feedErr != nil
       - bind: persistErr
         eval: s.persist(p.key, p.raw, false, versions)
         to: s.persist
@@ -9026,6 +9389,8 @@ sequences:
         kind: actor
       - id: (*Store).remove
         kind: self
+      - id: s.feed
+        kind: internal
       - id: s.persist
         kind: internal
       - id: s.mu.Lock
@@ -9054,6 +9419,14 @@ sequences:
             bind: _, found
             eval: s.docs[key]
           when: "!found"
+      - opt:
+          do:
+            - return: false, feedErr
+          init:
+            bind: feedErr
+            eval: s.feed(coredocstore.ChangeDelete, key, nil, nil)
+            to: s.feed
+          when: feedErr != nil
       - bind: persistErr
         eval: s.persist(key, nil, true, nil)
         to: s.persist

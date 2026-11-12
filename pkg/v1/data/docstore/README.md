@@ -162,6 +162,10 @@ for key, err := range pages.Keys("") {
   - [func \(Batcher\) Batch\(fn func\(w BatchWriter\[T\]\) error\) error](<#Batcher.Batch>)
 - [type BatcherContext](<#BatcherContext>)
   - [func \(BatcherContext\) Batch\(ctx context.Context, fn func\(w BatchWriter\[T\]\) error\) error](<#BatcherContext.Batch>)
+- [type Change](<#Change>)
+- [type ChangeFeeder](<#ChangeFeeder>)
+  - [func \(ChangeFeeder\) ChangeStream\(\) \(changes corestream.Stream, ok bool\)](<#ChangeFeeder.ChangeStream>)
+- [type ChangeOp](<#ChangeOp>)
 - [type Collection](<#Collection>)
   - [func \(Collection\) Delete\(key string\) error](<#Collection.Delete>)
   - [func \(Collection\) Entries\(limit int\) \(\[\]EntryValue, error\)](<#Collection.Entries>)
@@ -217,6 +221,7 @@ for key, err := range pages.Keys("") {
 - [type SQLConfig](<#SQLConfig>)
 - [type SQLStore](<#SQLStore>)
   - [func \(\*SQLStore\) Batch\(ctx context.Context, fn func\(w coredocstore.BatchWriter\[T\]\) error\) error](<#SQLStore.Batch>)
+  - [func \(\*SQLStore\) ChangeStream\(\) \(changes corestream.Stream, ok bool\)](<#SQLStore.ChangeStream>)
   - [func \(\*SQLStore\) Count\(ctx context.Context\) \(int, error\)](<#SQLStore.Count>)
   - [func \(\*SQLStore\) Delete\(ctx context.Context, key string\) error](<#SQLStore.Delete>)
   - [func \(\*SQLStore\) Documents\(ctx context.Context, after string, limit int\) iter.Seq2\[coredocstore.EntryValue, error\]](<#SQLStore.Documents>)
@@ -256,6 +261,7 @@ for key, err := range pages.Keys("") {
 - [type Stats](<#Stats>)
 - [type Store](<#Store>)
   - [func \(\*Store\) Batch\(fn func\(w coredocstore.BatchWriter\[T\]\) error\) error](<#Store.Batch>)
+  - [func \(\*Store\) ChangeStream\(\) \(changes corestream.Stream, ok bool\)](<#Store.ChangeStream>)
   - [func \(\*Store\) Close\(\) error](<#Store.Close>)
   - [func \(\*Store\) Delete\(key string\) error](<#Store.Delete>)
   - [func \(\*Store\) Documents\(after string, limit int\) iter.Seq2\[coredocstore.EntryValue, error\]](<#Store.Documents>)
@@ -331,6 +337,53 @@ for key, err := range pages.Keys("") {
   - [func \(VersionedContext\) Versions\(ctx context.Context, key string\) \(\[\]VersionValue, error\)](<#VersionedContext.Versions>)
 
 ## Constants
+
+<a name="ChangeDelete"></a>
+```go
+const ChangeDelete ChangeOp = "delete"
+```
+
+ChangeDelete records a document removed for good, by Delete or Purge.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.ChangeDelete`.
+
+<a name="ChangePut"></a>
+```go
+const ChangePut ChangeOp = "put"
+```
+
+ChangePut records a document stored.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.ChangePut`.
+
+<a name="ChangeRestore"></a>
+```go
+const ChangeRestore ChangeOp = "restore"
+```
+
+ChangeRestore records a document brought back from the trash.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.ChangeRestore`.
+
+<a name="ChangeTrash"></a>
+```go
+const ChangeTrash ChangeOp = "trash"
+```
+
+ChangeTrash records a document moved to the trash.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.ChangeTrash`.
+
+<a name="CodeChangeFeedFailed"></a>
+```go
+const CodeChangeFeedFailed errs.Code = 217113
+```
+
+CodeChangeFeedFailed: a write whose change record the change stream refused.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodeChangeFeedFailed`.
+
+Code `0.3.80.25`
 
 <a name="CodeDocumentExists"></a>
 ```go
@@ -633,6 +686,17 @@ MaxSQLTableLen is the longest table name [OpenSQL](#OpenSQL) and [SQLMigration](
 Initialised with `github.com/kitsunium/sdk/internal/service/data/docstore.MaxSQLTableLen`.
 
 ## Variables
+
+<a name="ChangeFeedFailed"></a>
+```go
+var ChangeFeedFailed *errs.Error
+```
+
+ChangeFeedFailed refuses a write whose change record the change stream refused; nothing was written.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.ChangeFeedFailed`.
+
+Code `0.3.80.25` · reason `CHANGE_FEED_FAILED` · public "The change could not be recorded, so the document was not written"
 
 <a name="DocumentExists"></a>
 ```go
@@ -1120,6 +1184,83 @@ func (BatcherContext) Batch(ctx context.Context, fn func(w BatchWriter[T]) error
 
 Batch is Batcher.Batch under ctx, in one transaction.
 
+<a name="Change"></a>
+## type [Change](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+Change is the public alias for one change record of a store's change feed, the JSON payload of the stream record a write appends: its Op, the document's Key and Version, the instant At, and the Document when the store was configured with ChangesWithDocument.
+
+```go
+type Change = coredocstore.ChangeValue
+```
+
+Change is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.ChangeValue`, declared as:
+
+```go
+type Change struct {
+	// At is when the write ran, in UTC, read from the store's clock and
+	// kept to the nanosecond.
+	At       time.Time       `json:"at"`
+	// Document is the document's JSON as the store holds it, compact: the
+	// stored document for a put or a restore, the trashed one for a trash.
+	// It is there only when the store was configured with its
+	// ChangesWithDocument, and never for a delete.
+	Document json.RawMessage `json:"doc,omitempty"`
+	// Key is the document's key.
+	Key      string          `json:"key"`
+	// Op is what the write did.
+	Op       ChangeOp        `json:"op"`
+	// Version is the number of the document's current version once the
+	// write stood — the one a put or a restore leaves, the trashed
+	// document's for a trash —, as [Versioned].Versions numbers them; 1
+	// for a document stored before its store kept versions, and 0 for a
+	// delete and on a store that keeps no versions.
+	Version  uint64          `json:"version,omitempty"`
+}
+```
+
+<a name="ChangeFeeder"></a>
+## type [ChangeFeeder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+ChangeFeeder is the public alias for a store that writes a change record of each write to a stream; both stores are one, and ChangeStream returns the stream their configuration's Changes named.
+
+```go
+type ChangeFeeder = coredocstore.ChangeFeeder
+```
+
+ChangeFeeder is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.ChangeFeeder`, declared as:
+
+```go
+type ChangeFeeder interface {
+	// ChangeStream returns the stream the store writes its change records
+	// to, and false when it was given none.
+	ChangeStream() (changes corestream.Stream, ok bool)
+}
+```
+
+<a name="ChangeFeeder.ChangeStream"></a>
+### func \(ChangeFeeder\) [ChangeStream](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (ChangeFeeder) ChangeStream() (changes corestream.Stream, ok bool)
+```
+
+ChangeStream returns the stream the store writes its change records to, and false when it was given none.
+
+<a name="ChangeOp"></a>
+## type [ChangeOp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+ChangeOp is the public alias for what a change record says a write did.
+
+```go
+type ChangeOp = coredocstore.ChangeOp
+```
+
+ChangeOp is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.ChangeOp`, declared as:
+
+```go
+type ChangeOp string
+```
+
 <a name="Collection"></a>
 ## type [Collection](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
@@ -1377,7 +1518,7 @@ Update is Collection.Update under ctx: fn runs inside the write's transaction, a
 <a name="Config"></a>
 ## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-Config is the public alias for a store's configuration: Key (required), FS and Path (both, or neither for a memory store), FoldAt, and Versions with its Clock and Held.
+Config is the public alias for a store's configuration: Key (required), FS and Path (both, or neither for a memory store), FoldAt, Versions with its Clock and Held, and the change feed Changes with ChangesWithDocument.
 
 ```go
 type Config[T any] = svcdocstore.Config[T]
@@ -1390,15 +1531,15 @@ type Config[T any] struct {
 	// Key returns the key a document is stored under. It must be a pure
 	// function of the document: the store calls it to file every write and
 	// compares its answers to refuse an update that would rename a document.
-	Key      func(T) string
+	Key                 func(T) string
 	// FS is where the store persists, and Path is the snapshot's name inside
 	// it — an io/fs name such as "shop/items.json". The overlay lives beside
 	// the snapshot, in the directory Path + ".d". A nil FS keeps the store in
 	// memory: nothing survives the process, and nothing is written anywhere.
-	FS       corevfs.FullFS
+	FS                  corevfs.FullFS
 	// Clock stamps each version with the instant of the write that made it.
 	// Nil is the system clock.
-	Clock    clock.Clock
+	Clock               clock.Clock
 	// Held reports whether the document stored under key is held — a legal
 	// hold — so that no write prunes its versions: they pile up beyond
 	// Versions until a write finds the document released, and that write
@@ -1406,16 +1547,16 @@ type Config[T any] struct {
 	// prune, under the writers' lock, so it may read this store and must not
 	// write to it; a panic in it reaches the writer, and nothing is written.
 	// Nil holds nothing. It is refused without Versions.
-	Held     func(key string) bool
+	Held                func(key string) bool
 	// Path is the snapshot's name inside FS. It is required with FS and
 	// refused without it, because a path with nowhere to be written is a
 	// store that would silently keep nothing.
-	Path     string
+	Path                string
 	// FoldAt is how many overlay entries fold the overlay into the snapshot
 	// on the write that reaches it. Zero is the default rule: as many entries
 	// as the store holds documents, and at least [DefaultFoldAt]. A negative
 	// value never folds on a write; Fold, Open and Close still do.
-	FoldAt   int
+	FoldAt              int
 	// Versions is how many former versions each document keeps beside its
 	// current one, the newest: a write that changes a document makes a new
 	// version, and prunes the oldest beyond Versions in the same durable
@@ -1425,7 +1566,23 @@ type Config[T any] struct {
 	// ran, and a store opened with zero over files that keep versions is
 	// refused rather than left to drop or corrupt them (ADR 0143). A store
 	// that keeps versions has a trash, Trash's; one that keeps none has none.
-	Versions int
+	Versions            int
+	// Changes is the store's change feed (kitsunium/sdk#831): every write
+	// that stands appends one record to it — keyed by the document's key,
+	// its payload a [coredocstore.ChangeValue] as JSON — under the
+	// writers' lock and BEFORE the write's overlay entry is published, so
+	// the records of a key are in the order its writes stood. A crash
+	// between the two leaves a record of a write that did not land: the
+	// feed is at least once, and a reader skips a record whose version
+	// the store does not hold. A record the stream refuses refuses the
+	// write, ChangeFeedFailed, nothing written. A batch appends one record
+	// per key it wrote, its final state. Nil writes no
+	// record.
+	Changes             corestream.Stream
+	// ChangesWithDocument puts the document's JSON in each change record
+	// of a put, a restore and a trash, so a reader rebuilds the store from
+	// the feed alone. It is refused without Changes.
+	ChangesWithDocument bool
 }
 ```
 
@@ -1804,7 +1961,7 @@ Revision is Revisioned.Revision under ctx, read in one statement on the transact
 <a name="SQLConfig"></a>
 ## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-SQLConfig is the public alias for a SQL store's configuration: Key, Transactor, Dialect and Table (required), IndexKey, and Versions with its Clock and Held.
+SQLConfig is the public alias for a SQL store's configuration: Key, Transactor, Dialect and Table (required), IndexKey, Versions with its Clock and Held, and the change feed Changes with ChangesWithDocument.
 
 ```go
 type SQLConfig[T any] = svcdocstore.SQLConfig[T]
@@ -1816,21 +1973,21 @@ SQLConfig is an alias of `github.com/kitsunium/sdk/internal/service/data/docstor
 type SQLConfig[T any] struct {
 	// Key returns the key a document is stored under, as for [Open]: a pure
 	// function of the document, compared byte for byte.
-	Key        func(T) string
+	Key                 func(T) string
 	// Clock stamps each version with the instant of the write that made it.
 	// Nil is the system clock.
-	Clock      clock.Clock
+	Clock               clock.Clock
 	// Held reports whether the document stored under key is held — a legal
 	// hold — so that no write prunes its versions, as for [Open]. It is
 	// called by a write that would prune, inside that write's transaction
 	// and with its context, so a read it makes through the same transactor
 	// joins it. Nil holds nothing. It is refused without Versions.
-	Held       func(ctx context.Context, key string) bool
+	Held                func(ctx context.Context, key string) bool
 	// Transactor is the transaction manager of the database the store lives
 	// in — the one the caller's own transactions are opened with, so a call
 	// made under one of them joins it. It must also be a core/data/sql Joiner and
 	// Deferrer, which the SDK's own transactor is.
-	Transactor coresql.Transactor
+	Transactor          coresql.Transactor
 	// IndexKey, when set, transforms every index key before it reaches the
 	// database — on a write, and on every Lookup and Find — so a table holds
 	// what it returns and never the key itself. An index is an equality
@@ -1842,15 +1999,15 @@ type SQLConfig[T any] struct {
 	// compares them as the table holds them, so a transform that does not
 	// keep their order — a keyed hash — leaves Range no order to read;
 	// return an ordered index's key as it is.
-	IndexKey   func(index string, key string) []byte
+	IndexKey            func(index string, key string) []byte
 	// Table names the documents' table. The store derives its index table's
 	// name from it by appending "___ix". It is a lower-case SQL identifier of
 	// at most [MaxSQLTableLen] bytes, holds no three underscores in a row,
 	// and does not start with "sqlite_". [SQLMigration] creates both tables.
-	Table      string
+	Table               string
 	// Dialect is the engine's: the SQL the store speaks to it. It must be the
 	// Transactor's own.
-	Dialect    coresql.Dialect
+	Dialect             coresql.Dialect
 	// Versions is how many former versions each document keeps beside its
 	// current one, as for [Open]: a write that changes a document makes a
 	// new version and prunes the oldest beyond Versions, in its own
@@ -1863,14 +2020,29 @@ type SQLConfig[T any] struct {
 	// one it replaced — so drop the table with the migration's Down (ADR 0143).
 	// A store that keeps versions has a trash, Trash's, in the same table; one
 	// that keeps none has none.
-	Versions   int
+	Versions            int
+	// Changes is the store's change feed (kitsunium/sdk#831): every write
+	// appends one record to it — keyed by the document's key, its payload a
+	// [coredocstore.ChangeValue] as JSON — INSIDE the write's own
+	// transaction or savepoint, with the write's context, so a write rolled
+	// back leaves no record and a committed one exactly one. That holds
+	// when Changes is the stream's SQL engine (internal/service/data/stream
+	// NewSQL) opened on this store's Transactor: on another transactor the
+	// record would commit apart from the write. A record the stream refuses
+	// rolls the write back, ChangeFeedFailed. With Changes every write runs
+	// in a transaction, even one of one statement. Nil writes no record.
+	Changes             corestream.Stream
+	// ChangesWithDocument puts the document's JSON in each change record
+	// of a put, a restore and a trash, so a reader rebuilds the store from
+	// the feed alone. It is refused without Changes.
+	ChangesWithDocument bool
 }
 ```
 
 <a name="SQLStore"></a>
 ## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-SQLStore is the public alias for the document store over SQL: Get, GetInto, List, Filter, Entries, Keys, Count, Lookup and Find read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version, RewriteVersions and VersionWeight, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
+SQLStore is the public alias for the document store over SQL: Get, GetInto, List, Filter, Entries, Keys, Count, Lookup and Find read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version, RewriteVersions and VersionWeight, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits, and ChangeStream names the change feed; Reindex files the stored documents again. Every call takes a context.
 
 ```go
 type SQLStore[T any] = svcdocstore.SQLStore[T]
@@ -1890,6 +2062,15 @@ func (*SQLStore) Batch(ctx context.Context, fn func(w coredocstore.BatchWriter[T
 ```
 
 Batch writes what fn records as one transaction — a savepoint of the one ctx carries, or one of the store's own — each write sending the statements it sends alone; a refusal or a failure rolls the whole batch back. The hooks run once the transaction committed.
+
+<a name="SQLStore.ChangeStream"></a>
+### func \(SQLStore\) [ChangeStream](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/change.go>)
+
+```go
+func (*SQLStore) ChangeStream() (changes corestream.Stream, ok bool)
+```
+
+ChangeStream returns the stream the store writes its change records to — [SQLConfig](#SQLConfig).Changes — and false when it was given none (core/data/docstore.ChangeFeeder).
 
 <a name="SQLStore.Count"></a>
 ### func \(SQLStore\) [Count](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
@@ -2272,7 +2453,7 @@ type Stats struct {
 <a name="Store"></a>
 ## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-Store is the public alias for the document store: Get, GetInto, List, Filter, Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones, VersionWeight says what they weigh; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
+Store is the public alias for the document store: Get, GetInto, List, Filter, Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones, VersionWeight says what they weigh; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce, and ChangeStream names the change feed; Fold and Close bring it to rest.
 
 ```go
 type Store[T any] = svcdocstore.Store[T]
@@ -2292,6 +2473,15 @@ func (*Store) Batch(fn func(w coredocstore.BatchWriter[T]) error) error
 ```
 
 Batch writes what fn records as one: planned under the writers' lock over the store and the batch's own writes — the first refusal ends it, nothing written — then published as ONE group entry holding every written key's latest state, then each key's own entry, then the group entry removed; a crash leaves the group entry, which the next Open replays over the keys' entries. The hooks run once it took effect.
+
+<a name="Store.ChangeStream"></a>
+### func \(Store\) [ChangeStream](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/change.go>)
+
+```go
+func (*Store) ChangeStream() (changes corestream.Stream, ok bool)
+```
+
+ChangeStream returns the stream the store writes its change records to — [Config](#Config).Changes — and false when it was given none (core/data/docstore.ChangeFeeder).
 
 <a name="Store.Close"></a>
 ### func \(Store\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/persist.go>)

@@ -14,6 +14,11 @@ worker per partition, the group's offset committed after the handler or by
 the handler in its own transaction (#823, ADR 0231's third amendment). Every
 engine also compacts by key (#824, ADR 0231's fourth amendment).
 
+A sibling writes to it: `docstore`'s change feed (#831) appends one record
+per document write to any `Stream` through the `core/data/stream` port — the
+SQL engine here, on the store's own transactor, joins the write's
+transaction — and its tests run it on `NewMemory` and `Subscribe`.
+
 ## Surface
 
 | Symbol | What it is |

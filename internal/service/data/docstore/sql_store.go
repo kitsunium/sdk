@@ -67,6 +67,9 @@ type SQLStore[T any] struct {
 	indexes []coredocstore.IndexSpec[T]
 	// onWrite and onDelete are the hooks called after a write or a deletion.
 	onWrite, onDelete hooks
+	// changes is the change feed every write appends its record to, in its
+	// own transaction.
+	changes changeFeed
 	// own are the options of a transaction the store opens itself.
 	own coresql.TxOptionsValue
 	// keep is how many former versions each document keeps; zero keeps no
@@ -102,6 +105,7 @@ func OpenSQL[T any](cfg SQLConfig[T], indexes ...coredocstore.IndexSpec[T]) (*SQ
 		indexes:  indexes,
 		own:      ownTxOptions(cfg.Dialect),
 		keep:     cfg.Versions,
+		changes:  changeFeed{stream: cfg.Changes, withDocument: cfg.ChangesWithDocument},
 	}
 	//: the system clock unless the caller brought one.
 	if store.clock == nil {

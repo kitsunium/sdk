@@ -89,3 +89,55 @@ type VersionWeightValue struct {
 // across a fold and a reopen; the SQL engine renders the row's revision,
 // which every write moves. Compare two only for equality.
 type RevisionValue string
+
+// ChangeOp is what a change record says a write did: [ChangePut],
+// [ChangeDelete], [ChangeTrash] or [ChangeRestore].
+type ChangeOp string
+
+// The four operations a change record names. A store's change stream
+// carries one record per write that stood, its [ChangeValue].Op one of
+// these.
+const (
+	// ChangePut records a document stored: Put, Insert, Replace, Update, their
+	// Stamped forms, ReplaceIf, a batch's write and PutDocument of a document
+	// the store holds.
+	ChangePut ChangeOp = "put"
+	// ChangeDelete records a document removed for good: Delete, a batch's
+	// deletion, and Purge, which empties the trash of one.
+	ChangeDelete ChangeOp = "delete"
+	// ChangeTrash records a document moved to the trash: Trash, and
+	// PutDocument of a trashed document. It leaves every read.
+	ChangeTrash ChangeOp = "trash"
+	// ChangeRestore records a document Restore brought back from the trash.
+	ChangeRestore ChangeOp = "restore"
+)
+
+// ChangeValue is one change record of a store's change feed
+// ([ChangeFeeder]): the payload of the stream record a write appends, as
+// JSON — decode it with encoding/json. The stream record's key is the
+// document's key.
+//
+// A reader rebuilds a store by applying the records of a partition in
+// offset order, and replays one idempotently by (Key, Version): a record
+// whose version a store already holds, or holds a later one of, changes
+// nothing.
+type ChangeValue struct {
+	// At is when the write ran, in UTC, read from the store's clock and
+	// kept to the nanosecond.
+	At time.Time `json:"at"`
+	// Document is the document's JSON as the store holds it, compact: the
+	// stored document for a put or a restore, the trashed one for a trash.
+	// It is there only when the store was configured with its
+	// ChangesWithDocument, and never for a delete.
+	Document json.RawMessage `json:"doc,omitempty"`
+	// Key is the document's key.
+	Key string `json:"key"`
+	// Op is what the write did.
+	Op ChangeOp `json:"op"`
+	// Version is the number of the document's current version once the
+	// write stood — the one a put or a restore leaves, the trashed
+	// document's for a trash —, as [Versioned].Versions numbers them; 1
+	// for a document stored before its store kept versions, and 0 for a
+	// delete and on a store that keeps no versions.
+	Version uint64 `json:"version,omitempty"`
+}

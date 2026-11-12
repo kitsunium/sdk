@@ -609,22 +609,10 @@ func (s *SQLStore[T]) putDocument(ctx context.Context, ex coresql.Executor, p *s
 		//: DocumentExists, or StatementFailed.
 		return err
 	}
-	rows := make([]versionRow, 0, len(given)+1)
-	//: newest first; the current version's document is the documents'
-	//: table's, or the trash's.
-	for i, v := range given {
-		row := versionRow{at: knownInstant(v.At), meta: v.Meta, num: v.Number}
-		//: a former version holds its document.
-		if i > 0 {
-			row.doc = v.JSON
-		}
-		rows = append(rows, row)
-	}
+	rows := versionRowsOf(given)
 	//: in the trash at its instant, filed nowhere.
 	if !trashedAt.IsZero() {
-		rows = append(rows, versionRow{at: new(trashedAt.UTC()), doc: p.raw, num: uint64(tombstoneNum)})
-		//: nil, or StatementFailed.
-		return s.insertVersionRows(ctx, ex, p.key, rows)
+		return s.putTrashed(ctx, ex, p, append(rows, versionRow{at: new(trashedAt.UTC()), doc: p.raw, num: uint64(tombstoneNum)}))
 	}
 	//: DocumentExists — a key raced in — or a collision.
 	if insertErr := s.insertRow(ctx, ex, p); insertErr != nil {
@@ -636,8 +624,41 @@ func (s *SQLStore[T]) putDocument(ctx context.Context, ex coresql.Executor, p *s
 		//: the write rolls back.
 		return fileErr
 	}
-	//: nil, or StatementFailed.
-	return s.insertVersionRows(ctx, ex, p.key, rows)
+	//: StatementFailed: the write rolls back.
+	if insertErr := s.insertVersionRows(ctx, ex, p.key, rows); insertErr != nil {
+		//: nothing written.
+		return insertErr
+	}
+	//: its change record, in the same transaction.
+	return s.feedIn(ctx, ex, coredocstore.ChangePut, p.key, p.raw)
+}
+
+// versionRowsOf is the version rows of given, newest first; the current
+// version's document is the documents' table's, or the trash's. The slice
+// has room for the tombstone a trashed write appends.
+func versionRowsOf(given []coredocstore.VersionValue) []versionRow {
+	rows := make([]versionRow, 0, len(given)+1)
+	for i, v := range given {
+		row := versionRow{at: knownInstant(v.At), meta: v.Meta, num: v.Number}
+		//: a former version holds its document.
+		if i > 0 {
+			row.doc = v.JSON
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// putTrashed writes rows, the tombstone among them, and the change record of
+// a document written into the trash.
+func (s *SQLStore[T]) putTrashed(ctx context.Context, ex coresql.Executor, p *sqlPrepared, rows []versionRow) error {
+	//: StatementFailed: the write rolls back.
+	if insertErr := s.insertVersionRows(ctx, ex, p.key, rows); insertErr != nil {
+		//: nothing written.
+		return insertErr
+	}
+	//: its change record, in the same transaction.
+	return s.feedIn(ctx, ex, coredocstore.ChangeTrash, p.key, p.raw)
 }
 
 // keyTaken refuses a key that holds anything: a version row — the trash's

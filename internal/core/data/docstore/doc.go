@@ -2,7 +2,8 @@
 // ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21,
 // ADR 0178 22, for a document written with its versions, and ADR 0209 23,
 // for a replacement made on a revision, and 24, for a range read of an
-// index that keeps no order). Both
+// index that keeps no order, and kitsunium/sdk#831 25, for a change
+// record the change stream refused). Both
 // engines answer every one of them alike, and the range keeps the LL = 3 its
 // engine allocated it under now that it is declared here (ADR 0160).
 //
@@ -28,9 +29,12 @@
 //     writes as one, through a [BatchWriter], [Pager] and [PagerContext] for
 //     the documents a page at a time, [Ranged] and [RangedContext] for an
 //     ordered index read between two keys, and [Announcer] is the pair of
-//     hooks both engines answer exactly as they are;
+//     hooks both engines answer exactly as they are, and [ChangeFeeder] the
+//     stream of change records a store writes each write to, when it was
+//     given one;
 //   - the values both engines read and return — [EntryValue], [VersionValue],
-//     [StampValue], [TombstoneValue], [VersionWeightValue], [RevisionValue] —
+//     [StampValue], [TombstoneValue], [VersionWeightValue], [RevisionValue],
+//     and [ChangeValue], a change record's payload, with its [ChangeOp] —
 //     and [IndexSpec],
 //     the declaration both take, with its three constructors [Unique],
 //     [Index] and [Ordered];

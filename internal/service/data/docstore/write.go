@@ -250,6 +250,12 @@ func (s *Store[T]) persistAndApply(p prepared, stamp coredocstore.StampValue) (a
 		return false, kerrs.Wrap(coredocstore.UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", name))
 	}
 	versions := s.nextVersions(p.key, p.raw, stamp)
+	//: the change record first: a crash after it leaves a record of a write
+	//: that did not land, never a write without its record.
+	if feedErr := s.feed(coredocstore.ChangePut, p.key, p.raw, versions); feedErr != nil {
+		//: ChangeFeedFailed: nothing changed anywhere.
+		return false, feedErr
+	}
 	persistErr := s.persist(p.key, p.raw, false, versions)
 	//: the filesystem refused: nothing changed anywhere.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
@@ -280,6 +286,11 @@ func (s *Store[T]) remove(key string) (applied bool, err error) {
 	if _, found := s.docs[key]; !found {
 		//: DocumentNotFound, naming no key.
 		return false, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+	}
+	//: the change record first.
+	if feedErr := s.feed(coredocstore.ChangeDelete, key, nil, nil); feedErr != nil {
+		//: ChangeFeedFailed: nothing changed anywhere.
+		return false, feedErr
 	}
 	persistErr := s.persist(key, nil, true, nil)
 	//: the filesystem refused: nothing changed anywhere.

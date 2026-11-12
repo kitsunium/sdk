@@ -201,6 +201,10 @@ func (s *SQLStore[T]) writeIn(ctx context.Context, ex coresql.Executor, p *sqlPr
 	if writeErr == nil {
 		writeErr = s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: old, raw: p.raw, key: p.key, existed: existed, inPlace: stamp.InPlace})
 	}
+	//: its change record, in the same transaction, once it is all written.
+	if writeErr == nil {
+		writeErr = s.feedIn(ctx, ex, coredocstore.ChangePut, p.key, p.raw)
+	}
 	//: nil, DocumentExists, DocumentNotFound, a failure, or a collision.
 	return writeErr
 }
@@ -317,11 +321,11 @@ func (s *SQLStore[T]) indexRows(v T) ([]indexRow, error) {
 }
 
 // several reports whether every write of the store sends more than one
-// statement — its index rows, its versions — and so needs a transaction of
-// its own outside the caller's.
+// statement — its index rows, its versions, its change record — and so needs
+// a transaction of its own outside the caller's.
 func (s *SQLStore[T]) several() bool {
-	//: a write files index rows, or keeps versions.
-	return len(s.indexes) > 0 || s.keep > 0
+	//: a write files index rows, keeps versions, or appends its change record.
+	return len(s.indexes) > 0 || s.keep > 0 || s.changes.on()
 }
 
 // writeDocument writes a prepared document's row the way mode asks, and
@@ -550,7 +554,12 @@ func (s *SQLStore[T]) modify(ctx context.Context, ex coresql.Executor, key strin
 		return zero, fileErr
 	}
 	//: its versions, in the same transaction.
-	return v, s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: raw, raw: p.raw, key: key, existed: true, inPlace: stamp.InPlace})
+	if versionsErr := s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: raw, raw: p.raw, key: key, existed: true, inPlace: stamp.InPlace}); versionsErr != nil {
+		//: the write rolls back.
+		return zero, versionsErr
+	}
+	//: its change record, in the same transaction.
+	return v, s.feedIn(ctx, ex, coredocstore.ChangePut, key, p.raw)
 }
 
 // remove runs Delete's statements.
@@ -577,8 +586,8 @@ func (s *SQLStore[T]) remove(ctx context.Context, ex coresql.Executor, key strin
 			return s.failed("delete a document's versions", err)
 		}
 	}
-	//: removed, rows, versions and all.
-	return nil
+	//: removed, rows, versions and all, and its change record written.
+	return s.feedIn(ctx, ex, coredocstore.ChangeDelete, key, nil)
 }
 
 // fileIndexes replaces a written document's index rows: it refuses a unique
