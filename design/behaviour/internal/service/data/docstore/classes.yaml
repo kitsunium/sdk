@@ -411,6 +411,7 @@ files:
       - Store
       - StatsValue
       - (*Store).Get
+      - (*Store).GetInto
       - (*Store).List
       - (*Store).Filter
       - (*Store).Entries
@@ -423,6 +424,7 @@ files:
       - (*Store).snapshotEntries
       - (*Store).decode
       - decodeAs
+      - decodeInto
       - (*Store).decodeAll
       - jsonCause
       - fieldPath
@@ -644,6 +646,7 @@ files:
       - OpenSQL
       - ownTxOptions
       - (*SQLStore).Get
+      - (*SQLStore).GetInto
       - (*SQLStore).List
       - (*SQLStore).Filter
       - (*SQLStore).Entries
@@ -848,6 +851,14 @@ functions:
     name: decodeAs
     params: store string, raw []byte
     results: T, error
+    typeParams: T any
+  - doc: |-
+      decodeInto decodes one stored document into *dst, which holds T's zero
+      value, or refuses it as decodeAs does and leaves *dst zero: a document half
+      decoded is never handed back.
+    name: decodeInto
+    params: store string, raw []byte, dst *T
+    results: error
     typeParams: T any
   - doc: |-
       jsonCause describes a failure to decode a value of type root without a
@@ -1869,6 +1880,10 @@ types:
         params: key string
         recv: s *Store[T]
         results: T, error
+      - name: GetInto
+        params: key string, dst *T
+        recv: s *Store[T]
+        results: error
       - name: List
         recv: s *Store[T]
         results: "[]T, error"
@@ -3257,6 +3272,10 @@ types:
         params: ctx context.Context, key string
         recv: s *SQLStore[T]
         results: T, error
+      - name: GetInto
+        params: ctx context.Context, key string, dst *T
+        recv: s *SQLStore[T]
+        results: error
       - name: List
         params: ctx context.Context
         recv: s *SQLStore[T]
@@ -3996,6 +4015,9 @@ vars:
         type: coredocstore.Revisioned[struct{}]
         value: (*Store[struct{}])(nil)
       - name: _
+        type: coredocstore.IntoGetter[struct{}]
+        value: (*Store[struct{}])(nil)
+      - name: _
         type: coredocstore.Batcher[struct{}]
         value: (*Store[struct{}])(nil)
       - name: _
@@ -4030,6 +4052,9 @@ vars:
         value: (*SQLStore[struct{}])(nil)
       - name: _
         type: coredocstore.RevisionedContext[struct{}]
+        value: (*SQLStore[struct{}])(nil)
+      - name: _
+        type: coredocstore.IntoGetterContext[struct{}]
         value: (*SQLStore[struct{}])(nil)
       - name: _
         type: coredocstore.BatcherContext[struct{}]

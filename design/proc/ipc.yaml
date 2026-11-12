@@ -123,7 +123,9 @@ packages:
           FileSender is the sibling a private connection may offer (ADR 0039),
           asserted on Conn.Conn: open files passed to the peer's process with
           SCM_RIGHTS on Unix, and on Windows in a frame the receiver takes each
-          handle out of the sender's process from, with DuplicateHandle.
+          handle out of the sender's process from, with DuplicateHandle — a socket
+          by WSADuplicateSocketW for the peer's process and WSASocketW there, since
+          a socket is not duplicated as a handle.
         methods:
           - doc: |-
               SendFiles sends payload with files attached; the peer receives copies of
@@ -149,8 +151,9 @@ packages:
               RecvFiles reads one message into buf and the descriptors attached to it,
               at most max (refused at zero), each close-on-exec — not inheritable on
               Windows — and wrapped as an *os.File the caller owns and closes.
-              Descriptors beyond max are closed by the kernel on Unix and in the
-              sender's process on Windows, never leaked into this process;
+              Descriptors beyond max are closed by the kernel on Unix and on Windows in
+              the sender's process — a socket, already the peer's, closed here —, never
+              leaked into this process;
               FDPassRefused with the reason "truncated" says so, beside the files that
               fit.
             in:
@@ -850,8 +853,9 @@ packages:
             name: Dialer
             target: coreipc.Dialer
           - doc: |-
-              FileSender passes open files to the peer's process (SCM_RIGHTS on Unix,
-              DuplicateHandle on Windows); assert it on Conn.Conn. Only to a peer the
+              FileSender passes open files to the peer's process (SCM_RIGHTS on Unix;
+              DuplicateHandle on Windows, WSADuplicateSocketW for a socket, a TCP
+              listener's file among them); assert it on Conn.Conn. Only to a peer the
               kernel named.
             name: FileSender
             target: coreipc.FileSender

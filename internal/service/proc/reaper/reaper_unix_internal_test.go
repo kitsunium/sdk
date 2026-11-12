@@ -36,6 +36,19 @@ const helperEnv string = "SDK_REAPER_ROLE_CHILD"
 // sleeps the requested seconds then exits, modelling the orphan to be reaped.
 const grandchildEnv string = "SDK_REAPER_ROLE_GRANDCHILD"
 
+// HoldRoleEnv gates the re-exec holder role: when set, the test binary reads
+// its standard input to the end, then exits holdExitCode — a child a test ends
+// by closing the pipe's other end, without a signal. Exported for the external
+// package's allocation gate, which collects such children one at a time.
+const HoldRoleEnv string = "SDK_REAPER_ROLE_HOLD"
+
+// HoldExitCode is the exit status of a holder whose input ended.
+const HoldExitCode int = 42
+
+// holdLifetime bounds a holder's life whatever became of the test that
+// started it: past it, the holder exits on its own.
+const holdLifetime time.Duration = 60 * time.Second
+
 const (
 	// reapDeadline bounds the wait for spawned children to exit and be reaped.
 	// It is generous on purpose: the assertion is that every child IS reaped,
@@ -50,6 +63,11 @@ const (
 // starts, so a child can orphan a sleeping grandchild onto the parent test
 // process. A bare m.Run() runs when neither role env is set.
 func TestMain(m *testing.M) {
+	//: the holder role waits for its input to end — it starts nothing, so it
+	//: can never start a holder in turn.
+	if os.Getenv(HoldRoleEnv) != "" {
+		os.Exit(runHolder())
+	}
 	//: the grandchild role just sleeps then exits — the orphan to be reaped.
 	if s := os.Getenv(grandchildEnv); s != "" {
 		os.Exit(runGrandchild(s))
@@ -60,6 +78,20 @@ func TestMain(m *testing.M) {
 	}
 	//: normal path — run the package test suite.
 	os.Exit(m.Run())
+}
+
+// runHolder reads standard input until it ends, then returns HoldExitCode;
+// past holdLifetime it ends anyway, with another status.
+func runHolder() (code int) {
+	//: a bounded life, whatever the test does with the pipe.
+	time.AfterFunc(holdLifetime, func() { os.Exit(1) })
+	var buf [64]byte
+	//: EOF, or an error: either way the input is over.
+	for {
+		if _, err := os.Stdin.Read(buf[:]); err != nil {
+			return HoldExitCode
+		}
+	}
 }
 
 // runGrandchild sleeps for secs seconds (clamped to >=1) then returns 0, so the

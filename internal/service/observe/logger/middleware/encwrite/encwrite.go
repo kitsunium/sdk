@@ -9,6 +9,7 @@ import (
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	coreencwrite "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite"
+	"github.com/kitsunium/sdk/internal/kernel/concur/buffer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -24,6 +25,10 @@ const (
 	// defaultInfo is the HKDF info label applied when Config.Info is empty; it
 	// binds the derived subkey to the encrypting-sink purpose.
 	defaultInfo string = "encwrite-sink"
+	// sealOverhead is what AES-256-GCM's box adds to a record: the version and
+	// id bytes, the 12-byte nonce and the 16-byte tag. It sizes the borrowed
+	// frame so the seal never grows it.
+	sealOverhead int = 2 + 12 + 16
 )
 
 // keyBytes is the seam through which deriveSubkey obtains a fresh copy of the
@@ -46,6 +51,11 @@ type EncWriter struct {
 	key corecrypto.Key
 	// subkey is the derived per-sink key used for sealing; zeroized on Close.
 	subkey corecrypto.Key
+	// sealer is the AEAD bound to subkey once, at construction (#813): the
+	// cipher is not rebuilt per record. Nil when the scheme was not
+	// registered then, and after Close, which drops the cipher with the key:
+	// a record is then sealed by crypto.Seal under subkey as it stands.
+	sealer corecrypto.Sealer
 }
 
 // NewEncWriter builds an EncWriter from cfg, deriving the per-sink subkey
@@ -66,8 +76,15 @@ func NewEncWriter(cfg Config) (writer *EncWriter, err error) {
 		//: propagate the already-typed seal sentinel from the helper unchanged.
 		return nil, derr
 	}
+	//: bind the subkey once, so no record rebuilds the cipher.
+	sealer, bindErr := corecrypto.NewSealer(aeadAlgorithm, subkey)
+	//: an AEAD not registered yet: the per-record Seal reports it at the first
+	//: Write, as it always has.
+	if bindErr != nil {
+		sealer = nil
+	}
 	//: hand back the ready sink wrapping the configured downstream.
-	return &EncWriter{downstream: cfg.Sink, key: cfg.Key, subkey: subkey}, nil
+	return &EncWriter{downstream: cfg.Sink, key: cfg.Key, subkey: subkey, sealer: sealer}, nil
 }
 
 // deriveSubkey derives the per-sink subkey from master via HKDF-SHA256 under the
@@ -114,27 +131,54 @@ func deriveSubkey(master corecrypto.Key, info string) (subkey corecrypto.Key, er
 func (s *EncWriter) Write(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	//: seal the record bytes under the derived subkey (nonce hidden in the box).
-	box, serr := corecrypto.Seal(aeadAlgorithm, s.subkey, p, nil)
+	bp := buffer.GetSize(lenPrefixBytes + len(p) + sealOverhead)
+	defer buffer.Put(bp)
+	framed, ferr := s.sealFramed((*bp)[:0], p)
+	*bp = framed
+	//: a seal or framing fault aborts before delivery.
+	if ferr != nil {
+		//: the typed EncWriteSealFailed or FramingFailed.
+		return 0, ferr
+	}
+	//: hand the framed box plus the record to the downstream sink.
+	return s.downstream.Write(ctx, r, framed)
+}
+
+// sealFramed appends to dst the 4-byte length prefix and the box of p sealed
+// under the per-sink subkey (nonce hidden in the box), then writes the box's
+// length into the prefix.
+func (s *EncWriter) sealFramed(dst, p []byte) (framed []byte, err error) {
+	framed, serr := s.sealTo(append(dst, 0, 0, 0, 0), p)
 	//: a seal fault (entropy / unknown scheme) aborts before delivery.
 	if serr != nil {
 		//: wrap the cause under the typed seal sentinel.
-		return 0, errs.Wrap(serr, errs.WrapParams{
+		return framed, errs.Wrap(serr, errs.WrapParams{
 			Code:    coreencwrite.CodeEncWriteSealFailed,
 			Reason:  "ENC_WRITE_SEAL_FAILED",
 			Public:  "Encrypting middleware could not seal the record",
 			Private: "service/observe/logger/middleware/encwrite: Seal returned an error",
 		})
 	}
-	//: length-prefix the sealed box so byte sinks can recover record boundaries.
-	framed, ferr := frame(box)
-	//: a box too large for the 4-byte prefix aborts before delivery.
-	if ferr != nil {
-		//: propagate the framing sentinel unchanged.
-		return 0, ferr
+	//: the box's length, big-endian, in the prefix reserved before it.
+	return framed, stampLength(framed)
+}
+
+// sealTo appends the box of p to dst: through the sealer bound at
+// construction, or crypto.Seal when there is none.
+func (s *EncWriter) sealTo(dst, p []byte) (sealed []byte, err error) {
+	//: the cipher built once.
+	if s.sealer != nil {
+		//: the box after dst's prefix.
+		return s.sealer.SealTo(dst, p, nil)
 	}
-	//: hand the framed box plus the record to the downstream sink.
-	return s.downstream.Write(ctx, r, framed)
+	box, serr := corecrypto.Seal(aeadAlgorithm, s.subkey, p, nil)
+	//: the scheme is missing or the host's entropy failed.
+	if serr != nil {
+		//: dst unextended.
+		return dst, serr
+	}
+	//: the box after dst's prefix.
+	return append(dst, box...), nil
 }
 
 // Flush forwards the flush to the downstream sink; this middleware buffers
@@ -155,26 +199,25 @@ func (s *EncWriter) Close() error {
 	s.key.Zeroize()
 	//: clear the derived subkey too so no copy of the secret survives.
 	s.subkey.Zeroize()
+	//: and drop the cipher built from it: its round keys go with it.
+	s.sealer = nil
 	//: release the downstream sink's resources.
 	return s.downstream.Close()
 }
 
-// frame prepends a 4-byte big-endian length prefix to box, returning
-// [len(box) as uint32 big-endian || box]. A box too large for a uint32 length
+// stampLength writes the length of the box that follows framed's 4-byte
+// prefix into that prefix, big-endian. A box too large for a uint32 length
 // returns FramingFailed.
-func frame(box []byte) (framed []byte, err error) {
+func stampLength(framed []byte) error {
+	boxLen := uint64(len(framed) - lenPrefixBytes)
 	//: reject boxes too large for the 32-bit length prefix; widen to uint64 first
 	//: so the MaxUint32 constant does not overflow int on a 32-bit GOARCH.
-	if uint64(len(box)) > math.MaxUint32 {
+	if boxLen > math.MaxUint32 {
 		//: no underlying cause — return the framing sentinel directly.
-		return nil, coreencwrite.FramingFailed
+		return coreencwrite.FramingFailed
 	}
-	//: allocate exactly the prefix plus the payload, no slack.
-	framed = make([]byte, lenPrefixBytes+len(box))
 	//: write the box length into the leading 4 bytes, big-endian.
-	binary.BigEndian.PutUint32(framed[:lenPrefixBytes], uint32(len(box)))
-	//: copy the sealed box after the prefix.
-	copy(framed[lenPrefixBytes:], box)
-	//: framed sealed box ready for the downstream sink.
-	return framed, nil
+	binary.BigEndian.PutUint32(framed[:lenPrefixBytes], uint32(boxLen))
+	//: the frame is complete.
+	return nil
 }

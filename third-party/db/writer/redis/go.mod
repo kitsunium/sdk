@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk/third-party/db/writer/redis
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000

@@ -22,6 +22,10 @@ buffer moved into the ledger, the same run measured 1 alloc / 160 B per sweep
 on every row — the status escaping to the heap once shown to an observer —
 and `TestReapOnceAllocatesNothingWithOrWithoutOnExit` (alloc lane) now holds
 the zero. To refresh on the reference machine with the rest of the table.
+A sweep that collects a child adds no allocation either, observer included:
+`TestReapOnceAllocatesNothingPerCollectedChild` (alloc lane) collects 8
+children with `WithOnExit` wired and counts 0 — 8 before `ExitValue.Usage`
+went by value, one `*UsageValue` per child (#1136).
 
 This is the number a supervisor needs before putting `ReapOnce` on a timer, and
 it is unambiguous: an idle sweep is a single syscall with no Go-side allocation

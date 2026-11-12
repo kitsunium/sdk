@@ -57,19 +57,20 @@ func newInternalKey(t *testing.T) corecrypto.Key {
 	return key
 }
 
-// runFrameCase drives one frame scenario over a byte slice of length n.
+// runFrameCase drives one frame scenario over a box of length n behind its
+// 4-byte prefix: stampLength writes n there and leaves the box as it was.
 func runFrameCase(t *testing.T, n int, wantErr bool) {
 	t.Helper()
-	box := make([]byte, n)
-	//: fill with a recognizable pattern to detect copy errors.
-	for i := range box {
+	framed := make([]byte, lenPrefixBytes+n)
+	//: fill the box with a recognizable pattern to detect a stray write.
+	for i := range n {
 		//: each byte mirrors its index modulo 256.
-		box[i] = byte(i)
+		framed[lenPrefixBytes+i] = byte(i)
 	}
-	out, err := frame(box)
+	err := stampLength(framed)
 	//: error presence must match expectation for this case.
 	if (err != nil) != wantErr {
-		t.Fatalf("frame(%d) err=%v wantErr=%v", n, err, wantErr)
+		t.Fatalf("stampLength(%d) err=%v wantErr=%v", n, err, wantErr)
 	}
 	//: an error case stops here — there is no framed output to inspect.
 	if wantErr {
@@ -77,14 +78,14 @@ func runFrameCase(t *testing.T, n int, wantErr bool) {
 		return
 	}
 	//: the prefix must carry the box length big-endian.
-	got := binary.BigEndian.Uint32(out[:lenPrefixBytes])
-	//: the decoded prefix must equal the input length.
-	if int(got) != n {
+	if got := binary.BigEndian.Uint32(framed[:lenPrefixBytes]); int(got) != n {
 		t.Fatalf("prefix=%d want=%d", got, n)
 	}
-	//: framed total length must be prefix + payload.
-	if len(out) != lenPrefixBytes+n {
-		t.Fatalf("len=%d want=%d", len(out), lenPrefixBytes+n)
+	//: the box behind the prefix is untouched.
+	for i := range n {
+		if framed[lenPrefixBytes+i] != byte(i) {
+			t.Fatalf("box byte %d = %d, want %d", i, framed[lenPrefixBytes+i], byte(i))
+		}
 	}
 }
 

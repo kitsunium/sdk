@@ -47,6 +47,8 @@ the same methods otherwise:
 | `VersionWeigherContext` — sibling | the SQL engine | a context first |
 | `Revisioned[T]` — sibling | the file engine | no context; `Revision`, `ReplaceIf` (ADR 0209) |
 | `RevisionedContext[T]` — sibling | the SQL engine | a context first |
+| `IntoGetter[T]` — sibling | the file engine | no context; `GetInto(key, dst)` — a read into the caller's value, zeroed first (#813) |
+| `IntoGetterContext[T]` — sibling | the SQL engine | a context first |
 | `Batcher[T]` — sibling | the file engine | no context; `Batch(fn)`, several writes as one (ADR 0209, amended 2026-11-02) |
 | `BatcherContext[T]` — sibling | the SQL engine | a context first; one transaction |
 | `Pager[T]` — sibling | the file engine | no context; `Documents(after, limit)` with their JSON, `FindAfter(index, key, after, limit)`: a page at a time (ADR 0209, amended 2026-11-03) |

@@ -196,3 +196,32 @@ own daemon running for as long as the squatter held the name.
    (`ENDPOINT_FOREIGN`). The probe instance listens for the moment it lives,
    and a pipe gone between the two creates is re-made by the probe and read
    as ours (`IN_USE`, cleared by a retry).
+
+## Amendment — 2026-11-11: a socket over the Windows pipe (kitsunium/sdk#936)
+
+The 2026-11-08 amendment said a Windows socket has no `*os.File`; Go 1.27's
+`TCPListener.File` gives one, so a listener can be handed over there too. A
+socket is not a handle `DuplicateHandle` may copy, so the frame gains a
+second layout (`SDK2`): each entry is tagged, a handle — taken out of the
+sender's process as before — or a socket.
+The sender tells a socket by `getsockopt(SO_TYPE)` and prepares it for the
+peer's process with `WSADuplicateSocketW`, its pid pinned by the process
+handle held since the connection (no handle, no socket: `FD_PASS_REFUSED`);
+the frame carries the `WSAPROTOCOL_INFOW`, from which the receiver makes its
+own socket with `WSASocketW(FROM_PROTOCOL_INFO)`, overlapped and not
+inheritable — the net package's own route within one process. Both come from
+`ws2_32.dll` through `syscall.NewLazyDLL`, without `x/sys`. A socket past
+`max` is made and closed by the receiver; one prepared for a frame that was
+never written is the peer's until it exits. `TestHandOverAListener`
+hands a TCP listener to a second process on every Unix and Windows, the
+sender's copies closed before the dial; it runs on Windows in e2e-cross only.
+
+**The version rule of a wire format.** A supervisor and its child may run two
+versions of the SDK at once, during an upgrade. So a frame layout is written
+in its newest version only, and the one before it is still read for at least
+one released version after the change: `SDK2` is written, and `SDKF` — bare
+handle values, as v0.60.0 (#1316) writes them — is still read, its handles
+taken as before (`TestAFirstLayoutFrameIsStillRead`). Any other magic, and an
+entry of a kind the reader does not know, is `FD_PASS_REFUSED`. `SDKF` may
+stop being read in a release after the first one that writes only `SDK2`.
+Unix sends no frame (`SCM_RIGHTS`), so the rule has nothing to read there.

@@ -555,12 +555,66 @@ sequences:
         eval: "otlpRequest{ResourceMetrics: []otlpResourceMetrics{resource}}"
       - return: request.appendJSON(make([]byte, 0, otlpDocCapacity(list))), nil
         to: request.appendJSON
+  - of: otlpArenaSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpArenaSize
+        kind: self
+      - id: otlpCountPoints
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: attrs, values
+              to: otlpCountPoints
+              value: otlpCountPoints(metric.Points, attrs, values, func(p coremetrics.SumValue) int { return len(p.Attrs) })
+          key: _
+          range: snap.Sums
+          value: metric
+      - loop:
+          do:
+            - set: attrs, values
+              to: otlpCountPoints
+              value: otlpCountPoints(metric.Points, attrs, values, func(p coremetrics.GaugeValue) int { return len(p.Attrs) })
+          key: _
+          range: snap.Gauges
+          value: metric
+      - loop:
+          do:
+            - set: attrs, values
+              to: otlpCountPoints
+              value: otlpCountPoints(metric.Points, attrs, values, func(p coremetrics.HistogramValue) int { return len(p.Attrs) })
+          key: _
+          range: snap.Histograms
+          value: metric
+      - loop:
+          do:
+            - set: attrs, values
+              to: otlpCountPoints
+              value: otlpCountPoints(metric.Points, attrs, values, func(p coremetrics.ExponentialHistogramValue) int { return len(p.Attrs) })
+          key: _
+          range: snap.ExponentialHistograms
+          value: metric
+      - return: attrs, values
+  - of: otlpCountPoints
+    steps:
+      - loop:
+          do:
+            - op: +=
+              set: attrs
+              value: attrsOf(points[i])
+          key: i
+          range: points
+      - return: attrs, values + len(points)
   - of: otlpMetricList
     participants:
       - id: caller
         kind: actor
       - id: otlpMetricList
         kind: self
+      - id: otlp
+        kind: package
       - id: appendOTLPSums
         kind: internal
       - id: appendOTLPGauges
@@ -572,26 +626,29 @@ sequences:
     steps:
       - bind: start, end
         eval: otlp.UnixNano(snap.StartTime), otlp.UnixNano(snap.Time)
+      - bind: arena
+        eval: otlp.NewArena(otlpArenaSize(snap))
+        to: otlp
       - set: list, err
         to: appendOTLPSums
-        value: appendOTLPSums(list, snap.Sums, start, end)
+        value: appendOTLPSums(list, snap.Sums, start, end, arena)
       - opt:
           do:
             - return: nil, err
           when: err != nil
       - set: list
         to: appendOTLPGauges
-        value: appendOTLPGauges(list, snap.Gauges, start, end)
+        value: appendOTLPGauges(list, snap.Gauges, start, end, arena)
       - set: list, err
         to: appendOTLPHistograms
-        value: appendOTLPHistograms(list, snap.Histograms, start, end)
+        value: appendOTLPHistograms(list, snap.Histograms, start, end, arena)
       - opt:
           do:
             - return: nil, err
           when: err != nil
       - set: list, err
         to: appendOTLPExponentials
-        value: appendOTLPExponentials(list, snap.ExponentialHistograms, start, end)
+        value: appendOTLPExponentials(list, snap.ExponentialHistograms, start, end, arena)
       - opt:
           do:
             - return: nil, err
@@ -620,7 +677,7 @@ sequences:
             - set: list
               value: |-
                 append(list, otlpMetric{Name: name, Description: metric.Description, Unit: metric.Unit, Sum: &otlpSum{
-                			DataPoints:             otlpSumPoints(metric.Points, start, end),
+                			DataPoints:             otlpSumPoints(metric.Points, start, end, arena),
                 			AggregationTemporality: temporality,
                 			IsMonotonic:            metric.Monotonic,
                 		}})
@@ -639,9 +696,9 @@ sequences:
                 append(points, otlpNumberDataPoint{
                 			StartTimeUnixNano: start,
                 			TimeUnixNano:      end,
-                			AsInt:             new(otlp.Int64(point.Value)),
+                			AsInt:             arena.Int64(point.Value),
                 			Exemplars:         otlpExemplars(point.Exemplars, true),
-                			Attributes:        otlp.Attrs(point.Attrs),
+                			Attributes:        arena.Attrs(point.Attrs),
                 		})
           key: _
           range: series
@@ -654,7 +711,7 @@ sequences:
             - set: list
               value: |-
                 append(list, otlpMetric{Name: name, Description: gauges[name].Description, Unit: gauges[name].Unit, Gauge: &otlpGauge{
-                			DataPoints: otlpGaugePoints(gauges[name].Points, start, end),
+                			DataPoints: otlpGaugePoints(gauges[name].Points, start, end, arena),
                 		}})
           key: _
           range: sortedKeys(gauges)
@@ -671,8 +728,8 @@ sequences:
                 append(points, otlpNumberDataPoint{
                 			StartTimeUnixNano: start,
                 			TimeUnixNano:      end,
-                			AsDouble:          new(otlp.Double(point.Value)),
-                			Attributes:        otlp.Attrs(point.Attrs),
+                			AsDouble:          arena.Double(point.Value),
+                			Attributes:        arena.Attrs(point.Attrs),
                 		})
           key: _
           range: series
@@ -701,7 +758,7 @@ sequences:
                   - return: nil, tempErr
                 when: tempErr != nil
             - bind: points, pointsErr
-              eval: otlpHistogramPoints(name, metric.Points, start, end)
+              eval: otlpHistogramPoints(name, metric.Points, start, end, arena)
               to: otlpHistogramPoints
             - opt:
                 do:
@@ -744,11 +801,11 @@ sequences:
                 			StartTimeUnixNano: start,
                 			TimeUnixNano:      end,
                 			Count:             otlp.Uint64(point.Count),
-                			Sum:               otlpOptionalSum(point.Sum, point.NoSum),
+                			Sum:               otlpOptionalSum(point.Sum, point.NoSum, arena),
                 			BucketCounts:      otlpBucketCounts(point.Counts),
                 			ExplicitBounds:    otlpExplicitBounds(point.Bounds),
                 			Exemplars:         otlpExemplars(point.Exemplars, false),
-                			Attributes:        otlp.Attrs(point.Attrs),
+                			Attributes:        arena.Attrs(point.Attrs),
                 		})
           key: _
           range: series
@@ -4264,7 +4321,7 @@ sequences:
             - set: list
               value: |-
                 append(list, otlpMetric{Name: name, Description: metric.Description, Unit: metric.Unit, ExponentialHistogram: &otlpExponentialHistogram{
-                			DataPoints:             otlpExponentialPoints(metric.Points, start, end),
+                			DataPoints:             otlpExponentialPoints(metric.Points, start, end, arena),
                 			AggregationTemporality: temporality,
                 		}})
           key: _
@@ -4283,26 +4340,34 @@ sequences:
                 			StartTimeUnixNano: start,
                 			TimeUnixNano:      end,
                 			Count:             otlp.Uint64(point.Count),
-                			Sum:               new(otlp.Double(point.Sum)),
+                			Sum:               arena.Double(point.Sum),
                 			Scale:             point.Scale,
                 			ZeroCount:         otlp.Uint64(point.ZeroCount),
                 			Positive:          otlpBuckets{Offset: point.Positive.Offset, BucketCounts: otlpBucketCounts(point.Positive.Counts)},
                 			Negative:          otlpBuckets{Offset: point.Negative.Offset, BucketCounts: otlpBucketCounts(point.Negative.Counts)},
                 			ZeroThreshold:     point.ZeroThreshold,
                 			Exemplars:         otlpExemplars(point.Exemplars, false),
-                			Attributes:        otlp.Attrs(point.Attrs),
+                			Attributes:        arena.Attrs(point.Attrs),
                 		})
           key: _
           range: series
           value: point
       - return: points
   - of: otlpOptionalSum
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpOptionalSum
+        kind: self
+      - id: arena.Double
+        kind: value
     steps:
       - opt:
           do:
             - return: nil
           when: noSum
-      - return: new(otlp.Double(sum))
+      - return: arena.Double(sum)
+        to: arena.Double
   - of: appendExemplars
     participants:
       - id: caller

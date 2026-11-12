@@ -24,9 +24,12 @@ const helperEnv = "PROC_SERVICE_TEST_HELPER"
 var helpers = map[string]func(){"notify": notifyHelper}
 
 // TestMain runs the helper when this binary was spawned to play one, once the
-// guard admitted it (helperguard_linux_external_test.go).
+// guard admitted it (helperguard_linux_external_test.go). A helper is a
+// service: SIGTERM ends it, so whatever the test runner's main registered for
+// SIGTERM (bazelTimeoutEnv) is undone first.
 func TestMain(m *testing.M) {
 	if name, ok := os.LookupEnv(helperEnv); ok {
+		signal.Reset(syscall.SIGTERM)
 		admitHelper(name)()
 		return
 	}

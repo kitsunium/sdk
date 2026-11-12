@@ -96,6 +96,7 @@ alias(
 go_test(
     name = "reaper_test",
     srcs = [
+        "allocwindow_test.go",
         "gen_api_1_test.go",
         "gen_api_2_test.go",
         "gen_api_3_test.go",

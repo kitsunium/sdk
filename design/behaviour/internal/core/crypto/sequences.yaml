@@ -745,6 +745,50 @@ sequences:
           when: "!ok"
       - return: scheme.Open(key, box, aad)
         to: scheme.Open
+  - of: NewSealer
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSealer
+        kind: self
+      - id: Lookup
+        kind: internal
+      - id: binder.Bind
+        kind: internal
+    steps:
+      - bind: scheme, ok
+        eval: Lookup(name)
+        to: Lookup
+      - opt:
+          do:
+            - return: nil, UnknownAlgorithm
+          when: "!ok"
+      - opt:
+          do:
+            - return: binder.Bind(key)
+              to: binder.Bind
+          init:
+            bind: binder, binds
+            eval: scheme.(Binder)
+          when: binds
+      - return: "sealEach{scheme: scheme, key: key}, nil"
+  - of: sealEach.SealTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: sealEach.SealTo
+        kind: self
+      - id: s.scheme.Seal
+        kind: internal
+    steps:
+      - bind: sealed, sealErr
+        eval: s.scheme.Seal(s.key, plaintext, aad)
+        to: s.scheme.Seal
+      - opt:
+          do:
+            - return: dst, sealErr
+          when: sealErr != nil
+      - return: append(dst, sealed...), nil
   - of: RegisterSigner
     participants:
       - id: caller

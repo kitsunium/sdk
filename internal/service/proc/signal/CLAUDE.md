@@ -66,7 +66,9 @@ Only the delivery path is split:
 - `relay_unix.go` (`//go:build unix`) — real kill(2) delivery;
 - `relay_windows.go` (`//go:build windows`) — kernel32 bound through
   `syscall.NewLazyDLL`: a group target gets `GenerateConsoleCtrlEvent`
-  (`CTRL_C` for SIGINT, `CTRL_BREAK` otherwise), a pid gets `OpenProcess` +
+  (`CTRL_BREAK` for every signal, SIGINT included: Windows delivers no
+  `CTRL_C` to one group — #933, `TestRelayInterruptReachesAGroupWindows`, run
+  on the Windows lane only), a pid gets `OpenProcess` +
   `TerminateProcess`; the reserved targets are refused as on Unix;
 - `relay_other.go` (`//go:build !unix && !windows`) — returns
   `coreproc.UnsupportedPlatform`, so every GOOS compiles and merely degrades.

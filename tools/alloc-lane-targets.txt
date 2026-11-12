@@ -206,9 +206,12 @@
 //internal/kernel/jsonenc:jsonenc_test
 //internal/kernel/semver:semver_test
 //internal/kernel/swar:swar_test
+//internal/service/data/docstore:docstore_test
 //internal/service/data/queue:queue_test
 //internal/service/net/http1:http1_test
+//internal/service/observe/logger/middleware/encwrite:encwrite_test
 //internal/service/observe/logger/middleware/sample:sample_test
+//internal/service/observe/metrics:metrics_test
 //internal/service/proc/ipc/rpc:rpc_test
 //pkg/v1/observe/logger:logger_test
 # END kit gen
