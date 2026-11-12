@@ -4347,6 +4347,260 @@ packages:
         struct:
           unexported: true
   - constants:
+      - doc: DefaultPositionTable is the table SQLConfig.Table names when it is empty.
+        name: DefaultPositionTable
+        type: string
+        value: "\"kit_consensus_applied\""
+    doc: |-
+      Package machine holds state machines for the consensus engine (ADR 0152
+      D3): the glue every product wrote by hand around a database, and the
+      reference key-value machine the linearizability checker models.
+
+      [SQL] is a [coreconsensus.DurableStateMachine] and a
+      [coreconsensus.BatchingStateMachine] over a [coresql.Transactor]. A
+      batch of committed commands is applied in ONE transaction: the caller's
+      [SQLConfig].Apply runs each command on the transaction's executor, and
+      the machine writes the log identity and the position of the last one
+      into its position row in that same transaction before it commits. A
+      crash between the batch and the position, or during the commit, loses
+      both or neither, so the engine resumes after exactly the entries the
+      database holds: none applied twice, none skipped. A batch that cannot
+      complete — the database's failure or Apply's — panics, and the node
+      stops with STATE_MACHINE_FAILED: the entries are committed, and the
+      restart applies them again from the position the database kept.
+
+      A snapshot is read in a read-only transaction the machine opens on the
+      apply goroutine (REPEATABLE READ, SERIALIZABLE on SQLite) and holds
+      until Release, so [SQLConfig].Dump streams the state of the batch last
+      committed while the next batches commit. A restore runs
+      [SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in
+      one transaction.
+
+      	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
+      		Transactor: tm, Dialect: sql.DialectPostgres,
+      		Apply:    applyCommand, // func(ctx, ex, entry) (result, error)
+      		Dump:     dumpTables, Truncate: truncateTables, Load: loadTables,
+      	})
+      	node, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})
+
+      [KV] is the reference machine: get, put and compare-and-swap on a
+      per-key revision that only grows, so a value written back to an earlier
+      one never passes a swap the caller read before (D6's ABA defence). Its
+      commands are built with [KVGet], [KVPut] and [KVCompareAndSwap], and
+      each answers a [KVResult]. It keeps its state in memory: a volatile
+      machine, rebuilt from the latest snapshot and the log at every start.
+    functions:
+      - doc: |-
+          NewSQL builds an SQL machine: it creates the position table when it is
+          absent, with a zero position row, and reads the position the database
+          holds. A configuration it cannot run is CONSENSUS_MISCONFIGURED; a
+          database that fails is STATE_MACHINE_FAILED.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: SQLConfig
+        name: NewSQL
+        out:
+          - type: "*SQL"
+          - type: error
+      - doc: NewKV returns an empty KV.
+        name: NewKV
+        out:
+          - type: "*KV"
+      - doc: KVGet returns the command that reads key through the log.
+        in:
+          - name: key
+            type: string
+        name: KVGet
+        out:
+          - type: "[]byte"
+      - doc: KVPut returns the command that stores value under key.
+        in:
+          - name: key
+            type: string
+          - name: value
+            type: "[]byte"
+        name: KVPut
+        out:
+          - type: "[]byte"
+      - doc: |-
+          KVCompareAndSwap returns the command that stores value under key only
+          while the key's revision is revision; revision 0 asks that the key be
+          absent.
+        in:
+          - name: key
+            type: string
+          - name: value
+            type: "[]byte"
+          - name: revision
+            type: uint64
+        name: KVCompareAndSwap
+        out:
+          - type: "[]byte"
+    imports:
+      context: context
+      coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+      coresql: github.com/kitsunium/sdk/internal/core/data/sql
+      io: io
+    path: github.com/kitsunium/sdk/internal/service/app/consensus/machine
+    types:
+      - doc: SQLConfig builds an SQL machine. Every field but Table is required.
+        name: SQLConfig
+        struct:
+          fields:
+            - doc: Transactor runs the machine's transactions.
+              name: Transactor
+              type: coresql.Transactor
+            - doc: Dialect spells the position table's statements.
+              name: Dialect
+              type: coresql.Dialect
+            - doc: |-
+                Table names the position table, a bare lower-case identifier of at
+                most 63 bytes; empty is DefaultPositionTable.
+              name: Table
+              type: string
+            - doc: |-
+                Apply applies one committed command on ex, the batch's transaction,
+                and returns its result. A refusal is a result; an error means the
+                command cannot complete, and stops the node.
+              name: Apply
+              type: func(ctx context.Context, ex coresql.Executor, e coreconsensus.EntryValue) (any, error)
+            - doc: |-
+                Dump writes the machine's state, read on ex, the snapshot's read-only
+                transaction.
+              name: Dump
+              type: func(ctx context.Context, ex coresql.Executor, w io.Writer) error
+            - doc: Truncate removes the machine's state on ex, before a Load.
+              name: Truncate
+              type: func(ctx context.Context, ex coresql.Executor) error
+            - doc: Load writes on ex the state Dump wrote into r.
+              name: Load
+              type: func(ctx context.Context, ex coresql.Executor, r io.Reader) error
+      - doc: |-
+          SQL is a durable, batching state machine over a database: the state is
+          the caller's tables, the applied position one row of its own, written
+          in the transaction of the batch it ends.
+        methods:
+          - doc: "Apply applies one committed command: ApplyBatch of one entry."
+            in:
+              - name: e
+                type: coreconsensus.EntryValue
+            name: Apply
+            out:
+              - type: any
+            recv: pointer
+          - doc: |-
+              ApplyBatch applies es in one transaction, writes the position of the
+              last one in that same transaction, commits, then fills results. It
+              panics when the batch cannot complete (D3).
+            in:
+              - name: es
+                type: "[]coreconsensus.EntryValue"
+              - name: results
+                type: "[]any"
+            name: ApplyBatch
+            recv: pointer
+          - doc: |-
+              AppliedPosition returns the log identity and the position the database
+              holds applied.
+            name: AppliedPosition
+            out:
+              - type: coreconsensus.LogIdentityValue
+              - type: coreconsensus.PositionValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              Snapshot opens the read-only transaction the view is read from and
+              reads the position in it, so that the database pins its view now.
+            name: Snapshot
+            out:
+              - type: coreconsensus.Snapshot
+              - type: error
+            recv: pointer
+          - doc: |-
+              Restore replaces the state with a snapshot's: Truncate, Load and the
+              snapshot's position, in one transaction. A snapshot no SQL machine
+              wrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.
+            in:
+              - name: r
+                type: io.Reader
+              - name: meta
+                type: coreconsensus.SnapshotMetaValue
+            name: Restore
+            out:
+              - type: error
+            recv: pointer
+        name: SQL
+        struct:
+          unexported: true
+      - doc: |-
+          KVResult is what a KV command answers: the key's value and revision
+          after the command, whether the key exists, and whether a put or a swap
+          took effect. Value is the machine's own: the caller does not write to it.
+        name: KVResult
+        struct:
+          fields:
+            - name: Value
+              type: "[]byte"
+            - name: Revision
+              type: uint64
+            - name: Found
+              type: bool
+            - name: Applied
+              type: bool
+      - doc: |-
+          KV is the reference key-value state machine: get, put and
+          compare-and-swap on a per-key revision. A command it does not read is
+          answered a VERSION_UNSUPPORTED error, not applied.
+        methods:
+          - doc: |-
+              Apply applies one command and returns its KVResult, or a refusal of a
+              command this machine does not read.
+            in:
+              - name: e
+                type: coreconsensus.EntryValue
+            name: Apply
+            out:
+              - type: any
+            recv: pointer
+          - doc: |-
+              Get reads key from this node's state: no read through the log, so not
+              linearizable.
+            in:
+              - name: key
+                type: string
+            name: Get
+            out:
+              - name: value
+                type: "[]byte"
+              - name: revision
+                type: uint64
+              - name: found
+                type: bool
+            recv: pointer
+          - doc: "Snapshot copies the map: the entries' bytes are shared, never copied."
+            name: Snapshot
+            out:
+              - type: coreconsensus.Snapshot
+              - type: error
+            recv: pointer
+          - doc: |-
+              Restore replaces the state with a snapshot's. A snapshot no KV wrote
+              is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.
+            in:
+              - name: r
+                type: io.Reader
+              - name: _
+                type: coreconsensus.SnapshotMetaValue
+            name: Restore
+            out:
+              - type: error
+            recv: pointer
+        name: KV
+        struct:
+          unexported: true
+  - constants:
       - blockDoc: The defaults a zero bound of Config clamps to.
         doc: |-
           DefaultMaxCommands is the commands one entry carries when
@@ -6987,3 +7241,110 @@ packages:
       wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
       x509: crypto/x509
     path: github.com/kitsunium/sdk/pkg/v1/app/consensus
+  - doc: |-
+      Package machine is the public facade of the consensus domain's state
+      machines (ADR 0152 D3): the durable machine over a database every
+      product otherwise writes by hand, and the reference key-value machine.
+
+      [NewSQL] builds a [SQL] machine over a transactor of package
+      [github.com/kitsunium/sdk/pkg/v1/data/sql]. It applies a batch of
+      committed commands in one transaction and writes the applied log identity
+      and position in that same transaction, so a crash between the two loses
+      both or neither and a node configured with DurabilityDurable resumes after
+      exactly the entries the database holds: none applied twice, none skipped.
+      A batch that cannot complete panics, and the node stops with
+      STATE_MACHINE_FAILED. A snapshot streams from a read-only transaction
+      opened when it is taken; a restore truncates and loads in one transaction
+      with the snapshot's position.
+
+      	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
+      		Transactor: tm, Dialect: sql.DialectPostgres,
+      		Apply:    applyCommand, // func(ctx, ex, entry) (result, error)
+      		Dump:     dumpTables, Truncate: truncateTables, Load: loadTables,
+      	})
+      	node, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})
+
+      [KV] keeps keys in memory, each with a revision that only grows: [KVPut]
+      stores a value, [KVGet] reads it through the log, [KVCompareAndSwap]
+      stores one only while the revision is the one the caller read, so a value
+      written back to an earlier one never passes a stale swap. Each command
+      answers a [KVResult] from Propose.
+
+      	_, res, err := node.Propose(ctx, machine.KVCompareAndSwap("leader", []byte("fra"), 0))
+      	if r, ok := res.(machine.KVResult); ok && r.Applied { … } // took the key at revision r.Revision
+    facade:
+      - alias:
+          - name: SQLConfig
+            target: svcmachine.SQLConfig
+          - name: SQL
+            target: svcmachine.SQL
+          - name: KVResult
+            target: svcmachine.KVResult
+          - name: KV
+            target: svcmachine.KV
+      - const:
+          - doc: DefaultPositionTable is the table SQLConfig.Table names when it is empty.
+            name: DefaultPositionTable
+            reexport: svcmachine.DefaultPositionTable
+            type: string
+            typed: true
+            value: "\"kit_consensus_applied\""
+      - func:
+          doc: |-
+            NewSQL builds an SQL machine: it creates the position table when it is
+            absent and reads the position the database holds.
+          forward: svcmachine.NewSQL
+          in:
+            - name: ctx
+              type: context.Context
+            - name: cfg
+              type: SQLConfig
+          name: NewSQL
+          out:
+            - type: "*SQL"
+            - type: error
+      - func:
+          doc: NewKV returns an empty KV.
+          forward: svcmachine.NewKV
+          name: NewKV
+          out:
+            - type: "*KV"
+      - func:
+          doc: KVGet returns the command that reads key through the log.
+          forward: svcmachine.KVGet
+          in:
+            - name: key
+              type: string
+          name: KVGet
+          out:
+            - type: "[]byte"
+      - func:
+          doc: KVPut returns the command that stores value under key.
+          forward: svcmachine.KVPut
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: "[]byte"
+          name: KVPut
+          out:
+            - type: "[]byte"
+      - func:
+          doc: |-
+            KVCompareAndSwap returns the command that stores value under key only
+            while the key's revision is revision; revision 0 asks that the key be
+            absent.
+          forward: svcmachine.KVCompareAndSwap
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: "[]byte"
+            - name: revision
+              type: uint64
+          name: KVCompareAndSwap
+          out:
+            - type: "[]byte"
+    imports:
+      svcmachine: github.com/kitsunium/sdk/internal/service/app/consensus/machine
+    path: github.com/kitsunium/sdk/pkg/v1/app/consensus/machine

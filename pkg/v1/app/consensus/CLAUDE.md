@@ -15,7 +15,8 @@ Backup section, #927),
 `NewTCPTransport` and `NewTCPTransportFromPEM`, the
 memory doubles, the wire codecs and the sentinels of both ranges. The
 `LeadershipWatcher` and `MembershipWatcher` siblings are aliased too: a
-product finds them by type assertion on its `*Node` (ADR 0039, #915).
+product finds them by type assertion on its `*Node` (ADR 0039, #915). The
+state machines (`NewSQL`, `NewKV`) are `machine/`'s facade (#916).
 
 ## Conventions
 

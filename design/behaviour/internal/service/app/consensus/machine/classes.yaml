@@ -1,0 +1,473 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The operations a KV command carries, its first byte.
+    grouped: true
+    items:
+      - name: kvOpGet
+        type: byte
+        value: iota + 1
+      - name: kvOpPut
+      - name: kvOpCAS
+    name: kvOpGet
+  - doc: kvSnapshotMagic and kvSnapshotVersion open every snapshot a KV writes.
+    grouped: true
+    items:
+      - name: kvSnapshotMagic
+        value: "\"KKV\""
+      - name: kvSnapshotVersion
+        type: byte
+        value: "1"
+    name: kvSnapshotMagic
+  - doc: maxKVField bounds a key or a value read back from a snapshot.
+    items:
+      - name: maxKVField
+        type: uint64
+        value: 1 << 30
+    name: maxKVField
+  - doc: DefaultPositionTable is the table SQLConfig.Table names when it is empty.
+    items:
+      - name: DefaultPositionTable
+        type: string
+        value: "\"kit_consensus_applied\""
+    name: DefaultPositionTable
+  - doc: |-
+      maxTableName bounds a position table's name: PostgreSQL's 63 bytes, the
+      shortest identifier limit of the three dialects.
+    items:
+      - name: maxTableName
+        type: int
+        value: "63"
+    name: maxTableName
+  - doc: |-
+      sqlSnapshotMagic and sqlSnapshotVersion open every snapshot an SQL
+      machine writes: four bytes and a format version, then what Dump wrote.
+    grouped: true
+    items:
+      - name: sqlSnapshotMagic
+        value: "\"KSQL\""
+      - name: sqlSnapshotVersion
+        type: byte
+        value: "1"
+    name: sqlSnapshotMagic
+  - doc: |-
+      positionColumns are the columns of the position row, in the order every
+      statement binds and scans them.
+    items:
+      - name: positionColumns
+        value: "\"cluster, epoch, predecessor, predecessor_epoch, kept_index, adopted_from, applied_term, applied_index\""
+    name: positionColumns
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - origin
+      - misconfigured
+      - failed
+      - corrupt
+      - unsupported
+    name: errors.go
+  - decls:
+      - kvOpGet
+      - kvSnapshotMagic
+      - maxKVField
+      - KVResult
+      - kvEntry
+      - KV
+      - NewKV
+      - KVGet
+      - KVPut
+      - KVCompareAndSwap
+      - kvCommand
+      - (*KV).Apply
+      - decodeKV
+      - (*KV).Get
+      - kvSnap
+      - (*KV).Snapshot
+      - kvSnap.WriteTo
+      - kvSnap.Release
+      - (*KV).Restore
+      - readEntry
+      - readField
+    name: kv.go
+  - decls:
+      - _
+    name: machine_compliance.go
+  - decls:
+      - DefaultPositionTable
+      - maxTableName
+      - sqlSnapshotMagic
+      - positionColumns
+      - SQLConfig
+      - SQL
+      - NewSQL
+      - (*SQLConfig).validate
+      - (*SQLConfig).validateParts
+      - bareIdent
+      - identByte
+      - (*SQL).Apply
+      - (*SQL).ApplyBatch
+      - (*SQL).AppliedPosition
+      - (*SQL).Restore
+      - (*SQL).writePosition
+      - (*SQL).readPosition
+      - clusterOf
+      - positionArgs
+    name: sql.go
+  - decls:
+      - sqlSnapshot
+      - writeReq
+      - (*SQL).Snapshot
+      - (*sqlSnapshot).hold
+      - (*sqlSnapshot).dump
+      - (*sqlSnapshot).WriteTo
+      - (*sqlSnapshot).Release
+      - countingWriter
+      - (*countingWriter).Write
+    name: sqlsnap.go
+functions:
+  - doc: |-
+      origin returns sentinel carrying fields: the machine raises the consensus
+      domain's own sentinels, so the node that stops on one reports it as it
+      reports its own (ADR 0160: the codes stay in the core).
+    name: origin
+    params: sentinel *errs.Error, fields ...errs.FieldValue
+    results: error
+  - doc: misconfigured refuses a configuration at construction.
+    name: misconfigured
+    params: why string
+    results: error
+  - doc: |-
+      failed is an operation of the machine that could not complete: the
+      database's failure, or the caller's function's, kept as a field.
+    name: failed
+    params: op string, cause error
+    results: error
+  - doc: corrupt is a snapshot whose bytes this machine cannot read.
+    name: corrupt
+    params: why string
+    results: error
+  - doc: |-
+      unsupported is a snapshot of a format version this build does not read:
+      the node stops rather than guess (D18).
+    name: unsupported
+    params: what string, version byte
+    results: error
+  - name: NewKV
+    results: "*KV"
+  - name: KVGet
+    params: key string
+    results: "[]byte"
+  - name: KVPut
+    params: key string, value []byte
+    results: "[]byte"
+  - name: KVCompareAndSwap
+    params: key string, value []byte, revision uint64
+    results: "[]byte"
+  - doc: |-
+      kvCommand encodes op, key, revision and value: the op byte, the key's
+      length as a uvarint and its bytes, the revision as a uvarint, the value.
+    name: kvCommand
+    params: op byte, key string, value []byte, rev uint64
+    results: "[]byte"
+  - doc: decodeKV reads a command kvCommand wrote.
+    name: decodeKV
+    params: b []byte
+    results: op byte, key string, rev uint64, value []byte, ok bool
+  - doc: readEntry reads one key with its revision and value.
+    name: readEntry
+    params: br *bufio.Reader
+    results: string, kvEntry, error
+  - doc: readField reads a uvarint length and that many bytes.
+    name: readField
+    params: br *bufio.Reader
+    results: "[]byte, error"
+  - name: NewSQL
+    params: ctx context.Context, cfg SQLConfig
+    results: "*SQL, error"
+  - doc: |-
+      bareIdent reports whether s is [a-z_][a-z0-9_]* of at most maxTableName
+      bytes: a name that needs no quoting in any dialect, and so reads the same
+      in all three.
+    name: bareIdent
+    params: s string
+    results: bool
+  - doc: identByte reports whether c is one of [a-z0-9_].
+    name: identByte
+    params: c byte
+    results: bool
+  - doc: clusterOf decodes a cluster id the position row spells in hex.
+    name: clusterOf
+    params: s string
+    results: coreconsensus.ClusterID, error
+  - doc: |-
+      positionArgs are the eight values of the position row, in column order.
+      A number above math.MaxInt64 has no BIGINT: the machine stops on it.
+    name: positionArgs
+    params: li coreconsensus.LogIdentityValue, pos coreconsensus.PositionValue
+    results: "[]any"
+imports:
+  binary: encoding/binary
+  bufio: bufio
+  bytes: bytes
+  context: context
+  coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+  coresql: github.com/kitsunium/sdk/internal/core/data/sql
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  hex: encoding/hex
+  io: io
+  maps: maps
+  math: math
+  slices: slices
+  stdsql: database/sql
+  strings: strings
+  sync: sync
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/consensus/machine
+  name: machine
+  purpose: "Package machine holds state machines for the consensus engine (ADR 0152 D3): the glue every product wrote by hand around a database, and the reference key-value machine the linearizability checker models."
+types:
+  - fields:
+      - name: Value
+        type: "[]byte"
+      - name: Revision
+        type: uint64
+      - name: Found
+        type: bool
+      - name: Applied
+        type: bool
+    kind: struct
+    name: KVResult
+  - doc: |-
+      kvEntry is one key's value and revision; its bytes are never written to
+      once stored, so a snapshot shares them.
+    fields:
+      - name: value
+        type: "[]byte"
+      - name: rev
+        type: uint64
+    kind: struct
+    name: kvEntry
+  - fields:
+      - name: mu
+        type: sync.RWMutex
+      - name: m
+        type: map[string]kvEntry
+    kind: struct
+    methods:
+      - name: Apply
+        params: e coreconsensus.EntryValue
+        recv: s *KV
+        results: any
+      - name: Get
+        params: key string
+        recv: s *KV
+        results: value []byte, revision uint64, found bool
+      - name: Snapshot
+        recv: s *KV
+        results: coreconsensus.Snapshot, error
+      - name: Restore
+        params: r io.Reader, _ coreconsensus.SnapshotMetaValue
+        recv: s *KV
+        results: error
+    name: KV
+  - doc: kvSnap is a copy of the map's entries; their bytes are shared.
+    fields:
+      - name: m
+        type: map[string]kvEntry
+    kind: struct
+    methods:
+      - doc: |-
+          WriteTo writes the header, the count, then each key in order with its
+          revision and value, every length a uvarint.
+        name: WriteTo
+        params: w io.Writer
+        recv: k kvSnap
+        results: int64, error
+      - doc: "Release frees nothing: the copy is the garbage collector's."
+        name: Release
+        recv: kvSnap
+    name: kvSnap
+  - fields:
+      - doc: Transactor runs the machine's transactions.
+        name: Transactor
+        type: coresql.Transactor
+      - doc: Dialect spells the position table's statements.
+        name: Dialect
+        type: coresql.Dialect
+      - doc: |-
+          Table names the position table, a bare lower-case identifier of at
+          most 63 bytes; empty is DefaultPositionTable.
+        name: Table
+        type: string
+      - doc: |-
+          Apply applies one committed command on ex, the batch's transaction,
+          and returns its result. A refusal is a result; an error means the
+          command cannot complete, and stops the node.
+        name: Apply
+        type: func(ctx context.Context, ex coresql.Executor, e coreconsensus.EntryValue) (any, error)
+      - doc: |-
+          Dump writes the machine's state, read on ex, the snapshot's read-only
+          transaction.
+        name: Dump
+        type: func(ctx context.Context, ex coresql.Executor, w io.Writer) error
+      - doc: Truncate removes the machine's state on ex, before a Load.
+        name: Truncate
+        type: func(ctx context.Context, ex coresql.Executor) error
+      - doc: Load writes on ex the state Dump wrote into r.
+        name: Load
+        type: func(ctx context.Context, ex coresql.Executor, r io.Reader) error
+    kind: struct
+    methods:
+      - doc: validate refuses a configuration the machine cannot run.
+        name: validate
+        recv: c *SQLConfig
+        results: error
+      - doc: validateParts refuses a missing transactor, dialect or callback.
+        name: validateParts
+        recv: c *SQLConfig
+        results: error
+    name: SQLConfig
+  - fields:
+      - name: cfg
+        type: SQLConfig
+      - doc: |-
+          sel, upd and ins are the position row's three statements, rendered
+          once for the dialect.
+        name: sel
+        type: string
+      - doc: |-
+          sel, upd and ins are the position row's three statements, rendered
+          once for the dialect.
+        name: upd
+        type: string
+      - doc: |-
+          sel, upd and ins are the position row's three statements, rendered
+          once for the dialect.
+        name: ins
+        type: string
+      - doc: snapIso is the isolation a snapshot's transaction reads at.
+        name: snapIso
+        type: stdsql.IsolationLevel
+      - name: mu
+        type: sync.Mutex
+      - name: li
+        type: coreconsensus.LogIdentityValue
+      - name: pos
+        type: coreconsensus.PositionValue
+    kind: struct
+    methods:
+      - name: Apply
+        params: e coreconsensus.EntryValue
+        recv: m *SQL
+        results: any
+      - name: ApplyBatch
+        params: es []coreconsensus.EntryValue, results []any
+        recv: m *SQL
+      - name: AppliedPosition
+        recv: m *SQL
+        results: coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error
+      - name: Restore
+        params: r io.Reader, meta coreconsensus.SnapshotMetaValue
+        recv: m *SQL
+        results: error
+      - doc: |-
+          writePosition updates the one position row inside the transaction ex
+          belongs to.
+        name: writePosition
+        params: ctx context.Context, ex coresql.Executor, li coreconsensus.LogIdentityValue, pos coreconsensus.PositionValue
+        recv: m *SQL
+        results: error
+      - doc: readPosition reads the position row; found is false when there is none.
+        name: readPosition
+        params: ctx context.Context, ex coresql.Executor
+        recv: m *SQL
+        results: li coreconsensus.LogIdentityValue, pos coreconsensus.PositionValue, found bool, err error
+      - name: Snapshot
+        recv: m *SQL
+        results: coreconsensus.Snapshot, error
+    name: SQL
+  - doc: |-
+      sqlSnapshot is a view of the database pinned by a read-only transaction
+      the snapshot holds open: opened and read once on the apply goroutine, so
+      it sees the state of the last batch committed, and read again by WriteTo
+      on the snapshot goroutine while Apply commits the next ones.
+    fields:
+      - name: m
+        type: "*SQL"
+      - doc: |-
+          write hands the transaction's goroutine the writer of WriteTo, and
+          release ends the transaction.
+        name: write
+        type: chan *writeReq
+      - name: release
+        type: chan struct{}
+      - name: once
+        type: sync.Once
+      - name: done
+        type: chan struct{}
+    kind: struct
+    methods:
+      - doc: hold runs the snapshot's transaction until Release, serving WriteTo in it.
+        name: hold
+        params: ready chan<- error
+        recv: s *sqlSnapshot
+      - doc: dump writes the header, then what Dump writes, counting the bytes.
+        name: dump
+        params: ctx context.Context, ex coresql.Executor, w io.Writer
+        recv: s *sqlSnapshot
+        results: int64, error
+      - doc: WriteTo writes the view's state to w, read in the snapshot's transaction.
+        name: WriteTo
+        params: w io.Writer
+        recv: s *sqlSnapshot
+        results: int64, error
+      - doc: Release ends the snapshot's transaction. It is idempotent.
+        name: Release
+        recv: s *sqlSnapshot
+    name: sqlSnapshot
+  - doc: |-
+      writeReq is one WriteTo, answered on done: a channel of one slot, so that the
+      answer never waits for WriteTo to be ready and is sent exactly once.
+    fields:
+      - name: w
+        type: io.Writer
+      - name: "n"
+        type: int64
+      - name: err
+        type: error
+      - name: done
+        type: chan struct{}
+    kind: struct
+    name: writeReq
+  - doc: countingWriter counts what passes through it.
+    fields:
+      - name: w
+        type: io.Writer
+      - name: "n"
+        type: int64
+    kind: struct
+    methods:
+      - doc: Write writes p and counts it.
+        name: Write
+        params: p []byte
+        recv: c *countingWriter
+        results: int, error
+    name: countingWriter
+vars:
+  - doc: |-
+      The ports each machine implements: SQL every sibling a durable, batching
+      machine speaks, KV the state machine alone (it is volatile).
+    grouped: true
+    items:
+      - name: _
+        type: coreconsensus.DurableStateMachine
+        value: (*SQL)(nil)
+      - name: _
+        type: coreconsensus.BatchingStateMachine
+        value: (*SQL)(nil)
+      - name: _
+        type: coreconsensus.StateMachine
+        value: (*KV)(nil)
+    name: _

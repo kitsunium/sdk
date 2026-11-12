@@ -214,7 +214,8 @@ internal/
                            health — check registry + per-check timeouts +
                              drain latch + HTTP handler + the loopback Ask;
                            consensus — the Raft engine (step function in
-                             raft/, wire layouts in wire/), segmented
+                             raft/, wire layouts in wire/, state machines
+                             in machine/), segmented
                              file log, snapshot store, data directory and
                              offline operations, mTLS transport, and
                              multi/, a packer of many commands into one

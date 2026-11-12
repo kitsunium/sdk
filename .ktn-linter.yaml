@@ -1776,6 +1776,12 @@ rules:
       # built, never on Enqueue's path (ADR 0185).
       - "**/internal/service/app/forward/forwarder.go"
       - "internal/service/app/forward/forwarder.go"
+      # service/app/consensus/machine.NewSQL(ctx, cfg SQLConfig) (ADR 0152 D3,
+      # #916) is the same class: the machine's config, a composite literal at
+      # the call site, copied once per machine built, never on an Apply path.
+      # Scoped to the one file.
+      - "**/internal/service/app/consensus/machine/sql.go"
+      - "internal/service/app/consensus/machine/sql.go"
       # core/app/consensus.MembershipValue (80 bytes) crossed 64 bytes when
       # #648 gave it RetiredKeys beside Members and Retired: three slice
       # headers and an index. Its methods — Member, IsRetired, IsRetiredKey,

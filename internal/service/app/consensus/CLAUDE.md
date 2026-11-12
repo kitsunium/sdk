@@ -28,7 +28,9 @@ after it in one framed file; `Node.AppendBackup`, the tail since a
 `BackupPoint`; `VerifyBackup` and `RestoreBackup` over a `BackupParams`,
 `backup.go`, #927), the mTLS TCP transport over `net/tlsid` and
 `net/server.Admission` (ADR 0174), and the in-memory doubles. It declares no
-code: it raises the core's.
+code: it raises the core's. The state machines a product plugs in — the
+durable, batching `SQL` machine and the reference `KV` — are `machine/`'s
+(#916), which imports nothing of this package.
 
 Platforms. The data directory's lock is `fs/flock`: where it has none
 (`flock.Native` false — illumos and Solaris, ADR 0144) `NewDataDir` refuses

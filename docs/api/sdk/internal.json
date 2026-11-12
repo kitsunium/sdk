@@ -874,6 +874,14 @@
       "doc": "Package consensus is the Raft engine of ADR 0152 and everything it ships\naround the step function of package raft: the event loop that drives it,\nthe storage actor that makes a write durable before any reply that depends\non it leaves, the apply goroutine, and snapshots cut, sent and installed in\nchecksummed chunks.\n\nA [Node] is built by [NewNode] over a [Config]: a state machine, a log, a\nsnapshot store and a transport. The shipped storage is a [DataDir] — a\nlock, a stamp, the segmented [fileLog], the [fileSnapshots] and the stop\nmarkers — and the shipped transport is the mutual-TLS [TCPTransport];\n[MemoryLog], [MemorySnapshots] and [MemoryNetwork] stand in for them in\ntests.\n\nA failed write or sync stops the node with STORAGE_FAILED and is never\nretried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],\n[Inspect], [ClearQuarantine] and [Preflight] work on a stopped node's\ndirectory only.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "machine",
+      "dir": "service/app/consensus/machine",
+      "layer": "service",
+      "family": "app",
+      "doc": "Package machine holds state machines for the consensus engine (ADR 0152\nD3): the glue every product wrote by hand around a database, and the\nreference key-value machine the linearizability checker models.\n\n[SQL] is a [coreconsensus.DurableStateMachine] and a\n[coreconsensus.BatchingStateMachine] over a [coresql.Transactor]. A\nbatch of committed commands is applied in ONE transaction: the caller's\n[SQLConfig].Apply runs each command on the transaction's executor, and\nthe machine writes the log identity and the position of the last one\ninto its position row in that same transaction before it commits. A\ncrash between the batch and the position, or during the commit, loses\nboth or neither, so the engine resumes after exactly the entries the\ndatabase holds: none applied twice, none skipped. A batch that cannot\ncomplete — the database's failure or Apply's — panics, and the node\nstops with STATE_MACHINE_FAILED: the entries are committed, and the\nrestart applies them again from the position the database kept.\n\nA snapshot is read in a read-only transaction the machine opens on the\napply goroutine (REPEATABLE READ, SERIALIZABLE on SQLite) and holds\nuntil Release, so [SQLConfig].Dump streams the state of the batch last\ncommitted while the next batches commit. A restore runs\n[SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in\none transaction.\n\n\tsm, err := machine.NewSQL(ctx, machine.SQLConfig{\n\t\tTransactor: tm, Dialect: sql.DialectPostgres,\n\t\tApply:    applyCommand, // func(ctx, ex, entry) (result, error)\n\t\tDump:     dumpTables, Truncate: truncateTables, Load: loadTables,\n\t})\n\tnode, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})\n\n[KV] is the reference machine: get, put and compare-and-swap on a\nper-key revision that only grows, so a value written back to an earlier\none never passes a swap the caller read before (D6's ABA defence). Its\ncommands are built with [KVGet], [KVPut] and [KVCompareAndSwap], and\neach answers a [KVResult]. It keeps its state in memory: a volatile\nmachine, rebuilt from the latest snapshot and the log at every start.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "raft",
       "dir": "service/app/consensus/raft",
@@ -65959,6 +65967,299 @@
       "value": "1",
       "doc": "WipeAndRejoin wipes the directory; the operator then Removes the old\nNodeID and Inits under a NEW one (R4-03). A voter's incarnation is\nnever swapped in place. A wipe that does not finish leaves the stop\nmarker STOP-WIPE, which refuses a start, Init, Redraw, Recover,\nRestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs\nagain and completes it.\n",
       "file": "service/app/consensus/offline.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.DefaultPositionTable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "DefaultPositionTable",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"kit_consensus_applied\"",
+      "doc": "DefaultPositionTable is the table SQLConfig.Table names when it is empty.\n",
+      "file": "service/app/consensus/machine/sql.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.KV",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "KV",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "KV is the reference key-value state machine: get, put and\ncompare-and-swap on a per-key revision. A command it does not read is\nanswered a VERSION_UNSUPPORTED error, not applied.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*KV).Apply",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "Apply",
+      "recv": "KV",
+      "spelled": "func(e coreconsensus.EntryValue) any",
+      "canonical": "func(e github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) any",
+      "doc": "Apply applies one command and returns its KVResult, or a refusal of a\ncommand this machine does not read.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*KV).Get",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "Get",
+      "recv": "KV",
+      "spelled": "func(key string) (value []byte, revision uint64, found bool)",
+      "canonical": "func(key string) (value []byte, revision uint64, found bool)",
+      "doc": "Get reads key from this node's state: no read through the log, so not\nlinearizable.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*KV).Restore",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "Restore",
+      "recv": "KV",
+      "spelled": "func(r io.Reader, _ coreconsensus.SnapshotMetaValue) error",
+      "canonical": "func(r io.Reader, _ github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
+      "doc": "Restore replaces the state with a snapshot's. A snapshot no KV wrote\nis SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*KV).Snapshot",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "Snapshot",
+      "recv": "KV",
+      "spelled": "func() (coreconsensus.Snapshot, error)",
+      "canonical": "func() (github.com/kitsunium/sdk/internal/core/app/consensus.Snapshot, error)",
+      "doc": "Snapshot copies the map: the entries' bytes are shared, never copied.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.KVCompareAndSwap",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "KVCompareAndSwap",
+      "spelled": "func(key string, value []byte, revision uint64) []byte",
+      "canonical": "func(key string, value []byte, revision uint64) []byte",
+      "doc": "KVCompareAndSwap returns the command that stores value under key only\nwhile the key's revision is revision; revision 0 asks that the key be\nabsent.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.KVGet",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "KVGet",
+      "spelled": "func(key string) []byte",
+      "canonical": "func(key string) []byte",
+      "doc": "KVGet returns the command that reads key through the log.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.KVPut",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "KVPut",
+      "spelled": "func(key string, value []byte) []byte",
+      "canonical": "func(key string, value []byte) []byte",
+      "doc": "KVPut returns the command that stores value under key.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.KVResult",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "KVResult",
+      "spelled": "struct{Value []byte; Revision uint64; Found bool; Applied bool}",
+      "canonical": "struct{Value []byte; Revision uint64; Found bool; Applied bool}",
+      "fields": [
+        {
+          "name": "Value",
+          "type": "[]byte"
+        },
+        {
+          "name": "Revision",
+          "type": "uint64"
+        },
+        {
+          "name": "Found",
+          "type": "bool"
+        },
+        {
+          "name": "Applied",
+          "type": "bool"
+        }
+      ],
+      "doc": "KVResult is what a KV command answers: the key's value and revision\nafter the command, whether the key exists, and whether a put or a swap\ntook effect. Value is the machine's own: the caller does not write to it.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.NewKV",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "NewKV",
+      "spelled": "func() *KV",
+      "canonical": "func() *github.com/kitsunium/sdk/internal/service/app/consensus/machine.KV",
+      "doc": "NewKV returns an empty KV.\n",
+      "file": "service/app/consensus/machine/kv.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.NewSQL",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "NewSQL",
+      "spelled": "func(ctx context.Context, cfg SQLConfig) (*SQL, error)",
+      "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/internal/service/app/consensus/machine.SQLConfig) (*github.com/kitsunium/sdk/internal/service/app/consensus/machine.SQL, error)",
+      "doc": "NewSQL builds an SQL machine: it creates the position table when it is\nabsent, with a zero position row, and reads the position the database\nholds. A configuration it cannot run is CONSENSUS_MISCONFIGURED; a\ndatabase that fails is STATE_MACHINE_FAILED.\n",
+      "file": "service/app/consensus/machine/sql.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.SQL",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "SQL",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "SQL is a durable, batching state machine over a database: the state is\nthe caller's tables, the applied position one row of its own, written\nin the transaction of the batch it ends.\n",
+      "file": "service/app/consensus/machine/sql.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*SQL).AppliedPosition",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "AppliedPosition",
+      "recv": "SQL",
+      "spelled": "func() (coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error)",
+      "canonical": "func() (github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentityValue, github.com/kitsunium/sdk/internal/core/app/consensus.PositionValue, error)",
+      "doc": "AppliedPosition returns the log identity and the position the database\nholds applied.\n",
+      "file": "service/app/consensus/machine/sql.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*SQL).Apply",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "Apply",
+      "recv": "SQL",
+      "spelled": "func(e coreconsensus.EntryValue) any",
+      "canonical": "func(e github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) any",
+      "doc": "Apply applies one committed command: ApplyBatch of one entry.\n",
+      "file": "service/app/consensus/machine/sql.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*SQL).ApplyBatch",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "ApplyBatch",
+      "recv": "SQL",
+      "spelled": "func(es []coreconsensus.EntryValue, results []any)",
+      "canonical": "func(es []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, results []any)",
+      "doc": "ApplyBatch applies es in one transaction, writes the position of the\nlast one in that same transaction, commits, then fills results. It\npanics when the batch cannot complete (D3).\n",
+      "file": "service/app/consensus/machine/sql.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*SQL).Restore",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "Restore",
+      "recv": "SQL",
+      "spelled": "func(r io.Reader, meta coreconsensus.SnapshotMetaValue) error",
+      "canonical": "func(r io.Reader, meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
+      "doc": "Restore replaces the state with a snapshot's: Truncate, Load and the\nsnapshot's position, in one transaction. A snapshot no SQL machine\nwrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.\n",
+      "file": "service/app/consensus/machine/sql.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*SQL).Snapshot",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "Snapshot",
+      "recv": "SQL",
+      "spelled": "func() (coreconsensus.Snapshot, error)",
+      "canonical": "func() (github.com/kitsunium/sdk/internal/core/app/consensus.Snapshot, error)",
+      "doc": "Snapshot opens the read-only transaction the view is read from and\nreads the position in it, so that the database pins its view now.\n",
+      "file": "service/app/consensus/machine/sqlsnap.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.SQLConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "SQLConfig",
+      "spelled": "struct{Transactor coresql.Transactor; Dialect coresql.Dialect; Table string; Apply func(ctx context.Context, ex coresql.Executor, e coreconsensus.EntryValue) (any, error); Dump func(ctx context.Context, ex coresql.Executor, w io.Writer) error; Truncate func(ctx context.Context, ex coresql.Executor) error; Load func(ctx context.Context, ex coresql.Executor, r io.Reader) error}",
+      "canonical": "struct{Transactor github.com/kitsunium/sdk/internal/core/data/sql.Transactor; Dialect github.com/kitsunium/sdk/internal/core/data/sql.Dialect; Table string; Apply func(ctx context.Context, ex github.com/kitsunium/sdk/internal/core/data/sql.Executor, e github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) (any, error); Dump func(ctx context.Context, ex github.com/kitsunium/sdk/internal/core/data/sql.Executor, w io.Writer) error; Truncate func(ctx context.Context, ex github.com/kitsunium/sdk/internal/core/data/sql.Executor) error; Load func(ctx context.Context, ex github.com/kitsunium/sdk/internal/core/data/sql.Executor, r io.Reader) error}",
+      "fields": [
+        {
+          "name": "Transactor",
+          "type": "coresql.Transactor",
+          "doc": "Transactor runs the machine's transactions.\n"
+        },
+        {
+          "name": "Dialect",
+          "type": "coresql.Dialect",
+          "doc": "Dialect spells the position table's statements.\n"
+        },
+        {
+          "name": "Table",
+          "type": "string",
+          "doc": "Table names the position table, a bare lower-case identifier of at\nmost 63 bytes; empty is DefaultPositionTable.\n"
+        },
+        {
+          "name": "Apply",
+          "type": "func(ctx context.Context, ex coresql.Executor, e coreconsensus.EntryValue) (any, error)",
+          "doc": "Apply applies one committed command on ex, the batch's transaction,\nand returns its result. A refusal is a result; an error means the\ncommand cannot complete, and stops the node.\n"
+        },
+        {
+          "name": "Dump",
+          "type": "func(ctx context.Context, ex coresql.Executor, w io.Writer) error",
+          "doc": "Dump writes the machine's state, read on ex, the snapshot's read-only\ntransaction.\n"
+        },
+        {
+          "name": "Truncate",
+          "type": "func(ctx context.Context, ex coresql.Executor) error",
+          "doc": "Truncate removes the machine's state on ex, before a Load.\n"
+        },
+        {
+          "name": "Load",
+          "type": "func(ctx context.Context, ex coresql.Executor, r io.Reader) error",
+          "doc": "Load writes on ex the state Dump wrote into r.\n"
+        }
+      ],
+      "doc": "SQLConfig builds an SQL machine. Every field but Table is required.\n",
+      "file": "service/app/consensus/machine/sql.go",
       "layer": "service",
       "family": "app"
     },
