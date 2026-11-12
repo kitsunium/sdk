@@ -37,6 +37,9 @@ go_test(
         "commit_bench_test.go",
         "commit_external_test.go",
         "gen_api_test.go",
+        "gen_perf_test.go",
+        "idle_external_test.go",
+        "perf_fixtures_test.go",
     ],
     deps = [
         ":commit",
