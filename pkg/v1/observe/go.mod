@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk/pkg/v1/observe
 
-go 1.27.3
+go 1.27.4
 
 replace github.com/kitsunium/sdk/internal => ../../../internal
 

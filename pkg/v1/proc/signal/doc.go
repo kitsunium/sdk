@@ -41,7 +41,8 @@
 // Parse, String, and Notify are portable. Relay has a native backend on Unix
 // (kill(2)) and on Windows, which has no kill(2): a pid target is terminated
 // with TerminateProcess, and a process-group target receives a console control
-// event (CTRL_C for SIGINT, CTRL_BREAK otherwise). On the remaining platforms it
+// event: CTRL_BREAK, SIGINT included, since Windows delivers no CTRL_C to one
+// group. On the remaining platforms it
 // returns the typed UNSUPPORTED_PLATFORM sentinel rather than acting, so code
 // compiles and degrades gracefully everywhere.
 package signal

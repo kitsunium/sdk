@@ -9,11 +9,14 @@ import (
 )
 
 // UsageOf reads the page-fault, block-I/O and context-switch counters of a
-// wait4 rusage into ExitValue.Usage. Linux, darwin and the BSDs fill them; a
-// counter that reads negative is reported as zero, not wrapped.
-func UsageOf(ru *syscall.Rusage) *coreproc.UsageValue {
+// wait4 rusage into ExitValue.Usage, Known set. Linux, darwin and the BSDs
+// fill them; a counter that reads negative is reported as zero, not wrapped.
+// The value is returned, not a pointer: a collection converts it without
+// allocating.
+func UsageOf(ru *syscall.Rusage) coreproc.UsageValue {
 	//: the six counters wait4 filled beside CPU time and peak RSS.
-	return &coreproc.UsageValue{
+	return coreproc.UsageValue{
+		Known:            true,
 		MinorFaults:      counter(ru.Minflt),
 		MajorFaults:      counter(ru.Majflt),
 		InBlock:          counter(ru.Inblock),

@@ -15,6 +15,7 @@ go_library(
         "//internal/core/crypto",
         "//internal/core/observe/logger",
         "//internal/core/observe/logger/middleware/encwrite",
+        "//internal/kernel/concur/buffer",
         "//internal/kernel/errs",
     ],
 )
@@ -26,6 +27,8 @@ go_test(
         "encwrite_internal_test.go",
         "frame_overflow_internal_test.go",
         "gen_api_test.go",
+        "gen_perf_test.go",
+        "perf_fixtures_test.go",
     ],
     embed = [":encwrite"],
     deps = [

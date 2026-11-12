@@ -170,3 +170,40 @@ finds it empty, yield (`runtime.Gosched`) before trying again. ns per record.
   record. `MultiQueue` stays, with no adopter until a measurement of a
   different MPSC shape — or of an adopter that is not saturated — shows it
   winning.
+
+## Edition 2026-11-11 — the floor of the happy rows (#1034)
+
+Same box as the 2026-11-03 edition (AMD EPYC 7351P, Linux 6.12, go1.27.3,
+`GOMAXPROCS=4`), `-benchmem -count 10`, benchstat medians:
+`cd internal && go test -run '^$' -bench 'SCStorePair|TryWrite_Happy|TryRead_Happy' -benchmem -count 10 ./kernel/collections/ring/`.
+
+| Row | ns/op | against `SCStorePair` |
+|---|---|---|
+| `SCStorePair` | 20.79 ± 0 % | — |
+| `TryWrite_Happy` | 21.14 ± 1 % | +1.7 % |
+| `TryRead_Happy` | 20.70 ± 5 % | −0.4 % |
+| `SPSC_ProducerConsumer/size1024` (`-count 6`) | 135.7 ± 26 % | 43 % of the 313.2 before #1034 |
+
+- **`SCStorePair` is two `atomic.Uint64.Store` on padded words and nothing
+  else** — tail's publication of a slot and head's release of it, the two
+  stores an iteration of either happy row (a write then a read) cannot do
+  without. The ring costs that and no more: the loads, the mask, the slot
+  copy and the interface call are inside the noise of two stores. One store
+  alone measures 10.6 ns here, an `atomic.Add` 10.2 ns: on amd64 every
+  `sync/atomic` write is a locked instruction (`XCHG` for a store) that drains
+  the store buffer.
+- **Why 50 % of the committed row cannot be reached.** Every `sync/atomic`
+  operation is sequentially consistent (the Go memory model), and an SC store
+  on x86 needs the `StoreLoad` fence `XCHG` carries. The ring only needs a
+  release store, a plain `MOV` under x86's TSO: a scratch copy of the ring
+  with plain stores, correct for one goroutine only, measured 5.7 ns for the
+  pair. Go does not let a package reach it: `internal/runtime/atomic`'s
+  `StoreRel` is not importable, a `go:linkname` to it is refused by the
+  linker's `-checklinkname` and by the SDK, and a plain store is a data race
+  that `-race` reports and the compiler may reorder past the slot's store.
+  Batching the publication would make `TryWrite` return before its item is
+  visible, or `TryWrite` answer `Full` with a slot free. On arm64 the same
+  `Store` is an `STLR`, already a release store.
+- **The bar this row can hold**: `TryWrite_Happy` and `TryRead_Happy` within
+  10 % of `SCStorePair` on the same box; `SPSC_ProducerConsumer/size1024` at
+  most 60 % of the pre-#1034 row, met (120.5 ns on 2026-11-03, 135.7 here).

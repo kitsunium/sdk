@@ -130,6 +130,9 @@ files:
       - headerLen
       - Seal
       - Open
+      - NewSealer
+      - sealEach
+      - sealEach.SealTo
     name: seal.go
   - decls:
       - signers
@@ -288,6 +291,9 @@ functions:
   - name: Open
     params: key Key, box, aad []byte
     results: plaintext []byte, err error
+  - name: NewSealer
+    params: name Algorithm, key Key
+    results: sealer Sealer, err error
   - name: RegisterSigner
     params: s Signer
     results: Signer
@@ -444,6 +450,24 @@ types:
       	comparable
       	Algorithm() Algorithm
       }
+  - doc: |-
+      sealEach is the Sealer of a scheme that does not implement [Binder]: each
+      SealTo is the scheme's Seal, its box appended to dst.
+    fields:
+      - doc: scheme is the registered AEAD.
+        name: scheme
+        type: AEAD
+      - doc: key is the key every box is sealed under.
+        name: key
+        type: Key
+    kind: struct
+    methods:
+      - doc: SealTo seals plaintext with the scheme's Seal and appends the box to dst.
+        name: SealTo
+        params: dst, plaintext, aad []byte
+        recv: s sealEach
+        results: box []byte, err error
+    name: sealEach
 vars:
   - doc: |-
       agreements maps each Algorithm to its Agreement scheme. Backed by the shared

@@ -134,6 +134,40 @@ func EncodeOTLPJSON(snap coremetrics.SnapshotValue) (doc []byte, err error) {
 	return request.appendJSON(make([]byte, 0, otlpDocCapacity(list))), nil
 }
 
+// otlpArenaSize counts what the tree of snap takes from its arena: every
+// point's attributes, and one oneof value a point — a sum's asInt, a gauge's
+// asDouble, a histogram's sum.
+func otlpArenaSize(snap coremetrics.SnapshotValue) (attrs, values int) {
+	//: sums.
+	for _, metric := range snap.Sums {
+		attrs, values = otlpCountPoints(metric.Points, attrs, values, func(p coremetrics.SumValue) int { return len(p.Attrs) })
+	}
+	//: gauges.
+	for _, metric := range snap.Gauges {
+		attrs, values = otlpCountPoints(metric.Points, attrs, values, func(p coremetrics.GaugeValue) int { return len(p.Attrs) })
+	}
+	//: histograms.
+	for _, metric := range snap.Histograms {
+		attrs, values = otlpCountPoints(metric.Points, attrs, values, func(p coremetrics.HistogramValue) int { return len(p.Attrs) })
+	}
+	//: exponential histograms.
+	for _, metric := range snap.ExponentialHistograms {
+		attrs, values = otlpCountPoints(metric.Points, attrs, values, func(p coremetrics.ExponentialHistogramValue) int { return len(p.Attrs) })
+	}
+	//: the arena's two sizes.
+	return attrs, values
+}
+
+// otlpCountPoints adds each point's attributes, and one value a point.
+func otlpCountPoints[P any](points []P, attrs, values int, attrsOf func(P) int) (allAttrs, allValues int) {
+	//: each point of the series.
+	for i := range points {
+		attrs += attrsOf(points[i])
+	}
+	//: the running totals.
+	return attrs, values + len(points)
+}
+
 // otlpMetricList flattens the snapshot's three name-keyed maps into the single
 // metrics[] array a ScopeMetrics carries.
 //
@@ -144,24 +178,27 @@ func EncodeOTLPJSON(snap coremetrics.SnapshotValue) (doc []byte, err error) {
 func otlpMetricList(snap coremetrics.SnapshotValue) (list []otlpMetric, err error) {
 	//: the window is one pair per snapshot and is copied down onto each point.
 	start, end := otlp.UnixNano(snap.StartTime), otlp.UnixNano(snap.Time)
+	//: every point's attributes and oneof value from one arena, not a slice
+	//: and a pointer per point (#813).
+	arena := otlp.NewArena(otlpArenaSize(snap))
 	//: sums first — Counters and UpDownCounters share this map.
-	list, err = appendOTLPSums(list, snap.Sums, start, end)
+	list, err = appendOTLPSums(list, snap.Sums, start, end, arena)
 	//: abort the whole document on a refusal.
 	if err != nil {
 		//: surface the typed refusal.
 		return nil, err
 	}
 	//: then gauges, which carry no temporality to refuse.
-	list = appendOTLPGauges(list, snap.Gauges, start, end)
+	list = appendOTLPGauges(list, snap.Gauges, start, end, arena)
 	//: then histograms, the only family with a bucket ladder to validate.
-	list, err = appendOTLPHistograms(list, snap.Histograms, start, end)
+	list, err = appendOTLPHistograms(list, snap.Histograms, start, end, arena)
 	//: same abort.
 	if err != nil {
 		//: surface the typed refusal.
 		return nil, err
 	}
 	//: last, exponential histograms, a temporality to refuse and no ladder.
-	list, err = appendOTLPExponentials(list, snap.ExponentialHistograms, start, end)
+	list, err = appendOTLPExponentials(list, snap.ExponentialHistograms, start, end, arena)
 	//: same abort.
 	if err != nil {
 		//: surface the typed refusal.
@@ -176,7 +213,7 @@ func otlpMetricList(snap coremetrics.SnapshotValue) (list []otlpMetric, err erro
 // A Counter and an UpDownCounter both land here, told apart by isMonotonic —
 // the OTel model's own economy, and the reason there is one point shape for two
 // instruments.
-func appendOTLPSums(list []otlpMetric, sums map[string]coremetrics.SumMetricValue, start, end otlp.Uint64) (metrics []otlpMetric, err error) {
+func appendOTLPSums(list []otlpMetric, sums map[string]coremetrics.SumMetricValue, start, end otlp.Uint64, arena *otlp.Arena) (metrics []otlpMetric, err error) {
 	//: names first, so the document is stable across runs.
 	for _, name := range sortedKeys(sums) {
 		metric := sums[name]
@@ -190,7 +227,7 @@ func appendOTLPSums(list []otlpMetric, sums map[string]coremetrics.SumMetricValu
 		//: one Metric per name, with the Sum envelope carrying the two facts
 		//: the OTel model attaches to the metric rather than to a point.
 		list = append(list, otlpMetric{Name: name, Description: metric.Description, Unit: metric.Unit, Sum: &otlpSum{
-			DataPoints:             otlpSumPoints(metric.Points, start, end),
+			DataPoints:             otlpSumPoints(metric.Points, start, end, arena),
 			AggregationTemporality: temporality,
 			IsMonotonic:            metric.Monotonic,
 		}})
@@ -201,7 +238,7 @@ func appendOTLPSums(list []otlpMetric, sums map[string]coremetrics.SumMetricValu
 
 // otlpSumPoints renders one sum name's series as NumberDataPoints carrying
 // asInt, because a sum in this SDK is an int64 accumulator.
-func otlpSumPoints(series []coremetrics.SumValue, start, end otlp.Uint64) []otlpNumberDataPoint {
+func otlpSumPoints(series []coremetrics.SumValue, start, end otlp.Uint64, arena *otlp.Arena) []otlpNumberDataPoint {
 	//: exactly-sized: one data point per series.
 	points := make([]otlpNumberDataPoint, 0, len(series))
 	//: the series are already sorted by attribute set by Collect.
@@ -210,9 +247,9 @@ func otlpSumPoints(series []coremetrics.SumValue, start, end otlp.Uint64) []otlp
 		points = append(points, otlpNumberDataPoint{
 			StartTimeUnixNano: start,
 			TimeUnixNano:      end,
-			AsInt:             new(otlp.Int64(point.Value)),
+			AsInt:             arena.Int64(point.Value),
 			Exemplars:         otlpExemplars(point.Exemplars, true),
-			Attributes:        otlp.Attrs(point.Attrs),
+			Attributes:        arena.Attrs(point.Attrs),
 		})
 	}
 	//: hand back the rendered points.
@@ -222,12 +259,12 @@ func otlpSumPoints(series []coremetrics.SumValue, start, end otlp.Uint64) []otlp
 // appendOTLPGauges renders each gauge name as one Metric carrying a Gauge
 // message. A Gauge has no aggregationTemporality field — a sampled reading
 // covers no window — so there is nothing here to refuse.
-func appendOTLPGauges(list []otlpMetric, gauges map[string]coremetrics.GaugeMetricValue, start, end otlp.Uint64) []otlpMetric {
+func appendOTLPGauges(list []otlpMetric, gauges map[string]coremetrics.GaugeMetricValue, start, end otlp.Uint64, arena *otlp.Arena) []otlpMetric {
 	//: same name-ordered walk as sums.
 	for _, name := range sortedKeys(gauges) {
 		//: one Metric per name; the Gauge envelope has a single field.
 		list = append(list, otlpMetric{Name: name, Description: gauges[name].Description, Unit: gauges[name].Unit, Gauge: &otlpGauge{
-			DataPoints: otlpGaugePoints(gauges[name].Points, start, end),
+			DataPoints: otlpGaugePoints(gauges[name].Points, start, end, arena),
 		}})
 	}
 	//: hand back the extended list.
@@ -236,7 +273,7 @@ func appendOTLPGauges(list []otlpMetric, gauges map[string]coremetrics.GaugeMetr
 
 // otlpGaugePoints renders one gauge name's series as NumberDataPoints carrying
 // asDouble, because a gauge reading is a float64.
-func otlpGaugePoints(series []coremetrics.GaugeValue, start, end otlp.Uint64) []otlpNumberDataPoint {
+func otlpGaugePoints(series []coremetrics.GaugeValue, start, end otlp.Uint64, arena *otlp.Arena) []otlpNumberDataPoint {
 	//: exactly-sized: one data point per series.
 	points := make([]otlpNumberDataPoint, 0, len(series))
 	//: one point per series, in the snapshot's canonical order.
@@ -245,8 +282,8 @@ func otlpGaugePoints(series []coremetrics.GaugeValue, start, end otlp.Uint64) []
 		points = append(points, otlpNumberDataPoint{
 			StartTimeUnixNano: start,
 			TimeUnixNano:      end,
-			AsDouble:          new(otlp.Double(point.Value)),
-			Attributes:        otlp.Attrs(point.Attrs),
+			AsDouble:          arena.Double(point.Value),
+			Attributes:        arena.Attrs(point.Attrs),
 		})
 	}
 	//: hand back the rendered points.
@@ -255,7 +292,7 @@ func otlpGaugePoints(series []coremetrics.GaugeValue, start, end otlp.Uint64) []
 
 // appendOTLPHistograms renders each histogram name as one Metric carrying a
 // Histogram message of explicit-bucket data points.
-func appendOTLPHistograms(list []otlpMetric, histograms map[string]coremetrics.HistogramMetricValue, start, end otlp.Uint64) (metrics []otlpMetric, err error) {
+func appendOTLPHistograms(list []otlpMetric, histograms map[string]coremetrics.HistogramMetricValue, start, end otlp.Uint64, arena *otlp.Arena) (metrics []otlpMetric, err error) {
 	//: same name-ordered walk as sums.
 	for _, name := range sortedKeys(histograms) {
 		metric := histograms[name]
@@ -267,7 +304,7 @@ func appendOTLPHistograms(list []otlpMetric, histograms map[string]coremetrics.H
 			return nil, tempErr
 		}
 		//: a ladder OTLP cannot express aborts the whole document too.
-		points, pointsErr := otlpHistogramPoints(name, metric.Points, start, end)
+		points, pointsErr := otlpHistogramPoints(name, metric.Points, start, end, arena)
 		//: surface the typed refusal.
 		if pointsErr != nil {
 			//: nothing is emitted.
@@ -290,7 +327,7 @@ func appendOTLPHistograms(list []otlpMetric, histograms map[string]coremetrics.H
 // Counts ride through unchanged: the snapshot stores them PER BUCKET and OTLP's
 // bucketCounts is per bucket too, so unlike the Prometheus connector — which
 // has to build a cumulative ladder as it walks — there is nothing to convert.
-func otlpHistogramPoints(name string, series []coremetrics.HistogramValue, start, end otlp.Uint64) (points []otlpHistogramDataPoint, err error) {
+func otlpHistogramPoints(name string, series []coremetrics.HistogramValue, start, end otlp.Uint64, arena *otlp.Arena) (points []otlpHistogramDataPoint, err error) {
 	//: exactly-sized: one data point per series.
 	rendered := make([]otlpHistogramDataPoint, 0, len(series))
 	//: one point per series, each with its own bucket ladder to check.
@@ -306,11 +343,11 @@ func otlpHistogramPoints(name string, series []coremetrics.HistogramValue, start
 			StartTimeUnixNano: start,
 			TimeUnixNano:      end,
 			Count:             otlp.Uint64(point.Count),
-			Sum:               otlpOptionalSum(point.Sum, point.NoSum),
+			Sum:               otlpOptionalSum(point.Sum, point.NoSum, arena),
 			BucketCounts:      otlpBucketCounts(point.Counts),
 			ExplicitBounds:    otlpExplicitBounds(point.Bounds),
 			Exemplars:         otlpExemplars(point.Exemplars, false),
-			Attributes:        otlp.Attrs(point.Attrs),
+			Attributes:        arena.Attrs(point.Attrs),
 		})
 	}
 	//: hand back the rendered points.

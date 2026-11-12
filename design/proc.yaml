@@ -404,8 +404,8 @@ packages:
       - doc: |-
           StdioPTY connects the child's stdin, stdout and stderr to the slave side of a
           new pseudo-terminal, which becomes its controlling terminal in a new session;
-          the master is the handle's Terminal.TTY. Linux, darwin and FreeBSD; every
-          other platform refuses it with UnsupportedPlatform before spawning.
+          the master is the handle's Terminal.TTY. Linux, darwin, FreeBSD and OpenBSD;
+          every other platform refuses it with UnsupportedPlatform before spawning.
         name: StdioPTY
         type: StdioMode
         value: "3"
@@ -1131,10 +1131,11 @@ packages:
           - doc: |-
               SignalGroup delivers sig to the leader's entire process group (kill(-pgid,
               sig)), reaching forked grandchildren — the KillMode=control-group analogue.
-              On Windows a Setpgid child's console process group receives the matching
-              console control event instead — CTRL_C for SIGINT, CTRL_BREAK for SIGTERM,
-              SIGHUP and SIGQUIT — and SIGKILL, or any signal to a child without its own
-              group, reaches the leader alone.
+              On Windows a Setpgid child's console process group receives CTRL_BREAK for
+              SIGINT, SIGTERM, SIGHUP and SIGQUIT instead — the one console event Windows
+              delivers to a single group, which a Go child reads as os.Interrupt; CTRL_C
+              never reaches one group — and SIGKILL, or any signal to a child without its
+              own group, reaches the leader alone.
             in:
               - name: sig
                 type: Signal
@@ -1771,11 +1772,14 @@ packages:
           signal that terminated it (if any), and resource-usage accounting. It is the
           value returned by Process.Wait.
         methods:
-          - doc: Success reports whether the process exited normally with status zero.
+          - doc: |-
+              Success reports whether the process exited normally with status zero. Its
+              receiver is a pointer: an ExitValue carries Usage by value, past the size
+              worth copying for a question.
             name: Success
             out:
               - type: bool
-            recv: value
+            recv: pointer
         name: ExitValue
         struct:
           fields:
@@ -1816,10 +1820,12 @@ packages:
             - doc: |-
                 Usage is the rest of wait4's resource accounting — page faults, block I/O
                 and context switches — read from the same rusage as UserTime and MaxRSS.
-                It is nil where the platform does not supply it (illumos, Solaris and
+                It is carried by value, so building an ExitValue allocates nothing and
+                one an observer keeps is never changed by a later collection. Its Known
+                is false where the platform does not supply it (illumos, Solaris and
                 Windows).
               name: Usage
-              type: "*UsageValue"
+              type: UsageValue
       - doc: |-
           FDPolicy says which of the supervisor's descriptors a child inherits besides
           its stdio and ExtraFiles (Spec.FDs). The zero value FDsSealed gives it none.
@@ -2376,6 +2382,12 @@ packages:
         name: UsageValue
         struct:
           fields:
+            - doc: |-
+                Known reports whether the platform filled the counters. It is false on
+                illumos, Solaris and Windows, where every counter reads zero, so a usage
+                nobody measured is never read as an idle process.
+              name: Known
+              type: bool
             - doc: MinorFaults counts the page faults served without I/O (ru_minflt).
               name: MinorFaults
               type: uint64
@@ -3131,25 +3143,27 @@ packages:
       - build: unix && !illumos && !solaris
         doc: |-
           UsageOf reads the page-fault, block-I/O and context-switch counters of a
-          wait4 rusage into ExitValue.Usage. Linux, darwin and the BSDs fill them; a
-          counter that reads negative is reported as zero, not wrapped.
+          wait4 rusage into ExitValue.Usage, Known set. Linux, darwin and the BSDs
+          fill them; a counter that reads negative is reported as zero, not wrapped.
+          The value is returned, not a pointer: a collection converts it without
+          allocating.
         in:
           - name: ru
             type: "*syscall.Rusage"
         name: UsageOf
         out:
-          - type: "*coreproc.UsageValue"
+          - type: coreproc.UsageValue
       - build: illumos || solaris
         doc: |-
           UsageOf reports no counters on illumos and Solaris: their wait4 leaves the
-          rusage counters unfilled, as it leaves ru_maxrss at 0, so the value is nil
-          rather than a row of zeros that would read as an idle process.
+          rusage counters unfilled, as it leaves ru_maxrss at 0, so the value's Known
+          is false rather than a row of zeros that would read as an idle process.
         in:
           - name: _
             type: "*syscall.Rusage"
         name: UsageOf
         out:
-          - type: "*coreproc.UsageValue"
+          - type: coreproc.UsageValue
     imports:
       coreproc: github.com/kitsunium/sdk/internal/core/proc
     path: github.com/kitsunium/sdk/internal/service/proc/childwait
@@ -3287,7 +3301,8 @@ packages:
 
       Package exec — the Windows process-handle value implementing the
       coreproc.Process port over an *os.Process. Windows has no Unix process groups
-      or wait4 rusage, so SignalGroup degrades to the leader and the ExitValue
+      or wait4 rusage, so SignalGroup sends a Setpgid child's console group
+      CTRL_BREAK and degrades to the leader without one, and the ExitValue
       carries the exit code + CPU times the os layer exposes (no terminating signal,
       no MaxRSS). The concrete type is unexported; Start returns it as the interface.
 
@@ -4596,8 +4611,9 @@ packages:
       kernel32 (syscall.NewLazyDLL, ABI cited, no golang.org/x/sys):
 
         - a process-group target (Target < -1) → GenerateConsoleCtrlEvent, the
-          console control event that reaches every process in the group (CTRL_C for
-          SIGINT, CTRL_BREAK otherwise — the only event that can target one group);
+          console control event that reaches every process in the group: CTRL_BREAK
+          for every signal, SIGINT included — the only event that can target one
+          group, which a Go process reads as os.Interrupt;
         - a single-pid target (Target > 0) → OpenProcess + TerminateProcess, the
           reliable per-process delivery (Windows has no per-pid interrupt).
 
@@ -5348,7 +5364,7 @@ packages:
       	CapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
       	CapDieWithParent       ✅     ❌     ✅      ✅      ❌      ❌      ❌        ❌      ❌
       	CapScheduling          ✅     ❌     ❌⁵     ✅⁶     ❌      ❌      ❌        ❌      ❌
-      	CapPTY                 ✅     ✅     ❌      ✅      ❌      ❌      ❌        ❌      ❌
+      	CapPTY                 ✅     ✅     ❌      ✅      ✅      ❌      ❌        ❌      ❌
       	CapProcessHandle       ✅     ❌     ✅      ❌      ❌      ❌      ❌        ❌      ❌
       	CapSandbox             ✅⁷    ❌     ❌      ❌      ❌      ❌      ❌        ❌      ❌
 
@@ -6162,8 +6178,9 @@ packages:
       Job Object) and the PATH search (with PATHEXT) all work, while the fields
       with no Windows meaning at this layer — User/Group/Groups, Umask, Nice,
       OOMScoreAdj, ExtraFiles, CgroupPath — are refused with UnsupportedPlatform
-      rather than dropped. There, SignalGroup reaches the leader only and Stop's
-      escalation is TerminateProcess. Every other platform returns
+      rather than dropped. There, SignalGroup sends a Setpgid child's group
+      CTRL_BREAK, which a Go child reads as os.Interrupt, and reaches the leader
+      alone otherwise; Stop's escalation is TerminateProcess. Every other platform returns
       UnsupportedPlatform from Start; the package compiles everywhere.
 
       # The process itself
@@ -6222,8 +6239,9 @@ packages:
       - alias:
           - doc: |-
               Usage is the page-fault, block-I/O and context-switch accounting an
-              ExitResult carries beside CPU time and peak RSS, nil where the platform
-              does not supply it. It is an alias of the core port's UsageValue.
+              ExitResult carries beside CPU time and peak RSS, by value, its Known false
+              where the platform does not supply it. It is an alias of the core port's
+              UsageValue.
             name: Usage
             target: coreproc.UsageValue
       - alias:
@@ -6661,7 +6679,7 @@ packages:
           - doc: |-
               StdioPTY gives the child one pseudo-terminal for stdin, stdout and stderr, as
               its controlling terminal in a new session; the master is Terminal.TTY. Linux,
-              darwin and FreeBSD.
+              darwin, FreeBSD and OpenBSD.
             name: StdioPTY
             reexport: coreproc.StdioPTY
             type: StdioMode
@@ -7496,7 +7514,8 @@ packages:
       Parse, String, and Notify are portable. Relay has a native backend on Unix
       (kill(2)) and on Windows, which has no kill(2): a pid target is terminated
       with TerminateProcess, and a process-group target receives a console control
-      event (CTRL_C for SIGINT, CTRL_BREAK otherwise). On the remaining platforms it
+      event: CTRL_BREAK, SIGINT included, since Windows delivers no CTRL_C to one
+      group. On the remaining platforms it
       returns the typed UNSUPPORTED_PLATFORM sentinel rather than acting, so code
       compiles and degrades gracefully everywhere.
     facade:

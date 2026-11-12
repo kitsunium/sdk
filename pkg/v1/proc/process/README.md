@@ -64,7 +64,7 @@ The Go runtime exposes no hook to run setrlimit(2) or umask(2) in the child betw
 
 ### Platforms
 
-Unix gets everything above. Windows spawns too, through CreateProcess: stdio wiring, Setpgid (a new console process group), Spec.Rlimits (enforced by a Job Object) and the PATH search (with PATHEXT) all work, while the fields with no Windows meaning at this layer — User/Group/Groups, Umask, Nice, OOMScoreAdj, ExtraFiles, CgroupPath — are refused with UnsupportedPlatform rather than dropped. There, SignalGroup reaches the leader only and Stop's escalation is TerminateProcess. Every other platform returns UnsupportedPlatform from Start; the package compiles everywhere.
+Unix gets everything above. Windows spawns too, through CreateProcess: stdio wiring, Setpgid (a new console process group), Spec.Rlimits (enforced by a Job Object) and the PATH search (with PATHEXT) all work, while the fields with no Windows meaning at this layer — User/Group/Groups, Umask, Nice, OOMScoreAdj, ExtraFiles, CgroupPath — are refused with UnsupportedPlatform rather than dropped. There, SignalGroup sends a Setpgid child's group CTRL\_BREAK, which a Go child reads as os.Interrupt, and reaches the leader alone otherwise; Stop's escalation is TerminateProcess. Every other platform returns UnsupportedPlatform from Start; the package compiles everywhere.
 
 ### The process itself
 
@@ -119,7 +119,7 @@ Package process — StdioMode re-exports for wiring a child's standard streams.
   - [func \(Distribution\) Count\(\) uint64](<#Distribution.Count>)
   - [func \(Distribution\) Quantile\(q float64\) time.Duration](<#Distribution.Quantile>)
 - [type ExitResult](<#ExitResult>)
-  - [func \(ExitResult\) Success\(\) bool](<#ExitResult.Success>)
+  - [func \(\*ExitResult\) Success\(\) bool](<#ExitResult.Success>)
 - [type FDPolicy](<#FDPolicy>)
 - [type IDMap](<#IDMap>)
 - [type IOClass](<#IOClass>)
@@ -741,7 +741,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/proc.StdioNull`.
 const StdioPTY StdioMode = 3
 ```
 
-StdioPTY gives the child one pseudo-terminal for stdin, stdout and stderr, as its controlling terminal in a new session; the master is Terminal.TTY. Linux, darwin and FreeBSD.
+StdioPTY gives the child one pseudo-terminal for stdin, stdout and stderr, as its controlling terminal in a new session; the master is Terminal.TTY. Linux, darwin, FreeBSD and OpenBSD.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/proc.StdioPTY`.
 
@@ -1146,9 +1146,11 @@ type ExitResult struct {
 	CoreDumped bool
 	// Usage is the rest of wait4's resource accounting — page faults, block I/O
 	// and context switches — read from the same rusage as UserTime and MaxRSS.
-	// It is nil where the platform does not supply it (illumos, Solaris and
+	// It is carried by value, so building an ExitValue allocates nothing and
+	// one an observer keeps is never changed by a later collection. Its Known
+	// is false where the platform does not supply it (illumos, Solaris and
 	// Windows).
-	Usage      *UsageValue
+	Usage      UsageValue
 }
 ```
 
@@ -1156,10 +1158,10 @@ type ExitResult struct {
 ### func \(ExitResult\) [Success](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/exit.go>)
 
 ```go
-func (ExitResult) Success() bool
+func (*ExitResult) Success() bool
 ```
 
-Success reports whether the process exited normally with status zero.
+Success reports whether the process exited normally with status zero. Its receiver is a pointer: an ExitValue carries Usage by value, past the size worth copying for a question.
 
 <a name="FDPolicy"></a>
 ## type [FDPolicy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
@@ -1491,10 +1493,11 @@ type Process interface {
 	Signal(sig Signal) error
 	// SignalGroup delivers sig to the leader's entire process group (kill(-pgid,
 	// sig)), reaching forked grandchildren — the KillMode=control-group analogue.
-	// On Windows a Setpgid child's console process group receives the matching
-	// console control event instead — CTRL_C for SIGINT, CTRL_BREAK for SIGTERM,
-	// SIGHUP and SIGQUIT — and SIGKILL, or any signal to a child without its own
-	// group, reaches the leader alone.
+	// On Windows a Setpgid child's console process group receives CTRL_BREAK for
+	// SIGINT, SIGTERM, SIGHUP and SIGQUIT instead — the one console event Windows
+	// delivers to a single group, which a Go child reads as os.Interrupt; CTRL_C
+	// never reaches one group — and SIGKILL, or any signal to a child without its
+	// own group, reaches the leader alone.
 	SignalGroup(sig Signal) error
 	// Stop terminates the process group gracefully: it sends sig, waits up to
 	// grace for exit, then escalates to SIGKILL. It returns when the process has
@@ -1540,7 +1543,7 @@ Signal delivers sig to the leader process only.
 func (Process) SignalGroup(sig Signal) error
 ```
 
-SignalGroup delivers sig to the leader's entire process group (kill(-pgid, sig)), reaching forked grandchildren — the KillMode=control-group analogue. On Windows a Setpgid child's console process group receives the matching console control event instead — CTRL\_C for SIGINT, CTRL\_BREAK for SIGTERM, SIGHUP and SIGQUIT — and SIGKILL, or any signal to a child without its own group, reaches the leader alone.
+SignalGroup delivers sig to the leader's entire process group (kill(-pgid, sig)), reaching forked grandchildren — the KillMode=control-group analogue. On Windows a Setpgid child's console process group receives CTRL\_BREAK for SIGINT, SIGTERM, SIGHUP and SIGQUIT instead — the one console event Windows delivers to a single group, which a Go child reads as os.Interrupt; CTRL\_C never reaches one group — and SIGKILL, or any signal to a child without its own group, reaches the leader alone.
 
 <a name="Process.Stop"></a>
 ### func \(Process\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
@@ -2307,7 +2310,7 @@ type Toolchain struct {
 <a name="Usage"></a>
 ## type [Usage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
 
-Usage is the page-fault, block-I/O and context-switch accounting an ExitResult carries beside CPU time and peak RSS, nil where the platform does not supply it. It is an alias of the core port's UsageValue.
+Usage is the page-fault, block-I/O and context-switch accounting an ExitResult carries beside CPU time and peak RSS, by value, its Known false where the platform does not supply it. It is an alias of the core port's UsageValue.
 
 ```go
 type Usage = coreproc.UsageValue
@@ -2317,6 +2320,10 @@ Usage is an alias of `github.com/kitsunium/sdk/internal/core/proc.UsageValue`, d
 
 ```go
 type Usage struct {
+	// Known reports whether the platform filled the counters. It is false on
+	// illumos, Solaris and Windows, where every counter reads zero, so a usage
+	// nobody measured is never read as an idle process.
+	Known            bool
 	// MinorFaults counts the page faults served without I/O (ru_minflt).
 	MinorFaults      uint64
 	// MajorFaults counts the page faults that needed I/O (ru_majflt).

@@ -745,6 +745,29 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/singleflight.(*Group[...]).Do
     allocs: 5
     fixture: DoLeading
+  # A document read into a value the caller keeps (#813): the decoder's
+  # state, and the strings and slice of the document itself — five for the
+  # fixture's account, whose three strings differ from one read to the
+  # next. Get's fresh T is the difference: 7 for the same read.
+  - fn: go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).GetInto
+    allocs: 5
+    fixture: GetInto
+  # The encrypting logger middleware (#813): the AES-GCM cipher bound once
+  # at construction (crypto.NewSealer), the box sealed straight after its
+  # length prefix into a frame borrowed from the kernel's buffer pool, the
+  # nonce drawn into its place in the box. Nothing a record — it was 6.
+  - fn: go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite.(*EncWriter).Write
+    allocs: 0
+    fixture: Write
+  # An OTLP/JSON export (#813): the tree's attributes and values come from
+  # one arena sized for the export (otlp.NewArena), where each point took a
+  # KeyValue slice and a pointer per value — five a point of the fixture's
+  # three attributes, 59 for its eight series. What is left does not grow
+  # with the points: the snapshot's walk, the name's envelope and points,
+  # the arena's slices and the document.
+  - fn: go:github.com/kitsunium/sdk/internal/service/observe/metrics.EncodeOTLPJSON
+    allocs: 22
+    fixture: EncodeOTLPJSON
   # The codecs' shared scratch: a warm round trip allocates nothing, and a
   # detach exactly once — the caller's own copy.
   - fn: go:github.com/kitsunium/sdk/internal/core/data/codec/scratch.AcquireBuffer

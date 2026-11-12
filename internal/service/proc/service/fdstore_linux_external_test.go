@@ -4,6 +4,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"os/signal"
@@ -149,7 +150,10 @@ func hangupHelper() {
 
 // storeUnit builds a notify unit over ListenNotify running this binary as
 // helper, its store of max descriptors, restarted at once after a crash; its
-// ExecStartPre= reports the descriptors a command holds.
+// ExecStartPre= reports the descriptors a command holds. Its stop is bounded
+// by storeStopTimeout, and its helpers end without the race detector's
+// one-second sleep at exit: eleven cycles of TestRealFDStoreLeaksNothing paid
+// eleven of those seconds out of a 60 s suite.
 func storeUnit(t *testing.T, helper, dir string, max int) *service.Unit {
 	t.Helper()
 	t.Cleanup(func() { killHolders(t, dir) })
@@ -162,7 +166,8 @@ func storeUnit(t *testing.T, helper, dir string, max int) *service.Unit {
 		Name: "store", Type: coresvc.TypeNotify, Notify: src, FileDescriptorStoreMax: max,
 		Restart: coresvc.RestartAlways, RestartDelay: 10 * time.Millisecond,
 		StartLimitBurst: restartBurst, StartLimitInterval: restartWindow,
-		Spec:         coreproc.Spec{Env: helperEnviron(helper, storeDirEnv+"="+dir)},
+		TimeoutStop:  storeStopTimeout,
+		Spec:         coreproc.Spec{Env: helperEnviron(helper, storeDirEnv+"="+dir, "GORACE=atexit_sleep_ms=0")},
 		ExecStartPre: []coresvc.CommandValue{command(t, ":/bin/sh", "-c", scan, filepath.Join(dir, "pre"))},
 		ExecStart:    []coresvc.CommandValue{command(t, os.Args[0], "-test.run=^$")},
 	}
@@ -196,6 +201,15 @@ func crash(t *testing.T, u *service.Unit, sub <-chan coresvc.EventValue) {
 // on the time its earlier phases took (kitsunium/sdk#1320).
 const storePhase = 30 * time.Second
 
+// storeStopTimeout is the store units' TimeoutStopSec=: a helper that
+// outlives its SIGTERM is killed within a phase, and its stop's result says
+// so, where the default 90 s outlasted the suite and left a Close waiting.
+const storeStopTimeout = 10 * time.Second
+
+// stopNotice is how long storeCycle's stop runs before the main process's
+// state is read, for the report of a stop that needed its final kill.
+const stopNotice = 5 * time.Second
+
 // phaseContext is a context bounded by storePhase, cancelled when t ends.
 func phaseContext(t *testing.T) context.Context {
 	t.Helper()
@@ -226,9 +240,7 @@ func storeCycle(t *testing.T) (handed string, listed []coresvc.StoredFDValue, re
 		time.Sleep(5 * time.Millisecond)
 	}
 	listed, refused = u.FDStore(), u.State().FDStoreRefused
-	if err = u.Stop(phaseContext(t)); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
+	stopReported(t, u)
 	if left := u.FDStore(); len(left) != 0 {
 		t.Errorf("a stopped unit (FileDescriptorStorePreserve=restart) keeps %v", left)
 	}
@@ -237,6 +249,52 @@ func storeCycle(t *testing.T) (handed string, listed []coresvc.StoredFDValue, re
 	}
 	preRaw, _ := os.ReadFile(filepath.Join(dir, "pre"))
 	return string(raw), listed, refused, string(preRaw)
+}
+
+// stopReported stops u and fails when the stop was not the main process's
+// answer to its SIGTERM: a helper ends at once on it, so a stop that needed
+// the final kill (Result timeout) is a defect, reported with what
+// /proc/<pid>/status said of the main process stopNotice into the stop —
+// its state, its pending, blocked, ignored and caught signals. A stop that is
+// slow but answered is logged with the same snapshot, and passes.
+func stopReported(t *testing.T, u *service.Unit) {
+	t.Helper()
+	main := u.State().MainPID
+	notice, cancel := context.WithTimeout(context.Background(), stopNotice)
+	defer cancel()
+	err := u.Stop(notice)
+	snapshot := ""
+	//: still stopping: what the main process looks like now, then the rest.
+	if errors.Is(err, context.DeadlineExceeded) {
+		snapshot = signalStatus(main)
+		err = u.Stop(phaseContext(t))
+	}
+	if err != nil {
+		t.Fatalf("Stop: %v (main %d at %v: %s)", err, main, stopNotice, snapshot)
+	}
+	if st := u.State(); st.Result != coresvc.ResultSuccess {
+		t.Fatalf("the stop of main %d ended %s: its SIGTERM was not its end (at %v: %s)", main, st.Result, stopNotice, snapshot)
+	}
+	if snapshot != "" {
+		t.Logf("the stop of main %d outlasted %v, then ended on its SIGTERM (at %v: %s)", main, stopNotice, stopNotice, snapshot)
+	}
+}
+
+// signalStatus is the state and signal lines of /proc/<pid>/status.
+func signalStatus(pid int) string {
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status")
+	if err != nil {
+		return err.Error()
+	}
+	var lines []string
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		for _, field := range []string{"State:", "SigQ:", "SigPnd:", "ShdPnd:", "SigBlk:", "SigIgn:", "SigCgt:"} {
+			if strings.HasPrefix(line, field) {
+				lines = append(lines, strings.Join(strings.Fields(line), " "))
+			}
+		}
+	}
+	return strings.Join(lines, "; ")
 }
 
 // TestRealFDStore: what the service stored is handed to its restarted main

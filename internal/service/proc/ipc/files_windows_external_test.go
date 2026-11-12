@@ -3,7 +3,6 @@
 package ipc_test
 
 import (
-	"net"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -145,25 +144,4 @@ func TestPassFilesOverAPipe(t *testing.T) {
 	if _, _, err := receiver.RecvFiles(buf, 0); !errs.HasCode(err, coreipc.CodeFDPassRefused) {
 		t.Errorf("RecvFiles(max 0) = %v, want FD_PASS_REFUSED", err)
 	}
-}
-
-// TestATCPListenerFileOnWindows records where #936's TCP-listener criterion
-// stands on Windows: since Go's net began handing a socket an *os.File there
-// (File no longer answers EWINDOWS), a listener has a file SendFiles could
-// take, but the pipe's DuplicateHandle route for a socket is not written and
-// no test passes one, so the criterion stays open (Refs #936).
-func TestATCPListenerFileOnWindows(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skipf("no loopback listener: %v", err)
-	}
-	defer ln.Close()
-	f, err := ln.(*net.TCPListener).File()
-	//: either answer is the toolchain's; the gap is SendFiles' route.
-	if err != nil {
-		t.Logf("TCPListener.File on Windows: %v", err)
-		return
-	}
-	defer f.Close()
-	t.Logf("TCPListener.File on Windows works; SendFiles' route for a socket is the gap (#936)")
 }

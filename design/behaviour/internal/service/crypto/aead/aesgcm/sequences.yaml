@@ -15,10 +15,8 @@ sequences:
         kind: self
       - id: newGCM
         kind: internal
-      - id: rand
-        kind: stdlib
-      - id: gcm.Seal
-        kind: value
+      - id: sealTo
+        kind: internal
     steps:
       - bind: gcm, gerr
         eval: newGCM(key.Bytes())
@@ -27,13 +25,73 @@ sequences:
           do:
             - return: nil, gerr
           when: gerr != nil
-      - var:
-          name: nonce
-          type: "[nonceLen]byte"
+      - bind: dst
+        eval: make([]byte, 0, len(plaintext)+nonceLen+gcmTagLen+headerLen)
+      - set: box, err
+        to: sealTo
+        value: sealTo(gcm, dst, plaintext, aad)
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: box, nil
+  - of: aesGCM.Bind
+    participants:
+      - id: caller
+        kind: actor
+      - id: aesGCM.Bind
+        kind: self
+      - id: key.Bytes
+        kind: value
+      - id: newGCM
+        kind: internal
+    steps:
+      - bind: raw
+        eval: key.Bytes()
+        to: key.Bytes
+      - defer: clear(raw)
+      - bind: gcm, gerr
+        eval: newGCM(raw)
+        to: newGCM
+      - opt:
+          do:
+            - return: nil, gerr
+          when: gerr != nil
+      - return: "boundGCM{gcm: gcm}, nil"
+  - of: boundGCM.SealTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundGCM.SealTo
+        kind: self
+      - id: sealTo
+        kind: internal
+    steps:
+      - return: sealTo(b.gcm, dst, plaintext, aad)
+        to: sealTo
+  - of: sealTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: sealTo
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: gcm.Seal
+        kind: value
+    steps:
+      - bind: start
+        eval: len(dst)
+      - set: box
+        value: append(dst, corecrypto.Version, algID)
+      - set: box
+        value: append(box, make([]byte, nonceLen)...)
+      - bind: nonce
+        eval: "box[start+headerLen : start+headerLen+nonceLen]"
       - opt:
           do:
             - return: |-
-                nil, errs.Wrap(rerr, errs.WrapParams{
+                dst, errs.Wrap(rerr, errs.WrapParams{
                 			Code:    corecrypto.CodeEntropyFailed,
                 			Reason:  "ENTROPY_FAILED",
                 			Public:  "Could not gather entropy for encryption",
@@ -41,16 +99,10 @@ sequences:
                 		})
           init:
             bind: _, rerr
-            eval: rand.Read(nonce[:])
+            eval: rand.Read(nonce)
             to: rand
           when: rerr != nil
-      - set: box
-        value: make([]byte, 0, len(plaintext)+nonceLen+gcmTagLen+headerLen)
-      - set: box
-        value: append(box, corecrypto.Version, algID)
-      - set: box
-        value: append(box, nonce[:]...)
-      - return: gcm.Seal(box, nonce[:], plaintext, aad), nil
+      - return: gcm.Seal(box, nonce, plaintext, aad), nil
         to: gcm.Seal
   - of: aesGCM.Open
     participants:

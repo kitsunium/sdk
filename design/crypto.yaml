@@ -669,6 +669,30 @@ packages:
           - name: err
             type: error
       - doc: |-
+          NewSealer binds key to the AEAD registered as name and returns a [Sealer]
+          that seals under it many times, with the cipher built once (#813). A scheme
+          that implements [Binder] builds it in Bind; any other is wrapped so each
+          SealTo still calls its Seal. A name with no registered scheme returns
+          UnknownAlgorithm; a key the scheme refuses, its error.
+
+          The Sealer keeps what the scheme derived from key — for AES-GCM its round
+          keys — for as long as it is referenced: Key.Zeroize does not reach it, so a
+          caller that zeroizes the key drops the Sealer with it.
+
+          IFACE-PLUGIN: the scheme's own Sealer comes back behind the port, its
+          concrete type unexported in the scheme's package.
+        in:
+          - name: name
+            type: Algorithm
+          - name: key
+            type: Key
+        name: NewSealer
+        out:
+          - name: sealer
+            type: Sealer
+          - name: err
+            type: error
+      - doc: |-
           RegisterSigner inserts s under s.Algorithm() and returns it so callers can
           bind the singleton to a typed package-level variable. Panics on a nil signer
           or when a distinct signer already claims the same Algorithm.
@@ -887,6 +911,48 @@ packages:
               - name: err
                 type: error
         name: AEAD
+      - doc: |-
+          Binder is the sibling of [AEAD] (ADR 0039) for a scheme that can bind a key
+          once and seal under it many times: [NewSealer] asks the registered scheme for
+          it, and wraps a scheme without it.
+        methods:
+          - doc: |-
+              Bind builds the scheme's cipher from key and returns the Sealer that holds
+              it, or InvalidKey for a key the cipher refuses.
+            in:
+              - name: key
+                type: Key
+            name: Bind
+            out:
+              - name: sealer
+                type: Sealer
+              - name: err
+                type: error
+        name: Binder
+      - doc: |-
+          Sealer is an AEAD scheme bound to one key, which [NewSealer] returns: the
+          box SealTo appends is the one the scheme's Seal returns for that key —
+          the same framing, a fresh random nonce each call — so Open opens it.
+          Implementations MUST be safe for concurrent use.
+        methods:
+          - doc: |-
+              SealTo encrypts plaintext, binding aad, appends the self-framed box
+              (Version + id + random nonce + ciphertext||tag) to dst and returns the
+              extended slice: no allocation when dst has the room. dst and plaintext
+              must not overlap. A host entropy fault returns EntropyFailed, and dst
+              unextended.
+            in:
+              - name: dst
+              - name: plaintext
+              - name: aad
+                type: "[]byte"
+            name: SealTo
+            out:
+              - name: box
+                type: "[]byte"
+              - name: err
+                type: error
+        name: Sealer
       - doc: |-
           Agreement is a key-agreement scheme (Diffie-Hellman style): it produces an
           ephemeral keypair and derives a shared secret from a local private key and a

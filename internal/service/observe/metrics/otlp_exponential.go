@@ -64,7 +64,7 @@ func (b *otlpBuckets) size() int {
 // appendOTLPExponentials renders each exponential histogram name as one
 // Metric carrying an ExponentialHistogram message, refusing an unresolved
 // temporality as every other family does.
-func appendOTLPExponentials(list []otlpMetric, metrics map[string]coremetrics.ExponentialHistogramMetricValue, start, end otlp.Uint64) (extended []otlpMetric, err error) {
+func appendOTLPExponentials(list []otlpMetric, metrics map[string]coremetrics.ExponentialHistogramMetricValue, start, end otlp.Uint64, arena *otlp.Arena) (extended []otlpMetric, err error) {
 	//: in ascending name order, as every other family.
 	for _, name := range sortedKeys(metrics) {
 		metric := metrics[name]
@@ -74,7 +74,7 @@ func appendOTLPExponentials(list []otlpMetric, metrics map[string]coremetrics.Ex
 			return nil, tempErr
 		}
 		list = append(list, otlpMetric{Name: name, Description: metric.Description, Unit: metric.Unit, ExponentialHistogram: &otlpExponentialHistogram{
-			DataPoints:             otlpExponentialPoints(metric.Points, start, end),
+			DataPoints:             otlpExponentialPoints(metric.Points, start, end, arena),
 			AggregationTemporality: temporality,
 		}})
 	}
@@ -84,7 +84,7 @@ func appendOTLPExponentials(list []otlpMetric, metrics map[string]coremetrics.Ex
 
 // otlpExponentialPoints renders one exponential name's series, the runs
 // copied as decimal strings.
-func otlpExponentialPoints(series []coremetrics.ExponentialHistogramValue, start, end otlp.Uint64) []otlpExponentialHistogramDataPoint {
+func otlpExponentialPoints(series []coremetrics.ExponentialHistogramValue, start, end otlp.Uint64, arena *otlp.Arena) []otlpExponentialHistogramDataPoint {
 	points := make([]otlpExponentialHistogramDataPoint, 0, len(series))
 	//: each series, in the order Collect sorted them.
 	for _, point := range series {
@@ -92,14 +92,14 @@ func otlpExponentialPoints(series []coremetrics.ExponentialHistogramValue, start
 			StartTimeUnixNano: start,
 			TimeUnixNano:      end,
 			Count:             otlp.Uint64(point.Count),
-			Sum:               new(otlp.Double(point.Sum)),
+			Sum:               arena.Double(point.Sum),
 			Scale:             point.Scale,
 			ZeroCount:         otlp.Uint64(point.ZeroCount),
 			Positive:          otlpBuckets{Offset: point.Positive.Offset, BucketCounts: otlpBucketCounts(point.Positive.Counts)},
 			Negative:          otlpBuckets{Offset: point.Negative.Offset, BucketCounts: otlpBucketCounts(point.Negative.Counts)},
 			ZeroThreshold:     point.ZeroThreshold,
 			Exemplars:         otlpExemplars(point.Exemplars, false),
-			Attributes:        otlp.Attrs(point.Attrs),
+			Attributes:        arena.Attrs(point.Attrs),
 		})
 	}
 	//: the rendered points.
@@ -108,13 +108,13 @@ func otlpExponentialPoints(series []coremetrics.ExponentialHistogramValue, start
 
 // otlpOptionalSum is a histogram point's sum, nil — absent on the wire — for
 // a source that keeps no total.
-func otlpOptionalSum(sum float64, noSum bool) *otlp.Double {
+func otlpOptionalSum(sum float64, noSum bool, arena *otlp.Arena) *otlp.Double {
 	//: nothing to state.
 	if noSum {
 		return nil
 	}
 	//: the total.
-	return new(otlp.Double(sum))
+	return arena.Double(sum)
 }
 
 // otlpExemplars renders a point's exemplars, the value as asInt on a sum
