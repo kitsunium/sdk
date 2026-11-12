@@ -43,9 +43,25 @@ const (
 // before it holds a record (D4, #922).
 type Preallocate uint8
 
+const (
+	// SyncFdatasync writes a batch's records with pwrite(2), then makes them
+	// durable with fdatasync(2): two calls per durability point. It is the
+	// zero value and the default (D4, #417).
+	SyncFdatasync SyncPath = iota
+	// SyncRWFDsync writes a batch's records with pwritev2(2) flagged
+	// RWF_DSYNC on Linux, which returns once they are durable: one call per
+	// durability point, the same two points as SyncFdatasync. A kernel or a
+	// platform without it opens the log in SyncFdatasync, with one line
+	// logged (#923).
+	SyncRWFDsync
+)
+
+// SyncPath is how the file log makes a batch's records durable (D4,
+type SyncPath uint8
+
 // DataDirOptions tunes NewDataDirWith: the size of a log segment, how a
-// new one is preallocated, and the boot-scoped directory of the second
-// STORAGE_FAILED marker.
+// new one is preallocated, how a batch is made durable, and the
+// boot-scoped directory of the second STORAGE_FAILED marker.
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
@@ -55,6 +71,12 @@ type DataDirOptions struct {
 	// size, as the no-space guard counts it. Another value is refused
 	// CONSENSUS_MISCONFIGURED.
 	Preallocate Preallocate
+	// SyncPath is how a batch's records are made durable: pwrite(2) then
+	// fdatasync(2) (SyncFdatasync, the zero value) or one pwritev2(2)
+	// flagged RWF_DSYNC (SyncRWFDsync). Either way a batch has the same two
+	// durability points, its end record written once the rest is durable.
+	// Another value is refused CONSENSUS_MISCONFIGURED.
+	SyncPath SyncPath
 	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
 	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
 	// kitsunium-consensus in the temporary directory elsewhere. It must
@@ -103,6 +125,9 @@ func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	}
 	if opts.Preallocate > PreallocateFallocate {
 		return DataDir{}, misconfigured("Preallocate", "not a Preallocate mode")
+	}
+	if opts.SyncPath > SyncRWFDsync {
+		return DataDir{}, misconfigured("SyncPath", "not a SyncPath mode")
 	}
 	// The directory lock is the first thing taken (D11), and there is none to
 	// take where the kernel has no flock(2) — illumos and Solaris (ADR 0144):

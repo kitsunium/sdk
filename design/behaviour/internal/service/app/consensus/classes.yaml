@@ -71,6 +71,23 @@ constants:
           it opens the log in PreallocateZeroFill, with one line logged (#922).
         name: PreallocateFallocate
     name: PreallocateZeroFill
+  - grouped: true
+    items:
+      - doc: |-
+          SyncFdatasync writes a batch's records with pwrite(2), then makes them
+          durable with fdatasync(2): two calls per durability point. It is the
+          zero value and the default (D4, #417).
+        name: SyncFdatasync
+        type: SyncPath
+        value: iota
+      - doc: |-
+          SyncRWFDsync writes a batch's records with pwritev2(2) flagged
+          RWF_DSYNC on Linux, which returns once they are durable: one call per
+          durability point, the same two points as SyncFdatasync. A kernel or a
+          platform without it opens the log in SyncFdatasync, with one line
+          logged (#923).
+        name: SyncRWFDsync
+    name: SyncFdatasync
   - doc: |-
       The stamp's encoding: the node's identity and its log's lineage, in the
       data directory's STAMP file.
@@ -763,6 +780,21 @@ constants:
         value: 4 << 20
     name: recordMagic
   - doc: |-
+      rwfDsyncProbeName is the file an open's probe writes and removes; a
+      crash leaves a .tmp, which recovery deletes as it deletes every one.
+    items:
+      - name: rwfDsyncProbeName
+        value: "\"rwfdsync-probe.tmp\""
+    name: rwfDsyncProbeName
+  - doc: |-
+      rwfDsync is RWF_DSYNC of linux/fs.h (Linux 4.7), which the syscall
+      package does not name: the write returns once its range is durable, as
+      if fdatasync(2) followed it.
+    items:
+      - name: rwfDsync
+        value: "0x2"
+    name: rwfDsync
+  - doc: |-
       The lane is the first byte a dialer writes after the handshake: it says
       what the connection carries, so control traffic never queues behind
       entries or a snapshot (D4).
@@ -998,6 +1030,8 @@ files:
       - fileLock
       - PreallocateZeroFill
       - Preallocate
+      - SyncFdatasync
+      - SyncPath
       - DataDirOptions
       - dataDir
       - DataDir
@@ -1874,6 +1908,19 @@ files:
   - decls:
       - syncDir
     name: syncdir_other.go
+  - decls:
+      - rwfDsyncProbeName
+      - syncEverywhere
+      - probeSyncPath
+      - (*fileLog).resolveSyncPath
+    name: syncpath.go
+  - decls:
+      - rwfDsync
+      - sysPwritev2
+      - pwritev2Number
+      - rwfDsyncProbe
+      - writeDsync
+    name: syncpath_linux.go
   - decls:
       - laneControl
       - defaultUnauthenticatedPerIP
@@ -3660,6 +3707,25 @@ functions:
     name: syncDir
     params: dir string
     results: err error
+  - doc: pwritev2Number is pwritev2's number on arch, 0 when unknown.
+    name: pwritev2Number
+    params: arch string
+    results: uintptr
+  - doc: |-
+      rwfDsyncProbe writes one byte flagged RWF_DSYNC to a fresh file in dir
+      and removes it: the reason the kernel cannot, empty when it can.
+    name: rwfDsyncProbe
+    params: dir string
+    results: string
+  - doc: |-
+      writeDsync writes b at off in f with pwritev2(2) flagged RWF_DSYNC,
+      retried on EINTR and continued after a short write: it returns once
+      every byte of b is durable. ok is false, nothing written, when the
+      kernel answers ENOSYS (no pwritev2, before 4.6), EOPNOTSUPP (no
+      RWF_DSYNC, before 4.7) or EINVAL to the first call.
+    name: writeDsync
+    params: f *os.File, b []byte, off int64
+    results: ok bool, err error
   - doc: |-
       transportMisconfigured refuses a TransportConfig, naming the field and
       the reason, never the value.
@@ -3907,6 +3973,7 @@ functions:
 imports:
   atomic: sync/atomic
   binary: encoding/binary
+  bits: math/bits
   bufio: bufio
   bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
@@ -3938,6 +4005,7 @@ imports:
   os: os
   raft: github.com/kitsunium/sdk/internal/service/app/consensus/raft
   rand: crypto/rand
+  runtime: runtime
   server: github.com/kitsunium/sdk/internal/service/net/server
   sha256: crypto/sha256
   slices: slices
@@ -3950,6 +4018,7 @@ imports:
   tls: crypto/tls
   tlsid: github.com/kitsunium/sdk/internal/service/net/tlsid
   unicode: unicode
+  unsafe: unsafe
   url: net/url
   utf8: unicode/utf8
   wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
@@ -4137,6 +4206,9 @@ types:
   - kind: named
     name: Preallocate
     underlying: uint8
+  - kind: named
+    name: SyncPath
+    underlying: uint8
   - fields:
       - doc: SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
         name: SegmentBytes
@@ -4149,6 +4221,14 @@ types:
           CONSENSUS_MISCONFIGURED.
         name: Preallocate
         type: Preallocate
+      - doc: |-
+          SyncPath is how a batch's records are made durable: pwrite(2) then
+          fdatasync(2) (SyncFdatasync, the zero value) or one pwritev2(2)
+          flagged RWF_DSYNC (SyncRWFDsync). Either way a batch has the same two
+          durability points, its end record written once the rest is durable.
+          Another value is refused CONSENSUS_MISCONFIGURED.
+        name: SyncPath
+        type: SyncPath
       - doc: |-
           RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
           marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
@@ -4804,9 +4884,9 @@ types:
         name: afterSeal
         type: func()
       - doc: |-
-          duringSync runs between each write of a batch and its fdatasync, the
-          lock released: twice for a batch of several records. Only a test sets
-          it.
+          duringSync runs between each write of a batch and its fdatasync, or
+          after each write flagged RWF_DSYNC (#923), the lock released: twice
+          for a batch of several records. Only a test sets it.
         name: duringSync
         type: func()
       - doc: |-
@@ -4824,6 +4904,17 @@ types:
           preallocWhy is why the log zero-fills although fallocate was asked
           for, until bindWarn logs it, once; empty otherwise. Under mu.
         name: preallocWhy
+        type: string
+      - doc: |-
+          syncPath is how a batch is made durable, set at open by
+          resolveSyncPath: SyncRWFDsync only where the kernel answered the
+          probe (#923).
+        name: syncPath
+        type: SyncPath
+      - doc: |-
+          syncWhy is why the log syncs with fdatasync although RWF_DSYNC was
+          asked for, until bindWarn logs it, once; empty otherwise. Under mu.
+        name: syncWhy
         type: string
       - doc: |-
           afterEntries is handed each batch Entries returns, under mu, before
@@ -5233,7 +5324,11 @@ types:
         params: cur *segment
         recv: l *fileLog
         results: error
-      - doc: writeAndSync writes b at off in segment cur and fdatasyncs it.
+      - doc: |-
+          writeAndSync writes b at off in segment cur and makes it durable: one
+          pwritev2 flagged RWF_DSYNC in SyncRWFDsync, pwrite then fdatasync
+          otherwise, or when the kernel stops answering to the flag after the
+          open's probe (#923).
         name: writeAndSync
         params: cur *segment, b []byte, off int64
         recv: l *fileLog
@@ -5409,7 +5504,8 @@ types:
         recv: l *fileLog
       - doc: |-
           bindWarn implements bindWarner: a log that asked for fallocate and
-          zero-fills says so once, through the log of the first node it serves.
+          zero-fills, or for RWF_DSYNC and syncs with fdatasync (#923), says so
+          once, one line each, through the log of the first node it serves.
         name: bindWarn
         params: warn func(msg string, attrs ...corelogger.AttrValue)
         recv: l *fileLog
@@ -5449,6 +5545,15 @@ types:
         params: storageOnly bool
         recv: l *fileLog
         results: error
+      - doc: |-
+          resolveSyncPath sets how the log makes a batch durable: the mode asked
+          for, or SyncFdatasync when RWF_DSYNC is asked for and the kernel or the
+          platform answers it cannot. That is never a refusal: the reason is kept
+          for the one line bindWarn logs (#923). It runs before recovery writes
+          anything.
+        name: resolveSyncPath
+        params: mode SyncPath
+        recv: l *fileLog
     name: fileLog
   - doc: |-
       scanned is one segment as recovery read it, before anything is changed.
@@ -10933,6 +11038,33 @@ vars:
       - name: unmarked
         type: sync.Map
     name: unmarked
+  - doc: |-
+      syncEverywhere opens every log in SyncRWFDsync, whatever its options
+      say. Only a test binary sets it, run with CONSENSUS_SYNC_PATH=rwfdsync,
+      so the whole suite runs on writes flagged RWF_DSYNC (#923); it is read
+      by openFileLog alone.
+    items:
+      - name: syncEverywhere
+        type: bool
+    name: syncEverywhere
+  - doc: |-
+      probeSyncPath answers why pwritev2(2) with RWF_DSYNC cannot write in
+      dir, empty when it can: rwfDsyncProbe, unless a test replaces it to
+      answer as a kernel without it does. Only an open's own goroutine reads
+      it.
+    items:
+      - name: probeSyncPath
+        value: rwfDsyncProbe
+    name: probeSyncPath
+  - doc: |-
+      sysPwritev2 is __NR_pwritev2 on this architecture, 0 where the SDK does
+      not know it: there the log syncs with fdatasync. The numbers are the
+      kernel's tables (arch/x86/entry/syscalls, include/uapi/asm-generic/
+      unistd.h, arch/arm/tools/syscall.tbl); the syscall package names none.
+    items:
+      - name: sysPwritev2
+        value: pwritev2Number(runtime.GOARCH)
+    name: sysPwritev2
   - doc: |-
       listenTCP opens the transport's listener; a test replaces it to make
       Accept fail the way an exhausted descriptor table does (#518).

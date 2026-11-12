@@ -7,10 +7,12 @@ negative="${2:-0}"
 fs="${3:-ext4}"
 prealloc="${4:-zerofill}"
 suite="${5:-}"
+syncpath="${6:-fdatasync}"
 apt-get update -qq >/dev/null 2>&1
 apt-get install -y -qq cryptsetup-bin dmsetup e2fsprogs xfsprogs procps >/dev/null 2>&1
-# Every run of the test binary preallocates segments this way (#922).
-export CONSENSUS_PREALLOCATE="$prealloc" DMCRYPT_FS="$fs"
+# Every run of the test binary preallocates segments this way (#922), and
+# makes its batches durable this way (#923): rwfdsync forces SyncRWFDsync.
+export CONSENSUS_PREALLOCATE="$prealloc" CONSENSUS_SYNC_PATH="$syncpath" DMCRYPT_FS="$fs"
 
 # A previous run killed mid-way leaves its mappings in the VM: drop them.
 umount -l /mnt 2>/dev/null || true
@@ -49,7 +51,7 @@ xfs) mkfs.xfs -q -f /dev/mapper/kcons-cut ;;
 esac
 mkdir -p /mnt
 mount /dev/mapper/kcons-cut /mnt
-echo "SETUP fs=$fs preallocate=$prealloc $(cryptsetup status kcons-crypt | grep -E 'cipher|keysize' | tr -s ' ' | tr '\n' ' ')"
+echo "SETUP fs=$fs preallocate=$prealloc sync_path=$syncpath $(cryptsetup status kcons-crypt | grep -E 'cipher|keysize' | tr -s ' ' | tr '\n' ' ')"
 
 export DMCRYPT_DIR=/mnt
 # The device the bench counts the bytes of: the cut device's dm-N (its
@@ -67,14 +69,24 @@ if [ "$negative" != 1 ]; then
 		rm -rf /mnt/prealloc-*
 	done
 fi
+if [ "$negative" != 1 ] && [ "$syncpath" = rwfdsync ]; then
+	# G1's sync path row (#923), ADR 0190's shape: SyncFdatasync and
+	# SyncRWFDsync side by side in one process, 2 x 8 windows a round, the
+	# gate on the interval of the ratios. Engine A must stay fdatasync, so
+	# the variable is cleared for this run.
+	CONSENSUS_SYNC_PATH= DMCRYPT_ROUNDS="${DMCRYPT_ROUNDS:-10}" /work/consensus.test -test.run '^TestDMCryptSyncPathBench$' -test.count=1 \
+		>/tmp/syncpath.log 2>&1 || { tail -20 /tmp/syncpath.log; exit 1; }
+	grep '^SYNCPATH' /tmp/syncpath.log
+	rm -rf /mnt/syncpath-*
+fi
 if [ -n "$suite" ]; then
 	# The file log's suite and its fuzz seeds, on this filesystem, in this
 	# mode: their temporary directories are on it.
 	mkdir -p /mnt/suite
 	if TMPDIR=/mnt/suite /work/consensus.test -test.run "$suite" -test.count=1 -test.v >/tmp/suite.log 2>&1; then
-		echo "SUITE ok fs=$fs preallocate=$prealloc passed=$(grep -c '^--- PASS' /tmp/suite.log) skipped=$(grep -c '^--- SKIP' /tmp/suite.log)"
+		echo "SUITE ok fs=$fs preallocate=$prealloc sync_path=$syncpath passed=$(grep -c '^--- PASS' /tmp/suite.log) skipped=$(grep -c '^--- SKIP' /tmp/suite.log)"
 	else
-		echo "SUITE FAILED fs=$fs preallocate=$prealloc"
+		echo "SUITE FAILED fs=$fs preallocate=$prealloc sync_path=$syncpath"
 		grep -E '^(--- FAIL|FAIL|panic)' /tmp/suite.log | head -20
 		tail -20 /tmp/suite.log
 		exit 1
@@ -131,7 +143,7 @@ for i in $(seq 1 "$iters"); do
 		echo "$line" | tail -5
 	fi
 done
-echo "RESULT crash_iterations=$iters passed=$pass negative_control=$negative"
+echo "RESULT crash_iterations=$iters passed=$pass negative_control=$negative fs=$fs preallocate=$prealloc sync_path=$syncpath"
 if [ "$negative" = 1 ]; then
 	# The control must be caught: some acknowledged entry lost.
 	[ "$pass" != "$iters" ]

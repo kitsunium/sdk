@@ -3538,6 +3538,47 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.SyncFdatasync",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "SyncFdatasync",
+      "spelled": "svcconsensus.SyncPath",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.SyncFdatasync",
+      "doc": "How the file log makes a batch durable.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.SyncPath",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "SyncPath",
+      "spelled": "svcconsensus.SyncPath",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.SyncRWFDsync",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "SyncRWFDsync",
+      "spelled": "svcconsensus.SyncPath",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.SyncRWFDsync",
+      "doc": "How the file log makes a batch durable.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.TCPTransport",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",

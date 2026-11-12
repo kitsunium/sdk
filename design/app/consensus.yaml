@@ -2295,6 +2295,22 @@ packages:
         name: PreallocateFallocate
         type: Preallocate
         value: "1"
+      - doc: |-
+          SyncFdatasync writes a batch's records with pwrite(2), then makes them
+          durable with fdatasync(2): two calls per durability point. It is the
+          zero value and the default (D4, #417).
+        name: SyncFdatasync
+        type: SyncPath
+        value: "0"
+      - doc: |-
+          SyncRWFDsync writes a batch's records with pwritev2(2) flagged
+          RWF_DSYNC on Linux, which returns once they are durable: one call per
+          durability point, the same two points as SyncFdatasync. A kernel or a
+          platform without it opens the log in SyncFdatasync, with one line
+          logged (#923).
+        name: SyncRWFDsync
+        type: SyncPath
+        value: "1"
     doc: |-
       Package consensus is the Raft engine of ADR 0152 and everything it ships
       around the step function of package raft: the event loop that drives it,
@@ -2864,8 +2880,8 @@ packages:
               type: corelogger.Logger
       - doc: |-
           DataDirOptions tunes NewDataDirWith: the size of a log segment, how a
-          new one is preallocated, and the boot-scoped directory of the second
-          STORAGE_FAILED marker.
+          new one is preallocated, how a batch is made durable, and the
+          boot-scoped directory of the second STORAGE_FAILED marker.
         name: DataDirOptions
         struct:
           fields:
@@ -2880,6 +2896,14 @@ packages:
                 CONSENSUS_MISCONFIGURED.
               name: Preallocate
               type: Preallocate
+            - doc: |-
+                SyncPath is how a batch's records are made durable: pwrite(2) then
+                fdatasync(2) (SyncFdatasync, the zero value) or one pwritev2(2)
+                flagged RWF_DSYNC (SyncRWFDsync). Either way a batch has the same two
+                durability points, its end record written once the rest is durable.
+                Another value is refused CONSENSUS_MISCONFIGURED.
+              name: SyncPath
+              type: SyncPath
             - doc: |-
                 RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
                 marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
@@ -3639,6 +3663,9 @@ packages:
           Preallocate is how the file log gives a new segment its fixed size
           before it holds a record (D4, #922).
         name: Preallocate
+        underlying: uint8
+      - doc: SyncPath is how the file log makes a batch's records durable (D4, #923).
+        name: SyncPath
         underlying: uint8
       - doc: |-
           RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
@@ -5353,6 +5380,8 @@ packages:
             target: svcconsensus.DataDirOptions
           - name: Preallocate
             target: svcconsensus.Preallocate
+          - name: SyncPath
+            target: svcconsensus.SyncPath
           - name: ReportValue
             target: svcconsensus.ReportValue
           - name: QuarantineExit
@@ -5392,6 +5421,16 @@ packages:
             type: svcconsensus.Preallocate
             value: "1"
         doc: How a new log segment is preallocated.
+      - const:
+          - name: SyncFdatasync
+            reexport: svcconsensus.SyncFdatasync
+            type: svcconsensus.SyncPath
+            value: "0"
+          - name: SyncRWFDsync
+            reexport: svcconsensus.SyncRWFDsync
+            type: svcconsensus.SyncPath
+            value: "1"
+        doc: How the file log makes a batch durable.
       - func:
           doc: NewDataDir takes the directory lock first, then recovers the log.
           forward: svcconsensus.NewDataDir

@@ -284,9 +284,9 @@ type fileLog struct {
 	// segment is published. Only the dm-crypt lane sets it, to cut power in
 	// that window; it is nil otherwise.
 	afterSeal func()
-	// duringSync runs between each write of a batch and its fdatasync, the
-	// lock released: twice for a batch of several records. Only a test sets
-	// it.
+	// duringSync runs between each write of a batch and its fdatasync, or
+	// after each write flagged RWF_DSYNC (#923), the lock released: twice
+	// for a batch of several records. Only a test sets it.
 	duringSync func()
 	// fill replaces zeroFrom when a test sets it, to fail as a full disk
 	// does; nil otherwise.
@@ -298,6 +298,13 @@ type fileLog struct {
 	// preallocWhy is why the log zero-fills although fallocate was asked
 	// for, until bindWarn logs it, once; empty otherwise. Under mu.
 	preallocWhy string
+	// syncPath is how a batch is made durable, set at open by
+	// resolveSyncPath: SyncRWFDsync only where the kernel answered the
+	// probe (#923).
+	syncPath SyncPath
+	// syncWhy is why the log syncs with fdatasync although RWF_DSYNC was
+	// asked for, until bindWarn logs it, once; empty otherwise. Under mu.
+	syncWhy string
 	// afterEntries is handed each batch Entries returns, under mu, before
 	// it returns it: a test counts what a reader of the log holds at once
 	// (#700). Only a test sets it, before the reads it counts.
@@ -363,6 +370,7 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 	// Resolved before recovery, which prepares the next segment, and after
 	// the markers: a refused log modifies nothing, not even by a probe.
 	l.resolvePreallocate(dd.opts.Preallocate)
+	l.resolveSyncPath(dd.opts.SyncPath)
 	if err := l.recover(); err != nil {
 		if errs.HasCode(err, coreconsensus.CodeLogQuarantined) {
 			l.refuse = err
@@ -1832,8 +1840,23 @@ func (l *fileLog) writeBatch(cur *segment) error {
 	return l.writeAndSync(cur, l.pending[l.pendingLast:], l.off+int64(len(body)))
 }
 
-// writeAndSync writes b at off in segment cur and fdatasyncs it.
+// writeAndSync writes b at off in segment cur and makes it durable: one
+// pwritev2 flagged RWF_DSYNC in SyncRWFDsync, pwrite then fdatasync
+// otherwise, or when the kernel stops answering to the flag after the
+// open's probe (#923).
 func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64) error {
+	if l.syncPath == SyncRWFDsync {
+		ok, err := writeDsync(cur.f, b, off)
+		if err != nil {
+			return storageFailed("pwritev2", err)
+		}
+		if ok {
+			if l.duringSync != nil {
+				l.duringSync()
+			}
+			return nil
+		}
+	}
 	if _, err := cur.f.WriteAt(b, off); err != nil {
 		return storageFailed("write", err)
 	}

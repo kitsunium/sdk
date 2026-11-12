@@ -626,6 +626,11 @@ PreallocateFallocate` opts in where it was measured not to cost
 (amendment of 2026-11-12, [#922](https://github.com/kitsunium/sdk/issues/922)):
 recovery already reads an unwritten extent as the zeros it reads, the hole
 `classifyTail` classifies, and the verdict per filesystem is in Deferred.
+`DataDirOptions.SyncPath = SyncRWFDsync` writes each durability point with
+one `pwritev2(2)` flagged `RWF_DSYNC` instead of `pwrite` then `fdatasync`,
+at the same two points (amendment of 2026-11-12,
+[#923](https://github.com/kitsunium/sdk/issues/923)); it is not the default
+anywhere, see Deferred.
 On darwin,
 `os.File.Sync` issues `F_FULLFSYNC`, which is stronger than `fdatasync`, and
 slower (R8-06). Elsewhere, `os.File.Sync` is the fallback, and it is stated
@@ -4360,6 +4365,31 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
   **Verdict, measured on ext4 and xfs: not adopted; ZeroFill stays the
   default on both.** The OVH VPS of D16 are measured under their real load
   before any filesystem adopts it.
+- **`RWF_DSYNC` and an io_uring write+fsync link for a batch: one built,
+  neither measured, neither the default** (amendment of 2026-11-12,
+  [#923](https://github.com/kitsunium/sdk/issues/923)). A batch stays two
+  durability points (#417). `DataDirOptions.SyncPath = SyncRWFDsync` makes
+  each one a single `pwritev2(2)` flagged `RWF_DSYNC` (Linux 4.7), which
+  can be one FUA write where the device has FUA, against `SyncFdatasync`'s
+  `pwrite` then `fdatasync`. An open probes it: a kernel answering ENOSYS,
+  EOPNOTSUPP or EINVAL, an architecture whose number the package does not
+  carry, or a platform other than Linux opens in `SyncFdatasync` with one
+  line logged, never a refusal. Both are device-dependent, so the paired
+  gate of ADR 0190 decides per device (`TestDMCryptSyncPathBench`, the
+  dm-crypt lane's fifth argument): `SyncRWFDsync` may be the default on a
+  device only if its entries/s ratio's lower bound is >= 1.00 and its
+  `Sync` p99 ratio's upper bound is <= 1.00. Measured on devbox (Linux
+  6.12 amd64, LUKS2 over a loop device, ten rounds, `run.sh 12 0 <fs>
+  zerofill rwfdsync`): the file log's suite, its fuzz seeds and 12 of 12
+  power cuts pass with every log writing `RWF_DSYNC`, on ext4 and on xfs,
+  with the verdicts of `SyncFdatasync`; the gate is not met on either.
+  ext4: entries/s ratio in [0.958, 1.034], `Sync` p99 ratio in [0.586,
+  2.162]; xfs: [0.955, 1.064] and [0.470, 1.967]. Both intervals straddle
+  1.00, so `SyncFdatasync` stays the default on both, and everywhere (the
+  OVH VPS are not measured). The io_uring mode (a
+  private ring in the storage actor, `opWrite` linked to `opFsync`) is
+  built only once `RWF_DSYNC` is measured, since it is the smaller gain
+  unless multi-group shares the ring.
 
 ## Amendment — the published names follow the SDK's roles (2026-10-13, v0 breaking changes)
 

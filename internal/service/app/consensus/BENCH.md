@@ -87,3 +87,27 @@ not reached.
   since each `fdatasync` after a write into an unwritten extent journals its
   conversion, and the median `Sync` is 1.6 to 2.7 times the zero-filled
   one's. Not adopted: ZeroFill stays the default (ADR 0152, Deferred).
+
+## Sync path of a batch (G1, #923)
+
+ADR 0152 G1's row `Append 64 x 256 B + Sync`, `DataDirOptions.SyncPath =
+SyncRWFDsync` (one `pwritev2(2)` flagged `RWF_DSYNC` per durability point)
+against `SyncFdatasync` (`pwrite(2)` then `fdatasync(2)`), is measured per
+device by the dm-crypt lane in ADR 0190's shape: both logs in one process on
+the same filesystem, a round of 2 x 8 windows of 200 Syncs in the order A, B,
+B, A, ..., ten rounds, and the gate held on the distribution-free interval of
+the ten ratios B / A (2nd and 9th order statistics):
+`testdata/dmcrypt/run.sh 12 0 <ext4|xfs> zerofill rwfdsync`,
+`TestDMCryptSyncPathBench`, its `SYNCPATH` and `SYNCPATH_GATE` lines. A mode
+may become the default on a device only if its entries/s ratio's lower bound
+is >= 1.00 and its Sync p99 ratio's upper bound is <= 1.00.
+
+| Device | Filesystem | ratio entries/s | ratio Sync p99 | verdict |
+|---|---|---|---|---|
+| dm-crypt over a loop device | ext4 | not measured | not measured | Fdatasync stays the default |
+| dm-crypt over a loop device | xfs | not measured | not measured | Fdatasync stays the default |
+| OVH VPS of D16 | — | not measured | not measured | Fdatasync stays the default |
+
+Not measured on 2026-11-12: the change was written on a macOS host whose
+Docker could not start and whose disk was full, so the lane did not run.
+`SyncFdatasync` stays the default everywhere until a row meets the gate.

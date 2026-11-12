@@ -39,15 +39,20 @@ func (l *fileLog) resolvePreallocate(mode Preallocate) {
 }
 
 // bindWarn implements bindWarner: a log that asked for fallocate and
-// zero-fills says so once, through the log of the first node it serves.
+// zero-fills, or for RWF_DSYNC and syncs with fdatasync (#923), says so
+// once, one line each, through the log of the first node it serves.
 func (l *fileLog) bindWarn(warn func(msg string, attrs ...corelogger.AttrValue)) {
 	l.mu.Lock()
-	why := l.preallocWhy
-	l.preallocWhy = ""
+	why, syncWhy := l.preallocWhy, l.syncWhy
+	l.preallocWhy, l.syncWhy = "", ""
 	l.mu.Unlock()
 	if why != "" {
 		warn("consensus: the file log zero-fills its segments, fallocate is not available",
 			lstr("dir", l.dir), lstr("why", why))
+	}
+	if syncWhy != "" {
+		warn("consensus: the file log syncs with fdatasync, RWF_DSYNC is not available",
+			lstr("dir", l.dir), lstr("why", syncWhy))
 	}
 }
 

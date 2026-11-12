@@ -1479,6 +1479,10 @@ sequences:
           when: opts.Preallocate > PreallocateFallocate
       - opt:
           do:
+            - return: DataDir{}, misconfigured("SyncPath", "not a SyncPath mode")
+          when: opts.SyncPath > SyncRWFDsync
+      - opt:
+          do:
             - return: DataDir{}, coreproc.UnsupportedPlatform
           when: "!flock.Native"
       - opt:
@@ -2579,6 +2583,8 @@ sequences:
         kind: internal
       - id: l.resolvePreallocate
         kind: internal
+      - id: l.resolveSyncPath
+        kind: internal
       - id: l.recover
         kind: internal
     steps:
@@ -2630,6 +2636,8 @@ sequences:
           when: err != nil
       - eval: l.resolvePreallocate(dd.opts.Preallocate)
         to: l.resolvePreallocate
+      - eval: l.resolveSyncPath(dd.opts.SyncPath)
+        to: l.resolveSyncPath
       - opt:
           do:
             - opt:
@@ -4809,13 +4817,34 @@ sequences:
         kind: actor
       - id: (*fileLog).writeAndSync
         kind: self
-      - id: cur.f.WriteAt
-        kind: value
+      - id: writeDsync
+        kind: internal
       - id: storageFailed
         kind: internal
+      - id: cur.f.WriteAt
+        kind: value
       - id: datasync
         kind: internal
     steps:
+      - opt:
+          do:
+            - bind: ok, err
+              eval: writeDsync(cur.f, b, off)
+              to: writeDsync
+            - opt:
+                do:
+                  - return: storageFailed("pwritev2", err)
+                    to: storageFailed
+                when: err != nil
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - eval: l.duringSync()
+                      when: l.duringSync != nil
+                  - return: nil
+                when: ok
+          when: l.syncPath == SyncRWFDsync
       - opt:
           do:
             - return: storageFailed("write", err)
@@ -19298,10 +19327,10 @@ sequences:
     steps:
       - eval: l.mu.Lock()
         to: l.mu.Lock
-      - bind: why
-        eval: l.preallocWhy
-      - set: l.preallocWhy
-        value: "\"\""
+      - bind: why, syncWhy
+        eval: l.preallocWhy, l.syncWhy
+      - set: l.preallocWhy, l.syncWhy
+        value: "\"\", \"\""
       - eval: l.mu.Unlock()
         to: l.mu.Unlock
       - opt:
@@ -19310,6 +19339,12 @@ sequences:
                 warn("consensus: the file log zero-fills its segments, fallocate is not available",
                 			lstr("dir", l.dir), lstr("why", why))
           when: why != ""
+      - opt:
+          do:
+            - eval: |-
+                warn("consensus: the file log syncs with fdatasync, RWF_DSYNC is not available",
+                			lstr("dir", l.dir), lstr("why", syncWhy))
+          when: syncWhy != ""
   - of: fallocateFill
     participants:
       - id: caller
@@ -22303,6 +22338,146 @@ sequences:
           	}()
       - return: d.Sync()
         to: d.Sync
+  - of: (*fileLog).resolveSyncPath
+    steps:
+      - opt:
+          do:
+            - set: mode
+              value: SyncRWFDsync
+          when: syncEverywhere
+      - set: l.syncPath
+        value: SyncFdatasync
+      - opt:
+          do:
+            - return: ""
+          when: mode != SyncRWFDsync
+      - opt:
+          do:
+            - set: l.syncWhy
+              value: why
+            - return: ""
+          init:
+            bind: why
+            eval: probeSyncPath(l.logDir())
+          when: why != ""
+      - set: l.syncPath
+        value: SyncRWFDsync
+  - of: pwritev2Number
+    steps:
+      - switch:
+          cases:
+            - case: "\"amd64\""
+              do:
+                - return: "328"
+            - case: "\"386\""
+              do:
+                - return: "379"
+            - case: "\"arm\""
+              do:
+                - return: "393"
+            - case: "\"arm64\", \"riscv64\", \"loong64\""
+              do:
+                - return: "287"
+          "on": arch
+      - return: "0"
+  - of: rwfDsyncProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: rwfDsyncProbe
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: writeDsync
+        kind: internal
+      - id: abandon
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"pwritev2(2) is not known on \" + runtime.GOARCH"
+          when: sysPwritev2 == 0
+      - bind: path
+        eval: filepath.Join(dir, rwfDsyncProbeName)
+        to: filepath
+      - bind: f, err
+        eval: os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+        to: os
+      - opt:
+          do:
+            - return: "\"probe: \" + err.Error()"
+          when: err != nil
+      - bind: ok, err
+        eval: writeDsync(f, []byte{0}, 0)
+        to: writeDsync
+      - eval: abandon(f.Close())
+        to: abandon
+      - eval: abandon(os.Remove(path))
+        to: abandon
+      - switch:
+          cases:
+            - case: err != nil
+              do:
+                - return: "\"probe: \" + err.Error()"
+            - case: "!ok"
+              do:
+                - return: "\"the kernel refuses pwritev2(2) with RWF_DSYNC\""
+      - return: "\"\""
+  - of: writeDsync
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeDsync
+        kind: self
+      - id: f.Fd
+        kind: value
+      - id: iov.SetLen
+        kind: value
+      - id: syscall
+        kind: stdlib
+      - id: runtime
+        kind: stdlib
+    steps:
+      - bind: fd
+        eval: f.Fd()
+        to: f.Fd
+      - loop:
+          cond: done < len(b)
+          do:
+            - bind: pos
+              eval: uint64(off) + uint64(done)
+            - bind: iov
+              eval: "syscall.Iovec{Base: &b[done]}"
+            - eval: iov.SetLen(len(b) - done)
+              to: iov.SetLen
+            - bind: n, _, errno
+              eval: |-
+                syscall.Syscall6(sysPwritev2, fd, uintptr(unsafe.Pointer(&iov)), 1,
+                			uintptr(pos), uintptr(pos>>(bits.UintSize/2)>>(bits.UintSize/2)), rwfDsync)
+              to: syscall
+            - eval: runtime.KeepAlive(b)
+              to: runtime
+            - switch:
+                cases:
+                  - case: errno == syscall.EINTR
+                    do:
+                      - continue: true
+                  - case: done == 0 && (errno == syscall.ENOSYS || errno == syscall.EOPNOTSUPP || errno == syscall.EINVAL)
+                    do:
+                      - return: false, nil
+                  - case: errno != 0
+                    do:
+                      - return: false, errno
+                  - case: n == 0
+                    do:
+                      - return: false, io.ErrShortWrite
+            - op: +=
+              set: done
+              value: int(n)
+          init: done := 0
+      - return: true, nil
   - of: transportMisconfigured
     participants:
       - id: caller

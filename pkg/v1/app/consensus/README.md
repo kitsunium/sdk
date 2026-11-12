@@ -245,6 +245,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*StatusValue\) Precondition\(\) PreconditionSpec](<#StatusValue.Precondition>)
 - [type StopReasonValue](<#StopReasonValue>)
   - [func \(StopReasonValue\) ExitCode\(\) int](<#StopReasonValue.ExitCode>)
+- [type SyncPath](<#SyncPath>)
 - [type TCPTransport](<#TCPTransport>)
   - [func \(\*TCPTransport\) Addr\(\) string](<#TCPTransport.Addr>)
   - [func \(\*TCPTransport\) AskMembership\(ctx context.Context, m coreconsensus.MemberValue\) \(coreconsensus.MembershipValue, error\)](<#TCPTransport.AskMembership>)
@@ -753,6 +754,24 @@ const StampMember coreconsensus.StampState = 3
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.StampMember`.
+
+<a name="SyncFdatasync"></a>
+```go
+const SyncFdatasync svcconsensus.SyncPath = 0
+```
+
+How the file log makes a batch durable.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.SyncFdatasync`.
+
+<a name="SyncRWFDsync"></a>
+```go
+const SyncRWFDsync svcconsensus.SyncPath = 1
+```
+
+How the file log makes a batch durable.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.SyncRWFDsync`.
 
 <a name="TruncateAndStaySilent"></a>
 ```go
@@ -1797,6 +1816,12 @@ type DataDirOptions struct {
 	// size, as the no-space guard counts it. Another value is refused
 	// CONSENSUS_MISCONFIGURED.
 	Preallocate  Preallocate
+	// SyncPath is how a batch's records are made durable: pwrite(2) then
+	// fdatasync(2) (SyncFdatasync, the zero value) or one pwritev2(2)
+	// flagged RWF_DSYNC (SyncRWFDsync). Either way a batch has the same two
+	// durability points, its end record written once the rest is durable.
+	// Another value is refused CONSENSUS_MISCONFIGURED.
+	SyncPath     SyncPath
 	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
 	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
 	// kitsunium-consensus in the temporary directory elsewhere. It must
@@ -4118,6 +4143,21 @@ func (StopReasonValue) ExitCode() int
 ```
 
 ExitCode returns errs.ExitCodeOf of the stop's error, or 73 for a storage failure whose marker could not be written (ADR 0152 D4).
+
+<a name="SyncPath"></a>
+## type [SyncPath](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type SyncPath = svcconsensus.SyncPath
+```
+
+SyncPath is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath`, declared as:
+
+```go
+type SyncPath uint8
+```
 
 <a name="TCPTransport"></a>
 ## type [TCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)

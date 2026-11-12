@@ -91,7 +91,7 @@ func TestAFilesystemWithoutFallocateOpensTheLogInZeroFill(t *testing.T) {
 	defer d2.Close()
 	var none preallocWarns
 	d2.d.log.bindWarn(none.warn)
-	if len(none.lines) != 0 && !preallocEverywhere {
+	if len(none.lines) != 0 && !preallocEverywhere && !syncEverywhere {
 		t.Fatalf("a ZeroFill log logged %q", none.lines)
 	}
 }
