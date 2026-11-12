@@ -68,7 +68,7 @@ func eachSeed(t *testing.T, seeds []uint64, body func(t *testing.T, seed uint64)
 func TestSimElectsAndReplicates(t *testing.T) {
 	eachSeed(t, seeds(t, 20), func(t *testing.T, seed uint64) {
 		s := newSim(simOptions{seed: seed})
-		s.run(s.after(10*time.Second), true)
+		s.play(nil, 10*time.Second, true)
 		if s.err != nil {
 			t.Fatalf("seed %d: %v", seed, s.err)
 		}
@@ -79,7 +79,7 @@ func TestSimElectsAndReplicates(t *testing.T) {
 			t.Fatalf("seed %d: commit %d after 10 s of load", seed, c)
 		}
 		// Every live node converges on the same applied prefix.
-		s.run(s.after(3*time.Second), false)
+		s.play(nil, 3*time.Second, false)
 		for _, id := range s.ids {
 			if got, want := len(s.nodes[id].applied), int(s.maxCommit()); got != want {
 				t.Fatalf("seed %d: node %d applied %d of %d", seed, id, got, want)
@@ -102,37 +102,36 @@ func TestSimSafetyUnderFaultsP10(t *testing.T) { simSafetyUnderFaults(t, seedPar
 func TestSimSafetyUnderFaultsP11(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 10, 12)) }
 func TestSimSafetyUnderFaultsP12(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 11, 12)) }
 
+// faultyWindow is the 30 s fault window of the safety and snapshot
+// schedules: messages dropped and duplicated, random crashes, and node 1
+// cut from {2, 3}, then {1, 2} from 3, then healed, twice over, 5 s each.
+func faultyWindow(drop, dup, crashes float64) schedule {
+	return schedule{
+		{kind: nemDrop, param: drop},
+		{kind: nemDup, param: dup},
+		{kind: nemCrashes, param: crashes},
+		{kind: nemPartition, nodes: []core.NodeID{1}, from: 0, dur: 5 * time.Second},
+		{kind: nemPartition, nodes: []core.NodeID{1, 2}, from: 5 * time.Second, dur: 5 * time.Second},
+		{kind: nemPartition, nodes: []core.NodeID{1}, from: 15 * time.Second, dur: 5 * time.Second},
+		{kind: nemPartition, nodes: []core.NodeID{1, 2}, from: 20 * time.Second, dur: 5 * time.Second},
+	}
+}
+
 func simSafetyUnderFaults(t *testing.T, seeds []uint64) {
 	// Each seed is its own simulation with no shared state, so the seeds run
 	// in parallel: the 60 of them are the test's strength and are all kept,
 	// while the wall time fits the 60 s per-target budget .bazelrc imposes,
 	// coverage instrumentation included.
 	eachSeed(t, seeds, func(t *testing.T, seed uint64) {
-		s := newSim(simOptions{seed: seed, drop: 0.05, dup: 0.02, crashRate: 0.5, diskMax: 20 * time.Millisecond})
-		for k := 0; k < 6 && s.err == nil; k++ {
-			switch k % 3 {
-			case 0:
-				s.partition([]core.NodeID{1}, []core.NodeID{2, 3})
-			case 1:
-				s.partition([]core.NodeID{1, 2}, []core.NodeID{3})
-			default:
-				s.heal()
-			}
-			s.run(s.after(5*time.Second), true)
-		}
+		s := newSim(simOptions{seed: seed, diskMax: 20 * time.Millisecond})
+		s.play(faultyWindow(0.05, 0.02, 0.5), 30*time.Second, true)
 		if s.err != nil {
 			t.Fatalf("seed %d: %v", seed, s.err)
 		}
-		// Liveness after healing: no more faults, every node back.
-		s.heal()
-		s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
-		for _, id := range s.ids {
-			if !s.nodes[id].alive {
-				s.start(s.nodes[id])
-			}
-		}
+		// Liveness after healing: the window ended every fault and
+		// restarted every node down.
 		before := s.maxCommit()
-		s.run(s.after(10*time.Second), true)
+		s.play(nil, 10*time.Second, true)
 		if s.err != nil {
 			t.Fatalf("seed %d after heal: %v", seed, s.err)
 		}
@@ -147,16 +146,13 @@ func simSafetyUnderFaults(t *testing.T, seeds []uint64) {
 func TestSimPowerCutAllThree(t *testing.T) {
 	eachSeed(t, seeds(t, 20), func(t *testing.T, seed uint64) {
 		s := newSim(simOptions{seed: seed, diskMax: 30 * time.Millisecond})
-		s.run(s.after(5*time.Second), true)
-		for _, id := range s.ids {
-			s.crash(id)
-		}
-		s.run(s.after(500*time.Millisecond), false)
-		for _, id := range s.ids {
-			s.start(s.nodes[id])
-		}
+		// 5 s of load, then the three down for 500 ms with no load.
+		s.play(schedule{
+			{kind: nemCrash, nodes: s.ids, from: 5 * time.Second, dur: 500 * time.Millisecond},
+			{kind: nemQuiet, from: 5 * time.Second, dur: 500 * time.Millisecond},
+		}, 5500*time.Millisecond, true)
 		before := s.maxCommit()
-		s.run(s.after(10*time.Second), true)
+		s.play(nil, 10*time.Second, true)
 		if s.err != nil {
 			t.Fatalf("seed %d: %v", seed, s.err)
 		}
@@ -170,19 +166,12 @@ func TestSimPowerCutAllThree(t *testing.T) {
 // election timeout, and the majority elects another.
 func TestSimIsolatedLeaderStepsDown(t *testing.T) {
 	s := newSim(simOptions{seed: 7})
-	s.run(s.after(5*time.Second), true)
+	s.play(nil, 5*time.Second, true)
 	old := s.leader()
 	if old == nil {
 		t.Fatal("no leader")
 	}
-	var rest []core.NodeID
-	for _, id := range s.ids {
-		if id != old.id {
-			rest = append(rest, id)
-		}
-	}
-	s.partition([]core.NodeID{old.id}, rest)
-	s.run(s.after(5*time.Second), true)
+	s.play(schedule{{kind: nemPartition, nodes: []core.NodeID{old.id}}}, 5*time.Second, true)
 	if s.err != nil {
 		t.Fatal(s.err)
 	}
@@ -198,7 +187,7 @@ func TestSimIsolatedLeaderStepsDown(t *testing.T) {
 // and when the partition heals it neither deposes the leader nor stays stuck.
 func TestSimPreVoteKeepsLeaderAfterHeal(t *testing.T) {
 	s := newSim(simOptions{seed: 11})
-	s.run(s.after(5*time.Second), true)
+	s.play(nil, 5*time.Second, true)
 	l := s.leader()
 	if l == nil {
 		t.Fatal("no leader")
@@ -211,19 +200,12 @@ func TestSimPreVoteKeepsLeaderAfterHeal(t *testing.T) {
 			break
 		}
 	}
-	var rest []core.NodeID
-	for _, id := range s.ids {
-		if id != victim {
-			rest = append(rest, id)
-		}
-	}
-	s.partition([]core.NodeID{victim}, rest)
-	s.run(s.after(10*time.Second), true)
+	// The window ends healed: the term is read before anything runs past it.
+	s.play(schedule{{kind: nemPartition, nodes: []core.NodeID{victim}}}, 10*time.Second, true)
 	if got := s.nodes[victim].r.Status().Term; got != term {
 		t.Fatalf("partitioned node raised its term to %d (was %d)", got, term)
 	}
-	s.heal()
-	s.run(s.after(5*time.Second), true)
+	s.play(nil, 5*time.Second, true)
 	if s.err != nil {
 		t.Fatal(s.err)
 	}
@@ -231,7 +213,7 @@ func TestSimPreVoteKeepsLeaderAfterHeal(t *testing.T) {
 		t.Fatal("the healed node deposed a healthy leader")
 	}
 	if s.nodes[victim].r.Status().Commit != l.r.Status().Commit {
-		s.run(s.after(2*time.Second), false)
+		s.play(nil, 2*time.Second, false)
 		if s.nodes[victim].r.Status().Commit != l.r.Status().Commit {
 			t.Fatal("the healed node did not converge through log repair")
 		}
@@ -240,7 +222,7 @@ func TestSimPreVoteKeepsLeaderAfterHeal(t *testing.T) {
 
 func TestSimLeadershipTransfer(t *testing.T) {
 	s := newSim(simOptions{seed: 3})
-	s.run(s.after(5*time.Second), true)
+	s.play(nil, 5*time.Second, true)
 	l := s.leader()
 	if l == nil {
 		t.Fatal("no leader")
@@ -255,7 +237,7 @@ func TestSimLeadershipTransfer(t *testing.T) {
 		t.Fatalf("transfer refused: %v", code)
 	}
 	s.process(l)
-	s.run(s.after(time.Second), false)
+	s.play(nil, time.Second, false)
 	if s.err != nil {
 		t.Fatal(s.err)
 	}
@@ -270,7 +252,7 @@ func TestSimLeadershipTransfer(t *testing.T) {
 func TestSimTransferForwardedFromFollower(t *testing.T) {
 	eachSeed(t, seeds(t, 20), func(t *testing.T, seed uint64) {
 		s := newSim(simOptions{seed: seed})
-		s.run(s.after(3*time.Second), true)
+		s.play(nil, 3*time.Second, true)
 		l := s.leader()
 		if l == nil {
 			t.Fatalf("seed %d: no leader", seed)
@@ -291,7 +273,7 @@ func TestSimTransferForwardedFromFollower(t *testing.T) {
 			Context: 77, Entries: []core.EntryValue{{Kind: core.EntryTransfer, BodySum: wire.BodySum(data), Data: data}},
 		}
 		s.deliver(m)
-		s.run(s.after(3*time.Second), true)
+		s.play(nil, 3*time.Second, true)
 		if s.err != nil {
 			t.Fatalf("seed %d: %v", seed, s.err)
 		}
@@ -330,28 +312,21 @@ func simBoundedRecentEntries(t *testing.T, seeds []uint64) {
 		}
 	})
 	eachSeed(t, seeds, func(t *testing.T, seed uint64) {
-		s := newSim(simOptions{seed: seed, drop: 0.02, crashRate: 0.3, recent: 512})
-		for k := 0; k < 4 && s.err == nil; k++ {
-			if k%2 == 0 {
-				s.partition([]core.NodeID{core.NodeID(k%3 + 1)}, nil)
-			} else {
-				s.heal()
-			}
-			s.run(s.after(4*time.Second), true)
-		}
-		s.heal()
-		s.opt.crashRate, s.opt.drop = 0, 0
-		for _, id := range s.ids {
-			if !s.nodes[id].alive {
-				s.start(s.nodes[id])
-			}
-		}
-		s.run(s.after(8*time.Second), true)
+		s := newSim(simOptions{seed: seed, recent: 512})
+		// Node 1 cut off for 4 s, healed, node 3 cut off, healed, under
+		// drops and crashes; the window restarts every node down.
+		s.play(schedule{
+			{kind: nemDrop, param: 0.02},
+			{kind: nemCrashes, param: 0.3},
+			{kind: nemPartition, nodes: []core.NodeID{1}, from: 0, dur: 4 * time.Second},
+			{kind: nemPartition, nodes: []core.NodeID{3}, from: 8 * time.Second, dur: 4 * time.Second},
+		}, 16*time.Second, true)
+		s.play(nil, 8*time.Second, true)
 		if s.err != nil {
 			t.Fatalf("seed %d: %v", seed, s.err)
 		}
 		want := s.maxCommit()
-		s.run(s.after(3*time.Second), false)
+		s.play(nil, 3*time.Second, false)
 		fetches.Add(int64(s.fetches))
 		for _, id := range s.ids {
 			n := s.nodes[id]
@@ -369,21 +344,8 @@ func simBoundedRecentEntries(t *testing.T, seeds []uint64) {
 // entries, restarts that lose the snapshot's body half the time (no table,
 // log kept), crashes, drops and partitions (review of PR #301, H1).
 func snapSim(seed uint64, mut mutation) *sim {
-	s := newSim(simOptions{
-		seed: seed, drop: 0.05, dup: 0.02, crashRate: 1, diskMax: 20 * time.Millisecond,
-		snapEvery: 16, snapLoss: 0.5, mut: mut,
-	})
-	for k := 0; k < 6 && s.err == nil; k++ {
-		switch k % 3 {
-		case 0:
-			s.partition([]core.NodeID{core.NodeID(k%3 + 1)}, nil)
-		case 1:
-			s.partition([]core.NodeID{1, 2}, []core.NodeID{3})
-		default:
-			s.heal()
-		}
-		s.run(s.after(5*time.Second), true)
-	}
+	s := newSim(simOptions{seed: seed, diskMax: 20 * time.Millisecond, snapEvery: 16, snapLoss: 0.5, mut: mut})
+	s.play(faultyWindow(0.05, 0.02, 1), 30*time.Second, true)
 	return s
 }
 
@@ -423,19 +385,13 @@ func simSnapshotsUnderFaults(t *testing.T, seeds []uint64) {
 		if s.err != nil {
 			t.Fatalf("seed %d: %v", seed, s.err)
 		}
-		s.heal()
-		s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
-		for _, id := range s.ids {
-			if !s.nodes[id].alive {
-				s.start(s.nodes[id])
-			}
-		}
-		s.run(s.after(10*time.Second), true)
+		// The window ended every fault and restarted every node down.
+		s.play(nil, 10*time.Second, true)
 		if s.err != nil {
 			t.Fatalf("seed %d after heal: %v", seed, s.err)
 		}
 		// Every node is back to a table and caught up.
-		s.run(s.after(5*time.Second), false)
+		s.play(nil, 5*time.Second, false)
 		for _, id := range s.ids {
 			n := s.nodes[id]
 			if n.noTable || n.r.Status().Commit != s.maxCommit() {

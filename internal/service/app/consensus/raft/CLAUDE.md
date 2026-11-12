@@ -43,6 +43,36 @@ leader's refusal, TimeoutNow's term, the verified prefix, an install's
 acknowledgement, an older term's append, a forward delivered twice, a
 silent node, a read index, an election and its first commit).
 
+The simulator's faults are values a scenario composes (#924,
+`nemesis_internal_test.go`): a `nemesis` is a kind on nodes from an
+offset for a duration with a parameter — `nemPartition`, `nemSkew` (a
+clock rate), `nemStallDisk` (no sync completes and no install is served
+until it ends, every write issued meanwhile queued behind it),
+`nemCrash`, `nemDrop`, `nemDup`, `nemCrashes` (random crashes per
+second), `nemQuiet` (no load) — and `sim.play(schedule, span, load)` runs
+a window under a `schedule`, cut at each instant one starts or ends, ends
+before starts, every one still holding ended at the span, so a window
+leaves the cluster healed with every node up. A schedule draws nothing
+from the generator: every scenario of `sim_scenarios_internal_test.go`
+is one, and each seed's run is the one the ad-hoc calls it replaced made,
+compared bit for bit on all 213 runs when they were rewritten.
+`simOptions.watch` runs the durable half of the driver's progress watch
+(consensus's `watchProgress`) at each tick, and
+`TestSimStalledDiskLeaderHandsOver` (`yieldonstall_internal_test.go`)
+stalls the leader's disk for three `ElectionTimeoutMax` under load: it
+hands over within one, a follower commits without it, and the same seed
+without the watch keeps the stalled leader (#554);
+`TestSimComposedScheduleKeepsSafetyAndProgress` composes a partition, a
+stall and a skew in one schedule. `FuzzStep`
+(`zfuzzstep_internal_test.go`) warms a 3-node cluster up, records every
+message, then steps ops that replay a recorded message or forge one
+(kind, term, index, log term, commit, entries, reject, receiver):
+replays keep every check and end on convergence, a forgery switches off
+the checks that compare nodes (`sim.forged`) and keeps each node's own;
+`sim.budget` and `maxReadyTurns` fail a run that never settles. Its seed
+corpus runs with the suite; `scripts/ci/consensus-fuzz.sh` fuzzes it 10
+minutes a night. Both files are named to sort after every seed suite.
+
 Bazel deals top-level tests to shards by their index, so a new test file
 whose name sorts before a seed suite's (`checks_*`, `lincheck_*`, `sim_*`,
 `unapplied_*`, every file calling `seedPart` or `eachSeed`) moves its seed
