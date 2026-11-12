@@ -160,6 +160,13 @@ type Node struct {
 	// MaxSnapshotBytes the newest snapshot is over: they are sent no
 	// entries (#613).
 	unfed map[coreconsensus.NodeID]bool
+	// bodies are the append bodies the current Ready shares among its
+	// followers, on the loop (#912).
+	bodies appendBodies
+	// batch is the transport's BatchSender, nil when it has none: asserted
+	// once in bindTransport, not on every Ready, whose type assertion may
+	// fill the runtime's cache on the loop (#912).
+	batch coreconsensus.BatchSender
 	// unreachableAt is when the transport last failed to reach a peer.
 	unreachableAt map[coreconsensus.NodeID]time.Time
 	lastTerm      uint64
@@ -524,9 +531,14 @@ func silenceOf(log coreconsensus.LogStore, o *obs) (term, index uint64, err erro
 // bindTransport hands the transport the node's callbacks. An unreachable
 // report is queued to the loop and dropped when the loop is saturated, as
 // it is advisory; the JOIN handler with reasons, and the read of the
-// configuration a member asks (#763), are bound when supported.
+// configuration a member asks (#763), are bound when supported. A transport
+// that is a BatchSender is kept as one, so that every Ready shares its
+// appends' bodies without asserting it again (#912).
 func (n *Node) bindTransport() error {
 	cfg := &n.cfg
+	if bs, ok := cfg.Transport.(coreconsensus.BatchSender); ok {
+		n.batch = bs
+	}
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
 		ur.Unreachable(func(id coreconsensus.NodeID) {
 			select {
@@ -1557,6 +1569,12 @@ func divergedErr(d raft.DivergenceValue) error {
 // sendMessages sends raft's messages, but no entries to a learner the
 // state outgrew (watchUnfed, #613).
 func (n *Node) sendMessages(ms []coreconsensus.MessageValue) {
+	if n.batch != nil {
+		// One encoding of an append's entries for every follower sent
+		// them (#912).
+		n.sendShared(n.batch, ms)
+		return
+	}
 	for i := range ms {
 		if len(ms[i].Entries) > 0 && n.unfed[ms[i].To] {
 			continue

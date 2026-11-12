@@ -4003,7 +4003,9 @@ sequences:
           		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.hasStateNotice()
   - of: (*ReadyValue).hasStateNotice
     steps:
-      - return: rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard
+      - return: |-
+          rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard ||
+          		rd.Diverged.Index != 0
   - of: (*Raft).Ready
     participants:
       - id: caller
@@ -5647,6 +5649,8 @@ sequences:
         kind: internal
       - id: r.send
         kind: internal
+      - id: r.committedDivergence
+        kind: internal
     steps:
       - opt:
           do:
@@ -5663,10 +5667,66 @@ sequences:
               to: r.send
             - return: "false"
           when: k >= len(m.Entries) || !ok || m.Entries[k].Position.Term != t
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: at
+            eval: r.committedDivergence(m, k)
+            to: r.committedDivergence
+          when: at != 0 && r.heldOnDivergence(m, at)
       - set: m.Entries
         value: m.Entries[k+1:]
       - set: m.Index, m.LogTerm
         value: r.log.committed, t
+      - return: "true"
+  - of: (*Raft).foundingDivergence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).foundingDivergence
+        kind: self
+      - id: r.log.term
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: len(m.Entries) == 0 || m.Index != 1 || r.log.committed < 1 || r.log.snapIndex >= 1
+      - opt:
+          do:
+            - return: "0"
+          init:
+            bind: t, _
+            eval: r.log.term(1)
+            to: r.log.term
+          when: t != 1
+      - bind: e
+        eval: "&m.Entries[0]"
+      - opt:
+          do:
+            - return: "0"
+          when: wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(1), e) == e.ChainSum
+      - return: "1"
+  - of: (*Raft).heldOnDivergence
+    steps:
+      - opt:
+          do:
+            - set: r.rd.Diverged
+              value: "DivergenceValue{Index: at, Leader: m.From}"
+            - return: "true"
+          when: m.Commit > at
+      - opt:
+          do:
+            - set: r.divergedFrom, r.divergedTerm, r.divergedSince
+              value: m.From, r.term, r.now
+          when: r.divergedFrom != m.From || r.divergedTerm != r.term
+      - opt:
+          do:
+            - return: "false"
+          when: r.now.Sub(r.divergedSince) >= r.timing.ElectionTimeoutMax
+      - set: r.rd.ChainRefusedBy
+        value: append(r.rd.ChainRefusedBy, m.From)
       - return: "true"
   - of: (*Raft).firstNewEntry
     participants:
@@ -5710,6 +5770,8 @@ sequences:
         kind: actor
       - id: (*Raft).appendNew
         kind: self
+      - id: r.foundingDivergence
+        kind: internal
       - id: r.truncateFrom
         kind: internal
       - id: r.lowerSilence
@@ -5717,6 +5779,14 @@ sequences:
       - id: r.appendEntries
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: at
+            eval: r.foundingDivergence(m)
+            to: r.foundingDivergence
+          when: start == 0 && at != 0 && r.heldOnDivergence(m, at)
       - opt:
           do:
             - return: "false"
@@ -5829,27 +5899,33 @@ sequences:
         kind: actor
       - id: (*Raft).chainRefused
         kind: self
+      - id: r.countRefusal
+        kind: internal
       - id: r.send
         kind: internal
+    steps:
+      - eval: r.countRefusal(m.From, at)
+        to: r.countRefusal
+      - set: r.rd.ChainRefusedBy
+        value: append(r.rd.ChainRefusedBy, m.From)
+      - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})"
+        to: r.send
+  - of: (*Raft).countRefusal
     steps:
       - alt:
           - do:
               - op: ++
                 set: r.refusals
-            when: r.refusedAt == at && r.refusedFrom == m.From
+            when: r.refusedAt == at && r.refusedFrom == from
           - do:
               - set: r.refusedAt, r.refusedFrom, r.refusals
-                value: at, m.From, 1
+                value: at, from, 1
             else: true
       - opt:
           do:
             - set: r.refusedLead, r.refusedTerm
-              value: m.From, r.term
+              value: from, r.term
           when: r.cfg.MaxChainRefusals > 0 && r.refusals >= r.cfg.MaxChainRefusals
-      - set: r.rd.ChainRefusedBy
-        value: append(r.rd.ChainRefusedBy, m.From)
-      - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})"
-        to: r.send
   - of: (*Raft).refuses
     steps:
       - return: r.refusedLead != 0 && r.refusedLead == from && r.refusedTerm == r.term && !r.mutated(mutRefusedLeadHeard)

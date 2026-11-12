@@ -242,17 +242,71 @@ sequences:
         kind: actor
       - id: AppendMessage
         kind: self
-      - id: binary.LittleEndian.AppendUint32
-        kind: value
-      - id: binary.LittleEndian.AppendUint64
-        kind: value
-      - id: appendEntry
+      - id: appendFixed
+        kind: internal
+      - id: AppendEntries
         kind: internal
       - id: binary.LittleEndian.PutUint32
         kind: value
     steps:
       - bind: start
         eval: len(dst)
+      - set: dst
+        to: appendFixed
+        value: appendFixed(dst, m)
+      - set: dst
+        to: AppendEntries
+        value: AppendEntries(dst, m.Entries)
+      - eval: binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
+        to: binary.LittleEndian.PutUint32
+      - return: dst
+  - of: AppendHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendHeader
+        kind: self
+      - id: appendFixed
+        kind: internal
+      - id: binary.LittleEndian.PutUint32
+        kind: value
+    steps:
+      - bind: start
+        eval: len(dst)
+      - set: dst
+        to: appendFixed
+        value: appendFixed(dst, m)
+      - eval: binary.LittleEndian.PutUint32(dst[start:], uint32(MessageHeaderLen-4+bodyLen))
+        to: binary.LittleEndian.PutUint32
+      - return: dst
+  - of: AppendEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendEntries
+        kind: self
+      - id: appendEntry
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: dst
+              to: appendEntry
+              value: appendEntry(dst, &ents[i])
+          key: i
+          range: ents
+      - return: dst
+  - of: appendFixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFixed
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
       - set: dst
         to: binary.LittleEndian.AppendUint32
         value: binary.LittleEndian.AppendUint32(dst, 0)
@@ -301,19 +355,8 @@ sequences:
       - set: dst
         to: binary.LittleEndian.AppendUint32
         value: binary.LittleEndian.AppendUint32(dst, uint32(m.Code))
-      - set: dst
+      - return: binary.LittleEndian.AppendUint32(dst, uint32(len(m.Entries)))
         to: binary.LittleEndian.AppendUint32
-        value: binary.LittleEndian.AppendUint32(dst, uint32(len(m.Entries)))
-      - loop:
-          do:
-            - set: dst
-              to: appendEntry
-              value: appendEntry(dst, &m.Entries[i])
-          key: i
-          range: m.Entries
-      - eval: binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
-        to: binary.LittleEndian.PutUint32
-      - return: dst
   - of: appendEntry
     participants:
       - id: caller

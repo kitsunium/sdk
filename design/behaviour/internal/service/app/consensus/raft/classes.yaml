@@ -715,6 +715,7 @@ files:
       - ReadState
       - TransferResult
       - ReadyValue
+      - DivergenceValue
       - UnsupportedEntryValue
       - ReadBackSpec
       - FetchSpec
@@ -829,6 +830,9 @@ files:
       - (*Raft).followTimeoutNow
       - (*Raft).handleAppend
       - (*Raft).rebaseOnCommit
+      - (*Raft).committedDivergence
+      - (*Raft).foundingDivergence
+      - (*Raft).heldOnDivergence
       - (*Raft).dropUnknownKinds
       - (*Raft).firstNewEntry
       - (*Raft).appendNew
@@ -836,6 +840,7 @@ files:
       - (*Raft).verifyChain
       - (*Raft).acknowledgeAppend
       - (*Raft).chainRefused
+      - (*Raft).countRefusal
       - (*Raft).refuses
       - (*Raft).maybeEndSilence
       - (*Raft).rewrittenPastSilence
@@ -1608,6 +1613,13 @@ types:
           consensus_chain_refusals_total.
         name: ChainRefusedBy
         type: "[]core.NodeID"
+      - doc: |-
+          Diverged names an append of a leader that committed past an index
+          this node holds committed, and carried another entry there than this
+          node's (#698): no majority holds this node's entry, and the driver
+          stops it.
+        name: Diverged
+        type: DivergenceValue
     kind: struct
     methods:
       - name: NeedsWrite
@@ -1627,11 +1639,23 @@ types:
       - doc: |-
           hasStateNotice reports whether the Ready tells the driver of a state: the
           end of the silence or its lowered point, an entry this version cannot
-          apply, or a node that may not campaign and hears no leader.
+          apply, a node that may not campaign and hears no leader, or a committed
+          entry a majority does not hold (#698).
         name: hasStateNotice
         recv: rd *ReadyValue
         results: bool
     name: ReadyValue
+  - fields:
+      - doc: |-
+          Index is the committed index at or below which the leader's log
+          differs from this node's.
+        name: Index
+        type: uint64
+      - doc: Leader is the leader whose append carried it.
+        name: Leader
+        type: core.NodeID
+    kind: struct
+    name: DivergenceValue
   - fields:
       - name: Index
         type: uint64
@@ -1855,6 +1879,16 @@ types:
         type: core.NodeID
       - name: refusals
         type: int
+      - doc: |-
+          divergedFrom, divergedTerm and divergedSince are the leader whose
+          append first contradicted a committed entry in this term, and when:
+          heldOnDivergence holds its refusals back for ElectionTimeoutMax (#698).
+        name: divergedFrom
+        type: core.NodeID
+      - name: divergedTerm
+        type: uint64
+      - name: divergedSince
+        type: time.Time
       - doc: |-
           guardRefusal is what #603's guard found when it refused the change
           the last Propose was handed: the voters that change would strand, nil
@@ -3585,9 +3619,59 @@ types:
           entries past the commit are still news: it is re-based on the committed
           entry when it carries that entry with our term. A node that acknowledges
           nothing — a silent one — learns the rest of the log no other way. It
-          reports false, having answered with the commit, when m cannot be re-based.
+          reports false, having answered with the commit, when m cannot be re-based,
+          and false unanswered when it carries another entry than this log's at a
+          committed index (heldOnDivergence).
         name: rebaseOnCommit
         params: m *core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          committedDivergence returns the first index, at most the commit, at which
+          m carries another entry than this log holds committed, 0 when there is
+          none. Both logs then hold a different committed entry at one position:
+          Log Matching is broken by construction, as when founders passed Bootstrap
+          different initial timings and each wrote and committed its own entry 1
+          (#698). Only an entry the leader's own sums verify counts, chained on
+          this log's entry before it: an entry damaged in transit or in the
+          leader's memory fails its sums, and the chain check refuses it as before
+          (D4). The entries at or below the snapshot are not compared, nor any past
+          k, the commit.
+        name: committedDivergence
+        params: m *core.MessageValue, k int
+        recv: r *Raft
+        results: uint64
+      - doc: |-
+          foundingDivergence returns 1 when m is an append after index 1 whose
+          first entry carries a body its sum verifies but a chain that does not
+          continue this node's entry 1, committed and of term 1, 0 otherwise: the
+          leader's entry 1 is another than this node's. A founder that passed
+          Bootstrap another initial timing than the others met it at every append
+          past entry 1, the leader's entry 2 chained on its own entry 1 (#698).
+          Only entry 1 is judged on the chain alone: no other entry is committed
+          by fiat, and an entry whose chain field rotted in a leader's memory,
+          its body intact, would stop every follower it reached.
+        name: foundingDivergence
+        params: m *core.MessageValue
+        recv: r *Raft
+        results: uint64
+      - doc: |-
+          heldOnDivergence handles an append that contradicts this log at the
+          committed index at, and reports whether it consumed it. A leader whose
+          commit passed at holds its entries through its commit on a majority,
+          each of which verified their chain, and so holds its own entry at at,
+          not this node's: the Ready names it (Ready.Diverged) and the driver stops
+          the node. A leader that committed nothing past at proves nothing about
+          which entry the cluster holds, and for ElectionTimeoutMax from the first
+          such append of its term the append is dropped unanswered and uncounted:
+          a leader of the majority that commits by then carries its commit in the
+          append it sends again at a heartbeat's answer. Counted at once, three
+          refusals reached a leader of the majority before its first commit, and
+          the odd founder refused it for the whole term, cut off with nothing said.
+          Past that window the append is refused as before (D4, R6-05): a leader
+          whose own entry is the odd one commits nothing, is refused and deposed.
+        name: heldOnDivergence
+        params: m *core.MessageValue, at uint64
         recv: r *Raft
         results: bool
       - doc: |-
@@ -3672,6 +3756,13 @@ types:
           index, that leader's heartbeats go unanswered for the term (D4, R6-05).
         name: chainRefused
         params: m core.MessageValue, at uint64
+        recv: r *Raft
+      - doc: |-
+          countRefusal counts a refusal of from's append at index at; after
+          MaxChainRefusals in a row at one index, that leader is refused for the
+          term (D4, R6-05).
+        name: countRefusal
+        params: from core.NodeID, at uint64
         recv: r *Raft
       - doc: |-
           refuses reports whether this node refused the leader from for the rest

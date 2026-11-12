@@ -253,6 +253,31 @@ workflows:
           range: r.voters()
           value: id
       - return: granted, rejected
+  - of: (*Raft).committedDivergence
+    steps:
+      - loop:
+          cond: j <= k
+          do:
+            - bind: e
+              eval: "&m.Entries[j]"
+            - bind: i
+              eval: e.Position.Index
+            - opt:
+                do:
+                  - return: "0"
+                when: i != m.Index+uint64(j)+1
+            - opt:
+                do:
+                  - continue: true
+                when: i <= r.log.snapIndex || r.log.chain(i) == e.ChainSum
+            - opt:
+                do:
+                  - return: i
+                when: wire.BodySum(e.Data) == e.BodySum && wire.ChainSum(r.log.chain(i-1), e) == e.ChainSum
+            - return: "0"
+          init: j := 0
+          post: j++
+      - return: "0"
   - of: (*Raft).dropUnknownKinds
     steps:
       - loop:

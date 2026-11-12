@@ -72,6 +72,8 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func TokenOf\(err error\) \(TokenValue, bool\)](<#TokenOf>)
 - [type AlarmID](<#AlarmID>)
 - [type AuthenticatedPeerValue](<#AuthenticatedPeerValue>)
+- [type BatchSender](<#BatchSender>)
+  - [func \(BatchSender\) SendShared\(to NodeID, header \[\]byte, body \[\]byte\)](<#BatchSender.SendShared>)
 - [type BatchingStateMachine](<#BatchingStateMachine>)
   - [func \(BatchingStateMachine\) ApplyBatch\(es \[\]EntryValue, results \[\]any\)](<#BatchingStateMachine.ApplyBatch>)
 - [type ClusterID](<#ClusterID>)
@@ -259,6 +261,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*TCPTransport\) RefusedBeforeHandshake\(\) int64](<#TCPTransport.RefusedBeforeHandshake>)
   - [func \(\*TCPTransport\) ReloadFailures\(\) int](<#TCPTransport.ReloadFailures>)
   - [func \(\*TCPTransport\) Send\(to coreconsensus.NodeID, frame \[\]byte\)](<#TCPTransport.Send>)
+  - [func \(\*TCPTransport\) SendShared\(to coreconsensus.NodeID, header \[\]byte, body \[\]byte\)](<#TCPTransport.SendShared>)
   - [func \(\*TCPTransport\) SetMembership\(group coreconsensus.GroupID, admitted \[\]coreconsensus.MemberValue\)](<#TCPTransport.SetMembership>)
   - [func \(\*TCPTransport\) Slot\(\) string](<#TCPTransport.Slot>)
   - [func \(\*TCPTransport\) Stream\(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func\(int64\) \(io.ReadCloser, error\)\) error](<#TCPTransport.Stream>)
@@ -1600,6 +1603,37 @@ type AuthenticatedPeerValue struct {
 	SPKI        [32]byte
 }
 ```
+
+<a name="BatchSender"></a>
+## type [BatchSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type BatchSender = coreconsensus.BatchSender
+```
+
+BatchSender is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.BatchSender`, declared as:
+
+```go
+type BatchSender interface {
+	// SendShared hands over the frame header then body, the bytes Send
+	// would have been handed. It never blocks and may drop, as Send; the
+	// transport owns header after the call. body is shared: neither the
+	// transport nor the caller mutates it, and several peers' queues may
+	// hold it at once.
+	SendShared(to NodeID, header []byte, body []byte)
+}
+```
+
+<a name="BatchSender.SendShared"></a>
+### func \(BatchSender\) [SendShared](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
+
+```go
+func (BatchSender) SendShared(to NodeID, header []byte, body []byte)
+```
+
+SendShared hands over the frame header then body, the bytes Send would have been handed. It never blocks and may drop, as Send; the transport owns header after the call. body is shared: neither the transport nor the caller mutates it, and several peers' queues may hold it at once.
 
 <a name="BatchingStateMachine"></a>
 ## type [BatchingStateMachine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -4281,6 +4315,15 @@ func (*TCPTransport) Send(to coreconsensus.NodeID, frame []byte)
 ```
 
 Send implements Transport: it never blocks, and drops when the peer's queue is full (D4). The first frame to a peer and lane launches that lane's background sender goroutine, which ends when Close is called.
+
+<a name="TCPTransport.SendShared"></a>
+### func \(TCPTransport\) [SendShared](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
+
+```go
+func (*TCPTransport) SendShared(to coreconsensus.NodeID, header []byte, body []byte)
+```
+
+SendShared implements BatchSender: the frame is queued as Send queues one, counted at the length of header and body, and written as header then body under the batch's one deadline and flush. body is never written to, so the frames of several peers share it.
 
 <a name="TCPTransport.SetMembership"></a>
 ### func \(TCPTransport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)

@@ -2782,6 +2782,31 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.BatchSender",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "BatchSender",
+      "spelled": "interface{SendShared(to NodeID, header []byte, body []byte)}",
+      "canonical": "interface{SendShared(to github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, header []byte, body []byte)}",
+      "doc": "BatchSender is the sibling of a transport that sends one frame as a\nheader and a body several peers share: the leader encodes the entries\nof an append once per Ready and hands the same body to every follower\nwhose append carries them (#912). A node that finds it sends every\nappend with entries through it, and every other frame through Send.\n",
+      "file": "core/app/consensus/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.BatchSender.SendShared",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "SendShared",
+      "recv": "BatchSender",
+      "spelled": "func(to NodeID, header []byte, body []byte)",
+      "canonical": "func(to github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, header []byte, body []byte)",
+      "doc": "SendShared hands over the frame header then body, the bytes Send\nwould have been handed. It never blocks and may drop, as Send; the\ntransport owns header after the call. body is shared: neither the\ntransport nor the caller mutates it, and several peers' queues may\nhold it at once.\n",
+      "file": "core/app/consensus/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.BatchingStateMachine",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -65517,6 +65542,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*TCPTransport).SendShared",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "SendShared",
+      "recv": "TCPTransport",
+      "spelled": "func(to coreconsensus.NodeID, header []byte, body []byte)",
+      "canonical": "func(to github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, header []byte, body []byte)",
+      "doc": "SendShared implements BatchSender: the frame is queued as Send queues\none, counted at the length of header and body, and written as header\nthen body under the batch's one deadline and flush. body is never\nwritten to, so the frames of several peers share it.\n",
+      "file": "service/app/consensus/tcp.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*TCPTransport).SetMembership",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -67095,6 +67133,30 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AppendEntries",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
+      "name": "AppendEntries",
+      "spelled": "func(dst []byte, ents []coreconsensus.EntryValue) []byte",
+      "canonical": "func(dst []byte, ents []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) []byte",
+      "doc": "AppendEntries appends to dst the entries body of an append message: each\nentry's fixed header, then its payload, EntryLen bytes each.\n",
+      "file": "service/app/consensus/wire/codec.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AppendHeader",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
+      "name": "AppendHeader",
+      "spelled": "func(dst []byte, m *coreconsensus.MessageValue, bodyLen int) []byte",
+      "canonical": "func(dst []byte, m *github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue, bodyLen int) []byte",
+      "doc": "AppendHeader appends to dst the part of m's frame before its entries:\nthe frame header, whose length counts bodyLen bytes of entries after it,\nand m's fixed fields with the count of m.Entries, whose contents it does\nnot read. Followed by AppendEntries of m.Entries, whose length is\nbodyLen, it writes AppendMessage's bytes: the body of an append is the\nsame for every peer, only this header differs (#912).\n",
+      "file": "service/app/consensus/wire/codec.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AppendMembership",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
@@ -67302,6 +67364,19 @@
       "spelled": "func(frame []byte) (coreconsensus.FrameLane, error)",
       "canonical": "func(frame []byte) (github.com/kitsunium/sdk/internal/core/app/consensus.FrameLane, error)",
       "doc": "Lane reads the lane of an encoded frame from its frozen header alone, so a\ntransport routes a frame of a type or a version it does not parse.\n",
+      "file": "service/app/consensus/wire/codec.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.MessageHeaderLen",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
+      "name": "MessageHeaderLen",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "112",
+      "doc": "MessageHeaderLen is the length AppendHeader writes: the frame header and\na message's fixed fields, up to and including its entry count.\n",
       "file": "service/app/consensus/wire/codec.go",
       "layer": "service",
       "family": "app"

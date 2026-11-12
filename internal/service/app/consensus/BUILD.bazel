@@ -34,6 +34,7 @@ go_library(
         "node_leadercontact.go",
         "node_progresswatch.go",
         "node_sendpin.go",
+        "node_sendshared.go",
         "node_snaplimit.go",
         "observe.go",
         "observed.go",
@@ -178,6 +179,8 @@ go_test(
         "retiredoffer_internal_test.go",
         "runtimedir_unix_internal_test.go",
         "savesnapshotstall_internal_test.go",
+        "sendshared_alloc_internal_test.go",
+        "sendshared_internal_test.go",
         "silencedurable_internal_test.go",
         "silencelowered_internal_test.go",
         "silentload_internal_test.go",
@@ -247,10 +250,11 @@ go_test(
 )
 
 # The allocation gates of the range read (filelog_alloc_internal_test.go,
-# #913) and of the receive path (receive_alloc_internal_test.go, #1110), both
+# #913), of the receive path (receive_alloc_internal_test.go, #1110) and of
+# the leader turn (sendshared_alloc_internal_test.go, #912), all
 # //go:build !race, in their own target so the race-off lane
-# (tools/alloc-lane-targets.txt) runs them alone, not the whole suite; under
-# race it compiles to nothing it runs.
+# (tools/alloc-lane-targets.txt) runs the gates and the window's negative
+# control, not the whole suite; under race it compiles to nothing it runs.
 # keep
 go_test(
     name = "consensus_alloc_test",
@@ -258,7 +262,10 @@ go_test(
         "allocwindow_test.go",
         "filelog_alloc_internal_test.go",
         "receive_alloc_internal_test.go",
+        "sendshared_alloc_internal_test.go",
+        "sendshared_internal_test.go",
     ],
+    args = ["-test.run=^(TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice|TestACompactionThroughASegmentBoundaryCopiesNoEntries|TestAFollowerStepKeepsTheFramesPayloads|TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers|TestAllocWindowCountsARealAllocation)$$"],
     embed = [":consensus"],
     deps = [
         "//internal/core/app/consensus",

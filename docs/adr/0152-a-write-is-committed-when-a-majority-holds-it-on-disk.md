@@ -7127,6 +7127,41 @@ live member and is refused when no other kept member is listed there;
   that take the exit asking the live members, or standing in for them
   once their links are cut or they are down.
 
+## Amendment — an append's entries are encoded once per Ready, whatever its followers (2026-11-12, #912)
+
+The leader builds one append per follower over the same slice of its log,
+and the driver encoded each with `wire.AppendMessage(nil, …)`: a fresh
+buffer and a full copy of up to `MaxBatchBytes` per follower per turn, on
+the loop whose turn is the lease's drift budget (D9, R7-20). The entries
+body is the same for every peer; only the 112-byte header — the frame
+header and the fixed fields, up to the entry count — names one
+([#912](https://github.com/kitsunium/sdk/issues/912)).
+
+- **The wire is unchanged.** `wire.AppendHeader` writes the header, whose
+  length counts the body after it, and `wire.AppendEntries` the body;
+  header then body is `AppendMessage`'s frame byte for byte, which a node
+  of the previous release decodes (`TestAHeaderThenItsEntriesAreTheMessagesBytes`).
+- **A sibling of `Transport`, never a widening (ADR 0039).**
+  `BatchSender.SendShared(to, header, body)` queues one frame as a header
+  the transport owns and a body neither side mutates, which several peers'
+  queues may hold at once. The TCP transport implements it: a queued frame
+  is a header and a body, counted at their sum against `PeerQueueBytes`,
+  written head then body under the batch's one deadline and flush. The
+  memory double does not: its `Send` copies already, and the suites' doubles
+  that embed it filter through `Send`, which a promoted `SendShared` would
+  bypass.
+- **The driver.** With a `BatchSender`, every append with entries goes
+  through it: the entries slice is encoded once per Ready (known by its
+  first element's address and its length, which nothing mutates within a
+  Ready), the Ready's headers share one buffer, each peer its own capped
+  part; every other message, and every transport without the sibling, goes
+  through `Send` as before. A leader turn of 64 entries of 256 B allocates
+  two buffers with two followers as with four, gated in the alloc lane
+  (`TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers`,
+  `//internal/service/app/consensus:consensus_alloc_test`).
+- **Not measured here.** `consensus_loop_turn_seconds` p99 at 1 000
+  proposals/s waits for the bench lane of #911.
+
 ## Revision history
 
 | Version | Round | What changed |

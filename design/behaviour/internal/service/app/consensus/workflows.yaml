@@ -110,6 +110,20 @@ workflows:
           key: i
           range: recs
       - return: "-1"
+  - of: entryRecords
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                when: s.recs[i].kind == recEntry
+          key: i
+          range: s.recs
+      - return: "n"
   - of: checkLayouts
     steps:
       - loop:
@@ -162,6 +176,26 @@ workflows:
           range: l.segs
           value: x
       - return: nil
+  - of: (*fileLog).termAt
+    steps:
+      - bind: lo, hi
+        eval: 0, len(l.runs)
+      - loop:
+          cond: lo < hi
+          do:
+            - alt:
+                - do:
+                    - set: lo
+                      value: m + 1
+                  init:
+                    bind: m
+                    eval: int(uint(lo+hi) >> 1)
+                  when: l.runs[m].first <= i
+                - do:
+                    - set: hi
+                      value: m
+                  else: true
+      - return: l.runs[lo-1].term
   - of: (*fileLog).retainsEntryIn
     steps:
       - loop:
@@ -169,10 +203,9 @@ workflows:
             - opt:
                 do:
                   - return: "true"
-                when: s.seg == seg
-          key: _
-          range: l.slots
-          value: s
+                when: l.tables[i].seg == seg && len(l.tables[i].offs) > 0
+          key: i
+          range: l.tables
       - return: "false"
   - of: isolationFlags
     steps:

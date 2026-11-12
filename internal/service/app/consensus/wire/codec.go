@@ -89,9 +89,45 @@ func Lane(frame []byte) (coreconsensus.FrameLane, error) {
 	return coreconsensus.FrameLane(frame[5] >> 6), nil
 }
 
+// MessageHeaderLen is the length AppendHeader writes: the frame header and
+// a message's fixed fields, up to and including its entry count.
+const MessageHeaderLen int = 112
+
 // AppendMessage appends m's encoding, frame header included, to dst.
 func AppendMessage(dst []byte, m *coreconsensus.MessageValue) []byte {
 	start := len(dst)
+	dst = appendFixed(dst, m)
+	dst = AppendEntries(dst, m.Entries)
+	binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
+	return dst
+}
+
+// AppendHeader appends to dst the part of m's frame before its entries:
+// the frame header, whose length counts bodyLen bytes of entries after it,
+// and m's fixed fields with the count of m.Entries, whose contents it does
+// not read. Followed by AppendEntries of m.Entries, whose length is
+// bodyLen, it writes AppendMessage's bytes: the body of an append is the
+// same for every peer, only this header differs (#912).
+func AppendHeader(dst []byte, m *coreconsensus.MessageValue, bodyLen int) []byte {
+	start := len(dst)
+	dst = appendFixed(dst, m)
+	binary.LittleEndian.PutUint32(dst[start:], uint32(MessageHeaderLen-4+bodyLen))
+	return dst
+}
+
+// AppendEntries appends to dst the entries body of an append message: each
+// entry's fixed header, then its payload, EntryLen bytes each.
+func AppendEntries(dst []byte, ents []coreconsensus.EntryValue) []byte {
+	for i := range ents {
+		dst = appendEntry(dst, &ents[i])
+	}
+	return dst
+}
+
+// appendFixed appends m's frame header, its length left zero for the
+// caller to set, and m's fixed fields up to its entry count:
+// MessageHeaderLen bytes.
+func appendFixed(dst []byte, m *coreconsensus.MessageValue) []byte {
 	dst = binary.LittleEndian.AppendUint32(dst, 0)
 	dst = append(dst, frameVersion1, byte(m.Kind))
 	dst = binary.LittleEndian.AppendUint64(dst, uint64(m.Group))
@@ -109,12 +145,7 @@ func AppendMessage(dst []byte, m *coreconsensus.MessageValue) []byte {
 	dst = binary.LittleEndian.AppendUint64(dst, m.TransferTerm)
 	dst = binary.LittleEndian.AppendUint64(dst, m.Contract)
 	dst = binary.LittleEndian.AppendUint32(dst, uint32(m.Code))
-	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(m.Entries)))
-	for i := range m.Entries {
-		dst = appendEntry(dst, &m.Entries[i])
-	}
-	binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
-	return dst
+	return binary.LittleEndian.AppendUint32(dst, uint32(len(m.Entries)))
 }
 
 // appendEntry appends one entry's wire form.

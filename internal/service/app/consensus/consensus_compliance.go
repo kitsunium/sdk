@@ -20,6 +20,7 @@ var (
 	_ coreconsensus.SnapshotStore = (*fileSnapshots)(nil)
 	_ coreconsensus.Transport     = (*TCPTransport)(nil)
 	_ coreconsensus.Transport     = (*MemoryTransport)(nil)
+	_ coreconsensus.BatchSender   = (*TCPTransport)(nil)
 
 	_ interface {
 		compactPrefixAt(through, term uint64) error

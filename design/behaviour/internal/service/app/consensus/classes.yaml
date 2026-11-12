@@ -245,15 +245,32 @@ constants:
         name: rangeReadBytes
         type: int64
         value: 4 << 20
-      - doc: |-
-          rangeGapBytes is the most bytes of other records, the hard states and
-          commits a follower writes between its entries, one read crosses
-          between two entries; a wider gap, a suffix truncated and written
-          again further on, starts another read.
-        name: rangeGapBytes
-        type: int64
-        value: 4 << 10
     name: rangeReadBytes
+  - doc: |-
+      indexEntryBytes is what the index keeps resident for one synced entry: its
+      offset in its segment's table. MemoryBudget counts it for every record
+      MaxLogBytes can hold.
+    items:
+      - name: indexEntryBytes
+        type: int64
+        value: "4"
+    name: indexEntryBytes
+  - doc: |-
+      minRecordBytes is the smallest record an entry takes on disk, an empty
+      payload's: a log of n bytes holds at most n / minRecordBytes entries.
+    items:
+      - name: minRecordBytes
+        type: int64
+        value: int64((recHeader + recFixed + recAlign - 1) &^ (recAlign - 1))
+    name: minRecordBytes
+  - doc: |-
+      maxIndexedOffset is the first offset a table cannot hold: 2^32 units of
+      recAlign, 32 GiB, far past any segment the log writes.
+    items:
+      - name: maxIndexedOffset
+        type: int64
+        value: 1 << 32 * int64(recAlign)
+    name: maxIndexedOffset
   - doc: |-
       supersededWhy is the SNAPSHOT_CORRUPT of a sink another install of the
       same id superseded: the leader answers it with a new offer.
@@ -1098,7 +1115,6 @@ files:
       - checkpoint.encode
       - decodeCheckpoint
       - encodeHS
-      - slot
       - segment
       - fileLog
       - segName
@@ -1188,7 +1204,6 @@ files:
       - (*fileLog).writeBatch
       - (*fileLog).writeAndSync
       - (*fileLog).settleBatch
-      - (*fileLog).relocate
       - (*fileLog).markDurable
       - (*fileLog).restamp
       - (*fileLog).TruncateSuffix
@@ -1197,7 +1212,6 @@ files:
       - compactionTerm
       - (*fileLog).dropSegmentsLocked
       - (*fileLog).supersedes
-      - (*fileLog).retainsEntryIn
       - (*fileLog).removeFirstSegment
       - (*fileLog).HardState
       - (*fileLog).Stamp
@@ -1207,6 +1221,31 @@ files:
       - (*fileLog).logBytes
       - (*fileLog).freeBytes
     name: filelog.go
+  - decls:
+      - indexEntryBytes
+      - minRecordBytes
+      - maxIndexedOffset
+      - segIndex
+      - termRun
+      - entryLoc
+      - (*fileLog).memFirst
+      - (*fileLog).tableOf
+      - (*fileLog).locate
+      - (*fileLog).spanEnd
+      - (*fileLog).pushDisk
+      - (*fileLog).pushTerm
+      - (*fileLog).termAt
+      - (*fileLog).cutDiskFrom
+      - (*fileLog).cutFrom
+      - (*fileLog).dropThrough
+      - (*fileLog).dropCompacted
+      - (*fileLog).lastTerm
+      - (*fileLog).clearIndex
+      - (*fileLog).relocate
+      - (*fileLog).retainsEntryIn
+      - (*fileLog).indexBytes
+      - (*fileLog).memEntry
+    name: filelog_index.go
   - decls:
       - supersededWhy
       - fileSnapshots
@@ -1560,6 +1599,13 @@ files:
       - sentReader
       - (*sentReader).Read
     name: node_sendpin.go
+  - decls:
+      - appendBodies
+      - encodedBody
+      - (*appendBodies).body
+      - (*appendBodies).reset
+      - (*Node).sendShared
+    name: node_sendshared.go
   - decls:
       - snapLimitFirstWait
       - snapLimitWatch
@@ -1933,6 +1979,9 @@ files:
       - SAN
       - spkiOf
       - SPKIOf
+      - outFrame
+      - outFrame.size
+      - outFrame.writeTo
       - peerConn
       - (*peerConn).halt
       - (*peerConn).track
@@ -1970,6 +2019,8 @@ files:
       - (*TCPTransport).dialVerified
       - (*TCPTransport).address
       - (*TCPTransport).Send
+      - (*TCPTransport).SendShared
+      - (*TCPTransport).enqueue
       - (*TCPTransport).droppedOversized
       - (*TCPTransport).sender
       - senderLink
@@ -2495,10 +2546,10 @@ functions:
     params: prev, r *scanRec
     results: bool
   - doc: |-
-      entryRecords is the number of entry records segs hold, the most slots
-      replay appends.
+      entryRecords is the number of entry records s holds, the most offsets
+      replay appends to its table.
     name: entryRecords
-    params: segs []*scanned
+    params: s *scanned
     results: int
   - doc: |-
       checkLayouts refuses, before any tail is classified or trimmed, a record
@@ -2609,7 +2660,7 @@ functions:
     results: err error
   - doc: lowPayload is the least payload a record of this aligned length holds.
     name: lowPayload
-    params: length uint32
+    params: length int64
     results: int64
   - doc: |-
       entryOf is the entry a parsed entry record holds; its Data is capped at
@@ -3796,14 +3847,14 @@ functions:
       takeBatch adds to batch every frame already queued, up to maxSenderBatch,
       and releases their bytes from the peer's queue budget.
     name: takeBatch
-    params: batch [][]byte, pc *peerConn
-    results: "[][]byte"
+    params: batch []outFrame, pc *peerConn
+    results: "[]outFrame"
   - doc: |-
       queuedFrame takes a frame already queued, without waiting. The queue is
       never closed, so a closed one reads as empty.
     name: queuedFrame
     params: pc *peerConn
-    results: "[]byte, bool"
+    results: outFrame, bool
   - doc: |-
       admittedUnion is the union of every group's admitted members, one record
       a member: the newest by at, the index each record is as of, the earlier
@@ -4009,6 +4060,7 @@ imports:
   server: github.com/kitsunium/sdk/internal/service/net/server
   sha256: crypto/sha256
   slices: slices
+  sort: sort
   strconv: strconv
   strings: strings
   svctransform: github.com/kitsunium/sdk/internal/service/data/transform
@@ -4788,24 +4840,6 @@ types:
         recv: c checkpoint
         results: "[]byte"
     name: checkpoint
-  - doc: |-
-      slot locates one retained entry: on disk once synced, in memory before.
-      length is its record's aligned length on disk, so Entries reads a run of
-      records in one pread without reading a header first (#913); 0 for a slot
-      in memory.
-    fields:
-      - name: seg
-        type: uint64
-      - name: "off"
-        type: int64
-      - name: term
-        type: uint64
-      - name: mem
-        type: "*coreconsensus.EntryValue"
-      - name: length
-        type: uint32
-    kind: struct
-    name: slot
   - fields:
       - name: "n"
         type: uint64
@@ -4837,8 +4871,22 @@ types:
         type: int
       - name: first
         type: uint64
-      - name: slots
-        type: "[]slot"
+      - doc: |-
+          n is how many entries the log retains, from first on; tables, runs
+          and mem are their index (filelog_index.go, #1111).
+        name: "n"
+        type: uint64
+      - name: tables
+        type: "[]segIndex"
+      - name: runs
+        type: "[]termRun"
+      - name: mem
+        type: "[]coreconsensus.EntryValue"
+      - doc: |-
+          tableHint is the capacity of a table replay opens, the entry records
+          of the segment it replays; 0 outside replay.
+        name: tableHint
+        type: int
       - name: prevTerm
         type: uint64
       - name: hs
@@ -5082,8 +5130,8 @@ types:
         recv: l *fileLog
         results: error
       - doc: |-
-          applyEntry appends an entry record's slot, quarantining one out of
-          sequence.
+          applyEntry appends an entry record to the index, quarantining one out of
+          sequence, or at an offset a table cannot hold.
         name: applyEntry
         params: seg uint64, r *scanRec
         recv: l *fileLog
@@ -5252,13 +5300,15 @@ types:
       - doc: |-
           readRun reads the synced entries from i on that lie in one interval of
           one segment, in one pread, and takes them into rr; it returns the index
-          of the first entry it did not take. The interval stops at the first
-          entry of another segment, in memory, past a gap of rangeGapBytes, past
-          rangeReadBytes, or whose payload, at least lowPayload, would pass
-          maxBytes: every entry the call takes was read, and an entry it does not
-          take is read at most once more than needed. A record that does not
-          parse as an entry is LOG_CORRUPT at its own offset, as readEntry's. The
-          caller holds mu.
+          of the first entry it did not take. A record's extent is bounded from
+          above by the next entry's offset, or by its table's end (#1111): the
+          interval stops at the first entry of another segment, in memory, past
+          rangeReadBytes, or whose payload, at least lowPayload of that extent,
+          would pass maxBytes. Where other records lie between two entries the
+          estimate counts them as payload, so a read may stop short of maxBytes,
+          never past it, and the next one goes on. A record that does not parse as
+          an entry is LOG_CORRUPT at its own offset, as readEntry's. The caller
+          holds mu.
         name: readRun
         params: rr *rangeRead, i uint64
         recv: l *fileLog
@@ -5275,11 +5325,11 @@ types:
         results: int, error
       - doc: |-
           readEntry reads the synced entry s locates from its segment, its header
-          first: the single-entry read, for a slot whose length is not known. A
+          first: the single-entry read, for an entry whose extent is not known. A
           record that does not parse as an entry there is LOG_CORRUPT: the log
           disagrees with what it recorded.
         name: readEntry
-        params: s slot
+        params: s entryLoc
         recv: l *fileLog
         results: coreconsensus.EntryValue, error
       - doc: Term implements LogReader.
@@ -5337,17 +5387,11 @@ types:
           settleBatch records the pending batch, now synced in segment seg, as
           durable: its entries are read from disk from here on, the write offset
           moves past it, and the next batch gets the next sequence number. The
-          caller holds mu.
+          caller holds mu. False when the index cannot hold the batch's offsets.
         name: settleBatch
         params: seg uint64
         recv: l *fileLog
-      - doc: |-
-          relocate points every slot the pending batch carried at its record in
-          segment seg, now that the batch is synced there, and releases its
-          in-memory copy. A slot replaced since, by another term, is left alone.
-        name: relocate
-        params: seg uint64
-        recv: l *fileLog
+        results: bool
       - doc: |-
           markDurable records the state the synced records now describe, which a
           rotation's checkpoint is written from.
@@ -5400,13 +5444,6 @@ types:
         recv: l *fileLog
         results: bool, error
       - doc: |-
-          retainsEntryIn reports whether a retained entry still lives in segment
-          seg.
-        name: retainsEntryIn
-        params: seg uint64
-        recv: l *fileLog
-        results: bool
-      - doc: |-
           removeFirstSegment closes and unlinks the oldest segment; the caller
           syncs the directory once every removal is done.
         name: removeFirstSegment
@@ -5452,6 +5489,121 @@ types:
         name: freeBytes
         recv: l *fileLog
         results: int64
+      - doc: |-
+          memFirst is the index of the first entry still in memory, first+n when
+          none is.
+        name: memFirst
+        recv: l *fileLog
+        results: uint64
+      - doc: |-
+          tableOf is the position of the table that holds synced entry i, and of
+          i in it; the caller checked that i is synced and retained.
+        name: tableOf
+        params: i uint64
+        recv: l *fileLog
+        results: t, p int
+      - doc: |-
+          locate is where synced entry i lies; the caller checked that it is synced
+          and retained.
+        name: locate
+        params: i uint64
+        recv: l *fileLog
+        results: entryLoc
+      - doc: |-
+          spanEnd bounds from above the end of the record at position p of table t:
+          the next entry's offset, or the table's end for its last one.
+        name: spanEnd
+        params: t *segIndex, p int
+        recv: l *fileLog
+        results: int64
+      - doc: |-
+          pushDisk appends synced entry index, whose record lies at [off, end) in
+          segment seg, to the tables; hint is the capacity of a table it opens, 0
+          to let it grow. A table left behind for another segment is clipped to its
+          length, once: it takes no more entries. An offset a table cannot hold is
+          refused, nothing changed.
+        name: pushDisk
+        params: index, seg uint64, off, end int64, hint int
+        recv: l *fileLog
+        results: bool
+      - doc: pushTerm records that entry index, the next one, is of term term.
+        name: pushTerm
+        params: index, term uint64
+        recv: l *fileLog
+      - doc: |-
+          termAt is the term of retained entry i; the caller checked that it is
+          retained.
+        name: termAt
+        params: i uint64
+        recv: l *fileLog
+        results: uint64
+      - doc: cutDiskFrom drops from the tables every entry from index i on.
+        name: cutDiskFrom
+        params: i uint64
+        recv: l *fileLog
+      - doc: |-
+          cutFrom drops every retained entry from index i on, in memory and on
+          disk; i lies at or below first+n. Below first, the log restarts empty at
+          i, the term before it unknown: a truncate record into a dropped segment
+          removes entries gone with it, and a later compact record covers what
+          follows.
+        name: cutFrom
+        params: i uint64
+        recv: l *fileLog
+      - doc: |-
+          dropThrough drops every retained entry through index through, and the log
+          starts past it, prev the term before it. Whole tables go, the one the point
+          falls in is resliced: nothing proportional to the entries kept is copied
+          (#1111). A point below the log changes nothing.
+        name: dropThrough
+        params: through, prev uint64
+        recv: l *fileLog
+      - doc: |-
+          dropCompacted drops the retained entries the compaction point covers,
+          keeping the term of the last one dropped as the term before the log, the
+          compaction's own past the log's end.
+        name: dropCompacted
+        recv: l *fileLog
+      - doc: |-
+          lastTerm is the term of the last retained entry, the term before the log
+          when it retains none.
+        name: lastTerm
+        recv: l *fileLog
+        results: uint64
+      - doc: clearIndex empties the index; the caller sets where the log starts.
+        name: clearIndex
+        recv: l *fileLog
+      - doc: |-
+          relocate points the index at the records of the pending batch, now synced
+          at l.off in segment seg, and releases the in-memory copies. Of the records
+          of one index the batch holds, the last is the retained one: an entry
+          truncated and written again in the same batch is written after its first
+          record. An entry that does not come back — none does, in a batch Append
+          and TruncateSuffix built — stays in memory. False when a table cannot hold
+          an offset: the log stops on it.
+        name: relocate
+        params: seg uint64
+        recv: l *fileLog
+        results: bool
+      - doc: |-
+          retainsEntryIn reports whether a retained entry still lives in segment
+          seg.
+        name: retainsEntryIn
+        params: seg uint64
+        recv: l *fileLog
+        results: bool
+      - doc: |-
+          indexBytes is the bytes the index keeps resident, the entries in memory
+          aside, which the unsynced batch bounds: the tables' offsets, the tables,
+          and the term runs (#1111).
+        name: indexBytes
+        recv: l *fileLog
+        results: int64
+      - doc: memEntry is entry i of the unsynced tail; the caller checked i >= memFirst.
+        name: memEntry
+        params: i uint64
+        recv: l *fileLog
+        results: coreconsensus.EntryValue
       - doc: |-
           restartAt makes the empty log start after the restored snapshot, with a
           hard state one term past it, durably.
@@ -5777,6 +5929,40 @@ types:
         recv: rr *rangeRead
         results: bool
     name: rangeRead
+  - doc: |-
+      segIndex locates the retained entries one segment holds, from index first
+      on: offs[k] is entry first+k's record offset over recAlign, and end bounds
+      the last one's record from above, its exact end once appended, the offset
+      of the first entry cut off after a truncation.
+    fields:
+      - name: seg
+        type: uint64
+      - name: first
+        type: uint64
+      - name: offs
+        type: "[]uint32"
+      - name: end
+        type: uint32
+    kind: struct
+    name: segIndex
+  - doc: |-
+      termRun is the term of every retained entry from index first to the next
+      run's first.
+    fields:
+      - name: first
+        type: uint64
+      - name: term
+        type: uint64
+    kind: struct
+    name: termRun
+  - doc: "entryLoc is where a synced entry's record lies: its segment and offset."
+    fields:
+      - name: seg
+        type: uint64
+      - name: "off"
+        type: int64
+    kind: struct
+    name: entryLoc
   - doc: |-
       fileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
       applied to a stream (D4). A snapshot is spooled to <id>.spool, synced,
@@ -6806,6 +6992,17 @@ types:
           entries (#613).
         name: unfed
         type: map[coreconsensus.NodeID]bool
+      - doc: |-
+          bodies are the append bodies the current Ready shares among its
+          followers, on the loop (#912).
+        name: bodies
+        type: appendBodies
+      - doc: |-
+          batch is the transport's BatchSender, nil when it has none: asserted
+          once in bindTransport, not on every Ready, whose type assertion may
+          fill the runtime's cache on the loop (#912).
+        name: batch
+        type: coreconsensus.BatchSender
       - doc: unreachableAt is when the transport last failed to reach a peer.
         name: unreachableAt
         type: map[coreconsensus.NodeID]time.Time
@@ -7352,7 +7549,9 @@ types:
           bindTransport hands the transport the node's callbacks. An unreachable
           report is queued to the loop and dropped when the loop is saturated, as
           it is advisory; the JOIN handler with reasons, and the read of the
-          configuration a member asks (#763), are bound when supported.
+          configuration a member asks (#763), are bound when supported. A transport
+          that is a BatchSender is kept as one, so that every Ready shares its
+          appends' bodies without asserting it again (#912).
         name: bindTransport
         recv: n *Node
         results: error
@@ -8242,6 +8441,18 @@ types:
           It runs on the loop.
         name: dropPin
         params: to coreconsensus.NodeID
+        recv: n *Node
+      - doc: |-
+          sendShared sends ms through bs: every append that carries entries as its
+          header and the body it shares with the other appends of the same
+          entries, every other message through Send as before. The headers of the
+          Ready share one allocation, each peer owning its own part of it, so a
+          Ready of N followers in replicate state allocates two buffers whatever
+          N, where it encoded and copied the entries once per follower. The bytes
+          on the wire are AppendMessage's (wire.AppendHeader): a node of the
+          previous release reads them unchanged.
+        name: sendShared
+        params: bs coreconsensus.BatchSender, ms []coreconsensus.MessageValue
         recv: n *Node
       - doc: |-
           watchSnapshotLimit proposes, at each tick, this node's MaxSnapshotBytes
@@ -9285,6 +9496,48 @@ types:
         results: int, error
     name: sentReader
   - doc: |-
+      appendBodies is what one Ready's appends share (#912): the leader builds
+      one message per follower over the same slice of its log, and every
+      follower in replicate state at the same next index is sent the same
+      entries. Their body is encoded once and handed to each peer under its own
+      header, through the transport's BatchSender; only the header names the
+      peer. It is the loop's alone, reset after every Ready so that it pins no
+      body past the turn.
+    fields:
+      - doc: ranges are the bodies encoded in this Ready, one per entries slice.
+        name: ranges
+        type: "[]encodedBody"
+    kind: struct
+    methods:
+      - doc: |-
+          body returns the encoding of ents, the one already made in this Ready
+          when another message carried the same entries, a new one otherwise,
+          sized once to its length.
+        name: body
+        params: ents []coreconsensus.EntryValue
+        recv: b *appendBodies
+        results: "[]byte"
+      - doc: |-
+          reset forgets this Ready's bodies, keeping the slice's room: the bodies
+          are the transport's now, and only its queues keep them alive.
+        name: reset
+        recv: b *appendBodies
+    name: appendBodies
+  - doc: |-
+      encodedBody is the body of one entries slice: the slice is known by its
+      first element's address and its length, so two messages share a body
+      only when they carry the very same entries of the leader's log, which
+      nothing mutates within a Ready.
+    fields:
+      - name: first
+        type: "*coreconsensus.EntryValue"
+      - name: "n"
+        type: int
+      - name: body
+        type: "[]byte"
+    kind: struct
+    name: encodedBody
+  - doc: |-
       snapLimitWatch is the state of watchSnapshotLimit. proposing is set while
       a proposal of the limit is in flight; the rest is under mu, which the
       proposal's goroutine takes to record its outcome.
@@ -10049,12 +10302,33 @@ types:
         recv: c *TransportConfig
         results: error
     name: TransportConfig
+  - doc: |-
+      outFrame is a frame queued for a peer: head, then body. A frame Send
+      hands over is head alone; one SendShared hands over keeps its body,
+      which other peers' queues may hold too and nothing writes to (#912).
+    fields:
+      - name: head
+        type: "[]byte"
+      - name: body
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: size is the frame's length on the wire.
+        name: size
+        recv: f outFrame
+        results: int
+      - doc: writeTo writes the frame on w, head then body.
+        name: writeTo
+        params: w io.Writer
+        recv: f outFrame
+        results: error
+    name: outFrame
   - fields:
       - doc: conn is the sender's open link, under mu, which halt closes.
         name: conn
         type: net.Conn
       - name: queue
-        type: chan []byte
+        type: chan outFrame
       - name: bytes
         type: int64
       - name: mu
@@ -10327,7 +10601,7 @@ types:
           deadline closes the connection, whose reader then stops: the member
           dials again.
         name: sendBack
-        params: k outKey, batch [][]byte
+        params: k outKey, batch []outFrame
         recv: t *TCPTransport
       - doc: |-
           notedSentBack counts a batch written back on a member's connection, and
@@ -10379,6 +10653,16 @@ types:
       - name: Send
         params: to coreconsensus.NodeID, frame []byte
         recv: t *TCPTransport
+      - name: SendShared
+        params: to coreconsensus.NodeID, header []byte, body []byte
+        recv: t *TCPTransport
+      - doc: |-
+          enqueue queues f for its peer and lane, read from its header; it never
+          blocks, and drops when the peer's queue is full (D4). The first frame to
+          a peer and lane launches that lane's sender.
+        name: enqueue
+        params: to coreconsensus.NodeID, f outFrame
+        recv: t *TCPTransport
       - doc: |-
           droppedOversized counts a frame Send dropped for being larger than the
           whole peer queue, and logs it at the first drop and at each power of two
@@ -10411,7 +10695,7 @@ types:
           would otherwise wait for Raft's next round. A failed dial or write is
           reported as before, whether the back link carried the batch or not.
         name: sendBatch
-        params: k outKey, link *senderLink, batch [][]byte
+        params: k outKey, link *senderLink, batch []outFrame
         recv: t *TCPTransport
       - doc: |-
           retire closes the link's connection when it may carry no more frames:
@@ -10426,7 +10710,7 @@ types:
           writeBatch writes the batch on the link's connection and flushes it,
           under one write deadline.
         name: writeBatch
-        params: link *senderLink, batch [][]byte
+        params: link *senderLink, batch []outFrame
         recv: t *TCPTransport
         results: error
       - doc: |-
@@ -10679,7 +10963,7 @@ types:
           that vanished does not leave the link accepting writes into a stream the
           kernel only retransmits.
         name: write
-        params: batch [][]byte, timeout time.Duration
+        params: batch []outFrame, timeout time.Duration
         recv: b *backLink
         results: error
     name: backLink
@@ -10811,6 +11095,9 @@ vars:
       - name: _
         type: coreconsensus.Transport
         value: (*MemoryTransport)(nil)
+      - name: _
+        type: coreconsensus.BatchSender
+        value: (*TCPTransport)(nil)
       - name: _
         type: |-
           interface {

@@ -944,6 +944,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.BatchSender",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "BatchSender",
+      "spelled": "coreconsensus.BatchSender",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.BatchSender",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/app/consensus.BatchSender",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.BatchingStateMachine",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",

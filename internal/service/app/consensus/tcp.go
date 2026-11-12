@@ -223,10 +223,33 @@ func spkiOf(c *x509.Certificate) [32]byte { return sha256.Sum256(c.RawSubjectPub
 // SubjectPublicKeyInfo.
 func SPKIOf(c *x509.Certificate) [32]byte { return spkiOf(c) }
 
+// outFrame is a frame queued for a peer: head, then body. A frame Send
+// hands over is head alone; one SendShared hands over keeps its body,
+// which other peers' queues may hold too and nothing writes to (#912).
+type outFrame struct {
+	head, body []byte
+}
+
+// size is the frame's length on the wire.
+func (f outFrame) size() int { return len(f.head) + len(f.body) }
+
+// writeTo writes the frame on w, head then body.
+func (f outFrame) writeTo(w io.Writer) error {
+	if _, err := w.Write(f.head); err != nil {
+		return err
+	}
+	//: a frame Send handed over has no body; a Write of none is skipped.
+	if len(f.body) == 0 {
+		return nil
+	}
+	_, err := w.Write(f.body)
+	return err
+}
+
 type peerConn struct {
 	// conn is the sender's open link, under mu, which halt closes.
 	conn  net.Conn
-	queue chan []byte
+	queue chan outFrame
 	bytes int64
 	mu    sync.Mutex
 	// stop is closed, once, when the peer leaves the admitted set: its
@@ -821,7 +844,7 @@ func (t *TCPTransport) dropBack(k outKey, bl *backLink) {
 // authenticated the connection under. A write that fails or misses its
 // deadline closes the connection, whose reader then stops: the member
 // dials again.
-func (t *TCPTransport) sendBack(k outKey, batch [][]byte) {
+func (t *TCPTransport) sendBack(k outKey, batch []outFrame) {
 	t.mu.Lock()
 	bl := t.back[k]
 	m, member := t.byID[k.to]
@@ -842,7 +865,7 @@ func (t *TCPTransport) sendBack(k outKey, batch [][]byte) {
 // first write on, as on an outbound link (boundUnacknowledged): a member
 // that vanished does not leave the link accepting writes into a stream the
 // kernel only retransmits.
-func (b *backLink) write(batch [][]byte, timeout time.Duration) error {
+func (b *backLink) write(batch []outFrame, timeout time.Duration) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.w == nil {
@@ -855,7 +878,7 @@ func (b *backLink) write(batch [][]byte, timeout time.Duration) error {
 		return err
 	}
 	for _, f := range batch {
-		if _, err := b.w.Write(f); err != nil {
+		if err := f.writeTo(b.w); err != nil {
 			return err
 		}
 	}
@@ -981,8 +1004,23 @@ func (t *TCPTransport) address(to coreconsensus.NodeID) (string, [32]byte, bool)
 // queue is full (D4). The first frame to a peer and lane launches that
 // lane's background sender goroutine, which ends when Close is called.
 func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
+	t.enqueue(to, outFrame{head: frame})
+}
+
+// SendShared implements BatchSender: the frame is queued as Send queues
+// one, counted at the length of header and body, and written as header
+// then body under the batch's one deadline and flush. body is never
+// written to, so the frames of several peers share it.
+func (t *TCPTransport) SendShared(to coreconsensus.NodeID, header []byte, body []byte) {
+	t.enqueue(to, outFrame{head: header, body: body})
+}
+
+// enqueue queues f for its peer and lane, read from its header; it never
+// blocks, and drops when the peer's queue is full (D4). The first frame to
+// a peer and lane launches that lane's sender.
+func (t *TCPTransport) enqueue(to coreconsensus.NodeID, f outFrame) {
 	lane := laneData
-	if l, err := wire.Lane(frame); err == nil && l == coreconsensus.LaneControl {
+	if l, err := wire.Lane(f.head); err == nil && l == coreconsensus.LaneControl {
 		lane = laneControl
 	}
 	k := outKey{to, lane}
@@ -1000,27 +1038,28 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 			t.mu.Unlock()
 			return
 		}
-		pc = &peerConn{queue: make(chan []byte, senderQueueFrames), stop: make(chan struct{})}
+		pc = &peerConn{queue: make(chan outFrame, senderQueueFrames), stop: make(chan struct{})}
 		t.out[k] = pc
 		t.wg.Add(1)
 		go t.sender(k, pc)
 	}
 	t.mu.Unlock()
+	n := int64(f.size())
 	pc.mu.Lock()
-	if pc.bytes+int64(len(frame)) > t.cfg.PeerQueueBytes {
+	if pc.bytes+n > t.cfg.PeerQueueBytes {
 		pc.mu.Unlock()
-		if int64(len(frame)) > t.cfg.PeerQueueBytes {
-			t.droppedOversized(to, lane, len(frame))
+		if n > t.cfg.PeerQueueBytes {
+			t.droppedOversized(to, lane, int(n))
 		}
 		return
 	}
-	pc.bytes += int64(len(frame))
+	pc.bytes += n
 	pc.mu.Unlock()
 	select {
-	case pc.queue <- frame:
+	case pc.queue <- f:
 	default:
 		pc.mu.Lock()
-		pc.bytes -= int64(len(frame))
+		pc.bytes -= n
 		pc.mu.Unlock()
 	}
 }
@@ -1055,9 +1094,9 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 	defer t.wg.Done()
 	var link senderLink
 	defer link.close()
-	var batch [][]byte
+	var batch []outFrame
 	for {
-		var f []byte
+		var f outFrame
 		select {
 		case <-t.done:
 			return
@@ -1101,7 +1140,7 @@ func (l *senderLink) close() {
 
 // takeBatch adds to batch every frame already queued, up to maxSenderBatch,
 // and releases their bytes from the peer's queue budget.
-func takeBatch(batch [][]byte, pc *peerConn) [][]byte {
+func takeBatch(batch []outFrame, pc *peerConn) []outFrame {
 	for len(batch) < maxSenderBatch {
 		g, ok := queuedFrame(pc)
 		if !ok {
@@ -1111,7 +1150,7 @@ func takeBatch(batch [][]byte, pc *peerConn) [][]byte {
 	}
 	size := 0
 	for _, b := range batch {
-		size += len(b)
+		size += b.size()
 	}
 	pc.mu.Lock()
 	pc.bytes -= int64(size)
@@ -1121,12 +1160,12 @@ func takeBatch(batch [][]byte, pc *peerConn) [][]byte {
 
 // queuedFrame takes a frame already queued, without waiting. The queue is
 // never closed, so a closed one reads as empty.
-func queuedFrame(pc *peerConn) ([]byte, bool) {
+func queuedFrame(pc *peerConn) (outFrame, bool) {
 	select {
 	case g, ok := <-pc.queue:
 		return g, ok
 	default:
-		return nil, false
+		return outFrame{}, false
 	}
 }
 
@@ -1140,7 +1179,7 @@ func queuedFrame(pc *peerConn) ([]byte, bool) {
 // (boundUnacknowledged) — and the batch, an election's vote among others,
 // would otherwise wait for Raft's next round. A failed dial or write is
 // reported as before, whether the back link carried the batch or not.
-func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch [][]byte) {
+func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch []outFrame) {
 	t.retire(k, link)
 	reused := link.conn != nil
 	if !reused && !t.redial(k, link) {
@@ -1181,7 +1220,7 @@ func (t *TCPTransport) retire(k outKey, link *senderLink) {
 
 // writeBatch writes the batch on the link's connection and flushes it,
 // under one write deadline.
-func (t *TCPTransport) writeBatch(link *senderLink, batch [][]byte) error {
+func (t *TCPTransport) writeBatch(link *senderLink, batch []outFrame) error {
 	// A write without its deadline could block this sender for good,
 	// so a connection that refuses one fails like a write that missed
 	// it (D4, R2-06).
@@ -1190,7 +1229,7 @@ func (t *TCPTransport) writeBatch(link *senderLink, batch [][]byte) error {
 		if err != nil {
 			return err
 		}
-		_, err = link.w.Write(b)
+		err = b.writeTo(link.w)
 	}
 	if err != nil {
 		return err

@@ -41,7 +41,7 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | unit, cluster, disk, TCP | `go test -race ./...` |
 | simulator soak | `CONSENSUS_SIM_SOAK=1 go test -run TestSimSoak ./raft/`; a seed replays with `CONSENSUS_SIM_SEED` |
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
-| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt`: `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go` and the package's copy of `allocwindow_test.go`, nothing else of the suite |
+| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt` (`bazel test --config=alloc` it, or `go test -run TestALeaderTurnEncodes .` race off): `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go`, the leader turn's budget of #912 (`sendshared_alloc_internal_test.go`, with `sendshared_internal_test.go` for its helpers, the target's `-test.run` naming the gates) and the package's copy of `allocwindow_test.go`, nothing else of the suite |
 | bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`); numbers in `BENCH.md` |
 | dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate] [fdatasync\|rwfdsync]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922), G1's paired sync path row (`TestDMCryptSyncPathBench`, ADR 0190's shape, #923) and power cuts through LUKS, on ext4 or xfs; with `fallocate` or `rwfdsync` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`) or writing `RWF_DSYNC` (`CONSENSUS_SYNC_PATH=rwfdsync`), and with `rwfdsync` the power cuts too; results in `testdata/dmcrypt/RESULTS.md` |
 
@@ -1395,3 +1395,18 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   (`silenceUnderItsLeaderOnDisk`,
   `TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt`,
   `TestTheSilenceBenchSkipsOnAHandOffInFlight`).
+- Encode an append's entries once per follower, or mutate the body a
+  `BatchSender` was handed: the leader builds one append per follower over
+  the same slice of its log, and each was encoded and copied whole on the
+  loop, up to `MaxBatchBytes` a follower a turn (#912). `sendShared`
+  (`node_sendshared.go`) encodes a slice once per Ready (`appendBodies`,
+  known by its first element's address and length), the Ready's headers in
+  one buffer, each peer's part capped, and hands the same body to every
+  peer; the TCP transport queues it as an `outFrame`, head then body,
+  never written to (`TestAReadyEncodesTheEntriesOfItsAppendsOnceForEveryFollower`,
+  `TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers`, two
+  allocations a turn of 64 entries with two followers as with four). Nor
+  give `MemoryTransport` the sibling: the suites' doubles embed it and
+  filter or delay through `Send`, which a promoted `SendShared` would
+  bypass; a transport without it is sent `AppendMessage`'s frames as before
+  (`TestATransportWithoutTheSiblingIsSentWholeFrames`).

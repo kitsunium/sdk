@@ -1424,7 +1424,9 @@ sequences:
       - return: nil
   - of: (*Config).MemoryBudget
     steps:
-      - return: c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes)
+      - bind: index
+        eval: c.MaxLogBytes / minRecordBytes * indexEntryBytes
+      - return: c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes) + index
   - of: defaultCodec
     steps:
       - bind: codec, ok
@@ -3281,11 +3283,12 @@ sequences:
         kind: internal
       - id: l.applyCheckpoint
         kind: internal
+      - id: entryRecords
+        kind: internal
       - id: l.applyRecord
         kind: internal
     steps:
-      - set: l.slots
-        value: make([]slot, 0, entryRecords(segs))
+      - defer: func() { l.tableHint = 0 }()
       - loop:
           do:
             - opt:
@@ -3301,6 +3304,9 @@ sequences:
                   eval: l.applyCheckpoint(si == 0, s.n, &s.cp)
                   to: l.applyCheckpoint
                 when: err != nil
+            - set: l.tableHint
+              to: entryRecords
+              value: entryRecords(s)
             - loop:
                 cond: i < len(s.recs)
                 do:
@@ -3327,25 +3333,6 @@ sequences:
           range: segs
           value: s
       - return: nil
-  - of: entryRecords
-    steps:
-      - bind: "n"
-        eval: "0"
-      - loop:
-          do:
-            - loop:
-                do:
-                  - opt:
-                      do:
-                        - op: ++
-                          set: "n"
-                      when: s.recs[i].kind == recEntry
-                key: i
-                range: s.recs
-          key: _
-          range: segs
-          value: s
-      - return: "n"
   - of: (*fileLog).applyCheckpoint
     participants:
       - id: caller
@@ -3373,7 +3360,7 @@ sequences:
               to: l.quarantine
           init:
             bind: want
-            eval: l.first + uint64(len(l.slots)) - 1
+            eval: l.first + l.n - 1
           when: cp.prevIndex != want
       - set: l.hs
         value: cp.hs
@@ -3437,14 +3424,23 @@ sequences:
         kind: self
       - id: l.quarantine
         kind: internal
+      - id: l.pushTerm
+        kind: internal
     steps:
       - opt:
           do:
             - return: l.quarantine(seg, r.off, "index out of sequence")
               to: l.quarantine
-          when: r.index != l.first+uint64(len(l.slots))
-      - set: l.slots
-        value: "append(l.slots, slot{seg: seg, off: r.off, term: r.term, length: r.length})"
+          when: r.index != l.first+l.n
+      - opt:
+          do:
+            - return: l.quarantine(seg, r.off, "offset past what the index holds")
+              to: l.quarantine
+          when: "!l.pushDisk(r.index, seg, r.off, r.off+int64(r.length), l.tableHint)"
+      - eval: l.pushTerm(r.index, r.term)
+        to: l.pushTerm
+      - op: ++
+        set: l.n
       - return: nil
   - of: knownLayout
     participants:
@@ -3507,15 +3503,18 @@ sequences:
           		errs.Int64("offset", r.off), errs.Int(field, v))
         to: origin
   - of: (*fileLog).applyCompactRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).applyCompactRecord
+        kind: self
+      - id: l.dropThrough
+        kind: internal
     steps:
       - opt:
           do:
-            - bind: drop
-              eval: min(index-l.first+1, uint64(len(l.slots)))
-            - set: l.slots
-              value: l.slots[drop:]
-            - set: l.first, l.prevTerm
-              value: index+1, term
+            - eval: l.dropThrough(index, term)
+              to: l.dropThrough
           when: index >= l.first
       - opt:
           do:
@@ -3523,17 +3522,19 @@ sequences:
               value: index, term
           when: index >= l.compact
   - of: (*fileLog).applyTruncate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).applyTruncate
+        kind: self
+      - id: l.cutFrom
+        kind: internal
     steps:
-      - switch:
-          cases:
-            - case: index >= l.first && index <= l.first+uint64(len(l.slots))
-              do:
-                - set: l.slots
-                  value: l.slots[:index-l.first]
-            - case: index < l.first
-              do:
-                - set: l.first, l.slots, l.prevTerm
-                  value: index, nil, 0
+      - opt:
+          do:
+            - eval: l.cutFrom(index)
+              to: l.cutFrom
+          when: index <= l.first+l.n
   - of: decodeHS
     steps:
       - return: |-
@@ -3542,27 +3543,20 @@ sequences:
           		Vote: coreconsensus.NodeID(binary.LittleEndian.Uint64(b[8:])), Commit: binary.LittleEndian.Uint64(b[16:]),
           	}
   - of: (*fileLog).applyCompaction
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).applyCompaction
+        kind: self
+      - id: l.dropCompacted
+        kind: internal
     steps:
       - opt:
           do:
             - return: ""
           when: l.compact < l.first
-      - bind: drop
-        eval: min(l.compact-l.first+1, uint64(len(l.slots)))
-      - opt:
-          do:
-            - set: l.prevTerm
-              value: l.slots[drop-1].term
-          when: drop > 0
-      - set: l.slots
-        value: l.slots[drop:]
-      - set: l.first
-        value: l.compact + 1
-      - opt:
-          do:
-            - set: l.prevTerm
-              value: l.compactTerm
-          when: drop == 0
+      - eval: l.dropCompacted()
+        to: l.dropCompacted
   - of: (*fileLog).openSegments
     participants:
       - id: caller
@@ -4317,16 +4311,24 @@ sequences:
         value: saved
       - return: err
   - of: (*fileLog).termLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).termLocked
+        kind: self
+      - id: l.termAt
+        kind: internal
     steps:
       - switch:
           cases:
             - case: i == l.first-1
               do:
                 - return: l.prevTerm
-            - case: i < l.first || i >= l.first+uint64(len(l.slots))
+            - case: i < l.first || i >= l.first+l.n
               do:
                 - return: "0"
-      - return: l.slots[i-l.first].term
+      - return: l.termAt(i)
+        to: l.termAt
   - of: (*fileLog).usable
     steps:
       - opt:
@@ -4379,7 +4381,7 @@ sequences:
       - opt:
           do:
             - return: dst, storageFailed("entries", errImpossible)
-          when: hi > l.first+uint64(len(l.slots))
+          when: hi > l.first+l.n
       - bind: before
         eval: len(dst)
       - bind: rr
@@ -4387,16 +4389,14 @@ sequences:
       - loop:
           cond: i < hi && !rr.full
           do:
-            - bind: s
-              eval: "&l.slots[i-l.first]"
             - opt:
                 do:
-                  - eval: rr.take(i, *s.mem)
+                  - eval: rr.take(i, l.memEntry(i))
                     to: rr.take
                   - op: ++
                     set: i
                   - continue: true
-                when: s.mem != nil
+                when: i >= l.memFirst()
             - bind: next, err
               eval: l.readRun(&rr, i)
               to: l.readRun
@@ -4414,18 +4414,22 @@ sequences:
       - return: rr.dst, nil
   - of: lowPayload
     steps:
-      - return: max(0, int64(length)-int64(recHeader+recFixed+recAlign-1))
+      - return: max(0, length-int64(recHeader+recFixed+recAlign-1))
   - of: (*fileLog).readRun
     participants:
       - id: caller
         kind: actor
       - id: (*fileLog).readRun
         kind: self
+      - id: l.tableOf
+        kind: internal
       - id: l.readEntry
         kind: internal
       - id: rr.take
         kind: internal
       - id: l.segmentNumbered
+        kind: internal
+      - id: l.spanEnd
         kind: internal
       - id: l.pread
         kind: internal
@@ -4434,12 +4438,17 @@ sequences:
       - id: parseRecord
         kind: internal
     steps:
-      - bind: first
-        eval: l.slots[i-l.first]
+      - bind: ti, p
+        eval: l.tableOf(i)
+        to: l.tableOf
+      - bind: t
+        eval: "&l.tables[ti]"
+      - bind: start, end
+        eval: int64(t.offs[p])*int64(recAlign), l.spanEnd(t, p)
       - opt:
           do:
             - bind: e, err
-              eval: l.readEntry(first)
+              eval: "l.readEntry(entryLoc{seg: t.seg, off: start})"
               to: l.readEntry
             - opt:
                 do:
@@ -4448,9 +4457,9 @@ sequences:
             - eval: rr.take(i, e)
               to: rr.take
             - return: i + 1, nil
-          when: first.length == 0
+          when: end <= start
       - bind: low
-        eval: int64(rr.size) + lowPayload(first.length)
+        eval: int64(rr.size) + lowPayload(end-start)
       - opt:
           do:
             - set: rr.full
@@ -4458,7 +4467,7 @@ sequences:
             - return: i, nil
           when: i > rr.lo && low > int64(rr.maxBytes)
       - bind: seg
-        eval: l.segmentNumbered(first.seg)
+        eval: l.segmentNumbered(t.seg)
         to: l.segmentNumbered
       - opt:
           do:
@@ -4466,35 +4475,31 @@ sequences:
           when: seg == nil
       - opt:
           do:
-            - return: i, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(first.seg)), errs.Int64("offset", first.off))
-          when: int64(first.length) > min(seg.size-first.off, math.MaxInt)
-      - bind: start, end
-        eval: first.off, first.off+int64(first.length)
+            - return: i, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(t.seg)), errs.Int64("offset", start))
+          when: end-start > min(seg.size-start, math.MaxInt)
+      - bind: limit
+        eval: min(rr.hi, l.memFirst(), t.first+uint64(len(t.offs)))
       - bind: k
         eval: i + 1
       - loop:
-          cond: k < rr.hi
+          cond: k < limit
           do:
-            - bind: s
-              eval: "&l.slots[k-l.first]"
-            - opt:
-                do:
-                  - break: true
-                when: s.mem != nil || s.seg != first.seg || s.length == 0 || s.off < end || s.off-end > rangeGapBytes
             - bind: next
-              eval: s.off + int64(s.length)
+              eval: l.spanEnd(t, q)
+              to: l.spanEnd
             - opt:
                 do:
                   - break: true
-                when: next-start > rangeReadBytes || next > seg.size
+                when: next <= end || next-start > rangeReadBytes || next > seg.size
             - leaf: an if whose init is no assignment
               stmt: |-
-                if low += lowPayload(s.length); low > int64(rr.maxBytes) {
+                if low += lowPayload(next - end); low > int64(rr.maxBytes) {
                 			break
                 		}
             - set: end
               value: next
-          post: k++
+          init: q := p + 1
+          post: k, q = k+1, q+1
       - bind: b
         eval: make([]byte, end-start)
       - opt:
@@ -4511,23 +4516,21 @@ sequences:
       - loop:
           cond: j < k
           do:
-            - bind: s
-              eval: "&l.slots[j-l.first]"
             - bind: o
-              eval: s.off - start
+              eval: int64(t.offs[q])*int64(recAlign) - start
             - bind: r, ok
-              eval: "parseRecord(b[o : o+int64(s.length)])"
+              eval: "parseRecord(b[o : l.spanEnd(t, q)-start])"
               to: parseRecord
             - opt:
                 do:
-                  - return: j, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
-                when: "!ok || r.kind != recEntry"
+                  - return: j, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(t.seg)), errs.Int64("offset", start+o))
+                when: "!ok || r.kind != recEntry || r.index != j"
             - opt:
                 do:
                   - return: j, nil
                 when: "!rr.take(j, entryOf(&r))"
-          init: j := i
-          post: j++
+          init: j, q := i, p
+          post: j, q = j+1, q+1
       - return: k, nil
   - of: (*fileLog).pread
     participants:
@@ -4614,6 +4617,13 @@ sequences:
       - return: entryOf(&r), nil
         to: entryOf
   - of: (*fileLog).Term
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).Term
+        kind: self
+      - id: l.termAt
+        kind: internal
     steps:
       - lock:
           mutex: l.mu
@@ -4626,10 +4636,11 @@ sequences:
             - case: index < l.first
               do:
                 - return: 0, compacted(index, l.first)
-            - case: index >= l.first+uint64(len(l.slots))
+            - case: index >= l.first+l.n
               do:
                 - return: 0, storageFailed("term", errImpossible)
-      - return: l.slots[index-l.first].term, nil
+      - return: l.termAt(index), nil
+        to: l.termAt
   - of: (*fileLog).Bounds
     steps:
       - lock:
@@ -4639,7 +4650,7 @@ sequences:
           do:
             - return: 1, 0
           when: l.refuse != nil
-      - return: l.first, l.first + uint64(len(l.slots)) - 1
+      - return: l.first, l.first + l.n - 1
   - of: (*fileLog).add
     participants:
       - id: caller
@@ -4666,6 +4677,8 @@ sequences:
         kind: internal
       - id: l.add
         kind: internal
+      - id: l.pushTerm
+        kind: internal
     steps:
       - lock:
           mutex: l.wmu
@@ -4687,15 +4700,19 @@ sequences:
                 do:
                   - return: storageFailed("append", errImpossible)
                     to: storageFailed
-                when: e.Position.Index != l.first+uint64(len(l.slots))
+                when: e.Position.Index != l.first+l.n
             - eval: |-
                 l.add(&record{
                 			kind: recEntry, batch: l.batch, term: e.Position.Term, index: e.Position.Index,
                 			ekind: uint8(e.Kind), ever: e.Version, body: e.BodySum, chain: e.ChainSum, data: e.Data,
                 		})
               to: l.add
-            - set: l.slots
-              value: "append(l.slots, slot{term: e.Position.Term, mem: &e})"
+            - set: l.mem
+              value: append(l.mem, e)
+            - eval: l.pushTerm(e.Position.Index, e.Position.Term)
+              to: l.pushTerm
+            - op: ++
+              set: l.n
           key: i
           range: entries
       - opt:
@@ -4726,7 +4743,7 @@ sequences:
         kind: internal
       - id: l.mu.Lock
         kind: value
-      - id: l.settleBatch
+      - id: storageFailed
         kind: internal
       - id: l.dropSegmentsLocked
         kind: internal
@@ -4783,8 +4800,13 @@ sequences:
               value: ferr
             - return: l.failed
           when: ferr != nil
-      - eval: l.settleBatch(cur.n)
-        to: l.settleBatch
+      - opt:
+          do:
+            - set: l.failed
+              to: storageFailed
+              value: storageFailed("index", errImpossible)
+            - return: l.failed
+          when: "!l.settleBatch(cur.n)"
       - return: l.dropSegmentsLocked()
         to: l.dropSegmentsLocked
   - of: (*fileLog).writeBatch
@@ -4874,13 +4896,13 @@ sequences:
         kind: actor
       - id: (*fileLog).settleBatch
         kind: self
-      - id: l.relocate
-        kind: internal
       - id: l.markDurable
         kind: internal
     steps:
-      - eval: l.relocate(seg)
-        to: l.relocate
+      - opt:
+          do:
+            - return: "false"
+          when: "!l.relocate(seg)"
       - op: +=
         set: l.off
         value: int64(len(l.pending))
@@ -4892,43 +4914,13 @@ sequences:
         value: "-1"
       - op: ++
         set: l.batch
-  - of: (*fileLog).relocate
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*fileLog).relocate
-        kind: self
-      - id: parseRecord
-        kind: internal
-    steps:
-      - var:
-          name: "off"
-          type: int64
-      - loop:
-          cond: off < int64(len(l.pending))
-          do:
-            - bind: r, _
-              eval: parseRecord(l.pending[off:])
-              to: parseRecord
-            - opt:
-                do:
-                  - bind: s
-                    eval: "&l.slots[r.index-l.first]"
-                  - opt:
-                      do:
-                        - set: s.seg, s.off, s.mem, s.length
-                          value: seg, l.off+off, nil, uint32(r.length)
-                      when: s.mem != nil && s.term == r.term
-                when: r.kind == recEntry && r.index >= l.first && r.index < l.first+uint64(len(l.slots))
-            - op: +=
-              set: "off"
-              value: int64(r.length)
+      - return: "true"
   - of: (*fileLog).markDurable
     steps:
       - bind: last
-        eval: l.first + uint64(len(l.slots)) - 1
+        eval: l.first + l.n - 1
       - set: l.dur
-        value: "checkpoint{hs: l.hs, prevIndex: last, prevTerm: l.termLocked(last), compact: l.compact, compactTerm: l.compactTerm}"
+        value: "checkpoint{hs: l.hs, prevIndex: last, prevTerm: l.lastTerm(), compact: l.compact, compactTerm: l.compactTerm}"
   - of: (*fileLog).restamp
     participants:
       - id: caller
@@ -4968,6 +4960,8 @@ sequences:
         kind: internal
       - id: l.add
         kind: internal
+      - id: l.cutFrom
+        kind: internal
     steps:
       - lock:
           mutex: l.wmu
@@ -4989,11 +4983,11 @@ sequences:
       - opt:
           do:
             - return: nil
-          when: from >= l.first+uint64(len(l.slots))
+          when: from >= l.first+l.n
       - eval: "l.add(&record{kind: recTruncate, batch: l.batch, index: from})"
         to: l.add
-      - set: l.slots
-        value: l.slots[:from-l.first]
+      - eval: l.cutFrom(from)
+        to: l.cutFrom
       - return: nil
   - of: (*fileLog).CompactPrefix
     participants:
@@ -5018,8 +5012,8 @@ sequences:
         kind: internal
       - id: l.add
         kind: internal
-      - id: slices
-        kind: stdlib
+      - id: l.dropThrough
+        kind: internal
     steps:
       - lock:
           mutex: l.wmu
@@ -5038,7 +5032,7 @@ sequences:
             - return: nil
           when: through < l.first
       - bind: last
-        eval: l.first + uint64(len(l.slots)) - 1
+        eval: l.first + l.n - 1
       - bind: t, err
         eval: compactionTerm(through, last, l.termLocked(through), term)
         to: compactionTerm
@@ -5048,18 +5042,8 @@ sequences:
           when: err != nil
       - eval: "l.add(&record{kind: recCompact, batch: l.batch, index: through, term: t})"
         to: l.add
-      - alt:
-          - do:
-              - set: l.slots
-                value: nil
-            when: through >= last
-          - do:
-              - set: l.slots
-                to: slices
-                value: slices.Clone(l.slots[through-l.first+1:])
-            else: true
-      - set: l.first, l.prevTerm
-        value: through+1, t
+      - eval: l.dropThrough(through, t)
+        to: l.dropThrough
       - set: l.compact, l.compactTerm
         value: through, t
       - return: nil
@@ -5340,6 +5324,336 @@ sequences:
     steps:
       - return: fsFree(l.dir)
         to: fsFree
+  - of: (*fileLog).memFirst
+    steps:
+      - return: l.first + l.n - uint64(len(l.mem))
+  - of: (*fileLog).tableOf
+    steps:
+      - set: t
+        value: sort.Search(len(l.tables), func(k int) bool { return l.tables[k].first > i }) - 1
+      - return: t, int(i - l.tables[t].first)
+  - of: (*fileLog).locate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).locate
+        kind: self
+      - id: l.tableOf
+        kind: internal
+    steps:
+      - bind: t, p
+        eval: l.tableOf(i)
+        to: l.tableOf
+      - return: "entryLoc{seg: l.tables[t].seg, off: int64(l.tables[t].offs[p]) * int64(recAlign)}"
+  - of: (*fileLog).spanEnd
+    steps:
+      - opt:
+          do:
+            - return: int64(t.offs[p+1]) * int64(recAlign)
+          when: p+1 < len(t.offs)
+      - return: int64(t.end) * int64(recAlign)
+  - of: (*fileLog).pushDisk
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: off < 0 || end <= off || end >= maxIndexedOffset
+      - bind: o, e
+        eval: uint32(off/int64(recAlign)), uint32((end+int64(recAlign)-1)/int64(recAlign))
+      - opt:
+          do:
+            - set: l.tables[k].offs
+              value: append(l.tables[k].offs, o)
+            - set: l.tables[k].end
+              value: e
+            - return: "true"
+          init:
+            bind: k
+            eval: len(l.tables) - 1
+          when: k >= 0 && l.tables[k].seg == seg && l.tables[k].first+uint64(len(l.tables[k].offs)) == index
+      - opt:
+          do:
+            - set: l.tables[k].offs
+              value: append([]uint32(nil), l.tables[k].offs...)
+          init:
+            bind: k
+            eval: len(l.tables) - 1
+          when: k >= 0 && cap(l.tables[k].offs) > len(l.tables[k].offs)
+      - bind: offs
+        eval: make([]uint32, 1, max(hint, 1))
+      - set: offs[0]
+        value: o
+      - set: l.tables
+        value: "append(l.tables, segIndex{seg: seg, first: index, offs: offs, end: e})"
+      - return: "true"
+  - of: (*fileLog).pushTerm
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: k
+            eval: len(l.runs) - 1
+          when: k >= 0 && l.runs[k].term == term
+      - set: l.runs
+        value: "append(l.runs, termRun{first: index, term: term})"
+  - of: (*fileLog).cutDiskFrom
+    steps:
+      - bind: k
+        eval: len(l.tables)
+      - loop:
+          cond: k > 0 && l.tables[k-1].first >= i
+          do:
+            - op: "--"
+              set: k
+      - eval: clear(l.tables[k:])
+      - set: l.tables
+        value: l.tables[:k]
+      - opt:
+          do:
+            - return: ""
+          when: k == 0
+      - bind: t
+        eval: "&l.tables[k-1]"
+      - opt:
+          do:
+            - set: t.end
+              value: t.offs[cut]
+            - set: t.offs
+              value: t.offs[:cut]
+          init:
+            bind: cut
+            eval: i - t.first
+          when: cut < uint64(len(t.offs))
+  - of: (*fileLog).cutFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).cutFrom
+        kind: self
+      - id: l.clearIndex
+        kind: internal
+      - id: l.memFirst
+        kind: internal
+      - id: l.cutDiskFrom
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: l.clearIndex()
+              to: l.clearIndex
+            - set: l.first, l.prevTerm
+              value: i, 0
+            - return: ""
+          when: i < l.first
+      - alt:
+          - do:
+              - eval: clear(l.mem[i-mf:])
+              - set: l.mem
+                value: l.mem[:i-mf]
+            init:
+              bind: mf
+              eval: l.memFirst()
+              to: l.memFirst
+            when: i >= mf
+          - do:
+              - eval: clear(l.mem)
+              - set: l.mem
+                value: l.mem[:0]
+              - eval: l.cutDiskFrom(i)
+                to: l.cutDiskFrom
+            else: true
+      - bind: k
+        eval: len(l.runs)
+      - loop:
+          cond: k > 0 && l.runs[k-1].first >= i
+          do:
+            - op: "--"
+              set: k
+      - set: l.runs
+        value: l.runs[:k]
+      - set: l.n
+        value: i - l.first
+  - of: (*fileLog).dropThrough
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).dropThrough
+        kind: self
+      - id: l.clearIndex
+        kind: internal
+      - id: l.memFirst
+        kind: internal
+    steps:
+      - bind: nf
+        eval: through + 1
+      - opt:
+          do:
+            - return: ""
+          when: nf <= l.first
+      - set: l.prevTerm
+        value: prev
+      - opt:
+          do:
+            - eval: l.clearIndex()
+              to: l.clearIndex
+            - set: l.first
+              value: nf
+            - return: ""
+          when: nf >= l.first+l.n
+      - opt:
+          do:
+            - bind: d
+              eval: nf - mf
+            - eval: clear(l.mem[:d])
+            - set: l.mem
+              value: l.mem[d:]
+          init:
+            bind: mf
+            eval: l.memFirst()
+            to: l.memFirst
+          when: nf > mf
+      - bind: k
+        eval: "0"
+      - loop:
+          cond: k < len(l.tables) && l.tables[k].first+uint64(len(l.tables[k].offs)) <= nf
+          do:
+            - op: ++
+              set: k
+      - eval: clear(l.tables[:k])
+      - set: l.tables
+        value: l.tables[k:]
+      - opt:
+          do:
+            - bind: t
+              eval: "&l.tables[0]"
+            - set: t.offs
+              value: t.offs[nf-t.first:]
+            - set: t.first
+              value: nf
+          when: len(l.tables) > 0 && l.tables[0].first < nf
+      - bind: r
+        eval: sort.Search(len(l.runs), func(k int) bool { return l.runs[k].first > nf }) - 1
+      - set: l.runs
+        value: l.runs[r:]
+      - set: l.runs[0].first
+        value: nf
+      - op: "-="
+        set: l.n
+        value: nf - l.first
+      - set: l.first
+        value: nf
+  - of: (*fileLog).dropCompacted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).dropCompacted
+        kind: self
+      - id: l.termAt
+        kind: internal
+      - id: l.dropThrough
+        kind: internal
+    steps:
+      - bind: prev
+        eval: l.compactTerm
+      - opt:
+          do:
+            - set: prev
+              to: l.termAt
+              value: l.termAt(min(l.compact, l.first+l.n-1))
+          when: l.n > 0
+      - eval: l.dropThrough(l.compact, prev)
+        to: l.dropThrough
+  - of: (*fileLog).lastTerm
+    steps:
+      - opt:
+          do:
+            - return: l.prevTerm
+          when: l.n == 0
+      - return: l.runs[len(l.runs)-1].term
+  - of: (*fileLog).clearIndex
+    steps:
+      - eval: clear(l.tables)
+      - set: l.tables
+        value: l.tables[:0]
+      - set: l.runs
+        value: l.runs[:0]
+      - eval: clear(l.mem)
+      - set: l.mem
+        value: l.mem[:0]
+      - set: l.n
+        value: "0"
+  - of: (*fileLog).relocate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).relocate
+        kind: self
+      - id: parseRecord
+        kind: internal
+      - id: l.cutDiskFrom
+        kind: internal
+    steps:
+      - bind: mf, moved
+        eval: l.memFirst(), 0
+      - var:
+          name: "off"
+          type: int64
+      - loop:
+          cond: off < int64(len(l.pending))
+          do:
+            - bind: r, _
+              eval: parseRecord(l.pending[off:])
+              to: parseRecord
+            - opt:
+                do:
+                  - bind: k
+                    eval: int(r.index - mf)
+                  - opt:
+                      do:
+                        - eval: l.cutDiskFrom(r.index)
+                          to: l.cutDiskFrom
+                        - set: moved
+                          value: k
+                      when: k < moved
+                  - opt:
+                      do:
+                        - opt:
+                            do:
+                              - return: "false"
+                            when: "!l.pushDisk(r.index, seg, l.off+off, l.off+off+int64(r.length), 0)"
+                        - op: ++
+                          set: moved
+                      when: k == moved
+                when: r.kind == recEntry && r.index >= mf && r.index < mf+uint64(len(l.mem)) && l.mem[r.index-mf].Position.Term == r.term
+            - op: +=
+              set: "off"
+              value: int64(r.length)
+      - eval: clear(l.mem[:moved])
+      - bind: "n"
+        eval: copy(l.mem, l.mem[moved:])
+      - eval: clear(l.mem[n:])
+      - set: l.mem
+        value: l.mem[:n]
+      - return: "true"
+  - of: (*fileLog).indexBytes
+    steps:
+      - lock:
+          mutex: l.mu
+          read: true
+      - bind: b
+        eval: int64(cap(l.tables))*int64(unsafe.Sizeof(segIndex{})) + int64(cap(l.runs))*int64(unsafe.Sizeof(termRun{}))
+      - loop:
+          do:
+            - op: +=
+              set: b
+              value: int64(cap(l.tables[i].offs)) * indexEntryBytes
+          key: i
+          range: l.tables
+      - return: b
+  - of: (*fileLog).memEntry
+    steps:
+      - return: l.mem[i-l.memFirst()]
   - of: newFileSnapshots
     participants:
       - id: caller
@@ -9513,6 +9827,14 @@ sequences:
         eval: "&n.cfg"
       - opt:
           do:
+            - set: n.batch
+              value: bs
+          init:
+            bind: bs, ok
+            eval: cfg.Transport.(coreconsensus.BatchSender)
+          when: ok
+      - opt:
+          do:
             - eval: |-
                 ur.Unreachable(func(id coreconsensus.NodeID) {
                 			select {
@@ -11080,9 +11402,17 @@ sequences:
         kind: actor
       - id: (*Node).sendMessages
         kind: self
+      - id: n.sendShared
+        kind: internal
       - id: n.cfg.Transport.Send
         kind: value
     steps:
+      - opt:
+          do:
+            - eval: n.sendShared(n.batch, ms)
+              to: n.sendShared
+            - return: ""
+          when: n.batch != nil
       - loop:
           do:
             - opt:
@@ -13205,6 +13535,107 @@ sequences:
               to: s.sent.CompareAndSwap
           when: err == io.EOF
       - return: k, err
+  - of: (*appendBodies).body
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*appendBodies).body
+        kind: self
+      - id: wire
+        kind: package
+    steps:
+      - bind: first
+        eval: "&ents[0]"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: b.ranges[i].body
+                when: b.ranges[i].first == first && b.ranges[i].n == len(ents)
+          key: i
+          range: b.ranges
+      - bind: size
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: size
+              to: wire
+              value: wire.EntryLen(&ents[i])
+          key: i
+          range: ents
+      - bind: body
+        eval: wire.AppendEntries(make([]byte, 0, size), ents)
+        to: wire
+      - set: b.ranges
+        value: "append(b.ranges, encodedBody{first: first, n: len(ents), body: body})"
+      - return: body
+  - of: (*appendBodies).reset
+    steps:
+      - eval: clear(b.ranges)
+      - set: b.ranges
+        value: b.ranges[:0]
+  - of: (*Node).sendShared
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).sendShared
+        kind: self
+      - id: n.cfg.Transport.Send
+        kind: value
+      - id: n.bodies.body
+        kind: internal
+      - id: wire
+        kind: package
+      - id: n.bodies.reset
+        kind: internal
+    steps:
+      - bind: heads
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: heads
+                when: len(ms[i].Entries) > 0 && !n.unfed[ms[i].To]
+          key: i
+          range: ms
+      - var:
+          name: slab
+          type: "[]byte"
+      - opt:
+          do:
+            - set: slab
+              value: make([]byte, 0, heads*wire.MessageHeaderLen)
+          when: heads > 0
+      - loop:
+          do:
+            - bind: m
+              eval: "&ms[i]"
+            - opt:
+                do:
+                  - eval: n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, m))
+                    to: n.cfg.Transport.Send
+                  - continue: true
+                when: len(m.Entries) == 0
+            - opt:
+                do:
+                  - continue: true
+                when: n.unfed[m.To]
+            - bind: body
+              eval: n.bodies.body(m.Entries)
+              to: n.bodies.body
+            - bind: start
+              eval: len(slab)
+            - set: slab
+              to: wire
+              value: wire.AppendHeader(slab, m, len(body))
+            - eval: bs.SendShared(m.To, slab[start:len(slab):len(slab)], body)
+          key: i
+          range: ms
+      - eval: n.bodies.reset()
+        to: n.bodies.reset
   - of: (*Node).watchSnapshotLimit
     participants:
       - id: caller
@@ -16820,6 +17251,8 @@ sequences:
         kind: self
       - id: l.add
         kind: internal
+      - id: l.clearIndex
+        kind: internal
     steps:
       - lock:
           mutex: l.wmu
@@ -16827,8 +17260,8 @@ sequences:
           mutex: l.mu
       - eval: "l.add(&record{kind: recCompact, batch: l.batch, index: index, term: term})"
         to: l.add
-      - set: l.slots
-        value: nil
+      - eval: l.clearIndex()
+        to: l.clearIndex
       - set: l.first, l.prevTerm
         value: index+1, term
       - set: l.compact, l.compactTerm
@@ -22585,6 +23018,34 @@ sequences:
     steps:
       - return: spkiOf(c)
         to: spkiOf
+  - of: outFrame.size
+    steps:
+      - return: len(f.head) + len(f.body)
+  - of: outFrame.writeTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: outFrame.writeTo
+        kind: self
+      - id: w.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: _, err
+            eval: w.Write(f.head)
+            to: w.Write
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: len(f.body) == 0
+      - bind: _, err
+        eval: w.Write(f.body)
+        to: w.Write
+      - return: err
   - of: (*peerConn).halt
     participants:
       - id: caller
@@ -23432,8 +23893,8 @@ sequences:
         kind: stdlib
       - id: b.conn.SetWriteDeadline
         kind: value
-      - id: b.w.Write
-        kind: value
+      - id: f.writeTo
+        kind: internal
       - id: b.w.Flush
         kind: value
     steps:
@@ -23467,9 +23928,9 @@ sequences:
                 do:
                   - return: err
                 init:
-                  bind: _, err
-                  eval: b.w.Write(f)
-                  to: b.w.Write
+                  bind: err
+                  eval: f.writeTo(b.w)
+                  to: f.writeTo
                 when: err != nil
           key: _
           range: batch
@@ -23686,6 +24147,28 @@ sequences:
         kind: actor
       - id: (*TCPTransport).Send
         kind: self
+      - id: t.enqueue
+        kind: internal
+    steps:
+      - eval: "t.enqueue(to, outFrame{head: frame})"
+        to: t.enqueue
+  - of: (*TCPTransport).SendShared
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).SendShared
+        kind: self
+      - id: t.enqueue
+        kind: internal
+    steps:
+      - eval: "t.enqueue(to, outFrame{head: header, body: body})"
+        to: t.enqueue
+  - of: (*TCPTransport).enqueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).enqueue
+        kind: self
       - id: wire
         kind: package
       - id: t.mu.Lock
@@ -23711,7 +24194,7 @@ sequences:
               value: laneControl
           init:
             bind: l, err
-            eval: wire.Lane(frame)
+            eval: wire.Lane(f.head)
             to: wire
           when: err == nil && l == coreconsensus.LaneControl
       - bind: k
@@ -23738,7 +24221,7 @@ sequences:
                   eval: t.byID[to]
                 when: "!ok"
             - set: pc
-              value: "&peerConn{queue: make(chan []byte, senderQueueFrames), stop: make(chan struct{})}"
+              value: "&peerConn{queue: make(chan outFrame, senderQueueFrames), stop: make(chan struct{})}"
             - set: t.out[k]
               value: pc
             - eval: t.wg.Add(1)
@@ -23748,6 +24231,8 @@ sequences:
           when: pc == nil
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
+      - bind: "n"
+        eval: int64(f.size())
       - eval: pc.mu.Lock()
         to: pc.mu.Lock
       - opt:
@@ -23756,26 +24241,26 @@ sequences:
               to: pc.mu.Unlock
             - opt:
                 do:
-                  - eval: t.droppedOversized(to, lane, len(frame))
+                  - eval: t.droppedOversized(to, lane, int(n))
                     to: t.droppedOversized
-                when: int64(len(frame)) > t.cfg.PeerQueueBytes
+                when: n > t.cfg.PeerQueueBytes
             - return: ""
-          when: pc.bytes+int64(len(frame)) > t.cfg.PeerQueueBytes
+          when: pc.bytes+n > t.cfg.PeerQueueBytes
       - op: +=
         set: pc.bytes
-        value: int64(len(frame))
+        value: "n"
       - eval: pc.mu.Unlock()
         to: pc.mu.Unlock
       - select:
           cases:
-            - comm: pc.queue <- frame
+            - comm: pc.queue <- f
             - default: true
               do:
                 - eval: pc.mu.Lock()
                   to: pc.mu.Lock
                 - op: "-="
                   set: pc.bytes
-                  value: int64(len(frame))
+                  value: "n"
                 - eval: pc.mu.Unlock()
                   to: pc.mu.Unlock
   - of: (*TCPTransport).droppedOversized
@@ -23834,12 +24319,12 @@ sequences:
         to: link.close
       - var:
           name: batch
-          type: "[][]byte"
+          type: "[]outFrame"
       - loop:
           do:
             - var:
                 name: f
-                type: "[]byte"
+                type: outFrame
             - select:
                 cases:
                   - comm: <-t.done
@@ -23884,6 +24369,8 @@ sequences:
         kind: self
       - id: queuedFrame
         kind: internal
+      - id: b.size
+        kind: internal
       - id: pc.mu.Lock
         kind: value
       - id: pc.mu.Unlock
@@ -23907,7 +24394,8 @@ sequences:
           do:
             - op: +=
               set: size
-              value: len(b)
+              to: b.size
+              value: b.size()
           key: _
           range: batch
           value: b
@@ -23928,7 +24416,7 @@ sequences:
                 - return: g, ok
             - default: true
               do:
-                - return: nil, false
+                - return: outFrame{}, false
   - of: (*TCPTransport).sendBatch
     participants:
       - id: caller
@@ -24008,8 +24496,8 @@ sequences:
         kind: self
       - id: link.conn.SetWriteDeadline
         kind: value
-      - id: link.w.Write
-        kind: value
+      - id: b.writeTo
+        kind: internal
       - id: link.w.Flush
         kind: value
     steps:
@@ -24022,9 +24510,9 @@ sequences:
                 do:
                   - return: err
                 when: err != nil
-            - set: _, err
-              to: link.w.Write
-              value: link.w.Write(b)
+            - set: err
+              to: b.writeTo
+              value: b.writeTo(link.w)
           key: _
           range: batch
           value: b

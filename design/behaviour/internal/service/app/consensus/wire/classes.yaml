@@ -126,6 +126,14 @@ constants:
         type: int
         value: 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 4 + 4
     name: frameHeaderLen
+  - doc: |-
+      MessageHeaderLen is the length AppendHeader writes: the frame header and
+      a message's fixed fields, up to and including its entry count.
+    items:
+      - name: MessageHeaderLen
+        type: int
+        value: "112"
+    name: MessageHeaderLen
 files:
   - decls:
       - ChangeFounding
@@ -144,7 +152,11 @@ files:
       - BodySum
       - ChainSum
       - Lane
+      - MessageHeaderLen
       - AppendMessage
+      - AppendHeader
+      - AppendEntries
+      - appendFixed
       - appendEntry
       - EntryLen
       - ParseMessage
@@ -209,6 +221,19 @@ functions:
     params: frame []byte
     results: coreconsensus.FrameLane, error
   - name: AppendMessage
+    params: dst []byte, m *coreconsensus.MessageValue
+    results: "[]byte"
+  - name: AppendHeader
+    params: dst []byte, m *coreconsensus.MessageValue, bodyLen int
+    results: "[]byte"
+  - name: AppendEntries
+    params: dst []byte, ents []coreconsensus.EntryValue
+    results: "[]byte"
+  - doc: |-
+      appendFixed appends m's frame header, its length left zero for the
+      caller to set, and m's fixed fields up to its entry count:
+      MessageHeaderLen bytes.
+    name: appendFixed
     params: dst []byte, m *coreconsensus.MessageValue
     results: "[]byte"
   - doc: appendEntry appends one entry's wire form.

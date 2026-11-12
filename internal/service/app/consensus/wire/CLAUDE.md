@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T17:00:00Z -->
+<!-- updated: 2026-11-12T10:00:00Z -->
 # internal/service/app/consensus/wire/
 
 ## Purpose
@@ -10,6 +10,11 @@ They are not codec formats: two nodes must write the same bytes.
 `EntryLen` is an entry's length in an append, its 33-byte header and its
 payload: what the leader cuts a batch by, a store counting the payloads
 alone (#683).
+`AppendHeader` and `AppendEntries` write an append's frame in two parts,
+its `MessageHeaderLen` bytes of header and its entries body, header then
+body being `AppendMessage`'s bytes: the leader encodes the body once per
+Ready and shares it across followers (#912,
+`TestAHeaderThenItsEntriesAreTheMessagesBytes`).
 
 ## Do NOT
 
