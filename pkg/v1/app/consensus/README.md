@@ -276,6 +276,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type TimingContractSpec](<#TimingContractSpec>)
 - [type TokenValue](<#TokenValue>)
   - [func \(TokenValue\) Position\(\) PositionValue](<#TokenValue.Position>)
+- [type TraceContextValue](<#TraceContextValue>)
 - [type Transport](<#Transport>)
   - [func \(Transport\) Bind\(group GroupID, deliver func\(from AuthenticatedPeerValue, frame \[\]byte\), offer func\(from AuthenticatedPeerValue, o InstallOfferValue\) InstallAcceptValue, install func\(InstallParams\) error, join func\(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue\) \(PositionValue, errs.Code\)\) error](<#Transport.Bind>)
   - [func \(Transport\) Send\(to NodeID, frame \[\]byte\)](<#Transport.Send>)
@@ -359,6 +360,15 @@ const FlagProtocol4 coreconsensus.MessageFlags = 64
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol4`.
+
+<a name="FlagTrace"></a>
+```go
+const FlagTrace coreconsensus.MessageFlags = 128
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagTrace`.
 
 <a name="FlagTransfer"></a>
 ```go
@@ -3192,6 +3202,9 @@ type MessageValue struct {
 	// Entries are the entries an append carries, or the proposal a forward
 	// carries with a zero position.
 	Entries        []EntryValue
+	// Trace is the proposer's span context a forward carries beside
+	// FlagTrace, the zero value without it.
+	Trace          TraceContextValue
 }
 ```
 
@@ -4574,6 +4587,28 @@ func (TokenValue) Position() PositionValue
 ```
 
 Position returns the token's position, without its lineage.
+
+<a name="TraceContextValue"></a>
+## type [TraceContextValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type TraceContextValue = coreconsensus.TraceContextValue
+```
+
+TraceContextValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.TraceContextValue`, declared as:
+
+```go
+type TraceContextValue struct {
+	// TraceID identifies the whole trace.
+	TraceID [16]byte
+	// SpanID is the proposer's span, the parent of the leader's.
+	SpanID  [8]byte
+	// Sampled is the proposer's sampling decision.
+	Sampled bool
+}
+```
 
 <a name="Transport"></a>
 ## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)

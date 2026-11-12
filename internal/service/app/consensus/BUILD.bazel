@@ -59,6 +59,7 @@ go_library(
         "syncpath_linux.go",
         "syncpath_other.go",
         "tcp.go",
+        "tracefwd.go",
         "unacked.go",
         "unacked_darwin.go",
         "unacked_linux.go",
@@ -219,6 +220,7 @@ go_test(
         "tcp_senderrelease_internal_test.go",
         "tcp_streamstall_internal_test.go",
         "tornbatchsilence_internal_test.go",
+        "tracefwd_internal_test.go",
         "transferpin_internal_test.go",
         "unacked_darwin_test.go",
         "unacked_linux_test.go",
@@ -269,6 +271,7 @@ go_test(
         "//internal/service/data/transform",
         "//internal/service/net/server",
         "//internal/service/observe/metrics",
+        "//internal/service/observe/trace",
     ],
 )
 

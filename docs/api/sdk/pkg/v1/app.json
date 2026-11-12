@@ -1397,6 +1397,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagTrace",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "FlagTrace",
+      "spelled": "coreconsensus.MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "128",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagTrace",
+      "doc": "The read modes and durabilities.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagTransfer",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
@@ -3727,6 +3741,19 @@
       "spelled": "coreconsensus.TokenValue",
       "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.TraceContextValue",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "TraceContextValue",
+      "spelled": "coreconsensus.TraceContextValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.TraceContextValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/app/consensus.TraceContextValue",
       "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",

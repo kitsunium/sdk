@@ -16,6 +16,14 @@ func FuzzParseMessage(f *testing.F) {
 		Entries: []coreconsensus.EntryValue{{Position: coreconsensus.PositionValue{Term: 3, Index: 4}, Kind: coreconsensus.EntryCommand, Data: []byte("x")}},
 	}
 	f.Add(wire.AppendMessage(nil, m))
+	// A forward of a cluster at version 4 carries its proposer's trace
+	// context after its entry, beside FlagTrace (#1115).
+	fwd := &coreconsensus.MessageValue{
+		Version: 1, Group: 1, Kind: coreconsensus.MsgForward, Flags: coreconsensus.FlagTrace, From: 2, To: 1, Term: 3, Context: 7,
+		Entries: []coreconsensus.EntryValue{{Kind: coreconsensus.EntryCommand, Data: []byte("x")}},
+		Trace:   coreconsensus.TraceContextValue{TraceID: [16]byte{1, 2}, SpanID: [8]byte{3}, Sampled: true},
+	}
+	f.Add(wire.AppendMessage(nil, fwd))
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, b []byte) {
 		var out coreconsensus.MessageValue

@@ -51,6 +51,7 @@ func (n *Node) submitProposal(ctx context.Context, p *proposal) (coreconsensus.T
 	}
 	start := n.clk.Now()
 	span := n.obs.span(ctx, "consensus.Propose")
+	p.span = span
 	n.pendingProp.Add(1)
 	n.obs.setGauge(mProposalsPending, float64(n.pendingProp.Load()))
 	defer func() {
@@ -242,6 +243,9 @@ func guardFields(vs []raft.IsolationValue) []errs.FieldValue {
 func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool) {
 	p.pos, p.local = pos, local
 	p.stage.Store(stageAppended)
+	if p.span != nil {
+		n.traceAppended(p, pos)
+	}
 	if local {
 		n.pendingBytes.Add(int64(len(p.entry.Data)))
 	}
@@ -306,9 +310,10 @@ func (n *Node) forward(p *proposal, st raft.StatusValue) {
 	if p.admin {
 		kind = coreconsensus.MsgForwardAdmin
 	}
+	flags, trace := traceForwardFlags(p, st.Cluster)
 	m := coreconsensus.MessageValue{
-		Version: 1, Group: n.cfg.Group, Kind: kind, From: n.stamp.ID, To: st.Lead,
-		Term: st.Term, Context: ctx, Entries: []coreconsensus.EntryValue{p.entry},
+		Version: 1, Group: n.cfg.Group, Kind: kind, Flags: flags, From: n.stamp.ID, To: st.Lead,
+		Term: st.Term, Context: ctx, Entries: []coreconsensus.EntryValue{p.entry}, Trace: trace,
 	}
 	p.sentAt = n.clk.Now()
 	n.forwards[ctx] = p

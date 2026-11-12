@@ -57,6 +57,9 @@ const (
 	// messageFixedLen is a message body's fixed part after the frame
 	// header, up to and including its entry count.
 	messageFixedLen int = 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 4 + 4
+	// traceLen is a forward's trace context after its entry, beside
+	// FlagTrace: trace id, parent span id, sampled (#1115).
+	traceLen int = 16 + 8 + 1
 )
 
 // castagnoli is the CRC-32C table every checksum of the domain uses.
@@ -98,6 +101,11 @@ func AppendMessage(dst []byte, m *coreconsensus.MessageValue) []byte {
 	start := len(dst)
 	dst = appendFixed(dst, m)
 	dst = AppendEntries(dst, m.Entries)
+	if m.Flags&coreconsensus.FlagTrace != 0 {
+		dst = append(dst, m.Trace.TraceID[:]...)
+		dst = append(dst, m.Trace.SpanID[:]...)
+		dst = append(dst, boolByte(m.Trace.Sampled))
+	}
 	binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
 	return dst
 }
@@ -231,11 +239,34 @@ func ParseMessage(frame []byte, m *coreconsensus.MessageValue) error {
 		}
 		entries = append(entries, e)
 	}
+	if m.Flags&coreconsensus.FlagTrace != 0 {
+		var err error
+		if body, err = parseTrace(body, m); err != nil {
+			return err
+		}
+	}
 	if len(body) != 0 {
 		return frameInvalid("trailing bytes", len(frame))
 	}
 	m.Entries = entries
 	return nil
+}
+
+// parseTrace reads the trace context a forward carries beside FlagTrace
+// from the head of b, after its entry, and returns the rest. The flag on
+// any other kind, a short context or a non-canonical sampled byte is
+// FRAME_INVALID: an accepted frame encodes back to its own bytes.
+func parseTrace(b []byte, m *coreconsensus.MessageValue) ([]byte, error) {
+	if m.Kind != coreconsensus.MsgForward && m.Kind != coreconsensus.MsgForwardAdmin {
+		return nil, frameInvalid("trace flag", len(b))
+	}
+	if len(b) < traceLen || b[traceLen-1] > 1 {
+		return nil, frameInvalid("trace context", len(b))
+	}
+	copy(m.Trace.TraceID[:], b)
+	copy(m.Trace.SpanID[:], b[16:])
+	m.Trace.Sampled = b[24] != 0
+	return b[traceLen:], nil
 }
 
 // parseEntry decodes one entry from the head of b and returns the rest.

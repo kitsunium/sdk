@@ -13,6 +13,7 @@ import (
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
+	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -194,12 +195,14 @@ type Node struct {
 	lastTerm      uint64
 	lastLead      coreconsensus.NodeID
 	lastRole      coreconsensus.Role
-	canVote       bool
-	noTable       bool
-	snapState     snapState
-	contact       leaderContact
-	progress      applyProgress
-	watch         progressWatch
+	// traced is what the loop holds of D13's spans until a commit (#1115).
+	traced    traceState
+	canVote   bool
+	noTable   bool
+	snapState snapState
+	contact   leaderContact
+	progress  applyProgress
+	watch     progressWatch
 	// cuttingSince is when the apply goroutine started capturing and
 	// writing a snapshot itself, applying nothing meanwhile, in Unix
 	// nanoseconds of n.clk; 0 when it is not cutting (#593).
@@ -304,6 +307,9 @@ type proposal struct {
 	sentAt time.Time
 	// gone is set by a caller that stopped waiting for a forward's answer.
 	gone atomic.Bool
+	// span is its caller's consensus.Propose span, nil with no Tracer;
+	// written before the loop has the proposal, read-only after (D13).
+	span coretrace.Span
 }
 
 type propResult struct {
@@ -1217,6 +1223,7 @@ func (n *Node) onMessage(m *coreconsensus.MessageValue, ok bool) (time.Time, boo
 	turn := n.clk.Now()
 	n.r.SetOverloaded(n.applyOverloaded())
 	n.declineNoted(m)
+	n.traceForward(m)
 	n.r.Step(n.clk.Now(), *m)
 	return turn, true
 }
@@ -1335,6 +1342,7 @@ func (n *Node) drainControl() {
 			return
 		}
 		n.declineNoted(&m)
+		n.traceForward(&m)
 		n.r.Step(n.clk.Now(), m)
 	}
 }
@@ -1699,6 +1707,9 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 		}
 		n.sq.push(q)
 	}
+	// Before apply is handed anything: a "committed" event precedes its
+	// "applied" (D13).
+	n.traceReady(rd)
 	n.queueApply(rd)
 	for _, f := range rd.Fetch {
 		n.fetchq.push(f)
@@ -1871,6 +1882,10 @@ func (n *Node) leadershipChanged() {
 		return
 	}
 	n.lastTerm, n.lastLead, n.lastRole = st.Term, st.Lead, st.Role
+	if st.Role != coreconsensus.RoleLeader && (len(n.traced.answers) > 0 || len(n.traced.open) > 0) {
+		// A forward answered with a position may never commit now.
+		n.traceEnd(notLeader(st.Lead))
+	}
 	for _, stop := range n.sendStop {
 		// An offer of a past term is refused at its end anyway, and its
 		// abort could unlink the spool the new leader's install of the
@@ -2455,6 +2470,7 @@ func (n *Node) StopReason() (coreconsensus.StopReasonValue, bool) {
 // been appended with OUTCOME_UNKNOWN, since it may yet commit elsewhere.
 func (n *Node) failAllOnStop() {
 	err := n.stoppedErr()
+	n.traceEnd(err)
 	for ctx, p := range n.forwards {
 		n.dropForward(ctx)
 		if p.stage.Load() == stageUnsent {

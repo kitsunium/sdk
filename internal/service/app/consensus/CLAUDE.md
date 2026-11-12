@@ -1056,6 +1056,20 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   D13 could not be written (#914,
   `TestTheD13SeriesArePublishedWithTheirLabels`,
   `TestThePinGaugesCountAndAgeEachPinAndResetOneThatEnded`).
+- Trace a Propose from submission to apply on the follower alone, or set
+  `FlagTrace` on a forward before the committed cluster version is 4: the
+  span recorded `applied` only, and a forwarded write's leader side was in
+  no trace. `submit` hands its span to the proposal, `traceAppended` records
+  `appended` at the position and `committed` once `traceReady` sees a Ready's
+  commit cover it, before `queueApply` hands the entry on; `forward` writes
+  the span's context into the frame at version 4 (`traceForwardFlags`), and
+  the leader's `traceForward` opens `consensus.Forward` with that context as
+  its parent, takes its position from the answer the Ready sends
+  (`traceAnswers`) and ends it at the commit, a lost leadership or a stop
+  (`traceEnd`). Every hook is behind a nil span or a nil Tracer, so a node
+  with none allocates as before; below version 4 a forward is the layout a
+  node of protocol 3 parses (#1115,
+  `TestAForwardedProposeIsOneTraceAcrossTheTwoNodes`).
 - Report a follower Ready on its apply alone and say nothing of how far
   its log trails the leader's: a node 50 000 entries behind on a slow disk
   answered Ready, and the only lag series were the leader's per peer.

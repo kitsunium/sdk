@@ -89,6 +89,12 @@ const (
 	// cluster version to 4 while a member's last frame of the term lacks it
 	// (#919).
 	FlagProtocol4
+	// FlagTrace marks a forward that carries its proposer's trace context
+	// after its entry (Trace). A follower sets it only once the committed
+	// cluster version is 4, which every member announced, so a node of
+	// protocol 3 or below never meets the trailing bytes; on any other
+	// kind it is refused as a frame that does not parse (#1115).
+	FlagTrace
 )
 
 // Lane returns the connection the kind belongs on.
@@ -149,4 +155,20 @@ type MessageValue struct {
 	// Entries are the entries an append carries, or the proposal a forward
 	// carries with a zero position.
 	Entries []EntryValue
+	// Trace is the proposer's span context a forward carries beside
+	// FlagTrace, the zero value without it.
+	Trace TraceContextValue
+}
+
+// TraceContextValue is the span context a forwarded proposal travels with:
+// the W3C trace and parent span identifiers and the proposer's sampling
+// decision, 25 bytes on the wire after the forward's entry (ADR 0152
+// D13, #1115).
+type TraceContextValue struct {
+	// TraceID identifies the whole trace.
+	TraceID [16]byte
+	// SpanID is the proposer's span, the parent of the leader's.
+	SpanID [8]byte
+	// Sampled is the proposer's sampling decision.
+	Sampled bool
 }

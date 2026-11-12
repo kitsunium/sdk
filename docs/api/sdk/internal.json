@@ -3903,6 +3903,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagTrace",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "FlagTrace",
+      "spelled": "MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "128",
+      "doc": "FlagTrace marks a forward that carries its proposer's trace context\nafter its entry (Trace). A follower sets it only once the committed\ncluster version is 4, which every member announced, so a node of\nprotocol 3 or below never meets the trailing bytes; on any other\nkind it is refused as a frame that does not parse (#1115).\n",
+      "file": "core/app/consensus/message.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagTransfer",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -4963,8 +4976,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
       "name": "MessageValue",
-      "spelled": "struct{Version uint8; Group GroupID; Kind MessageKind; Flags MessageFlags; From NodeID; To NodeID; Term uint64; LogTerm uint64; Index uint64; Commit uint64; Reject bool; RejectHint uint64; Context uint64; TransferIssuer NodeID; TransferTerm uint64; Contract uint64; Code errs.Code; Entries []EntryValue}",
-      "canonical": "struct{Version uint8; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; Kind github.com/kitsunium/sdk/internal/core/app/consensus.MessageKind; Flags github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags; From github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; To github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Term uint64; LogTerm uint64; Index uint64; Commit uint64; Reject bool; RejectHint uint64; Context uint64; TransferIssuer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; TransferTerm uint64; Contract uint64; Code github.com/kitsunium/sdk/internal/kernel/errs.Code; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue}",
+      "spelled": "struct{Version uint8; Group GroupID; Kind MessageKind; Flags MessageFlags; From NodeID; To NodeID; Term uint64; LogTerm uint64; Index uint64; Commit uint64; Reject bool; RejectHint uint64; Context uint64; TransferIssuer NodeID; TransferTerm uint64; Contract uint64; Code errs.Code; Entries []EntryValue; Trace TraceContextValue}",
+      "canonical": "struct{Version uint8; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; Kind github.com/kitsunium/sdk/internal/core/app/consensus.MessageKind; Flags github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags; From github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; To github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Term uint64; LogTerm uint64; Index uint64; Commit uint64; Reject bool; RejectHint uint64; Context uint64; TransferIssuer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; TransferTerm uint64; Contract uint64; Code github.com/kitsunium/sdk/internal/kernel/errs.Code; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Trace github.com/kitsunium/sdk/internal/core/app/consensus.TraceContextValue}",
       "fields": [
         {
           "name": "Version",
@@ -5055,6 +5068,11 @@
           "name": "Entries",
           "type": "[]EntryValue",
           "doc": "Entries are the entries an append carries, or the proposal a forward\ncarries with a zero position.\n"
+        },
+        {
+          "name": "Trace",
+          "type": "TraceContextValue",
+          "doc": "Trace is the proposer's span context a forward carries beside\nFlagTrace, the zero value without it.\n"
         }
       ],
       "doc": "MessageValue is one protocol message: a plain value, encoded by the service's\nAppendMessage and decoded by ParseMessage, never by a method. The engine\ntrusts the transport's authenticated peer over From, and drops a message\nwhose From differs from it.\n",
@@ -6414,6 +6432,35 @@
       "canonical": "func() github.com/kitsunium/sdk/internal/core/app/consensus.PositionValue",
       "doc": "Position returns the token's position, without its lineage.\n",
       "file": "core/app/consensus/identity.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.TraceContextValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "TraceContextValue",
+      "spelled": "struct{TraceID [16]byte; SpanID [8]byte; Sampled bool}",
+      "canonical": "struct{TraceID [16]byte; SpanID [8]byte; Sampled bool}",
+      "fields": [
+        {
+          "name": "TraceID",
+          "type": "[16]byte",
+          "doc": "TraceID identifies the whole trace.\n"
+        },
+        {
+          "name": "SpanID",
+          "type": "[8]byte",
+          "doc": "SpanID is the proposer's span, the parent of the leader's.\n"
+        },
+        {
+          "name": "Sampled",
+          "type": "bool",
+          "doc": "Sampled is the proposer's sampling decision.\n"
+        }
+      ],
+      "doc": "TraceContextValue is the span context a forwarded proposal travels with:\nthe W3C trace and parent span identifiers and the proposer's sampling\ndecision, 25 bytes on the wire after the forward's entry (ADR 0152\nD13, #1115).\n",
+      "file": "core/app/consensus/message.go",
       "layer": "core",
       "family": "app"
     },

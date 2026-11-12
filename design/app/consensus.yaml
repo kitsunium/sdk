@@ -443,6 +443,16 @@ packages:
         name: FlagProtocol4
         type: MessageFlags
         value: "64"
+      - blockDoc: The flags.
+        doc: |-
+          FlagTrace marks a forward that carries its proposer's trace context
+          after its entry (Trace). A follower sets it only once the committed
+          cluster version is 4, which every member announced, so a node of
+          protocol 3 or below never meets the trailing bytes; on any other
+          kind it is refused as a frame that does not parse (#1115).
+        name: FlagTrace
+        type: MessageFlags
+        value: "128"
       - blockDoc: The states of a stamp.
         doc: |-
           StampJoining is a directory Init prepared: it may join as an empty
@@ -1782,6 +1792,28 @@ packages:
                 carries with a zero position.
               name: Entries
               type: "[]EntryValue"
+            - doc: |-
+                Trace is the proposer's span context a forward carries beside
+                FlagTrace, the zero value without it.
+              name: Trace
+              type: TraceContextValue
+      - doc: |-
+          TraceContextValue is the span context a forwarded proposal travels with:
+          the W3C trace and parent span identifiers and the proposer's sampling
+          decision, 25 bytes on the wire after the forward's entry (ADR 0152
+          D13, #1115).
+        name: TraceContextValue
+        struct:
+          fields:
+            - doc: TraceID identifies the whole trace.
+              name: TraceID
+              type: "[16]byte"
+            - doc: SpanID is the proposer's span, the parent of the leader's.
+              name: SpanID
+              type: "[8]byte"
+            - doc: Sampled is the proposer's sampling decision.
+              name: Sampled
+              type: bool
       - doc: |-
           PositionValue is an entry's place in the log: the term it was created in and its
           index. The index is a fencing token: unique, strictly increasing over the
@@ -5742,6 +5774,8 @@ packages:
             target: coreconsensus.StampState
           - name: MessageValue
             target: coreconsensus.MessageValue
+          - name: TraceContextValue
+            target: coreconsensus.TraceContextValue
           - name: MessageKind
             target: coreconsensus.MessageKind
           - name: FrameLane
@@ -6324,6 +6358,10 @@ packages:
             reexport: coreconsensus.FlagProtocol4
             type: coreconsensus.MessageFlags
             value: "64"
+          - name: FlagTrace
+            reexport: coreconsensus.FlagTrace
+            type: coreconsensus.MessageFlags
+            value: "128"
           - name: MsgForward
             reexport: coreconsensus.MsgForward
             type: coreconsensus.MessageKind

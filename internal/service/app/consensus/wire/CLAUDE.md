@@ -51,3 +51,9 @@ Ready and shares it across followers (#912,
   Version is AdminVersion2 or AdminVersion3 (#561) and the membership's
   retired keys exactly when it is AdminVersion3 (#648), so a node of a
   previous protocol never meets one before the raise.
+- Write or accept a forward's trace context without `FlagTrace`, or on any
+  kind but `MsgForward` and `MsgForwardAdmin`: the 25 bytes after its entry
+  (trace id, span id, sampled 0 or 1) exist exactly beside the flag, which
+  the driver sets only at cluster version 4, so a node of protocol 3 never
+  meets them; anything else is FRAME_INVALID (#1115,
+  `TestAForwardCarriesItsTraceContextOnlyBesideFlagTrace`, `FuzzParseMessage`).

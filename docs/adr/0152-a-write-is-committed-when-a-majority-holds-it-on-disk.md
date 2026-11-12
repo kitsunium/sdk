@@ -2575,7 +2575,20 @@ neither polls nor takes a loop turn from the heartbeats (#915). `Status`
 stays frozen: the configuration is its own value. Through `trace` (ADR 0051): one span
 per `Propose` from submission to local apply, with events at append, commit
 and apply; the trace context travels in the forwarding frame only — never in
-the log, which must not grow with telemetry. Through `logger`: role and term
+the log, which must not grow with telemetry. The frame layout of that context
+(#1115): a `MsgForward` or `MsgForwardAdmin` carrying `FlagTrace` (bit 7 of the
+flags) is followed, after its entry, by 25 bytes — the trace id (16), the
+proposer's span id (8) and its sampled bit (one byte, 0 or 1) — and the flag on
+any other kind, a short context or another sampled byte is `FRAME_INVALID`;
+the frame version stays 1. A follower sets the flag only once the committed
+cluster version is 4, which every member announced, so a node of protocol 3
+never meets the trailing bytes; below 4 the forward is the layout before, byte
+for byte. The leader opens `consensus.Forward`, the child of the proposer's
+span, at the forward, records `appended` at the position it answers and ends
+it at its commit of that position (or at a lost leadership or a stop); the
+proposer's span records `appended` with the position, `committed` before the
+apply goroutine is handed the entry, and `applied`. With no `Tracer` nothing
+of it runs. Through `logger`: role and term
 changes, membership changes, snapshots and truncations at `Info`; nothing per
 entry.
 
