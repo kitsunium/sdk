@@ -1589,7 +1589,7 @@ func (l *fileLog) resetTo(index, term uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.add(&record{kind: recCompact, batch: l.batch, index: index, term: term})
-	l.slots = nil
+	l.clearIndex()
 	l.first, l.prevTerm = index+1, term
 	l.compact, l.compactTerm = index, term
 	return nil

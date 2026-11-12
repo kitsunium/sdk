@@ -1742,7 +1742,7 @@ type Config struct {
 func (*Config) MemoryBudget(peers int) int64
 ```
 
-MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14).
+MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14) and of the file log's index: 4 bytes for each record MaxLogBytes holds at most, one of 56 bytes, an empty payload's.
 
 <a name="DataDir"></a>
 ## type [DataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)

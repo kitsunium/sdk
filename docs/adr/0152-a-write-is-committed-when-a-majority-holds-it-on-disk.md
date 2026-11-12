@@ -2827,13 +2827,24 @@ transport. The cross-field rules are checked after defaults are applied
   `PeerQueueBytes` per peer and connection, and `InboundDataBytes`. With the
   defaults and two peers, that is under 1 GiB. `NewRaft` reports the total,
   so a product can check it against its own limit.
+- **The file log's index is in that sum** (amendment of 2026-11-12,
+  [#1111](https://github.com/kitsunium/sdk/issues/1111)): a table per
+  segment of its retained entries' offsets, 4 bytes an entry, the term runs
+  (one per change of term) and the unsynced batch's entries. It replaces a
+  40-byte slot per entry, a tenth of the log with 256-byte entries, which
+  no bound counted; `MemoryBudget` adds `MaxLogBytes / 56 * 4`, 56 bytes
+  being an empty entry's record, and 1 048 576 entries of 256 B on 64 KiB
+  segments were measured at 4.6 bytes an entry. A compaction drops whole
+  tables and copies none.
 - **Opening the log is outside that sum**: about one segment and 80 bytes
-  per record of one segment, plus 80 bytes per entry, before any of these
+  per record of one segment, plus 44 bytes per entry, before any of these
   bounds holds anything (amendments of 2026-10-24 and 2026-10-25,
   [#630](https://github.com/kitsunium/sdk/issues/630),
   [#660](https://github.com/kitsunium/sdk/issues/660); 72 until the index
   kept each record's length, amendment of 2026-11-11,
-  [#913](https://github.com/kitsunium/sdk/issues/913)).
+  [#913](https://github.com/kitsunium/sdk/issues/913), 80 until it kept
+  4 bytes an entry, amendment of 2026-11-12,
+  [#1111](https://github.com/kitsunium/sdk/issues/1111)).
 - **Snapshot slots are bounded and enforced, and the disk reservation is
   their actual maximum (R4-28, R5-01, R6-02).** At most FOUR snapshots exist
   at once: the two retained, one being written, and one being received.
@@ -3081,6 +3092,7 @@ across changes.
 | segmented log, `Append` 64 × 256 B + one `Sync` | reported per device, as ADR 0056's `BENCH.md` reports publication |
 | segmented log, `Entries` of 64 × 256 B synced in one segment | 1 pread, ≤ 2 allocs/op (the read's buffer and the entry slice), the entries' data aliasing the buffer; the fetch cost per entry in the package's `BENCH.md` (amendment of 2026-11-11, [#913](https://github.com/kitsunium/sdk/issues/913)) |
 | a follower's receive of a `MsgApp` of 64 × 256 B (frame copied, parsed, stepped) | its payloads cost the frame's copy and the entry slice, Step none: the entries' data alias the frame copy (`Raft.Step`'s gift), and the entries `LogReader.Entries` returns own their data, so `fetch` and `readBack` copy nothing (amendment of 2026-11-12, [#1110](https://github.com/kitsunium/sdk/issues/1110)) |
+| segmented log, `compactPrefixAt` through a segment boundary | 0 slices proportional to the entries kept (≤ 2 allocs; measured 0), the tables before the point dropped whole (amendment of 2026-11-12, [#1111](https://github.com/kitsunium/sdk/issues/1111)) |
 | first consumer's table checksum, one update, at 10³ to 10⁶ repositories | constant time across sizes (R5-07) |
 
 **The implementing change's verifiers (R7-00f).** Each acceptance criterion

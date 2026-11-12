@@ -2780,7 +2780,8 @@ packages:
         methods:
           - doc: |-
               MemoryBudget is the node's memory budget with two peers, the sum of its
-              bounds (D14).
+              bounds (D14) and of the file log's index: 4 bytes for each record
+              MaxLogBytes holds at most, one of 56 bytes, an empty payload's.
             in:
               - name: peers
                 type: int

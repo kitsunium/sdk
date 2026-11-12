@@ -223,7 +223,7 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 	dd := silenceOpen(t, v.dir, run)
 	l := dd.d.log
 	l.mu.RLock()
-	s := l.slots[base+3-l.first]
+	s := l.locate(base + 3)
 	l.mu.RUnlock()
 	if err := dd.Close(); err != nil {
 		t.Fatal(err)

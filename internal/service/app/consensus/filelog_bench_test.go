@@ -49,8 +49,8 @@ func BenchmarkFileLogEntries(b *testing.B) {
 			for b.Loop() {
 				dst = dst[:0]
 				l.mu.RLock()
-				for _, s := range l.slots {
-					e, rerr := l.readEntry(s)
+				for i := l.first; i < l.first+l.n; i++ {
+					e, rerr := l.readEntry(l.locate(i))
 					if rerr != nil {
 						l.mu.RUnlock()
 						b.Fatal(rerr)

@@ -226,18 +226,6 @@ func encodeHS(hs coreconsensus.HardState) []byte {
 	return binary.LittleEndian.AppendUint64(b, hs.Commit)
 }
 
-// slot locates one retained entry: on disk once synced, in memory before.
-// length is its record's aligned length on disk, so Entries reads a run of
-// records in one pread without reading a header first (#913); 0 for a slot
-// in memory.
-type slot struct {
-	seg    uint64
-	off    int64
-	term   uint64
-	mem    *coreconsensus.EntryValue
-	length uint32
-}
-
 type segment struct {
 	n    uint64
 	f    *os.File
@@ -257,7 +245,15 @@ type fileLog struct {
 	pending     []byte
 	pendingLast int // offset in pending of the last record, -1 for none
 	first       uint64
-	slots       []slot
+	// n is how many entries the log retains, from first on; tables, runs
+	// and mem are their index (filelog_index.go, #1111).
+	n      uint64
+	tables []segIndex
+	runs   []termRun
+	mem    []coreconsensus.EntryValue
+	// tableHint is the capacity of a table replay opens, the entry records
+	// of the segment it replays; 0 outside replay.
+	tableHint   int
 	prevTerm    uint64 // term of first-1
 	hs          coreconsensus.HardState
 	compact     uint64
@@ -829,10 +825,10 @@ func (l *fileLog) trimTornTail(last *scanned) error {
 // and records in order, truncate records included, and judges continuity
 // on the result (R8-01).
 func (l *fileLog) replay(segs []*scanned) error {
-	// Sized once, for every entry record read: grown entry by entry, the
-	// index left several times its size to the collector within the open
-	// (#630). A truncate that drops it starts a new one.
-	l.slots = make([]slot, 0, entryRecords(segs))
+	// Each segment's table is sized once, for every entry record it holds:
+	// grown entry by entry, the index left several times its size to the
+	// collector within the open (#630).
+	defer func() { l.tableHint = 0 }()
 	for si, s := range segs {
 		if !s.cpOK {
 			return l.quarantine(s.n, 0, "checkpoint payload")
@@ -840,6 +836,7 @@ func (l *fileLog) replay(segs []*scanned) error {
 		if err := l.applyCheckpoint(si == 0, s.n, &s.cp); err != nil {
 			return err
 		}
+		l.tableHint = entryRecords(s)
 		for i := 1; i < len(s.recs); i++ {
 			r := &s.recs[i]
 			if err := l.applyRecord(s.n, r, s.data); err != nil {
@@ -854,15 +851,13 @@ func (l *fileLog) replay(segs []*scanned) error {
 	return nil
 }
 
-// entryRecords is the number of entry records segs hold, the most slots
-// replay appends.
-func entryRecords(segs []*scanned) int {
+// entryRecords is the number of entry records s holds, the most offsets
+// replay appends to its table.
+func entryRecords(s *scanned) int {
 	n := 0
-	for _, s := range segs {
-		for i := range s.recs {
-			if s.recs[i].kind == recEntry {
-				n++
-			}
+	for i := range s.recs {
+		if s.recs[i].kind == recEntry {
+			n++
 		}
 	}
 	return n
@@ -880,7 +875,7 @@ func (l *fileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error 
 		l.prevTerm = cp.prevTerm
 		return nil
 	}
-	if want := l.first + uint64(len(l.slots)) - 1; cp.prevIndex != want {
+	if want := l.first + l.n - 1; cp.prevIndex != want {
 		return l.quarantine(seg, 0, "checkpoint does not continue the log")
 	}
 	l.hs = cp.hs
@@ -916,13 +911,17 @@ func (l *fileLog) applyRecord(seg uint64, r *scanRec, data []byte) error {
 	return nil
 }
 
-// applyEntry appends an entry record's slot, quarantining one out of
-// sequence.
+// applyEntry appends an entry record to the index, quarantining one out of
+// sequence, or at an offset a table cannot hold.
 func (l *fileLog) applyEntry(seg uint64, r *scanRec) error {
-	if r.index != l.first+uint64(len(l.slots)) {
+	if r.index != l.first+l.n {
 		return l.quarantine(seg, r.off, "index out of sequence")
 	}
-	l.slots = append(l.slots, slot{seg: seg, off: r.off, term: r.term, length: r.length})
+	if !l.pushDisk(r.index, seg, r.off, r.off+int64(r.length), l.tableHint) {
+		return l.quarantine(seg, r.off, "offset past what the index holds")
+	}
+	l.pushTerm(r.index, r.term)
+	l.n++
 	return nil
 }
 
@@ -984,9 +983,7 @@ func unknownLayout(seg uint64, r *scanRec, field string, v int) error {
 // install and appended was quarantined at its next restart (#516).
 func (l *fileLog) applyCompactRecord(index, term uint64) {
 	if index >= l.first {
-		drop := min(index-l.first+1, uint64(len(l.slots)))
-		l.slots = l.slots[drop:]
-		l.first, l.prevTerm = index+1, term
+		l.dropThrough(index, term)
 	}
 	if index >= l.compact {
 		l.compact, l.compactTerm = index, term
@@ -997,11 +994,8 @@ func (l *fileLog) applyCompactRecord(index, term uint64) {
 // a dropped segment removes entries that are gone with it, and a later
 // compact record covers what follows.
 func (l *fileLog) applyTruncate(index uint64) {
-	switch {
-	case index >= l.first && index <= l.first+uint64(len(l.slots)):
-		l.slots = l.slots[:index-l.first]
-	case index < l.first:
-		l.first, l.slots, l.prevTerm = index, nil, 0
+	if index <= l.first+l.n {
+		l.cutFrom(index)
 	}
 }
 
@@ -1019,15 +1013,7 @@ func (l *fileLog) applyCompaction() {
 	if l.compact < l.first {
 		return
 	}
-	drop := min(l.compact-l.first+1, uint64(len(l.slots)))
-	if drop > 0 {
-		l.prevTerm = l.slots[drop-1].term
-	}
-	l.slots = l.slots[drop:]
-	l.first = l.compact + 1
-	if drop == 0 {
-		l.prevTerm = l.compactTerm
-	}
+	l.dropCompacted()
 }
 
 // openSegments opens every scanned segment for reading and writing, in
@@ -1491,10 +1477,10 @@ func (l *fileLog) termLocked(i uint64) uint64 {
 	switch {
 	case i == l.first-1:
 		return l.prevTerm
-	case i < l.first || i >= l.first+uint64(len(l.slots)):
+	case i < l.first || i >= l.first+l.n:
 		return 0
 	}
-	return l.slots[i-l.first].term
+	return l.termAt(i)
 }
 
 // usable is why the log refuses a call: its quarantine first, then the
@@ -1513,11 +1499,6 @@ const (
 	// rangeReadBytes is the most bytes one read takes past its first
 	// record: a run of synced entries longer than this is read in several.
 	rangeReadBytes int64 = 4 << 20
-	// rangeGapBytes is the most bytes of other records, the hard states and
-	// commits a follower writes between its entries, one read crosses
-	// between two entries; a wider gap, a suffix truncated and written
-	// again further on, starts another read.
-	rangeGapBytes int64 = 4 << 10
 )
 
 // rangeRead is one Entries call under way: its bounds, the payload bytes
@@ -1557,15 +1538,14 @@ func (l *fileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry
 	if lo < l.first {
 		return dst, compacted(lo, l.first)
 	}
-	if hi > l.first+uint64(len(l.slots)) {
+	if hi > l.first+l.n {
 		return dst, storageFailed("entries", errImpossible)
 	}
 	before := len(dst)
 	rr := rangeRead{lo: lo, hi: hi, maxBytes: maxBytes, dst: dst}
 	for i := lo; i < hi && !rr.full; {
-		s := &l.slots[i-l.first]
-		if s.mem != nil {
-			rr.take(i, *s.mem)
+		if i >= l.memFirst() {
+			rr.take(i, l.memEntry(i))
 			i++
 			continue
 		}
@@ -1582,56 +1562,56 @@ func (l *fileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry
 }
 
 // lowPayload is the least payload a record of this aligned length holds.
-func lowPayload(length uint32) int64 {
-	return max(0, int64(length)-int64(recHeader+recFixed+recAlign-1))
+func lowPayload(length int64) int64 {
+	return max(0, length-int64(recHeader+recFixed+recAlign-1))
 }
 
 // readRun reads the synced entries from i on that lie in one interval of
 // one segment, in one pread, and takes them into rr; it returns the index
-// of the first entry it did not take. The interval stops at the first
-// entry of another segment, in memory, past a gap of rangeGapBytes, past
-// rangeReadBytes, or whose payload, at least lowPayload, would pass
-// maxBytes: every entry the call takes was read, and an entry it does not
-// take is read at most once more than needed. A record that does not
-// parse as an entry is LOG_CORRUPT at its own offset, as readEntry's. The
-// caller holds mu.
+// of the first entry it did not take. A record's extent is bounded from
+// above by the next entry's offset, or by its table's end (#1111): the
+// interval stops at the first entry of another segment, in memory, past
+// rangeReadBytes, or whose payload, at least lowPayload of that extent,
+// would pass maxBytes. Where other records lie between two entries the
+// estimate counts them as payload, so a read may stop short of maxBytes,
+// never past it, and the next one goes on. A record that does not parse as
+// an entry is LOG_CORRUPT at its own offset, as readEntry's. The caller
+// holds mu.
 func (l *fileLog) readRun(rr *rangeRead, i uint64) (uint64, error) {
-	first := l.slots[i-l.first]
-	if first.length == 0 {
-		// No length known: the single-entry read, header first.
-		e, err := l.readEntry(first)
+	ti, p := l.tableOf(i)
+	t := &l.tables[ti]
+	start, end := int64(t.offs[p])*int64(recAlign), l.spanEnd(t, p)
+	if end <= start {
+		// No extent known: the single-entry read, header first.
+		e, err := l.readEntry(entryLoc{seg: t.seg, off: start})
 		if err != nil {
 			return i, err
 		}
 		rr.take(i, e)
 		return i + 1, nil
 	}
-	low := int64(rr.size) + lowPayload(first.length)
+	low := int64(rr.size) + lowPayload(end-start)
 	if i > rr.lo && low > int64(rr.maxBytes) {
 		rr.full = true
 		return i, nil
 	}
-	seg := l.segmentNumbered(first.seg)
+	seg := l.segmentNumbered(t.seg)
 	if seg == nil {
 		return i, storageFailed("read", errImpossible)
 	}
 	// Bounded by the segment, and by what an int holds, before the
 	// conversion, as readEntry's (#422).
-	if int64(first.length) > min(seg.size-first.off, math.MaxInt) {
-		return i, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(first.seg)), errs.Int64("offset", first.off))
+	if end-start > min(seg.size-start, math.MaxInt) {
+		return i, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(t.seg)), errs.Int64("offset", start))
 	}
-	start, end := first.off, first.off+int64(first.length)
+	limit := min(rr.hi, l.memFirst(), t.first+uint64(len(t.offs)))
 	k := i + 1
-	for ; k < rr.hi; k++ {
-		s := &l.slots[k-l.first]
-		if s.mem != nil || s.seg != first.seg || s.length == 0 || s.off < end || s.off-end > rangeGapBytes {
+	for q := p + 1; k < limit; k, q = k+1, q+1 {
+		next := l.spanEnd(t, q)
+		if next <= end || next-start > rangeReadBytes || next > seg.size {
 			break
 		}
-		next := s.off + int64(s.length)
-		if next-start > rangeReadBytes || next > seg.size {
-			break
-		}
-		if low += lowPayload(s.length); low > int64(rr.maxBytes) {
+		if low += lowPayload(next - end); low > int64(rr.maxBytes) {
 			break
 		}
 		end = next
@@ -1641,13 +1621,12 @@ func (l *fileLog) readRun(rr *rangeRead, i uint64) (uint64, error) {
 		return i, storageFailed("read", err)
 	}
 	rr.dst = slices.Grow(rr.dst, int(k-i))
-	for j := i; j < k; j++ {
-		s := &l.slots[j-l.first]
-		o := s.off - start
-		r, ok := parseRecord(b[o : o+int64(s.length)])
-		if !ok || r.kind != recEntry {
+	for j, q := i, p; j < k; j, q = j+1, q+1 {
+		o := int64(t.offs[q])*int64(recAlign) - start
+		r, ok := parseRecord(b[o : l.spanEnd(t, q)-start])
+		if !ok || r.kind != recEntry || r.index != j {
 			// A log that cannot be read cannot be trusted to agree with itself.
-			return j, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
+			return j, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(t.seg)), errs.Int64("offset", start+o))
 		}
 		if !rr.take(j, entryOf(&r)) {
 			return j, nil
@@ -1686,10 +1665,10 @@ func entryOf(r *record) coreconsensus.EntryValue {
 }
 
 // readEntry reads the synced entry s locates from its segment, its header
-// first: the single-entry read, for a slot whose length is not known. A
+// first: the single-entry read, for an entry whose extent is not known. A
 // record that does not parse as an entry there is LOG_CORRUPT: the log
 // disagrees with what it recorded.
-func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
+func (l *fileLog) readEntry(s entryLoc) (coreconsensus.EntryValue, error) {
 	seg := l.segmentNumbered(s.seg)
 	if seg == nil {
 		return coreconsensus.EntryValue{}, storageFailed("read", errImpossible)
@@ -1727,10 +1706,10 @@ func (l *fileLog) Term(index uint64) (uint64, error) {
 		return l.prevTerm, nil
 	case index < l.first:
 		return 0, compacted(index, l.first)
-	case index >= l.first+uint64(len(l.slots)):
+	case index >= l.first+l.n:
 		return 0, storageFailed("term", errImpossible)
 	}
-	return l.slots[index-l.first].term, nil
+	return l.termAt(index), nil
 }
 
 // Bounds implements LogReader; a refused log is empty.
@@ -1740,7 +1719,7 @@ func (l *fileLog) Bounds() (first, last uint64) {
 	if l.refuse != nil {
 		return 1, 0
 	}
-	return l.first, l.first + uint64(len(l.slots)) - 1
+	return l.first, l.first + l.n - 1
 }
 
 // ---- LogStore ----
@@ -1763,14 +1742,16 @@ func (l *fileLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.H
 	}
 	for i := range entries {
 		e := entries[i]
-		if e.Position.Index != l.first+uint64(len(l.slots)) {
+		if e.Position.Index != l.first+l.n {
 			return storageFailed("append", errImpossible)
 		}
 		l.add(&record{
 			kind: recEntry, batch: l.batch, term: e.Position.Term, index: e.Position.Index,
 			ekind: uint8(e.Kind), ever: e.Version, body: e.BodySum, chain: e.ChainSum, data: e.Data,
 		})
-		l.slots = append(l.slots, slot{term: e.Position.Term, mem: &e})
+		l.mem = append(l.mem, e)
+		l.pushTerm(e.Position.Index, e.Position.Term)
+		l.n++
 	}
 	if hs != nil {
 		l.add(&record{kind: recHardState, batch: l.batch, data: encodeHS(*hs)})
@@ -1817,7 +1798,10 @@ func (l *fileLog) Sync() error {
 		l.failed = ferr
 		return l.failed
 	}
-	l.settleBatch(cur.n)
+	if !l.settleBatch(cur.n) {
+		l.failed = storageFailed("index", errImpossible)
+		return l.failed
+	}
 	return l.dropSegmentsLocked()
 }
 
@@ -1872,38 +1856,24 @@ func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64) error {
 // settleBatch records the pending batch, now synced in segment seg, as
 // durable: its entries are read from disk from here on, the write offset
 // moves past it, and the next batch gets the next sequence number. The
-// caller holds mu.
-func (l *fileLog) settleBatch(seg uint64) {
-	l.relocate(seg)
+// caller holds mu. False when the index cannot hold the batch's offsets.
+func (l *fileLog) settleBatch(seg uint64) bool {
+	if !l.relocate(seg) {
+		return false
+	}
 	l.off += int64(len(l.pending))
 	l.markDurable()
 	l.pending = l.pending[:0]
 	l.pendingLast = -1
 	l.batch++
-}
-
-// relocate points every slot the pending batch carried at its record in
-// segment seg, now that the batch is synced there, and releases its
-// in-memory copy. A slot replaced since, by another term, is left alone.
-func (l *fileLog) relocate(seg uint64) {
-	var off int64
-	for off < int64(len(l.pending)) {
-		r, _ := parseRecord(l.pending[off:])
-		if r.kind == recEntry && r.index >= l.first && r.index < l.first+uint64(len(l.slots)) {
-			s := &l.slots[r.index-l.first]
-			if s.mem != nil && s.term == r.term {
-				s.seg, s.off, s.mem, s.length = seg, l.off+off, nil, uint32(r.length)
-			}
-		}
-		off += int64(r.length)
-	}
+	return true
 }
 
 // markDurable records the state the synced records now describe, which a
 // rotation's checkpoint is written from.
 func (l *fileLog) markDurable() {
-	last := l.first + uint64(len(l.slots)) - 1
-	l.dur = checkpoint{hs: l.hs, prevIndex: last, prevTerm: l.termLocked(last), compact: l.compact, compactTerm: l.compactTerm}
+	last := l.first + l.n - 1
+	l.dur = checkpoint{hs: l.hs, prevIndex: last, prevTerm: l.lastTerm(), compact: l.compact, compactTerm: l.compactTerm}
 }
 
 // restamp rewrites the batch sequence of every pending record.
@@ -1930,11 +1900,11 @@ func (l *fileLog) TruncateSuffix(from uint64) error {
 	if from < l.first {
 		from = l.first
 	}
-	if from >= l.first+uint64(len(l.slots)) {
+	if from >= l.first+l.n {
 		return nil
 	}
 	l.add(&record{kind: recTruncate, batch: l.batch, index: from})
-	l.slots = l.slots[:from-l.first]
+	l.cutFrom(from)
 	return nil
 }
 
@@ -1961,18 +1931,14 @@ func (l *fileLog) compactPrefixAt(through, term uint64) error {
 	if through < l.first {
 		return nil
 	}
-	last := l.first + uint64(len(l.slots)) - 1
+	last := l.first + l.n - 1
 	t, err := compactionTerm(through, last, l.termLocked(through), term)
 	if err != nil {
 		return err
 	}
 	l.add(&record{kind: recCompact, batch: l.batch, index: through, term: t})
-	if through >= last {
-		l.slots = nil
-	} else {
-		l.slots = slices.Clone(l.slots[through-l.first+1:])
-	}
-	l.first, l.prevTerm = through+1, t
+	// Whole tables go, none is copied (#1111).
+	l.dropThrough(through, t)
 	l.compact, l.compactTerm = through, t
 	return nil
 }
@@ -2038,17 +2004,6 @@ func (l *fileLog) supersedes(next *segment) (bool, error) {
 	}
 	cp, ok := decodeCheckpoint(r.data)
 	return ok && cp.prevIndex <= l.compact, nil
-}
-
-// retainsEntryIn reports whether a retained entry still lives in segment
-// seg.
-func (l *fileLog) retainsEntryIn(seg uint64) bool {
-	for _, s := range l.slots {
-		if s.seg == seg {
-			return true
-		}
-	}
-	return false
 }
 
 // removeFirstSegment closes and unlinks the oldest segment; the caller

@@ -204,14 +204,15 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 - Read synced entries one pread of a header and one of a record at a time:
   past a batch's sync every read of its entries goes to the segment, and a
   1 MiB fetch of 256-byte entries was 8 192 syscalls and as many
-  allocations (#913). Each slot keeps its record's aligned `length`, and
-  `readRun` reads a run of one segment — contiguous but for gaps of
-  `rangeGapBytes`, at most `rangeReadBytes`, cut where the least payload
-  the lengths allow passes `maxBytes` — with ONE pread into one buffer,
-  parsed in place: each entry's `Data` aliases it, capped at its length
-  (`entryOf`), and a record that does not parse is LOG_CORRUPT at its own
-  offset. `readEntry` stays the single-entry read, header first, for a slot
-  with no length. The slot grew from 32 to 40 bytes
+  allocations (#913). `readRun` reads a run of one segment — each
+  record's extent bounded by the next entry's offset or its table's `end`,
+  at most `rangeReadBytes`, cut where the least payload those extents
+  allow passes `maxBytes` (records between entries count as payload, so a
+  read may stop short of `maxBytes`, never past it) — with ONE pread into
+  one buffer, parsed in place: each entry's `Data` aliases it, capped at
+  its length (`entryOf`), and a record that does not parse, or names
+  another index, is LOG_CORRUPT at its own offset. `readEntry` stays the
+  single-entry read, header first, for an entry with no extent
   (`TestEntriesReadASyncedRunOfOneSegmentInOnePread`,
   `TestEntriesReadOnePreadPerSegment`,
   `TestADamagedRecordInsideARunIsCorruptAtItsOwnOffset`,
@@ -234,6 +235,31 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   of 64 entries cost its payloads 65 allocations, now the frame's copy and
   the entry slice (#1110, in the alloc lane
   `TestAFollowerStepKeepsTheFramesPayloads`).
+- Keep a slot per retained entry: one `slot{seg, off, term, mem,
+  length}`, 40 bytes, from `first` to the last index, held the retained
+  log's index in heap at about a tenth of the log with 256-byte entries,
+  outside `MemoryBudget`, and `compactPrefixAt` cloned it at every
+  compaction (#1111). The index is `filelog_index.go`: a `segIndex` per
+  segment, the offsets of its retained entries over `recAlign` in a
+  `[]uint32` (32 GiB a segment at most, `maxIndexedOffset`; past it replay
+  quarantines and a sync stops the log) with its first index and an upper
+  bound of its last record's end; the term runs, one `termRun` per change
+  of term, which `Term` searches; and the unsynced batch's entries in
+  `mem`, the log's tail, which `relocate` moves to the tables once synced,
+  the last record of an index the retained one. A compaction drops whole
+  tables and reslices the one its point falls in, a truncation cuts the
+  tables, runs and tail; a table left for another segment is clipped to
+  its length once. `MemoryBudget` counts `MaxLogBytes / minRecordBytes *
+  indexEntryBytes`, and `indexBytes` reports what the index holds
+  (`TestTheIndexHoldsFourBytesAnEntry`: 1 048 576 entries of 256 B on
+  64 KiB segments in 4.6 bytes an entry, under 5 MiB, where slots took
+  40 MiB; `TestTermAgreesWithTheMemoryLogAcrossElections`;
+  `TestMemoryBudgetCountsTheIndex`; in the alloc lane
+  `TestACompactionThroughASegmentBoundaryCopiesNoEntries`, 0 allocations).
+  Nor make `termLocked`, `markDurable`, `applyCompaction`,
+  `applyCompactRecord` or `applyTruncate` stop inlining: `kit gen` holds
+  the inline set of the base and refuses a generation that loses one, so
+  their bodies call one helper of the index each.
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.

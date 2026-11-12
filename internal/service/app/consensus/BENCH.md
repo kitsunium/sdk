@@ -11,7 +11,8 @@ the apply goroutine's read back past `RecentEntriesBytes`, `Recover` and
 `Inspect` — goes to the segment file. `per-entry` is the path before #913:
 `readEntry`, a pread of the header then a pread of the record into a buffer of
 its own, two allocations an entry. `range` is `Entries` since #913: the run's
-interval, known from the slots, read with ONE pread into one buffer, each
+interval, known from the segment's table of offsets (#1111: 4 bytes an
+entry, the slot of 40 bytes it replaced held the record's length), read with ONE pread into one buffer, each
 entry's `Data` aliasing it. The 4 096-entry row is the issue's 1 MiB fetch of
 256-byte entries.
 
@@ -29,17 +30,17 @@ entry's `Data` aliasing it. The 4 096-entry row is the issue's 1 MiB fetch of
 | RAM | 16 GiB |
 | OS | macOS 26.6.2 (25G83), darwin/arm64 |
 | Go | go1.27.3 |
-| Commit | b4c299a46 plus the change of #913 |
-| Taken | 2026-11-11, `-count=3`, default `-benchtime` |
+| Commit | a42d59ef5 (#913) plus the change of #1111 |
+| Taken | 2026-11-12, `-count=3`, default `-benchtime` |
 
 ## Results
 
 | Benchmark | ns/op (3 runs) | ns/entry | B/op | allocs/op | preads |
 |---|---|---|---|---|---|
-| `range/64` | 78 712, 72 733, 46 046 | 1 230, 1 137, 720 | 20 480 | 1 | 1 |
-| `per-entry/64` | 187 137, 306 964, 453 618 | 2 924, 4 796, 7 090 | 20 992 | 128 | 128 |
-| `range/4096` | 1 514 128, 2 145 751, 2 076 112 | 371, 524, 507 | 1 278 456 | 1 | 1 |
-| `per-entry/4096` | 35 506 749, 26 240 787, 28 013 003 | 8 693, 6 798, 7 163 | 1 343 514 | 8 192 | 8 192 |
+| `range/64` | 10 669, 15 932, 22 106 | 167, 249, 345 | 20 480 | 1 | 1 |
+| `per-entry/64` | 135 076, 142 187, 141 774 | 2 112, 2 225, 2 216 | 20 992 | 128 | 128 |
+| `range/4096` | 1 084 509, 1 463 573, 1 043 041 | 265, 358, 255 | 1 278 085 – 1 278 325 | 1 | 1 |
+| `per-entry/4096` | 12 481 218, 19 868 417, 11 115 205 | 3 048, 4 851, 2 715 | 1 343 497 – 1 343 517 | 8 192 | 8 192 |
 
 The preads column is counted, not timed: `TestEntriesReadASyncedRunOfOneSegmentInOnePread`
 and the alloc lane's `TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice`
@@ -50,10 +51,10 @@ is D15's budget (`Entries of 64 x 256 B: 1 pread, <= 2 allocs/op`).
 ## Reading it
 
 - **The 1 MiB fetch** went from 8 192 syscalls and 8 192 allocations to one
-  of each, and from 7 to 9 µs an entry to 0.4 to 0.5 µs: 13 to 23 times
-  faster in these runs.
+  of each, and from 2.7 to 4.9 µs an entry to 0.26 to 0.36 µs: 8 to 19
+  times faster in these runs.
 - **64 entries** gain less per entry (the one pread's fixed cost is spread
-  over fewer records) and still 2.5 to 10 times.
+  over fewer records) and still 6 to 13 times.
 - **The bytes are the same**: one buffer of the records' aligned length
   against a buffer per record; the 512 B more of `per-entry/64` are its 64
   headers.

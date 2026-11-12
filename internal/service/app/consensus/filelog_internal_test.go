@@ -1280,7 +1280,7 @@ func TestASegmentAnIntDoesNotHoldIsRefusedOn32Bits(t *testing.T) {
 		t.Fatalf("scan of a segment of %d bytes: %v, want STORAGE_FAILED", size, err)
 	}
 	l := &fileLog{segs: []*segment{{n: 1, f: f, size: size}}}
-	if _, err := l.readEntry(slot{seg: 1}); !errors.Is(err, coreconsensus.LogCorrupt) {
+	if _, err := l.readEntry(entryLoc{seg: 1}); !errors.Is(err, coreconsensus.LogCorrupt) {
 		t.Fatalf("an entry of 2^31 bytes: %v, want LOG_CORRUPT", err)
 	}
 }

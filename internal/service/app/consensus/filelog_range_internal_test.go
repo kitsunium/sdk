@@ -144,7 +144,7 @@ func TestEntriesReadOnePreadPerSegment(t *testing.T) {
 	first, last := l.Bounds()
 	segs := map[uint64]bool{}
 	for i := first; i <= last; i++ {
-		segs[l.slots[i-l.first].seg] = true
+		segs[l.locate(i).seg] = true
 	}
 	if len(segs) < 2 {
 		t.Fatalf("the entries sit in %d segment, want several", len(segs))
@@ -187,7 +187,7 @@ func TestADamagedRecordInsideARunIsCorruptAtItsOwnOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustSync(t, l)
-	s := l.slots[damaged-l.first]
+	s := l.locate(damaged)
 	f, err := os.OpenFile(filepath.Join(l.logDir(), segName(s.seg)), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)

@@ -979,7 +979,7 @@ func silenceUnderItsLeaderOnDiskWith(t *testing.T, before func(s *silencedOnDisk
 	dd := openDir(t, s.victim.dir, 16<<10)
 	l := dd.d.log
 	l.mu.RLock()
-	slot := l.slots[s.acked["ack03"]-l.first]
+	slot := l.locate(s.acked["ack03"])
 	l.mu.RUnlock()
 	if err := dd.Close(); err != nil {
 		t.Fatal(err)

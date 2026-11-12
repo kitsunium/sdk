@@ -49,7 +49,7 @@ func TestADroppedSegmentIsSyncedWhenTheNextOneIsRetained(t *testing.T) {
 	}
 	// The second segment still holds a retained entry: the pass removes the
 	// first segment, then stops.
-	l.slots = []slot{{seg: 2}}
+	l.tables = []segIndex{{seg: 2, offs: []uint32{0}}}
 	if err := os.Chmod(logDir, 0o300); err != nil {
 		t.Fatal(err)
 	}

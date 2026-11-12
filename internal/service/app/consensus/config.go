@@ -325,9 +325,13 @@ func refuseDurability(c *Config) error {
 }
 
 // MemoryBudget is the node's memory budget with two peers, the sum of its
-// bounds (D14).
+// bounds (D14) and of the file log's index: 4 bytes for each record
+// MaxLogBytes holds at most, one of 56 bytes, an empty payload's.
 func (c *Config) MemoryBudget(peers int) int64 {
-	return c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes)
+	// The index's term: one offset per entry the log may retain, each at
+	// least an empty record on disk (#1111).
+	index := c.MaxLogBytes / minRecordBytes * indexEntryBytes
+	return c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes) + index
 }
 
 // defaultCodec is flate, whose registered singleton bounds its

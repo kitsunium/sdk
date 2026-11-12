@@ -255,7 +255,7 @@ func TestACutPastTheCommitTheNodeKnowsWaitsForIt(t *testing.T) {
 	dd := b.openDD(f.dir)
 	fl := dd.d.log
 	fl.mu.RLock()
-	s := fl.slots[j-fl.first]
+	s := fl.locate(j)
 	fl.mu.RUnlock()
 	if err := dd.Close(); err != nil {
 		t.Fatal(err)

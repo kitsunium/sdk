@@ -105,3 +105,55 @@ func TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice(t *testing.T) {
 		t.Fatalf("%d reads into a reused slice allocated %d times, over one a read", entriesAllocRuns, got.own)
 	}
 }
+
+// compactPrefixAt through a segment boundary drops the tables before it
+// whole and reslices the one it falls in: nothing proportional to the
+// entries kept is copied (#1111). The index's slot slice was cloned at
+// every compaction, one allocation of 40 bytes per entry kept.
+func TestACompactionThroughASegmentBoundaryCopiesNoEntries(t *testing.T) {
+	if !flock.Native {
+		t.Skip("no flock(2), no data directory (ADR 0144)")
+	}
+	d, err := NewDataDirWith(t.TempDir(), DataDirOptions{SegmentBytes: 64 << 10, RuntimeDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	l := d.d.log
+	data := bytes.Repeat([]byte{0xc4}, 1<<10)
+	var next uint64 = 1
+	for len(l.tables) < 8 {
+		es := make([]coreconsensus.EntryValue, 0, 16)
+		for range 16 {
+			es = append(es, coreconsensus.EntryValue{
+				Position: coreconsensus.PositionValue{Term: 1, Index: next},
+				Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data,
+			})
+			next++
+		}
+		if err := l.Append(es, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Sync(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Each compaction goes through the first entry of the next segment's
+	// table: the one before goes whole, the next is resliced.
+	throughs := []uint64{l.tables[1].first, l.tables[2].first, l.tables[3].first, l.tables[4].first}
+	l.pending = make([]byte, 0, 1<<12)
+	k := 0
+	allocs := testing.AllocsPerRun(len(throughs)-1, func() {
+		if err := l.compactPrefixAt(throughs[k], 0); err != nil {
+			t.Fatal(err)
+		}
+		k++
+	})
+	t.Logf("a compaction through a segment boundary: %.1f allocs, %d entries kept", allocs, l.n)
+	if first, _ := l.Bounds(); first != throughs[3]+1 {
+		t.Fatalf("the log starts at %d, want %d", first, throughs[3]+1)
+	}
+	if allocs > 2 {
+		t.Fatalf("a compaction through a segment boundary allocated %.1f times, over 2", allocs)
+	}
+}

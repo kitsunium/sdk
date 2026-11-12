@@ -168,7 +168,7 @@ func TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt(t *testing.T) {
 	dd := silenceOpen(t, victim.dir, run)
 	l := dd.d.log
 	l.mu.RLock()
-	s := l.slots[acked["ack03"]-l.first]
+	s := l.locate(acked["ack03"])
 	l.mu.RUnlock()
 	if err := dd.Close(); err != nil {
 		t.Fatal(err)

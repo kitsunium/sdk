@@ -63521,7 +63521,7 @@
       "recv": "Config",
       "spelled": "func(peers int) int64",
       "canonical": "func(peers int) int64",
-      "doc": "MemoryBudget is the node's memory budget with two peers, the sum of its\nbounds (D14).\n",
+      "doc": "MemoryBudget is the node's memory budget with two peers, the sum of its\nbounds (D14) and of the file log's index: 4 bytes for each record\nMaxLogBytes holds at most, one of 56 bytes, an empty payload's.\n",
       "file": "service/app/consensus/config.go",
       "layer": "service",
       "family": "app"
