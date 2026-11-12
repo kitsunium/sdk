@@ -51,8 +51,9 @@ func groupsInUse(d *dirFlushes) int {
 
 // TestPublicationsIntoOneDirectoryShareTheNextFlush pins #803's adoption: the
 // publications that reach step 5 while a flush of their directory runs share
-// ONE flush after it, rather than paying one each; and the directory's group
-// is gone once the last of them has its verdict.
+// ONE flush after it, rather than paying one each — the running one being the
+// leader's own, run on its goroutine since it found the directory idle (#813);
+// and the directory's group is gone once the last of them has its verdict.
 //
 // It does not run in parallel: it counts the goroutines parked in a commit
 // group, and a parallel test's would be counted too.
@@ -78,7 +79,9 @@ func TestPublicationsIntoOneDirectoryShareTheNextFlush(t *testing.T) {
 	for i := 1; i <= followers; i++ {
 		wg.Go(func() { verdicts[i] = flushes.sync("queue/ready") })
 	}
-	eventually(t, "the leader and its seven followers parked in the group", func() bool { return parkedInGroups() >= followers+1 })
+	//: the leader found the directory idle: it flushes on its own goroutine
+	//: (commit's idle path, #813), held in the flush, not parked in Do.
+	eventually(t, "the seven followers parked in the group", func() bool { return parkedInGroups() >= followers })
 	close(release)
 	wg.Wait()
 	for i, err := range verdicts {
@@ -242,5 +245,43 @@ func TestConcurrentPublicationsIntoOneDirectoryAllLand(t *testing.T) {
 	}
 	if n := groupsInUse(disk.flushes); n != 0 {
 		t.Fatalf("%d directory groups held after every publication returned, want none", n)
+	}
+}
+
+// TestAnUncontendedFlushRunsOnItsPublicationsGoroutine pins #813's fast path:
+// a publication that finds its directory idle flushes it on its own
+// goroutine, through the commit group's idle path — no batch, no leading
+// goroutine —, and the entry it used is kept as the next directory's, rebound
+// to it, so a run of uncontended publications builds one group in all.
+func TestAnUncontendedFlushRunsOnItsPublicationsGoroutine(t *testing.T) {
+	t.Parallel()
+	var flushed []string
+	var onCaller []bool
+	flushes := newDirFlushes(func(dir string) error {
+		buf := make([]byte, 1<<16)
+		stack := string(buf[:runtime.Stack(buf, false)])
+		flushed = append(flushed, dir)
+		onCaller = append(onCaller, strings.Contains(stack, "vfs.(*dirFlushes).sync("))
+		return nil
+	})
+	for _, dir := range []string{"a", "b", "a"} {
+		if err := flushes.sync(dir); err != nil {
+			t.Fatalf("sync(%s) = %v", dir, err)
+		}
+	}
+	if strings.Join(flushed, ",") != "a,b,a" {
+		t.Fatalf("flushed %v, want [a b a]: a kept entry flushes the directory it is bound to now", flushed)
+	}
+	for i, ok := range onCaller {
+		if !ok {
+			t.Fatalf("flush %d ran off its publication's goroutine: an uncontended publication pays the group's batch", i)
+		}
+	}
+	first := flushes.spare
+	if err := flushes.sync("c"); err != nil {
+		t.Fatalf("sync(c) = %v", err)
+	}
+	if first == nil || flushes.spare != first || groupsInUse(flushes) != 0 {
+		t.Fatalf("spare %p then %p with %d groups in use, want one entry kept and reused, none in use", first, flushes.spare, groupsInUse(flushes))
 	}
 }

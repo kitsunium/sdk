@@ -126,10 +126,12 @@ cost — anyone sizing a publisher must benchmark against `NewOS`.
   it is stdlib code this package delegates to rather than reimplements. It is
   reported rather than hidden; it is not worth a private read loop to shave,
   since the same call is already 7.4 µs of syscall.
-- **`WriteAtomic` on disk allocates 24 times and 1 248 B.** Roughly three times
-  `WriteFile`'s 8, from the temporary's name (entropy, hex encoding, `path.Join`),
-  the extra open, and the directory handle for the final flush. **This is
-  deliberately not optimised.** 1 248 B of garbage sits next to 3 milliseconds
+- **`WriteAtomic` on disk allocated 24 times and 1 248 B** when this table was
+  taken (32 after #803's shared flush, 20 since #813 — see the last section).
+  Roughly three times `WriteFile`'s 8, from the temporary's name (entropy, hex
+  encoding, `path.Join`), the extra open, and the directory handle for the final
+  flush. **What is left is not optimised further**: `os.Root`'s confinement is
+  18 of the 20, and it stays (ADR 0056, ADR 0083). 1 248 B of garbage sits next to 3 milliseconds
   of `fsync`: removing every allocation on the path would improve the verb by
   well under a tenth of a percent, and each one removed would be a step away
   from the straightforward code that makes the failure paths auditable. The
@@ -190,3 +192,39 @@ the files):
 The directory flush is shared; the sixteen file flushes are not, and they are
 what is left: each must reach the device before its own rename. A batch of one
 costs what `WriteAtomic` costs.
+
+## The name in one allocation, the idle directory flushed in place (#813, 2026-11-12)
+
+Measured 2026-11-12 on the same 8-core AMD EPYC 7351P VM (Linux
+6.12.101+deb13-amd64), 4 CPUs (`GOMAXPROCS=4`), go1.27.4 linux/amd64, branch
+`wip/sdk-lot-4-x13` against its base `26a4ae8a5`: two test binaries run in
+turn, three rounds of `-test.bench '^Benchmark(WriteAtomic|WriteAtomic_Parallel)$'
+-test.benchmem -test.count=2 -test.benchtime=1s`, benchstat over the six
+samples of each:
+
+| Benchmark | before | after |
+|---|---|---|
+| `WriteAtomic/os/256` | 2.848 ms, 1 848 B, **32 allocs** | 2.787 ms (~, p = 0.49), 1 105 B, **20 allocs** |
+| `WriteAtomic/os/4096` | 2.836 ms, 1 841 B, 32 allocs | 2.825 ms (~, p = 0.94), 1 104 B, 20 allocs |
+| `WriteAtomic/os/65536` | 3.130 ms, 1 843 B, 32 allocs | 3.100 ms (~, p = 0.49), 1 104 B, 20 allocs |
+| `WriteAtomic_Parallel` | 425 µs, 1 190 B, 20 allocs | 435 µs (~, p = 0.94), 983 B, 16 allocs |
+
+Where the twenty go (`-memprofile -memprofilerate=1`, 2 000 publications):
+`os.Root` — the guard's `Lstat` 3, the temporary's `O_EXCL` create 5, the
+rename 6, the directory's open for its fsync 4 —, the temporary's name 1, and
+one tiny allocation the profile does not see. The twelve removed:
+
+- **the temporary's name, 5 → 1.** It was sixteen random bytes, their hex and
+  `path.Join`; it is the process's seed, drawn once, and a counter, written on
+  the stack. A name found taken — only a planter that read the directory can
+  guess the next one — falls back to a random name, at most three tries.
+- **the directory's commit group, 8 → 0 when nobody shares it.** A publication
+  that finds its directory idle flushes it on its own goroutine through
+  `concur/commit`'s idle path (no batch, no channel, no goroutine), and the
+  directory's entry is kept for the next one rather than rebuilt. Concurrent
+  publications still share the next flush (#803): `WriteAtomic_Parallel` keeps
+  its time.
+
+`TestAnUncontendedPublicationStaysWithinItsAllocationBudget`
+(`alloc_external_test.go`, the race-off lane) holds the nineteen counted on
+the caller's stack.

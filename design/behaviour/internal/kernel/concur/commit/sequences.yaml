@@ -46,11 +46,18 @@ sequences:
         kind: actor
       - id: (*Group).Do
         kind: self
+      - id: g.runInline
+        kind: internal
       - id: g.join
         kind: internal
       - id: ctx.Err
         kind: value
     steps:
+      - opt:
+          do:
+            - return: g.runInline(ctx, item)
+              to: g.runInline
+          when: ctx.Done() == nil && g.cfg.MaxWait <= 0 && g.startInline()
       - bind: joined, refusal
         eval: g.join(ctx, item)
         to: g.join
@@ -81,6 +88,67 @@ sequences:
                       - default: true
                 - return: ctx.Err()
                   to: ctx.Err
+  - of: (*Group).startInline
+    steps:
+      - lock:
+          mutex: g.mu
+      - opt:
+          do:
+            - return: "false"
+          when: g.closed || g.inline != inlineNone || g.pending != nil || !settled(g.tail)
+      - set: g.inline
+        value: inlineLatest
+      - return: "true"
+  - of: (*Group).runInline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).runInline
+        kind: self
+      - id: g.endInline
+        kind: internal
+    steps:
+      - defer: g.endInline()
+        to: g.endInline
+      - return: g.flush(ctx, []T{item})
+  - of: (*Group).endInline
+    steps:
+      - lock:
+          mutex: g.mu
+      - set: g.inline
+        value: inlineNone
+      - opt:
+          do:
+            - eval: close(g.inlineDone)
+            - set: g.inlineDone
+              value: nil
+          when: g.inlineDone != nil
+  - of: (*Group).last
+    steps:
+      - opt:
+          do:
+            - return: g.tail
+          when: g.inline != inlineLatest
+      - opt:
+          do:
+            - set: g.inlineDone
+              value: make(chan struct{})
+          when: g.inlineDone == nil
+      - return: g.inlineDone
+  - of: settled
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: done == nil
+      - select:
+          cases:
+            - comm: <-done
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
   - of: (*Group).join
     participants:
       - id: caller
@@ -106,9 +174,14 @@ sequences:
           do:
             - set: current
               to: newBatch
-              value: newBatch[T](g.tail)
+              value: newBatch[T](g.last())
             - set: g.pending, g.tail
               value: current, current.done
+            - opt:
+                do:
+                  - set: g.inline
+                    value: inlineBehind
+                when: g.inline == inlineLatest
             - go: g.lead(context.WithoutCancel(ctx), current)
               to: g.lead
           when: current == nil
@@ -180,6 +253,8 @@ sequences:
         kind: self
       - id: g.mu.Lock
         kind: value
+      - id: g.last
+        kind: internal
       - id: g.mu.Unlock
         kind: value
     steps:
@@ -188,7 +263,8 @@ sequences:
       - set: g.closed
         value: "true"
       - bind: last
-        eval: g.tail
+        eval: g.last()
+        to: g.last
       - eval: g.mu.Unlock()
         to: g.mu.Unlock
       - opt:

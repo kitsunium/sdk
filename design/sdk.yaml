@@ -745,6 +745,14 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/singleflight.(*Group[...]).Do
     allocs: 5
     fixture: DoLeading
+  # An idle Do (#813): a context that can never end, on a group with
+  # nothing gathering or flushing and no MaxWait, flushes its item alone on
+  # its caller's goroutine — no batch, no channel, no goroutine. Zero for an
+  # item of size zero, the one vfs's directory flush passes; the same call
+  # through a batch costs 6 (BENCH.md, Do_Uncontended).
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/commit.(*Group[...]).Do
+    allocs: 0
+    fixture: DoIdle
   # A document read into a value the caller keeps (#813): the decoder's
   # state, and the strings and slice of the document itself — five for the
   # fixture's account, whose three strings differ from one read to the
