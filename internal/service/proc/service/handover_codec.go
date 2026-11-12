@@ -454,7 +454,7 @@ func encodeExit(x *coreproc.ExitValue) []byte {
 	w.i64(xMaxRSS, x.MaxRSS)
 	w.flag(xCore, x.CoreDumped)
 	//: the counters, when the kernel filled them.
-	if u := x.Usage; u != nil {
+	if u := x.Usage; u.Known {
 		uw := &writer{}
 		//: in their order.
 		for i, v := range []uint64{u.MinorFaults, u.MajorFaults, u.InBlock, u.OutBlock, u.VoluntaryCtxSw, u.InvoluntaryCtxSw} {
@@ -674,8 +674,9 @@ func decodeExit(r *reader, b []byte) coreproc.ExitValue {
 }
 
 // decodeUsage reads an exit's counters.
-func decodeUsage(r *reader, b []byte) *coreproc.UsageValue {
-	u := &coreproc.UsageValue{}
+func decodeUsage(r *reader, b []byte) coreproc.UsageValue {
+	//: a record present is a usage the kernel filled.
+	u := coreproc.UsageValue{Known: true}
 	slots := [...]*uint64{&u.MinorFaults, &u.MajorFaults, &u.InBlock, &u.OutBlock, &u.VoluntaryCtxSw, &u.InvoluntaryCtxSw}
 	sub := &reader{b: b}
 	//: each record.

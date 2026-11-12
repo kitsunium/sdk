@@ -1112,6 +1112,54 @@ packages:
           - constraint: any
             name: T
       - doc: |-
+          IntoGetter is a read into a value the caller owns, on a store whose calls
+          take no context: the sibling of [Collection] the file engine implements
+          beside it (#813). A caller that reads in a loop keeps one value and
+          decodes each document into it, rather than receiving a fresh one per
+          read.
+        methods:
+          - doc: |-
+              GetInto decodes the document stored under key into dst, which it
+              first sets to T's zero value: dst ends up equal to what Get returns,
+              sharing nothing with the store or with what dst held before — no
+              field of an earlier document survives, and no slice, map or pointer
+              dst held is written through. DOCUMENT_NOT_FOUND, STORE_CLOSED and
+              DOCUMENT_UNDECODABLE as Get; on any error dst holds T's zero value.
+            in:
+              - name: key
+                type: string
+              - name: dst
+                type: "*T"
+            name: GetInto
+            out:
+              - type: error
+        name: IntoGetter
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          IntoGetterContext is [IntoGetter] with a context on every call: the
+          sibling of [CollectionContext] the SQL engine implements beside it.
+        methods:
+          - doc: |-
+              GetInto is IntoGetter.GetInto under ctx, read in one statement on the
+              transaction ctx carries for the store's database, and on the pool
+              otherwise.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: dst
+                type: "*T"
+            name: GetInto
+            out:
+              - type: error
+        name: IntoGetterContext
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
           BatchWriter records the writes of one batch, in order, for [Batcher] and
           [BatcherContext]: each call prepares its document — its key, its JSON, its
           index keys — and answers at once only what the document alone decides,
@@ -2116,6 +2164,21 @@ packages:
               - type: T
               - type: error
             recv: pointer
+          - doc: |-
+              GetInto decodes the document stored under key into dst, as
+              core/data/docstore.IntoGetter says: dst set to T's zero value first, so
+              it ends up equal to what Get returns and shares nothing with the store or
+              with what it held, without the fresh T Get returns. DocumentNotFound,
+              StoreClosed or DocumentUndecodable as Get, dst zero then.
+            in:
+              - name: key
+                type: string
+              - name: dst
+                type: "*T"
+            name: GetInto
+            out:
+              - type: error
+            recv: pointer
           - doc: List returns every document, in key order.
             name: List
             out:
@@ -2729,6 +2792,23 @@ packages:
             name: Get
             out:
               - type: T
+              - type: error
+            recv: pointer
+          - doc: |-
+              GetInto decodes the document stored under key into dst, as
+              core/data/docstore.IntoGetterContext says: dst set to T's zero value
+              first, so it ends up equal to what Get returns and shares nothing with
+              what it held. DocumentNotFound, StatementFailed or DocumentUndecodable as
+              Get, dst zero then.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: dst
+                type: "*T"
+            name: GetInto
+            out:
               - type: error
             recv: pointer
           - doc: |-
@@ -3779,8 +3859,8 @@ packages:
             type: "*errs.Error"
       - alias:
           - doc: |-
-              Store is the public alias for the document store: Get, List, Filter,
-              Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and
+              Store is the public alias for the document store: Get, GetInto, List,
+              Filter, Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and
               Range read a page at a time; Put, Insert, Replace, Update and
               Delete write, and their Stamped forms say what the version they make
               records; Versions and Version read a document's versions, RewriteVersions
@@ -3850,8 +3930,8 @@ packages:
             target: svcdocstore.StatsValue
       - alias:
           - doc: |-
-              SQLStore is the public alias for the document store over SQL: Get, List,
-              Filter, Entries, Keys, Count, Lookup and Find read, and Documents,
+              SQLStore is the public alias for the document store over SQL: Get,
+              GetInto, List, Filter, Entries, Keys, Count, Lookup and Find read, and Documents,
               FindAfter and Range read a page at a time; Put, Insert, Replace, Update
               and Delete write, and their Stamped forms say what the version they make
               records; Versions, Version, RewriteVersions and VersionWeight, Trash,
@@ -3984,6 +4064,26 @@ packages:
               every call, which [SQLStore] implements.
             name: RevisionedContext
             target: coredocstore.RevisionedContext[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              IntoGetter is the public alias for the sibling of [Collection] that
+              decodes a document into a value the caller owns, without a context,
+              which [Store] implements: GetInto — a read loop that keeps one value
+              instead of receiving a fresh one per read (#813).
+            name: IntoGetter
+            target: coredocstore.IntoGetter[T]
+            typeParams:
+              - constraint: any
+                name: T
+      - alias:
+          - doc: |-
+              IntoGetterContext is the public alias for [IntoGetter] with a context on
+              every call, which [SQLStore] implements.
+            name: IntoGetterContext
+            target: coredocstore.IntoGetterContext[T]
             typeParams:
               - constraint: any
                 name: T

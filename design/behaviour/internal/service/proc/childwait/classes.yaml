@@ -103,11 +103,13 @@ functions:
     results: int64
   - doc: |-
       UsageOf reads the page-fault, block-I/O and context-switch counters of a
-      wait4 rusage into ExitValue.Usage. Linux, darwin and the BSDs fill them; a
-      counter that reads negative is reported as zero, not wrapped.
+      wait4 rusage into ExitValue.Usage, Known set. Linux, darwin and the BSDs
+      fill them; a counter that reads negative is reported as zero, not wrapped.
+      The value is returned, not a pointer: a collection converts it without
+      allocating.
     name: UsageOf
     params: ru *syscall.Rusage
-    results: "*coreproc.UsageValue"
+    results: coreproc.UsageValue
   - doc: |-
       counter widens one rusage counter — int64 on a 64-bit target, int32 on
       386, arm and mips — to the port's uint64. A counter is never negative; one

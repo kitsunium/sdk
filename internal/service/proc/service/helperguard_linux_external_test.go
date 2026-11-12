@@ -58,6 +58,14 @@ const (
 	holdersQuiet  = 3
 	// probeWait bounds the wait for a guard probe.
 	probeWait = 30 * time.Second
+	// bazelTimeoutEnv is Bazel's test timeout. rules_go's generated main reads
+	// it and then registers a SIGTERM channel nobody reads
+	// (bzltestutil.RegisterTimeoutHandler), so a helper that inherited it
+	// swallowed every SIGTERM until it registered its own: a stop that landed
+	// between a helper's READY=1 and its signal.Notify waited for the final
+	// kill (run 43144125124). A helper is a service, not a test: it never
+	// inherits the variable.
+	bazelTimeoutEnv = "TEST_TIMEOUT"
 )
 
 // supervisorHelpers are the helpers that spawn further helpers.
@@ -92,10 +100,11 @@ func entryName(kv string) string {
 
 // helperEnviron is this process's environment for a child that plays helper,
 // with extra's assignments: helperEnv and each name of extra are taken out
-// before they are set, so none reaches the child twice. The depth stays, as
-// the guard left it.
+// before they are set, so none reaches the child twice, and Bazel's test
+// timeout is taken out for good (bazelTimeoutEnv). The depth stays, as the
+// guard left it.
 func helperEnviron(helper string, extra ...string) []string {
-	drop := map[string]bool{helperEnv: true}
+	drop := map[string]bool{helperEnv: true, bazelTimeoutEnv: true}
 	for _, kv := range extra {
 		drop[entryName(kv)] = true
 	}
@@ -518,6 +527,18 @@ func TestHelperGuardEndsAHangingHelper(t *testing.T) {
 	status, ok := state.Sys().(syscall.WaitStatus)
 	if !ok || !status.Signaled() || status.Signal() != syscall.SIGKILL {
 		t.Errorf("the helper ended %v (output %q), want SIGKILL", state, output)
+	}
+}
+
+// TestHelperGuardEnvironDropsTheTestTimeout: Bazel's test timeout, whatever
+// this process inherited, reaches no helper, so no runner's main swallows the
+// SIGTERM that stops one.
+func TestHelperGuardEnvironDropsTheTestTimeout(t *testing.T) {
+	t.Setenv(bazelTimeoutEnv, "300")
+	for _, env := range [][]string{helperEnviron("fdstore"), reexecEnviron("guard-supervisor")} {
+		if slices.ContainsFunc(env, func(kv string) bool { return entryName(kv) == bazelTimeoutEnv }) {
+			t.Errorf("%s reached a helper's environment", bazelTimeoutEnv)
+		}
 	}
 }
 

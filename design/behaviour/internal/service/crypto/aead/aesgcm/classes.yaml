@@ -34,12 +34,25 @@ files:
       - aesGCM.Algorithm
       - aesGCM.ID
       - aesGCM.Seal
+      - aesGCM.Bind
+      - boundGCM
+      - boundGCM.SealTo
+      - sealTo
       - aesGCM.Open
       - newGCM
     name: aesgcm.go
   - decls: []
     name: doc.go
 functions:
+  - doc: |-
+      sealTo appends the box — the version, algID, a fresh nonce, then
+      ciphertext||tag — to dst, or returns dst unextended with EntropyFailed when
+      crypto/rand fails. The nonce is drawn straight into its place in the box: a
+      nonce array of its own would escape through the cipher.AEAD interface call,
+      one allocation per box.
+    name: sealTo
+    params: gcm cipher.AEAD, dst, plaintext, aad []byte
+    results: box []byte, err error
   - doc: |-
       newGCM builds the GCM cipher.AEAD from the raw key bytes. A key the cipher
       rejects (it never should — Key is always KeyLen bytes) surfaces as the typed
@@ -79,6 +92,15 @@ types:
         recv: aesGCM
         results: box []byte, err error
       - doc: |-
+          Bind implements core/crypto.Binder: the GCM mode built once from key, for a
+          Sealer that seals under it many times (#813). The copy of the key the cipher
+          was built from is cleared before Bind returns; the cipher's round keys live
+          as long as the Sealer.
+        name: Bind
+        params: key corecrypto.Key
+        recv: aesGCM
+        results: sealer corecrypto.Sealer, err error
+      - doc: |-
           Open validates the framing, decrypts, and verifies aad. Every failure returns
           the shared non-oracle DecryptionFailed so this scheme cannot become an oracle.
         name: Open
@@ -86,6 +108,21 @@ types:
         recv: aesGCM
         results: plaintext []byte, err error
     name: aesGCM
+  - doc: |-
+      boundGCM is the Sealer Bind returns: one GCM mode, safe for concurrent use
+      as crypto/cipher's GCM is.
+    fields:
+      - doc: gcm is the mode built from the bound key.
+        name: gcm
+        type: cipher.AEAD
+    kind: struct
+    methods:
+      - doc: SealTo appends the self-framed box of plaintext under the bound key to dst.
+        name: SealTo
+        params: dst, plaintext, aad []byte
+        recv: b boundGCM
+        results: box []byte, err error
+    name: boundGCM
 vars:
   - doc: |-
       AEAD is the registered AES-256-GCM scheme singleton (no init(); package-level

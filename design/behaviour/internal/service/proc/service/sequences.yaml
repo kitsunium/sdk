@@ -5695,7 +5695,7 @@ sequences:
           init:
             bind: u
             eval: x.Usage
-          when: u != nil
+          when: u.Known
       - return: w.b
   - of: checkModel
     participants:
@@ -5917,7 +5917,7 @@ sequences:
         kind: internal
     steps:
       - bind: u
-        eval: "&coreproc.UsageValue{}"
+        eval: "coreproc.UsageValue{Known: true}"
       - bind: slots
         eval: "[...]*uint64{&u.MinorFaults, &u.MajorFaults, &u.InBlock, &u.OutBlock, &u.VoluntaryCtxSw, &u.InvoluntaryCtxSw}"
       - bind: sub

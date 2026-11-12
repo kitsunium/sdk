@@ -189,6 +189,10 @@ for key, err := range pages.Keys("") {
 - [type Config](<#Config>)
 - [type Entry](<#Entry>)
 - [type IndexSpec](<#IndexSpec>)
+- [type IntoGetter](<#IntoGetter>)
+  - [func \(IntoGetter\) GetInto\(key string, dst \*T\) error](<#IntoGetter.GetInto>)
+- [type IntoGetterContext](<#IntoGetterContext>)
+  - [func \(IntoGetterContext\) GetInto\(ctx context.Context, key string, dst \*T\) error](<#IntoGetterContext.GetInto>)
 - [type KeyLister](<#KeyLister>)
   - [func \(KeyLister\) Keys\(after string\) iter.Seq2\[string, error\]](<#KeyLister.Keys>)
 - [type KeyListerContext](<#KeyListerContext>)
@@ -221,6 +225,7 @@ for key, err := range pages.Keys("") {
   - [func \(\*SQLStore\) Find\(ctx context.Context, index string, key string\) \(\[\]T, error\)](<#SQLStore.Find>)
   - [func \(\*SQLStore\) FindAfter\(ctx context.Context, index string, key string, after string, limit int\) iter.Seq2\[T, error\]](<#SQLStore.FindAfter>)
   - [func \(\*SQLStore\) Get\(ctx context.Context, key string\) \(T, error\)](<#SQLStore.Get>)
+  - [func \(\*SQLStore\) GetInto\(ctx context.Context, key string, dst \*T\) error](<#SQLStore.GetInto>)
   - [func \(\*SQLStore\) Insert\(ctx context.Context, v T\) error](<#SQLStore.Insert>)
   - [func \(\*SQLStore\) InsertStamped\(ctx context.Context, v T, stamp coredocstore.StampValue\) error](<#SQLStore.InsertStamped>)
   - [func \(\*SQLStore\) Keys\(ctx context.Context, after string\) iter.Seq2\[string, error\]](<#SQLStore.Keys>)
@@ -260,6 +265,7 @@ for key, err := range pages.Keys("") {
   - [func \(\*Store\) FindAfter\(index string, key string, after string, limit int\) iter.Seq2\[T, error\]](<#Store.FindAfter>)
   - [func \(\*Store\) Fold\(\) error](<#Store.Fold>)
   - [func \(\*Store\) Get\(key string\) \(T, error\)](<#Store.Get>)
+  - [func \(\*Store\) GetInto\(key string, dst \*T\) error](<#Store.GetInto>)
   - [func \(\*Store\) Insert\(v T\) error](<#Store.Insert>)
   - [func \(\*Store\) InsertStamped\(v T, stamp coredocstore.StampValue\) error](<#Store.InsertStamped>)
   - [func \(\*Store\) Keys\(after string\) iter.Seq2\[string, error\]](<#Store.Keys>)
@@ -1471,6 +1477,58 @@ type IndexSpec[T any] struct {
 }
 ```
 
+<a name="IntoGetter"></a>
+## type [IntoGetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+IntoGetter is the public alias for the sibling of [Collection](#Collection) that decodes a document into a value the caller owns, without a context, which [Store](#Store) implements: GetInto — a read loop that keeps one value instead of receiving a fresh one per read (#813).
+
+```go
+type IntoGetter[T any] = coredocstore.IntoGetter[T]
+```
+
+IntoGetter is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetter`, declared as:
+
+```go
+type IntoGetter[T any] interface {
+	GetInto(key string, dst *T) error
+}
+```
+
+<a name="IntoGetter.GetInto"></a>
+### func \(IntoGetter\) [GetInto](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (IntoGetter) GetInto(key string, dst *T) error
+```
+
+GetInto decodes the document stored under key into dst, which it first sets to T's zero value: dst ends up equal to what Get returns, sharing nothing with the store or with what dst held before — no field of an earlier document survives, and no slice, map or pointer dst held is written through. DOCUMENT\_NOT\_FOUND, STORE\_CLOSED and DOCUMENT\_UNDECODABLE as Get; on any error dst holds T's zero value.
+
+<a name="IntoGetterContext"></a>
+## type [IntoGetterContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
+
+IntoGetterContext is the public alias for [IntoGetter](#IntoGetter) with a context on every call, which [SQLStore](#SQLStore) implements.
+
+```go
+type IntoGetterContext[T any] = coredocstore.IntoGetterContext[T]
+```
+
+IntoGetterContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.IntoGetterContext`, declared as:
+
+```go
+type IntoGetterContext[T any] interface {
+	GetInto(ctx context.Context, key string, dst *T) error
+}
+```
+
+<a name="IntoGetterContext.GetInto"></a>
+### func \(IntoGetterContext\) [GetInto](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/gen_ports.go>)
+
+```go
+func (IntoGetterContext) GetInto(ctx context.Context, key string, dst *T) error
+```
+
+GetInto is IntoGetter.GetInto under ctx, read in one statement on the transaction ctx carries for the store's database, and on the pool otherwise.
+
 <a name="KeyLister"></a>
 ## type [KeyLister](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
@@ -1812,7 +1870,7 @@ type SQLConfig[T any] struct {
 <a name="SQLStore"></a>
 ## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Keys, Count, Lookup and Find read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version, RewriteVersions and VersionWeight, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
+SQLStore is the public alias for the document store over SQL: Get, GetInto, List, Filter, Entries, Keys, Count, Lookup and Find read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version, RewriteVersions and VersionWeight, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
 
 ```go
 type SQLStore[T any] = svcdocstore.SQLStore[T]
@@ -1904,6 +1962,15 @@ func (*SQLStore) Get(ctx context.Context, key string) (T, error)
 ```
 
 Get returns the document stored under key, or DocumentNotFound.
+
+<a name="SQLStore.GetInto"></a>
+### func \(SQLStore\) [GetInto](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
+
+```go
+func (*SQLStore) GetInto(ctx context.Context, key string, dst *T) error
+```
+
+GetInto decodes the document stored under key into dst, as core/data/docstore.IntoGetterContext says: dst set to T's zero value first, so it ends up equal to what Get returns and shares nothing with what it held. DocumentNotFound, StatementFailed or DocumentUndecodable as Get, dst zero then.
 
 <a name="SQLStore.Insert"></a>
 ### func \(SQLStore\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_write.go>)
@@ -2205,7 +2272,7 @@ type Stats struct {
 <a name="Store"></a>
 ## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/gen_facade.go>)
 
-Store is the public alias for the document store: Get, List, Filter, Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones, VersionWeight says what they weigh; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
+Store is the public alias for the document store: Get, GetInto, List, Filter, Entries, Keys, Lookup, Find and Stats read, and Documents, FindAfter and Range read a page at a time; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones, VersionWeight says what they weigh; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
 ```go
 type Store[T any] = svcdocstore.Store[T]
@@ -2306,6 +2373,15 @@ func (*Store) Get(key string) (T, error)
 ```
 
 Get returns the document stored under key, or DocumentNotFound.
+
+<a name="Store.GetInto"></a>
+### func \(Store\) [GetInto](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/docstore.go>)
+
+```go
+func (*Store) GetInto(key string, dst *T) error
+```
+
+GetInto decodes the document stored under key into dst, as core/data/docstore.IntoGetter says: dst set to T's zero value first, so it ends up equal to what Get returns and shares nothing with the store or with what it held, without the fresh T Get returns. DocumentNotFound, StoreClosed or DocumentUndecodable as Get, dst zero then.
 
 <a name="Store.Insert"></a>
 ### func \(Store\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/write.go>)

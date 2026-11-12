@@ -53,12 +53,13 @@ func Test_exitValue_usage(t *testing.T) {
 
 		//: a platform that does not report gives no value at all.
 		if !rusageReported() {
-			if out.Usage != nil {
-				t.Errorf("Usage = %+v, want nil", out.Usage)
+			if out.Usage != (coreproc.UsageValue{}) {
+				t.Errorf("Usage = %+v, want none, not Known", out.Usage)
 			}
 			return
 		}
-		if out.Usage == nil || *out.Usage != c.want {
+		c.want.Known = true
+		if out.Usage != c.want {
 			t.Errorf("Usage = %+v, want %+v", out.Usage, c.want)
 		}
 	}
@@ -135,13 +136,7 @@ func Test_exitValue_isTheSweepsExit(t *testing.T) {
 		own := exitValue(c.ws, &ru)
 		status := childwait.StatusValue{WaitStatus: c.ws, Rusage: c.ru}
 		swept := status.Exit()
-		if own.Usage != nil && swept.Usage != nil && *own.Usage != *swept.Usage {
-			t.Errorf("Usage: own wait %+v, sweep %+v", *own.Usage, *swept.Usage)
-		}
-		if (own.Usage == nil) != (swept.Usage == nil) {
-			t.Errorf("Usage: own wait %+v, sweep %+v — one is missing", own.Usage, swept.Usage)
-		}
-		own.Usage, swept.Usage = nil, nil
+		//: Usage is a value: the whole ExitValue compares, counters and Known included.
 		if own != swept {
 			t.Errorf("own wait %+v, sweep %+v", own, swept)
 		}
@@ -257,7 +252,7 @@ func TestWait_coreDumpedAndUsageAgreeOnBothPaths(t *testing.T) {
 		if !got.Signaled || got.Signal != coreproc.Signal(syscall.SIGSEGV) {
 			t.Fatalf("exit = %+v, want a death by SIGSEGV", got)
 		}
-		if (got.Usage != nil) != rusageReported() {
+		if got.Usage.Known != rusageReported() {
 			t.Errorf("Usage = %+v, want a value exactly where the kernel reports one", got.Usage)
 		}
 		//: RLIMIT_CORE at zero stops a dump to a file; a pattern that pipes to a
@@ -339,7 +334,7 @@ func TestWait_minorFaultsOfAChildHolding64MiB(t *testing.T) {
 	if got.Code != 0 {
 		t.Fatalf("the child exited %d: it did not hold the 64 MiB", got.Code)
 	}
-	if got.Usage == nil || got.Usage.MinorFaults < pages {
+	if !got.Usage.Known || got.Usage.MinorFaults < pages {
 		t.Errorf("Usage = %+v, want MinorFaults >= %d", got.Usage, pages)
 	}
 }

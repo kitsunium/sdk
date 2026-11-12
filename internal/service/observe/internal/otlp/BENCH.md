@@ -141,3 +141,29 @@ BenchmarkBuildAndMarshal_1000-10          	     716	   2660213 ns/op	  851877 B/
 PASS
 ok  	github.com/kitsunium/sdk/internal/service/observe/internal/otlp	33.751s
 ```
+
+## The tree from one arena (#813, 2026-11-11)
+
+AMD EPYC 7351P VM (4 CPUs of the lane), Linux 6.12, go1.27.3, branch
+`wip/sdk-lot-4-suite`, base `b5285df65`, `-benchmem -count 6`, benchstat.
+`benchTree` now builds as the metrics encoder does: every point's attributes
+and `asInt` from one `otlp.Arena` sized for the export.
+
+| Row | allocs/op before | after | B/op before → after |
+|---|---|---|---|
+| `BuildAndAppend_1000` — what an export pays | 5 004 | **7** (−99.9 %) | 675.6 → 728.1 KiB (+7.8 %) |
+| `BuildAndMarshal_1000` — the reference oracle | 9 012 | 4 015 (−55 %) | 818 → 829 KiB (~) |
+
+- **The tree was the cost.** Five allocations a point — the `KeyValue`
+  slice, a pointer per oneof value (two strings, one integer) and `asInt` —
+  are now three slices per export (pairs, strings, integers).
+- **`BuildAndMarshal_1000` stays at 4 015, above #813's 3 000, and cannot
+  go lower through `encoding/json`.** What is left is four `MarshalJSON` a
+  point — the two timestamps, `asInt` and the integer attribute — each a
+  fresh `[]byte` that `encoding/json` v1 copies and re-validates; its
+  `MarshalJSONTo` (json/v2) is still behind `GOEXPERIMENT=jsonv2` in
+  go1.27.3. And this row prices `Marshal`, the ORACLE the appenders are
+  tested against byte for byte: no signal exports through it, so it must stay
+  encoding/json's own rendering. The export path is `BuildAndAppend_1000`.
+- **The bytes grow by 8 %**: each kind's slice is sized for every attribute
+  and value of the export, since the kinds are not counted ahead.

@@ -25,6 +25,13 @@ constants:
         name: defaultInfo
         type: string
         value: "\"encwrite-sink\""
+      - doc: |-
+          sealOverhead is what AES-256-GCM's box adds to a record: the version and
+          id bytes, the 12-byte nonce and the 16-byte tag. It sizes the borrowed
+          frame so the seal never grows it.
+        name: sealOverhead
+        type: int
+        value: 2 + 12 + 16
     name: aeadAlgorithm
 files:
   - decls:
@@ -39,9 +46,11 @@ files:
       - NewEncWriter
       - deriveSubkey
       - (*EncWriter).Write
+      - (*EncWriter).sealFramed
+      - (*EncWriter).sealTo
       - (*EncWriter).Flush
       - (*EncWriter).Close
-      - frame
+      - stampLength
     name: encwrite.go
 functions:
   - name: NewEncWriter
@@ -56,14 +65,15 @@ functions:
     params: master corecrypto.Key, info string
     results: subkey corecrypto.Key, err error
   - doc: |-
-      frame prepends a 4-byte big-endian length prefix to box, returning
-      [len(box) as uint32 big-endian || box]. A box too large for a uint32 length
+      stampLength writes the length of the box that follows framed's 4-byte
+      prefix into that prefix, big-endian. A box too large for a uint32 length
       returns FramingFailed.
-    name: frame
-    params: box []byte
-    results: framed []byte, err error
+    name: stampLength
+    params: framed []byte
+    results: error
 imports:
   binary: encoding/binary
+  buffer: github.com/kitsunium/sdk/internal/kernel/concur/buffer
   context: context
   corecrypto: github.com/kitsunium/sdk/internal/core/crypto
   coreencwrite: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite
@@ -104,12 +114,34 @@ types:
       - doc: subkey is the derived per-sink key used for sealing; zeroized on Close.
         name: subkey
         type: corecrypto.Key
+      - doc: |-
+          sealer is the AEAD bound to subkey once, at construction (#813): the
+          cipher is not rebuilt per record. Nil when the scheme was not
+          registered then, and after Close, which drops the cipher with the key:
+          a record is then sealed by crypto.Seal under subkey as it stands.
+        name: sealer
+        type: corecrypto.Sealer
     kind: struct
     methods:
       - name: Write
         params: ctx context.Context, r corelogger.RecordEvent, p []byte
         recv: s *EncWriter
         results: n int, err error
+      - doc: |-
+          sealFramed appends to dst the 4-byte length prefix and the box of p sealed
+          under the per-sink subkey (nonce hidden in the box), then writes the box's
+          length into the prefix.
+        name: sealFramed
+        params: dst, p []byte
+        recv: s *EncWriter
+        results: framed []byte, err error
+      - doc: |-
+          sealTo appends the box of p to dst: through the sealer bound at
+          construction, or crypto.Seal when there is none.
+        name: sealTo
+        params: dst, p []byte
+        recv: s *EncWriter
+        results: sealed []byte, err error
       - name: Flush
         params: ctx context.Context
         recv: s *EncWriter

@@ -61,7 +61,8 @@
 //
 // Package exec — the Windows process-handle value implementing the
 // coreproc.Process port over an *os.Process. Windows has no Unix process groups
-// or wait4 rusage, so SignalGroup degrades to the leader and the ExitValue
+// or wait4 rusage, so SignalGroup sends a Setpgid child's console group
+// CTRL_BREAK and degrades to the leader without one, and the ExitValue
 // carries the exit code + CPU times the os layer exposes (no terminating signal,
 // no MaxRSS). The concrete type is unexported; Start returns it as the interface.
 //

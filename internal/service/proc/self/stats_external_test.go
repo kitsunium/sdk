@@ -69,30 +69,50 @@ func TestReadStats(t *testing.T) {
 }
 
 // TestReadStats_CPUTimeGrowsWithTheKernelsCount pins #938's Windows criterion
-// on every platform that has the kernel's count: CPUTime rises by at least
-// 40 ms across 50 ms of spinning, with no garbage collection between the two
-// snapshots — the runtime's estimate, refreshed only at one, would not.
+// on every platform that has the kernel's count: across a spin that the
+// kernel itself — getrusage(2) or GetProcessTimes, read by the test between
+// the two snapshots — charged at least 50 ms of CPU, CPUTime grows by no less
+// than that charge, with no garbage collection asked for: the runtime's
+// estimate, refreshed only at one, would not. The work is measured in CPU
+// time, never in wall time, which a loaded machine gives without CPU.
 func TestReadStats_CPUTimeGrowsWithTheKernelsCount(t *testing.T) {
 	t.Parallel()
-	before := self.ReadStats()
-	if before.CPUEstimated {
+	if self.ReadStats().CPUEstimated {
 		t.Skipf("%s has no kernel count of the process's CPU time, only the runtime's estimate", runtime.GOOS)
 	}
-	//: a machine under load can deschedule the spinning thread for part of
-	//: its 50 ms, so the criterion is tried a few times: a count that does not
-	//: follow the work fails every one of them.
 	const (
-		attempts = 5
-		floor    = 40 * time.Millisecond
+		work   = 50 * time.Millisecond
+		budget = 20 * time.Second
 	)
-	var grew time.Duration
-	for range attempts {
-		start := self.ReadStats()
-		spin(t)
-		grew = self.ReadStats().CPUTime - start.CPUTime
-		if grew >= floor {
-			return
+	start := self.ReadStats()
+	from, ok := processCPU()
+	if !ok {
+		t.Fatal("the kernel's count of the process's CPU time did not answer")
+	}
+	charged := spinCPU(t, from, work, budget)
+	grew := self.ReadStats().CPUTime - start.CPUTime
+	if charged < work {
+		t.Skipf("the kernel charged %v of CPU in %v of spinning: the machine gave this process too little to judge", charged, budget)
+	}
+	if grew < charged {
+		t.Errorf("CPUTime grew by %v while the kernel charged the process %v", grew, charged)
+	}
+}
+
+// spinCPU burns CPU until the kernel has charged the process work since
+// from, or budget of wall time has passed, and returns the charge.
+func spinCPU(t *testing.T, from, work, budget time.Duration) time.Duration {
+	t.Helper()
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		now, ok := processCPU()
+		if !ok {
+			t.Fatal("the kernel's count of the process's CPU time stopped answering")
+		}
+		if now-from >= work {
+			return now - from
 		}
 	}
-	t.Errorf("CPUTime grew by %v across 50 ms of spinning, want at least %v", grew, floor)
+	now, _ := processCPU()
+	return now - from
 }

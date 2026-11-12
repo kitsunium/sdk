@@ -102,7 +102,7 @@ var (
 		CapSocketActivation: unixTargets,
 		CapDieWithParent:    {"linux", "freebsd", "windows"},
 		CapScheduling:       {"linux", "freebsd"},
-		CapPTY:              {"linux", "darwin", "freebsd"},
+		CapPTY:              {"linux", "darwin", "freebsd", "openbsd"},
 		CapProcessHandle:    {"linux", "windows"},
 		CapSandbox:          sandboxGOOS(runtime.GOARCH),
 	}

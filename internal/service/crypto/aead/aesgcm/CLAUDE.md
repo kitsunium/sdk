@@ -14,7 +14,7 @@ hardware-accelerated (AES-NI) and FIPS-track.
 
 | File | Role |
 |---|---|
-| `aesgcm.go` | `AEAD` singleton, `aesGCM` (`Algorithm` / `ID` / `Seal` / `Open`), `newGCM` helper |
+| `aesgcm.go` | `AEAD` singleton, `aesGCM` (`Algorithm` / `ID` / `Seal` / `Open`, and `Bind` — `core/crypto.Binder`, #813), `boundGCM` (the `Sealer` `Bind` returns: one GCM mode, `SealTo`), `sealTo` (the framing both write, the nonce drawn into its place in the box so it does not escape through the `cipher.AEAD` call), `newGCM` helper |
 
 No `codes.go` / `errors.go` — the scheme returns the shared `core/crypto`
 sentinels (`InvalidKey`, `DecryptionFailed`) and wraps a `crypto/rand` fault as
@@ -37,6 +37,10 @@ sentinels (`InvalidKey`, `DecryptionFailed`) and wraps a `crypto/rand` fault as
 - **Seal** — `InvalidKey` if the cipher refuses the key (never happens: `Key` is
   always `KeyLen` bytes), `EntropyFailed` (wrapping the cause) on a
   `crypto/rand` fault. Otherwise returns the self-framed box.
+- **Bind** — builds the GCM mode once from the key (its `Bytes` copy cleared
+  before return) and returns a `Sealer` whose `SealTo` appends the box `Seal`
+  returns to `dst`, allocating nothing when `dst` has the room (#813). The
+  round keys live as long as the `Sealer`: `Key.Zeroize` does not reach them.
 - **Open** — returns the single non-oracle `DecryptionFailed` for **every**
   failure (short/wrong-version/wrong-id framing, bad tag, wrong key, wrong aad).
   It never distinguishes them.

@@ -280,7 +280,8 @@ sequences:
   - of: UsageOf
     steps:
       - return: |-
-          &coreproc.UsageValue{
+          coreproc.UsageValue{
+          		Known:            true,
           		MinorFaults:      counter(ru.Minflt),
           		MajorFaults:      counter(ru.Majflt),
           		InBlock:          counter(ru.Inblock),
