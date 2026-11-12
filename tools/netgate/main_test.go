@@ -218,7 +218,7 @@ func TestEvaluate_shippedTable(t *testing.T) {
 		t.Fatalf("calibrated run failed: %+v", rep)
 	}
 	for _, g := range rep.Gates {
-		active := strings.HasPrefix(g.Step, "cal-") || g.Step == "P2" || g.Step == "P4a" || g.Step == "P6"
+		active := (strings.HasPrefix(g.Step, "cal-") && g.Load != loadL1h2) || g.Step == "P2" || g.Step == "P4a" || g.Step == "P6"
 		if active != g.Active || (!active && (g.Verdict != verdictInactive || g.Pending == "")) || (active && g.Verdict != verdictPass) {
 			t.Errorf("%s: active=%t verdict=%s pending=%q", g.Step, g.Active, g.Verdict, g.Pending)
 		}
@@ -270,13 +270,16 @@ func mustParse(t *testing.T, in string) samplesEntity {
 // and only known loads, metrics and ops.
 func TestGates_table(t *testing.T) {
 	want := map[string]string{
-		"P2":     "L2 handwritten chain cpu-ns/req<=1.05r",
-		"P4a":    "L3 recvmmsg gro datagrams/syscall>=4r(reported) cpu-ns/datagram<=0.75r",
-		"P6":     "L1 goroutine loop cpu-ns/req<=0.7r",
-		"P5":     "L1 published loop cpu-ns/req<=1r",
-		"cal-L1": "L1 loop loop cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
-		"cal-L2": "L2 handwritten handwritten cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
-		"cal-L3": "L3 recvmmsg recvmmsg cpu-ns/datagram<=1.25r cpu-ns/datagram>=0.8r datagrams/syscall<=1.25r datagrams/syscall>=0.8r",
+		"P2":       "L2 handwritten chain cpu-ns/req<=1.05r",
+		"P4a":      "L3 recvmmsg gro datagrams/syscall>=4r(reported) cpu-ns/datagram<=0.75r",
+		"P6":       "L1 goroutine loop cpu-ns/req<=0.7r",
+		"P5":       "L1 published loop cpu-ns/req<=1r",
+		"cal-L1":   "L1 loop loop cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
+		"cal-L2":   "L2 handwritten handwritten cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
+		"cal-L3":   "L3 recvmmsg recvmmsg cpu-ns/datagram<=1.25r cpu-ns/datagram>=0.8r datagrams/syscall<=1.25r datagrams/syscall>=0.8r",
+		"P9":       "L1h2 goroutine-h2 loop-h2 cpu-ns/req<=0.7r",
+		"cal-L1h2": "L1h2 loop-h2 loop-h2 cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
+		"h1-h2":    "L1h2 loop loop-h2 cpu-ns/req<=1r(reported)",
 	}
 	if len(gates) != len(want) {
 		t.Fatalf("%d gates, want %d", len(gates), len(want))
@@ -298,7 +301,7 @@ func TestGates_table(t *testing.T) {
 		if got != want[g.Step] {
 			t.Errorf("%s = %q, want %q", g.Step, got, want[g.Step])
 		}
-		if !slices.Contains([]string{loadL1, loadL2, loadL3}, g.Load) {
+		if !slices.Contains([]string{loadL1, loadL2, loadL3, loadL1h2}, g.Load) {
 			t.Errorf("%s: unknown load %q", g.Step, g.Load)
 		}
 	}
@@ -307,6 +310,30 @@ func TestGates_table(t *testing.T) {
 	}
 	if gates[0].Step != "P2" || !strings.Contains(gates[0].AllocBudget, "0 allocations") {
 		t.Errorf("P2's 0-alloc budget is not named: %q", gates[0].AllocBudget)
+	}
+}
+
+// TestEvaluate_h2RowsInactive pins #963's first criterion: a run whose bench
+// emits no L1h2 pair reports P9, cal-L1h2 and h1-h2 inactive, pending, and
+// passes; one that emits them reports what they measured and still passes.
+func TestEvaluate_h2RowsInactive(t *testing.T) {
+	for i, in := range []string{calibrated + p4aPassing(), calibrated + p4aPassing() +
+		pairLines("L1h2", "goroutine-h2", "loop-h2", "cpu-ns/req", scaled(tightRatios, 2)) +
+		pairLines("L1h2", "loop-h2", "loop-h2", "cpu-ns/req", scaled(tightRatios, 1.2)) +
+		pairLines("L1h2", "loop", "loop-h2", "cpu-ns/req", scaled(tightRatios, 3))} {
+		rep := evaluate(gates, mustParse(t, in), "abc")
+		//: the labels with a hyphen are parsed whole, the procs suffix aside.
+		if g := gateNamed(t, rep, "P9"); i == 1 && (len(g.Measured) == 0 || g.Measured[0].Verdict != verdictFail) {
+			t.Fatalf("P9 did not report what it measured: %+v", g.Measured)
+		}
+		if !rep.Passed {
+			t.Fatalf("a run passed nothing because of an inactive h2 row: %+v", rep)
+		}
+		for _, step := range []string{"P9", "cal-L1h2", "h1-h2"} {
+			if g := gateNamed(t, rep, step); g.Active || g.Verdict != verdictInactive || g.Pending == "" {
+				t.Errorf("%s: active=%t verdict=%s pending=%q", step, g.Active, g.Verdict, g.Pending)
+			}
+		}
 	}
 }
 

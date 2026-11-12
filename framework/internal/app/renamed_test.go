@@ -79,6 +79,7 @@ func TestTheCommandsRefuseAnOldVariable(t *testing.T) {
 // A product whose prefix is the old one reads those names as its own.
 func TestAProductNamedLikeTheOldPrefixReadsItsOwn(t *testing.T) {
 	t.Setenv("KIT_TRUST_PROXY", "on")
+	t.Setenv("KIT_TRUSTED_PROXIES", "10.0.0.0/8")
 	a := app.NewApp("kit", Shop, Audit, Members).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard))
 	if err := a.Start(t.Context()); err != nil {
 		t.Fatal(err)

@@ -13,3 +13,6 @@ import (
 // libc's getpeerucred — all out of the standard library's reach (ADR 0148
 // §Deferred, narrowed by #1093). The directory is the gate.
 func peerOf(_ *net.UnixConn) coreipc.PeerValue { return coreipc.PeerValue{UID: -1, GID: -1} }
+
+// peerGroups reads nothing here, as peerOf does.
+func peerGroups(_ *net.UnixConn) []int { return nil }

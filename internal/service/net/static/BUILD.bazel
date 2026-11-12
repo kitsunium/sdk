@@ -39,6 +39,7 @@ go_test(
     srcs = [
         "gen_api_test.go",
         "lookup_external_test.go",
+        "precompressed_external_test.go",
         "serve_external_test.go",
         "static_external_test.go",
     ],

@@ -2,6 +2,14 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      listenBacklog is the backlog asked of listen(2): every kernel clamps it to
+      its own maximum (somaxconn), which is what net.ListenUnix ends up with too.
+    items:
+      - name: listenBacklog
+        type: int
+        value: 1<<16 - 1
+    name: listenBacklog
+  - doc: |-
       worldWritable is the bit that lets any account create, rename or remove an
       entry in a directory.
     items:
@@ -79,7 +87,74 @@ constants:
         type: bool
         value: "true"
     name: kernelNamesPeer
+  - doc: |-
+      soPeerGroups is SO_PEERGROUPS (include/uapi/asm-generic/socket.h, Linux
+      4.13): 59 on every Linux port Go supports — parisc, sparc and alpha, the
+      ports that number it otherwise, are not Go's.
+    items:
+      - name: soPeerGroups
+        type: uintptr
+        value: "59"
+    name: soPeerGroups
+  - doc: |-
+      Buffers of SO_PEERGROUPS: the first holds a usual account's groups; a
+      longer list is read once more at the length the kernel asked for, bounded
+      by NGROUPS_MAX; a group id is four bytes.
+    grouped: true
+    items:
+      - name: firstPeerGroups
+        type: int
+        value: "64"
+      - name: maxPeerGroups
+        type: int
+        value: "65536"
+      - name: gidBytes
+        type: int
+        value: "4"
+    name: firstPeerGroups
+  - doc: |-
+      Socket modes: the narrowest that lets every account the lists name
+      connect(2), which needs write permission on the socket and nothing else —
+      a read bit grants nothing on a socket, so 0660 and 0666 are written as
+      every service manager writes them.
+    grouped: true
+    items:
+      - doc: ownerOnly admits this account (and root, whom no mode stops).
+        name: ownerOnly
+        type: os.FileMode
+        value: "0o600"
+      - doc: ownerAndGroup admits the socket's group besides.
+        name: ownerAndGroup
+        type: os.FileMode
+        value: "0o660"
+      - doc: |-
+          everyAccount admits every account that reaches the socket; the
+          directory, and the listener's admission, are the gates then.
+        name: everyAccount
+        type: os.FileMode
+        value: "0o666"
+      - doc: anybodySearches is the directory bit that lets every account through.
+        name: anybodySearches
+        type: os.FileMode
+        value: "0o001"
+    name: ownerOnly
+  - doc: getsockoptTrap is getsockopt(2)'s system call.
+    items:
+      - name: getsockoptTrap
+        type: uintptr
+        value: syscall.SYS_GETSOCKOPT
+    name: getsockoptTrap
 files:
+  - decls:
+      - listenBacklog
+      - bindSocket
+      - setPosture
+      - listenBound
+      - listenOn
+      - abandon
+      - removeBestEffort
+      - listenFailed
+    name: bind_unix.go
   - decls:
       - worldWritable
       - rootUID
@@ -150,8 +225,18 @@ files:
       - kernelNamesPeer
     name: peer_named.go
   - decls:
+      - soPeerGroups
+      - firstPeerGroups
+      - peerGroups
+      - readPeerGroups
+    name: peergroups_linux.go
+  - decls:
+      - ownerOnly
       - socketAcceptor
+      - posture
       - socketAcceptor.accept
+      - socketPosture
+      - checkReach
       - listen
       - clearStale
       - nobodyListens
@@ -159,7 +244,51 @@ files:
       - dial
       - dialWith
     name: socket.go
+  - decls:
+      - getsockoptTrap
+    name: sockopt_linux.go
 functions:
+  - doc: |-
+      bindSocket binds a Unix stream socket at path and gives the file p's group
+      and mode, without listening yet: until listenBound, a connect(2) is refused
+      (ECONNREFUSED), so no connection is made while the file still has the mode
+      the umask gave it at bind — wider than p's, under a permissive umask. The
+      returned file holds the socket; on failure nothing stays at path.
+    name: bindSocket
+    params: path string, p posture
+    results: "*os.File, error"
+  - doc: |-
+      setPosture gives the bound socket file p's group, then p's mode. A group
+      the file cannot take — this account is not a member, and is not root — is
+      a refusal: left at its old group the socket would admit nobody the list
+      names, and opened to everyone it would admit more than it names.
+    name: setPosture
+    params: path string, p posture
+    results: error
+  - doc: |-
+      listenBound starts listening on the socket bindSocket bound at path and
+      hands it to the net package, which removes path when the listener closes.
+      f is closed either way; on failure nothing stays at path.
+    name: listenBound
+    params: f *os.File, path string
+    results: "*net.UnixListener, error"
+  - doc: listenOn calls listen(2) on the socket f holds.
+    name: listenOn
+    params: f *os.File
+    results: error
+  - doc: abandon closes a socket that will not listen and removes its file.
+    name: abandon
+    params: f *os.File, path string
+  - doc: |-
+      removeBestEffort removes the socket file this listen bound and gives up on:
+      the refusal already says why, and a file that cannot be removed is a
+      leftover the next Listen clears.
+    name: removeBestEffort
+    params: path string
+  - doc: listenFailed is LISTEN_FAILED at path with its cause.
+    name: listenFailed
+    params: path, cause string
+    results: error
   - doc: |-
       checkChain refuses the socket directory dir when another account could steer
       a component of the path ABOVE it. The socket directory's own entry is not
@@ -277,18 +406,22 @@ functions:
     params: cfg *Config
     results: "*Listener, error"
   - doc: |-
-      admit says whether p may use a socket of account self under cfg. An
-      unverified peer passed the directory, which is the only gate there is.
+      admit says whether p, whose supplementary groups the kernel gave as
+      groups, may use a socket of account self under cfg. An unverified peer
+      passed the directory, which is the only gate there is.
     name: admit
-    params: p coreipc.PeerValue, self int, cfg *Config
+    params: p coreipc.PeerValue, groups []int, self int, cfg *Config
     results: error
   - doc: |-
       admitWhere is admit on a platform whose kernel names the peer (named) or
       does not. Where it does, a peer it did not name is an anomaly and is
       refused (#1093, ADR 0031) rather than let through as the directory's; where
-      it does not, the directory is the gate and admitted it.
+      it does not, the directory is the gate and admitted it. A named peer is
+      admitted for its user, or for its effective group or one of its
+      supplementary groups (#1092) — the groups the kernel recorded with its
+      credentials when it connected, never read again from the process.
     name: admitWhere
-    params: p coreipc.PeerValue, self int, cfg *Config, named bool
+    params: p coreipc.PeerValue, groups []int, self int, cfg *Config, named bool
     results: error
   - name: NewDialer
     params: cfg *Config
@@ -316,8 +449,50 @@ functions:
     params: c *net.UnixConn
     results: coreipc.PeerValue
   - doc: |-
+      peerGroups asks the kernel for the supplementary groups of the process at
+      the other end of c (#1092): SO_PEERGROUPS, the group list of the very
+      credentials SO_PEERCRED reads — recorded when the peer connected or
+      listened, never read again from a process whose pid may since name another
+      one. nil when the kernel does not answer (before 4.13): the peer is then
+      judged on its effective group alone, which admits fewer, never more. A list
+      longer than the first buffer is read once more at the length the kernel
+      asked for.
+    name: peerGroups
+    params: c *net.UnixConn
+    results: "[]int"
+  - doc: |-
+      readPeerGroups is one SO_PEERGROUPS read into room groups: the groups, or
+      nil and — when the kernel said the list is longer (ERANGE) — how many it
+      holds.
+    name: readPeerGroups
+    params: raw syscall.RawConn, room int
+    results: groups []int, need int
+  - doc: |-
+      socketPosture is the narrowest posture that lets the accounts cfg names
+      connect (#1092, the owner's decision of 2026-11-10): 0600 when it names
+      none but this account and root; 0660 and the group when it names a single
+      group and no other user — the kernel's own check then admits that group's
+      members, supplementary ones included, and nobody else; 0666 when it names
+      another user or several groups, which no one group can hold.
+    name: socketPosture
+    params: cfg *Config, self int
+    results: posture
+  - doc: |-
+      checkReach refuses a socket every account may connect to in a directory
+      every account may search, where the kernel names no peer (named false):
+      nothing would gate it — not the directory, not the mode, not the
+      admission, which admits a peer it cannot name. Where the kernel names
+      peers, the admission refuses who the lists do not name, and a directory
+      whose group is the allowed accounts' still keeps the others out first.
+    name: checkReach
+    params: dir string, p posture, named bool
+    results: error
+  - doc: |-
       listen opens the Unix socket at cfg.Path, once its directory is private
-      and what was at the path is known to be a leftover.
+      and what was at the path is known to be a leftover. The socket's mode and
+      group are set between bind(2) and listen(2) (bindSocket, listenBound): no
+      connection completes before the socket is at the posture the lists ask
+      for, whatever the umask made of it at bind.
     name: listen
     params: cfg *Config
     results: "*Listener, error"
@@ -371,6 +546,7 @@ imports:
   sync: sync
   syscall: syscall
   time: time
+  unsafe: unsafe
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/proc/ipc
@@ -410,9 +586,12 @@ types:
         type: string
       - doc: |-
           AllowUIDs and AllowGIDs admit peers besides this process's own user:
-          an on-call group declared at deployment, say. They are enforced where
-          the kernel names the peer (Peer.Verified); the directory must still
-          let those accounts reach the socket, which is the deployment's to
+          an on-call group declared at deployment, say. The listener opens the
+          socket file to them — 0660 and the group for one group, 0666 for
+          another user or several groups — and, where the kernel names the
+          peer (Peer.Verified), admits a peer by its user, its effective group
+          or one of its supplementary groups. The directory must still let
+          those accounts reach the socket, which is the deployment's to
           arrange — this package never widens a directory. Windows has no UID:
           there the pipe's DACL admits this account only, and the lists admit
           nobody more.
@@ -420,9 +599,12 @@ types:
         type: "[]int"
       - doc: |-
           AllowUIDs and AllowGIDs admit peers besides this process's own user:
-          an on-call group declared at deployment, say. They are enforced where
-          the kernel names the peer (Peer.Verified); the directory must still
-          let those accounts reach the socket, which is the deployment's to
+          an on-call group declared at deployment, say. The listener opens the
+          socket file to them — 0660 and the group for one group, 0666 for
+          another user or several groups — and, where the kernel names the
+          peer (Peer.Verified), admits a peer by its user, its effective group
+          or one of its supplementary groups. The directory must still let
+          those accounts reach the socket, which is the deployment's to
           arrange — this package never widens a directory. Windows has no UID:
           there the pipe's DACL admits this account only, and the lists admit
           nobody more.
@@ -469,23 +651,24 @@ types:
         recv: l *Listener
         results: error
       - doc: |-
-          admits is the Unix admission: this account, or an allowed user or group,
-          or a peer the kernel did not name — the directory admitted it.
+          admits is the Unix admission: this account, or an allowed user, or a peer
+          whose effective or supplementary group is allowed, or a peer the kernel did
+          not name where it names none — the directory admitted it.
         name: admits
-        params: p coreipc.PeerValue
+        params: p coreipc.PeerValue, groups []int
         recv: l *Listener
         results: error
     name: Listener
   - doc: |-
       acceptor is the endpoint a Listener accepts on: a Unix socket
       (socket.go), a named pipe on Windows (pipe_windows.go). accept returns the
-      next connection and what the kernel says of its peer; admission is the
-      Listener's.
+      next connection, what the kernel says of its peer and, where it reads
+      them, the peer's supplementary groups; admission is the Listener's.
     kind: named
     name: acceptor
     underlying: |-
       interface {
-      	accept() (net.Conn, coreipc.PeerValue, error)
+      	accept() (conn net.Conn, peer coreipc.PeerValue, groups []int, err error)
       	Close() error
       	Addr() net.Addr
       }
@@ -499,18 +682,37 @@ types:
         recv: d *Dialer
         results: "*coreipc.Conn, error"
     name: Dialer
-  - doc: socketAcceptor accepts on a Unix socket; its peers are named by peerOf.
+  - doc: |-
+      socketAcceptor accepts on a Unix socket; its peers are named by peerOf, and
+      their supplementary groups read (peerGroups) when an allowed group may
+      need them.
     fields:
       - name: ""
         role: embedded
         type: "*net.UnixListener"
+      - name: groups
+        type: bool
     kind: struct
     methods:
-      - doc: accept returns the next connection and its peer as the kernel names it.
+      - doc: |-
+          accept returns the next connection, its peer as the kernel names it and,
+          when the acceptor reads them, the peer's groups.
         name: accept
         recv: s socketAcceptor
-        results: net.Conn, coreipc.PeerValue, error
+        results: conn net.Conn, peer coreipc.PeerValue, groups []int, err error
     name: socketAcceptor
+  - doc: |-
+      posture is the socket file's mode, the group it is given (-1 keeps the one
+      bind gave it), and whether that mode lets every account connect.
+    fields:
+      - name: mode
+        type: os.FileMode
+      - name: gid
+        type: int
+      - name: others
+        type: bool
+    kind: struct
+    name: posture
 vars:
   - doc: Every private connection on Unix passes files both ways (#936).
     grouped: true

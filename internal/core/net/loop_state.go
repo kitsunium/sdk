@@ -34,6 +34,24 @@ type LoopRingStateValue struct {
 	// BatchesCut is the number of batches BatchBudget stopped while this ring
 	// still had completions to reap (ADR 0206).
 	BatchesCut uint64 `json:"batches_cut"`
+	// BytesIn is the number of bytes the ring received and delivered to the handler.
+	BytesIn uint64 `json:"bytes_in"`
+	// BytesOut is the number of bytes the ring sent: the answers the kernel took, a short
+	// send counted as it left.
+	BytesOut uint64 `json:"bytes_out"`
+	// OutputRefused is the number of Writes the ring refused with LoopOutputFull: the
+	// connection's output ceiling, or the slab's budget, reached.
+	OutputRefused uint64 `json:"output_refused"`
+	// SpillClosed is the number of connections the ring closed with LoopSpillFull:
+	// unconsumed input past SpillCap, or the slab's budget spent.
+	SpillClosed uint64 `json:"spill_closed"`
+	// Timeouts is the number of deadlines of SetDeadline that fired (OnTimeout calls).
+	Timeouts uint64 `json:"timeouts"`
+	// IdleClosed is the number of connections the ring closed for IdleTimeout.
+	IdleClosed uint64 `json:"idle_closed"`
+	// PendingOutput is the bytes written and not yet sent, a gauge: what the ring's
+	// connections still owe their peers at the last batch's end.
+	PendingOutput int64 `json:"pending_output"`
 	// Draining reports a ring the watchdog judged sick: it accepts nothing new
 	// and closes its connections as they fall idle.
 	Draining bool `json:"draining"`
@@ -79,6 +97,22 @@ type LoopStateValue struct {
 	// (LoopOutboundFull), every lane's: for the http1 adapter, the 503s it
 	// answered for them. Zero when the group offloads nothing.
 	OutboundRefused uint64 `json:"outbound_refused"`
+	// SlabInUse is the bytes of the spill and output chunks every loop's slab holds at
+	// the last batches' end, chunk sizes counted, a gauge.
+	SlabInUse int64 `json:"slab_in_use"`
+	// SlabMapped is the bytes every loop's slab has mapped outside the Go heap. A size
+	// class keeps one wholly free arena and unmaps the others on the loop's tick
+	// (#809), so it falls back after a burst.
+	SlabMapped int64 `json:"slab_mapped"`
+	// SlabBudget is the ceiling of SlabInUse, every loop's summed: past it a Write is
+	// refused and a spill closes its connection, by name, never by the kernel's OOM
+	// killer.
+	SlabBudget int64 `json:"slab_budget"`
+	// SlabBudgetSource says where each loop's slab budget came from (#809):
+	// "explicit" for LoopValue.SlabBudget, "derived" from the cgroup allowance
+	// memlimit read, "default" for 128 MiB a loop; empty on the portable
+	// backend, which has no slab.
+	SlabBudgetSource string `json:"slab_budget_source"`
 	// RingStates reports every ring of every loop, loop by loop.
 	RingStates []LoopRingStateValue `json:"ring_states"`
 	// Capabilities reports every optional kernel capability the group's backend

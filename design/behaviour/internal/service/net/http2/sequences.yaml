@@ -1,0 +1,6096 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*Conn).has
+    steps:
+      - return: c.flags&f == f
+  - of: (*Conn).set
+    steps:
+      - op: "|="
+        set: c.flags
+        value: f
+  - of: (*streamState).has
+    steps:
+      - return: s.flags&f == f
+  - of: (*streamState).set
+    steps:
+      - op: "|="
+        set: s.flags
+        value: f
+  - of: (*tableArena).get
+    steps:
+      - opt:
+          do:
+            - bind: id
+              eval: a.free[n-1]
+            - set: a.free
+              value: a.free[:n-1]
+            - return: id
+          init:
+            bind: "n"
+            eval: len(a.free)
+          when: n > 0
+      - opt:
+          do:
+            - set: a.chunks
+              value: append(a.chunks, make([]byte, int(tableChunk)*a.size))
+          when: a.next == int32(len(a.chunks))*tableChunk
+      - bind: id
+        eval: a.next
+      - op: ++
+        set: a.next
+      - return: id
+  - of: (*tableArena).mem
+    steps:
+      - bind: block
+        eval: int(id%tableChunk) * a.size
+      - return: "a.chunks[id/tableChunk][block : block+a.size]"
+  - of: (*tableArena).put
+    steps:
+      - set: a.free
+        value: append(a.free, id)
+  - of: NewLane
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewLane
+        kind: self
+      - id: v.Resolve
+        kind: value
+      - id: newLaneResolved
+        kind: internal
+    steps:
+      - bind: resolved, err
+        eval: v.Resolve()
+        to: v.Resolve
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: newLaneResolved(resolved, maxBody, holdCap), nil
+        to: newLaneResolved
+  - of: newLaneResolved
+    steps:
+      - opt:
+          do:
+            - set: holdCap
+              value: defaultHoldCap
+          when: holdCap == 0
+      - return: |-
+          &Lane{
+          		limits:     resolved,
+          		maxBody:    int32(min(maxBody, int64(corehttp2.MaxWindow))),
+          		holdCap:    int32(min(holdCap, corehttp2.MaxWindow)),
+          		freeStream: noIndex,
+          		tables:     tableArena{size: TableMem(resolved.HeaderTable)},
+          		epoch:      1,
+          	}
+  - of: (*Lane).Open
+    steps:
+      - set: "*c"
+        value: |-
+          Conn{
+          		decoder:      NewDecoder(l.limits.HeaderTable, l.limits.MaxHeaderList),
+          		peerWindow:   int32(corehttp2.DefaultWindow),
+          		sendWindow:   int32(corehttp2.DefaultWindow),
+          		initialSend:  int32(corehttp2.DefaultWindow),
+          		peerMaxFrame: int32(corehttp2.DefaultMaxFrame),
+          		head:         noIndex,
+          		table:        noIndex,
+          		hold:         noIndex,
+          		resets:       resetBudgetFactor * int32(l.limits.MaxStreams),
+          	}
+  - of: (*Lane).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).Close
+        kind: self
+      - id: l.freeStreamSlot
+        kind: internal
+      - id: l.tables.put
+        kind: internal
+      - id: l.releaseHold
+        kind: internal
+    steps:
+      - loop:
+          cond: idx != noIndex
+          do:
+            - bind: next
+              eval: l.streams[idx].next
+            - eval: l.freeStreamSlot(idx)
+              to: l.freeStreamSlot
+            - set: idx
+              value: next
+          init: idx := c.head
+      - opt:
+          do:
+            - eval: l.tables.put(c.table)
+              to: l.tables.put
+          when: c.table != noIndex
+      - eval: l.releaseHold(c)
+        to: l.releaseHold
+      - set: c.head, c.table, c.hold
+        value: noIndex, noIndex, noIndex
+      - set: c.open, c.held
+        value: 0, 0
+  - of: (*Lane).Events
+    steps:
+      - return: l.events
+  - of: (*Lane).EndBatch
+    steps:
+      - set: l.join
+        value: l.join[:0]
+      - op: ++
+        set: l.epoch
+  - of: (*Lane).TakeErrors
+    steps:
+      - loop:
+          do:
+            - op: +=
+              set: dst[i]
+              value: l.errs[i]
+            - set: l.errs[i]
+              value: "0"
+          key: i
+          range: min(len(dst), len(l.errs))
+  - of: (*Lane).countErr
+    steps:
+      - op: ++
+        set: l.errs[corehttp2.ErrorTypeOf(code)]
+  - of: (*Lane).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).Decode
+        kind: self
+      - id: l.tables.get
+        kind: internal
+      - id: c.decoder.Decode
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: c.table
+              to: l.tables.get
+              value: l.tables.get()
+          when: c.table == noIndex
+      - return: c.decoder.Decode(l.tables.mem(c.table), block, scratch, req)
+        to: c.decoder.Decode
+  - of: (*Lane).Closing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).Closing
+        kind: self
+      - id: c.has
+        kind: internal
+    steps:
+      - return: c.has(flagClosing)
+        to: c.has
+  - of: (*Lane).Done
+    steps:
+      - return: c.flags&(flagGoAway|flagPeerGoAway) != 0 && c.open == 0
+  - of: (*feedRun).priorityFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).priorityFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.l.countErr
+        kind: internal
+      - id: AppendRSTStream
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+      - id: f.frameLen
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: f.h.StreamID == 0
+      - opt:
+          do:
+            - eval: f.l.countErr(corehttp2.ErrCodeFrameSize)
+              to: f.l.countErr
+            - set: f.dst
+              to: AppendRSTStream
+              value: AppendRSTStream(f.dst, f.h.StreamID, corehttp2.ErrCodeFrameSize)
+          when: f.h.Length != priorityFrameLen
+      - eval: f.spendControl()
+        to: f.spendControl
+      - return: f.frameLen()
+        to: f.frameLen
+  - of: (*feedRun).rstFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).rstFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.l.find
+        kind: internal
+      - id: f.rstOnAbsent
+        kind: internal
+      - id: f.frameLen
+        kind: internal
+      - id: corehttp2
+        kind: package
+      - id: f.l.closeStream
+        kind: internal
+      - id: f.emit
+        kind: internal
+      - id: f.spendReset
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: f.h.StreamID == 0
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFrameSize)
+              to: f.connError
+            - return: "0"
+          when: f.h.Length != streamIDFieldLen
+      - bind: idx, _
+        eval: f.l.find(f.c, f.h.StreamID)
+        to: f.l.find
+      - opt:
+          do:
+            - eval: f.rstOnAbsent()
+              to: f.rstOnAbsent
+            - return: f.frameLen()
+              to: f.frameLen
+          when: idx == noIndex
+      - bind: code
+        eval: corehttp2.ErrCode(binary.BigEndian.Uint32(f.payload))
+        to: corehttp2
+      - eval: f.l.closeStream(f.c, idx)
+        to: f.l.closeStream
+      - eval: "f.emit(Event{Kind: EventReset, Stream: f.h.StreamID, Code: code})"
+        to: f.emit
+      - eval: f.spendReset()
+        to: f.spendReset
+      - return: f.frameLen()
+        to: f.frameLen
+  - of: (*feedRun).rstOnAbsent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).rstOnAbsent
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+          when: f.h.StreamID > f.c.lastStream
+      - eval: f.spendControl()
+        to: f.spendControl
+  - of: (*feedRun).spendReset
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).spendReset
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - op: "--"
+        set: f.c.resets
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeEnhanceYourCalm)
+              to: f.connError
+          when: f.c.resets <= 0
+  - of: (*feedRun).pushFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).pushFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - eval: f.connError(corehttp2.ErrCodeProtocol)
+        to: f.connError
+      - return: "0"
+  - of: (*feedRun).pingFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).pingFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+      - id: AppendPing
+        kind: internal
+      - id: f.frameLen
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: f.h.StreamID != 0
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFrameSize)
+              to: f.connError
+            - return: "0"
+          when: f.h.Length != pingPayloadLen
+      - eval: f.spendControl()
+        to: f.spendControl
+      - opt:
+          do:
+            - var:
+                name: data
+                type: "[pingPayloadLen]byte"
+            - eval: copy(data[:], f.payload)
+            - set: f.dst
+              to: AppendPing
+              value: AppendPing(f.dst, true, &data)
+          when: f.h.Flags&corehttp2.FlagAck == 0 && !f.c.has(flagClosing)
+      - return: f.frameLen()
+        to: f.frameLen
+  - of: (*feedRun).goAwayFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).goAwayFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.c.set
+        kind: internal
+      - id: corehttp2
+        kind: package
+      - id: f.emit
+        kind: internal
+      - id: f.frameLen
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: f.h.StreamID != 0
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFrameSize)
+              to: f.connError
+            - return: "0"
+          when: f.h.Length < goAwayMinLen
+      - eval: f.c.set(flagPeerGoAway)
+        to: f.c.set
+      - bind: code
+        eval: corehttp2.ErrCode(binary.BigEndian.Uint32(f.payload[streamIDFieldLen:]))
+        to: corehttp2
+      - eval: "f.emit(Event{Kind: EventGoAway, Code: code})"
+        to: f.emit
+      - return: f.frameLen()
+        to: f.frameLen
+  - of: (*feedRun).windowFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).windowFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+      - id: f.connectionCredit
+        kind: internal
+      - id: f.streamCredit
+        kind: internal
+      - id: f.frameLen
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFrameSize)
+              to: f.connError
+            - return: "0"
+          when: f.h.Length != streamIDFieldLen
+      - eval: f.spendControl()
+        to: f.spendControl
+      - bind: inc
+        eval: binary.BigEndian.Uint32(f.payload) & streamIDMask
+      - alt:
+          - do:
+              - eval: f.connectionCredit(inc)
+                to: f.connectionCredit
+            when: f.h.StreamID == 0
+          - do:
+              - eval: f.streamCredit(inc)
+                to: f.streamCredit
+            else: true
+      - return: f.frameLen()
+        to: f.frameLen
+  - of: (*feedRun).connectionCredit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).connectionCredit
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.l.flushHolds
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: ""
+          when: inc == 0
+      - bind: next
+        eval: int64(f.c.sendWindow) + int64(inc)
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFlowControl)
+              to: f.connError
+            - return: ""
+          when: next > int64(corehttp2.MaxWindow)
+      - set: f.c.sendWindow
+        value: int32(next)
+      - eval: f.l.flushHolds(f)
+        to: f.l.flushHolds
+  - of: (*feedRun).streamCredit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).streamCredit
+        kind: self
+      - id: f.l.find
+        kind: internal
+      - id: f.creditOnAbsent
+        kind: internal
+      - id: f.streamError
+        kind: internal
+      - id: f.l.flushHolds
+        kind: internal
+    steps:
+      - bind: idx, _
+        eval: f.l.find(f.c, f.h.StreamID)
+        to: f.l.find
+      - opt:
+          do:
+            - eval: f.creditOnAbsent(inc)
+              to: f.creditOnAbsent
+            - return: ""
+          when: idx == noIndex
+      - bind: st
+        eval: "&f.l.streams[idx]"
+      - opt:
+          do:
+            - eval: f.streamError(idx, corehttp2.ErrCodeProtocol)
+              to: f.streamError
+            - return: ""
+          when: inc == 0
+      - bind: next
+        eval: int64(st.sendWindow) + int64(inc)
+      - opt:
+          do:
+            - eval: f.streamError(idx, corehttp2.ErrCodeFlowControl)
+              to: f.streamError
+            - return: ""
+          when: next > int64(corehttp2.MaxWindow)
+      - set: st.sendWindow
+        value: int32(next)
+      - eval: f.l.flushHolds(f)
+        to: f.l.flushHolds
+  - of: (*feedRun).creditOnAbsent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).creditOnAbsent
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.l.countErr
+        kind: internal
+      - id: AppendRSTStream
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: ""
+          when: f.h.StreamID > f.c.lastStream
+      - opt:
+          do:
+            - eval: f.l.countErr(corehttp2.ErrCodeProtocol)
+              to: f.l.countErr
+            - set: f.dst
+              to: AppendRSTStream
+              value: AppendRSTStream(f.dst, f.h.StreamID, corehttp2.ErrCodeProtocol)
+          when: inc == 0
+  - of: (*feedRun).dataFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).dataFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.l.find
+        kind: internal
+      - id: f.dataOnAbsent
+        kind: internal
+      - id: f.frameLen
+        kind: internal
+      - id: f.dataOnStream
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: f.h.StreamID == 0
+      - bind: idx, _
+        eval: f.l.find(f.c, f.h.StreamID)
+        to: f.l.find
+      - opt:
+          do:
+            - eval: f.dataOnAbsent()
+              to: f.dataOnAbsent
+            - return: f.frameLen()
+              to: f.frameLen
+          when: idx == noIndex
+      - eval: f.dataOnStream(idx)
+        to: f.dataOnStream
+      - return: f.frameLen()
+        to: f.frameLen
+  - of: (*feedRun).dataOnAbsent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).dataOnAbsent
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+      - id: f.discardAgainstConn
+        kind: internal
+      - id: f.l.countErr
+        kind: internal
+      - id: AppendRSTStream
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: ""
+          when: f.h.StreamID > f.c.lastStream
+      - eval: f.spendControl()
+        to: f.spendControl
+      - eval: f.discardAgainstConn()
+        to: f.discardAgainstConn
+      - opt:
+          do:
+            - eval: f.l.countErr(corehttp2.ErrCodeStreamClosed)
+              to: f.l.countErr
+            - set: f.dst
+              to: AppendRSTStream
+              value: AppendRSTStream(f.dst, f.h.StreamID, corehttp2.ErrCodeStreamClosed)
+          when: "!f.c.has(flagClosing)"
+  - of: (*feedRun).discardAgainstConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).discardAgainstConn
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFlowControl)
+              to: f.connError
+            - return: ""
+          when: int(f.c.peerWindow) < f.h.Length
+      - op: "-="
+        set: f.c.peerWindow
+        value: int32(f.h.Length)
+      - op: +=
+        set: f.c.peerCredit
+        value: int32(f.h.Length)
+  - of: (*feedRun).dataOnStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).dataOnStream
+        kind: self
+      - id: f.discardAgainstConn
+        kind: internal
+      - id: f.streamError
+        kind: internal
+      - id: f.connError
+        kind: internal
+      - id: f.deliverData
+        kind: internal
+    steps:
+      - bind: st
+        eval: "&f.l.streams[idx]"
+      - opt:
+          do:
+            - eval: f.discardAgainstConn()
+              to: f.discardAgainstConn
+            - eval: f.streamError(idx, corehttp2.ErrCodeStreamClosed)
+              to: f.streamError
+            - return: ""
+          when: st.has(streamRemoteClosed)
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFlowControl)
+              to: f.connError
+            - return: ""
+          when: int(f.c.peerWindow) < f.h.Length
+      - opt:
+          do:
+            - eval: f.discardAgainstConn()
+              to: f.discardAgainstConn
+            - eval: f.streamError(idx, corehttp2.ErrCodeFlowControl)
+              to: f.streamError
+            - return: ""
+          when: int(st.peerWindow) < f.h.Length
+      - op: "-="
+        set: f.c.peerWindow
+        value: int32(f.h.Length)
+      - op: "-="
+        set: st.peerWindow
+        value: int32(f.h.Length)
+      - eval: f.deliverData(idx)
+        to: f.deliverData
+  - of: (*feedRun).deliverData
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).deliverData
+        kind: self
+      - id: st.set
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+      - id: f.emit
+        kind: internal
+      - id: f.finishIfDone
+        kind: internal
+    steps:
+      - bind: st
+        eval: "&f.l.streams[idx]"
+      - bind: payload
+        eval: f.payload
+      - bind: pad
+        eval: "0"
+      - opt:
+          do:
+            - set: pad
+              value: int(payload[0])
+            - set: payload
+              value: "payload[1 : len(payload)-pad]"
+          when: f.h.Flags&corehttp2.FlagPadded != 0
+      - bind: credit
+        eval: int32(f.h.Length - len(payload))
+      - op: +=
+        set: st.peerCredit
+        value: credit
+      - op: +=
+        set: f.c.peerCredit
+        value: credit
+      - bind: end
+        eval: f.h.Flags&corehttp2.FlagEndStream != 0
+      - bind: over
+        eval: st.has(streamOverBody) || int64(st.bodyLen)+int64(len(payload)) > int64(f.l.maxBody)
+      - opt:
+          do:
+            - eval: st.set(streamOverBody)
+              to: st.set
+            - op: +=
+              set: st.peerCredit
+              value: int32(len(payload))
+            - op: +=
+              set: f.c.peerCredit
+              value: int32(len(payload))
+          when: over
+      - op: +=
+        set: st.bodyLen
+        value: int32(len(payload))
+      - opt:
+          do:
+            - eval: st.set(streamRemoteClosed)
+              to: st.set
+          when: end
+      - opt:
+          do:
+            - eval: f.spendControl()
+              to: f.spendControl
+          when: len(payload) == 0 && !end
+      - eval: "f.emit(Event{Kind: EventData, Stream: st.id, Data: payload, Flags: dataFlags(end, over)})"
+        to: f.emit
+      - opt:
+          do:
+            - eval: f.finishIfDone(idx)
+              to: f.finishIfDone
+          when: end
+  - of: dataFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: dataFlags
+        kind: self
+      - id: endFlag
+        kind: internal
+    steps:
+      - bind: flags
+        eval: endFlag(end)
+        to: endFlag
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: EventOverBody
+          when: over
+      - return: flags
+  - of: (*Lane).Feed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).Feed
+        kind: self
+      - id: f.startBatch
+        kind: internal
+      - id: f.preface
+        kind: internal
+      - id: f.frame
+        kind: internal
+    steps:
+      - set: l.events
+        value: l.events[:0]
+      - bind: f
+        eval: "feedRun{l: l, c: c, buf: buf, dst: dst}"
+      - eval: f.startBatch()
+        to: f.startBatch
+      - bind: used, ready
+        eval: f.preface()
+        to: f.preface
+      - opt:
+          do:
+            - return: used, f.dst
+          when: "!ready"
+      - loop:
+          cond: used < len(buf) && !c.has(flagClosing)
+          do:
+            - bind: "n"
+              eval: f.frame(buf[used:])
+              to: f.frame
+            - opt:
+                do:
+                  - break: true
+                when: n == 0
+            - op: +=
+              set: used
+              value: "n"
+      - opt:
+          do:
+            - return: len(buf), f.dst
+          when: c.has(flagClosing)
+      - return: used, f.dst
+  - of: (*feedRun).startBatch
+    steps:
+      - opt:
+          do:
+            - set: f.c.epoch
+              value: f.l.epoch
+            - set: f.c.control
+              value: "0"
+          when: f.c.epoch != f.l.epoch
+  - of: (*feedRun).preface
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).preface
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.c.set
+        kind: internal
+      - id: appendServerPreface
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, true
+          when: f.c.has(flagPreface)
+      - bind: "n"
+        eval: min(len(f.buf), clientPrefaceLen)
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: len(f.buf), false
+          when: "!bytes.Equal(f.buf[:n], clientPrefaceBytes[:n])"
+      - opt:
+          do:
+            - return: 0, false
+          when: n < clientPrefaceLen
+      - eval: f.c.set(flagPreface)
+        to: f.c.set
+      - set: f.dst
+        to: appendServerPreface
+        value: appendServerPreface(f.dst, f.l)
+      - set: f.c.peerWindow
+        value: int32(f.l.limits.ReceivePerConn)
+      - return: clientPrefaceLen, true
+  - of: appendServerPreface
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendServerPreface
+        kind: self
+      - id: AppendSettings
+        kind: internal
+      - id: AppendWindowUpdate
+        kind: internal
+    steps:
+      - bind: settings
+        eval: |-
+          [...]corehttp2.SettingValue{
+          		{ID: corehttp2.SettingMaxConcurrentStreams, Val: uint32(l.limits.MaxStreams)},
+          		{ID: corehttp2.SettingInitialWindowSize, Val: uint32(l.limits.ReceivePerStream)},
+          		{ID: corehttp2.SettingMaxHeaderListSize, Val: uint32(l.limits.MaxHeaderList)},
+          		{ID: corehttp2.SettingHeaderTableSize, Val: uint32(l.limits.HeaderTable)},
+          		{ID: corehttp2.SettingMaxFrameSize, Val: uint32(l.limits.MaxFrame)},
+          	}
+      - set: dst
+        to: AppendSettings
+        value: AppendSettings(dst, settings[:])
+      - return: AppendWindowUpdate(dst, 0, uint32(l.limits.ReceivePerConn-corehttp2.DefaultWindow))
+        to: AppendWindowUpdate
+  - of: (*feedRun).frame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).frame
+        kind: self
+      - id: ParseFrameHeader
+        kind: internal
+      - id: f.connError
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+      - id: f.dispatchLow
+        kind: internal
+      - id: f.dispatchHigh
+        kind: internal
+    steps:
+      - bind: h, n, code
+        eval: ParseFrameHeader(in, f.l.limits.MaxFrame)
+        to: ParseFrameHeader
+      - opt:
+          do:
+            - return: "0"
+          when: n == 0
+      - opt:
+          do:
+            - eval: f.connError(code)
+              to: f.connError
+            - return: "0"
+          when: code != corehttp2.ErrCodeNoError
+      - opt:
+          do:
+            - return: "0"
+          when: len(in) < n+h.Length
+      - set: f.h, f.payload
+        value: h, in[n:n+h.Length]
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: "!f.c.has(flagSettings) && (h.Type != corehttp2.FrameSettings || h.Flags&corehttp2.FlagAck != 0)"
+      - opt:
+          do:
+            - eval: f.spendControl()
+              to: f.spendControl
+            - return: n + h.Length
+          when: h.Type > frameKnownMax
+      - opt:
+          do:
+            - return: f.dispatchLow(in)
+              to: f.dispatchLow
+          when: h.Type <= corehttp2.FrameSettings
+      - return: f.dispatchHigh()
+        to: f.dispatchHigh
+  - of: (*feedRun).dispatchLow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).dispatchLow
+        kind: self
+      - id: f.dataFrame
+        kind: internal
+      - id: f.headersFrame
+        kind: internal
+      - id: f.priorityFrame
+        kind: internal
+      - id: f.rstFrame
+        kind: internal
+      - id: f.settingsFrame
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: corehttp2.FrameData
+              do:
+                - return: f.dataFrame()
+                  to: f.dataFrame
+            - case: corehttp2.FrameHeaders
+              do:
+                - return: f.headersFrame(in)
+                  to: f.headersFrame
+            - case: corehttp2.FramePriority
+              do:
+                - return: f.priorityFrame()
+                  to: f.priorityFrame
+            - case: corehttp2.FrameRSTStream
+              do:
+                - return: f.rstFrame()
+                  to: f.rstFrame
+            - default: true
+              do:
+                - return: f.settingsFrame()
+                  to: f.settingsFrame
+          "on": f.h.Type
+  - of: (*feedRun).dispatchHigh
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).dispatchHigh
+        kind: self
+      - id: f.pushFrame
+        kind: internal
+      - id: f.pingFrame
+        kind: internal
+      - id: f.goAwayFrame
+        kind: internal
+      - id: f.windowFrame
+        kind: internal
+      - id: f.continuationFrame
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: corehttp2.FramePushPromise
+              do:
+                - return: f.pushFrame()
+                  to: f.pushFrame
+            - case: corehttp2.FramePing
+              do:
+                - return: f.pingFrame()
+                  to: f.pingFrame
+            - case: corehttp2.FrameGoAway
+              do:
+                - return: f.goAwayFrame()
+                  to: f.goAwayFrame
+            - case: corehttp2.FrameWindowUpdate
+              do:
+                - return: f.windowFrame()
+                  to: f.windowFrame
+            - default: true
+              do:
+                - return: f.continuationFrame()
+                  to: f.continuationFrame
+          "on": f.h.Type
+  - of: (*feedRun).frameLen
+    steps:
+      - return: corehttp2.FrameHeaderLen + f.h.Length
+  - of: (*feedRun).spendControl
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).spendControl
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - op: ++
+        set: f.c.control
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeEnhanceYourCalm)
+              to: f.connError
+          when: f.c.control > controlPerBatch
+  - of: (*feedRun).connError
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).connError
+        kind: self
+      - id: f.c.set
+        kind: internal
+      - id: f.l.countErr
+        kind: internal
+      - id: AppendGoAway
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: f.c.has(flagClosing)
+      - eval: f.c.set(flagClosing)
+        to: f.c.set
+      - eval: f.l.countErr(code)
+        to: f.l.countErr
+      - set: f.dst
+        to: AppendGoAway
+        value: AppendGoAway(f.dst, f.c.lastOpen, code)
+  - of: (*feedRun).streamError
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).streamError
+        kind: self
+      - id: f.l.countErr
+        kind: internal
+      - id: AppendRSTStream
+        kind: internal
+      - id: f.l.closeStream
+        kind: internal
+    steps:
+      - bind: stream
+        eval: f.l.streams[idx].id
+      - eval: f.l.countErr(code)
+        to: f.l.countErr
+      - set: f.dst
+        to: AppendRSTStream
+        value: AppendRSTStream(f.dst, stream, code)
+      - eval: f.l.closeStream(f.c, idx)
+        to: f.l.closeStream
+      - set: f.l.events
+        value: "append(f.l.events, Event{Kind: EventReset, Stream: stream, Code: code})"
+  - of: (*feedRun).emit
+    steps:
+      - set: f.l.events
+        value: append(f.l.events, ev)
+  - of: (*Lane).newStream
+    steps:
+      - bind: idx
+        eval: l.freeStream
+      - alt:
+          - do:
+              - set: l.freeStream
+                value: l.streams[idx].next
+            when: idx != noIndex
+          - do:
+              - set: l.streams
+                value: append(l.streams, streamState{})
+              - set: idx
+                value: int32(len(l.streams) - 1)
+            else: true
+      - set: l.streams[idx]
+        value: |-
+          streamState{
+          		id:         id,
+          		next:       c.head,
+          		peerWindow: int32(l.limits.ReceivePerStream),
+          		sendWindow: c.initialSend,
+          	}
+      - set: c.head
+        value: idx
+      - op: ++
+        set: c.open
+      - return: idx
+  - of: (*Lane).closeStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).closeStream
+        kind: self
+      - id: l.find
+        kind: internal
+      - id: l.freeStreamSlot
+        kind: internal
+    steps:
+      - bind: id
+        eval: l.streams[idx].id
+      - bind: _, prev
+        eval: l.find(c, id)
+        to: l.find
+      - bind: st
+        eval: "&l.streams[idx]"
+      - alt:
+          - do:
+              - set: c.head
+                value: st.next
+            when: prev == noIndex
+          - do:
+              - set: l.streams[prev].next
+                value: st.next
+            else: true
+      - op: "--"
+        set: c.open
+      - op: "-="
+        set: c.held
+        value: st.holdLen
+      - eval: l.freeStreamSlot(idx)
+        to: l.freeStreamSlot
+  - of: (*Lane).freeStreamSlot
+    steps:
+      - set: l.streams[idx].next
+        value: l.freeStream
+      - set: l.freeStream
+        value: idx
+  - of: (*Lane).releaseHold
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.hold == noIndex
+      - opt:
+          do:
+            - set: l.holds[c.hold].buf
+              value: nil
+          when: cap(l.holds[c.hold].buf) > holdKeepMax
+      - set: l.holds[c.hold].buf
+        value: l.holds[c.hold].buf[:0]
+      - set: l.holds[c.hold].dead
+        value: "0"
+      - set: l.freeHolds
+        value: append(l.freeHolds, c.hold)
+      - set: c.hold
+        value: noIndex
+  - of: (*feedRun).finishIfDone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).finishIfDone
+        kind: self
+      - id: AppendRSTStream
+        kind: internal
+      - id: f.refundReset
+        kind: internal
+      - id: f.l.closeStream
+        kind: internal
+    steps:
+      - bind: st
+        eval: "&f.l.streams[idx]"
+      - opt:
+          do:
+            - return: ""
+          when: "!st.has(streamLocalClosed) || st.holdLen > 0"
+      - opt:
+          do:
+            - set: f.dst
+              to: AppendRSTStream
+              value: AppendRSTStream(f.dst, st.id, corehttp2.ErrCodeNoError)
+          when: "!st.has(streamRemoteClosed)"
+      - eval: f.refundReset()
+        to: f.refundReset
+      - eval: f.l.closeStream(f.c, idx)
+        to: f.l.closeStream
+  - of: (*feedRun).refundReset
+    steps:
+      - bind: limit
+        eval: resetBudgetFactor * int32(f.l.limits.MaxStreams)
+      - opt:
+          do:
+            - op: ++
+              set: f.c.resets
+          when: f.c.resets < limit
+  - of: (*feedRun).headersFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).headersFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.readSequence
+        kind: internal
+      - id: f.onHeaderBlock
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: f.h.StreamID == 0
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: f.h.StreamID%2 == 0
+      - bind: seq, ok
+        eval: f.readSequence(in)
+        to: f.readSequence
+      - opt:
+          do:
+            - return: "0"
+          when: "!ok || f.c.has(flagClosing)"
+      - set: f.c.scanFrames, f.c.scanOff, f.c.scanBlock
+        value: 0, 0, 0
+      - eval: f.onHeaderBlock(&seq)
+        to: f.onHeaderBlock
+      - return: seq.total
+  - of: (*feedRun).readSequence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).readSequence
+        kind: self
+      - id: f.fragmentOf
+        kind: internal
+      - id: f.resumeScan
+        kind: internal
+      - id: f.nextContinuation
+        kind: internal
+      - id: f.joinSequence
+        kind: internal
+    steps:
+      - bind: first
+        eval: f.fragmentOf(f.h, f.payload)
+        to: f.fragmentOf
+      - bind: endStream
+        eval: f.h.Flags&corehttp2.FlagEndStream != 0
+      - opt:
+          do:
+            - return: "headerSequence{total: f.frameLen(), block: first, endStream: endStream}, true"
+          when: f.h.Flags&corehttp2.FlagEndHeaders != 0
+      - bind: off, blockLen
+        eval: f.resumeScan(in, int32(len(first)))
+        to: f.resumeScan
+      - loop:
+          do:
+            - bind: h, n, ok
+              eval: f.nextContinuation(in[off:])
+              to: f.nextContinuation
+            - opt:
+                do:
+                  - set: f.c.scanOff, f.c.scanBlock
+                    value: off, blockLen
+                  - return: headerSequence{}, false
+                when: "!ok"
+            - op: +=
+              set: "off"
+              value: int32(n)
+            - op: +=
+              set: blockLen
+              value: int32(h.Length)
+            - opt:
+                do:
+                  - return: headerSequence{}, false
+                when: "!f.withinBlockBound(blockLen)"
+            - op: ++
+              set: f.c.scanFrames
+            - opt:
+                do:
+                  - return: f.joinSequence(in, first, int(off), endStream), true
+                    to: f.joinSequence
+                when: h.Flags&corehttp2.FlagEndHeaders != 0
+          forever: true
+  - of: (*feedRun).resumeScan
+    steps:
+      - bind: frameEnd
+        eval: int32(f.frameLen())
+      - opt:
+          do:
+            - return: f.c.scanOff, max(f.c.scanBlock, firstLen)
+          when: f.c.scanOff > frameEnd && int(f.c.scanOff) <= len(in)
+      - set: f.c.scanFrames
+        value: "0"
+      - return: frameEnd, firstLen
+  - of: (*feedRun).withinBlockBound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).withinBlockBound
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeEnhanceYourCalm)
+              to: f.connError
+            - return: "false"
+          when: int(blockLen) > f.l.limits.MaxHeaderList*blockBoundFactor || f.c.scanFrames >= maxContinuationFrames
+      - return: "true"
+  - of: (*feedRun).nextContinuation
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).nextContinuation
+        kind: self
+      - id: ParseFrameHeader
+        kind: internal
+      - id: f.connError
+        kind: internal
+    steps:
+      - bind: h, n, code
+        eval: ParseFrameHeader(in, f.l.limits.MaxFrame)
+        to: ParseFrameHeader
+      - opt:
+          do:
+            - return: h, 0, false
+          when: n == 0
+      - opt:
+          do:
+            - eval: f.connError(code)
+              to: f.connError
+            - return: h, 0, false
+          when: code != corehttp2.ErrCodeNoError
+      - opt:
+          do:
+            - return: h, 0, false
+          when: len(in) < n+h.Length
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: h, 0, false
+          when: h.Type != corehttp2.FrameContinuation || h.StreamID != f.h.StreamID
+      - return: h, n + h.Length, true
+  - of: (*feedRun).joinSequence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).joinSequence
+        kind: self
+      - id: f.frameLen
+        kind: internal
+      - id: ParseFrameHeader
+        kind: internal
+    steps:
+      - bind: start
+        eval: len(f.l.join)
+      - set: f.l.join
+        value: append(f.l.join, first...)
+      - bind: "off"
+        eval: f.frameLen()
+        to: f.frameLen
+      - loop:
+          cond: off < end
+          do:
+            - bind: h, n, _
+              eval: ParseFrameHeader(in[off:], f.l.limits.MaxFrame)
+              to: ParseFrameHeader
+            - set: f.l.join
+              value: append(f.l.join, in[off+n:off+n+h.Length]...)
+            - op: +=
+              set: "off"
+              value: n + h.Length
+      - bind: block
+        eval: f.l.join[start:len(f.l.join):len(f.l.join)]
+      - return: "headerSequence{total: end, block: block, endStream: endStream}"
+  - of: (*feedRun).fragmentOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).fragmentOf
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: pad
+              eval: int(payload[0])
+            - set: payload
+              value: "payload[1 : len(payload)-pad]"
+          when: h.Flags&corehttp2.FlagPadded != 0
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: f.connError(corehttp2.ErrCodeFrameSize)
+                    to: f.connError
+                  - return: nil
+                when: len(payload) < priorityFieldsLen
+            - set: payload
+              value: payload[priorityFieldsLen:]
+          when: h.Flags&corehttp2.FlagPriority != 0
+      - return: payload
+  - of: (*feedRun).onHeaderBlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).onHeaderBlock
+        kind: self
+      - id: f.l.find
+        kind: internal
+      - id: f.headersOnOpenStream
+        kind: internal
+      - id: f.connError
+        kind: internal
+      - id: f.emit
+        kind: internal
+      - id: f.l.countErr
+        kind: internal
+      - id: AppendRSTStream
+        kind: internal
+      - id: f.l.newStream
+        kind: internal
+      - id: f.l.streams[idx].set
+        kind: internal
+    steps:
+      - bind: idx, _
+        eval: f.l.find(f.c, f.h.StreamID)
+        to: f.l.find
+      - opt:
+          do:
+            - eval: f.headersOnOpenStream(idx, seq)
+              to: f.headersOnOpenStream
+            - return: ""
+          when: idx != noIndex
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: ""
+          when: f.h.StreamID <= f.c.lastStream
+      - set: f.c.lastStream
+        value: f.h.StreamID
+      - opt:
+          do:
+            - eval: "f.emit(Event{Kind: EventHeaders, Stream: f.h.StreamID, Data: seq.block, Flags: EventDiscard})"
+              to: f.emit
+            - eval: f.l.countErr(corehttp2.ErrCodeRefusedStream)
+              to: f.l.countErr
+            - set: f.dst
+              to: AppendRSTStream
+              value: AppendRSTStream(f.dst, f.h.StreamID, corehttp2.ErrCodeRefusedStream)
+            - return: ""
+          when: f.c.has(flagGoAway) || int(f.c.open) >= f.l.limits.MaxStreams
+      - set: f.c.lastOpen
+        value: f.h.StreamID
+      - set: idx
+        to: f.l.newStream
+        value: f.l.newStream(f.c, f.h.StreamID)
+      - opt:
+          do:
+            - eval: f.l.streams[idx].set(streamRemoteClosed)
+              to: f.l.streams[idx].set
+          when: seq.endStream
+      - eval: "f.emit(Event{Kind: EventHeaders, Stream: f.h.StreamID, Data: seq.block, Flags: endFlag(seq.endStream)})"
+        to: f.emit
+  - of: (*feedRun).headersOnOpenStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).headersOnOpenStream
+        kind: self
+      - id: f.emit
+        kind: internal
+      - id: f.streamError
+        kind: internal
+    steps:
+      - bind: st
+        eval: "&f.l.streams[idx]"
+      - eval: "f.emit(Event{Kind: EventHeaders, Stream: st.id, Data: seq.block, Flags: EventDiscard})"
+        to: f.emit
+      - opt:
+          do:
+            - eval: f.streamError(idx, corehttp2.ErrCodeStreamClosed)
+              to: f.streamError
+            - return: ""
+          when: st.has(streamRemoteClosed)
+      - eval: f.streamError(idx, corehttp2.ErrCodeProtocol)
+        to: f.streamError
+  - of: (*feedRun).continuationFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).continuationFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - eval: f.connError(corehttp2.ErrCodeProtocol)
+        to: f.connError
+      - return: "0"
+  - of: endFlag
+    steps:
+      - opt:
+          do:
+            - return: EventEndStream
+          when: end
+      - return: "0"
+  - of: (*Lane).Headers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).Headers
+        kind: self
+      - id: l.find
+        kind: internal
+      - id: NewEncoder(int(c.peerMaxFrame)).AppendHeaders
+        kind: internal
+      - id: l.streams[idx].set
+        kind: internal
+      - id: f.finishIfDone
+        kind: internal
+    steps:
+      - bind: idx, _
+        eval: l.find(c, stream)
+        to: l.find
+      - opt:
+          do:
+            - return: dst, nil
+          when: idx == noIndex
+      - bind: out, err
+        eval: NewEncoder(int(c.peerMaxFrame)).AppendHeaders(dst, stream, res, endStream)
+        to: NewEncoder(int(c.peerMaxFrame)).AppendHeaders
+      - opt:
+          do:
+            - return: dst, err
+          when: err != nil
+      - opt:
+          do:
+            - bind: f
+              eval: "feedRun{l: l, c: c, dst: out}"
+            - eval: l.streams[idx].set(streamLocalClosed)
+              to: l.streams[idx].set
+            - eval: f.finishIfDone(idx)
+              to: f.finishIfDone
+            - set: out
+              value: f.dst
+          when: endStream
+      - return: out, nil
+  - of: (*Lane).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).Send
+        kind: self
+      - id: l.find
+        kind: internal
+      - id: f.sendNow
+        kind: internal
+    steps:
+      - bind: idx, _
+        eval: l.find(c, stream)
+        to: l.find
+      - opt:
+          do:
+            - return: dst
+          when: idx == noIndex
+      - bind: f
+        eval: "feedRun{l: l, c: c, dst: dst}"
+      - eval: f.sendNow(idx, body, endStream)
+        to: f.sendNow
+      - return: f.dst
+  - of: (*feedRun).sendNow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).sendNow
+        kind: self
+      - id: f.appendData
+        kind: internal
+      - id: f.hold
+        kind: internal
+      - id: st.set
+        kind: internal
+      - id: f.finishIfDone
+        kind: internal
+    steps:
+      - bind: st
+        eval: "&f.l.streams[idx]"
+      - bind: "n"
+        eval: f.appendData(st, p, end)
+        to: f.appendData
+      - opt:
+          do:
+            - eval: f.hold(idx, p[n:], end)
+              to: f.hold
+            - return: ""
+          when: n < len(p)
+      - opt:
+          do:
+            - eval: st.set(streamLocalClosed)
+              to: st.set
+            - eval: f.finishIfDone(idx)
+              to: f.finishIfDone
+          when: end
+  - of: (*feedRun).appendData
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).appendData
+        kind: self
+      - id: corehttp2
+        kind: package
+      - id: AppendFrameHeader
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: min(len(p), int(max(st.sendWindow, 0)), int(max(f.c.sendWindow, 0)))
+      - bind: sent
+        eval: "0"
+      - bind: maxFrame
+        eval: int(f.c.peerMaxFrame)
+      - loop:
+          cond: sent < n
+          do:
+            - bind: size
+              eval: min(n-sent, maxFrame)
+            - bind: flags
+              eval: corehttp2.FrameFlags(0)
+              to: corehttp2
+            - opt:
+                do:
+                  - set: flags
+                    value: corehttp2.FlagEndStream
+                when: end && sent+size == len(p)
+            - set: f.dst
+              to: AppendFrameHeader
+              value: "AppendFrameHeader(f.dst, corehttp2.FrameValue{Type: corehttp2.FrameData, Flags: flags, StreamID: st.id, Length: size})"
+            - set: f.dst
+              value: append(f.dst, p[sent:sent+size]...)
+            - op: +=
+              set: sent
+              value: size
+      - op: "-="
+        set: st.sendWindow
+        value: int32(n)
+      - op: "-="
+        set: f.c.sendWindow
+        value: int32(n)
+      - opt:
+          do:
+            - set: f.dst
+              to: AppendFrameHeader
+              value: "AppendFrameHeader(f.dst, corehttp2.FrameValue{Type: corehttp2.FrameData, Flags: corehttp2.FlagEndStream, StreamID: st.id})"
+          when: end && len(p) == 0
+      - return: "n"
+  - of: (*feedRun).hold
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).hold
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.l.holdOf
+        kind: internal
+      - id: st.set
+        kind: internal
+    steps:
+      - bind: st
+        eval: "&f.l.streams[idx]"
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeEnhanceYourCalm)
+              to: f.connError
+            - return: ""
+          when: int(f.c.held)+len(p) > int(f.l.holdCap)
+      - bind: h
+        eval: f.l.holdOf(f.c)
+        to: f.l.holdOf
+      - opt:
+          do:
+            - op: +=
+              set: h.dead
+              value: st.holdLen
+            - set: h.buf
+              value: append(h.buf, h.buf[st.holdOff:st.holdOff+st.holdLen]...)
+            - set: st.holdOff
+              value: int32(len(h.buf)) - st.holdLen
+          when: st.holdLen > 0 && int(st.holdOff+st.holdLen) != len(h.buf)
+      - opt:
+          do:
+            - set: st.holdOff
+              value: int32(len(h.buf))
+          when: st.holdLen == 0
+      - set: h.buf
+        value: append(h.buf, p...)
+      - op: +=
+        set: st.holdLen
+        value: int32(len(p))
+      - op: +=
+        set: f.c.held
+        value: int32(len(p))
+      - opt:
+          do:
+            - eval: st.set(streamHoldEnd)
+              to: st.set
+          when: end
+  - of: (*Lane).holdOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).holdOf
+        kind: self
+      - id: l.takeHold
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: c.hold
+              to: l.takeHold
+              value: l.takeHold()
+          when: c.hold == noIndex
+      - return: "&l.holds[c.hold]"
+  - of: (*Lane).takeHold
+    steps:
+      - opt:
+          do:
+            - bind: id
+              eval: l.freeHolds[n-1]
+            - set: l.freeHolds
+              value: l.freeHolds[:n-1]
+            - return: id
+          init:
+            bind: "n"
+            eval: len(l.freeHolds)
+          when: n > 0
+      - set: l.holds
+        value: append(l.holds, holdBuffer{})
+      - return: int32(len(l.holds) - 1)
+  - of: (*Lane).flushHolds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).flushHolds
+        kind: self
+      - id: l.flushStream
+        kind: internal
+      - id: l.compactHold
+        kind: internal
+    steps:
+      - bind: c
+        eval: f.c
+      - opt:
+          do:
+            - return: ""
+          when: c.held == 0
+      - loop:
+          cond: idx != noIndex && c.sendWindow > 0
+          do:
+            - bind: next
+              eval: l.streams[idx].next
+            - eval: l.flushStream(f, idx)
+              to: l.flushStream
+            - set: idx
+              value: next
+          init: idx := c.head
+      - eval: l.compactHold(c)
+        to: l.compactHold
+  - of: (*Lane).flushStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).flushStream
+        kind: self
+      - id: st.has
+        kind: internal
+      - id: f.appendData
+        kind: internal
+      - id: st.set
+        kind: internal
+      - id: f.finishIfDone
+        kind: internal
+    steps:
+      - bind: st
+        eval: "&l.streams[idx]"
+      - opt:
+          do:
+            - return: ""
+          when: st.holdLen == 0 || st.sendWindow <= 0
+      - bind: buf
+        eval: l.holds[f.c.hold].buf
+      - bind: p
+        eval: "buf[st.holdOff : st.holdOff+st.holdLen]"
+      - bind: end
+        eval: st.has(streamHoldEnd)
+        to: st.has
+      - bind: "n"
+        eval: f.appendData(st, p, end)
+        to: f.appendData
+      - op: +=
+        set: st.holdOff
+        value: int32(n)
+      - op: "-="
+        set: st.holdLen
+        value: int32(n)
+      - op: "-="
+        set: f.c.held
+        value: int32(n)
+      - op: +=
+        set: l.holds[f.c.hold].dead
+        value: int32(n)
+      - opt:
+          do:
+            - eval: st.set(streamLocalClosed)
+              to: st.set
+            - eval: f.finishIfDone(idx)
+              to: f.finishIfDone
+          when: st.holdLen == 0 && end
+  - of: (*Lane).compactHold
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).compactHold
+        kind: self
+      - id: l.releaseHold
+        kind: internal
+      - id: l.moveHoldDown
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.hold == noIndex
+      - opt:
+          do:
+            - eval: l.releaseHold(c)
+              to: l.releaseHold
+            - return: ""
+          when: c.held == 0
+      - bind: h
+        eval: "&l.holds[c.hold]"
+      - opt:
+          do:
+            - eval: l.moveHoldDown(c, h)
+              to: l.moveHoldDown
+          when: int(h.dead)*2 > len(h.buf)
+  - of: (*Lane).moveHoldDown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).moveHoldDown
+        kind: self
+      - id: l.lowestHold
+        kind: internal
+    steps:
+      - bind: write
+        eval: int32(0)
+      - loop:
+          do:
+            - bind: idx
+              eval: l.lowestHold(c, write)
+              to: l.lowestHold
+            - opt:
+                do:
+                  - break: true
+                when: idx == noIndex
+            - bind: st
+              eval: "&l.streams[idx]"
+            - eval: copy(h.buf[write:], h.buf[st.holdOff:st.holdOff+st.holdLen])
+            - set: st.holdOff
+              value: write
+            - op: +=
+              set: write
+              value: st.holdLen
+          forever: true
+      - set: h.buf
+        value: h.buf[:write]
+      - set: h.dead
+        value: "0"
+  - of: (*Lane).Consume
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).Consume
+        kind: self
+      - id: l.find
+        kind: internal
+    steps:
+      - op: +=
+        set: c.peerCredit
+        value: int32(n)
+      - bind: idx, _
+        eval: l.find(c, stream)
+        to: l.find
+      - opt:
+          do:
+            - return: ""
+          when: idx == noIndex || l.streams[idx].has(streamRemoteClosed)
+      - op: +=
+        set: l.streams[idx].peerCredit
+        value: int32(n)
+  - of: (*Lane).AppendCredits
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).AppendCredits
+        kind: self
+      - id: AppendWindowUpdate
+        kind: internal
+    steps:
+      - loop:
+          cond: idx != noIndex
+          do:
+            - bind: st
+              eval: "&l.streams[idx]"
+            - opt:
+                do:
+                  - set: dst
+                    to: AppendWindowUpdate
+                    value: AppendWindowUpdate(dst, st.id, uint32(st.peerCredit))
+                  - op: +=
+                    set: st.peerWindow
+                    value: st.peerCredit
+                  - set: st.peerCredit
+                    value: "0"
+                when: st.peerCredit >= int32(l.limits.ReceivePerStream)/creditDivisor
+          init: idx := c.head
+          post: idx = l.streams[idx].next
+      - opt:
+          do:
+            - set: dst
+              to: AppendWindowUpdate
+              value: AppendWindowUpdate(dst, 0, uint32(c.peerCredit))
+            - op: +=
+              set: c.peerWindow
+              value: c.peerCredit
+            - set: c.peerCredit
+              value: "0"
+          when: c.peerCredit >= int32(l.limits.ReceivePerConn)/creditDivisor
+      - return: dst
+  - of: (*Lane).GoAway
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).GoAway
+        kind: self
+      - id: c.set
+        kind: internal
+      - id: AppendGoAway
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: c.has(flagGoAway)
+      - eval: c.set(flagGoAway)
+        to: c.set
+      - return: AppendGoAway(dst, c.lastOpen, code)
+        to: AppendGoAway
+  - of: (*Lane).Abort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).Abort
+        kind: self
+      - id: c.set
+        kind: internal
+      - id: AppendGoAway
+        kind: internal
+    steps:
+      - eval: c.set(flagClosing)
+        to: c.set
+      - return: AppendGoAway(dst, c.lastOpen, code)
+        to: AppendGoAway
+  - of: (*Lane).ResetStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Lane).ResetStream
+        kind: self
+      - id: l.find
+        kind: internal
+      - id: AppendRSTStream
+        kind: internal
+      - id: l.closeStream
+        kind: internal
+    steps:
+      - bind: idx, _
+        eval: l.find(c, stream)
+        to: l.find
+      - opt:
+          do:
+            - return: dst
+          when: idx == noIndex
+      - set: dst
+        to: AppendRSTStream
+        value: AppendRSTStream(dst, stream, code)
+      - eval: l.closeStream(c, idx)
+        to: l.closeStream
+      - return: dst
+  - of: (*Lane).OpenStreams
+    steps:
+      - return: int(c.open)
+  - of: (*feedRun).settingsFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).settingsFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.settingsAck
+        kind: internal
+      - id: f.frameLen
+        kind: internal
+      - id: f.c.set
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+      - id: f.applySettings
+        kind: internal
+      - id: AppendSettingsAck
+        kind: internal
+      - id: f.l.flushHolds
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: "0"
+          when: f.h.StreamID != 0
+      - opt:
+          do:
+            - eval: f.settingsAck()
+              to: f.settingsAck
+            - return: f.frameLen()
+              to: f.frameLen
+          when: f.h.Flags&corehttp2.FlagAck != 0
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFrameSize)
+              to: f.connError
+            - return: "0"
+          when: f.h.Length%settingLenLocal != 0
+      - eval: f.c.set(flagSettings)
+        to: f.c.set
+      - eval: f.spendControl()
+        to: f.spendControl
+      - eval: f.applySettings()
+        to: f.applySettings
+      - opt:
+          do:
+            - set: f.dst
+              to: AppendSettingsAck
+              value: AppendSettingsAck(f.dst)
+            - eval: f.l.flushHolds(f)
+              to: f.l.flushHolds
+          when: "!f.c.has(flagClosing)"
+      - return: f.frameLen()
+        to: f.frameLen
+  - of: (*feedRun).settingsAck
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).settingsAck
+        kind: self
+      - id: f.connError
+        kind: internal
+      - id: f.spendControl
+        kind: internal
+      - id: f.c.decoder.acknowledge
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFrameSize)
+              to: f.connError
+            - return: ""
+          when: f.h.Length != settingsAckLen
+      - eval: f.spendControl()
+        to: f.spendControl
+      - eval: f.c.decoder.acknowledge()
+        to: f.c.decoder.acknowledge
+  - of: (*feedRun).applySettings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).applySettings
+        kind: self
+      - id: corehttp2
+        kind: package
+      - id: binary.BigEndian.Uint32
+        kind: value
+      - id: f.applySetting
+        kind: internal
+    steps:
+      - bind: payload
+        eval: f.payload
+      - loop:
+          cond: len(payload) > 0 && !f.c.has(flagClosing)
+          do:
+            - bind: id
+              eval: corehttp2.SettingID(binary.BigEndian.Uint16(payload))
+              to: corehttp2
+            - bind: val
+              eval: binary.BigEndian.Uint32(payload[2:])
+              to: binary.BigEndian.Uint32
+            - set: payload
+              value: payload[settingLenLocal:]
+            - eval: f.applySetting(id, val)
+              to: f.applySetting
+  - of: (*feedRun).applySetting
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).applySetting
+        kind: self
+      - id: f.applyInitialWindow
+        kind: internal
+      - id: f.applyMaxFrame
+        kind: internal
+      - id: f.applyEnablePush
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: corehttp2.SettingInitialWindowSize
+              do:
+                - eval: f.applyInitialWindow(val)
+                  to: f.applyInitialWindow
+            - case: corehttp2.SettingMaxFrameSize
+              do:
+                - eval: f.applyMaxFrame(val)
+                  to: f.applyMaxFrame
+            - case: corehttp2.SettingEnablePush
+              do:
+                - eval: f.applyEnablePush(val)
+                  to: f.applyEnablePush
+            - default: true
+          "on": id
+  - of: (*feedRun).applyEnablePush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).applyEnablePush
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+          when: val > 1
+  - of: (*feedRun).applyMaxFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).applyMaxFrame
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeProtocol)
+              to: f.connError
+            - return: ""
+          when: int64(val) < int64(corehttp2.DefaultMaxFrame) || int64(val) > int64(corehttp2.MaxFrameLimit)
+      - set: f.c.peerMaxFrame
+        value: int32(val)
+  - of: (*feedRun).applyInitialWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*feedRun).applyInitialWindow
+        kind: self
+      - id: f.connError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.connError(corehttp2.ErrCodeFlowControl)
+              to: f.connError
+            - return: ""
+          when: int64(val) > int64(corehttp2.MaxWindow)
+      - bind: delta
+        eval: int64(val) - int64(f.c.initialSend)
+      - loop:
+          cond: idx != noIndex
+          do:
+            - bind: st
+              eval: "&f.l.streams[idx]"
+            - bind: next
+              eval: int64(st.sendWindow) + delta
+            - opt:
+                do:
+                  - eval: f.connError(corehttp2.ErrCodeFlowControl)
+                    to: f.connError
+                  - return: ""
+                when: next > int64(corehttp2.MaxWindow)
+            - set: st.sendWindow
+              value: int32(next)
+          init: idx := f.c.head
+          post: idx = f.l.streams[idx].next
+      - set: f.c.initialSend
+        value: int32(val)
+  - of: ParseFrameHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseFrameHeader
+        kind: self
+      - id: judgePadding
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corehttp2.FrameValue{}, 0, corehttp2.ErrCodeNoError
+          when: len(buf) < corehttp2.FrameHeaderLen
+      - bind: h
+        eval: |-
+          corehttp2.FrameValue{
+          		Type:     corehttp2.FrameType(buf[3]),
+          		Flags:    corehttp2.FrameFlags(buf[4]),
+          		StreamID: binary.BigEndian.Uint32(buf[5:9]) & streamIDMask,
+          		Length:   int(buf[0])<<byte0Shift | int(buf[1])<<byte1Shift | int(buf[2]),
+          	}
+      - opt:
+          do:
+            - return: h, corehttp2.FrameHeaderLen, corehttp2.ErrCodeFrameSize
+          when: h.Length > maxFrame
+      - opt:
+          do:
+            - return: h, corehttp2.FrameHeaderLen, corehttp2.ErrCodeNoError
+          when: "!isPaddedFrame(h)"
+      - return: judgePadding(buf, h)
+        to: judgePadding
+  - of: isPaddedFrame
+    steps:
+      - return: |-
+          h.Flags&corehttp2.FlagPadded != 0 &&
+          		(h.Type == corehttp2.FrameData || h.Type == corehttp2.FrameHeaders)
+  - of: judgePadding
+    steps:
+      - opt:
+          do:
+            - return: h, corehttp2.FrameHeaderLen, corehttp2.ErrCodeProtocol
+          when: h.Length == 0
+      - opt:
+          do:
+            - return: corehttp2.FrameValue{}, 0, corehttp2.ErrCodeNoError
+          when: len(buf) < paddedHeaderLen
+      - opt:
+          do:
+            - return: h, corehttp2.FrameHeaderLen, corehttp2.ErrCodeProtocol
+          when: int(buf[corehttp2.FrameHeaderLen]) >= h.Length
+      - return: h, corehttp2.FrameHeaderLen, corehttp2.ErrCodeNoError
+  - of: AppendFrameHeader
+    steps:
+      - return: |-
+          append(dst,
+          		byte(h.Length>>byte0Shift), byte(h.Length>>byte1Shift), byte(h.Length),
+          		byte(h.Type), byte(h.Flags),
+          		byte(h.StreamID>>24), byte(h.StreamID>>16), byte(h.StreamID>>8), byte(h.StreamID))
+  - of: AppendSettings
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendSettings
+        kind: self
+      - id: AppendFrameHeader
+        kind: internal
+      - id: binary.BigEndian.AppendUint16
+        kind: value
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: AppendFrameHeader
+        value: |-
+          AppendFrameHeader(dst, corehttp2.FrameValue{
+          		Type:   corehttp2.FrameSettings,
+          		Length: len(settings) * settingLen,
+          	})
+      - loop:
+          do:
+            - set: dst
+              to: binary.BigEndian.AppendUint16
+              value: binary.BigEndian.AppendUint16(dst, uint16(s.ID))
+            - set: dst
+              to: binary.BigEndian.AppendUint32
+              value: binary.BigEndian.AppendUint32(dst, s.Val)
+          key: _
+          range: settings
+          value: s
+      - return: dst
+  - of: AppendSettingsAck
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendSettingsAck
+        kind: self
+      - id: AppendFrameHeader
+        kind: internal
+    steps:
+      - return: "AppendFrameHeader(dst, corehttp2.FrameValue{Type: corehttp2.FrameSettings, Flags: corehttp2.FlagAck})"
+        to: AppendFrameHeader
+  - of: AppendWindowUpdate
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendWindowUpdate
+        kind: self
+      - id: AppendFrameHeader
+        kind: internal
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: AppendFrameHeader
+        value: |-
+          AppendFrameHeader(dst, corehttp2.FrameValue{
+          		Type: corehttp2.FrameWindowUpdate, StreamID: stream, Length: windowUpdateLen,
+          	})
+      - return: binary.BigEndian.AppendUint32(dst, increment&streamIDMask)
+        to: binary.BigEndian.AppendUint32
+  - of: AppendRSTStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendRSTStream
+        kind: self
+      - id: AppendFrameHeader
+        kind: internal
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: AppendFrameHeader
+        value: |-
+          AppendFrameHeader(dst, corehttp2.FrameValue{
+          		Type: corehttp2.FrameRSTStream, StreamID: stream, Length: rstStreamLen,
+          	})
+      - return: binary.BigEndian.AppendUint32(dst, uint32(code))
+        to: binary.BigEndian.AppendUint32
+  - of: AppendGoAway
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendGoAway
+        kind: self
+      - id: AppendFrameHeader
+        kind: internal
+      - id: binary.BigEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: AppendFrameHeader
+        value: "AppendFrameHeader(dst, corehttp2.FrameValue{Type: corehttp2.FrameGoAway, Length: goAwayLen})"
+      - set: dst
+        to: binary.BigEndian.AppendUint32
+        value: binary.BigEndian.AppendUint32(dst, last&streamIDMask)
+      - return: binary.BigEndian.AppendUint32(dst, uint32(code))
+        to: binary.BigEndian.AppendUint32
+  - of: AppendPing
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendPing
+        kind: self
+      - id: AppendFrameHeader
+        kind: internal
+    steps:
+      - bind: h
+        eval: "corehttp2.FrameValue{Type: corehttp2.FramePing, Length: pingLen}"
+      - opt:
+          do:
+            - set: h.Flags
+              value: corehttp2.FlagAck
+          when: ack
+      - set: dst
+        to: AppendFrameHeader
+        value: AppendFrameHeader(dst, h)
+      - return: append(dst, data[:]...)
+  - of: (*Decoder).Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Decoder).Decode
+        kind: self
+      - id: r.step
+        kind: internal
+    steps:
+      - bind: r
+        eval: "decodeRun{d: d, mem: mem, block: block, scratch: scratch, req: req}"
+      - set: req.NFields
+        value: "0"
+      - loop:
+          cond: len(r.block) > 0
+          do:
+            - opt:
+                do:
+                  - return: r.scratch, err
+                init:
+                  bind: err
+                  eval: r.step()
+                  to: r.step
+                when: err != nil
+      - opt:
+          do:
+            - return: r.scratch, corehttp2.FieldMalformed
+          when: r.invalid
+      - return: r.scratch, nil
+  - of: (*decodeRun).step
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).step
+        kind: self
+      - id: r.indexed
+        kind: internal
+      - id: r.literal
+        kind: internal
+      - id: r.sizeUpdate
+        kind: internal
+    steps:
+      - bind: first
+        eval: r.block[0]
+      - switch:
+          cases:
+            - case: first&indexedPrefix != 0
+              do:
+                - return: r.indexed()
+                  to: r.indexed
+            - case: first&incrementalMask == incrementalBits
+              do:
+                - return: r.literal(prefix6, true)
+                  to: r.literal
+            - case: first&sizeUpdateMask == sizeUpdateBits
+              do:
+                - return: r.sizeUpdate()
+                  to: r.sizeUpdate
+            - default: true
+              do:
+                - return: r.literal(prefix4, false)
+                  to: r.literal
+  - of: (*decodeRun).readInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).readInt
+        kind: self
+      - id: r.readContinuation
+        kind: internal
+    steps:
+      - bind: mask
+        eval: byte(1)<<prefix - 1
+      - bind: value
+        eval: int(r.block[0] & mask)
+      - set: r.block
+        value: r.block[1:]
+      - opt:
+          do:
+            - return: value, nil
+          when: value < int(mask)
+      - return: r.readContinuation(value)
+        to: r.readContinuation
+  - of: (*decodeRun).readContinuation
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).readContinuation
+        kind: self
+      - id: checkedInt
+        kind: internal
+    steps:
+      - bind: shift
+        eval: uint(0)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: 0, corehttp2.CompressionFailed
+                when: len(r.block) == 0
+            - bind: b
+              eval: r.block[0]
+            - set: r.block
+              value: r.block[1:]
+            - op: +=
+              set: value
+              value: int(b&^continuationBit) << shift
+            - opt:
+                do:
+                  - return: checkedInt(value)
+                    to: checkedInt
+                when: b&continuationBit == 0
+            - op: +=
+              set: shift
+              value: continuationShift
+          range: maxIntBytes
+      - return: 0, corehttp2.CompressionFailed
+  - of: checkedInt
+    steps:
+      - opt:
+          do:
+            - return: 0, corehttp2.CompressionFailed
+          when: value > maxHpackInt
+      - return: value, nil
+  - of: (*decodeRun).indexed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).indexed
+        kind: self
+      - id: r.readInt
+        kind: internal
+      - id: r.fieldByIndex
+        kind: internal
+      - id: r.emit
+        kind: internal
+    steps:
+      - bind: index, err
+        eval: r.readInt(prefix7)
+        to: r.readInt
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: corehttp2.CompressionFailed
+          when: index == 0
+      - bind: field, err
+        eval: r.fieldByIndex(index)
+        to: r.fieldByIndex
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: r.emit(&field)
+        to: r.emit
+  - of: (*decodeRun).fieldByIndex
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).fieldByIndex
+        kind: self
+      - id: staticField
+        kind: internal
+      - id: r.dynamicField
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: staticField(index), nil
+              to: staticField
+          when: index <= staticLen
+      - return: r.dynamicField(index)
+        to: r.dynamicField
+  - of: staticField
+    steps:
+      - bind: at
+        eval: staticOffsetSlots * (index - 1)
+      - bind: nameOff, nameLen
+        eval: int(staticOffsets[at]), int(staticOffsets[at+1])
+      - bind: valOff, valLen
+        eval: int(staticOffsets[at+2]), int(staticOffsets[at+3])
+      - return: |-
+          decodedField{
+          		name:  staticBytes[nameOff : nameOff+nameLen : nameOff+nameLen],
+          		value: staticBytes[valOff : valOff+valLen : valOff+valLen],
+          	}
+  - of: (*decodeRun).dynamicField
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).dynamicField
+        kind: self
+      - id: r.d.entrySize
+        kind: internal
+      - id: r.d.entryAt
+        kind: internal
+    steps:
+      - bind: age
+        eval: index - firstDynamicIndex
+      - opt:
+          do:
+            - return: decodedField{}, corehttp2.CompressionFailed
+          when: age >= int(r.d.count)
+      - bind: nameLen, valueLen
+        eval: r.d.entrySize(r.mem, int32(age))
+        to: r.d.entrySize
+      - opt:
+          do:
+            - return: decodedField{}, corehttp2.HeadersTooLarge
+          when: r.list+int(nameLen)+int(valueLen)+listFieldOverhead > r.d.maxList
+      - bind: field, scratch
+        eval: r.d.entryAt(r.mem, r.scratch, int32(age))
+        to: r.d.entryAt
+      - set: r.scratch
+        value: scratch
+      - return: field, nil
+  - of: (*decodeRun).emit
+    steps:
+      - set: r.updatesDone
+        value: "true"
+      - op: +=
+        set: r.list
+        value: len(f.name) + len(f.value) + listFieldOverhead
+      - opt:
+          do:
+            - return: corehttp2.HeadersTooLarge
+          when: r.list > r.d.maxList || r.req.NFields == corenet.HTTP1MaxFields
+      - set: r.req.Fields[r.req.NFields]
+        value: "corenet.HTTP1FieldValue{Name: f.name, Value: f.value}"
+      - op: ++
+        set: r.req.NFields
+      - set: r.invalid
+        value: r.invalid || f.invalid
+      - return: nil
+  - of: (*decodeRun).sizeUpdate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).sizeUpdate
+        kind: self
+      - id: r.readInt
+        kind: internal
+      - id: r.d.shrinkTo
+        kind: internal
+    steps:
+      - bind: size, err
+        eval: r.readInt(prefix5)
+        to: r.readInt
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: corehttp2.CompressionFailed
+          when: r.updatesDone || size > int(r.d.limit)
+      - set: r.d.maxSize
+        value: int32(size)
+      - eval: r.d.shrinkTo(r.mem, r.d.maxSize)
+        to: r.d.shrinkTo
+      - return: nil
+  - of: (*decodeRun).literal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).literal
+        kind: self
+      - id: r.readInt
+        kind: internal
+      - id: r.literalName
+        kind: internal
+      - id: r.readString
+        kind: internal
+      - id: validField
+        kind: internal
+      - id: r.emit
+        kind: internal
+      - id: r.d.insert
+        kind: internal
+    steps:
+      - bind: nameIndex, err
+        eval: r.readInt(prefix)
+        to: r.readInt
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: field, err
+        eval: r.literalName(nameIndex)
+        to: r.literalName
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: field.value, err
+            eval: r.readString(r.budget(&field))
+            op: =
+            to: r.readString
+          when: err != nil
+      - set: field.invalid
+        to: validField
+        value: "!validField(&field)"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: r.emit(&field)
+            to: r.emit
+          when: err != nil
+      - opt:
+          do:
+            - eval: r.d.insert(r.mem, field.name, field.value, field.invalid)
+              to: r.d.insert
+          when: index
+      - return: nil
+  - of: (*decodeRun).budget
+    steps:
+      - return: max(r.d.maxList-r.list-len(f.name)-listFieldOverhead, 0)
+  - of: (*decodeRun).literalName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).literalName
+        kind: self
+      - id: r.readString
+        kind: internal
+      - id: r.dynamicName
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: name, err
+              eval: r.readString(r.d.maxList - r.list)
+              to: r.readString
+            - return: "decodedField{name: name}, err"
+          when: nameIndex == 0
+      - opt:
+          do:
+            - return: "decodedField{name: staticField(nameIndex).name}, nil"
+          when: nameIndex <= staticLen
+      - return: r.dynamicName(nameIndex)
+        to: r.dynamicName
+  - of: (*decodeRun).dynamicName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).dynamicName
+        kind: self
+      - id: r.d.entrySize
+        kind: internal
+      - id: r.d.nameAt
+        kind: internal
+    steps:
+      - bind: age
+        eval: index - firstDynamicIndex
+      - opt:
+          do:
+            - return: decodedField{}, corehttp2.CompressionFailed
+          when: age >= int(r.d.count)
+      - bind: nameLen, _
+        eval: r.d.entrySize(r.mem, int32(age))
+        to: r.d.entrySize
+      - opt:
+          do:
+            - return: decodedField{}, corehttp2.HeadersTooLarge
+          when: r.list+int(nameLen)+listFieldOverhead > r.d.maxList
+      - bind: name, scratch
+        eval: r.d.nameAt(r.mem, r.scratch, int32(age))
+        to: r.d.nameAt
+      - set: r.scratch
+        value: scratch
+      - return: "decodedField{name: name}, nil"
+  - of: (*decodeRun).readString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).readString
+        kind: self
+      - id: r.readInt
+        kind: internal
+      - id: r.huffmanString
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, corehttp2.CompressionFailed
+          when: len(r.block) == 0
+      - bind: huffman
+        eval: r.block[0]&huffmanBit != 0
+      - bind: length, err
+        eval: r.readInt(prefix7)
+        to: r.readInt
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, corehttp2.CompressionFailed
+          when: length > len(r.block)
+      - bind: raw
+        eval: r.block[:length:length]
+      - set: r.block
+        value: r.block[length:]
+      - opt:
+          do:
+            - return: raw, nil
+          when: "!huffman"
+      - return: r.huffmanString(raw, budget)
+        to: r.huffmanString
+  - of: NewEncoder
+    steps:
+      - return: "Encoder{maxFrame: maxFrame}"
+  - of: Encoder.AppendHeaders
+    participants:
+      - id: caller
+        kind: actor
+      - id: Encoder.AppendHeaders
+        kind: self
+      - id: cmpInt
+        kind: internal
+      - id: AppendFrameHeader
+        kind: internal
+      - id: appendStatus
+        kind: internal
+      - id: appendResponseFields
+        kind: internal
+      - id: appendExtraFields
+        kind: internal
+      - id: appendContentLength
+        kind: internal
+      - id: e.frameBlock
+        kind: internal
+    steps:
+      - bind: status
+        eval: cmpInt(res.Status, statusOK)
+        to: cmpInt
+      - opt:
+          do:
+            - return: dst, corenet.HTTP1ResponseInvalid
+          when: "!sendableStatus(status, res)"
+      - bind: start
+        eval: len(dst)
+      - set: dst
+        to: AppendFrameHeader
+        value: AppendFrameHeader(dst, corehttp2.FrameValue{})
+      - bind: blockStart
+        eval: len(dst)
+      - set: dst
+        to: appendStatus
+        value: appendStatus(dst, status)
+      - bind: dst, ok
+        eval: appendResponseFields(dst, res.Header)
+        to: appendResponseFields
+      - opt:
+          do:
+            - return: dst[:start], corenet.HTTP1ResponseInvalid
+          when: "!ok"
+      - var:
+          name: fok
+          type: bool
+      - opt:
+          do:
+            - return: dst[:start], corenet.HTTP1ResponseInvalid
+          init:
+            bind: dst, fok
+            eval: appendExtraFields(dst, res)
+            op: =
+            to: appendExtraFields
+          when: "!fok"
+      - opt:
+          do:
+            - set: dst
+              to: appendContentLength
+              value: appendContentLength(dst, len(res.Body))
+          when: status != statusNoContent && status != statusNotModified
+      - return: e.frameBlock(dst, start, blockStart, stream, endStream), nil
+        to: e.frameBlock
+  - of: cmpInt
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: v == 0
+      - return: v
+  - of: sendableStatus
+    steps:
+      - bind: bodiless
+        eval: status == statusNoContent || status == statusNotModified
+      - opt:
+          do:
+            - return: "false"
+          when: status < statusMin || status > statusMax || (bodiless && len(res.Body) > 0)
+      - return: "true"
+  - of: appendStatus
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendStatus
+        kind: self
+      - id: appendIndexedLiteralName
+        kind: internal
+      - id: strconv
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: append(dst, indexedPrefix|byte(firstStaticStatus+i))
+                when: int(code) == status
+          key: i
+          range: staticStatusCodes
+          value: code
+      - set: dst
+        to: appendIndexedLiteralName
+        value: appendIndexedLiteralName(dst, statusNameIndex)
+      - set: dst
+        value: append(dst, statusFieldLen)
+      - return: strconv.AppendInt(dst, int64(status), decimal)
+        to: strconv
+  - of: appendContentLength
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendContentLength
+        kind: self
+      - id: appendIndexedLiteralName
+        kind: internal
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        to: appendIndexedLiteralName
+        value: appendIndexedLiteralName(dst, contentLengthIndex)
+      - bind: lengthAt
+        eval: len(dst)
+      - set: dst
+        value: append(dst, 0)
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(n), decimal)
+      - set: dst[lengthAt]
+        value: byte(len(dst) - lengthAt - 1)
+      - return: dst
+  - of: appendIndexedLiteralName
+    steps:
+      - opt:
+          do:
+            - return: append(dst, neverIndexedByte|byte(index))
+          when: index < prefix4Max
+      - return: append(dst, neverIndexedByte|byte(prefix4Max), byte(index-prefix4Max))
+  - of: appendExtraFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendExtraFields
+        kind: self
+      - id: appendResponseFields
+        kind: internal
+      - id: strconv
+        kind: stdlib
+      - id: appendField
+        kind: internal
+      - id: res.RequestID.Bytes
+        kind: value
+    steps:
+      - bind: dst, ok
+        eval: appendResponseFields(dst, res.CORS)
+        to: appendResponseFields
+      - opt:
+          do:
+            - return: dst, false
+          when: "!ok"
+      - var:
+          name: line
+          type: "[extraFieldMax]byte"
+      - opt:
+          do:
+            - bind: out
+              eval: "strconv.AppendInt(append(line[:0], \"Retry-After: \"...), int64(res.RetryAfter), 10)"
+              to: strconv
+            - set: dst, ok
+              to: appendField
+              value: appendField(dst, out)
+            - opt:
+                do:
+                  - return: dst, false
+                when: "!ok"
+          when: res.RetryAfter > 0
+      - opt:
+          do:
+            - set: dst, ok
+              to: appendField
+              value: "appendField(dst, append(append(line[:0], \"X-Request-Id: \"...), id...))"
+          init:
+            bind: id
+            eval: res.RequestID.Bytes()
+            to: res.RequestID.Bytes
+          when: "len(id) > 0 && len(id) < extraFieldMax-len(\"X-Request-Id: \")"
+      - return: dst, ok
+  - of: appendResponseFields
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendResponseFields
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: appendField
+        kind: internal
+    steps:
+      - loop:
+          cond: len(header) > 0
+          do:
+            - bind: end
+              eval: bytes.IndexByte(header, asciiLF)
+              to: bytes
+            - opt:
+                do:
+                  - return: dst, false
+                when: end < 1 || header[end-1] != asciiCR
+            - var:
+                name: ok
+                type: bool
+            - opt:
+                do:
+                  - return: dst, false
+                init:
+                  bind: dst, ok
+                  eval: appendField(dst, header[:end-1])
+                  op: =
+                  to: appendField
+                when: "!ok"
+            - set: header
+              value: header[end+1:]
+      - return: dst, true
+  - of: appendField
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendField
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: appendNamedField
+        kind: internal
+    steps:
+      - bind: colon
+        eval: bytes.IndexByte(line, asciiColonByte)
+        to: bytes
+      - opt:
+          do:
+            - return: dst, false
+          when: colon <= 0 || colon >= maxNameLen || !isToken(line[:colon])
+      - bind: name, value
+        eval: line[:colon], bytes.Trim(line[colon+1:], " \t")
+      - opt:
+          do:
+            - return: dst, false
+          when: valueStop.Index(value) >= 0
+      - opt:
+          do:
+            - return: dst, true
+          when: isConnectionField(name)
+      - return: appendNamedField(dst, name, value), true
+        to: appendNamedField
+  - of: appendNamedField
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendNamedField
+        kind: self
+      - id: staticNameIndex
+        kind: internal
+      - id: appendIndexedLiteralName
+        kind: internal
+      - id: appendString
+        kind: internal
+      - id: appendIntOfLen
+        kind: internal
+      - id: foldToLower
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: dst
+              to: appendIndexedLiteralName
+              value: appendIndexedLiteralName(dst, index)
+            - return: appendString(dst, value)
+              to: appendString
+          init:
+            bind: index
+            eval: staticNameIndex(name)
+            to: staticNameIndex
+          when: index > 0
+      - set: dst
+        value: append(dst, neverIndexedByte)
+      - set: dst
+        to: appendIntOfLen
+        value: appendIntOfLen(dst, len(name))
+      - bind: at
+        eval: len(dst)
+      - set: dst
+        value: append(dst, name...)
+      - eval: foldToLower(dst[at:])
+        to: foldToLower
+      - return: appendString(dst, value)
+        to: appendString
+  - of: lowerByte
+    steps:
+      - opt:
+          do:
+            - return: c | toLower
+          when: c >= firstUpper && c <= lastUpper
+      - return: c
+  - of: appendString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendString
+        kind: self
+      - id: appendIntOfLen
+        kind: internal
+    steps:
+      - set: dst
+        to: appendIntOfLen
+        value: appendIntOfLen(dst, len(s))
+      - return: append(dst, s...)
+  - of: appendIntOfLen
+    steps:
+      - opt:
+          do:
+            - return: append(dst, byte(n))
+          when: n < stringLenThreshold
+      - set: dst
+        value: append(dst, byte(stringLenThreshold))
+      - op: "-="
+        set: "n"
+        value: stringLenThreshold
+      - loop:
+          cond: n >= int(continuationBit)
+          do:
+            - set: dst
+              value: append(dst, byte(n%int(continuationBit))|continuationBit)
+            - op: /=
+              set: "n"
+              value: int(continuationBit)
+      - return: append(dst, byte(n))
+  - of: foldToLower
+    participants:
+      - id: caller
+        kind: actor
+      - id: foldToLower
+        kind: self
+      - id: lowerByte
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: b[i]
+              to: lowerByte
+              value: lowerByte(c)
+          key: i
+          range: b
+          value: c
+  - of: Encoder.frameBlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: Encoder.frameBlock
+        kind: self
+      - id: AppendFrameHeader
+        kind: internal
+      - id: e.splitBlock
+        kind: internal
+    steps:
+      - bind: blockLen
+        eval: len(dst) - blockStart
+      - bind: maxFrame
+        eval: max(e.maxFrame, corehttp2.DefaultMaxFrame)
+      - bind: flags
+        eval: corehttp2.FlagEndHeaders
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: corehttp2.FlagEndStream
+          when: endStream
+      - opt:
+          do:
+            - bind: h
+              eval: "corehttp2.FrameValue{Type: corehttp2.FrameHeaders, Flags: flags, StreamID: stream, Length: blockLen}"
+            - eval: AppendFrameHeader(dst[:start], h)
+              to: AppendFrameHeader
+            - return: dst
+          when: blockLen <= maxFrame
+      - return: e.splitBlock(dst, start, blockStart, stream, flags)
+        to: e.splitBlock
+  - of: Encoder.splitBlock
+    participants:
+      - id: caller
+        kind: actor
+      - id: Encoder.splitBlock
+        kind: self
+      - id: AppendFrameHeader
+        kind: internal
+    steps:
+      - bind: maxFrame
+        eval: max(e.maxFrame, corehttp2.DefaultMaxFrame)
+      - bind: blockLen
+        eval: len(dst) - blockStart
+      - bind: extra
+        eval: (blockLen - 1) / maxFrame
+      - bind: end
+        eval: len(dst) + extra*corehttp2.FrameHeaderLen
+      - set: dst
+        value: append(dst, make([]byte, extra*corehttp2.FrameHeaderLen)...)
+      - bind: writeTail
+        eval: end
+      - loop:
+          cond: i > 0
+          do:
+            - bind: fragment
+              eval: blockLen - i*maxFrame
+            - bind: fragStart
+              eval: blockStart + i*maxFrame
+            - bind: fragEnd
+              eval: fragStart + fragment
+            - eval: copy(dst[writeTail-fragment:writeTail], dst[fragStart:fragEnd])
+            - bind: h
+              eval: "corehttp2.FrameValue{Type: corehttp2.FrameContinuation, StreamID: stream, Length: fragment}"
+            - opt:
+                do:
+                  - set: h.Flags
+                    value: corehttp2.FlagEndHeaders
+                when: i == extra
+            - eval: AppendFrameHeader(dst[:writeTail-fragment-corehttp2.FrameHeaderLen], h)
+              to: AppendFrameHeader
+            - op: "-="
+              set: writeTail
+              value: fragment + corehttp2.FrameHeaderLen
+            - set: blockLen
+              value: fragStart - blockStart
+          init: i := extra
+          post: i--
+      - bind: h
+        eval: "corehttp2.FrameValue{Type: corehttp2.FrameHeaders, Flags: flags &^ corehttp2.FlagEndHeaders, StreamID: stream, Length: maxFrame}"
+      - eval: AppendFrameHeader(dst[:start], h)
+        to: AppendFrameHeader
+      - return: dst
+  - of: (*decodeRun).huffmanString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*decodeRun).huffmanString
+        kind: self
+      - id: huffStep
+        kind: internal
+    steps:
+      - bind: start
+        eval: len(r.scratch)
+      - bind: state
+        eval: uint32(0)
+      - bind: scratch
+        eval: r.scratch
+      - loop:
+          do:
+            - var:
+                name: err
+                type: error
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: scratch, state, err
+                  eval: huffStep(scratch, state, b>>nibbleShift)
+                  op: =
+                  to: huffStep
+                when: err != nil
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: scratch, state, err
+                  eval: huffStep(scratch, state, b&lowNibble)
+                  op: =
+                  to: huffStep
+                when: err != nil
+            - opt:
+                do:
+                  - return: nil, corehttp2.HeadersTooLarge
+                when: len(scratch)-start > budget
+          key: _
+          range: raw
+          value: b
+      - opt:
+          do:
+            - return: nil, corehttp2.CompressionFailed
+          when: "!huffAccept[state]"
+      - set: r.scratch
+        value: scratch
+      - return: scratch[start:len(scratch):len(scratch)], nil
+  - of: huffStep
+    steps:
+      - bind: word
+        eval: huffTable[state<<nibbleShift|uint32(nibble)]
+      - opt:
+          do:
+            - return: nil, 0, corehttp2.CompressionFailed
+          when: word&huffFail != 0
+      - opt:
+          do:
+            - set: scratch
+              value: append(scratch, byte(word>>huffSymShift))
+          when: word&huffEmit != 0
+      - return: scratch, word & huffStateMask, nil
+  - of: NewDecoder
+    steps:
+      - bind: capacity
+        eval: max(table, corehttp2.DefaultHeaderTable)
+      - return: |-
+          Decoder{
+          		maxList:    maxList,
+          		capacity:   int32(capacity),
+          		limit:      int32(corehttp2.DefaultHeaderTable),
+          		advertised: int32(table),
+          		maxSize:    int32(corehttp2.DefaultHeaderTable),
+          	}
+  - of: TableMem
+    steps:
+      - bind: capacity
+        eval: max(table, corehttp2.DefaultHeaderTable)
+      - return: capacity + capacity/int(entryOverhead)*int(slotLen)
+  - of: (*Decoder).acknowledge
+    steps:
+      - set: d.limit
+        value: d.advertised
+  - of: (*Decoder).slots
+    steps:
+      - return: d.capacity / entryOverhead
+  - of: (*Decoder).ringPut
+    steps:
+      - bind: "n"
+        eval: copy(mem[at:d.capacity], p)
+      - eval: copy(mem, p[n:])
+      - return: (at + int32(len(p))) % d.capacity
+  - of: (*Decoder).ringGet
+    steps:
+      - opt:
+          do:
+            - return: append(dst, mem[at:at+n]...)
+          when: at+n <= d.capacity
+      - bind: first
+        eval: d.capacity - at
+      - set: dst
+        value: append(dst, mem[at:d.capacity]...)
+      - return: append(dst, mem[:n-first]...)
+  - of: (*Decoder).slotAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Decoder).slotAt
+        kind: self
+      - id: d.slots
+        kind: internal
+    steps:
+      - bind: slots
+        eval: d.slots()
+        to: d.slots
+      - bind: slot
+        eval: (d.top - age + slots) % slots
+      - bind: at
+        eval: d.capacity + slot*slotLen
+      - return: int32(uint16(mem[at]) | uint16(mem[at+1])<<8)
+  - of: (*Decoder).storeSlot
+    steps:
+      - set: d.top
+        value: (d.top + 1) % d.slots()
+      - bind: at
+        eval: d.capacity + d.top*slotLen
+      - set: mem[at]
+        value: byte(offset)
+      - set: mem[at+1]
+        value: byte(offset >> 8)
+  - of: (*Decoder).entryAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Decoder).entryAt
+        kind: self
+      - id: d.slotAt
+        kind: internal
+      - id: d.ringGet
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.slotAt(mem, age)
+        to: d.slotAt
+      - var:
+          name: hdr
+          type: "[entryHeaderLen]byte"
+      - bind: dst
+        eval: d.ringGet(mem, hdr[:0], at, entryHeaderLen)
+        to: d.ringGet
+      - bind: flag, nameLen, valueLen
+        eval: dst[0], d.u16(dst[1:]), d.u16(dst[3:])
+      - bind: start
+        eval: len(scratch)
+      - set: scratch
+        to: d.ringGet
+        value: d.ringGet(mem, scratch, (at+entryHeaderLen)%d.capacity, int32(nameLen))
+      - bind: mid
+        eval: len(scratch)
+      - set: scratch
+        to: d.ringGet
+        value: d.ringGet(mem, scratch, (at+entryHeaderLen+int32(nameLen))%d.capacity, int32(valueLen))
+      - return: |-
+          decodedField{
+          		name:    scratch[start:mid:mid],
+          		value:   scratch[mid:len(scratch):len(scratch)],
+          		invalid: flag&entryFlagInvalid != 0,
+          	}, scratch
+  - of: (*Decoder).entrySize
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Decoder).entrySize
+        kind: self
+      - id: d.slotAt
+        kind: internal
+      - id: d.ringGet
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.slotAt(mem, age)
+        to: d.slotAt
+      - var:
+          name: hdr
+          type: "[entryHeaderLen]byte"
+      - bind: dst
+        eval: d.ringGet(mem, hdr[:0], at, entryHeaderLen)
+        to: d.ringGet
+      - return: int32(d.u16(dst[1:])), int32(d.u16(dst[3:]))
+  - of: (*Decoder).nameAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Decoder).nameAt
+        kind: self
+      - id: d.slotAt
+        kind: internal
+      - id: d.ringGet
+        kind: internal
+    steps:
+      - bind: at
+        eval: d.slotAt(mem, age)
+        to: d.slotAt
+      - var:
+          name: hdr
+          type: "[entryHeaderLen]byte"
+      - bind: dst
+        eval: d.ringGet(mem, hdr[:0], at, entryHeaderLen)
+        to: d.ringGet
+      - bind: nameLen
+        eval: int32(d.u16(dst[1:]))
+      - bind: start
+        eval: len(scratch)
+      - set: scratch
+        to: d.ringGet
+        value: d.ringGet(mem, scratch, (at+entryHeaderLen)%d.capacity, nameLen)
+      - return: scratch[start:len(scratch):len(scratch)], scratch
+  - of: (*Decoder).u16
+    steps:
+      - return: uint16(b[0]) | uint16(b[1])<<8
+  - of: (*Decoder).evictOldest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Decoder).evictOldest
+        kind: self
+      - id: d.entrySize
+        kind: internal
+    steps:
+      - bind: nameLen, valueLen
+        eval: d.entrySize(mem, d.count-1)
+        to: d.entrySize
+      - bind: stored
+        eval: entryHeaderLen + nameLen + valueLen
+      - set: d.tail
+        value: (d.tail + stored) % d.capacity
+      - op: "-="
+        set: d.size
+        value: nameLen + valueLen + entryOverhead
+      - op: "--"
+        set: d.count
+  - of: (*Decoder).shrinkTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Decoder).shrinkTo
+        kind: self
+      - id: d.evictOldest
+        kind: internal
+    steps:
+      - loop:
+          cond: d.size > target
+          do:
+            - eval: d.evictOldest(mem)
+              to: d.evictOldest
+  - of: (*Decoder).insert
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Decoder).insert
+        kind: self
+      - id: d.shrinkTo
+        kind: internal
+      - id: d.ringPut
+        kind: internal
+      - id: d.storeSlot
+        kind: internal
+    steps:
+      - bind: size
+        eval: int32(len(name)) + int32(len(value)) + entryOverhead
+      - opt:
+          do:
+            - eval: d.shrinkTo(mem, 0)
+              to: d.shrinkTo
+            - return: ""
+          when: size > d.maxSize
+      - eval: d.shrinkTo(mem, d.maxSize-size)
+        to: d.shrinkTo
+      - bind: at
+        eval: d.head
+      - var:
+          name: flag
+          type: byte
+      - opt:
+          do:
+            - set: flag
+              value: entryFlagInvalid
+          when: invalid
+      - bind: hdr
+        eval: "[entryHeaderLen]byte{flag, byte(len(name)), byte(len(name) >> 8), byte(len(value)), byte(len(value) >> 8)}"
+      - bind: next
+        eval: d.ringPut(mem, at, hdr[:])
+        to: d.ringPut
+      - set: next
+        to: d.ringPut
+        value: d.ringPut(mem, next, name)
+      - set: d.head
+        to: d.ringPut
+        value: d.ringPut(mem, next, value)
+      - eval: d.storeSlot(mem, at)
+        to: d.storeSlot
+      - op: ++
+        set: d.count
+      - op: +=
+        set: d.size
+        value: size
+  - of: validField
+    steps:
+      - return: validName(f.name) && validValue(f.value)
+  - of: nameByte
+    steps:
+      - return: c >= firstVisible && c <= lastVisible && (c < firstUpper || c > lastUpper) && c != asciiColon
+  - of: validValue
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: len(value) == 0
+      - return: "!isOWS(value[0]) && !isOWS(value[len(value)-1]) && valueStop.Index(value) < 0"
+  - of: isOWS
+    steps:
+      - return: c == asciiSpace || c == asciiTab
+  - of: HandleLoop
+    steps:
+      - bind: w, _
+        eval: h.(corenet.HTTP1Worker)
+      - bind: r, _
+        eval: h.(corenet.HTTP1BodyReader)
+      - bind: ab, _
+        eval: h.(corenet.HTTP1BodyAborter)
+      - return: |-
+          &LoopHandler{
+          		h: h, p: p, h1: http1.HandleLoop(h, p), worker: w, reader: r, aborter: ab,
+          		serveH1: true, serveH2: true, maxBody: p.Limits().Body, holdCap: defaultHoldCap,
+          	}
+  - of: NewLoopHandler
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewLoopHandler
+        kind: self
+      - id: HandleLoop
+        kind: internal
+    steps:
+      - return: HandleLoop(h, p)
+        to: HandleLoop
+  - of: (*LoopHandler).OnStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStart
+        kind: self
+      - id: a.h1.OnStart
+        kind: value
+      - id: a.state
+        kind: internal
+    steps:
+      - eval: a.h1.OnStart(lanes)
+        to: a.h1.OnStart
+      - loop:
+          do:
+            - eval: a.state(i)
+              to: a.state
+          key: i
+          range: lanes
+  - of: (*LoopHandler).Honours
+    steps:
+      - return: k == corenet.OptionProtocols || k == corenet.OptionHTTP2
+  - of: (*LoopHandler).SetHTTP
+    steps:
+      - set: a.limits
+        value: v.HTTP2
+      - opt:
+          do:
+            - set: a.serveH1, a.serveH2
+              value: false, false
+            - loop:
+                do:
+                  - set: a.serveH1
+                    value: a.serveH1 || p == protoHTTP1
+                  - set: a.serveH2
+                    value: a.serveH2 || p == protoH2
+                key: _
+                range: v.Protocols
+                value: p
+          when: v.Protocols != nil
+      - opt:
+          do:
+            - set: a.serveH2
+              value: "false"
+          when: v.HTTP2Off
+  - of: (*LoopHandler).CheckSpill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).CheckSpill
+        kind: self
+      - id: a.h1.CheckSpill
+        kind: value
+      - id: a.checkH2Spill
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: a.h1.CheckSpill(spillCap)
+            to: a.h1.CheckSpill
+          when: err != nil
+      - return: a.checkH2Spill(spillCap)
+        to: a.checkH2Spill
+  - of: (*LoopHandler).checkH2Spill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).checkH2Spill
+        kind: self
+      - id: a.limits.Resolve
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - bind: limits, err
+        eval: a.limits.Resolve()
+        to: a.limits.Resolve
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: frames
+        eval: int(maxContinuationFrames) + 1
+      - bind: need
+        eval: max(limits.MaxFrame, blockBoundFactor*limits.MaxHeaderList+frames*corehttp2.FrameHeaderLen)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corehttp2.LimitsRefused, errs.WrapParams{},
+                			errs.String("reason", "spill"), errs.Int("spill_cap", spillCap), errs.Int("needed", need+corehttp2.FrameHeaderLen))
+              to: errs
+          when: spillCap < need+corehttp2.FrameHeaderLen
+      - return: nil
+  - of: (*LoopHandler).Unwrap
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).Unwrap
+        kind: self
+      - id: a.h1.Unwrap
+        kind: value
+    steps:
+      - return: a.h1.Unwrap()
+        to: a.h1.Unwrap
+  - of: (*LoopHandler).OnOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnOpen
+        kind: self
+      - id: a.state
+        kind: internal
+      - id: st.remember
+        kind: internal
+      - id: st.entry
+        kind: internal
+    steps:
+      - bind: st
+        eval: a.state(io.Loop())
+        to: a.state
+      - eval: st.remember(io)
+        to: st.remember
+      - bind: e
+        eval: st.entry(ref)
+        to: st.entry
+      - set: e.kind, e.gen, e.flags
+        value: kindSniffing, ref.Gen, entryLive
+      - set: e.requests, e.buffered
+        value: noIndex, 0
+  - of: (*LoopHandler).OnData
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnData
+        kind: self
+      - id: a.state
+        kind: internal
+      - id: st.entry
+        kind: internal
+      - id: a.sniff
+        kind: internal
+      - id: a.h1.OnData
+        kind: value
+      - id: a.feed
+        kind: internal
+    steps:
+      - bind: st
+        eval: a.state(io.Loop())
+        to: a.state
+      - bind: e
+        eval: st.entry(ref)
+        to: st.entry
+      - opt:
+          do:
+            - bind: ready, used
+              eval: a.sniff(io, ref, e, buf)
+              to: a.sniff
+            - opt:
+                do:
+                  - return: used
+                when: "!ready"
+          when: e.kind == kindSniffing
+      - switch:
+          cases:
+            - case: kindHTTP1
+              do:
+                - return: a.h1.OnData(io, ref, buf)
+                  to: a.h1.OnData
+            - case: kindHTTP2
+              do:
+                - return: a.feed(io, ref, st, e, buf)
+                  to: a.feed
+            - default: true
+              do:
+                - return: len(buf)
+          "on": e.kind
+  - of: (*LoopHandler).sniff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).sniff
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: a.state
+        kind: internal
+      - id: st.lane.Open
+        kind: internal
+      - id: a.h1.OnOpen
+        kind: value
+      - id: a.writeClose
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: min(len(buf), clientPrefaceLen)
+      - bind: match
+        eval: bytes.Equal(buf[:n], clientPrefaceBytes[:n])
+        to: bytes
+      - opt:
+          do:
+            - return: false, 0
+          when: match && n < clientPrefaceLen
+      - switch:
+          cases:
+            - case: match && a.serveH2
+              do:
+                - bind: st
+                  eval: a.state(io.Loop())
+                  to: a.state
+                - eval: st.lane.Open(&e.conn)
+                  to: st.lane.Open
+                - set: e.kind
+                  value: kindHTTP2
+                - return: true, 0
+            - case: "!match && a.serveH1"
+              do:
+                - eval: a.h1.OnOpen(io, ref)
+                  to: a.h1.OnOpen
+                - set: e.kind
+                  value: kindHTTP1
+                - return: true, 0
+            - default: true
+              do:
+                - set: e.kind
+                  value: kindRefused
+                - eval: a.writeClose(io, ref, refusalPreface, true)
+                  to: a.writeClose
+                - return: false, len(buf)
+  - of: (*LoopHandler).writeClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).writeClose
+        kind: self
+      - id: io.Write
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: err
+            eval: io.Write(ref, p)
+            to: io.Write
+          when: err == nil && !closing
+      - eval: swallowErr(io.Close(ref))
+        to: swallowErr
+  - of: (*LoopHandler).OnTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnTimeout
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: swallowErr(io.Close(ref))
+        to: swallowErr
+  - of: (*LoopHandler).OnWritable
+    steps:
+      - set: _, _
+        value: io, ref
+  - of: (*LoopHandler).OnClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnClose
+        kind: self
+      - id: a.state
+        kind: internal
+      - id: st.entry
+        kind: internal
+      - id: a.h1.OnClose
+        kind: value
+      - id: st.closeRequests
+        kind: internal
+      - id: st.lane.Close
+        kind: internal
+    steps:
+      - bind: st
+        eval: a.state(io.Loop())
+        to: a.state
+      - bind: e
+        eval: st.entry(ref)
+        to: st.entry
+      - opt:
+          do:
+            - eval: a.h1.OnClose(io, ref, err)
+              to: a.h1.OnClose
+          when: e.kind == kindHTTP1
+      - opt:
+          do:
+            - eval: st.closeRequests(a, e)
+              to: st.closeRequests
+            - eval: st.lane.Close(&e.conn)
+              to: st.lane.Close
+          when: e.kind == kindHTTP2
+      - set: e.kind, e.flags
+        value: kindRefused, 0
+  - of: (*LoopHandler).state
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).state
+        kind: self
+      - id: a.lanes.Load
+        kind: value
+      - id: a.grow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: (*p)[i]
+          init:
+            bind: p
+            eval: a.lanes.Load()
+            to: a.lanes.Load
+          when: p != nil && i < len(*p) && (*p)[i] != nil
+      - return: a.grow(i)
+        to: a.grow
+  - of: (*LoopHandler).grow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).grow
+        kind: self
+      - id: a.lanes.Load
+        kind: value
+      - id: newLaneState
+        kind: internal
+      - id: a.lanes.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: a.mu
+      - var:
+          name: cur
+          type: "[]*laneState"
+      - opt:
+          do:
+            - set: cur
+              value: "*p"
+          init:
+            bind: p
+            eval: a.lanes.Load()
+            to: a.lanes.Load
+          when: p != nil
+      - opt:
+          do:
+            - return: cur[i]
+          when: i < len(cur) && cur[i] != nil
+      - bind: next
+        eval: make([]*laneState, max(len(cur), i+1))
+      - eval: copy(next, cur)
+      - bind: st
+        eval: newLaneState(a, i)
+        to: newLaneState
+      - set: next[i]
+        value: st
+      - eval: a.lanes.Store(&next)
+        to: a.lanes.Store
+      - return: st
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: (*connEntry).live
+    steps:
+      - return: e.flags&entryLive != 0
+  - of: (*requestState).has
+    steps:
+      - return: r.flags&f == f
+  - of: newLaneState
+    participants:
+      - id: caller
+        kind: actor
+      - id: newLaneState
+        kind: self
+      - id: a.limits.Resolve
+        kind: value
+      - id: st.slots.Store
+        kind: value
+    steps:
+      - bind: resolved, err
+        eval: a.limits.Resolve()
+        to: a.limits.Resolve
+      - opt:
+          do:
+            - set: resolved
+              value: defaultLaneLimits
+          when: err != nil
+      - bind: st
+        eval: "&laneState{lane: newLaneResolved(resolved, a.maxBody, a.holdCap), index: i, freeRequests: noIndex}"
+      - set: st.req.Lane
+        value: i
+      - var:
+          name: empty
+          type: "[]*workSlot"
+      - eval: st.slots.Store(&empty)
+        to: st.slots.Store
+      - return: st
+  - of: (*laneState).remember
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).remember
+        kind: self
+      - id: st.post.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: st.post.Load() != nil
+      - eval: "st.post.Store(&postHolder{io: io})"
+        to: st.post.Store
+  - of: (*laneState).entry
+    steps:
+      - bind: ring, slot
+        eval: int(ref.Ring), int(ref.Slot)
+      - opt:
+          do:
+            - set: st.entries
+              value: append(st.entries, make([][]connEntry, ring+1-len(st.entries))...)
+          when: ring >= len(st.entries)
+      - opt:
+          do:
+            - bind: grown
+              eval: make([]connEntry, max(slot+1, entriesGrowth(len(st.entries[ring]))))
+            - eval: copy(grown, st.entries[ring])
+            - set: st.entries[ring]
+              value: grown
+          when: slot >= len(st.entries[ring])
+      - return: "&st.entries[ring][slot]"
+  - of: entriesGrowth
+    steps:
+      - opt:
+          do:
+            - return: entriesInitial
+          when: n == 0
+      - opt:
+          do:
+            - return: 2 * n
+          when: n < entriesDoubleBelow
+      - return: n + n/2
+  - of: (*laneState).take
+    steps:
+      - opt:
+          do:
+            - return: "&corenet.HTTP1ResponseValue{}"
+          when: len(st.free) == 0
+      - bind: res
+        eval: st.free[len(st.free)-1]
+      - set: st.free
+        value: st.free[:len(st.free)-1]
+      - set: "*res"
+        value: corenet.HTTP1ResponseValue{}
+      - return: res
+  - of: (*laneState).give
+    steps:
+      - set: st.free
+        value: append(st.free, res)
+  - of: (*laneState).takeRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).takeRequest
+        kind: self
+      - id: r.resetKeepingBuffers
+        kind: internal
+    steps:
+      - bind: idx
+        eval: st.freeRequests
+      - alt:
+          - do:
+              - set: st.freeRequests
+                value: st.requests[idx].next
+            when: idx != noIndex
+          - do:
+              - set: st.requests
+                value: append(st.requests, &requestState{})
+              - set: idx
+                value: int32(len(st.requests) - 1)
+            else: true
+      - bind: r
+        eval: st.requests[idx]
+      - eval: r.resetKeepingBuffers(stream, e.requests)
+        to: r.resetKeepingBuffers
+      - set: e.requests
+        value: idx
+      - return: idx, r
+  - of: (*requestState).resetKeepingBuffers
+    steps:
+      - bind: head, body
+        eval: r.head[:0], r.body[:0]
+      - set: "*r"
+        value: "requestState{stream: stream, next: next, slot: noIndex, head: head, body: body}"
+  - of: (*laneState).unlinkRequest
+    steps:
+      - bind: r
+        eval: st.requests[idx]
+      - alt:
+          - do:
+              - set: e.requests
+                value: r.next
+            when: prev == noIndex
+          - do:
+              - set: st.requests[prev].next
+                value: r.next
+            else: true
+  - of: (*laneState).release
+    steps:
+      - bind: r
+        eval: st.requests[idx]
+      - opt:
+          do:
+            - set: r.body
+              value: nil
+          when: cap(r.body) > holdKeepMax
+      - opt:
+          do:
+            - set: r.head
+              value: nil
+          when: cap(r.head) > holdKeepMax
+      - set: r.next
+        value: st.freeRequests
+      - set: st.freeRequests
+        value: idx
+  - of: (*laneState).finishRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).finishRequest
+        kind: self
+      - id: st.lane.Consume
+        kind: internal
+      - id: st.unlinkRequest
+        kind: internal
+    steps:
+      - bind: r
+        eval: st.requests[idx]
+      - opt:
+          do:
+            - eval: st.lane.Consume(&e.conn, r.stream, int(r.uncredited))
+              to: st.lane.Consume
+            - set: r.uncredited
+              value: "0"
+          when: r.uncredited > 0
+      - op: "-="
+        set: e.buffered
+        value: int32(len(r.body))
+      - eval: st.unlinkRequest(e, idx, prev)
+        to: st.unlinkRequest
+      - set: st.completed
+        value: append(st.completed, idx)
+  - of: (*laneState).closeRequests
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).closeRequests
+        kind: self
+      - id: a.aborter.AbortBody
+        kind: value
+      - id: (*st.slots.Load())[r.slot].cancelled.Store
+        kind: value
+      - id: st.release
+        kind: internal
+    steps:
+      - loop:
+          cond: idx != noIndex
+          do:
+            - bind: r
+              eval: st.requests[idx]
+            - bind: next
+              eval: r.next
+            - opt:
+                do:
+                  - eval: a.aborter.AbortBody(&r.req)
+                    to: a.aborter.AbortBody
+                when: r.has(requestReading) && a.aborter != nil
+            - opt:
+                do:
+                  - eval: (*st.slots.Load())[r.slot].cancelled.Store(true)
+                    to: (*st.slots.Load())[r.slot].cancelled.Store
+                when: r.slot != noIndex
+            - eval: st.release(idx)
+              to: st.release
+            - set: idx
+              value: next
+          init: idx := e.requests
+      - set: e.requests, e.buffered
+        value: noIndex, 0
+  - of: h2Worker.Work
+    participants:
+      - id: caller
+        kind: actor
+      - id: h2Worker.Work
+        kind: self
+      - id: w.h1.Work
+        kind: value
+      - id: w.a.worker.WorkHTTP1
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: w.h1.Work(lane, job)
+              to: w.h1.Work
+            - return: ""
+          when: job.Slot&slotHTTP2 == 0
+      - bind: slot
+        eval: (*w.a.state(lane).slots.Load())[job.Slot&^slotHTTP2]
+      - opt:
+          do:
+            - return: ""
+          when: slot.cancelled.Load()
+      - eval: w.a.worker.WorkHTTP1(lane, job.Arg, &slot.res)
+        to: w.a.worker.WorkHTTP1
+  - of: (*LoopHandler).Worker
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.worker == nil
+      - return: "h2Worker{a: a, h1: a.h1.Worker()}"
+  - of: (*LoopHandler).OnOutbound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnOutbound
+        kind: self
+      - id: a.h1.OnOutbound
+        kind: value
+    steps:
+      - set: a.holdCap
+        value: v.OutputCap
+      - eval: a.h1.OnOutbound(v)
+        to: a.h1.OnOutbound
+      - loop:
+          do:
+            - set: a.state(i).outbound
+              value: out
+          key: i
+          range: v.Lanes
+          value: out
+  - of: (*LoopHandler).OnDone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnDone
+        kind: self
+      - id: a.h1.OnDone
+        kind: value
+      - id: a.state
+        kind: internal
+      - id: st.entry
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+      - id: a.answerSlot
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: a.h1.OnDone(io, job)
+              to: a.h1.OnDone
+            - return: ""
+          when: job.Slot&slotHTTP2 == 0
+      - bind: st
+        eval: a.state(io.Loop())
+        to: a.state
+      - bind: idx
+        eval: job.Slot &^ slotHTTP2
+      - bind: slot
+        eval: (*st.slots.Load())[idx]
+      - opt:
+          do:
+            - return: ""
+          when: slot.gen != job.Gen
+      - bind: e
+        eval: st.entry(slot.ref)
+        to: st.entry
+      - opt:
+          do:
+            - eval: st.freeSlot(idx)
+              to: st.freeSlot
+            - return: ""
+          when: slot.cancelled.Load() || !e.live() || e.gen != slot.ref.Gen
+      - eval: a.answerSlot(io, st, e, slot, idx)
+        to: a.answerSlot
+  - of: (*LoopHandler).answerSlot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).answerSlot
+        kind: self
+      - id: c.answer
+        kind: internal
+      - id: c.goAway
+        kind: internal
+      - id: st.finishSlot
+        kind: internal
+      - id: st.lane.AppendCredits
+        kind: internal
+      - id: a.writeClose
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+    steps:
+      - bind: c
+        eval: "h2Call{a: a, io: io, ref: slot.ref, st: st, e: e}"
+      - bind: "off"
+        eval: len(st.out)
+      - eval: c.answer(slot.stream, &slot.res, slot.isHead)
+        to: c.answer
+      - opt:
+          do:
+            - eval: c.goAway()
+              to: c.goAway
+          when: slot.res.Close || io.Pressure(slot.ref)
+      - eval: st.finishSlot(e, slot.stream)
+        to: st.finishSlot
+      - set: st.out
+        to: st.lane.AppendCredits
+        value: st.lane.AppendCredits(&e.conn, st.out)
+      - bind: out
+        eval: st.out[off:]
+      - eval: a.writeClose(io, slot.ref, out, st.lane.Closing(&e.conn) || st.lane.Done(&e.conn))
+        to: a.writeClose
+      - set: st.out
+        value: st.out[:off]
+      - eval: st.freeSlot(idx)
+        to: st.freeSlot
+  - of: (*laneState).finishSlot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).finishSlot
+        kind: self
+      - id: st.findRequest
+        kind: internal
+      - id: st.finishRequest
+        kind: internal
+      - id: st.releaseCompleted
+        kind: internal
+    steps:
+      - bind: idx, prev
+        eval: st.findRequest(e, stream)
+        to: st.findRequest
+      - opt:
+          do:
+            - return: ""
+          when: idx == noIndex
+      - set: st.requests[idx].slot
+        value: noIndex
+      - eval: st.finishRequest(e, idx, prev)
+        to: st.finishRequest
+      - opt:
+          do:
+            - eval: st.releaseCompleted()
+              to: st.releaseCompleted
+          when: len(st.active) == 0
+  - of: (*laneState).releaseCompleted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).releaseCompleted
+        kind: self
+      - id: st.release
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: st.release(idx)
+              to: st.release
+          key: _
+          range: st.completed
+          value: idx
+      - set: st.completed
+        value: st.completed[:0]
+  - of: (*h2Call).offload
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).offload
+        kind: self
+      - id: c.answerStatus
+        kind: internal
+      - id: st.takeSlot
+        kind: internal
+      - id: slot.cancelled.Store
+        kind: value
+      - id: st.outbound.Send
+        kind: value
+      - id: st.freeSlot
+        kind: internal
+      - id: c.answerUnavailable
+        kind: internal
+      - id: st.takeRequest
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - opt:
+          do:
+            - eval: c.answerStatus(stream, statusInternal)
+              to: c.answerStatus
+            - return: idx
+          when: res.Defer || c.a.worker == nil || st.outbound == nil
+      - bind: slot, slotIdx
+        eval: st.takeSlot()
+        to: st.takeSlot
+      - set: slot.ref, slot.stream, slot.isHead
+        value: c.ref, stream, isHead
+      - set: slot.res
+        value: corenet.HTTP1ResponseValue{}
+      - eval: slot.cancelled.Store(false)
+        to: slot.cancelled.Store
+      - bind: job
+        eval: "corenet.LoopJobValue{Ref: c.ref, Slot: slotIdx | slotHTTP2, Gen: slot.gen, Arg: res.Job}"
+      - opt:
+          do:
+            - eval: st.freeSlot(slotIdx)
+              to: st.freeSlot
+            - eval: c.answerUnavailable(stream)
+              to: c.answerUnavailable
+            - return: idx
+          init:
+            bind: err
+            eval: st.outbound.Send(c.io, job)
+            to: st.outbound.Send
+          when: err != nil
+      - opt:
+          do:
+            - set: idx, _
+              to: st.takeRequest
+              value: st.takeRequest(c.e, stream)
+          when: idx == noIndex
+      - set: st.requests[idx].slot
+        value: int32(slotIdx)
+      - return: idx
+  - of: (*h2Call).answerUnavailable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).answerUnavailable
+        kind: self
+      - id: st.lane.Headers
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: res
+        eval: "&corenet.HTTP1ResponseValue{Status: statusUnavailable, Header: retryAfter}"
+      - bind: out, err
+        eval: st.lane.Headers(&c.e.conn, stream, res, true, st.out)
+        to: st.lane.Headers
+      - opt:
+          do:
+            - set: st.out
+              value: out
+          when: err == nil
+  - of: (*laneState).takeSlot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).takeSlot
+        kind: self
+      - id: st.slots.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: idx
+              eval: st.freeSlots[n-1]
+            - set: st.freeSlots
+              value: st.freeSlots[:n-1]
+            - bind: slot
+              eval: (*st.slots.Load())[idx]
+            - op: ++
+              set: slot.gen
+            - return: slot, idx
+          init:
+            bind: "n"
+            eval: len(st.freeSlots)
+          when: n > 0
+      - bind: cur
+        eval: "*st.slots.Load()"
+      - bind: next
+        eval: make([]*workSlot, len(cur)+1, max(2*len(cur), len(cur)+1))
+      - eval: copy(next, cur)
+      - bind: slot
+        eval: "&workSlot{idx: uint32(len(cur))}"
+      - set: next[len(cur)]
+        value: slot
+      - eval: st.slots.Store(&next)
+        to: st.slots.Store
+      - return: slot, slot.idx
+  - of: (*laneState).freeSlot
+    steps:
+      - set: st.freeSlots
+        value: append(st.freeSlots, idx)
+  - of: (*LoopHandler).Draining
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).Draining
+        kind: self
+      - id: a.lanes.Load
+        kind: value
+      - id: a.announce
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: a.draining.Swap(true)
+      - bind: p
+        eval: a.lanes.Load()
+        to: a.lanes.Load
+      - opt:
+          do:
+            - return: ""
+          when: p == nil
+      - loop:
+          do:
+            - eval: a.announce(st)
+              to: a.announce
+          key: _
+          range: "*p"
+          value: st
+  - of: (*LoopHandler).announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).announce
+        kind: self
+      - id: st.post.Load
+        kind: value
+      - id: st.goAwayDone.Store
+        kind: value
+      - id: drainKeys.Add
+        kind: value
+      - id: drainRegistry.Store
+        kind: value
+      - id: holder.io.Post
+        kind: value
+      - id: drainRegistry.Delete
+        kind: value
+    steps:
+      - bind: holder
+        eval: st.post.Load()
+        to: st.post.Load
+      - opt:
+          do:
+            - eval: st.goAwayDone.Store(true)
+              to: st.goAwayDone.Store
+            - return: ""
+          when: holder == nil
+      - bind: key
+        eval: drainKeys.Add(1)
+        to: drainKeys.Add
+      - eval: drainRegistry.Store(key, st)
+        to: drainRegistry.Store
+      - opt:
+          do:
+            - eval: drainRegistry.Delete(key)
+              to: drainRegistry.Delete
+            - eval: st.goAwayDone.Store(true)
+              to: st.goAwayDone.Store
+          init:
+            bind: err
+            eval: holder.io.Post(runDrainGoAway, key)
+            to: holder.io.Post
+          when: err != nil
+  - of: runDrainGoAway
+    participants:
+      - id: caller
+        kind: actor
+      - id: runDrainGoAway
+        kind: self
+      - id: drainRegistry.LoadAndDelete
+        kind: value
+      - id: st.announceDrain
+        kind: internal
+    steps:
+      - bind: v, ok
+        eval: drainRegistry.LoadAndDelete(key)
+        to: drainRegistry.LoadAndDelete
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - bind: st, _
+        eval: v.(*laneState)
+      - eval: st.announceDrain(io)
+        to: st.announceDrain
+  - of: (*laneState).announceDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).announceDrain
+        kind: self
+      - id: st.announceConn
+        kind: internal
+      - id: st.goAwayDone.Store
+        kind: value
+    steps:
+      - loop:
+          do:
+            - loop:
+                do:
+                  - bind: e
+                    eval: "&st.entries[ring][slot]"
+                  - opt:
+                      do:
+                        - continue: true
+                      when: "!e.live() || e.kind != kindHTTP2"
+                  - eval: "st.announceConn(io, corenet.LoopConnRef{Ring: uint32(ring), Slot: uint32(slot), Gen: e.gen}, e)"
+                    to: st.announceConn
+                key: slot
+                range: st.entries[ring]
+          key: ring
+          range: st.entries
+      - eval: st.goAwayDone.Store(true)
+        to: st.goAwayDone.Store
+  - of: (*laneState).announceConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).announceConn
+        kind: self
+      - id: st.lane.GoAway
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - op: "|="
+              set: e.flags
+              value: entryGoAway
+            - set: st.jobOut
+              to: st.lane.GoAway
+              value: st.lane.GoAway(&e.conn, corehttp2.ErrCodeNoError, st.jobOut[:0])
+            - eval: swallowErr(io.Write(ref, st.jobOut))
+              to: swallowErr
+          when: e.flags&entryGoAway == 0
+      - opt:
+          do:
+            - eval: swallowErr(io.Close(ref))
+              to: swallowErr
+          when: st.lane.Done(&e.conn)
+  - of: (*LoopHandler).InFlight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).InFlight
+        kind: self
+      - id: a.state
+        kind: internal
+      - id: st.peek
+        kind: internal
+    steps:
+      - bind: st
+        eval: a.state(lane)
+        to: a.state
+      - bind: e
+        eval: st.peek(ref)
+        to: st.peek
+      - opt:
+          do:
+            - return: "false"
+          when: e == nil || e.kind != kindHTTP2
+      - opt:
+          do:
+            - return: "true"
+          when: a.draining.Load() && !st.goAwayDone.Load()
+      - return: st.lane.OpenStreams(&e.conn) > 0
+  - of: (*LoopHandler).Pending
+    steps:
+      - return: a.h1.Pending(lane, ref) || a.InFlight(lane, ref)
+  - of: (*laneState).peek
+    steps:
+      - bind: ring, slot
+        eval: int(ref.Ring), int(ref.Slot)
+      - opt:
+          do:
+            - return: nil
+          when: ring >= len(st.entries) || slot >= len(st.entries[ring])
+      - bind: e
+        eval: "&st.entries[ring][slot]"
+      - opt:
+          do:
+            - return: nil
+          when: "!e.live() || e.gen != ref.Gen"
+      - return: e
+  - of: mapRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: mapRequest
+        kind: self
+      - id: resetMapped
+        kind: internal
+      - id: m.pseudo
+        kind: internal
+      - id: m.regular
+        kind: internal
+      - id: m.host
+        kind: internal
+      - id: joinCookies
+        kind: internal
+      - id: m.judge
+        kind: internal
+    steps:
+      - eval: resetMapped(req)
+        to: resetMapped
+      - set: req.Proto, req.Stream
+        value: protoMajorHTTP2, stream
+      - var:
+          name: m
+          type: mapState
+      - bind: write
+        eval: "0"
+      - loop:
+          do:
+            - bind: name
+              eval: req.Fields[i].Name
+            - opt:
+                do:
+                  - eval: m.pseudo(name, req.Fields[i].Value)
+                    to: m.pseudo
+                  - continue: true
+                when: len(name) > 0 && name[0] == ':'
+            - eval: m.regular(req, i)
+              to: m.regular
+            - opt:
+                do:
+                  - set: req.Fields[write]
+                    value: req.Fields[i]
+                when: write != i
+            - op: ++
+              set: write
+          key: i
+          range: req.NFields
+      - set: req.NFields
+        value: write
+      - opt:
+          do:
+            - set: m.v.malformed
+              value: "true"
+            - return: m.v
+          when: m.v.malformed || !m.complete()
+      - set: req.Method, req.Target, req.Scheme
+        value: m.method, m.target, m.scheme
+      - set: req.Host, req.HasHost
+        to: m.host
+        value: m.host(req)
+      - opt:
+          do:
+            - set: m.v.refusal
+              value: http1.RefusalTargetHost
+            - return: m.v
+          when: m.hostConflict(req)
+      - opt:
+          do:
+            - eval: joinCookies(req, st)
+              to: joinCookies
+          when: m.crumbs > 1
+      - set: req.ContentLength
+        value: m.v.wanted
+      - set: m.v.refusal
+        to: m.judge
+        value: m.judge(req)
+      - return: m.v
+  - of: resetMapped
+    participants:
+      - id: caller
+        kind: actor
+      - id: resetMapped
+        kind: self
+      - id: req.Auth.Reset
+        kind: value
+      - id: req.RequestID.Reset
+        kind: value
+    steps:
+      - set: req.Method, req.Target, req.Host, req.Authorization, req.Body
+        value: nil, nil, nil, nil, nil
+      - set: req.Path, req.Query, req.Scheme
+        value: nil, nil, nil
+      - set: req.ContentLength
+        value: "0"
+      - set: req.HeadLen, req.Consumed, req.Route, req.RoutePrefix
+        value: 0, 0, 0, 0
+      - set: req.HasHost, req.HasAuthorization, req.Close, req.Authenticated
+        value: false, false, false, false
+      - eval: req.Auth.Reset()
+        to: req.Auth.Reset
+      - set: req.Trace
+        value: trace.SpanContextValue{}
+      - eval: req.RequestID.Reset()
+        to: req.RequestID.Reset
+  - of: (*mapState).pseudo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapState).pseudo
+        kind: self
+      - id: m.setOnce
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: m.v.malformed
+              value: "true"
+            - return: ""
+          when: m.seenRegular
+      - switch:
+          cases:
+            - case: bytes.Equal(name, pseudoMethod)
+              do:
+                - eval: m.setOnce(seenMethod, &m.method, value)
+                  to: m.setOnce
+            - case: bytes.Equal(name, pseudoPath)
+              do:
+                - eval: m.setOnce(seenTarget, &m.target, value)
+                  to: m.setOnce
+            - case: bytes.Equal(name, pseudoScheme)
+              do:
+                - eval: m.setOnce(seenScheme, &m.scheme, value)
+                  to: m.setOnce
+            - case: bytes.Equal(name, pseudoAuthority)
+              do:
+                - eval: m.setOnce(seenAuthority, &m.authority, value)
+                  to: m.setOnce
+            - default: true
+              do:
+                - set: m.v.malformed
+                  value: "true"
+  - of: (*mapState).setOnce
+    steps:
+      - opt:
+          do:
+            - set: m.v.malformed
+              value: "true"
+            - return: ""
+          when: m.seen&bit != 0
+      - op: "|="
+        set: m.seen
+        value: bit
+      - set: "*slot"
+        value: value
+  - of: (*mapState).regular
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapState).regular
+        kind: self
+      - id: m.authorization
+        kind: internal
+      - id: m.contentLength
+        kind: internal
+      - id: m.host1
+        kind: internal
+      - id: m.refuse
+        kind: internal
+      - id: m.te
+        kind: internal
+    steps:
+      - set: m.seenRegular
+        value: "true"
+      - bind: f
+        eval: "&req.Fields[i]"
+      - switch:
+          cases:
+            - case: bytes.Equal(f.Name, fieldAuthorization)
+              do:
+                - eval: m.authorization(req, f.Value)
+                  to: m.authorization
+            - case: bytes.Equal(f.Name, fieldContentLength)
+              do:
+                - eval: m.contentLength(f.Value)
+                  to: m.contentLength
+            - case: bytes.Equal(f.Name, fieldCookie)
+              do:
+                - op: ++
+                  set: m.crumbs
+            - case: string(f.Name) == hostFieldName
+              do:
+                - eval: m.host1()
+                  to: m.host1
+            - case: bytes.Equal(f.Name, fieldExpect)
+              do:
+                - eval: m.refuse(http1.RefusalExpect)
+                  to: m.refuse
+            - case: bytes.Equal(f.Name, fieldTE)
+              do:
+                - eval: m.te(f.Value)
+                  to: m.te
+            - case: connectionSpecific(f.Name)
+              do:
+                - set: m.v.malformed
+                  value: "true"
+  - of: (*mapState).te
+    steps:
+      - opt:
+          do:
+            - set: m.v.malformed
+              value: "true"
+          when: "!bytes.EqualFold(value, valueTrailers)"
+  - of: connectionSpecific
+    steps:
+      - return: |-
+          bytes.Equal(name, fieldConnection) || bytes.Equal(name, fieldKeepAlive) ||
+          		bytes.Equal(name, fieldProxyConnection) || bytes.Equal(name, fieldTransferEncoding) ||
+          		bytes.Equal(name, fieldUpgrade)
+  - of: (*mapState).host1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapState).host1
+        kind: self
+      - id: m.refuse
+        kind: internal
+    steps:
+      - op: ++
+        set: m.hosts
+      - opt:
+          do:
+            - eval: m.refuse(http1.RefusalHostDuplicated)
+              to: m.refuse
+          when: m.hosts > 1
+  - of: (*mapState).authorization
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapState).authorization
+        kind: self
+      - id: m.refuse
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: m.refuse(http1.RefusalAuthorizationDuplicated)
+              to: m.refuse
+            - return: ""
+          when: req.HasAuthorization
+      - set: req.HasAuthorization
+        value: "true"
+      - set: req.Authorization
+        value: value
+  - of: (*mapState).contentLength
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapState).contentLength
+        kind: self
+      - id: m.refuse
+        kind: internal
+      - id: parseDecimal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: m.refuse(http1.RefusalContentLengthDuplicated)
+              to: m.refuse
+            - return: ""
+          when: m.v.declared
+      - bind: n, ok
+        eval: parseDecimal(value)
+        to: parseDecimal
+      - opt:
+          do:
+            - eval: m.refuse(http1.RefusalContentLength)
+              to: m.refuse
+            - return: ""
+          when: "!ok"
+      - set: m.v.wanted, m.v.declared
+        value: n, true
+  - of: (*mapState).refuse
+    steps:
+      - opt:
+          do:
+            - set: m.v.refusal
+              value: r
+          when: m.v.refusal == http1.RefusalNone
+  - of: (*mapState).complete
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: m.seen&seenMethod == 0
+      - opt:
+          do:
+            - return: "true"
+          when: bytes.Equal(m.method, methodConnect)
+      - return: m.seen&seenScheme != 0 && len(m.target) > 0
+  - of: (*mapState).host
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapState).host
+        kind: self
+      - id: req.Field
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: m.authority, true
+          when: m.seen&seenAuthority != 0
+      - bind: v, ok
+        eval: req.Field(hostFieldName)
+        to: req.Field
+      - return: v, ok
+  - of: (*mapState).hostConflict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapState).hostConflict
+        kind: self
+      - id: req.Field
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: m.seen&seenAuthority == 0
+      - bind: v, ok
+        eval: req.Field(hostFieldName)
+        to: req.Field
+      - return: ok && !bytes.Equal(v, m.authority)
+  - of: (*mapState).judge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*mapState).judge
+        kind: self
+      - id: http1
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: m.v.refusal
+          when: m.v.refusal != http1.RefusalNone
+      - opt:
+          do:
+            - return: http1.RefusalMethodUnsupported
+          when: bytes.Equal(m.method, methodConnect)
+      - opt:
+          do:
+            - return: http1.RefusalTargetForm
+          when: m.target[0] != '/' && (len(m.target) != 1 || m.target[0] != '*')
+      - return: http1.Canonical(req)
+        to: http1
+  - of: copyRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: copyRequest
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: copyBytes
+        kind: internal
+    steps:
+      - bind: size
+        eval: len(src.Method) + len(src.Target) + len(src.Host) + len(src.Authorization) + len(src.Path) + len(src.Query) + len(src.Scheme)
+      - loop:
+          do:
+            - op: +=
+              set: size
+              value: len(src.Fields[i].Name) + len(src.Fields[i].Value)
+          key: i
+          range: src.NFields
+      - set: head
+        to: slices
+        value: slices.Grow(head[:0], size)
+      - set: "*dst"
+        value: "*src"
+      - set: dst.Method, head
+        to: copyBytes
+        value: copyBytes(head, src.Method)
+      - set: dst.Target, head
+        to: copyBytes
+        value: copyBytes(head, src.Target)
+      - set: dst.Host, head
+        to: copyBytes
+        value: copyBytes(head, src.Host)
+      - set: dst.Authorization, head
+        to: copyBytes
+        value: copyBytes(head, src.Authorization)
+      - set: dst.Path, head
+        to: copyBytes
+        value: copyBytes(head, src.Path)
+      - set: dst.Query, head
+        to: copyBytes
+        value: copyBytes(head, src.Query)
+      - set: dst.Scheme, head
+        to: copyBytes
+        value: copyBytes(head, src.Scheme)
+      - set: dst.Fields
+        value: src.Fields
+      - loop:
+          do:
+            - set: dst.Fields[i].Name, head
+              to: copyBytes
+              value: copyBytes(head, src.Fields[i].Name)
+            - set: dst.Fields[i].Value, head
+              to: copyBytes
+              value: copyBytes(head, src.Fields[i].Value)
+          key: i
+          range: src.NFields
+      - return: head
+  - of: copyBytes
+    steps:
+      - opt:
+          do:
+            - return: nil, head
+          when: b == nil
+      - bind: start
+        eval: len(head)
+      - set: head
+        value: append(head, b...)
+      - return: head[start:len(head):len(head)], head
+  - of: (*LoopHandler).feed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).feed
+        kind: self
+      - id: st.lane.Feed
+        kind: internal
+      - id: c.event
+        kind: internal
+      - id: c.goAway
+        kind: internal
+      - id: st.pushWrite
+        kind: internal
+    steps:
+      - bind: "off"
+        eval: len(st.out)
+      - bind: n, out
+        eval: st.lane.Feed(&e.conn, buf, st.out)
+        to: st.lane.Feed
+      - set: st.out
+        value: out
+      - bind: c
+        eval: "h2Call{a: a, io: io, ref: ref, st: st, e: e}"
+      - loop:
+          do:
+            - eval: c.event(ev)
+              to: c.event
+          key: _
+          range: st.lane.Events()
+          value: ev
+      - opt:
+          do:
+            - eval: c.goAway()
+              to: c.goAway
+          when: io.Pressure(ref)
+      - eval: st.pushWrite(ref, off, e)
+        to: st.pushWrite
+      - return: "n"
+  - of: (*laneState).pushWrite
+    steps:
+      - opt:
+          do:
+            - set: st.writes
+              value: "append(st.writes, write{ref: ref, off: off, end: len(st.out)})"
+          when: len(st.out) > off
+      - opt:
+          do:
+            - set: e.activeAt
+              value: st.lane.epoch
+            - set: st.active
+              value: append(st.active, ref)
+          when: e.activeAt != st.lane.epoch
+  - of: (*h2Call).event
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).event
+        kind: self
+      - id: c.onHeaders
+        kind: internal
+      - id: c.onData
+        kind: internal
+      - id: c.onReset
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: EventHeaders
+              do:
+                - eval: c.onHeaders(ev)
+                  to: c.onHeaders
+            - case: EventData
+              do:
+                - eval: c.onData(ev)
+                  to: c.onData
+            - case: EventReset
+              do:
+                - eval: c.onReset(ev)
+                  to: c.onReset
+            - default: true
+          "on": ev.Kind
+  - of: (*h2Call).onHeaders
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).onHeaders
+        kind: self
+      - id: st.lane.Decode
+        kind: internal
+      - id: st.countAbort
+        kind: internal
+      - id: st.lane.Abort
+        kind: internal
+      - id: st.lane.ResetStream
+        kind: internal
+      - id: st.lane.find
+        kind: internal
+      - id: c.open
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - var:
+          name: err
+          type: error
+      - set: st.scratch, err
+        to: st.lane.Decode
+        value: st.lane.Decode(&c.e.conn, ev.Data, st.scratch, &st.req)
+      - opt:
+          do:
+            - eval: st.countAbort(err)
+              to: st.countAbort
+            - set: st.out
+              to: st.lane.Abort
+              value: st.lane.Abort(&c.e.conn, corehttp2.ErrCodeCompression, st.out)
+            - return: ""
+          when: err != nil && !errors.Is(err, corehttp2.FieldMalformed)
+      - opt:
+          do:
+            - return: ""
+          when: ev.Flags&EventDiscard != 0
+      - opt:
+          do:
+            - op: ++
+              set: st.errs[corehttp2.ErrorTypeProtocol]
+            - set: st.out
+              to: st.lane.ResetStream
+              value: st.lane.ResetStream(&c.e.conn, ev.Stream, corehttp2.ErrCodeProtocol, st.out)
+            - return: ""
+          when: err != nil
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: idx, _
+            eval: st.lane.find(&c.e.conn, ev.Stream)
+            to: st.lane.find
+          when: idx == noIndex
+      - eval: c.open(ev.Stream, ev.Flags&EventEndStream != 0)
+        to: c.open
+  - of: (*h2Call).open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).open
+        kind: self
+      - id: mapRequest
+        kind: internal
+      - id: st.lane.ResetStream
+        kind: internal
+      - id: c.answerStatus
+        kind: internal
+      - id: c.serve
+        kind: internal
+      - id: c.keep
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: req
+        eval: "&st.req"
+      - bind: verdict
+        eval: mapRequest(req, st, stream)
+        to: mapRequest
+      - switch:
+          cases:
+            - case: verdict.malformed
+              do:
+                - op: ++
+                  set: st.errs[corehttp2.ErrorTypeProtocol]
+                - set: st.out
+                  to: st.lane.ResetStream
+                  value: st.lane.ResetStream(&c.e.conn, stream, corehttp2.ErrCodeProtocol, st.out)
+            - case: verdict.refusal != http1.RefusalNone
+              do:
+                - eval: c.answerStatus(stream, verdict.refusal.Status())
+                  to: c.answerStatus
+            - case: end
+              do:
+                - eval: c.serve(stream, req, noIndex, noIndex)
+                  to: c.serve
+            - default: true
+              do:
+                - eval: c.keep(stream, verdict)
+                  to: c.keep
+  - of: (*h2Call).keep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).keep
+        kind: self
+      - id: st.takeRequest
+        kind: internal
+      - id: copyRequest
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: _, r
+        eval: st.takeRequest(c.e, stream)
+        to: st.takeRequest
+      - set: r.head
+        to: copyRequest
+        value: copyRequest(&r.req, &st.req, r.head)
+      - set: r.wanted
+        value: v.wanted
+      - opt:
+          do:
+            - op: "|="
+              set: r.flags
+              value: requestDeclared
+          when: v.declared
+      - opt:
+          do:
+            - op: "|="
+              set: r.flags
+              value: requestHead
+          when: bytes.Equal(r.req.Method, methodHEAD)
+  - of: (*h2Call).onData
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).onData
+        kind: self
+      - id: st.findRequest
+        kind: internal
+      - id: st.lane.Consume
+        kind: internal
+      - id: c.refuseBody
+        kind: internal
+      - id: c.resetMalformed
+        kind: internal
+      - id: c.take
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: idx, prev
+        eval: st.findRequest(c.e, ev.Stream)
+        to: st.findRequest
+      - opt:
+          do:
+            - eval: st.lane.Consume(&c.e.conn, ev.Stream, len(ev.Data))
+              to: st.lane.Consume
+            - return: ""
+          when: idx == noIndex
+      - bind: r
+        eval: st.requests[idx]
+      - opt:
+          do:
+            - eval: st.lane.Consume(&c.e.conn, ev.Stream, len(ev.Data))
+              to: st.lane.Consume
+            - return: ""
+          when: r.has(requestRefused)
+      - opt:
+          do:
+            - eval: c.refuseBody(idx, prev, statusContentTooLarge)
+              to: c.refuseBody
+            - return: ""
+          when: ev.Flags&EventOverBody != 0
+      - opt:
+          do:
+            - eval: c.resetMalformed(idx, prev)
+              to: c.resetMalformed
+            - return: ""
+          when: r.has(requestDeclared) && r.received()+int64(len(ev.Data)) > r.wanted
+      - eval: c.take(idx, prev, r, ev)
+        to: c.take
+  - of: (*requestState).received
+    steps:
+      - return: int64(len(r.body)) + r.chunks
+  - of: (*h2Call).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).take
+        kind: self
+      - id: c.a.reader.OnBody
+        kind: value
+      - id: st.lane.Consume
+        kind: internal
+      - id: c.buffer
+        kind: internal
+      - id: c.resetMalformed
+        kind: internal
+      - id: c.serve
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: end
+        eval: ev.Flags&EventEndStream != 0
+      - alt:
+          - do:
+              - op: +=
+                set: r.chunks
+                value: int64(len(ev.Data))
+              - op: "|="
+                set: r.flags
+                value: requestReading
+              - eval: c.a.reader.OnBody(&r.req, ev.Data, end)
+                to: c.a.reader.OnBody
+              - eval: st.lane.Consume(&c.e.conn, ev.Stream, len(ev.Data))
+                to: st.lane.Consume
+            when: c.a.reader != nil
+          - do:
+              - eval: c.buffer(r, ev)
+                to: c.buffer
+            else: true
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: c.resetMalformed(idx, prev)
+                    to: c.resetMalformed
+                  - return: ""
+                when: r.has(requestDeclared) && r.received() != r.wanted
+            - eval: c.serve(ev.Stream, &r.req, idx, prev)
+              to: c.serve
+          when: end
+  - of: (*h2Call).buffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).buffer
+        kind: self
+      - id: st.lane.Consume
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - set: r.body
+        value: append(r.body, ev.Data...)
+      - op: +=
+        set: c.e.buffered
+        value: int32(len(ev.Data))
+      - alt:
+          - do:
+              - eval: st.lane.Consume(&c.e.conn, ev.Stream, len(ev.Data))
+                to: st.lane.Consume
+            when: int(c.e.buffered) <= st.lane.limits.ReceivePerConn
+          - do:
+              - op: +=
+                set: r.uncredited
+                value: int32(len(ev.Data))
+            else: true
+  - of: (*h2Call).refuseBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).refuseBody
+        kind: self
+      - id: c.a.aborter.AbortBody
+        kind: value
+      - id: c.answerStatus
+        kind: internal
+      - id: st.finishRequest
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: r
+        eval: st.requests[idx]
+      - op: "|="
+        set: r.flags
+        value: requestRefused
+      - opt:
+          do:
+            - eval: c.a.aborter.AbortBody(&r.req)
+              to: c.a.aborter.AbortBody
+          when: r.has(requestReading) && c.a.aborter != nil
+      - eval: c.answerStatus(r.stream, status)
+        to: c.answerStatus
+      - eval: st.finishRequest(c.e, idx, prev)
+        to: st.finishRequest
+  - of: (*h2Call).resetMalformed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).resetMalformed
+        kind: self
+      - id: c.a.aborter.AbortBody
+        kind: value
+      - id: st.lane.ResetStream
+        kind: internal
+      - id: st.finishRequest
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: r
+        eval: st.requests[idx]
+      - opt:
+          do:
+            - eval: c.a.aborter.AbortBody(&r.req)
+              to: c.a.aborter.AbortBody
+          when: r.has(requestReading) && c.a.aborter != nil
+      - op: ++
+        set: st.errs[corehttp2.ErrorTypeProtocol]
+      - set: st.out
+        to: st.lane.ResetStream
+        value: st.lane.ResetStream(&c.e.conn, r.stream, corehttp2.ErrCodeProtocol, st.out)
+      - eval: st.finishRequest(c.e, idx, prev)
+        to: st.finishRequest
+  - of: (*h2Call).onReset
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).onReset
+        kind: self
+      - id: st.findRequest
+        kind: internal
+      - id: c.a.aborter.AbortBody
+        kind: value
+      - id: (*st.slots.Load())[r.slot].cancelled.Store
+        kind: value
+      - id: st.finishRequest
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: idx, prev
+        eval: st.findRequest(c.e, ev.Stream)
+        to: st.findRequest
+      - opt:
+          do:
+            - return: ""
+          when: idx == noIndex
+      - bind: r
+        eval: st.requests[idx]
+      - opt:
+          do:
+            - eval: c.a.aborter.AbortBody(&r.req)
+              to: c.a.aborter.AbortBody
+          when: r.has(requestReading) && c.a.aborter != nil
+      - opt:
+          do:
+            - eval: (*st.slots.Load())[r.slot].cancelled.Store(true)
+              to: (*st.slots.Load())[r.slot].cancelled.Store
+          when: r.slot != noIndex
+      - eval: st.finishRequest(c.e, idx, prev)
+        to: st.finishRequest
+  - of: (*h2Call).serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).serve
+        kind: self
+      - id: st.take
+        kind: internal
+      - id: c.a.h.ServeHTTP1
+        kind: value
+      - id: c.dispatch
+        kind: internal
+      - id: c.goAway
+        kind: internal
+      - id: st.finishRequest
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: res
+        eval: st.take()
+        to: st.take
+      - op: ++
+        set: st.served
+      - set: req.Lane, req.Conn
+        value: st.index, c.ref
+      - op: ++
+        set: st.count
+      - set: req.ID
+        value: uint64(st.index)<<idLaneShift | idHTTP2Bit | st.count&idCounterMask
+      - opt:
+          do:
+            - set: req.Body
+              value: st.requests[idx].body
+          when: idx != noIndex && c.a.reader == nil
+      - eval: c.a.h.ServeHTTP1(req, res)
+        to: c.a.h.ServeHTTP1
+      - bind: closing
+        eval: res.Close || c.io.Pressure(c.ref)
+      - set: idx
+        to: c.dispatch
+        value: c.dispatch(stream, res, bytes.Equal(req.Method, methodHEAD), idx)
+      - opt:
+          do:
+            - eval: c.goAway()
+              to: c.goAway
+          when: closing
+      - opt:
+          do:
+            - eval: st.finishRequest(c.e, idx, prev)
+              to: st.finishRequest
+          when: idx != noIndex && st.requests[idx].slot == noIndex
+  - of: (*h2Call).dispatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).dispatch
+        kind: self
+      - id: c.offload
+        kind: internal
+      - id: st.give
+        kind: internal
+      - id: c.answer
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - switch:
+          cases:
+            - case: res.Pending
+              do:
+                - set: idx
+                  to: c.offload
+                  value: c.offload(stream, res, isHead, idx)
+                - eval: st.give(res)
+                  to: st.give
+            - case: res.Defer
+              do:
+                - set: st.deferred
+                  value: "append(st.deferred, deferredAnswer{res: res, ref: c.ref, stream: stream, isHead: isHead})"
+            - default: true
+              do:
+                - eval: c.answer(stream, res, isHead)
+                  to: c.answer
+                - eval: st.give(res)
+                  to: st.give
+      - return: idx
+  - of: (*h2Call).answer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).answer
+        kind: self
+      - id: c.answerStatus
+        kind: internal
+      - id: st.lane.Headers
+        kind: internal
+      - id: st.lane.Send
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - opt:
+          do:
+            - eval: c.answerStatus(stream, statusInternal)
+              to: c.answerStatus
+            - return: ""
+          when: unservable(res)
+      - bind: body
+        eval: res.Body
+      - bind: endOnHeaders
+        eval: len(body) == 0 || isHead
+      - bind: out, err
+        eval: st.lane.Headers(&c.e.conn, stream, res, endOnHeaders, st.out)
+        to: st.lane.Headers
+      - opt:
+          do:
+            - eval: c.answerStatus(stream, statusInternal)
+              to: c.answerStatus
+            - return: ""
+          when: err != nil
+      - set: st.out
+        value: out
+      - opt:
+          do:
+            - set: st.out
+              to: st.lane.Send
+              value: st.lane.Send(&c.e.conn, stream, body, st.out, true)
+          when: "!endOnHeaders"
+  - of: unservable
+    participants:
+      - id: caller
+        kind: actor
+      - id: unservable
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: swallowErr(c.Close())
+              to: swallowErr
+          init:
+            bind: c, ok
+            eval: res.File.R.(io.Closer)
+          when: ok && res.File.R != nil
+      - return: res.Stream || res.Upgrade || res.File.R != nil
+  - of: (*h2Call).answerStatus
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).answerStatus
+        kind: self
+      - id: st.lane.Headers
+        kind: internal
+    steps:
+      - bind: st
+        eval: c.st
+      - bind: res
+        eval: "&corenet.HTTP1ResponseValue{Status: status}"
+      - bind: out, err
+        eval: st.lane.Headers(&c.e.conn, stream, res, true, st.out)
+        to: st.lane.Headers
+      - opt:
+          do:
+            - set: st.out
+              value: out
+          when: err == nil
+  - of: (*h2Call).goAway
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*h2Call).goAway
+        kind: self
+      - id: c.st.lane.GoAway
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.e.flags&entryGoAway != 0
+      - op: "|="
+        set: c.e.flags
+        value: entryGoAway
+      - set: c.st.out
+        to: c.st.lane.GoAway
+        value: c.st.lane.GoAway(&c.e.conn, corehttp2.ErrCodeNoError, c.st.out)
+  - of: (*LoopHandler).OnBatchEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnBatchEnd
+        kind: self
+      - id: a.state
+        kind: internal
+      - id: a.h1.MarkServed
+        kind: value
+      - id: a.h1.OnBatchEnd
+        kind: value
+      - id: a.completeDeferred
+        kind: internal
+      - id: a.flush
+        kind: internal
+      - id: a.publish
+        kind: internal
+      - id: st.endBatch
+        kind: internal
+    steps:
+      - bind: st
+        eval: a.state(io.Loop())
+        to: a.state
+      - opt:
+          do:
+            - eval: a.h1.MarkServed(st.index)
+              to: a.h1.MarkServed
+          when: st.served > 0
+      - eval: a.h1.OnBatchEnd(io)
+        to: a.h1.OnBatchEnd
+      - opt:
+          do:
+            - return: ""
+          when: len(st.active) == 0 && len(st.writes) == 0 && len(st.deferred) == 0
+      - eval: a.completeDeferred(io, st)
+        to: a.completeDeferred
+      - eval: a.flush(io, st)
+        to: a.flush
+      - eval: a.publish(st)
+        to: a.publish
+      - eval: st.endBatch()
+        to: st.endBatch
+  - of: (*LoopHandler).publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).publish
+        kind: self
+      - id: a.requests.Add
+        kind: value
+      - id: st.lane.TakeErrors
+        kind: internal
+      - id: a.errs[i].Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: a.requests.Add(uint64(st.served))
+              to: a.requests.Add
+          when: st.served > 0
+      - eval: st.lane.TakeErrors(st.errs[:])
+        to: st.lane.TakeErrors
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: a.errs[i].Add(n)
+                    to: a.errs[i].Add
+                  - set: st.errs[i]
+                    value: "0"
+                when: n > 0
+          key: i
+          range: st.errs
+          value: "n"
+  - of: (*laneState).countAbort
+    steps:
+      - opt:
+          do:
+            - op: ++
+              set: st.errs[corehttp2.ErrorTypeHeaderList]
+            - return: ""
+          when: errors.Is(err, corehttp2.HeadersTooLarge)
+      - op: ++
+        set: st.errs[corehttp2.ErrorTypeCompression]
+  - of: (*LoopHandler).HTTPCounts
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).HTTPCounts
+        kind: self
+      - id: a.h1.HTTPCounts
+        kind: value
+      - id: a.requests.Load
+        kind: value
+      - id: a.errs[i].Load
+        kind: value
+    steps:
+      - bind: v
+        eval: a.h1.HTTPCounts()
+        to: a.h1.HTTPCounts
+      - set: v.HTTP2Requests
+        to: a.requests.Load
+        value: a.requests.Load()
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: v.HTTP2Errors
+                    value: "append(v.HTTP2Errors, corehttp2.ErrorCountValue{Type: corehttp2.ErrorType(i), Count: n})"
+                init:
+                  bind: "n"
+                  eval: a.errs[i].Load()
+                  to: a.errs[i].Load
+                when: n > 0
+          key: i
+          range: a.errs
+      - return: v
+  - of: (*LoopHandler).completeDeferred
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).completeDeferred
+        kind: self
+      - id: st.entry
+        kind: internal
+      - id: st.give
+        kind: internal
+      - id: c.answer
+        kind: internal
+      - id: st.pushWrite
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: d
+              eval: "&st.deferred[i]"
+            - bind: e
+              eval: st.entry(d.ref)
+              to: st.entry
+            - opt:
+                do:
+                  - eval: st.give(d.res)
+                    to: st.give
+                  - continue: true
+                when: "!e.live() || e.gen != d.ref.Gen"
+            - bind: c
+              eval: "h2Call{a: a, io: io, ref: d.ref, st: st, e: e}"
+            - bind: "off"
+              eval: len(st.out)
+            - opt:
+                do:
+                  - set: d.res.Status
+                    value: statusInternal
+                  - set: d.res.Header, d.res.Body
+                    value: nil, nil
+                when: d.res.Defer
+            - eval: c.answer(d.stream, d.res, d.isHead)
+              to: c.answer
+            - eval: st.give(d.res)
+              to: st.give
+            - eval: st.pushWrite(d.ref, off, e)
+              to: st.pushWrite
+          key: i
+          range: st.deferred
+      - set: st.deferred
+        value: st.deferred[:0]
+  - of: (*LoopHandler).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).flush
+        kind: self
+      - id: st.credit
+        kind: internal
+      - id: st.writeAll
+        kind: internal
+      - id: a.closeIfDone
+        kind: internal
+    steps:
+      - eval: st.credit()
+        to: st.credit
+      - eval: st.writeAll(io)
+        to: st.writeAll
+      - loop:
+          do:
+            - eval: a.closeIfDone(io, ref, st)
+              to: a.closeIfDone
+          key: _
+          range: st.active
+          value: ref
+  - of: (*laneState).credit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).credit
+        kind: self
+      - id: st.entry
+        kind: internal
+      - id: st.lane.AppendCredits
+        kind: internal
+      - id: st.pushWrite
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: e
+              eval: st.entry(ref)
+              to: st.entry
+            - opt:
+                do:
+                  - continue: true
+                when: "!e.live() || e.gen != ref.Gen"
+            - bind: "off"
+              eval: len(st.out)
+            - set: st.out
+              to: st.lane.AppendCredits
+              value: st.lane.AppendCredits(&e.conn, st.out)
+            - eval: st.pushWrite(ref, off, e)
+              to: st.pushWrite
+          key: _
+          range: st.active
+          value: ref
+  - of: (*laneState).writeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).writeAll
+        kind: self
+      - id: st.entry
+        kind: internal
+      - id: io.Write
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: e
+              eval: st.entry(w.ref)
+              to: st.entry
+            - opt:
+                do:
+                  - continue: true
+                when: "!e.live() || e.gen != w.ref.Gen"
+            - opt:
+                do:
+                  - op: "|="
+                    set: e.flags
+                    value: entryEnded
+                init:
+                  bind: err
+                  eval: io.Write(w.ref, st.out[w.off:w.end])
+                  to: io.Write
+                when: err != nil
+          key: _
+          range: st.writes
+          value: w
+  - of: (*LoopHandler).closeIfDone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).closeIfDone
+        kind: self
+      - id: st.entry
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: e
+        eval: st.entry(ref)
+        to: st.entry
+      - opt:
+          do:
+            - return: ""
+          when: "!e.live() || e.gen != ref.Gen"
+      - opt:
+          do:
+            - eval: swallowErr(io.Close(ref))
+              to: swallowErr
+          when: e.flags&entryEnded != 0 || st.lane.Closing(&e.conn) || st.lane.Done(&e.conn)
+  - of: (*laneState).endBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).endBatch
+        kind: self
+      - id: st.lane.EndBatch
+        kind: internal
+      - id: st.release
+        kind: internal
+    steps:
+      - eval: st.lane.EndBatch()
+        to: st.lane.EndBatch
+      - set: st.out, st.writes, st.active
+        value: st.out[:0], st.writes[:0], st.active[:0]
+      - set: st.scratch, st.served
+        value: st.scratch[:0], 0
+      - loop:
+          do:
+            - eval: st.release(idx)
+              to: st.release
+          key: _
+          range: st.completed
+          value: idx
+      - set: st.completed
+        value: st.completed[:0]

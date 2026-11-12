@@ -18,6 +18,20 @@ constants:
         type: int
         value: "2"
     name: crlfWidth
+  - doc: "statusUnset is what a zero status means: the stream is accepted."
+    items:
+      - name: statusUnset
+        type: int
+        value: "0"
+    name: statusUnset
+  - doc: |-
+      drainRetry is the reconnection hint a drain sends when the stream was given
+      none: long enough for a restart, short enough to be a pause.
+    items:
+      - name: drainRetry
+        type: time.Duration
+        value: 3 * time.Second
+    name: drainRetry
   - doc: |-
       DefaultKeepAlive is the comment cadence a stream uses when the caller sets
       none. It sits under the idle timeout of every proxy worth naming — nginx and
@@ -106,6 +120,27 @@ files:
       - indexFrom
       - appendField
     name: frame.go
+  - decls:
+      - statusUnset
+      - drainRetry
+      - keepAliveFrame
+      - LoopHandler
+      - LoopStreamValue
+      - NewLoopHandler
+      - hasWriteTimeout
+      - (*LoopHandler).ServeHTTP1
+      - (*LoopHandler).OnStreamOpen
+      - (*LoopHandler).OnStreamTimeout
+      - (*LoopHandler).OnStreamDrain
+      - (*LoopHandler).OnStreamClose
+      - (*LoopHandler).armKeepAlive
+      - LoopStreamValue.Send
+      - LoopStreamValue.Conn
+      - LoopStreamValue.End
+      - (*LoopHandler).lane
+      - (*LoopHandler).growLane
+      - sendErr
+    name: loop.go
   - decls:
       - DefaultKeepAlive
       - DefaultWriteTimeout
@@ -202,6 +237,20 @@ functions:
     name: appendField
     params: dst []byte, name, value string
     results: "[]byte"
+  - name: NewLoopHandler
+    params: src LoopSource, opts ...Option
+    results: "*LoopHandler, error"
+  - doc: |-
+      hasWriteTimeout reports whether WriteTimeout was among opts, looked at before
+      resolve's defaults fill it in.
+    name: hasWriteTimeout
+    params: opts []Option
+    results: bool
+  - doc: |-
+      sendErr discards a write's refusal: a stream closing past its output ceiling,
+      or already closed, is told by OnStreamClose, which is the one place to act.
+    name: sendErr
+    params: err error
   - name: KeepAlive
     params: d time.Duration
     results: Option
@@ -238,6 +287,7 @@ functions:
     params: w http.ResponseWriter
     results: bool
 imports:
+  atomic: sync/atomic
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   corenet: github.com/kitsunium/sdk/internal/core/net
@@ -254,6 +304,77 @@ package:
   name: sse
   purpose: "Package sse — an event's wire form, as the WHATWG HTML standard's Server-Sent Events format spells it: the encoder that turns a corenet.SSEEventValue into the bytes a stream writes, and a comment into the one frame no client dispatches."
 types:
+  - fields:
+      - doc: src answers the program's half.
+        name: src
+        type: LoopSource
+      - doc: |-
+          retry is the opening hint, zero for none; keepAlive the comment cadence,
+          zero for none.
+        name: retry
+        type: time.Duration
+      - name: keepAlive
+        type: time.Duration
+      - doc: scratch is each lane's reused frame buffer, found by lane with no lock.
+        name: scratch
+        type: atomic.Pointer[[]*[]byte]
+      - doc: mu serialises the first sight of a lane.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: h *LoopHandler
+      - name: OnStreamOpen
+        params: s corenet.HTTP1StreamValue
+        recv: h *LoopHandler
+      - name: OnStreamTimeout
+        params: s corenet.HTTP1StreamValue
+        recv: h *LoopHandler
+      - name: OnStreamDrain
+        params: s corenet.HTTP1StreamValue
+        recv: h *LoopHandler
+      - name: OnStreamClose
+        params: s corenet.HTTP1StreamValue, err error
+        recv: h *LoopHandler
+      - doc: |-
+          armKeepAlive sets the connection's timer for the next comment, unless asked
+          for no keep-alive.
+        name: armKeepAlive
+        params: s corenet.HTTP1StreamValue
+        recv: h *LoopHandler
+      - doc: lane returns lane i's frame buffer, built the first time it is asked for.
+        name: lane
+        params: i int
+        recv: h *LoopHandler
+        results: "*[]byte"
+      - doc: growLane builds lane i's buffer and publishes a table that holds it.
+        name: growLane
+        params: i int
+        recv: h *LoopHandler
+        results: "*[]byte"
+    name: LoopHandler
+  - fields:
+      - doc: h is the handler that owns the lane's scratch.
+        name: h
+        type: "*LoopHandler"
+      - doc: s is the response delimited by close.
+        name: s
+        type: corenet.HTTP1StreamValue
+    kind: struct
+    methods:
+      - name: Send
+        params: e corenet.SSEEventValue
+        recv: s LoopStreamValue
+        results: error
+      - name: Conn
+        recv: s LoopStreamValue
+        results: corenet.LoopConnRef
+      - name: End
+        recv: s LoopStreamValue
+        results: error
+    name: LoopStreamValue
   - kind: named
     name: Option
     underlying: func(*config)
@@ -409,3 +530,15 @@ types:
         params: cfg config
         recv: s *Stream
     name: Stream
+vars:
+  - grouped: true
+    items:
+      - doc: |-
+          keepAliveFrame is the comment a keep-alive writes: nothing for a client to
+          parse, enough to keep a proxy from cutting an idle stream.
+        name: keepAliveFrame
+        value: "[]byte(\":\\n\\n\")"
+      - doc: loopHead are the response fields every event stream carries, written once.
+        name: loopHead
+        value: "[]byte(\"Content-Type: \" + corenet.SSEContentType + \"\\r\\nCache-Control: no-cache\\r\\nX-Accel-Buffering: no\\r\\n\")"
+    name: keepAliveFrame

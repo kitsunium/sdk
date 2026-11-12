@@ -17,6 +17,14 @@ constants:
         type: int
         value: "8"
     name: defaultPerAddress
+  - doc: |-
+      maxListenerBacklog is the ceiling the standard library puts on the backlog it
+      asks for by default: the kernel's own limits are 16 bits wide.
+    items:
+      - name: maxListenerBacklog
+        type: int
+        value: 1<<16 - 1
+    name: maxListenerBacklog
   - grouped: true
     items:
       - doc: |-
@@ -32,6 +40,51 @@ constants:
         type: int
         value: 256 << 10
     name: replyQueue
+  - grouped: true
+    items:
+      - doc: contentSniffBytes is how much http.DetectContentType reads.
+        name: contentSniffBytes
+        type: int
+        value: "512"
+      - doc: |-
+          defaultCompressMinBytes is the smallest body compressed unless CompressValue
+          says otherwise: below about a kilobyte gzip's container costs what it saves.
+        name: defaultCompressMinBytes
+        type: int
+        value: 1 << 10
+      - doc: gzipMinLevel is gzip's smallest level; -1 is its default.
+        name: gzipMinLevel
+        type: int
+        value: gzip.BestSpeed
+      - doc: gzipMaxLevel is gzip's largest level.
+        name: gzipMaxLevel
+        type: int
+        value: gzip.BestCompression
+    name: contentSniffBytes
+  - grouped: true
+    items:
+      - doc: |-
+          errorLogCap is how many records of net/http's own log a server writes in
+          one second. The rest are counted, never written: a scanner probing a port
+          must not turn into one line per attempt.
+        name: errorLogCap
+        type: int
+        value: "10"
+      - doc: errorLogWindow is the span the cap counts in.
+        name: errorLogWindow
+        type: time.Duration
+        value: time.Second
+      - doc: |-
+          errorLogDetailMax clips the lines after the first of one record — a
+          recovered panic's stack — in the record's detail attribute.
+        name: errorLogDetailMax
+        type: int
+        value: "2048"
+      - doc: errorLogSource is the value of the source attribute every record carries.
+        name: errorLogSource
+        type: string
+        value: "\"net/http\""
+    name: errorLogCap
   - doc: |-
       rebindAttempts is one: an address in use elsewhere is a real conflict, and
       a TIME_WAIT connection does not hold a listener's address (Go binds with
@@ -63,12 +116,72 @@ constants:
         type: string
         value: "\"net/server\""
     name: healthCheckName
+  - doc: |-
+      defaultMaxBodyBytes is the request-body bound a zero MaxBodyBytes selects:
+      1 MiB, the http1 profile's own (corenet.HTTP1DefaultBody) and the
+      framework's.
+    items:
+      - name: defaultMaxBodyBytes
+        type: int64
+        value: 1 << 20
+    name: defaultMaxBodyBytes
+  - doc: noBodyBound is the MaxBodyBytes value that states no bound.
+    items:
+      - name: noBodyBound
+        type: int64
+        value: "-1"
+    name: noBodyBound
+  - doc: bodyTooLarge is the text of the 413 limitBody answers.
+    items:
+      - name: bodyTooLarge
+        type: string
+        value: "\"request body too large\\n\""
+    name: bodyTooLarge
+  - doc: |-
+      errTypeLostPing is what net/http's CountError reports for a connection
+      closed on an unanswered PING.
+    items:
+      - name: errTypeLostPing
+        type: string
+        value: "\"conn_close_lost_ping\""
+    name: errTypeLostPing
+  - doc: |-
+      keepAliveProbes is the unanswered probes a keepalive socket tolerates, the
+      standard library's own.
+    items:
+      - name: keepAliveProbes
+        type: int
+        value: "9"
+    name: keepAliveProbes
+  - doc: |-
+      tcpUserTimeoutOption is TCP_USER_TIMEOUT (Linux 2.6.37, include/uapi/linux/tcp.h):
+      absent from the standard library's syscall package.
+    items:
+      - name: tcpUserTimeoutOption
+        type: int
+        value: "0x12"
+    name: tcpUserTimeoutOption
   - doc: drainPollInterval is how often the drain re-checks the in-flight count.
     items:
       - name: drainPollInterval
         type: time.Duration
         value: 10 * time.Millisecond
     name: drainPollInterval
+  - grouped: true
+    items:
+      - doc: "reuseNone binds without SO_REUSEPORT: one socket holds the address."
+        name: reuseNone
+        type: reuseMode
+        value: iota
+      - doc: |-
+          reuseShards sets SO_REUSEPORT for the group's own shards, the address
+          probed first (#1330).
+        name: reuseShards
+      - doc: |-
+          reuseShared sets it for another process to join too: ShareAddress
+          (#1330).
+        name: reuseShared
+    name: reuseNone
   - doc: |-
       The eight callbacks a loop middleware's layer forwards, in the order the
       probe sends them.
@@ -86,12 +199,29 @@ constants:
       - name: probeHonours
       - name: probeCallbacks
     name: probeStart
-  - doc: nativeLoopBackends is true where the leaf's io_uring and epoll exist.
+  - doc: "nativePoller is epoll: Linux's readiness poller, with io_uring above it."
     items:
-      - name: nativeLoopBackends
-        type: bool
-        value: "true"
-    name: nativeLoopBackends
+      - name: nativePoller
+        type: corenet.Capability
+        value: corenet.CapabilityEpoll
+    name: nativePoller
+  - doc: |-
+      networkUnixpacket is the stream network no loop backend reads whole: each
+      reads a connection as a byte stream into a buffer that cuts a record longer
+      than itself, with no flag to say so (#974).
+    items:
+      - name: networkUnixpacket
+        type: string
+        value: "\"unixpacket\""
+    name: networkUnixpacket
+  - doc: |-
+      unixSocketReason is why tcp-nodelay is not probed on a group with no TCP
+      listener: the family has no such option to read (#974).
+    items:
+      - name: unixSocketReason
+        type: string
+        value: "\"unix socket\""
+    name: unixSocketReason
   - grouped: true
     items:
       - doc: |-
@@ -132,6 +262,15 @@ constants:
         name: portableQuiet
         type: time.Duration
         value: time.Second
+      - doc: |-
+          portableLinger bounds how long a connection its handler closed keeps
+          reading, its writing side shut, before the close: a close with input
+          unread sends a reset, and Windows discards on a reset what its peer had
+          received and not yet read — a 413 refusing a body on its head would
+          never be read (#844). net/http lingers as long for the same reason.
+        name: portableLinger
+        type: time.Duration
+        value: 500 * time.Millisecond
       - doc: portableEvents bounds the events one batch takes.
         name: portableEvents
         type: int
@@ -177,6 +316,167 @@ constants:
         type: int
         value: 1 << 16
     name: portableTakeMax
+  - doc: "The names of the instruments RegisterMetrics creates (#847): observables, each read once per collection from State, never per request."
+    grouped: true
+    items:
+      - doc: |-
+          MetricConnsActive names the connections a stream group is serving now, a gauge per
+          group (attribute group).
+        name: MetricConnsActive
+        type: string
+        value: "\"net_server_conns_active\""
+      - doc: |-
+          MetricConnsTotal names the connections a stream group served since the server
+          started - accepted, then past a PROXY header and the ceiling -, a counter per
+          group (attribute group): a connection MetricConnsRejected counts is not in it,
+          although State's TotalConns counts it too (#847).
+        name: MetricConnsTotal
+        type: string
+        value: "\"net_server_conns_total\""
+      - doc: |-
+          MetricConnsRejected names the connections a stream group's ceiling turned away, a
+          counter per group (attribute group): State's RejectedConns, split by group.
+        name: MetricConnsRejected
+        type: string
+        value: "\"net_server_conns_rejected_total\""
+      - doc: |-
+          MetricAcceptBackoffs names the waits the accept loops took after a failed Accept:
+          State's AcceptBackoffs.
+        name: MetricAcceptBackoffs
+        type: string
+        value: "\"net_server_accept_backoffs_total\""
+      - doc: |-
+          MetricDatagramsTruncated names the datagrams the batched read cut: State's
+          Datagrams.TruncatedPackets.
+        name: MetricDatagramsTruncated
+        type: string
+        value: "\"net_server_datagrams_truncated_total\""
+      - doc: |-
+          MetricGSOOversized names the GSO sends the device refused: State's
+          Datagrams.GSOOversized.
+        name: MetricGSOOversized
+        type: string
+        value: "\"net_server_gso_oversized_total\""
+      - doc: |-
+          MetricReplyFailures names the replies that did not leave: State's
+          Datagrams.ReplyFailures.
+        name: MetricReplyFailures
+        type: string
+        value: "\"net_server_datagram_reply_failures_total\""
+      - doc: |-
+          MetricSuppressedLogs names the lines of net/http's own log the server did not write:
+          State's SuppressedLogs.
+        name: MetricSuppressedLogs
+        type: string
+        value: "\"net_server_suppressed_logs_total\""
+      - doc: |-
+          MetricDegraded names 1 while State reports the server degraded - a fallback, a
+          fault, a listener below what it asked for -, 0 otherwise.
+        name: MetricDegraded
+        type: string
+        value: "\"net_server_degraded\""
+      - doc: |-
+          MetricLoopBatches names the batches a loop ring ran, a counter per ring (attributes
+          group, loop, ring).
+        name: MetricLoopBatches
+        type: string
+        value: "\"net_loop_batches_total\""
+      - doc: |-
+          MetricLoopCompletions names the completions a loop ring reaped, a counter per ring
+          (attributes group, loop, ring).
+        name: MetricLoopCompletions
+        type: string
+        value: "\"net_loop_completions_total\""
+      - doc: |-
+          MetricLoopBufferStarved names the receives a loop ring found no provided buffer for,
+          a counter per ring (attributes group, loop, ring).
+        name: MetricLoopBufferStarved
+        type: string
+        value: "\"net_loop_buffer_starved_total\""
+      - doc: |-
+          MetricLoopBatchesCut names the batches a loop ring's budget cut short, a counter per
+          ring (attributes group, loop, ring).
+        name: MetricLoopBatchesCut
+        type: string
+        value: "\"net_loop_batches_cut_total\""
+      - doc: |-
+          MetricLoopRingsDrained names the rings of a loop group the accept watchdog has
+          drained, a gauge per group (attribute group): all of them is a stalled group.
+        name: MetricLoopRingsDrained
+        type: string
+        value: "\"net_loop_rings_drained\""
+      - doc: |-
+          MetricLoopOutboundRefused names the offloaded answers a loop group refused, a
+          counter per group (attribute group): LoopStateValue.OutboundRefused.
+        name: MetricLoopOutboundRefused
+        type: string
+        value: "\"net_loop_outbound_refused_total\""
+      - doc: |-
+          MetricLoopBatchP99 names the 99th percentile of a loop group's batch duration, in
+          seconds, a gauge per group (attribute group).
+        name: MetricLoopBatchP99
+        type: string
+        value: "\"net_loop_batch_p99_seconds\""
+    name: MetricConnsActive
+  - doc: The units the instruments carry, in UCUM's annotation form.
+    grouped: true
+    items:
+      - doc: unitConn counts connections.
+        name: unitConn
+        type: string
+        value: "\"{connection}\""
+      - doc: unitBackoff counts waits.
+        name: unitBackoff
+        type: string
+        value: "\"{backoff}\""
+      - doc: unitDatagram counts datagrams, sends and replies.
+        name: unitDatagram
+        type: string
+        value: "\"{datagram}\""
+      - doc: unitLine counts lines of a log.
+        name: unitLine
+        type: string
+        value: "\"{line}\""
+      - doc: unitBatch counts batches.
+        name: unitBatch
+        type: string
+        value: "\"{batch}\""
+      - doc: unitCompletion counts completions.
+        name: unitCompletion
+        type: string
+        value: "\"{completion}\""
+      - doc: unitRecv counts receives.
+        name: unitRecv
+        type: string
+        value: "\"{receive}\""
+      - doc: unitRing counts rings.
+        name: unitRing
+        type: string
+        value: "\"{ring}\""
+      - doc: unitAnswer counts answers.
+        name: unitAnswer
+        type: string
+        value: "\"{answer}\""
+      - doc: unitSecond is the second.
+        name: unitSecond
+        type: string
+        value: "\"s\""
+      - doc: unitState is a dimensionless state, 0 or 1.
+        name: unitState
+        type: string
+        value: "\"1\""
+    name: unitConn
+  - grouped: true
+    items:
+      - doc: metricCounter is a monotonic sum, reported as its absolute total.
+        name: metricCounter
+        type: metricsKind
+        value: iota + 1
+      - doc: metricGauge is a level, an up-down counter.
+        name: metricGauge
+      - doc: metricFloatGauge is a sampled reading in a float.
+        name: metricFloatGauge
+    name: metricCounter
   - grouped: true
     items:
       - doc: |-
@@ -200,11 +500,22 @@ constants:
         type: int
         value: "4"
       - doc: |-
+          soRxqOvfl is SO_RXQ_OVFL, the socket option that has the kernel attach to
+          each message read the number of datagrams it dropped for want of room in
+          the receive buffer, as a SOL_SOCKET control message of the same type
+          (include/uapi/asm-generic/socket.h; Linux 2.6.33).
+        name: soRxqOvfl
+        value: "40"
+      - doc: "rxqBytes is the size of that message's payload: a 32-bit count."
+        name: rxqBytes
+        type: int
+        value: "4"
+      - doc: |-
           groControlSpace is the control room a GRO read gives each message: the
-          UDP_GRO message's 24 bytes and room beside it for those a caller may have
-          asked of the socket itself — IP_PKTINFO (32), IPV6_PKTINFO (40), a
-          timestamp (32 to 64) —, so a foreign control message never cuts the one
-          the reader needs (MSG_CTRUNC). 64 slots of it are 16 KiB.
+          UDP_GRO message's 24 bytes, SO_RXQ_OVFL's 24 (#973), and room beside them
+          for those a caller may have asked of the socket itself — IP_PKTINFO (32),
+          IPV6_PKTINFO (40), a timestamp (32 to 64) —, so a foreign control message
+          never cuts the one the reader needs (MSG_CTRUNC). 64 slots of it are 16 KiB.
         name: groControlSpace
         type: int
         value: "256"
@@ -283,8 +594,9 @@ constants:
         value: "4"
     name: udpSegment
   - doc: |-
-      The ranks of the lattice iouring > epoll > portable > goroutine (ADR 0188
-      §D1). A rank is compared, never shown: State spells the capability.
+      The ranks of the lattice iouring > epoll = kqueue > portable > goroutine
+      (ADR 0188 §D1, ADR 0222). A rank is compared, never shown: State spells the
+      capability.
     grouped: true
     items:
       - doc: rankGoroutine is the goroutine engine, the bottom.
@@ -293,7 +605,9 @@ constants:
         value: iota + 1
       - doc: rankPortable is the portable loop backend, the loop family's floor.
         name: rankPortable
-      - doc: rankEpoll is epoll.
+      - doc: |-
+          rankEpoll is epoll, and kqueue beside it: each the readiness poller of
+          its platforms, never both on one.
         name: rankEpoll
       - doc: rankIOURing is io_uring, the top.
         name: rankIOURing
@@ -341,6 +655,12 @@ constants:
         type: time.Duration
         value: 250 * time.Millisecond
     name: faultGSO
+  - doc: networkUnixgram is the Unix datagram family, which a lane does not serve.
+    items:
+      - name: networkUnixgram
+        type: string
+        value: "\"unixgram\""
+    name: networkUnixgram
   - grouped: true
     items:
       - doc: |-
@@ -356,6 +676,105 @@ constants:
         type: int
         value: "16"
     name: defaultMaxPacketSize
+  - grouped: true
+    items:
+      - doc: |-
+          in6PktinfoBytes is the size of struct in6_pktinfo, the larger of the two
+          destination control messages (include/uapi/linux/ipv6.h).
+        name: in6PktinfoBytes
+        type: int
+        value: "20"
+      - doc: inPktinfoBytes is the size of struct in_pktinfo (include/linux/in.h).
+        name: inPktinfoBytes
+        type: int
+        value: "12"
+      - doc: pinControlBytes is one sendmsg's room for the control message.
+        name: pinControlBytes
+        type: int
+        value: "64"
+    name: in6PktinfoBytes
+  - grouped: true
+    items:
+      - doc: |-
+          defaultProxyTimeout bounds a header when the group sets none. A header is
+          a balancer's first bytes on a connection it opened itself, so the time it
+          is allowed is short.
+        name: defaultProxyTimeout
+        type: time.Duration
+        value: 3 * time.Second
+      - doc: |-
+          proxyV1MaxBytes is the longest v1 header the PROXY protocol allows, CRLF
+          included.
+        name: proxyV1MaxBytes
+        type: int
+        value: "107"
+      - doc: |-
+          proxyV2FixedBytes is the v2 header's fixed part: the signature, the
+          version and command, the family and the length.
+        name: proxyV2FixedBytes
+        type: int
+        value: "16"
+      - doc: |-
+          proxyV2MaxPayload bounds what follows the fixed part: the addresses and
+          the TLVs a balancer adds (AWS, GCP and a host name fit well inside it).
+          A trusted balancer is not an excuse: the length is read before anything
+          is, and a header past this is refused without reading it.
+        name: proxyV2MaxPayload
+        type: int
+        value: "2048"
+      - doc: proxyBufferBytes is one header's scratch, taken from a shared pool.
+        name: proxyBufferBytes
+        type: int
+        value: proxyV2FixedBytes + proxyV2MaxPayload
+      - doc: proxyV2Version is the high nibble of the version and command byte.
+        name: proxyV2Version
+        type: byte
+        value: "2"
+      - doc: |-
+          proxyV2Local is the LOCAL command: the balancer's own traffic, and the
+          socket's address is the real one.
+        name: proxyV2Local
+        type: byte
+        value: "0"
+      - doc: proxyV2Proxy is the PROXY command.
+        name: proxyV2Proxy
+        type: byte
+        value: "1"
+      - doc: |-
+          proxyV2Unspec, TCP4 and TCP6 are the family-and-protocol bytes this
+          listener believes; every other — UDP, Unix — is a refusal.
+        name: proxyV2Unspec
+        type: byte
+        value: "0x00"
+      - doc: proxyV2TCP4 is AF_INET, STREAM.
+        name: proxyV2TCP4
+        type: byte
+        value: "0x11"
+      - doc: proxyV2TCP6 is AF_INET6, STREAM.
+        name: proxyV2TCP6
+        type: byte
+        value: "0x21"
+      - doc: proxyV2TCP4Bytes is the addresses and ports of an IPv4 v2 header.
+        name: proxyV2TCP4Bytes
+        type: int
+        value: "12"
+      - doc: proxyV2TCP6Bytes is the addresses and ports of an IPv6 v2 header.
+        name: proxyV2TCP6Bytes
+        type: int
+        value: "36"
+    name: defaultProxyTimeout
+  - doc: The kinds of key RateLimit may read.
+    grouped: true
+    items:
+      - doc: httpRateKeyNone is the zero HTTPRateKeyValue, refused.
+        name: httpRateKeyNone
+        type: uint8
+        value: iota
+      - doc: httpRateKeyRemote keys on the peer address.
+        name: httpRateKeyRemote
+      - doc: httpRateKeyHeader keys on a request field.
+        name: httpRateKeyHeader
+    name: httpRateKeyNone
   - doc: |-
       soReusePort is SO_REUSEPORT.
 
@@ -368,6 +787,14 @@ constants:
         type: int
         value: "0xf"
     name: soReusePort
+  - doc: |-
+      destinationUnavailable is the udp-pktinfo row's reason where the socket cannot
+      name a datagram's destination (ADR 0029 D5: stated, never silent).
+    items:
+      - name: destinationUnavailable
+        type: string
+        value: "\"destination address unavailable\""
+    name: destinationUnavailable
   - doc: |-
       sysSendmmsg is sendmmsg(2)'s number on linux/amd64
       (arch/x86/entry/syscalls/syscall_64.tbl), which the standard library's
@@ -480,7 +907,9 @@ constants:
         name: classKernel
         type: string
         value: "\"a-kernel\""
-      - doc: statusOn, statusAbsent and statusDisabled are the rows server writes.
+      - doc: |-
+          statusOn, statusAbsent, statusDisabled and statusUnprobed are the rows
+          server writes.
         name: statusOn
         type: string
         value: "\"on\""
@@ -490,11 +919,52 @@ constants:
       - name: statusDisabled
         type: string
         value: "\"disabled\""
+      - name: statusUnprobed
+        type: string
+        value: "\"unprobed\""
       - doc: statusMissing is an opt-in the kernel lacks.
         name: statusMissing
         type: string
         value: "\"missing\""
     name: classKernel
+  - doc: "classCode is class A-code: opt-in, what a loop group's rows call it."
+    items:
+      - name: classCode
+        type: string
+        value: "\"a-code\""
+    name: classCode
+  - grouped: true
+    items:
+      - doc: |-
+          soAttachReuseportCBPF is SO_ATTACH_REUSEPORT_CBPF
+          (include/uapi/asm-generic/socket.h, Linux 4.5): a classic BPF program that
+          picks the socket of a SO_REUSEPORT group by its return value.
+        name: soAttachReuseportCBPF
+        type: int
+        value: "51"
+      - doc: |-
+          skfAdOff is SKF_AD_OFF (include/uapi/linux/filter.h): an absolute load past
+          it reads a socket-filter extension.
+        name: skfAdOff
+        type: int32
+        value: "-0x1000"
+      - doc: skfAdCPU is SKF_AD_CPU, the extension of the CPU the softirq runs on.
+        name: skfAdCPU
+        type: int32
+        value: "36"
+      - doc: bpfLdWAbs is BPF_LD|BPF_W|BPF_ABS (include/uapi/linux/bpf_common.h).
+        name: bpfLdWAbs
+        type: uint16
+        value: "0x20"
+      - doc: bpfAluModK is BPF_ALU|BPF_MOD|BPF_K.
+        name: bpfAluModK
+        type: uint16
+        value: "0x94"
+      - doc: bpfRetA is BPF_RET|BPF_A.
+        name: bpfRetA
+        type: uint16
+        value: "0x16"
+    name: soAttachReuseportCBPF
   - grouped: true
     items:
       - doc: protoHTTP1 is HTTP/1.1's ALPN identifier (RFC 7301).
@@ -505,36 +975,6 @@ constants:
         name: protoH2
         type: string
         value: "\"h2\""
-      - doc: |-
-          h2MaxConcurrentStreams is how many streams one HTTP/2 connection may have
-          open at once: net/http's own floor, set rather than left implicit.
-        name: h2MaxConcurrentStreams
-        type: int
-        value: "100"
-      - doc: |-
-          h2MaxReadFrameSize is the largest frame read, the protocol's minimum
-          (RFC 9113 §4.2): a peer cannot make one frame cost more.
-        name: h2MaxReadFrameSize
-        type: int
-        value: 16 << 10
-      - doc: |-
-          h2HeaderTableSize bounds both HPACK tables, the protocol's default
-          (RFC 7541 §4.2).
-        name: h2HeaderTableSize
-        type: int
-        value: 4 << 10
-      - doc: |-
-          h2ReceivePerStream is the flow-control window a stream's body may hold
-          unread: what a handler that never reads its body costs at most.
-        name: h2ReceivePerStream
-        type: int
-        value: 256 << 10
-      - doc: |-
-          h2ReceivePerConn is the window of a whole connection, four streams'
-          worth, so one unread stream never stops the others.
-        name: h2ReceivePerConn
-        type: int
-        value: 4 * h2ReceivePerStream
     name: protoHTTP1
 files:
   - decls:
@@ -562,8 +1002,19 @@ files:
       - packetConnsFromFiles
     name: adopt.go
   - decls:
+      - maxListenerBacklog
+      - defaultBacklog
+      - applyBacklog
+      - joinReason
+    name: backlog.go
+  - decls:
+      - setBacklog
+    name: backlog_unix.go
+  - decls:
       - replyQueue
       - datagram
+      - localAddress
+      - (*localAddress).addrOf
       - (*datagram).payload
       - (*datagram).segment
       - (*datagram).count
@@ -576,18 +1027,66 @@ files:
       - _
     name: batch_compliance.go
   - decls:
+      - pinSender
       - portableReader
       - (*portableReader).readBatch
       - (*portableReader).slotSize
       - portableSink
       - portableSink.begin
       - portableSink.reply
+      - portableSink.replyFrom
       - portableSink.flush
     name: batch_portable.go
+  - decls:
+      - bufferControl
+      - socketBuffers
+      - bufferSpec
+      - adoptedBuffers
+      - applyBuffers
+      - (*StreamGroup).valueRefusalBuffers
+    name: bufsize.go
+  - decls:
+      - setBuffers
+      - bufferRefusal
+      - readBuffers
+      - bufferOption
+    name: bufsize_unix.go
+  - decls:
+      - contentSniffBytes
+      - compressDefaults
+      - Compress
+      - compressSettings
+      - newCompressSettings
+      - (*compressSettings).serve
+      - compressWriter
+      - (*compressWriter).Header
+      - (*compressWriter).WriteHeader
+      - (*compressWriter).Write
+      - (*compressWriter).writeDecided
+      - (*compressWriter).Flush
+      - (*compressWriter).Hijack
+      - (*compressWriter).Unwrap
+      - (*compressWriter).compressible
+      - (*compressSettings).allows
+      - (*compressWriter).decide
+      - (*compressWriter).sniffPrefix
+      - (*compressWriter).addVary
+      - (*compressWriter).startGzip
+      - (*compressWriter).flushHeld
+      - (*compressWriter).finish
+      - (*compressWriter).decidedIdentity
+    name: compress.go
   - decls:
       - conn
       - (*conn).Read
       - (*conn).Write
+      - (*conn).ReadFrom
+      - (*conn).WriteTo
+      - (*conn).Unwrap
+      - connWriter
+      - connWriter.Write
+      - connReader
+      - connReader.Read
       - (*conn).boundRead
       - (*conn).boundWrite
       - tighterBudget
@@ -607,6 +1106,8 @@ files:
       - (*trackedConn).holdSlot
       - (*trackedConn).CloseWrite
       - (*trackedConn).ReadFrom
+      - (*trackedConn).WriteTo
+      - (*trackedConn).Unwrap
       - hijackedTracker
     name: conn_tracked.go
   - decls:
@@ -614,8 +1115,13 @@ files:
       - (*connWaiter).release
     name: conn_waiter.go
   - decls:
+      - CORS
+      - setCORSFields
+    name: cors.go
+  - decls:
       - newDatagramSource
       - newDatagramSink
+      - pinnedPortable
       - batchAvailable
     name: datagram_source_linux.go
   - decls: []
@@ -625,11 +1131,21 @@ files:
       - (*StreamGroup).engineRefusal
     name: engine_option.go
   - decls:
+      - errorLogCap
+      - errorLogBudget
+      - (*errorLogBudget).admit
+      - errorLogWriter
+      - (*errorLogWriter).Write
+      - clip
+      - (*Server).errorLog
+    name: error_log.go
+  - decls:
       - bindReport
       - exclusiveApplies
       - (*Server).rebindAttempts
       - (*Server).holdsPort
       - listenControl
+      - controlBeforeBind
       - exclusiveOf
       - rebindDelay
       - bindRetrying
@@ -641,6 +1157,7 @@ files:
       - exclusiveAddrSupported
       - setExclusiveAddr
       - exclusiveAddrOf
+      - bindConflict
       - addrInUse
       - closeConn
     name: exclusive_other.go
@@ -677,11 +1194,34 @@ files:
       - rawSocket
     name: http_adapter.go
   - decls:
+      - defaultMaxBodyBytes
+      - noBodyBound
+      - bodyTooLarge
       - httpBounds
+      - httpBounds.bodyBytes
+      - (*StreamGroup).valueRefusal
+      - (*StreamGroup).valueRefusalProxy
+      - (*StreamGroup).valueInvalid
+      - (*StreamGroup).reportedBodyBound
+      - limitBody
       - httpBounds.headerTimeout
       - idleOrRead
       - httpBounds.headerBytes
     name: http_bounds.go
+  - decls:
+      - errTypeLostPing
+      - netHTTPFrameErrors
+      - httpCounts
+      - (*httpCounts).countError
+      - (*httpCounts).value
+      - netHTTPErrorType
+      - errorTypeByCodeName
+      - versionCounter
+      - versionCounter.ServeHTTP
+      - findHTTPCounter
+      - groupHTTPCounts
+      - (*Server).foldHTTPCounts
+    name: http_counts.go
   - decls:
       - chanListener
       - newChanListener
@@ -699,6 +1239,19 @@ files:
       - (*deadlineBody).Close
     name: http_read_deadline.go
   - decls:
+      - keepAliveProbes
+      - applyKeepAlive
+      - applyAcceptedKeepAlive
+      - portableKeepAlive
+      - (*Server).keepAliveOf
+      - (*Server).userTimeoutOf
+      - resolveUserTimeout
+    name: keepalive.go
+  - decls:
+      - tcpUserTimeoutOption
+      - userTimeoutControl
+    name: keepalive_linux.go
+  - decls:
       - setKernelLen
     name: kernel_len_linux.go
   - decls:
@@ -709,6 +1262,8 @@ files:
       - (*Server).bindEverything
       - (*Server).bindPacketAll
       - (*Server).bindPacketGroup
+      - (*Server).bindPacketShards
+      - pinPort
       - (*Server).adoptPacketSockets
       - batchDegradation
       - (*Server).bindAll
@@ -719,6 +1274,7 @@ files:
       - (*Server).acceptLoop
       - (*Server).backOff
       - (*Server).serve
+      - (*Server).serveAdmitted
       - recoverHandler
       - (*Server).Serve
       - (*Server).Shutdown
@@ -735,10 +1291,12 @@ files:
     name: linux_compliance.go
   - decls:
       - streamNetworks
+      - withBoundPort
       - shardable
       - resolveShards
       - shardsFor
       - reusePortControl
+      - socketSpec
       - listen
       - familyUnavailable
       - layered
@@ -746,6 +1304,11 @@ files:
       - (*boundListener).closedSignal
       - (*boundListener).Close
     name: listen.go
+  - decls:
+      - reuseNone
+      - reuseMode
+      - reuseOf
+    name: listen_reuse.go
   - decls:
       - trackedListener
       - (*trackedListener).Accept
@@ -778,29 +1341,52 @@ files:
       - probeIO.Loop
     name: loop_chain.go
   - decls:
-      - nativeLoopBackends
+      - nativePoller
       - startLoopEngine
+      - dupHandoff
+    name: loop_engine_linux.go
+  - decls:
+      - startNativeEngine
+      - loopMemory
       - nativeEngine
       - (*nativeEngine).State
       - probeNoDelay
       - noDelayOf
       - dupListeners
       - closeHandoff
-    name: loop_engine_linux.go
+    name: loop_engine_native.go
   - decls:
+      - networkUnixpacket
+      - unixSocketReason
       - loopEngine
       - (*StreamGroup).HandleLoop
       - (*StreamGroup).loopRefusal
+      - (*StreamGroup).spillRefusal
       - (*StreamGroup).loopHonoursKind
       - loopHonours
       - (*Server).bindLoopGroup
       - startLanes
+      - resolveLanes
       - (*Server).registerLoopListeners
       - (*Server).loopStates
       - (*Server).shutdownLoops
       - (*Server).closeLoops
       - loopIdle
+      - unixpacketRefused
+      - refuseUnixpacketListeners
+      - isTCPListener
     name: loop_group.go
+  - decls:
+      - findHTTPCodec
+      - (*StreamGroup).codecListRefusal
+      - (*StreamGroup).codecServes
+      - (*StreamGroup).protocolList
+      - (*Server).applyHTTPCodec
+      - httpCodecEngine
+      - wrapHTTPCodec
+      - (*httpCodecEngine).Shutdown
+      - (*httpCodecEngine).State
+    name: loop_http_codec.go
   - decls:
       - defaultOutboundDepth
       - jobRing
@@ -861,6 +1447,8 @@ files:
       - (*portableLoop).open
       - (*portableLoop).reader
       - (*portableLoop).writer
+      - lingerClose
+      - (*portableLoop).dropOutput
       - (*portableLoop).lookupSlot
       - (*portableLoop).lookup
       - (*portableConn).heard
@@ -876,6 +1464,7 @@ files:
       - (*portableLoop).drainable
       - (*portableLoop).endBatch
       - (*portableLoop).settle
+      - markClosing
       - (*portableLoop).compactListed
       - (*portableLoop).closeAll
       - (*portableLoop).discard
@@ -885,6 +1474,7 @@ files:
       - (*portableLoop).Close
       - (*portableLoop).SetDeadline
       - (*portableLoop).Pressure
+      - (*portableLoop).Peer
       - (*portableLoop).Loop
       - (*portableLoop).Post
       - portableEngine
@@ -898,6 +1488,12 @@ files:
       - acceptCloexec
     name: loop_portable_accept_linux.go
   - decls:
+      - _#4
+    name: loop_portable_compliance.go
+  - decls:
+      - portablePeer
+    name: loop_portable_peer_linux.go
+  - decls:
       - portableTakeMax
       - filer
       - ownListeners
@@ -910,11 +1506,19 @@ files:
       - acceptRaw
     name: loop_portable_take_unix.go
   - decls:
+      - (*StreamGroup).shardsRefusal
+      - loopShardCount
+      - (*Server).bindLoopAddress
+      - pinnedAddr
+    name: loop_shards.go
+  - decls:
       - alpnHTTP1
       - codecUnwrapper
       - (*StreamGroup).tlsCodec
       - (*StreamGroup).loopTLSRefusal
       - (*StreamGroup).tlsCodecRefusal
+      - (*StreamGroup).multiVersion
+      - (*StreamGroup).codecVersions
       - (*StreamGroup).codecProtocols
       - (*StreamGroup).tlsErr
       - (*StreamGroup).loopLayers
@@ -926,21 +1530,49 @@ files:
       - handshake
     name: loop_tls.go
   - decls:
+      - MetricConnsActive
+      - unitConn
+      - metricsKind
+      - metricCounter
+      - metricsSnapshot
+      - metricInstrument
+      - metricInstruments
+      - groupConns
+      - (*Server).groupConnections
+      - serverInstruments
+      - groupInstruments
+      - loopInstruments
+      - ringsDraining
+      - boolInt
+      - metricsReader
+      - (*metricsReader).observe
+      - (*metricsReader).with
+      - (*Server).RegisterMetrics
+      - registerInstrument
+      - (*Server).claimMeter
+    name: metrics.go
+  - decls:
       - udpGRO
       - multiReader
       - newMultiReader
       - (*multiReader).enableGRO
+      - (*multiReader).enableRxqOvfl
       - (*multiReader).setGRO
       - (*multiReader).handover
       - (*multiReader).stopGRO
       - (*multiReader).switchGROOff
       - (*multiReader).slotSize
       - (*multiReader).wire
+      - (*multiReader).neededControl
       - (*multiReader).bind
       - (*multiReader).prepare
       - (*multiReader).readBatch
       - (*multiReader).drain
       - (*multiReader).fill
+      - (*multiReader).readControl
+      - (*multiReader).countDrops
+      - rxqOverflow
+      - controlMessage
       - groSegment
     name: multireader_linux.go
   - decls:
@@ -960,19 +1592,25 @@ files:
       - sendmmsg
       - (*multiWriter).begin
       - (*multiWriter).reply
+      - (*multiWriter).replyFrom
       - (*multiWriter).encode
+      - encodeSockaddr
       - (*multiWriter).flush
       - (*multiWriter).flushLocked
       - (*multiWriter).build
+      - (*pendingReply).joins
       - (*multiWriter).runFrom
       - (*multiWriter).layout
+      - (*multiWriter).writeControl
       - (*multiWriter).sendAll
       - (*multiWriter).refused
+      - (*multiWriter).unpinned
       - (*multiWriter).gsoRefused
       - (*multiWriter).sendFrom
       - (*multiWriter).left
       - (*multiWriter).unavailable
       - (*multiWriter).writeEach
+      - (*multiWriter).writeNow
       - (*multiWriter).fail
       - (*multiWriter).disableGSO
     name: multiwriter_linux.go
@@ -995,6 +1633,8 @@ files:
       - loopPlan
       - (*operatorEnv).plan
       - (*operatorEnv).backendPlan
+      - (*operatorEnv).linuxPlan
+      - (*operatorEnv).kqueuePlan
     name: operator.go
   - decls:
       - optionSet
@@ -1007,6 +1647,7 @@ files:
       - GroupOption
       - WithDrainTimeout
       - WithDrainGrace
+      - WithLogger
       - Loop
       - Listen
       - TLS
@@ -1015,12 +1656,21 @@ files:
       - IdleTimeout
       - ReadHeaderTimeout
       - MaxHeaderBytes
+      - MaxBodyBytes
+      - ProxyProtocol
+      - Steer
+      - KeepAlive
+      - UserTimeout
+      - Backlog
+      - ReceiveBuffer
+      - SendBuffer
       - HandshakeTimeout
       - ReadBufferSize
       - MaxPacketSize
       - BatchSize
       - BatchReplies
       - Shards
+      - ShareAddress
       - MaxConns
       - Adopt
       - Plaintext
@@ -1050,9 +1700,27 @@ files:
       - (*PacketGroup).Name
       - (*PacketGroup).Handle
       - (*PacketGroup).HandleFunc
+      - (*PacketGroup).HandleLoop
       - (*PacketGroup).Use
       - (*PacketGroup).resolved
     name: packet_group.go
+  - decls:
+      - networkUnixgram
+      - laneProbe
+      - packetLoopRefusal
+      - (*Server).startReader
+      - (*Server).startPacketLanes
+      - (*Server).startURingLane
+      - (*Server).awaitLane
+      - (*Server).laneAllowed
+      - laneReason
+      - (*Server).laneCapability
+    name: packet_lanes.go
+  - decls:
+      - startPacketLane
+      - dupPacketFD
+      - dupRefused
+    name: packet_lanes_linux.go
   - decls:
       - defaultMaxPacketSize
       - packetNetworks
@@ -1071,7 +1739,32 @@ files:
       - (*Server).dispatch
       - (*Server).serveMessage
       - (*Server).servePacket
+      - boundPort
     name: packet_loop.go
+  - decls:
+      - packetLoopLane
+      - (*packetLoopLane).Reply
+      - (*packetLoopLane).sourceFor
+      - (*packetLoopLane).Loop
+      - (*Server).dispatchLoop
+      - servePacketLoop
+      - endPacketLoop
+      - addrPortOf
+    name: packet_loop_lane.go
+  - decls:
+      - in6PktinfoBytes
+      - enableDestination
+      - (*multiReader).enablePktinfo
+      - pktinfoOf
+      - localOf4
+      - localOf6
+      - writePktinfo
+      - pinWriter
+      - newPinWriter
+      - socketFamily
+      - (*pinWriter).send
+      - (*pinWriter).layout
+    name: pktinfo_linux.go
   - decls:
       - readPlatform
     name: platform.go
@@ -1084,6 +1777,43 @@ files:
       - (*Server).closeLive
     name: pool.go
   - decls:
+      - defaultProxyTimeout
+      - proxyV2Signature
+      - proxyPolicy
+      - parseProxyPolicy
+      - (*proxyPolicy).trusts
+      - proxyListener
+      - (*proxyListener).Accept
+      - announcedClient
+      - (*announcedClient).store
+      - proxyConn
+      - (*proxyConn).RemoteAddr
+      - (*proxyConn).CloseWrite
+      - (*proxyConn).ReadFrom
+      - (*proxyConn).WriteTo
+      - (*proxyConn).Unwrap
+      - (*proxyConn).establish
+      - (*proxyConn).armDeadline
+      - proxyRefusal
+      - readProxyHeader
+      - readProxyV2
+      - parseProxyV2
+      - announceV2
+      - readProxyV1
+      - parseProxyV1
+      - proxySocket
+      - (*Server).admitProxied
+    name: proxy.go
+  - decls:
+      - httpRateKeyNone
+      - HTTPRateKeyValue
+      - RateKeyRemoteAddr
+      - RateKeyHeader
+      - RateLimit
+      - rateKeyOf
+      - rateMisconfigured
+    name: ratelimit.go
+  - decls:
       - rawConnProvider
     name: raw_conn_provider_linux.go
   - decls:
@@ -1092,6 +1822,7 @@ files:
       - newQueuedSink
       - (*queuedSink).begin
       - (*queuedSink).reply
+      - (*queuedSink).replyFrom
       - (*queuedSink).flush
       - (*queuedSink).flushLocked
     name: reply_queue.go
@@ -1100,6 +1831,19 @@ files:
       - reusePortSupported
       - setReusePort
     name: reuseport_linux.go
+  - decls:
+      - destinationUnavailable
+      - rxqProbe
+      - (*Server).probeKernelDrops
+      - (*Server).datagramCapabilities
+      - (*Server).rxqCapability
+      - destinationProbe
+      - (*Server).probeDestination
+      - (*Server).pktinfoCapability
+    name: rxq.go
+  - decls:
+      - enableKernelDrops
+    name: rxq_linux.go
   - decls:
       - sysSendmmsg
     name: sendmmsg_linux_amd64.go
@@ -1114,10 +1858,19 @@ files:
       - (*Server).PacketGroup
       - (*Server).judgePacketOptions
       - packetHonours
+      - (*Server).foldProxyRefused
       - (*Server).recordDeclError
       - (*Server).State
       - (*Server).recordFallback
     name: server.go
+  - decls:
+      - shareRefusal
+      - packetReuseRefusal
+      - shareRefusalFor
+      - mustProbe
+      - probeAddress
+      - bindRefusal
+    name: share.go
   - decls:
       - entryHTTP
       - (*Server).HTTP
@@ -1151,6 +1904,9 @@ files:
       - zoneOf
     name: sockaddr_linux.go
   - decls:
+      - hostSomaxconn
+    name: somaxconn_linux.go
+  - decls:
       - loopStallGrace
       - faultListener
       - classKernel
@@ -1166,7 +1922,23 @@ files:
       - ringFaults
     name: stall.go
   - decls:
+      - classCode
+      - unixgramShardsRefusal
+      - steerProbe
+      - (*Server).probeSteer
+      - (*Server).steerCapability
+    name: steer.go
+  - decls:
+      - soAttachReuseportCBPF
+      - sockFilter
+      - sockFprog
+      - attachSteer
+      - steerAttach
+      - cpuModProgram
+    name: steer_linux.go
+  - decls:
       - StreamGroup
+      - connCounters
       - (*StreamGroup).Name
       - (*StreamGroup).Handle
       - (*StreamGroup).claimHandler
@@ -1192,7 +1964,13 @@ files:
       - httpProtocols
       - Protocols
       - (*StreamGroup).protocolsRefusal
+      - (*StreamGroup).computeProtocols
       - checkProtocols
+      - HTTP2
+      - (*StreamGroup).http2Refusal
+      - (*StreamGroup).effectiveHTTP2
+      - (*StreamGroup).http2Bounds
+      - (*StreamGroup).servesH2C
       - offered
       - (*StreamGroup).protocolsErr
       - (*StreamGroup).serverTLS
@@ -1257,6 +2035,34 @@ functions:
     params: name string, files []*os.File
     results: conns []stdnet.PacketConn, err error
   - doc: |-
+      defaultBacklog is the backlog a listener has when the group asked for none:
+      the host's somaxconn, as the standard library reads it once and caps it.
+      Zero when the platform does not say.
+    name: defaultBacklog
+    results: int
+  - doc: |-
+      applyBacklog gives a bound listener the listen backlog the group asked for
+      (#978) and says what it ended up with. The kernel clamps a backlog to the
+      host's somaxconn without a word, so the value reported is the clamp, with the
+      reason the caller's figure was not the one applied: Degraded in State, never
+      silently. A request of zero keeps the standard library's backlog and reports
+      the host's. listen(2) called again on a listening socket sets its backlog
+      anew on every platform that has the call, which is how the stdlib's own
+      listener is resized without creating the socket here.
+    name: applyBacklog
+    params: ln stdnet.Listener, requested int
+    results: effective int, reason string
+  - doc: joinReason is a degradation reason followed by another, when both exist.
+    name: joinReason
+    params: reason, more string
+    results: string
+  - doc: |-
+      setBacklog calls listen(2) again on ln's socket with n, and says why it
+      could not: the empty string is success.
+    name: setBacklog
+    params: ln stdnet.Listener, n int
+    results: string
+  - doc: |-
       newSlots allocates a read batch sized for the group.
 
       Each buffer is ONE BYTE past the group's ceiling, and that probe byte is what
@@ -1269,6 +2075,68 @@ functions:
     name: newSlots
     params: count, size int
     results: "[]datagram"
+  - doc: |-
+      bufferControl sets the socket buffers a group asked for, before bind
+      (#973): SO_RCVBUF and SO_SNDBUF, for each that is above zero. A listener's
+      accepted sockets, and a datagram socket's own, then start with them; the
+      kernel doubles a value and clamps it to rmem_max and wmem_max, which State
+      reads back and reports (socketBuffers), never as a fault.
+    name: bufferControl
+    params: spec socketSpec, rawConn syscall.RawConn
+    results: error
+  - doc: |-
+      socketBuffers reads a bound socket's buffers back, in bytes, as the kernel
+      holds them; zero for what the platform cannot say.
+    name: socketBuffers
+    params: sc syscall.Conn
+    results: receive, send int
+  - doc: bufferSpec is the part of a socketSpec a group's limits ask for.
+    name: bufferSpec
+    params: limits corenet.LimitsValue
+    results: socketSpec
+  - doc: |-
+      adoptedBuffers applies the group's buffers to a socket it took over and reads
+      back what the kernel holds. The bind that sets them on a socket of its own
+      never ran here, and SO_RCVBUF and SO_SNDBUF take effect after bind too; a
+      listener's next accepted sockets inherit them. A setsockopt the kernel refused
+      outright is the socket's report, reason, not an adoption failure: the
+      supervisor's socket still serves, on the size it had.
+    name: adoptedBuffers
+    params: sc syscall.Conn, spec socketSpec
+    results: receive, send int, reason string
+  - doc: applyBuffers sets the group's sizes on a socket already bound.
+    name: applyBuffers
+    params: sc syscall.Conn, spec socketSpec
+    results: error
+  - doc: setBuffers sets SO_RCVBUF and SO_SNDBUF on the descriptor, each if above zero.
+    name: setBuffers
+    params: fd uintptr, receive, send int
+    results: error
+  - doc: |-
+      bufferRefusal is what a setsockopt's error means to a group: Linux clamps a
+      size past its ceiling, the BSDs and darwin answer ENOBUFS and keep what the
+      socket held, which is the same fact — the group gets less than it asked, and
+      State reports what it holds — so it fails no bind. Any other error does.
+    name: bufferRefusal
+    params: err error
+    results: error
+  - doc: |-
+      readBuffers reads SO_RCVBUF and SO_SNDBUF from the descriptor; zero for one
+      the kernel does not answer.
+    name: readBuffers
+    params: fd uintptr
+    results: receive, send int
+  - doc: bufferOption reads one socket option, zero when the kernel does not answer.
+    name: bufferOption
+    params: fd uintptr, option int
+    results: int
+  - name: Compress
+    params: v corenet.CompressValue
+    results: func(http.Handler) http.Handler, error
+  - doc: newCompressSettings resolves v's defaults.
+    name: newCompressSettings
+    params: v corenet.CompressValue
+    results: "*compressSettings"
   - doc: tighterBudget returns the smaller of two budgets, treating zero as unbounded.
     name: tighterBudget
     params: a, b time.Duration
@@ -1280,6 +2148,12 @@ functions:
     name: hijackedTracker
     params: c corenet.Conn
     results: "*trackedConn"
+  - name: CORS
+    params: cfg corenet.CORSValue
+    results: corenet.Middleware[http.Handler], error
+  - doc: setCORSFields adds an answer's fields to h, keeping a Vary the handler set.
+    name: setCORSFields
+    params: h http.Header, a corenet.CORSAnswerValue
   - doc: |-
       newDatagramSource returns the batched reader when the socket exposes a raw
       descriptor, and the portable one otherwise. With gro, the batched reader
@@ -1298,15 +2172,26 @@ functions:
       one WriteTo each, unless batched — BatchReplies —, then per batch: the
       sendmmsg and GSO sink when the socket is UDP and exposes a raw descriptor, the
       queued one otherwise. onGSOOff is called once the device refuses GSO for the
-      socket.
+      socket. With pinned — a wildcard socket that reads each datagram's
+      destination, #972 — a reply can leave from that destination.
     name: newDatagramSink
-    params: pc stdnet.PacketConn, batched bool, counters *datagramCounters, onGSOOff func()
+    params: pc stdnet.PacketConn, batched, pinned bool, counters *datagramCounters, onGSOOff func()
     results: datagramSink
+  - doc: |-
+      pinnedPortable builds the one-a-call sink, with or without a pin writer: a nil
+      *pinWriter must stay a nil interface.
+    name: pinnedPortable
+    params: pc stdnet.PacketConn, pin *pinWriter
+    results: portableSink
   - doc: |-
       batchAvailable reports whether the platform can read several datagrams per
       syscall. It feeds the degradation reported by State.
     name: batchAvailable
     results: bool
+  - doc: clip bounds s to n bytes.
+    name: clip
+    params: s string, n int
+    results: string
   - doc: |-
       exclusiveApplies reports whether a socket of network bound to address takes
       SO_EXCLUSIVEADDRUSE: a unicast TCP or UDP one, on a platform that has the
@@ -1316,12 +2201,20 @@ functions:
     params: network, address string
     results: bool
   - doc: |-
-      listenControl is net.ListenConfig.Control for one bind: SO_REUSEPORT when
-      the address is sharded, SO_EXCLUSIVEADDRUSE when it applies, both before
-      bind; nil when neither can, so the bind is the standard library's own.
+      listenControl is net.ListenConfig.Control for one bind: the buffers the
+      group asked for, SO_REUSEPORT when the address is sharded, SO_EXCLUSIVEADDRUSE
+      when it applies, all before bind; nil when none can, so the bind is the
+      standard library's own.
     name: listenControl
-    params: sharded bool
+    params: sharded bool, spec socketSpec
     results: func(network, address string, rawConn syscall.RawConn) error
+  - doc: |-
+      controlBeforeBind sets, on one socket and before bind, the buffers the group
+      asked for, SO_REUSEPORT when the address is sharded and SO_EXCLUSIVEADDRUSE
+      when it applies.
+    name: controlBeforeBind
+    params: sharded bool, spec socketSpec, network, address string, rawConn syscall.RawConn
+    results: error
   - doc: |-
       exclusiveOf reads SO_EXCLUSIVEADDRUSE back from an adopted socket: what a
       supervisor set is reported, never set and never fatal (a socket that cannot
@@ -1364,6 +2257,12 @@ functions:
     name: exclusiveAddrOf
     params: _ uintptr
     results: bool, error
+  - doc: |-
+      bindConflict reports a bind refused because another socket holds the
+      address: EADDRINUSE (#1330).
+    name: bindConflict
+    params: err error
+    results: bool
   - doc: "addrInUse never asks for a rebind: rebindAttempts is one."
     name: addrInUse
     params: _ error
@@ -1423,12 +2322,43 @@ functions:
     params: c corenet.Conn
     results: stdnet.Conn
   - doc: |-
+      limitBody bounds the request body next reads to n bytes: a Content-Length
+      past n is answered 413 on the head, with Connection: close, before next
+      runs and before a body byte is read; a body of unknown length is wrapped in
+      http.MaxBytesReader, whose error next sees as *http.MaxBytesError. A bound
+      below zero leaves the handler as it is.
+    name: limitBody
+    params: next http.Handler, n int64
+    results: http.Handler
+  - doc: |-
       idleOrRead resolves http.Server.IdleTimeout: the idle budget when it was
       set, the read budget otherwise — the fallback net/http applied itself while
       the adapter still set ReadTimeout.
     name: idleOrRead
     params: idle, read time.Duration
     results: time.Duration
+  - doc: |-
+      netHTTPErrorType classifies an error name net/http's CountError reports:
+      "conn_" or "stream_" then the RFC code's name then the cause, a frame_
+      name of the frame layer, or the lost PING. Anything else is
+      corehttp2.ErrorTypeOther, so a name a later Go release adds grows no table.
+    name: netHTTPErrorType
+    params: errType string
+    results: corehttp2.ErrorType
+  - doc: errorTypeByCodeName reads the code name after a "conn_" or "stream_" scope.
+    name: errorTypeByCodeName
+    params: errType string
+    results: corehttp2.ErrorType
+  - doc: findHTTPCounter walks a loop chain for a corenet.LoopHTTPCounter.
+    name: findHTTPCounter
+    params: chain corenet.LoopHandler
+    results: corenet.LoopHTTPCounter
+  - doc: |-
+      groupHTTPCounts are a group's HTTP counts: net/http's engine's, or its loop
+      adapter's; false for a group that counts none.
+    name: groupHTTPCounts
+    params: g *StreamGroup
+    results: corenet.HTTPCountsValue, bool
   - doc: newChanListener builds a bridge listener for the given address.
     name: newChanListener
     params: addr stdnet.Addr
@@ -1453,6 +2383,35 @@ functions:
     name: perReadBody
     params: next http.Handler, read time.Duration
     results: http.Handler
+  - doc: |-
+      applyKeepAlive configures keepalive on a listener's accepted sockets: the
+      standard library sets it at Accept, on the connection, from these fields.
+      Zero keeps its default, 15 s; negative sets none; a positive value is both the
+      idle time and the probe interval, as the loop's engines take it (ADR 0189).
+    name: applyKeepAlive
+    params: cfg *stdnet.ListenConfig, d time.Duration
+  - doc: |-
+      applyAcceptedKeepAlive sets keepalive on one accepted socket: the portable
+      backend's, as the listener-level path is the goroutine engine's.
+    name: applyAcceptedKeepAlive
+    params: tc *stdnet.TCPConn, d time.Duration
+  - doc: |-
+      portableKeepAlive is the keepalive of a portable group's sockets: the group's,
+      negative when the operator switched tcp-keepalive off.
+    name: portableKeepAlive
+    params: group *StreamGroup, plan loopPlan
+    results: time.Duration
+  - doc: "resolveUserTimeout is what UserTimeout's zero means: the group's write bound."
+    name: resolveUserTimeout
+    params: group *StreamGroup
+    results: time.Duration
+  - doc: |-
+      userTimeoutControl sets TCP_USER_TIMEOUT on a TCP socket about to be bound,
+      which every socket it accepts inherits (ADR 0189); it runs from the Control
+      hook, the same place as the socket's other options.
+    name: userTimeoutControl
+    params: spec socketSpec, network string, rawConn syscall.RawConn
+    results: error
   - doc: |-
       setKernelLen assigns n to a kernel length field.
 
@@ -1482,6 +2441,12 @@ functions:
     params: groups []*StreamGroup
     results: error
   - doc: |-
+      pinPort returns addr with the port pc bound, so the other shards of an address
+      asked as ":0" join it instead of drawing their own.
+    name: pinPort
+    params: addr corenet.AddressValue, pc stdnet.PacketConn
+    results: corenet.AddressValue
+  - doc: |-
       batchDegradation reports whether batched reading was asked for and is
       unavailable, and why. A silent fallback is indistinguishable from a working
       one, so it is surfaced through State rather than logged once at startup.
@@ -1499,6 +2464,15 @@ functions:
       recoverHandler swallows a handler panic so it cannot unwind past the
       connection that caused it.
     name: recoverHandler
+  - doc: |-
+      withBoundPort returns addr with the port the kernel bound for local, its host
+      as asked, so every shard after the first joins the first's port instead of
+      drawing its own when the address was asked as host:0 (#1331): the streams',
+      the datagrams' and a loop group's shards alike. An address local names no
+      port for — a Unix socket — or that is not host:port is returned unchanged.
+    name: withBoundPort
+    params: addr corenet.AddressValue, local stdnet.Addr
+    results: corenet.AddressValue
   - doc: |-
       shardable reports whether an address can carry several listeners.
 
@@ -1544,13 +2518,13 @@ functions:
       handshake is driven by the connection's own goroutine, which is what keeps a
       slow or hostile peer from stalling the accept path for everyone else.
 
-      trackCloses hands out sockets that report their own Close (see trackedConn),
-      for a group whose ceiling must keep counting a connection a handler took
-      over. A unicast TCP socket holds its address exclusively where the platform
-      can (exclusiveApplies), and an address still held is bound again, at most
-      attempts binds (bindRetrying); the report says both.
+      spec.trackCloses hands out sockets that report their own Close (see
+      trackedConn), for a group whose ceiling must keep counting a connection a
+      handler took over. A unicast TCP socket holds its address exclusively where
+      the platform can (exclusiveApplies), and an address still held is bound
+      again, at most spec.attempts binds (bindRetrying); the report says both.
     name: listen
-    params: ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, sharded, trackCloses bool, attempts int
+    params: ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, spec socketSpec
     results: ln stdnet.Listener, rep bindReport, err error
   - doc: |-
       familyUnavailable refuses a family the engine serves but this platform has
@@ -1564,17 +2538,24 @@ functions:
     params: addr corenet.AddressValue
     results: error
   - doc: |-
-      layered puts a group's layers over a raw stream listener: the close tracker
-      when the group has a ceiling to keep counting, then TLS when it carries an
-      identity. It is the ONE place that decides them, for a socket this process
-      bound and for one a supervisor handed over alike.
+      layered puts a group's layers over a raw stream listener: the PROXY protocol
+      reader when the group has one, the close tracker when it has a ceiling to keep
+      counting, then TLS when it carries an identity — the balancer's header is the
+      first thing on the wire. It is the ONE place that decides them, for a socket
+      this process bound and for one a supervisor handed over alike.
 
       The adopted path used to add the tracker and never TLS, so a group with an
       identity served an inherited socket in plaintext and reported no error —
       the supervisor passes a raw socket, and TLS is this process's layer to add.
     name: layered
-    params: raw stdnet.Listener, cfgTLS *tls.Config, trackCloses bool
+    params: raw stdnet.Listener, cfgTLS *tls.Config, trackCloses bool, proxy *proxyPolicy
     results: stdnet.Listener
+  - doc: |-
+      reuseOf is the mode of an address opened as count sockets, shared with
+      other processes or not.
+    name: reuseOf
+    params: count int, share bool
+    results: reuseMode
   - doc: |-
       loopLanes is how many lanes a loop group runs on every backend: Loops,
       zero meaning one (R8). bindLoopGroup has resolved LoopsAuto by then.
@@ -1622,11 +2603,9 @@ functions:
     params: probed corenet.LoopHandler
   - doc: |-
       startLoopEngine starts a loop group on Linux on the backend plan names —
-      min(code, environment), ADR 0188 —: the leaf's native backends, handed
-      duplicated descriptors of the listeners server bound (ADR 0186 §D3), or the
-      portable backend when the plan says so or, when the code asked for auto, when
-      no native backend starts — reported, never silent. A backend the plan rules
-      out is never probed.
+      min(code, environment), ADR 0188 —: the leaf's io_uring or epoll, or the
+      portable backend (startNativeEngine). kqueue is darwin's and the BSDs'
+      (ADR 0222), refused here with the shared UnsupportedPlatform.
 
       IFACE-OPAQUE: which engine runs is decided here at Start — the leaf's
       *loop.Group or the portable backend — and server only drives the lifecycle
@@ -1634,10 +2613,25 @@ functions:
     name: startLoopEngine
     params: group *StreamGroup, lns []stdnet.Listener, plan loopPlan
     results: loopEngine, error
+  - doc: dupHandoff duplicates fd, close-on-exec from its birth (F_DUPFD_CLOEXEC).
+    name: dupHandoff
+    params: fd uintptr
+    results: int, error
   - doc: |-
-      probeNoDelay reads TCP_NODELAY back from every listener the leaf set it on,
-      whose accepted sockets inherit it: on when all carry it, absent with the
-      first refusal otherwise, disabled when the operator switched it off.
+      startNativeEngine starts a loop group on the backend plan names —
+      min(code, environment), ADR 0188 —: the leaf's native backends, handed
+      duplicated descriptors of the listeners server bound (ADR 0186 §D3), or the
+      portable backend when the plan says so or, when the code asked for auto, when
+      no native backend starts — reported, never silent. A backend the plan rules
+      out is never probed.
+    name: startNativeEngine
+    params: group *StreamGroup, lns []stdnet.Listener, plan loopPlan
+    results: loopEngine, error
+  - doc: |-
+      probeNoDelay reads TCP_NODELAY back from every TCP listener the leaf set it
+      on, whose accepted sockets inherit it: on when all carry it, absent with the
+      first refusal otherwise, disabled when the operator switched it off, and
+      unprobed on a group with no TCP listener, whose family has no such option.
     name: probeNoDelay
     params: lns []stdnet.Listener, plan loopPlan
     results: corenet.CapabilityValue
@@ -1656,8 +2650,8 @@ functions:
     params: ls []loop.Listener
   - doc: |-
       loopHonours reports the options the loop engine honours itself (ADR 0186
-      §D4, ADR 0187): IdleTimeout, MaxConns and Adopt, and Plaintext, Name and
-      Engine, which every engine honours. Listen and Loop are not options a loop
+      §D4, ADR 0187): IdleTimeout, MaxConns and Adopt, Backlog (#978, the
+      listener's own), and Plaintext, Name and Engine, which every engine honours. Listen and Loop are not options a loop
       judges; the drain is the server's.
     name: loopHonours
     params: k corenet.OptionKind
@@ -1670,10 +2664,46 @@ functions:
       before any callback.
     name: startLanes
     params: group *StreamGroup
+  - doc: |-
+      resolveLanes reads LoopsAuto once — a group resolved already keeps its
+      snapshot and its source — so the shards of Shards(0), the chain's OnStart
+      and State see the same count.
+    name: resolveLanes
+    params: group *StreamGroup
   - doc: loopIdle is the group's IdleTimeout as the loop takes it.
     name: loopIdle
     params: group *StreamGroup
     results: time.Duration
+  - doc: |-
+      unixpacketRefused is the refusal of a loop group on a record socket, named
+      so that a cut record never reaches OnData (ADR 0031).
+    name: unixpacketRefused
+    params: group string
+    results: error
+  - doc: |-
+      refuseUnixpacketListeners refuses a group holding a record socket, which an
+      inherited descriptor reveals only once adopted.
+    name: refuseUnixpacketListeners
+    params: group string, lns []stdnet.Listener
+    results: error
+  - doc: |-
+      isTCPListener reports whether ln is a TCP socket, the one family that has a
+      TCP_NODELAY to set and read back.
+    name: isTCPListener
+    params: ln stdnet.Listener
+    results: bool
+  - doc: |-
+      findHTTPCodec walks the chain for a corenet.LoopHTTPCodec, the adapter that
+      serves more than one HTTP version on a group (ADR 0221).
+    name: findHTTPCodec
+    params: chain corenet.LoopHandler
+    results: corenet.LoopHTTPCodec
+  - doc: |-
+      wrapHTTPCodec adds the drain's announcement and State's row to a group whose
+      chain is a multi-version adapter.
+    name: wrapHTTPCodec
+    params: s *Server, group *StreamGroup, eng loopEngine
+    results: loopEngine
   - doc: newJobRing allocates a ring of at least n jobs.
     name: newJobRing
     params: n int
@@ -1731,18 +2761,34 @@ functions:
   - doc: |-
       portableNoDelay is the portable backend's tcp-nodelay row: the netpoller
       sets TCP_NODELAY on every connection it accepts, cleared once the operator
-      switched it off.
+      switched it off, and unprobed on a group with no TCP listener.
     name: portableNoDelay
-    params: plan loopPlan
+    params: lns []stdnet.Listener, plan loopPlan
     results: corenet.CapabilityValue
   - doc: orDefaultInt returns v, or def when v is zero or less.
     name: orDefaultInt
     params: v, def int
     results: int
+  - doc: |-
+      lingerClose shuts pc's writing side once its output left, and bounds the
+      reader by portableLinger: the reader ends the connection at the peer's close
+      or at the bound, and its end finishes it, so the answer is read before any
+      reset (portableLinger). It reports false where the connection has no half
+      close, or the half close failed: the caller closes at once.
+    name: lingerClose
+    params: pc *portableConn
+    results: bool
   - doc: clampUsed treats an OnData return outside 0 to n as n.
     name: clampUsed
     params: v, n int
     results: int
+  - doc: |-
+      markClosing records, under the writer's lock, whether pc closes and
+      whether its writer lingers (lingerClose), and reports whether it finishes
+      now: closing, nothing left to send, and no linger.
+    name: markClosing
+    params: pc *portableConn
+    results: bool
   - doc: fillMark fills b with recycledMark.
     name: fillMark
     params: b []byte
@@ -1752,6 +2798,14 @@ functions:
     name: acceptCloexec
     params: fd int
     results: int, error
+  - doc: |-
+      portablePeer reads the credentials of a Unix connection's peer as the kernel
+      recorded them when it connected (SO_PEERCRED). It answers the zero value for
+      any other connection, and for a peer in a process namespace the kernel cannot
+      translate (a process id of zero).
+    name: portablePeer
+    params: c stdnet.Conn
+    results: corenet.LoopPeerValue
   - doc: |-
       ownListeners duplicates each listener server bound, so the portable
       backend closes its own copy once its drain took the queue, and server's
@@ -1794,9 +2848,23 @@ functions:
     params: rc syscall.RawConn
     results: int, error
   - doc: |-
+      loopShardCount is how many listeners a loop group opens on addr: one per
+      loop for Shards(0), one where the backend is portable (no loop owns a
+      listener there) or the operator switched reuseport-loops off (the row reads
+      disabled and the group serves one listener).
+    name: loopShardCount
+    params: group *StreamGroup, plan loopPlan
+    results: int
+  - doc: |-
+      pinnedAddr is addr with the port ln drew, so the shards of an address asked
+      as ":0" join it instead of drawing their own.
+    name: pinnedAddr
+    params: addr corenet.AddressValue, ln stdnet.Listener
+    results: corenet.AddressValue
+  - doc: |-
       tlsCodecHonours reports the kinds a TLS codec group honours beyond the
       loop's own: TLS, its handshake bound, and Protocols, which tlsCodecRefusal
-      keeps to HTTP/1.1 alone.
+      keeps to the versions the codec serves.
     name: tlsCodecHonours
     params: k corenet.OptionKind
     results: bool
@@ -1815,10 +2883,55 @@ functions:
     name: handshake
     params: c stdnet.Conn, d time.Duration
     results: bool
+  - doc: |-
+      metricInstruments are the instruments RegisterMetrics creates, in the order
+      of the Metric constants.
+    name: metricInstruments
+    results: "[]metricInstrument"
+  - doc: |-
+      serverInstruments are the instruments of the server as a whole: no
+      attribute beyond the caller's.
+    name: serverInstruments
+    results: "[]metricInstrument"
+  - doc: |-
+      groupInstruments are the stream groups' connections, each series carrying
+      the group.
+    name: groupInstruments
+    results: "[]metricInstrument"
+  - doc: |-
+      loopInstruments are the loop groups': a ring's counters carry the group,
+      the loop and the ring; the rest carry the group.
+    name: loopInstruments
+    results: "[]metricInstrument"
+  - doc: ringsDraining counts the rings of a loop group the watchdog has drained.
+    name: ringsDraining
+    params: lp corenet.LoopStateValue
+    results: int64
+  - doc: boolInt is 1 for true, 0 for false.
+    name: boolInt
+    params: b bool
+    results: int64
+  - doc: registerInstrument registers inst on m as the observable its kind names.
+    name: registerInstrument
+    params: m coremetrics.AsyncMeter, reader *metricsReader, inst metricInstrument
   - doc: newMultiReader builds a batched reader over pc.
     name: newMultiReader
     params: pc stdnet.PacketConn, sc rawConnProvider
     results: reader *multiReader, err error
+  - doc: |-
+      rxqOverflow returns the SO_RXQ_OVFL count control carries, and whether it
+      carries one.
+    name: rxqOverflow
+    params: control []byte
+    results: count uint32, ok bool
+  - doc: |-
+      controlMessage returns the payload of the first control message of level and
+      typ at least size bytes long, or nil. The buffer is walked as the kernel laid
+      it out, never assumed: a length that does not cover its own header, or runs
+      past the buffer, ends the walk.
+    name: controlMessage
+    params: control []byte, level, typ int32, size int
+    results: "[]byte"
   - doc: |-
       groSegment returns the segment size a UDP_GRO control message reports in
       control, or zero when it carries none: the message is then one datagram.
@@ -1852,6 +2965,12 @@ functions:
     params: fd uintptr, headers []mmsghdr
     results: sent int, errno syscall.Errno
   - doc: |-
+      encodeSockaddr writes to's sockaddr for a socket of family into name, and
+      reports whether it could, as multiWriter.encode says.
+    name: encodeSockaddr
+    params: family int, to stdnet.Addr, name *syscall.RawSockaddrInet6, namelen *uint32
+    results: bool
+  - doc: |-
       readOperator reads both variables through lookup and applies R5 (ADR 0187
       §D8): an empty value is unset, an unknown token caps the engine at portable,
       and nothing the environment says raises a group above its code's choice.
@@ -1867,6 +2986,9 @@ functions:
     results: Option
   - name: WithDrainGrace
     params: d time.Duration
+    results: Option
+  - name: WithLogger
+    params: l corelogger.Logger
     results: Option
   - name: Loop
     params: v corenet.LoopValue
@@ -1892,6 +3014,30 @@ functions:
   - name: MaxHeaderBytes
     params: n int
     results: GroupOption
+  - name: MaxBodyBytes
+    params: n int64
+    results: GroupOption
+  - name: ProxyProtocol
+    params: v corenet.ProxyProtocolValue
+    results: GroupOption
+  - name: Steer
+    params: v corenet.SteerValue
+    results: GroupOption
+  - name: KeepAlive
+    params: d time.Duration
+    results: GroupOption
+  - name: UserTimeout
+    params: d time.Duration
+    results: GroupOption
+  - name: Backlog
+    params: n int
+    results: GroupOption
+  - name: ReceiveBuffer
+    params: n int
+    results: GroupOption
+  - name: SendBuffer
+    params: n int
+    results: GroupOption
   - name: HandshakeTimeout
     params: d time.Duration
     results: GroupOption
@@ -1909,6 +3055,8 @@ functions:
   - name: Shards
     params: n int
     results: GroupOption
+  - name: ShareAddress
+    results: GroupOption
   - name: MaxConns
     params: n int
     results: GroupOption
@@ -1924,6 +3072,32 @@ functions:
     params: e corenet.EngineValue
     results: GroupOption
   - doc: |-
+      packetLoopRefusal refuses a group HandleLoop serves that also has a
+      PacketHandler, middlewares, or a Unix datagram address.
+    name: packetLoopRefusal
+    params: group *PacketGroup
+    results: error
+  - doc: |-
+      laneReason is a refusal's stage and reason, and whether it is the
+      platform's.
+    name: laneReason
+    params: err error
+    results: string, bool
+  - doc: |-
+      startPacketLane hands a duplicated, non-blocking descriptor of bound's
+      socket to a new io_uring lane, which owns it from then on.
+    name: startPacketLane
+    params: s *Server, bound *boundPacketConn, group *PacketGroup
+    results: loop.PacketLane, error
+  - doc: dupPacketFD duplicates bound's socket close-on-exec and non-blocking.
+    name: dupPacketFD
+    params: bound *boundPacketConn
+    results: int, error
+  - doc: dupRefused is the refusal of a socket that cannot be handed to a lane.
+    name: dupRefused
+    params: cause error
+    results: error
+  - doc: |-
       listenPacket binds one datagram socket.
 
       A unicast UDP socket holds its address exclusively where the platform can
@@ -1931,7 +3105,7 @@ functions:
       socket leaves no connection behind it to wait out; the report says whether
       it holds its address.
     name: listenPacket
-    params: ctx context.Context, addr corenet.AddressValue
+    params: ctx context.Context, addr corenet.AddressValue, spec socketSpec
     results: pc stdnet.PacketConn, rep bindReport, err error
   - doc: packetSize returns the group's datagram ceiling.
     name: packetSize
@@ -1940,6 +3114,68 @@ functions:
   - doc: batchSize returns how many datagrams one read should attempt to collect.
     name: batchSize
     params: limits corenet.LimitsValue
+    results: int
+  - doc: boundPort returns the port pc holds, or zero when it holds none.
+    name: boundPort
+    params: pc stdnet.PacketConn
+    results: int
+  - doc: servePacketLoop runs OnPacket, containing a panic as servePacket does.
+    name: servePacketLoop
+    params: h corenet.PacketLoopHandler, l *packetLoopLane, from netip.AddrPort, data []byte
+  - doc: endPacketLoop runs OnBatchEnd, containing a panic.
+    name: endPacketLoop
+    params: h corenet.PacketLoopHandler, l *packetLoopLane
+  - doc: |-
+      addrPortOf is a UDP sender's address as a value; the zero AddrPort for any
+      other.
+    name: addrPortOf
+    params: a stdnet.Addr
+    results: netip.AddrPort
+  - doc: |-
+      enableDestination asks the socket to name each datagram's destination, when
+      source is the batched reader and the socket is bound to a wildcard address
+      (#972): the kernel then writes IP_PKTINFO or IPV6_PKTINFO beside every message.
+    name: enableDestination
+    params: source datagramSource, pc stdnet.PacketConn
+    results: asked, on bool, why string
+  - doc: |-
+      pktinfoOf returns the destination the control data names on a socket of
+      family, zero when it names none.
+    name: pktinfoOf
+    params: control []byte, family int
+    results: localAddress
+  - doc: |-
+      localOf4 reads an in_pktinfo: ipi_addr is the destination the sender used, and
+      ipi_spec_dst the local address the kernel would answer from, which it fills in
+      for a broadcast or a multicast destination too.
+    name: localOf4
+    params: info *syscall.Inet4Pktinfo
+    results: localAddress
+  - doc: |-
+      localOf6 reads an in6_pktinfo, whose one address is both: it is a source only
+      when it is a unicast address, a group or a mapped broadcast being none.
+    name: localOf6
+    params: info *syscall.Inet6Pktinfo
+    results: localAddress
+  - doc: |-
+      writePktinfo writes the control message that names source on a socket of
+      family into control, and returns the bytes it took. The interface index stays
+      zero, so the routing table still decides the way out: pinning the interface
+      would break a reply asymmetric routing sends through another, and a source
+      alone answers the client that matches addresses.
+    name: writePktinfo
+    params: control []byte, family int, source localAddress
+    results: int
+  - doc: |-
+      newPinWriter builds a writer over pc, or nil when the descriptor cannot be
+      reached or is of no family this writer addresses: a reply then leaves as
+      before.
+    name: newPinWriter
+    params: pc stdnet.PacketConn, sc rawConnProvider
+    results: "*pinWriter"
+  - doc: socketFamily returns the socket's family, or zero when unreadable.
+    name: socketFamily
+    params: raw syscall.RawConn
     results: int
   - doc: |-
       readPlatform names what the server runs on: the GOOS, the GOARCH, the
@@ -1952,6 +3188,68 @@ functions:
       call fails.
     name: kernelRelease
     results: string
+  - doc: parseProxyPolicy reads v, or returns ok false for a value outside its range.
+    name: parseProxyPolicy
+    params: v corenet.ProxyProtocolValue
+    results: policy *proxyPolicy, ok bool
+  - doc: proxyRefusal is ProxyHeaderInvalid, a field naming why.
+    name: proxyRefusal
+    params: why string
+    results: error
+  - doc: |-
+      readProxyHeader reads a v1 or v2 header off socket into buf, exactly, and
+      stores the client it announced in out, unset to keep the socket's own.
+    name: readProxyHeader
+    params: socket io.Reader, buf []byte, out *announcedClient
+    results: error
+  - doc: |-
+      readProxyV2 reads what is left of a v2 header after its first byte, the
+      length checked before the payload is read.
+    name: readProxyV2
+    params: socket io.Reader, buf []byte, out *announcedClient
+    results: error
+  - doc: parseProxyV2 reads a complete v2 header's command, family and addresses.
+    name: parseProxyV2
+    params: verCmd, family byte, payload []byte, out *announcedClient
+    results: error
+  - doc: |-
+      announceV2 stores the client of a v2 address block of ipLen addresses, want
+      bytes long at least.
+    name: announceV2
+    params: payload []byte, ipLen, want int, out *announcedClient
+    results: error
+  - doc: |-
+      readProxyV1 reads a v1 line, one byte at a time so nothing past its CRLF is
+      consumed, then parses it. The first byte is already in buf.
+    name: readProxyV1
+    params: socket io.Reader, buf []byte, out *announcedClient
+    results: error
+  - doc: |-
+      parseProxyV1 reads "PROXY TCP4 src dst sport dport" or "PROXY UNKNOWN…",
+      strictly: one space between fields, addresses of the announced family.
+    name: parseProxyV1
+    params: line string, out *announcedClient
+    results: error
+  - doc: proxySocket finds the proxyConn under raw's layers, nil when there is none.
+    name: proxySocket
+    params: raw stdnet.Conn
+    results: "*proxyConn"
+  - name: RateKeyRemoteAddr
+    results: HTTPRateKeyValue
+  - name: RateKeyHeader
+    params: name string
+    results: HTTPRateKeyValue
+  - name: RateLimit
+    params: l corenet.HTTP1Limiter, key HTTPRateKeyValue
+    results: corenet.Middleware[http.Handler], error
+  - doc: rateKeyOf reads the bytes key names off r.
+    name: rateKeyOf
+    params: r *http.Request, key HTTPRateKeyValue
+    results: "[]byte"
+  - doc: rateMisconfigured names what the middleware refused.
+    name: rateMisconfigured
+    params: what string
+    results: error
   - doc: newQueuedSink builds a queued sink over pc.
     name: newQueuedSink
     params: pc stdnet.PacketConn, counters *datagramCounters
@@ -1965,6 +3263,12 @@ functions:
     name: setReusePort
     params: fd uintptr
     results: error
+  - doc: |-
+      enableKernelDrops switches SO_RXQ_OVFL on for source when it is the batched
+      reader, which alone parses control messages, and says why when it cannot.
+    name: enableKernelDrops
+    params: source datagramSource, drops *atomic.Uint64
+    results: on bool, why string
   - doc: newPooledConn mints an empty connection wrapper for the recycler.
     name: newPooledConn
     results: "*conn"
@@ -1984,6 +3288,57 @@ functions:
     name: packetHonours
     params: k corenet.OptionKind
     results: bool
+  - doc: |-
+      shareRefusal refuses ShareAddress where it cannot apply (#1330): a platform
+      without SO_REUSEPORT, with UnsupportedPlatform — Windows holds its addresses
+      with SO_EXCLUSIVEADDRUSE instead —, then an address of a Unix socket, with
+      familyRefusal (LoopOptionUnsupported for a stream group,
+      PacketOptionUnsupported for a datagram one). It returns nil when the group
+      did not ask.
+    name: shareRefusal
+    params: group *StreamGroup, familyRefusal *errs.Error
+    results: error
+  - doc: |-
+      packetReuseRefusal is a datagram group's refusal of what its sockets
+      cannot share: an explicit shard count on a Unix datagram socket (#977), then
+      ShareAddress (#1330).
+    name: packetReuseRefusal
+    params: shim *StreamGroup
+    results: error
+  - doc: |-
+      shareRefusalFor is shareRefusal with the platform's SO_REUSEPORT answer
+      passed in, so the refusal only Windows, Solaris and illumos give is
+      exercised by the suite on every OS.
+    name: shareRefusalFor
+    params: group *StreamGroup, familyRefusal *errs.Error, reusePort bool
+    results: error
+  - doc: |-
+      mustProbe reports whether an address about to be opened as count sockets is
+      probed first (#1330): only when the sockets share it through SO_REUSEPORT
+      without the group asking to share it with others, and only when it names a
+      port — an address asked as port 0 draws one nobody holds.
+    name: mustProbe
+    params: addr corenet.AddressValue, count int, share bool
+    results: bool
+  - doc: |-
+      probeAddress binds addr once, plainly — no SO_REUSEPORT, the options the
+      standard library sets for a single listener —, and closes the socket at once
+      (#1330). An address another socket holds is refused as a single listener's
+      bind would refuse it: the shards that follow cannot join a holder unless
+      both asked to share. A stream address is listened on for the instant
+      between the bind and the close, which the standard library does not
+      separate; nobody else serves the address then, so a connection arriving in
+      that instant is refused either way. stream picks the socket's kind.
+    name: probeAddress
+    params: ctx context.Context, addr corenet.AddressValue, stream bool
+    results: error
+  - doc: |-
+      bindRefusal is the error of a bind of addr the OS refused with cause:
+      AddressInUse when another socket holds the address, ListenFailed otherwise,
+      both naming it.
+    name: bindRefusal
+    params: addr corenet.AddressValue, cause error
+    results: error
   - doc: |-
       defaultName names a group declared with no name, unless a later Name
       option names it: it is a declaration's own, recording no kind.
@@ -2050,6 +3405,11 @@ functions:
     params: scope uint32
     results: zone string, ok bool
   - doc: |-
+      hostSomaxconn is /proc/sys/net/core/somaxconn, the clamp of every listen
+      backlog; zero when it cannot be read.
+    name: hostSomaxconn
+    results: int
+  - doc: |-
       groupStalled reports whether every ring of a loop group is drained: a
       native backend whose watchdog gave up on each of its rings. The portable
       backend has no ring and never stalls.
@@ -2066,6 +3426,25 @@ functions:
     name: ringFaults
     params: lp corenet.LoopStateValue
     results: "[]corenet.FaultValue"
+  - doc: |-
+      unixgramShardsRefusal refuses an explicit Shards above one on a Unix datagram
+      socket: SO_REUSEPORT is an IP-socket option, and a count the socket cannot
+      honour is refused rather than quietly one.
+    name: unixgramShardsRefusal
+    params: shim *StreamGroup
+    results: error
+  - doc: |-
+      attachSteer installs the program that hands each datagram to the socket of
+      index cpu mod n of the group's sockets, on the first of them: the kernel keeps
+      one program per reuseport group, whichever socket carries it. EINVAL or EPERM,
+      a seccomp filter or a kernel before 4.5, leave the hash spread (#977).
+    name: attachSteer
+    params: sockets []stdnet.PacketConn
+    results: error
+  - doc: "cpuModProgram is the steering program: A = cpu; A %= n; return A."
+    name: cpuModProgram
+    params: n uint32
+    results: "[]sockFilter"
   - doc: newConnLimiter returns the group's ceiling, or nil when it has none.
     name: newConnLimiter
     params: limits corenet.LimitsValue
@@ -2082,6 +3461,9 @@ functions:
     name: checkProtocols
     params: protos []string, tlsOn bool
     results: string
+  - name: HTTP2
+    params: v corehttp2.LimitsValue
+    results: GroupOption
   - doc: |-
       offered is the ALPN list a TLS group offers: protos when the identity
       names none, else the identity's NextProtos that protos holds, in the
@@ -2091,7 +3473,7 @@ functions:
     params: next, protos []string
     results: "[]string, string"
   - doc: |-
-      http2Config is the HTTP/2 bounds every HTTP group serves with: set, never
+      http2Config is the HTTP/2 bounds an HTTP group serves with: set, never
       left to net/http's defaults, so a release of the standard library cannot
       move them. silence is how long a connection may send no frame before the
       server PINGs it, and how long the PING's answer may take before the
@@ -2099,7 +3481,7 @@ functions:
       stream is open, its idle timer stopped — a header block left unfinished
       behind an open stream is closed by it (ADR 0195 §D3). Zero sets none.
     name: http2Config
-    params: write corenet.DurationValue, silence time.Duration
+    params: write corenet.DurationValue, silence time.Duration, l corehttp2.LimitsValue, count func(string)
     results: "*http.HTTP2Config"
   - doc: |-
       h2Silence is the group's HTTP/2 silence bound: the header phase's
@@ -2129,22 +3511,33 @@ functions:
     results: bool
 imports:
   atomic: sync/atomic
+  binary: encoding/binary
   bits: math/bits
   buffer: github.com/kitsunium/sdk/internal/kernel/concur/buffer
+  bufio: bufio
+  bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   cmp: cmp
   context: context
   corehealth: github.com/kitsunium/sdk/internal/core/app/health
+  corehttp2: github.com/kitsunium/sdk/internal/core/net/http2
+  corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
   corenet: github.com/kitsunium/sdk/internal/core/net
+  coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
   coreproc: github.com/kitsunium/sdk/internal/core/proc
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  gzip: compress/gzip
   http: net/http
   http1: github.com/kitsunium/sdk/internal/service/net/http1
   io: io
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+  level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+  log: log
   loop: github.com/kitsunium/sdk/internal/service/net/loop
   maps: maps
+  memlimit: github.com/kitsunium/sdk/internal/service/proc/memlimit
   netip: net/netip
   os: os
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
@@ -2240,6 +3633,11 @@ types:
       - doc: addr is the sender of the last read.
         name: addr
         type: stdnet.Addr
+      - doc: |-
+          local is the datagram's own destination, as IP_PKTINFO or IPV6_PKTINFO
+          read it; zero when the socket did not ask (#972).
+        name: local
+        type: localAddress
     kind: struct
     methods:
       - doc: payload returns the bytes of the last read.
@@ -2259,6 +3657,38 @@ types:
         recv: d *datagram
         results: int
     name: datagram
+  - doc: |-
+      localAddress is what a datagram's destination control message said (#972): the
+      address the sender used, and the address a reply should leave from, which for
+      a broadcast or a multicast destination is not that one. A length of zero means
+      unknown, and each field is 4 or 16 bytes long, in the socket's family.
+    fields:
+      - doc: |-
+          to and source are the addresses, in their first toLen and sourceLen
+          bytes.
+        name: to
+        type: "[16]byte"
+      - doc: |-
+          to and source are the addresses, in their first toLen and sourceLen
+          bytes.
+        name: source
+        type: "[16]byte"
+      - doc: toLen and sourceLen are their lengths, 0, 4 or 16.
+        name: toLen
+        type: uint8
+      - doc: toLen and sourceLen are their lengths, 0, 4 or 16.
+        name: sourceLen
+        type: uint8
+    kind: struct
+    methods:
+      - doc: |-
+          addrOf returns the destination as a net.UDPAddr with port, or nil when it is
+          unknown. It allocates, and runs only when a handler asks.
+        name: addrOf
+        params: port int
+        recv: l *localAddress
+        results: "*stdnet.UDPAddr"
+    name: localAddress
   - doc: |-
       datagramSource collects one or more datagrams per call.
 
@@ -2300,6 +3730,9 @@ types:
       	begin()
       	// reply sends b to to, or queues it until flush while a batch is open.
       	reply(b []byte, to stdnet.Addr) (n int, err error)
+      	// replyFrom is reply leaving from source, where the socket can name one
+      	// (#972); a sink that cannot sends it as reply does.
+      	replyFrom(b []byte, to stdnet.Addr, source localAddress) (n int, err error)
       	// flush sends what the batch queued and closes it.
       	flush()
       }
@@ -2319,8 +3752,24 @@ types:
       - doc: replyFailures counts queued replies that did not leave.
         name: replyFailures
         type: atomic.Uint64
+      - doc: |-
+          kernelDrops is the datagrams the kernel dropped for want of receive
+          buffer, which each batched socket adds the growth of its SO_RXQ_OVFL count
+          to (#973).
+        name: kernelDrops
+        type: atomic.Uint64
     kind: struct
     name: datagramCounters
+  - doc: |-
+      pinSender is the part of a socket that sends one reply from a named source
+      (#972), satisfied on Linux by pinWriter.
+    kind: named
+    name: pinSender
+    underlying: |-
+      interface {
+      	// send writes b to to from source, reported as a write is.
+      	send(b []byte, to stdnet.Addr, source localAddress) (n int, err error)
+      }
   - doc: |-
       portableReader reads one datagram per syscall using the standard library.
 
@@ -2357,6 +3806,9 @@ types:
       - doc: pc is the socket replies leave through.
         name: pc
         type: stdnet.PacketConn
+      - doc: pin sends a reply from a named source, nil where the socket cannot.
+        name: pin
+        type: pinSender
     kind: struct
     methods:
       - doc: "begin implements datagramSink: there is no queue to open."
@@ -2367,10 +3819,159 @@ types:
         params: b []byte, to stdnet.Addr
         recv: w portableSink
         results: n int, err error
+      - doc: "replyFrom implements datagramSink: from source where the socket can name one."
+        name: replyFrom
+        params: b []byte, to stdnet.Addr, source localAddress
+        recv: w portableSink
+        results: n int, err error
       - doc: "flush implements datagramSink: nothing was queued."
         name: flush
         recv: portableSink
     name: portableSink
+  - doc: |-
+      compressSettings are one Compress middleware's resolved configuration, and
+      the gzip writers it recycles.
+    fields:
+      - doc: level is gzip's level, resolved.
+        name: level
+        type: int
+      - doc: minBytes is the smallest body compressed, resolved.
+        name: minBytes
+        type: int
+      - doc: types is the allowlist, lower-cased.
+        name: types
+        type: "[]string"
+      - doc: |-
+          writers recycles the gzip writers: each owns several kilobytes of
+          dictionary and window.
+        name: writers
+        type: sync.Pool
+    kind: struct
+    methods:
+      - doc: serve is the middleware's request.
+        name: serve
+        params: next http.Handler, w http.ResponseWriter, r *http.Request
+        recv: c *compressSettings
+      - doc: allows reports whether contentType, parameters ignored, is on the list.
+        name: allows
+        params: contentType string
+        recv: c *compressSettings
+        results: bool
+    name: compressSettings
+  - doc: |-
+      compressWriter delays the response until it knows enough to choose: the
+      first bytes, up to minBytes, are held so a small body can stay identity, and
+      the status with them.
+    fields:
+      - doc: settings is the middleware's.
+        name: settings
+        type: "*compressSettings"
+      - doc: inner is the ResponseWriter the answer leaves through.
+        name: inner
+        type: http.ResponseWriter
+      - doc: |-
+          status is what the handler said, zero until it says; held held the bytes
+          of the undecided prefix, lazily allocated.
+        name: status
+        type: int
+      - name: held
+        type: "[]byte"
+      - doc: |-
+          decided records that the choice was made; gz, when not nil, is the gzip
+          stream it chose.
+        name: decided
+        type: bool
+      - name: gz
+        type: "*gzip.Writer"
+      - doc: hijacked is set when the handler took the socket over.
+        name: hijacked
+        type: bool
+    kind: struct
+    methods:
+      - doc: Header implements http.ResponseWriter.
+        name: Header
+        recv: w *compressWriter
+        results: http.Header
+      - doc: |-
+          WriteHeader implements http.ResponseWriter. It is held until the choice,
+          unless the handler said an informational status, which goes at once.
+        name: WriteHeader
+        params: status int
+        recv: w *compressWriter
+      - doc: |-
+          Write implements http.ResponseWriter: held while undecided, then through the
+          choice.
+        name: Write
+        params: p []byte
+        recv: w *compressWriter
+        results: n int, err error
+      - doc: writeDecided writes p through the decided path.
+        name: writeDecided
+        params: p []byte
+        recv: w *compressWriter
+        results: int, error
+      - doc: |-
+          Flush implements http.Flusher: a flushed response stays live. The undecided
+          prefix is decided now, compressed if its type admits it whatever its length:
+          the handler said it is a stream, and a chunk of one is worth compressing.
+        name: Flush
+        recv: w *compressWriter
+      - doc: "Hijack implements http.Hijacker: the socket leaves the response, undecided."
+        name: Hijack
+        recv: w *compressWriter
+        results: stdnet.Conn, *bufio.ReadWriter, error
+      - doc: |-
+          Unwrap gives net/http's ResponseController, and any handler that asks, the
+          writer beneath.
+        name: Unwrap
+        recv: w *compressWriter
+        results: http.ResponseWriter
+      - doc: |-
+          compressible reports whether what the handler has said so far permits
+          compression: the status, and the headers it set.
+        name: compressible
+        recv: w *compressWriter
+        results: bool
+      - doc: |-
+          decide makes the choice with what is known now — total is the bytes the
+          handler has said so far, first the part not yet held — writes the held status
+          and bytes through it, and leaves w.decided set. flushing says the handler
+          declared a stream, the minimum then not applying.
+        name: decide
+        params: total int, first []byte, flushing bool
+        recv: w *compressWriter
+        results: error
+      - doc: |-
+          sniffPrefix returns what http.DetectContentType reads: at most its 512 bytes,
+          the held bytes then the first of what is being written.
+        name: sniffPrefix
+        params: first []byte
+        recv: w *compressWriter
+        results: "[]byte"
+      - doc: |-
+          addVary says a cache may hold this answer in two codings, for any answer of a
+          type that can be compressed, small ones included.
+        name: addVary
+        recv: w *compressWriter
+      - doc: startGzip sets the compressed answer's headers and takes a writer.
+        name: startGzip
+        recv: w *compressWriter
+      - doc: flushHeld writes the status and the held bytes through the chosen writer.
+        name: flushHeld
+        recv: w *compressWriter
+        results: error
+      - doc: |-
+          finish ends the response: an undecided short body goes out identity, and a
+          gzip stream is closed unless the handler panicked, net/http aborting it.
+        name: finish
+        params: completed bool
+        recv: w *compressWriter
+      - doc: |-
+          decidedIdentity sends a response that never reached the minimum: the status
+          and held bytes through the plain path, with Vary where it applies.
+        name: decidedIdentity
+        recv: w *compressWriter
+    name: compressWriter
   - doc: |-
       conn is the domain's view of one accepted connection.
 
@@ -2433,6 +4034,31 @@ types:
         params: p []byte
         recv: c *conn
         results: n int, err error
+      - doc: |-
+          ReadFrom implements io.ReaderFrom: a copy into the connection reaches the
+          socket's own, so a plaintext TCP socket chooses sendfile or splice (#970). A
+          group with a write bound keeps it per write, as its contract says, so the copy
+          then goes one bounded write at a time: one deadline for the whole of it would
+          be the lifetime budget this type exists to refuse, and would end a long copy
+          to a healthy peer.
+        name: ReadFrom
+        params: r io.Reader
+        recv: c *conn
+        results: n int64, err error
+      - doc: |-
+          WriteTo implements io.WriterTo, as ReadFrom does for the other direction: the
+          bound it keeps is the one boundRead installs.
+        name: WriteTo
+        params: w io.Writer
+        recv: c *conn
+        results: n int64, err error
+      - doc: |-
+          Unwrap implements corenet.ConnUnwrapper: the socket under the engine's
+          layers, the close tracker included, so the standard library sees the concrete
+          type it asserts on. A TLS group's is its *tls.Conn.
+        name: Unwrap
+        recv: c *conn
+        results: stdnet.Conn
       - doc: boundRead installs the deadline for the read about to start.
         name: boundRead
         recv: c *conn
@@ -2477,6 +4103,36 @@ types:
         name: reset
         recv: c *conn
     name: conn
+  - doc: |-
+      connWriter hides ReadFrom, so io.Copy into it uses conn.Write's per-operation
+      bound and cannot come back into conn.ReadFrom.
+    fields:
+      - doc: c is the connection written to.
+        name: c
+        type: "*conn"
+    kind: struct
+    methods:
+      - doc: Write implements io.Writer.
+        name: Write
+        params: p []byte
+        recv: w connWriter
+        results: n int, err error
+    name: connWriter
+  - doc: |-
+      connReader hides WriteTo, so io.Copy out of it uses conn.Read's per-operation
+      bound and cannot come back into conn.WriteTo.
+    fields:
+      - doc: c is the connection read from.
+        name: c
+        type: "*conn"
+    kind: struct
+    methods:
+      - doc: Read implements io.Reader.
+        name: Read
+        params: p []byte
+        recv: r connReader
+        results: n int, err error
+    name: connReader
   - doc: |-
       trackedConn is an accepted socket that reports its own Close, so a ceilinged
       group keeps counting a connection a handler has taken over.
@@ -2550,6 +4206,17 @@ types:
         params: r io.Reader
         recv: t *trackedConn
         results: n int64, err error
+      - doc: |-
+          WriteTo copies the socket to w through the socket's own WriteTo when it has
+          one, as ReadFrom does the other way (#970).
+        name: WriteTo
+        params: w io.Writer
+        recv: t *trackedConn
+        results: n int64, err error
+      - doc: "Unwrap implements corenet.ConnUnwrapper: the socket beneath the tracker."
+        name: Unwrap
+        recv: t *trackedConn
+        results: stdnet.Conn
     name: trackedConn
   - doc: |-
       connWaiter is what a ServeConn blocks on while net/http drives a connection.
@@ -2584,15 +4251,95 @@ types:
         recv: w *connWaiter
     name: connWaiter
   - doc: |-
+      errorLogBudget is the server's one budget of net/http log records, shared by
+      every HTTP group: the cap is a property of the process's log, not of a port.
+    fields:
+      - doc: mu guards the window.
+        name: mu
+        type: sync.Mutex
+      - doc: start is when the current window opened.
+        name: start
+        type: time.Time
+      - doc: used counts the records the window has written.
+        name: used
+        type: int
+      - doc: |-
+          suppressed counts every record not written — over the cap, or with no
+          logger to write it to — for State.
+        name: suppressed
+        type: atomic.Uint64
+    kind: struct
+    methods:
+      - doc: |-
+          admit reports whether one more record may be written at now, opening a new
+          window once the last has elapsed. A record not admitted is counted.
+        name: admit
+        params: now time.Time
+        recv: b *errorLogBudget
+        results: bool
+    name: errorLogBudget
+  - doc: |-
+      errorLogWriter is the io.Writer behind http.Server.ErrorLog: what net/http
+      reports from its own goroutines — a recovered handler panic, an HTTP/2
+      stream error, a superfluous WriteHeader, a failed accept — as a warn record
+      of the SDK's logger with source=net/http, under the server's budget. With no
+      logger it discards, counting: net/http's default is the process's standard
+      logger, plain text on stderr outside the structured stream.
+    fields:
+      - doc: logger receives the records; nil discards and counts.
+        name: logger
+        type: corelogger.Logger
+      - doc: group names the group whose http.Server wrote the line.
+        name: group
+        type: string
+      - doc: budget is the server's, shared by its groups.
+        name: budget
+        type: "*errorLogBudget"
+      - doc: clk is the server's clock, the budget's window.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    methods:
+      - doc: |-
+          Write implements io.Writer. It never fails: net/http has nobody to hand a
+          failed log to.
+        name: Write
+        params: p []byte
+        recv: w *errorLogWriter
+        results: int, error
+    name: errorLogWriter
+  - doc: |-
       bindReport is what binding one address tells State: whether the socket
       holds its address exclusively, and how long the bind waited for it.
     fields:
       - doc: exclusive is ListenerStateValue.Exclusive.
         name: exclusive
         type: bool
+      - doc: |-
+          shared is ListenerStateValue.Shared: the socket was bound for another
+          process to join (ShareAddress, #1330).
+        name: shared
+        type: bool
       - doc: wait is ListenerStateValue.BindWait.
         name: wait
         type: time.Duration
+      - doc: |-
+          backlog is ListenerStateValue.Backlog, the accept queue's depth as
+          applied; backlogReason says why it is not what was asked, "" when it is.
+        name: backlog
+        type: int
+      - name: backlogReason
+        type: string
+      - doc: |-
+          receiveBuffer and sendBuffer are ListenerStateValue's, read back after
+          bind.
+        name: receiveBuffer
+        type: int
+      - doc: |-
+          receiveBuffer and sendBuffer are ListenerStateValue's, read back after
+          bind.
+        name: sendBuffer
+        type: int
     kind: struct
     name: bindReport
   - doc: |-
@@ -2651,10 +4398,22 @@ types:
         name: bounds
         type: httpBounds
       - doc: |-
+          errorLog is http.Server.ErrorLog: what net/http reports from its own
+          goroutines, handed to the server's logger (WithLogger); nil falls back to
+          net/http's own, the process's standard logger.
+        name: errorLog
+        type: "*log.Logger"
+      - doc: |-
           protocols is http.Server.Protocols, computed once at Start with the ALPN
           list the group's listeners offer (ADR 0195); nil until then.
         name: protocols
         type: "*http.Protocols"
+      - doc: http2 is the group's HTTP/2 bounds, resolved at Start.
+        name: http2
+        type: corehttp2.LimitsValue
+      - doc: counts are the group's requests per version and HTTP/2 errors (#966).
+        name: counts
+        type: httpCounts
       - doc: start guarantees the serving goroutine is launched at most once.
         name: start
         type: sync.Once
@@ -2790,8 +4549,19 @@ types:
           negative leaves net/http's default.
         name: maxHeaderBytes
         type: int
+      - doc: |-
+          maxBodyBytes bounds the request body, as the option was given: zero
+          selects defaultMaxBodyBytes and noBodyBound states none.
+        name: maxBodyBytes
+        type: int64
     kind: struct
     methods:
+      - doc: |-
+          bodyBytes resolves the request-body bound handed to the adapter: the
+          default's 1 MiB for zero, the caller's n, or noBodyBound.
+        name: bodyBytes
+        recv: b httpBounds
+        results: int64
       - doc: |-
           headerTimeout resolves the header phase's deadline: the option when it was
           set, the read timeout otherwise — which is what the adapter applied before
@@ -2807,6 +4577,47 @@ types:
         recv: b httpBounds
         results: int
     name: httpBounds
+  - doc: |-
+      httpCounts are an HTTP group's counts on net/http's engine (#966): its
+      requests per version and the HTTP/2 errors net/http's CountError reports.
+    fields:
+      - doc: h1 and h2 count the requests by version.
+        name: h1
+        type: atomic.Uint64
+      - doc: h1 and h2 count the requests by version.
+        name: h2
+        type: atomic.Uint64
+      - doc: errs count the HTTP/2 errors by corehttp2.ErrorType.
+        name: errs
+        type: "[corehttp2.ErrorTypes]atomic.Uint64"
+    kind: struct
+    methods:
+      - doc: "countError is http.HTTP2Config.CountError: one error, named by net/http."
+        name: countError
+        params: errType string
+        recv: c *httpCounts
+      - doc: value is the counts as State reports them.
+        name: value
+        recv: c *httpCounts
+        results: corenet.HTTPCountsValue
+    name: httpCounts
+  - doc: |-
+      versionCounter counts each request by its version on its way to the
+      handler: one atomic add, nothing allocated.
+    fields:
+      - doc: next is the handler.
+        name: next
+        type: http.Handler
+      - doc: counts are the group's.
+        name: counts
+        type: "*httpCounts"
+    kind: struct
+    methods:
+      - doc: ServeHTTP implements http.Handler.
+        name: ServeHTTP
+        params: w http.ResponseWriter, r *http.Request
+        recv: h versionCounter
+    name: versionCounter
   - doc: |-
       chanListener is a net.Listener fed by our accept path.
 
@@ -2891,6 +4702,49 @@ types:
         recv: b *deadlineBody
         results: error
     name: deadlineBody
+  - doc: |-
+      socketSpec is what a group asks of the sockets it binds beyond their
+      address: whether the address is shared by shards, whether a handler may take
+      a socket over while a ceiling still counts it, how many binds an address
+      still held gets, and the depth of the accept queue (#978).
+    fields:
+      - doc: reuse says whether the socket is opened with SO_REUSEPORT, and for whom.
+        name: reuse
+        type: reuseMode
+      - doc: trackCloses hands out sockets that report their own Close.
+        name: trackCloses
+        type: bool
+      - doc: attempts bounds the binds of one address.
+        name: attempts
+        type: int
+      - doc: backlog is LimitsValue.Backlog; zero keeps the host's.
+        name: backlog
+        type: int
+      - doc: |-
+          receiveBuffer and sendBuffer are LimitsValue's: SO_RCVBUF and SO_SNDBUF
+          asked before bind, zero keeping the kernel's default (#973).
+        name: receiveBuffer
+        type: int
+      - doc: |-
+          receiveBuffer and sendBuffer are LimitsValue's: SO_RCVBUF and SO_SNDBUF
+          asked before bind, zero keeping the kernel's default (#973).
+        name: sendBuffer
+        type: int
+      - doc: proxy is the group's ProxyProtocol, nil when it has none (#841).
+        name: proxy
+        type: "*proxyPolicy"
+      - doc: |-
+          keepAlive is the accepted sockets' keepalive, as TimeoutsValue reads it
+          and the operator's switch off (#971): zero the standard library's.
+        name: keepAlive
+        type: time.Duration
+      - doc: |-
+          userTimeout is TCP_USER_TIMEOUT, set on the listener and inherited; zero
+          sets none (#971).
+        name: userTimeout
+        type: time.Duration
+    kind: struct
+    name: socketSpec
   - doc: boundListener pairs a live listener with the group that owns it.
     fields:
       - doc: group is the owning group's name.
@@ -2924,6 +4778,10 @@ types:
         recv: b *boundListener
         results: error
     name: boundListener
+  - doc: reuseMode is whether a socket is opened with SO_REUSEPORT, and for whom.
+    kind: named
+    name: reuseMode
+    underlying: uint8
   - doc: |-
       trackedListener wraps every socket it accepts in a trackedConn.
 
@@ -3052,6 +4910,31 @@ types:
       	// State reports the group.
       	State() corenet.LoopStateValue
       }
+  - doc: |-
+      httpCodecEngine is a loop group whose handler is a multi-version adapter: it
+      tells the adapter the drain has begun, and reports the http2-loop row.
+    fields:
+      - name: ""
+        role: embedded
+        type: loopEngine
+      - doc: codec is the adapter.
+        name: codec
+        type: corenet.LoopHTTPCodec
+      - doc: row is the capability row State appends.
+        name: row
+        type: corenet.CapabilityValue
+    kind: struct
+    methods:
+      - doc: Shutdown announces the drain to the adapter, then drains the group.
+        name: Shutdown
+        params: ctx context.Context
+        recv: e *httpCodecEngine
+        results: error
+      - doc: State reports the group, the adapter's capability row included.
+        name: State
+        recv: e *httpCodecEngine
+        results: corenet.LoopStateValue
+    name: httpCodecEngine
   - doc: |-
       jobRing is a single-producer single-consumer ring of jobs, preallocated:
       head is written by the consumer only, tail by the producer only, and each
@@ -3278,7 +5161,7 @@ types:
       - doc: kick wakes the writer.
         name: kick
         type: chan struct{}
-      - doc: mu guards out, flight and closing, shared with the writer.
+      - doc: mu guards out, flight, closing and linger, shared with the writer.
         name: mu
         type: sync.Mutex
       - name: out
@@ -3287,6 +5170,16 @@ types:
         type: int
       - name: closing
         type: bool
+      - doc: |-
+          linger says the close is the handler's own, the peer still sending:
+          the writer shuts its side and lets the reader end it (lingerClose).
+        name: linger
+        type: bool
+      - doc: |-
+          lingering is set by the writer once it shut its side: the reader's
+          bytes from then on are the peer's leftovers, dropped.
+        name: lingering
+        type: atomic.Bool
       - doc: The handler goroutine's own state.
         name: open
         type: bool
@@ -3303,6 +5196,9 @@ types:
           leaves a connection that has sent nothing open for portableQuiet.
         name: heardAt
         type: time.Time
+      - doc: drained says the drain has told the handler about this connection.
+        name: drained
+        type: bool
       - name: pressure
         type: bool
       - name: wantWrite
@@ -3316,6 +5212,12 @@ types:
       - doc: compact lists the connection on its loop's compaction list.
         name: compact
         type: bool
+      - doc: |-
+          peer is who the kernel named when the connection opened; Verified says
+          whether it named anyone (#974). Reading it costs an allocation, so it is
+          read once, at open, and Peer only returns it.
+        name: peer
+        type: corenet.LoopPeerValue
     kind: struct
     methods:
       - doc: |-
@@ -3356,6 +5258,12 @@ types:
         type: "[]corenet.CapabilityValue"
       - name: noDelayOff
         type: bool
+      - doc: |-
+          keepAlive is the accepted sockets' keepalive, as TimeoutsValue reads it and
+          the operator's switch off: negative sets none, zero leaves the standard
+          library's; positive is applied per connection (#971).
+        name: keepAlive
+        type: time.Duration
       - name: lanes
         type: "[]*portableLoop"
       - name: lns
@@ -3505,6 +5413,50 @@ types:
         type: atomic.Uint64
       - name: batches
         type: atomic.Uint64
+      - doc: |-
+          bytesIn, bytesOut, outputRefused, spillClosed, timeouts and idleClosed are
+          the lane's traffic and refusals, read by State (#975). pendingOutput is
+          the bytes queued by Write and not yet sent, a gauge: the writer takes each
+          flight off it, and at its end what it left behind.
+        name: bytesIn
+        type: atomic.Uint64
+      - doc: |-
+          bytesIn, bytesOut, outputRefused, spillClosed, timeouts and idleClosed are
+          the lane's traffic and refusals, read by State (#975). pendingOutput is
+          the bytes queued by Write and not yet sent, a gauge: the writer takes each
+          flight off it, and at its end what it left behind.
+        name: bytesOut
+        type: atomic.Uint64
+      - doc: |-
+          bytesIn, bytesOut, outputRefused, spillClosed, timeouts and idleClosed are
+          the lane's traffic and refusals, read by State (#975). pendingOutput is
+          the bytes queued by Write and not yet sent, a gauge: the writer takes each
+          flight off it, and at its end what it left behind.
+        name: outputRefused
+        type: atomic.Uint64
+      - doc: |-
+          bytesIn, bytesOut, outputRefused, spillClosed, timeouts and idleClosed are
+          the lane's traffic and refusals, read by State (#975). pendingOutput is
+          the bytes queued by Write and not yet sent, a gauge: the writer takes each
+          flight off it, and at its end what it left behind.
+        name: spillClosed
+        type: atomic.Uint64
+      - doc: |-
+          bytesIn, bytesOut, outputRefused, spillClosed, timeouts and idleClosed are
+          the lane's traffic and refusals, read by State (#975). pendingOutput is
+          the bytes queued by Write and not yet sent, a gauge: the writer takes each
+          flight off it, and at its end what it left behind.
+        name: timeouts
+        type: atomic.Uint64
+      - doc: |-
+          bytesIn, bytesOut, outputRefused, spillClosed, timeouts and idleClosed are
+          the lane's traffic and refusals, read by State (#975). pendingOutput is
+          the bytes queued by Write and not yet sent, a gauge: the writer takes each
+          flight off it, and at its end what it left behind.
+        name: idleClosed
+        type: atomic.Uint64
+      - name: pendingOutput
+        type: atomic.Int64
       - name: readers
         type: sync.WaitGroup
       - doc: batchAcks are the readers waiting on the current batch.
@@ -3595,6 +5547,10 @@ types:
       - doc: writer sends pc's output, one flight at a time.
         name: writer
         params: slot int32, pc *portableConn
+        recv: pl *portableLoop
+      - doc: dropOutput takes what the writer left behind off the pending gauge.
+        name: dropOutput
+        params: pc *portableConn
         recv: pl *portableLoop
       - doc: lookupSlot returns slot's connection when gen is still its generation.
         name: lookupSlot
@@ -3715,6 +5671,14 @@ types:
         params: ref corenet.LoopConnRef
         recv: pl *portableLoop
         results: bool
+      - doc: |-
+          Peer implements corenet.LoopPeer: who the kernel named when the connection
+          opened (ADR 0148, #974). It answers false for a stale reference, a TCP
+          connection, and wherever nothing could verify the peer.
+        name: Peer
+        params: ref corenet.LoopConnRef
+        recv: pl *portableLoop
+        results: corenet.LoopPeerValue, bool
       - doc: "Loop implements corenet.LoopIO: the lane's index."
         name: Loop
         recv: pl *portableLoop
@@ -3778,6 +5742,101 @@ types:
       	// Unwrap returns the HTTP1Handler the adapter serves.
       	Unwrap() corenet.HTTP1Handler
       }
+  - doc: metricsKind says which observable an instrument is registered as.
+    kind: named
+    name: metricsKind
+    underlying: uint8
+  - doc: |-
+      metricsSnapshot is what one collection reads: State once, and the
+      connections each goroutine-engine stream group counts.
+    fields:
+      - doc: state is the server's State at the start of the collection.
+        name: state
+        type: corenet.StateValue
+      - doc: groups are the stream groups' own connection counts.
+        name: groups
+        type: "[]groupConns"
+    kind: struct
+    name: metricsSnapshot
+  - doc: |-
+      metricInstrument is one instrument: its name, unit and kind, and how it
+      reads the snapshot. A point is reported with the attributes it adds to the
+      caller's.
+    fields:
+      - doc: name is the instrument's name, a Metric constant.
+        name: name
+        type: string
+      - doc: unit is its UCUM unit.
+        name: unit
+        type: string
+      - doc: kind is what it is registered as.
+        name: kind
+        type: metricsKind
+      - doc: ints reports an integer instrument's points.
+        name: ints
+        type: func(snap *metricsSnapshot, report func(value int64, attrs ...coreotel.AttrValue))
+      - doc: floats reports a float gauge's points.
+        name: floats
+        type: func(snap *metricsSnapshot, report func(value float64, attrs ...coreotel.AttrValue))
+    kind: struct
+    name: metricInstrument
+  - doc: groupConns is one stream group's counts at a collection.
+    fields:
+      - doc: name is the group's.
+        name: name
+        type: string
+      - doc: active, admitted and rejected are its connCounters values.
+        name: active
+        type: int64
+      - name: admitted
+        type: uint64
+      - name: rejected
+        type: uint64
+    kind: struct
+    name: groupConns
+  - doc: |-
+      metricsReader reads the server once per collection for every instrument
+      registered through it: the meter runs each callback once per collection,
+      serialised, so the first callback of a round takes the snapshot and the
+      others read it. A meter collected from two goroutines at once is serialised
+      here.
+    fields:
+      - doc: s is the server read.
+        name: s
+        type: "*Server"
+      - doc: attrs are the caller's, riding on every series.
+        name: attrs
+        type: "[]coreotel.AttrValue"
+      - doc: mu guards the round.
+        name: mu
+        type: sync.Mutex
+      - doc: snap is the round's snapshot.
+        name: snap
+        type: metricsSnapshot
+      - doc: |-
+          served counts the callbacks of the round; callbacks is how many a round
+          runs.
+        name: served
+        type: int
+      - doc: |-
+          served counts the callbacks of the round; callbacks is how many a round
+          runs.
+        name: callbacks
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          observe runs one instrument's callback: the round's first takes the
+          snapshot.
+        name: observe
+        params: read func(snap *metricsSnapshot)
+        recv: r *metricsReader
+      - doc: with is the caller's attributes followed by a point's own.
+        name: with
+        params: attrs []coreotel.AttrValue
+        recv: r *metricsReader
+        results: "[]coreotel.AttrValue"
+    name: metricsReader
   - doc: |-
       multiReader reads several datagrams per syscall using recvmmsg(2).
 
@@ -3811,6 +5870,25 @@ types:
           without it — a control message the caller asked of the socket is then
           not read, and its MSG_CTRUNC means nothing to the reader.
         name: controlSpace
+        type: int
+      - doc: |-
+          rxq records that SO_RXQ_OVFL was switched on at construction, so each
+          message carries the kernel's drop count and controlSpace holds its room.
+        name: rxq
+        type: bool
+      - doc: |-
+          drops is the shared counter the kernel's drops are added to, by what each
+          message's count grew since the last: the kernel's counter is 32 bits and
+          wraps, and this one does not. lastOvfl is the last count this socket saw.
+        name: drops
+        type: "*atomic.Uint64"
+      - name: lastOvfl
+        type: uint32
+      - doc: |-
+          dstFamily is the family of the destination message the socket asked for
+          (#972), AF_INET or AF_INET6, zero when it asked for none: fill reads the
+          message and controlSpace holds its room.
+        name: dstFamily
         type: int
       - doc: wired records the slot count the arrays were built for.
         name: wired
@@ -3853,6 +5931,15 @@ types:
         name: enableGRO
         recv: r *multiReader
         results: bool
+      - doc: |-
+          enableRxqOvfl switches SO_RXQ_OVFL on and reports whether the kernel took it.
+          From then on every message read carries the socket's drop count, which fill
+          adds to drops. It runs before the first read, so the control room is sized
+          for it.
+        name: enableRxqOvfl
+        params: drops *atomic.Uint64
+        recv: r *multiReader
+        results: error
       - doc: setGRO sets UDP_GRO on the socket.
         name: setGRO
         params: on bool
@@ -3897,6 +5984,12 @@ types:
         params: slots []datagram
         recv: r *multiReader
       - doc: |-
+          neededControl is the control room one message needs: GRO's, which holds the
+          rest beside it, or the drop count's and the destination's alone.
+        name: neededControl
+        recv: r *multiReader
+        results: int
+      - doc: |-
           bind builds, once, the functions the descriptor runs: recvmmsg parked on the
           netpoller, and the drain's, which never waits. They write into the reader's
           fields, so neither moves a variable to the heap on each read.
@@ -3936,6 +6029,27 @@ types:
         name: fill
         params: slots []datagram, received int
         recv: r *multiReader
+      - doc: |-
+          readControl reads message i's control data: GRO's segment size into slot, and
+          the kernel's drop count when it was asked for.
+        name: readControl
+        params: i int, slot *datagram
+        recv: r *multiReader
+      - doc: |-
+          countDrops adds to the shared counter what the kernel's drop count grew by
+          since the last message of this socket, read from control.
+        name: countDrops
+        params: control []byte
+        recv: r *multiReader
+      - doc: |-
+          enablePktinfo switches the socket's destination control message on, for its
+          family: IP_PKTINFO on an IPv4 socket, IPV6_RECVPKTINFO on an IPv6 one, which
+          names an IPv4-mapped destination for a mapped peer. It runs before the first
+          read, so the control room is sized for it.
+        name: enablePktinfo
+        params: bound *stdnet.UDPAddr
+        recv: r *multiReader
+        results: error
     name: multiReader
   - doc: |-
       mmsghdr mirrors struct mmsghdr from <sys/socket.h>:
@@ -3983,6 +6097,11 @@ types:
       - doc: namelen is the length of name the kernel reads.
         name: namelen
         type: uint32
+      - doc: |-
+          source is the address the reply leaves from, zero for the kernel's
+          choice (#972).
+        name: source
+        type: localAddress
     kind: struct
     methods:
       - doc: |-
@@ -3991,6 +6110,13 @@ types:
         name: addr
         recv: e *pendingReply
         results: stdnet.Addr
+      - doc: |-
+          joins reports whether next may be a segment of e's GSO message: same peer,
+          same source, no larger than e, and not empty.
+        name: joins
+        params: next *pendingReply
+        recv: e *pendingReply
+        results: bool
     name: pendingReply
   - doc: |-
       replySpan is one message of a send: count consecutive queued replies from
@@ -4031,6 +6157,11 @@ types:
       - doc: onGSOOff is called once GSO is switched off on this socket.
         name: onGSOOff
         type: func()
+      - doc: |-
+          pin sends one reply from a named source, off the batched path; nil on a
+          socket whose reads name no destination (#972).
+        name: pin
+        type: "*pinWriter"
       - doc: send is sendmmsg; a test swaps it to answer what a device would.
         name: send
         type: func(fd uintptr, headers []mmsghdr) (sent int, errno syscall.Errno)
@@ -4118,6 +6249,11 @@ types:
         params: b []byte, to stdnet.Addr
         recv: w *multiWriter
         results: n int, err error
+      - doc: "replyFrom implements datagramSink: as reply, leaving from source."
+        name: replyFrom
+        params: b []byte, to stdnet.Addr, source localAddress
+        recv: w *multiWriter
+        results: n int, err error
       - doc: |-
           encode writes to's sockaddr for this socket's family into entry, and reports
           whether it could: a UDP address of the socket's family, or an IPv4 one on an
@@ -4154,6 +6290,14 @@ types:
         params: m, first, count, total int
         recv: w *multiWriter
       - doc: |-
+          writeControl writes a message's control data: UDP_SEGMENT when it carries
+          several datagrams, the source when its reply names one (#972). It returns the
+          bytes it wrote.
+        name: writeControl
+        params: control []byte, entry *pendingReply, count int
+        recv: w *multiWriter
+        results: int
+      - doc: |-
           sendAll sends messages [0, messages) built from the queue, resuming from the
           count each sendmmsg returns, and returns the queue index the next build
           starts from: the queue's end once everything left or was counted, or the
@@ -4169,6 +6313,13 @@ types:
         params: k, messages int, errno syscall.Errno
         recv: w *multiWriter
         results: resume int, again bool
+      - doc: |-
+          unpinned sends reply i with the kernel's choice of source: a destination the
+          socket read may not be one it may send from (a broadcast address on a
+          dual-stack socket). A failure is counted as any queued reply's.
+        name: unpinned
+        params: i int
+        recv: w *multiWriter
       - doc: |-
           gsoRefused judges a GSO send's refusal with errno, and reports whether the
           queue is to be rebuilt from resume.
@@ -4206,6 +6357,13 @@ types:
         params: first, last int
         recv: w *multiWriter
         results: int
+      - doc: |-
+          writeNow sends one reply off the batch, from source when it names one and the
+          socket can.
+        name: writeNow
+        params: b []byte, to stdnet.Addr, source localAddress
+        recv: w *multiWriter
+        results: n int, err error
       - doc: fail counts the replies of messages [k, messages) as failed.
         name: fail
         params: k, messages int
@@ -4247,9 +6405,11 @@ types:
       - doc: ceiling is the highest rank the environment allows.
         name: ceiling
         type: int
-      - doc: disabled holds the ranks KITSUNIUM_NET_DISABLE switched off.
-        name: disabled
-        type: "[rankIOURing + 1]bool"
+      - doc: |-
+          enginesOff are the engines KITSUNIUM_NET_DISABLE switched off, by token:
+          epoll and kqueue share a rank and are switched off apart.
+        name: enginesOff
+        type: "[]corenet.Capability"
       - doc: |-
           kernelOff are the kernel capabilities it switched off; noOptional is
           set by an unknown token, which switches every one off (R5).
@@ -4278,15 +6438,16 @@ types:
         name: unknown
         params: variable, token string
         recv: e *operatorEnv
-      - doc: applied is the highest engine the environment allows, Disabled skipped.
+      - doc: |-
+          applied is the highest engine the environment allows, Disabled skipped; at
+          epoll's rank, the poller of this platform (nativePoller), epoll where it
+          has neither.
         name: applied
         recv: e *operatorEnv
         results: corenet.Capability
-      - doc: |-
-          allows reports whether the environment lets a group run on the engine of
-          rank r.
+      - doc: allows reports whether the environment lets a group run on engine.
         name: allows
-        params: r int
+        params: engine corenet.Capability
         recv: e *operatorEnv
         results: bool
       - doc: |-
@@ -4304,18 +6465,39 @@ types:
         results: "[]corenet.Capability, string"
       - doc: |-
           plan is min(code, environment) for a loop group whose code asked for code,
-          on a platform with the native backends when native is true (ADR 0187 §D8):
-          the highest backend at or below the code's that the environment allows. A
-          backend the environment rules out is never probed: epoll and portable never
-          reach io_uring_setup. Off Linux every loop group is portable, whatever the
+          on a platform whose readiness poller is poller — epoll on Linux, where
+          io_uring sits above it, kqueue on darwin and the BSDs, none elsewhere
+          (ADR 0187 §D8, ADR 0222): the highest backend at or below the code's that
+          the environment allows. A backend the environment rules out is never
+          probed: epoll and portable never reach io_uring_setup, portable never
+          reaches kqueue(2). With no poller every loop group is portable, whatever the
           environment says, an explicit native backend having been refused already.
         name: plan
-        params: code corenet.LoopBackend, native bool
+        params: code corenet.LoopBackend, poller corenet.Capability
         recv: e *operatorEnv
         results: loopPlan
-      - doc: backendPlan is plan's backend half.
+      - doc: backendPlan is plan's backend half, by the platform's poller.
         name: backendPlan
-        params: code corenet.LoopBackend, native bool
+        params: code corenet.LoopBackend, poller corenet.Capability
+        recv: e *operatorEnv
+        results: loopPlan
+      - doc: |-
+          linuxPlan is backendPlan on Linux: the highest of io_uring and epoll at or
+          below the code's choice that the environment allows, the floor otherwise.
+          kqueue, which startLoopEngine refuses before any plan runs, plans the floor.
+        name: linuxPlan
+        params: code corenet.LoopBackend
+        recv: e *operatorEnv
+        results: loopPlan
+      - doc: |-
+          kqueuePlan is backendPlan on darwin and the BSDs: kqueue only when the code
+          named it and the environment allows it; the portable backend otherwise,
+          auto included. A backend that has never run on these platforms is not their
+          default: auto stays portable until the paired gate of ADR 0190 holds kqueue
+          (ADR 0222 §D6). io_uring and epoll, refused by startLoopEngine there, plan
+          the floor.
+        name: kqueuePlan
+        params: code corenet.LoopBackend
         recv: e *operatorEnv
         results: loopPlan
     name: operatorEnv
@@ -4401,6 +6583,14 @@ types:
       - doc: group names the listener group that received it.
         name: group
         type: string
+      - doc: local is the datagram's own destination, when the read saw one (#972).
+        name: local
+        type: localAddress
+      - doc: |-
+          port is the socket's own port, which a destination read from the
+          datagram is reported with.
+        name: port
+        type: int
     kind: struct
     methods:
       - doc: Data implements corenet.Packet.
@@ -4475,6 +6665,24 @@ types:
           ends (BatchReplies, ADR 0192).
         name: batchReplies
         type: bool
+      - doc: |-
+          kinds is the set of option kinds the group was given: Shards, a zero
+          included — a group without it keeps one socket per address (#977) —,
+          and ShareAddress, which binds its sockets for another process to join
+          (#1330).
+        name: kinds
+        type: optionSet
+      - doc: steer is the Steer option's value, SteerHash without the option.
+        name: steer
+        type: corenet.SteerValue
+      - doc: |-
+          loopHandler serves the group on the loop engine, set by HandleLoop
+          (#852); lanes are its bound sockets, gathered at Start before any lane
+          starts, so OnStart learns their count first.
+        name: loopHandler
+        type: corenet.PacketLoopHandler
+      - name: lanes
+        type: "[]*boundPacketConn"
     kind: struct
     methods:
       - name: Name
@@ -4486,6 +6694,10 @@ types:
         results: "*PacketGroup"
       - name: HandleFunc
         params: f corenet.PacketHandlerFunc
+        recv: g *PacketGroup
+        results: "*PacketGroup"
+      - name: HandleLoop
+        params: h corenet.PacketLoopHandler
         recv: g *PacketGroup
         results: "*PacketGroup"
       - name: Use
@@ -4504,6 +6716,30 @@ types:
         recv: g *PacketGroup
         results: error
     name: PacketGroup
+  - doc: |-
+      laneProbe is what the lanes of the groups HandleLoop serves said of
+      io_uring (#852): how many tried, how many serve on it, and the first
+      refusal's reason and whether it was the platform's.
+    fields:
+      - doc: mu guards the fields.
+        name: mu
+        type: sync.Mutex
+      - doc: tried and on count the lanes.
+        name: tried
+        type: int
+      - doc: tried and on count the lanes.
+        name: "on"
+        type: int
+      - doc: why is the first refusal; platform is set when no lane exists here.
+        name: why
+        type: string
+      - name: platform
+        type: bool
+      - doc: disabled is set when the environment ruled io_uring out.
+        name: disabled
+        type: bool
+    kind: struct
+    name: laneProbe
   - doc: boundPacketConn pairs a live datagram socket with the group that owns it.
     fields:
       - doc: group is the owning group's name.
@@ -4529,6 +6765,13 @@ types:
         type: chan struct{}
       - name: doneOnce
         type: sync.Once
+      - doc: |-
+          laneIndex is the socket's lane in a group HandleLoop serves; lane its
+          io_uring lane when one serves it (#852), nil on the batched reader.
+        name: laneIndex
+        type: int
+      - name: lane
+        type: loop.PacketLane
     kind: struct
     methods:
       - doc: "finish closes done, once: the read loop has ended."
@@ -4560,6 +6803,230 @@ types:
       	// stopGRO switches GRO off without a drain.
       	stopGRO()
       }
+  - doc: |-
+      packetLoopLane is a datagram lane served by the batched reader (#852): the
+      epoll lane of a group PacketGroup.HandleLoop serves, where io_uring's is
+      absent, switched off or not built — the netpoller's recvmmsg, GRO and the
+      batch's sendmmsg, behind corenet.PacketLoopIO.
+    fields:
+      - doc: sink sends the batch's replies; always a batched one.
+        name: sink
+        type: datagramSink
+      - doc: lane is the lane's index.
+        name: lane
+        type: int
+      - doc: handed is a datagram handed on since the last OnBatchEnd.
+        name: handed
+        type: bool
+      - doc: |-
+          batch is the batch being handed on, whose destinations a reply leaves
+          from (#972); nil between batches.
+        name: batch
+        type: "[]datagram"
+    kind: struct
+    methods:
+      - doc: |-
+          Reply implements corenet.PacketLoopIO: queued in the batch's sink, sent
+          when the batch ends, from the destination to reached in this batch (#972).
+        name: Reply
+        params: to netip.AddrPort, p []byte
+        recv: l *packetLoopLane
+        results: error
+      - doc: |-
+          sourceFor is the destination of the newest datagram to sent in the batch,
+          an IPv4-mapped peer matching its IPv4 form; zero, the kernel's choice, for a
+          peer that sent none or a socket that reads no destination.
+        name: sourceFor
+        params: to netip.AddrPort
+        recv: l *packetLoopLane
+        results: localAddress
+      - doc: "Loop implements corenet.PacketLoopIO: the lane's index."
+        name: Loop
+        recv: l *packetLoopLane
+        results: int
+    name: packetLoopLane
+  - doc: |-
+      pinWriter sends one reply from a named source with a one-message sendmmsg(2),
+      the unbatched path's (sendmsg has no syscall number of its own on linux/386):
+      its message, its name and its function are built once, so a reply allocates
+      nothing, and a mutex guards them, a handler that kept its Packet replying from
+      another goroutine.
+    fields:
+      - doc: pc is the socket, written directly when the peer has no sockaddr here.
+        name: pc
+        type: stdnet.PacketConn
+      - doc: raw exposes the descriptor under the runtime's netpoller.
+        name: raw
+        type: syscall.RawConn
+      - doc: family is the socket's.
+        name: family
+        type: int
+      - doc: mu guards everything below.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          name and namelen address the peer, iov carries the bytes, oob the
+          control message, and headers the one message sendmmsg takes.
+        name: name
+        type: syscall.RawSockaddrInet6
+      - name: namelen
+        type: uint32
+      - name: iov
+        type: syscall.Iovec
+      - name: oob
+        type: "[pinControlBytes]byte"
+      - name: headers
+        type: "[1]mmsghdr"
+      - doc: |-
+          sent and errno are what sendmmsg returned, the bytes of the message;
+          write is the function the descriptor runs, bound once.
+        name: sent
+        type: int
+      - name: errno
+        type: syscall.Errno
+      - name: write
+        type: func(fd uintptr) bool
+    kind: struct
+    methods:
+      - doc: |-
+          send writes b to to, leaving from source. A peer this writer cannot address, a
+          zoned one included, and a source the kernel refuses (EINVAL: a broadcast
+          address on a dual-stack socket), leave by WriteTo, from the kernel's choice.
+        name: send
+        params: b []byte, to stdnet.Addr, source localAddress
+        recv: w *pinWriter
+        results: n int, err error
+      - doc: layout fills msg for b and source.
+        name: layout
+        params: b []byte, source localAddress
+        recv: w *pinWriter
+    name: pinWriter
+  - doc: proxyPolicy is a group's ProxyProtocol, parsed at Start.
+    fields:
+      - doc: trusted are the balancers' ranges.
+        name: trusted
+        type: "[]netip.Prefix"
+      - doc: timeout bounds a header.
+        name: timeout
+        type: time.Duration
+      - doc: refused is the group's count, shared by its listeners.
+        name: refused
+        type: atomic.Uint64
+    kind: struct
+    methods:
+      - doc: trusts reports whether the socket's real peer is a balancer.
+        name: trusts
+        params: addr stdnet.Addr
+        recv: p *proxyPolicy
+        results: bool
+    name: proxyPolicy
+  - doc: |-
+      proxyListener wraps every socket it accepts in a proxyConn, under TLS and the
+      close tracker, and closes on the spot any peer the group does not trust: no
+      goroutine, no byte read, one close per connection from outside the balancers.
+    fields:
+      - name: ""
+        role: embedded
+        type: stdnet.Listener
+      - doc: policy is the group's.
+        name: policy
+        type: "*proxyPolicy"
+    kind: struct
+    methods:
+      - doc: Accept implements net.Listener.
+        name: Accept
+        recv: l *proxyListener
+        results: conn stdnet.Conn, err error
+    name: proxyListener
+  - doc: |-
+      announcedClient is the client a header named, held inline so that reading a
+      header allocates nothing per connection.
+    fields:
+      - doc: addr is what RemoteAddr returns; IP points into ip.
+        name: addr
+        type: stdnet.TCPAddr
+      - doc: ip holds the address.
+        name: ip
+        type: "[stdnet.IPv6len]byte"
+      - doc: set records that a header named a client at all.
+        name: set
+        type: bool
+    kind: struct
+    methods:
+      - doc: store records ip and port.
+        name: store
+        params: ip []byte, port uint16
+        recv: a *announcedClient
+    name: announcedClient
+  - doc: |-
+      proxyConn is a socket from a trusted balancer: Read reaches it unchanged, and
+      RemoteAddr answers the client the balancer announced, once establish has read
+      the header. It forwards what the layers above assert on, so the close tracker
+      and the handler's copies keep the socket's own paths.
+    fields:
+      - name: ""
+        role: embedded
+        type: stdnet.Conn
+      - doc: policy is the group's.
+        name: policy
+        type: "*proxyPolicy"
+      - doc: announced is the client's address, unset when the header kept the socket's.
+        name: announced
+        type: announcedClient
+    kind: struct
+    methods:
+      - doc: RemoteAddr implements net.Conn.
+        name: RemoteAddr
+        recv: p *proxyConn
+        results: stdnet.Addr
+      - doc: CloseWrite forwards the half-close net/http and closeConn assert on.
+        name: CloseWrite
+        recv: p *proxyConn
+        results: error
+      - doc: ReadFrom forwards the socket's own copy, as trackedConn does.
+        name: ReadFrom
+        params: r io.Reader
+        recv: p *proxyConn
+        results: n int64, err error
+      - doc: WriteTo forwards the socket's own copy.
+        name: WriteTo
+        params: w io.Writer
+        recv: p *proxyConn
+        results: n int64, err error
+      - doc: "Unwrap implements corenet.ConnUnwrapper: the socket beneath the header's layer."
+        name: Unwrap
+        recv: p *proxyConn
+        results: stdnet.Conn
+      - doc: |-
+          establish reads the header from the socket, every read exact: nothing past the
+          header is consumed, so a handler or a TLS handshake reads the first byte of
+          what the client sent. It is bounded by the policy's timeout on clk, and the
+          bound's deadline is cleared before it returns.
+        name: establish
+        params: clk clock.Timed
+        recv: p *proxyConn
+        results: error
+      - doc: |-
+          armDeadline ends a blocked read once the budget elapses on clk, by a deadline
+          in the past: a manual clock moves the budget, and the socket has no reference
+          to it. The returned stop waits for the watcher to end.
+
+          Goroutine lifecycle: one per header being read, ending when stop runs; stop
+          runs on the serving goroutine before the header's outcome is acted on.
+        name: armDeadline
+        params: clk clock.Timed, budget time.Duration
+        recv: p *proxyConn
+        results: func()
+    name: proxyConn
+  - fields:
+      - doc: kind is the kind of key, zero for none.
+        name: kind
+        type: uint8
+      - doc: header is the field name, canonicalized.
+        name: header
+        type: string
+    kind: struct
+    name: HTTPRateKeyValue
   - doc: |-
       rawConnProvider is the part of *net.UDPConn the batched reader needs: access
       to the raw descriptor under the runtime's netpoller.
@@ -4629,6 +7096,13 @@ types:
         params: b []byte, to stdnet.Addr
         recv: w *queuedSink
         results: n int, err error
+      - doc: |-
+          replyFrom implements datagramSink: this sink has no descriptor to name a
+          source on, so the reply is queued as any other.
+        name: replyFrom
+        params: b []byte, to stdnet.Addr, _ localAddress
+        recv: w *queuedSink
+        results: n int, err error
       - doc: "flush implements datagramSink: it sends what the batch queued and closes it."
         name: flush
         recv: w *queuedSink
@@ -4636,6 +7110,42 @@ types:
         name: flushLocked
         recv: w *queuedSink
     name: queuedSink
+  - doc: |-
+      rxqProbe is what the datagram sockets said of SO_RXQ_OVFL (#973): how many
+      asked for it, how many took it, and the first reason one did not.
+    fields:
+      - doc: mu guards the fields.
+        name: mu
+        type: sync.Mutex
+      - doc: tried and on count the sockets asked and the sockets that took it.
+        name: tried
+        type: int
+      - doc: tried and on count the sockets asked and the sockets that took it.
+        name: "on"
+        type: int
+      - doc: why is the first refusal's reason.
+        name: why
+        type: string
+    kind: struct
+    name: rxqProbe
+  - doc: |-
+      destinationProbe is what the wildcard datagram sockets said of IP_PKTINFO
+      (#972): the first reason one did not take it, and how many took it.
+    fields:
+      - doc: mu guards the fields.
+        name: mu
+        type: sync.Mutex
+      - doc: asked and on count the sockets asked and those that took it.
+        name: asked
+        type: int
+      - doc: asked and on count the sockets asked and those that took it.
+        name: "on"
+        type: int
+      - doc: why is the first failure's reason.
+        name: why
+        type: string
+    kind: struct
+    name: destinationProbe
   - doc: "lookupFunc reads one environment variable: os.LookupEnv, or a test's map."
     kind: named
     name: lookupFunc
@@ -4774,6 +7284,41 @@ types:
       - doc: stall watches the loop groups for one every ring of which is drained.
         name: stall
         type: stallWatch
+      - doc: |-
+          logger receives what net/http reports through http.Server.ErrorLog
+          (WithLogger); nil discards it, counted.
+        name: logger
+        type: corelogger.Logger
+      - doc: |-
+          errBudget is the cap on those records, shared by the HTTP groups, and
+          the count of those it did not write.
+        name: errBudget
+        type: errorLogBudget
+      - doc: rxq is what the datagram sockets said of SO_RXQ_OVFL (#973).
+        name: rxq
+        type: rxqProbe
+      - doc: |-
+          lanes is what the lanes of the groups HandleLoop serves said of
+          io_uring (#852).
+        name: lanes
+        type: laneProbe
+      - doc: |-
+          startLane starts a socket's io_uring lane: startPacketLane, which a
+          test replaces to play a refused probe.
+        name: startLane
+        type: func(s *Server, bound *boundPacketConn, group *PacketGroup) (loop.PacketLane, error)
+      - doc: dst is what the wildcard datagram sockets said of IP_PKTINFO (#972).
+        name: dst
+        type: destinationProbe
+      - doc: steer is what the datagram groups said of their steering program (#977).
+        name: steer
+        type: steerProbe
+      - doc: metricsMu guards meters.
+        name: metricsMu
+        type: sync.Mutex
+      - doc: meters are the destinations RegisterMetrics took (#847).
+        name: meters
+        type: "[]coremetrics.AsyncMeter"
     kind: struct
     methods:
       - doc: |-
@@ -4808,6 +7353,14 @@ types:
         recv: s *Server
         results: conns []stdnet.PacketConn, err error
       - doc: |-
+          errorLog is the *log.Logger a group's http.Server writes to: the server's
+          logger and budget behind an io.Writer, with no prefix and no flags — the
+          record carries its own time.
+        name: errorLog
+        params: group string
+        recv: s *Server
+        results: "*log.Logger"
+      - doc: |-
           rebindAttempts is how many binds addr gets: rebindAttempts on a platform
           that holds an address after its socket closed, but one when this server
           already holds a socket on the same port, of the same transport — another
@@ -4840,6 +7393,28 @@ types:
         name: liveness
         recv: s *Server
         results: error
+      - doc: |-
+          foldHTTPCounts writes each HTTP group's counts and the ALPN list its
+          listeners offer (#964) into its rows of listeners, the counts read once a
+          group. The caller holds s.mu.
+        name: foldHTTPCounts
+        params: listeners []corenet.ListenerStateValue
+        recv: s *Server
+      - doc: |-
+          keepAliveOf is the keepalive a stream group's sockets take: the option's,
+          or negative when the operator switched tcp-keepalive off.
+        name: keepAliveOf
+        params: group *StreamGroup
+        recv: s *Server
+        results: time.Duration
+      - doc: |-
+          userTimeoutOf is the TCP_USER_TIMEOUT a stream group's listeners take: zero
+          when the operator switched tcp-user-timeout off, otherwise resolved as the
+          group's option or its write bound.
+        name: userTimeoutOf
+        params: group *StreamGroup
+        recv: s *Server
+        results: time.Duration
       - name: Start
         params: ctx context.Context
         recv: s *Server
@@ -4864,6 +7439,19 @@ types:
           when Close or Shutdown closes its socket.
         name: bindPacketGroup
         params: ctx context.Context, group *PacketGroup
+        recv: s *Server
+        results: error
+      - doc: |-
+          bindPacketShards binds one datagram address: count sockets sharing it through
+          SO_REUSEPORT (#977), one read loop each, the first row in State carrying the
+          count, and last the steering program, once every socket is bound. A group
+          without Shards keeps one socket and no SO_REUSEPORT.
+
+          Goroutine lifecycle: it starts exactly one readLoop per shard, each owned by
+          the Server and holding an inFlight token until Close or Shutdown closes its
+          socket, exactly as a single bound socket's does.
+        name: bindPacketShards
+        params: ctx context.Context, group *PacketGroup, addr corenet.AddressValue, handler corenet.PacketHandler
         recv: s *Server
         results: error
       - doc: |-
@@ -4945,6 +7533,10 @@ types:
         name: serve
         params: raw stdnet.Conn, group *StreamGroup, handler corenet.ConnHandler, release func()
         recv: s *Server
+      - doc: serveAdmitted runs the handler for one connection already admitted.
+        name: serveAdmitted
+        params: c *conn, group *StreamGroup, handler corenet.ConnHandler, release func()
+        recv: s *Server
       - name: Serve
         params: ctx context.Context
         recv: s *Server
@@ -5000,9 +7592,11 @@ types:
           registerLoopListeners records a loop group's listeners, so Close and
           Shutdown close them and State reports them, as for every group: bound ones
           with the bind's report, adopted ones (rep nil) with SO_EXCLUSIVEADDRUSE
-          read back.
+          read back. shards is how many listeners the address holds: a shard after
+          the first (shards zero) is closed like any other and adds no row, as for
+          the goroutine engine.
         name: registerLoopListeners
-        params: group *StreamGroup, lns []stdnet.Listener, rep *bindReport
+        params: group *StreamGroup, lns []stdnet.Listener, rep *bindReport, shards int
         recv: s *Server
       - doc: loopStates reports every loop group.
         name: loopStates
@@ -5016,6 +7610,40 @@ types:
       - doc: closeLoops closes every loop group now.
         name: closeLoops
         recv: s *Server
+      - doc: |-
+          applyHTTPCodec tells a multi-version adapter what the group serves and what
+          the operator switched off, once, before any callback, and keeps its
+          connections through a drain.
+        name: applyHTTPCodec
+        params: group *StreamGroup
+        recv: s *Server
+      - doc: |-
+          bindLoopAddress binds one address of a loop group: one listener, or
+          Shards(0)'s one per loop sharing the address through SO_REUSEPORT, each
+          owned by its loop. An address asked as ":0" draws the port once and the
+          other shards join it.
+        name: bindLoopAddress
+        params: ctx context.Context, group *StreamGroup, addr corenet.AddressValue, plan loopPlan
+        recv: s *Server
+        results: "[]stdnet.Listener, []int, error"
+      - doc: |-
+          groupConnections reads the connection counts of the goroutine-engine stream
+          groups, in declaration order. A loop group counts per ring, in State.
+        name: groupConnections
+        recv: s *Server
+        results: "[]groupConns"
+      - name: RegisterMetrics
+        params: m coremetrics.AsyncMeter, attrs ...coreotel.AttrValue
+        recv: s *Server
+        results: error
+      - doc: |-
+          claimMeter records m as a destination, and reports false when the server is
+          already registered on it. A meter whose dynamic type is not comparable cannot
+          be told apart, and is taken each time.
+        name: claimMeter
+        params: m coremetrics.AsyncMeter
+        recv: s *Server
+        results: bool
       - doc: |-
           newBoundPacket pairs a live datagram socket with its group, its source — the
           batched reader with UDP GRO on where the platform has it — and its sink:
@@ -5048,7 +7676,56 @@ types:
         name: stopGROPackets
         recv: s *Server
       - doc: |-
-          readLoop serves datagrams until its socket is closed.
+          startReader starts bound's read loop for a PacketHandler, or gathers it as
+          a lane of a group HandleLoop serves.
+
+          Goroutine lifecycle: one read loop per socket of a PacketHandler's group,
+          owned by the Server, holding an inFlight token until Close or Shutdown
+          closes its socket; a lane starts nothing here.
+        name: startReader
+        params: bound *boundPacketConn, group *PacketGroup, handler corenet.PacketHandler
+        recv: s *Server
+      - doc: |-
+          startPacketLanes tells the handler the lane count, then starts each lane:
+          on io_uring when the environment allows it and the probe passes, on the
+          batched reader otherwise — the row says which, and no fault is raised.
+
+          Goroutine lifecycle: one per lane — a read loop, or a waiter on the io_uring
+          lane's end —, owned by the Server and holding an inFlight token until the
+          lane ends.
+        name: startPacketLanes
+        params: group *PacketGroup
+        recv: s *Server
+      - doc: |-
+          startURingLane starts bound's io_uring lane, recording the probe's verdict,
+          and reports whether it serves.
+
+          Goroutine lifecycle: one waiter per lane served on io_uring, holding an
+          inFlight token until the lane's thread returned — on Stop, or once a
+          handover drained the socket.
+        name: startURingLane
+        params: bound *boundPacketConn, group *PacketGroup
+        recv: s *Server
+        results: bool
+      - doc: awaitLane waits for an io_uring lane's end, then marks its socket done.
+        name: awaitLane
+        params: bound *boundPacketConn, lane loop.PacketLane
+        recv: s *Server
+      - doc: |-
+          laneAllowed reports whether the environment lets a lane try io_uring, and
+          records it when it does not.
+        name: laneAllowed
+        recv: s *Server
+        results: bool
+      - doc: |-
+          laneCapability is the uring-multishot-recvmsg row, or none while no group
+          HandleLoop serves exists.
+        name: laneCapability
+        recv: s *Server
+        results: "[]corenet.CapabilityValue"
+      - doc: |-
+          readLoop serves datagrams until its socket is closed: to handler, or with a
+          nil handler to the group's PacketLoopHandler, the lane's epoll lane (#852).
 
           Goroutine lifecycle: one per datagram socket, started by bindPacketGroup and
           owned by the Server. It exits when Close or Shutdown closes the socket — the
@@ -5088,6 +7765,13 @@ types:
         recv: s *Server
         results: error
       - doc: |-
+          dispatchLoop hands every datagram of a filled batch to h, one OnPacket
+          each, a coalesced message split, a cut one or one past the ceiling counted
+          and dropped as dispatch does, then OnBatchEnd once if any was handed on.
+        name: dispatchLoop
+        params: slots []datagram, l *packetLoopLane, h corenet.PacketLoopHandler, ceiling int
+        recv: s *Server
+      - doc: |-
           acquire takes a pooled connection wrapper and fills it for this socket.
 
           Pooling the wrapper — and the scratch buffer with it — is what keeps a
@@ -5117,6 +7801,46 @@ types:
           handler already closed is the expected case, not a fault.
         name: closeLive
         recv: s *Server
+      - doc: |-
+          admitProxied reads the header of a proxied connection on its own goroutine,
+          bounded, then counts it against Admission on the announced client. It returns
+          the admission's release, and ok false when the connection must be closed.
+        name: admitProxied
+        params: raw stdnet.Conn, group *StreamGroup
+        recv: s *Server
+        results: release func(), ok bool
+      - doc: |-
+          probeKernelDrops asks a bound datagram socket's source for the kernel's drop
+          count, unless the operator switched udp-rxq-ovfl off: then the option is not
+          set, the count stays zero and the row reads disabled.
+        name: probeKernelDrops
+        params: source datagramSource
+        recv: s *Server
+      - doc: |-
+          datagramCapabilities is the datagram sockets' capability rows: udp-rxq-ovfl
+          and udp-pktinfo, each empty while no socket concerns it and the operator left
+          it alone.
+        name: datagramCapabilities
+        recv: s *Server
+        results: "[]corenet.CapabilityValue"
+      - doc: rxqCapability is the udp-rxq-ovfl row, or none.
+        name: rxqCapability
+        recv: s *Server
+        results: "[]corenet.CapabilityValue"
+      - doc: |-
+          probeDestination asks a bound datagram socket to name each datagram's
+          destination when it is bound to a wildcard address, unless the operator
+          switched udp-pktinfo off, and reports whether the reply can pin its source.
+        name: probeDestination
+        params: source datagramSource, pc stdnet.PacketConn
+        recv: s *Server
+        results: bool
+      - doc: |-
+          pktinfoCapability is the udp-pktinfo row, or none while no wildcard socket
+          concerns it.
+        name: pktinfoCapability
+        recv: s *Server
+        results: "[]corenet.CapabilityValue"
       - name: Group
         params: name string, opts ...GroupOption
         recv: s *Server
@@ -5132,6 +7856,12 @@ types:
           an Engine other than the goroutine one. The caller holds s.mu.
         name: judgePacketOptions
         params: shim *StreamGroup
+        recv: s *Server
+      - doc: |-
+          foldProxyRefused writes each ProxyProtocol group's refusals into its rows of
+          listeners. The caller holds s.mu.
+        name: foldProxyRefused
+        params: listeners []corenet.ListenerStateValue
         recv: s *Server
       - doc: recordDeclError keeps the first declaration error. The caller holds s.mu.
         name: recordDeclError
@@ -5203,15 +7933,28 @@ types:
         recv: s *Server
         results: "[]corenet.FaultValue"
       - doc: |-
+          probeSteer attaches the group's steering program to its sockets, unless the
+          operator switched reuseport-cbpf off, and records how that went for its row.
+          A group without Steer asks for nothing; one socket has nothing to steer.
+        name: probeSteer
+        params: steer corenet.SteerValue, sockets []stdnet.PacketConn
+        recv: s *Server
+      - doc: steerCapability is the reuseport-cbpf row, or none while no group asked.
+        name: steerCapability
+        recv: s *Server
+        results: "[]corenet.CapabilityValue"
+      - doc: |-
           admit runs the handler under the group's ceiling, translating a rejection
-          into the domain's own sentinel.
+          into the domain's own sentinel. A connection the ceiling lets through is
+          counted in admitted before its handler runs, so a long-lived one is counted
+          while it is served and the count never falls.
 
           A connection turned away here has already been accepted by the kernel, so it
           is answered by closing it immediately rather than by letting the accept queue
           overflow silently — a refusal the peer can observe beats a timeout it cannot
           distinguish from a hang.
         name: admit
-        params: ctx context.Context, limiter *connLimiter, c corenet.Conn, handler corenet.ConnHandler
+        params: ctx context.Context, limiter *connLimiter, admitted *atomic.Uint64, c corenet.Conn, handler corenet.ConnHandler
         recv: s *Server
         results: error
     name: Server
@@ -5239,6 +7982,48 @@ types:
         type: "*worker.LoopDaemon"
     kind: struct
     name: stallWatch
+  - doc: |-
+      steerProbe is what the datagram groups said of their steering program: the
+      first reason one could not attach, and how many did.
+    fields:
+      - doc: mu guards the fields.
+        name: mu
+        type: sync.Mutex
+      - doc: asked and on count the groups asked and those attached.
+        name: asked
+        type: int
+      - doc: asked and on count the groups asked and those attached.
+        name: "on"
+        type: int
+      - doc: why is the first failure's reason.
+        name: why
+        type: string
+    kind: struct
+    name: steerProbe
+  - doc: sockFilter is struct sock_filter (include/uapi/linux/filter.h).
+    fields:
+      - doc: code, jt and jf are the opcode and its jump offsets.
+        name: code
+        type: uint16
+      - name: jt
+        type: uint8
+      - name: jf
+        type: uint8
+      - doc: k is the operand.
+        name: k
+        type: uint32
+    kind: struct
+    name: sockFilter
+  - doc: "sockFprog is struct sock_fprog: the length, then the instructions."
+    fields:
+      - doc: length is the program's instruction count.
+        name: length
+        type: uint16
+      - doc: filter is the program.
+        name: filter
+        type: "*sockFilter"
+    kind: struct
+    name: sockFprog
   - fields:
       - doc: name identifies the group in logs, metrics and State.
         name: name
@@ -5280,7 +8065,10 @@ types:
           httpProtos is what the group serves, computed at Start from protos and
           the identity (protocolsRefusal; a TLS codec group's ALPN alone,
           tlsCodecRefusal).
-        name: httpProtos
+          http2Limits is the HTTP2 option's value, the zero value when unset.
+        name: http2Limits
+        type: corehttp2.LimitsValue
+      - name: httpProtos
         type: httpProtocols
       - doc: limiter caps concurrent connections; nil when the group has no ceiling.
         name: limiter
@@ -5293,6 +8081,16 @@ types:
           handshake; nil when the group has none (ADR 0174).
         name: admission
         type: "*Admission"
+      - doc: |-
+          proxyProtocol is the ProxyProtocol option's value, as given;
+          proxyPolicy is what Start parsed of it, nil without the option (#841).
+        name: proxyProtocol
+        type: corenet.ProxyProtocolValue
+      - name: proxyPolicy
+        type: "*proxyPolicy"
+      - doc: steer is the Steer option's value (#977); a stream group refuses it.
+        name: steer
+        type: corenet.SteerValue
       - doc: |-
           declErr is the group's first declaration error — a second handler,
           HandlerAlreadySet — surfaced by Start like the server's own (ADR 0186
@@ -5340,6 +8138,17 @@ types:
         name: loopChain
         type: corenet.LoopHandler
       - doc: |-
+          loopOwners is, per listener handed to the engine, one more than the
+          loop that alone accepts on it, zero when every loop does: Shards(0)'s
+          per-loop listeners (#856).
+        name: loopOwners
+        type: "[]int"
+      - doc: |-
+          conns are the group's own connection counts, which State folds into the
+          server's and RegisterMetrics reports by group (#847).
+        name: conns
+        type: connCounters
+      - doc: |-
           kinds is the set of option kinds the group was given, a zero value
           included, so a refusal reads what was posed rather than guessing from a
           non-zero field (ADR 0187).
@@ -5357,6 +8166,10 @@ types:
         type: string
     kind: struct
     methods:
+      - doc: "valueRefusalBuffers judges the buffers' values: a negative size is no size."
+        name: valueRefusalBuffers
+        recv: g *StreamGroup
+        results: error
       - doc: |-
           reconcileName applies the Name option to the name the group was declared
           with (ADR 0187): an empty declared name takes it, an equal one keeps it,
@@ -5373,6 +8186,32 @@ types:
         name: engineRefusal
         recv: g *StreamGroup
         results: error
+      - doc: |-
+          valueRefusal judges the values of the options a group was given at Start: a
+          MaxBodyBytes below -1 is neither a bound nor "none", and a Backlog below zero
+          is neither a depth nor the default; each is refused naming the option rather
+          than read as either (ADR 0031).
+        name: valueRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          valueRefusalProxy parses the group's ProxyProtocol, refusing a value outside
+          its range, and a group with an address the trust cannot apply to: a Unix
+          socket's peer has no address to believe.
+        name: valueRefusalProxy
+        recv: g *StreamGroup
+        results: error
+      - doc: valueInvalid is OptionValueInvalid naming the group and the option.
+        name: valueInvalid
+        params: k corenet.OptionKind
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          reportedBodyBound is the request-body bound State reports for the group's
+          listeners: the adapter's, and zero for a group net/http does not serve.
+        name: reportedBodyBound
+        recv: g *StreamGroup
+        results: int64
       - doc: |-
           startRefusal is one group's judgement at Start: its first declaration
           error, then the options that constrain its engine (ADR 0187), then the
@@ -5397,6 +8236,13 @@ types:
         recv: g *StreamGroup
         results: error
       - doc: |-
+          spillRefusal has a handler that frames whole requests agree with the group's
+          SpillCap (#844): corenet.LoopSpillChecker adapts its bounds to the effective
+          value, or refuses the group, before any address is bound.
+        name: spillRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
           loopHonoursKind reports whether the loop group applies the option of kind
           k: the engine, the TLS codec's path, or the chain — Use never, whatever it
           claims.
@@ -5404,6 +8250,33 @@ types:
         params: chain corenet.LoopHandler, k corenet.OptionKind
         recv: g *StreamGroup
         results: bool
+      - doc: |-
+          codecListRefusal judges a Protocols list given to a multi-version adapter:
+          an empty, repeated or unknown identifier is refused as an HTTP group's is.
+          The h2 cleartext restriction is the goroutine engine's; the adapter serves
+          prior knowledge.
+        name: codecListRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          codecServes is the versions a multi-version adapter serves: on a TLS group
+          the ALPN list its listeners offer, so a version the handshake cannot
+          negotiate is not served by the preface either (#964); otherwise the
+          Protocols list, nil when the group gave none.
+        name: codecServes
+        recv: g *StreamGroup
+        results: "[]string"
+      - doc: protocolList is the group's Protocols list, nil when it gave none.
+        name: protocolList
+        recv: g *StreamGroup
+        results: "[]string"
+      - doc: |-
+          shardsRefusal refuses what Shards cannot mean on a loop group (#856): any
+          count but zero — Shards(0) is one listener per loop — and an address whose
+          family has no SO_REUSEPORT.
+        name: shardsRefusal
+        recv: g *StreamGroup
+        results: error
       - doc: |-
           tlsCodec reports whether the group is the http1 codec given TLS (ADR 0187
           §D5, ADR 0198): crypto/tls handshakes on its own goroutine, then the
@@ -5422,17 +8295,32 @@ types:
           nothing, an explicit native backend — TLS runs on the portable backend
           alone — and a loop middleware are refused with LoopTLSUnsupported, the
           option named; nothing is served without TLS or elsewhere instead. A
-          Protocols list that is not HTTP/1.1 alone, and an identity whose
-          NextProtos names h2 or nothing the codec serves, are refused with
-          ProtocolsRefused, as an HTTP group's would be (ADR 0195).
+          Protocols list naming a version the codec does not serve — h2 for the
+          http1 adapter —, and an identity whose NextProtos names such a version or
+          nothing the codec serves, are refused with ProtocolsRefused, as an HTTP
+          group's would be (ADR 0195). The h2 adapter serves both (#964).
         name: tlsCodecRefusal
         recv: g *StreamGroup
         results: error
       - doc: |-
+          multiVersion reports whether the group's handler is an adapter serving more
+          than HTTP/1.1 — the h2 adapter, a corenet.LoopHTTPCodec.
+        name: multiVersion
+        recv: g *StreamGroup
+        results: bool
+      - doc: |-
+          codecVersions is the versions a TLS codec group serves, in the order its
+          ALPN offers them: the Protocols list when set, which codecProtocols judged;
+          otherwise h2 then HTTP/1.1 for the h2 adapter, HTTP/1.1 for the http1 one.
+        name: codecVersions
+        recv: g *StreamGroup
+        results: "[]string"
+      - doc: |-
           codecProtocols returns why the group's Protocols list cannot be served by
-          the codec, or "" when it is unset or names HTTP/1.1 alone: the list is
-          judged as an HTTP group's with TLS (checkProtocols), then h2, which the
-          codec does not serve, is refused rather than dropped from it.
+          the codec, or "" when it is unset or names what the codec serves: the list
+          is judged as an HTTP group's with TLS (checkProtocols), then h2, which the
+          http1 codec does not serve, is refused rather than dropped from it; the h2
+          adapter serves it.
         name: codecProtocols
         recv: g *StreamGroup
         results: string
@@ -5442,9 +8330,9 @@ types:
         recv: g *StreamGroup
         results: error
       - doc: |-
-          loopLayers wraps a TLS codec group's listeners in TLS, offering HTTP/1.1
-          alone, never below TLS 1.2 (tlsFloor); any other loop group's are returned
-          as they are.
+          loopLayers wraps a TLS codec group's listeners in TLS, offering the
+          group's ALPN list, never below TLS 1.2 (tlsFloor); any other loop group's
+          are returned as they are.
         name: loopLayers
         params: lns []stdnet.Listener
         recv: g *StreamGroup
@@ -5457,9 +8345,9 @@ types:
         results: corenet.LoopBackend
       - doc: |-
           codecTLS is the configuration of a TLS codec group's listeners: the
-          identity's, offering HTTP/1.1 alone — the identity's NextProtos and the
-          Protocols list kept to it at Start by tlsCodecRefusal — a fresh value each
-          call; loopLayers floors it (tlsFloor).
+          identity's, offering the group's ALPN list — the identity's NextProtos and
+          the Protocols list kept to what the codec serves at Start by
+          tlsCodecRefusal — a fresh value each call; loopLayers floors it (tlsFloor).
         name: codecTLS
         recv: g *StreamGroup
         results: "*tls.Config"
@@ -5575,6 +8463,34 @@ types:
         name: protocolsRefusal
         recv: g *StreamGroup
         results: error
+      - doc: computeProtocols records what the group serves, from its checked list.
+        name: computeProtocols
+        params: protos []string, tlsOn bool
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          http2Refusal judges the HTTP2 option: the bounds, on a group that can serve
+          them. A group with no HTTP handler is refused here unless it is a loop
+          group, whose handler answers for it.
+        name: http2Refusal
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          effectiveHTTP2 is the group's resolved bounds; http2Refusal has already
+          refused a value that does not resolve.
+        name: effectiveHTTP2
+        recv: g *StreamGroup
+        results: corehttp2.LimitsValue
+      - doc: |-
+          http2Bounds returns the resolved bounds for a State row, nil on a group
+          serving no HTTP.
+        name: http2Bounds
+        recv: g *StreamGroup
+        results: "*corehttp2.LimitsValue"
+      - doc: servesH2C reports whether the group's listeners serve HTTP/2 in cleartext.
+        name: servesH2C
+        recv: g *StreamGroup
+        results: bool
       - doc: protocolsErr wraps ProtocolsRefused with the group and the reason.
         name: protocolsErr
         params: reason string
@@ -5589,6 +8505,21 @@ types:
         recv: g *StreamGroup
         results: "*tls.Config"
     name: StreamGroup
+  - doc: connCounters are one goroutine-engine stream group's connection counts.
+    fields:
+      - doc: active is the connections being served now.
+        name: active
+        type: atomic.Int64
+      - doc: |-
+          admitted is the connections the group served: taken, then past the
+          PROXY header and the ceiling. MetricConnsTotal reads it (#847).
+        name: admitted
+        type: atomic.Uint64
+      - doc: rejected is the connections the group's ceiling turned away.
+        name: rejected
+        type: atomic.Uint64
+    kind: struct
+    name: connCounters
   - doc: |-
       connLimiter caps how many connections a group holds at once.
 
@@ -5667,13 +8598,70 @@ vars:
         value: (*boundPacketConn)(nil)
     name: _
   - doc: |-
+      compressDefaults are the types compressed unless CompressValue names others:
+      neither text/html (BREACH) nor text/event-stream, which a compressor would
+      buffer.
+    items:
+      - name: compressDefaults
+        value: |-
+          []string{
+          	"text/plain", "text/css", "text/javascript", "text/csv", "text/xml",
+          	"application/json", "application/javascript", "application/xml",
+          	"image/svg+xml", "application/wasm",
+          }
+    name: compressDefaults
+  - doc: |-
       The pooled connection wrapper must still satisfy the port it is handed to
       handlers as; a drift here is silent until a handler calls the missing method.
+      A handler's io.Copy finds the socket's own copy through ReaderFrom and
+      WriterTo, and the standard library's concrete assertions through Unwrap (#970).
+    grouped: true
     items:
       - name: _
         type: corenet.Conn
         value: (*conn)(nil)
+      - name: _
+        type: io.ReaderFrom
+        value: (*conn)(nil)
+      - name: _
+        type: io.WriterTo
+        value: (*conn)(nil)
+      - name: _
+        type: corenet.ConnUnwrapper
+        value: (*conn)(nil)
+      - name: _
+        type: corenet.ConnUnwrapper
+        value: (*trackedConn)(nil)
+      - name: _
+        type: io.WriterTo
+        value: (*trackedConn)(nil)
     name: _#2
+  - doc: |-
+      netHTTPFrameErrors are the frame layer's error names net/http reports with
+      no code, by the code its frame parser answers with: a wrong length is
+      FRAME_SIZE_ERROR, a window past 2^31-1 FLOW_CONTROL_ERROR; any other
+      frame_ name is a PROTOCOL_ERROR.
+    items:
+      - name: netHTTPFrameErrors
+        value: |-
+          map[string]corehttp2.ErrorType{
+          	"frame_settings_ack_with_length":     corehttp2.ErrorTypeFrameSize,
+          	"frame_settings_mod_6":               corehttp2.ErrorTypeFrameSize,
+          	"frame_ping_length":                  corehttp2.ErrorTypeFrameSize,
+          	"frame_goaway_short":                 corehttp2.ErrorTypeFrameSize,
+          	"frame_windowupdate_bad_len":         corehttp2.ErrorTypeFrameSize,
+          	"frame_priority_bad_length":          corehttp2.ErrorTypeFrameSize,
+          	"frame_priority_update_bad_length":   corehttp2.ErrorTypeFrameSize,
+          	"frame_rststream_bad_len":            corehttp2.ErrorTypeFrameSize,
+          	"frame_data_pad_byte_short":          corehttp2.ErrorTypeFrameSize,
+          	"frame_headers_pad_short":            corehttp2.ErrorTypeFrameSize,
+          	"frame_headers_prio_short":           corehttp2.ErrorTypeFrameSize,
+          	"frame_headers_prio_weight_short":    corehttp2.ErrorTypeFrameSize,
+          	"frame_pushpromise_pad_short":        corehttp2.ErrorTypeFrameSize,
+          	"frame_pushpromise_promiseid_short":  corehttp2.ErrorTypeFrameSize,
+          	"frame_settings_window_size_too_big": corehttp2.ErrorTypeFlowControl,
+          }
+    name: netHTTPFrameErrors
   - grouped: true
     items:
       - doc: |-
@@ -5709,6 +8697,13 @@ vars:
           }
     name: probeNames
   - doc: |-
+      loopMemory reads the cgroup allowance a loop group's slab budget is derived
+      from, without installing a limit (#809); a test replaces it.
+    items:
+      - name: loopMemory
+        value: memlimit.Derive
+    name: loopMemory
+  - doc: |-
       outboundLanes holds every running lane of every server's outbound, by key:
       a PostFunc is a plain function and its argument an integer, so the
       completion op finds its lane here. A key is never given twice, so an op
@@ -5726,11 +8721,26 @@ vars:
         type: atomic.Bool
     name: markRecycled
   - doc: |-
-      alpnHTTP1 is the one protocol the http1 codec's TLS path offers: the
-      profile is HTTP/1.1 only (ADR 0187 §D5).
+      A portable lane is a LoopIO that is also a LoopPeer: a handler finds it by a
+      type assertion.
     items:
-      - name: alpnHTTP1
+      - name: _
+        type: corenet.LoopPeer
+        value: (*portableLoop)(nil)
+    name: _#4
+  - doc: The ALPN lists a TLS codec group offers when Protocols names none.
+    grouped: true
+    items:
+      - doc: |-
+          alpnHTTP1 is the one protocol the http1 codec's TLS path offers: the
+          profile is HTTP/1.1 only (ADR 0187 §D5).
+        name: alpnHTTP1
         value: "[]string{\"http/1.1\"}"
+      - doc: |-
+          alpnBoth is what the h2 adapter's offers: h2 first, as an HTTP
+          group's (ADR 0195 §D1).
+        name: alpnBoth
+        value: "[]string{\"h2\", \"http/1.1\"}"
     name: alpnHTTP1
   - doc: |-
       capabilityRegistry is design/net.yaml's registry, top first.
@@ -5741,6 +8751,7 @@ vars:
           [...]capabilityEntry{
           	{token: corenet.CapabilityIOURing, rank: rankIOURing, switchable: true},
           	{token: corenet.CapabilityEpoll, rank: rankEpoll, switchable: true},
+          	{token: corenet.CapabilityKqueue, rank: rankEpoll, switchable: true},
           	{token: corenet.CapabilityPortable, rank: rankPortable, switchable: false},
           	{token: corenet.CapabilityGoroutine, rank: rankGoroutine, switchable: false},
           	{token: corenet.CapabilityURingMultishotRecv, rank: rankKernel, switchable: true, kernel: true},
@@ -5749,18 +8760,29 @@ vars:
           	{token: corenet.CapabilityURingDirect, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityEpollExclusive, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityTCPNoDelay, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityUDPRxqOvfl, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityUDPPktinfo, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingRecvmsg, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityTCPKeepAlive, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityTCPUserTimeout, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingDeferTaskrun, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingNoSQArray, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingRingFDs, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingSQRewind, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingRecvBundle, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityTCPDeferAccept, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityReuseportLoops, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityLoopAffinity, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilitySOIncomingCPU, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityTCPNotsentLowat, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityHTTP2Loop, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityBusyPoll, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingSendZC, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingBundle, rank: rankKernel, switchable: true, kernel: true},
-          	{token: corenet.CapabilityBusyPoll, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingZCRX, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityReuseportCBPF, rank: rankKernel, switchable: true, kernel: true},
-          	{token: corenet.CapabilityTCPDeferAccept, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingMinTimeout, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityTCPFastOpen, rank: rankKernel, switchable: true, kernel: true},
           }
     name: capabilityRegistry
   - doc: packetNetworks are the datagram families the engine serves.
@@ -5771,3 +8793,34 @@ vars:
           	"udp": {}, "udp4": {}, "udp6": {}, "unixgram": {},
           }
     name: packetNetworks
+  - doc: proxyV2Signature is the v2 header's first twelve bytes.
+    items:
+      - name: proxyV2Signature
+        value: "[12]byte{'\\r', '\\n', '\\r', '\\n', 0, '\\r', '\\n', 'Q', 'U', 'I', 'T', '\\n'}"
+    name: proxyV2Signature
+  - doc: |-
+      steerAttach is the setsockopt attachSteer makes; a test swaps it to answer what
+      a seccomp filter would.
+    items:
+      - name: steerAttach
+        type: func(fd int, program []sockFilter) error
+        value: |-
+          func(fd int, program []sockFilter) error {
+          	//: the kernel reads the program through the pointer inside sock_fprog, so
+          	//: the instructions must stay where they are for the call.
+          	var pin runtime.Pinner
+          	pin.Pin(&program[0])
+          	defer pin.Unpin()
+          	prog := sockFprog{length: uint16(len(program)), filter: &program[0]}
+          	//: SetsockoptString is what every linux arch's setsockopt goes through
+          	//: (socketcall on 386), and copies the bytes of sock_fprog; its pointer
+          	//: inside them is the one pinned above.
+          	bytesOf := unsafe.String((*byte)(unsafe.Pointer(&prog)), unsafe.Sizeof(prog))
+          	if err := syscall.SetsockoptString(fd, syscall.SOL_SOCKET, soAttachReuseportCBPF, bytesOf); err != nil {
+          		//: the kernel's refusal, named on the row.
+          		return errs.Wrap(corenet.ListenFailed, errs.WrapParams{}, errs.String("cause", "setsockopt SO_ATTACH_REUSEPORT_CBPF: "+err.Error()))
+          	}
+          	//: attached.
+          	return nil
+          }
+    name: steerAttach

@@ -13,14 +13,244 @@ constants:
         type: string
         value: "\"bearer\""
     name: bearerScheme
+  - doc: traceFieldName is the field Trace reads, in the case every comparison folds to.
+    items:
+      - name: traceFieldName
+        type: string
+        value: "\"traceparent\""
+    name: traceFieldName
+  - grouped: true
+    items:
+      - doc: statusTooManyRequests answers a request a limiter refused.
+        name: statusTooManyRequests
+        type: int
+        value: "429"
+      - doc: routeKeyLen is the width of a number used as a rate key.
+        name: routeKeyLen
+        type: int
+        value: "8"
+      - doc: byteBits is how many bits a byte holds.
+        name: byteBits
+        type: int
+        value: "8"
+      - doc: |-
+          corsOriginField is the field a browser names its page's origin in;
+          lowercase, as the codec's comparison folds it.
+        name: corsOriginField
+        type: string
+        value: "\"origin\""
+      - doc: corsRequestMethodField asks a preflight's question.
+        name: corsRequestMethodField
+        type: string
+        value: "\"access-control-request-method\""
+      - doc: |-
+          requestIDFieldName is the field RequestID reads, in the case every
+          comparison folds to.
+        name: requestIDFieldName
+        type: string
+        value: "\"x-request-id\""
+      - doc: "mintedIDLen is the length of a minted identifier: a 64-bit number in hex."
+        name: mintedIDLen
+        type: int
+        value: "16"
+      - doc: lowerHex are a minted identifier's digits.
+        name: lowerHex
+        type: string
+        value: "\"0123456789abcdef\""
+      - doc: nibbleBits is how many bits one hexadecimal digit spells.
+        name: nibbleBits
+        type: int
+        value: "4"
+      - doc: nibbleMask keeps one digit's bits.
+        name: nibbleMask
+        type: uint64
+        value: "0xf"
+      - doc: laneShift places the lane above a request's counter (HTTP1RequestValue.ID).
+        name: laneShift
+        type: int
+        value: "48"
+      - doc: counterMask keeps a request's counter below its lane.
+        name: counterMask
+        type: uint64
+        value: 1<<laneShift - 1
+    name: statusTooManyRequests
+  - grouped: true
+    items:
+      - doc: rateKeyNone is the zero RateKey, refused.
+        name: rateKeyNone
+        type: rateKeyKind
+        value: iota
+      - doc: rateKeySubject keys on HTTP1RequestValue.Auth.
+        name: rateKeySubject
+      - doc: rateKeyRoute keys on HTTP1RequestValue.Route.
+        name: rateKeyRoute
+      - doc: rateKeyLane keys on HTTP1RequestValue.Lane.
+        name: rateKeyLane
+      - doc: rateKeyField keys on a request field.
+        name: rateKeyField
+    name: rateKeyNone
+  - grouped: true
+    items:
+      - doc: |-
+          copyChunk is the largest chunk one worker job reads for the copy path:
+          the size a step of the zero-copy path sends too.
+        name: copyChunk
+        type: int64
+        value: 64 << 10
+      - doc: |-
+          copyMinChunk is the smallest chunk: an output ceiling under it would make
+          the copy path write nothing at all.
+        name: copyMinChunk
+        type: int64
+        value: 4 << 10
+      - doc: |-
+          copyStall is how long a chunk the output refused may wait for OnWritable: a
+          client slower than a chunk's worth of drain in this long stops holding the
+          file. Every backend reports a failed write as the connection's end (the
+          portable writer posts it itself since #982), so the timer bounds a slow
+          peer, not a lost event.
+        name: copyStall
+        type: time.Duration
+        value: 10 * time.Second
+    name: copyChunk
+  - doc: The bits of fileBody.flags.
+    grouped: true
+    items:
+      - doc: bodyActive says a file's body is leaving.
+        name: bodyActive
+        type: uint8
+        value: 1 << iota
+      - doc: |-
+          bodyNative says the engine owns the file: OnWritable ends it, and no
+          reader is held here.
+        name: bodyNative
+      - doc: bodyClosing says the connection closes after the file.
+        name: bodyClosing
+      - doc: |-
+          bodyBusy says a chunk is out with the worker, the reader the worker's
+          until it comes back.
+        name: bodyBusy
+      - doc: |-
+          bodyParked says bytes wait in tail for room: what followed a file — the
+          head of another, or the held answers — refused by the output's ceiling,
+          which the file's own last bytes may still fill. OnWritable writes them.
+        name: bodyParked
+      - doc: |-
+          bodyAfter says a file's body has just left: the answers flushed next may
+          find the output still full of it, and are parked rather than refused.
+        name: bodyAfter
+    name: bodyActive
+  - grouped: true
+    items:
+      - doc: |-
+          filesTagBits place a Files link's tag in a job's top bits; the tag sets
+          them, and the rest of the job is the link's own entry index.
+        name: filesTagBits
+        type: uint64
+        value: "48"
+      - doc: filesEntryMask keeps the entry index below the tag.
+        name: filesEntryMask
+        type: uint64
+        value: 1<<filesTagBits - 1
+      - doc: |-
+          filesFieldCap bounds a copied Range, If-None-Match or If-Modified-Since:
+          a longer value is treated as absent, a validator never matched by a
+          fragment of itself and a range never parsed from a truncation.
+        name: filesFieldCap
+        type: int
+        value: "256"
+      - doc: |-
+          filesIndex is the file a directory is served by, the single-page
+          application's shell too, as the static tree's indexName is.
+        name: filesIndex
+        type: string
+        value: "\"index.html\""
+      - doc: filesAllow is the Allow of a 405.
+        name: filesAllow
+        type: string
+        value: "\"GET, HEAD\""
+      - doc: filesOctet is the type a name says nothing of.
+        name: filesOctet
+        type: string
+        value: "\"application/octet-stream\""
+      - doc: httpDate is the layout of Last-Modified and If-Modified-Since.
+        name: httpDate
+        type: string
+        value: "\"Mon, 02 Jan 2006 15:04:05 GMT\""
+      - doc: statusPartial answers one Range.
+        name: statusPartial
+        type: int
+        value: "206"
+      - doc: statusMoved redirects a directory named without its slash.
+        name: statusMoved
+        type: int
+        value: "301"
+      - doc: statusRangeBad answers a Range that cannot be satisfied.
+        name: statusRangeBad
+        type: int
+        value: "416"
+      - doc: statusNotAllowed answers a method the tree does not serve.
+        name: statusNotAllowed
+        type: int
+        value: "405"
+      - doc: statusNotFound answers a name the tree does not hold.
+        name: statusNotFound
+        type: int
+        value: "404"
+      - doc: filesEntries is how many job entries a lane starts with.
+        name: filesEntries
+        type: int
+        value: "8"
+      - doc: nibbleLow keeps the low half of a byte.
+        name: nibbleLow
+        type: byte
+        value: "0x0f"
+      - doc: hexUpper are the digits an escape is spelled with.
+        name: hexUpper
+        type: string
+        value: "\"0123456789ABCDEF\""
+      - doc: |-
+          unreservedSet is RFC 3986's unreserved characters beside the letters
+          and digits.
+        name: unreservedSet
+        type: string
+        value: "\"-_.~\""
+    name: filesTagBits
   - doc: |-
       internalError is the whole answer to a response the writer refused or a
       handler left deferred: a 500 with no body, and the connection closed.
     items:
       - name: internalError
         type: string
-        value: "\"HTTP/1.1 500 Internal Server Error\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n\""
+        value: "\"HTTP/1.1 500 Internal Server Error\\r\\n\" + internalErrorTail"
     name: internalError
+  - doc: internalErrorTail is what follows the status line of that answer.
+    items:
+      - name: internalErrorTail
+        type: string
+        value: "\"Content-Length: 0\\r\\nConnection: close\\r\\n\\r\\n\""
+    name: internalErrorTail
+  - doc: What one turn of OnData decided.
+    grouped: true
+    items:
+      - doc: "stepMore reads on: more of the buffer can be used."
+        name: stepMore
+        type: stepKind
+        value: iota
+      - doc: "stepWait stops: the rest waits in the spill for its next bytes."
+        name: stepWait
+      - doc: "stepClose stops: the connection closes and nothing more is read."
+        name: stepClose
+    name: stepMore
+  - doc: |-
+      minBodyBound is the Content-Length bound a spill with no room beside the head
+      still leaves: a parser's bound of zero means the default, so the smallest
+      bound it can be given is this one, which only a misconfigured SpillCap reaches.
+    items:
+      - name: minBodyBound
+        type: int64
+        value: "1"
+    name: minBodyBound
   - grouped: true
     items:
       - doc: |-
@@ -82,6 +312,10 @@ constants:
         name: knownMaxLen
         type: int
         value: len("transfer-encoding") + 1
+      - doc: "protoMajor is what Parse sets Proto to: the profile's one version."
+        name: protoMajor
+        type: uint8
+        value: "1"
     name: byteValues
   - doc: fieldKind names the fields the profile reads; kindOther is every other one.
     grouped: true
@@ -103,6 +337,32 @@ constants:
       - doc: kindTransferEncoding is Transfer-Encoding.
         name: kindTransferEncoding
     name: kindOther
+  - doc: The bucket table's shape.
+    grouped: true
+    items:
+      - doc: bucketShardsLarge is how many shards a large table is split into.
+        name: bucketShardsLarge
+        type: int
+        value: "64"
+      - doc: |-
+          bucketShardsThreshold is the key count at which a table takes its shards:
+          below it the LRU is one list, exact.
+        name: bucketShardsThreshold
+        type: int
+        value: "8192"
+      - doc: nanosPerSecond is how many nanoseconds a second holds.
+        name: nanosPerSecond
+        type: float64
+        value: float64(time.Second)
+      - doc: fullTable is the fraction of slots an open-addressed index may use.
+        name: indexGrowth
+        type: int
+        value: "2"
+      - doc: noEntry marks an empty index slot and the ends of a shard's LRU list.
+        name: noEntry
+        type: int32
+        value: "-1"
+    name: bucketShardsLarge
   - grouped: true
     items:
       - doc: "RefusalNone is no refusal: the request was framed, or needs more bytes."
@@ -269,6 +529,14 @@ constants:
         name: statusNotModified
         type: int
         value: "304"
+      - doc: statusSwitching is the one interim status the profile sends, for Upgrade.
+        name: statusSwitching
+        type: int
+        value: "101"
+      - doc: statusInternal answers what the writer refused or a handler left deferred.
+        name: statusInternal
+        type: int
+        value: "500"
       - doc: "statusMin is the lowest status the profile sends: no interim response."
         name: statusMin
         type: int
@@ -290,11 +558,15 @@ files:
   - decls:
       - statusUnauthorized
       - bearerScheme
+      - traceFieldName
+      - statusTooManyRequests
+      - rateKeyNone
       - wwwAuthenticate
       - RouteValue
       - route
       - link
       - newLink
+      - (*link).wrapped
       - (*link).endBatch
       - misconfigured
       - Routes
@@ -315,28 +587,187 @@ files:
       - (*HeadersLayer).ServeHTTP1
       - (*HeadersLayer).EndBatch
       - Log
+      - LogOption
+      - LogAllow
+      - LogSlowerThan
+      - LogSample
+      - LogClock
+      - CORS
+      - CORSLayer
+      - (*CORSLayer).ServeHTTP1
+      - (*CORSLayer).EndBatch
+      - logConfig
+      - newLogConfig
       - credential
       - repeated
       - LogLayer
+      - logLane
+      - deferredAccess
       - (*LogLayer).ServeHTTP1
+      - stageOf
+      - (*LogLayer).emit
+      - (*LogLayer).keep
       - (*LogLayer).EndBatch
+      - (*LogLayer).finishBatch
+      - completionStatus
+      - Trace
+      - TraceLayer
+      - (*TraceLayer).ServeHTTP1
+      - (*TraceLayer).EndBatch
+      - RequestIDOption
+      - RequestIDMint
+      - RequestID
+      - RequestIDLayer
+      - (*RequestIDLayer).ServeHTTP1
+      - (*RequestIDLayer).accepted
+      - mintRequestID
+      - (*RequestIDLayer).EndBatch
+      - rateKeyKind
+      - rateLane
+      - RateKey
+      - RateKeySubject
+      - RateKeyRoute
+      - RateKeyLane
+      - RateKeyField
+      - RateOption
+      - rateConfig
+      - RateExempt
+      - RateClock
+      - RateLimit
+      - RateLimitLayer
+      - (*RateLimitLayer).ServeHTTP1
+      - (*RateLimitLayer).keyOf
+      - appendBE
+      - (*RateLimitLayer).EndBatch
+      - (*RateLimitLayer).finishRateBatch
+      - FilesLayer
     name: chain.go
   - decls: []
     name: doc.go
   - decls:
+      - copyChunk
+      - bodyActive
+      - fileBody
+      - (*fileBody).active
+      - (*connFlag).setFile
+      - (*connFlag).clearFile
+      - (*connFlag).fileLeft
+      - (*connFlag).afterFile
+      - fileStart
+      - jobCanceller
+      - findCanceller
+      - (*LoopHandler).cancelJob
+      - closeFileReader
+      - (*LoopHandler).startFile
+      - (*LoopHandler).startNative
+      - (*LoopHandler).startCopy
+      - (*LoopHandler).copyNext
+      - slotCopy
+      - (*LoopHandler).chunk
+      - workCopy
+      - (*LoopHandler).copyDone
+      - (*LoopHandler).writeChunk
+      - (*LoopHandler).endCopy
+      - (*LoopHandler).fileWritable
+      - (*LoopHandler).retryCopies
+      - closedFile
+      - (*LoopHandler).park
+      - (*LoopHandler).unpark
+    name: file_body.go
+  - decls:
+      - filesTagBits
+      - methodGet
+      - Files
+      - filesBase
+      - filesAllowField
+      - fileJob
+      - filesLane
+      - (*FilesLayer).ServeHTTP1
+      - (*FilesLayer).EndBatch
+      - (*fileJob).fill
+      - copyField
+      - appendDecoded
+      - unhex
+      - (*FilesLayer).laneOf
+      - (*FilesLayer).growLane
+      - (*filesLane).take
+      - (*filesLane).put
+      - (*filesLane).grow
+      - (*FilesLayer).CancelJob
+      - (*FilesLayer).WorkHTTP1
+      - (*FilesLayer).resolve
+      - (*FilesLayer).resolveFound
+      - (*FilesLayer).resolveAbsent
+      - (*FilesLayer).spaRoute
+      - treeFile
+      - (*FilesLayer).openName
+      - checkLinks
+      - sameFile
+      - filesLookupErr
+      - (*FilesLayer).resolveDir
+      - (*FilesLayer).resolveShell
+      - redirectSlash
+      - appendEscaped
+      - unreservedByte
+      - (*FilesLayer).fileAnswer
+      - readerOf
+      - sequentialFile
+      - (*sequentialFile).ReadAt
+      - (*sequentialFile).Close
+      - (*FilesLayer).appendCommon
+      - contentTypeOf
+      - pinnedType
+      - appendETag
+      - (*fileJob).notModified
+      - etagListed
+      - parseRange
+      - suffixRange
+      - fromRange
+      - parseOffset
+      - appendContentRange
+      - cleanName
+      - closeTreeFile
+    name: files.go
+  - decls:
+      - _
+    name: files_compliance.go
+  - decls:
+      - laneTable
+      - (*laneTable).get
+      - (*laneTable).grow
+    name: lanes.go
+  - decls:
       - internalError
+      - internalErrorTail
+      - stepMore
       - HandleLoop
+      - newLoopHandler
+      - findStreamer
+      - findWorker
+      - strayFile
+      - (*connFlag).holds
+      - stepKind
+      - connMode
       - LoopHandler
       - loopState
+      - dataCall
       - item
       - connFlag
       - (*LoopHandler).OnOpen
+      - (*connFlag).endInput
       - (*connFlag).reset
       - (*LoopHandler).OnData
+      - (*LoopHandler).step
       - (*LoopHandler).serve
       - (*LoopHandler).OnTimeout
+      - (*LoopHandler).timeout
       - (*LoopHandler).OnWritable
+      - (*LoopHandler).writable
       - (*LoopHandler).OnBatchEnd
+      - (*loopState).endServed
+      - (*loopState).idle
+      - (*LoopHandler).MarkServed
+      - (*LoopHandler).HTTPCounts
       - (*LoopHandler).Unwrap
       - (*LoopHandler).OnStart
       - (*LoopHandler).OnClose
@@ -352,9 +783,17 @@ files:
       - swallowErr
     name: loop.go
   - decls:
+      - minBodyBound
+      - (*LoopHandler).CheckSpill
+      - (*LoopHandler).openBody
+      - (*LoopHandler).feedBody
+      - (*LoopHandler).abortBody
+    name: loop_body.go
+  - decls:
       - statusUnavailable
       - retryAfter
       - pendSlot
+      - copyJob
       - heldItem
       - pendingWorker
       - pendingWorker.Work
@@ -377,8 +816,9 @@ files:
       - (*loopState).completeHeld
       - (*loopState).completeConn
       - appendHeld
-      - (*loopState).flushReady
-      - (*loopState).flushHeld
+      - (*LoopHandler).flushReady
+      - (*LoopHandler).flushHeld
+      - (*LoopHandler).writeAfterFile
       - (*connFlag).compact
       - heldItem.ready
       - (*loopState).appendItem
@@ -431,6 +871,25 @@ files:
       - foldIs
     name: parse.go
   - decls:
+      - bucketShardsLarge
+      - KeyedBucketsValue
+      - KeyedBuckets
+      - bucketShard
+      - bucketEntry
+      - NewKeyedBuckets
+      - (*bucketShard).init
+      - (*KeyedBuckets).Allow
+      - ceilToInt
+      - (*bucketShard).lookup
+      - (*bucketShard).touch
+      - (*bucketShard).link
+      - (*bucketShard).unlink
+      - (*bucketShard).evictTail
+      - (*bucketShard).moveEntry
+      - (*bucketShard).removeIndex
+      - (*bucketShard).movable
+    name: ratelimit.go
+  - decls:
       - RefusalNone
       - refusalCount
       - statusBadRequest
@@ -441,10 +900,16 @@ files:
       - Refusal.Err
     name: refusal.go
   - decls:
+      - (*LoopHandler).openStream
+      - (*LoopHandler).feedUpgraded
+      - (*LoopHandler).announceStreams
+      - (*LoopHandler).OnDrain
+    name: stream.go
+  - decls:
       - schemeHTTP
       - hexDigits
       - hexTable
-      - canonical
+      - Canonical
       - absoluteForm
       - cutScheme
       - authorityIsHost
@@ -466,8 +931,15 @@ files:
       - fieldText
       - owned
       - AppendResponse
+      - appendUpgrade
+      - refusedBody
+      - bodyLength
+      - appendLinkFields
       - appendFraming
       - AppendRefusal
+      - appendInternalError
+      - appendRequestID
+      - appendRetryAfter
     name: write.go
 functions:
   - doc: newLink finds next's batcher once, never per batch.
@@ -512,8 +984,27 @@ functions:
     params: pairs ...string
     results: corenet.Middleware[corenet.HTTP1Handler], error
   - name: Log
-    params: l corenet.HTTP1AccessLogger, allow ...string
+    params: l corenet.HTTP1AccessLogger, opts ...LogOption
     results: corenet.Middleware[corenet.HTTP1Handler], error
+  - name: LogAllow
+    params: names ...string
+    results: LogOption
+  - name: LogSlowerThan
+    params: d time.Duration
+    results: LogOption
+  - name: LogSample
+    params: n int
+    results: LogOption
+  - name: LogClock
+    params: c clock.Clock
+    results: LogOption
+  - name: CORS
+    params: cfg corenet.CORSValue
+    results: corenet.Middleware[corenet.HTTP1Handler], error
+  - doc: newLogConfig folds and checks opts.
+    name: newLogConfig
+    params: opts []LogOption
+    results: "*logConfig, error"
   - doc: credential reports whether name is a field Log never records.
     name: credential
     params: name string
@@ -522,9 +1013,237 @@ functions:
     name: repeated
     params: name string, before []string
     results: bool
+  - doc: stageOf names what a record says about the answer res holds.
+    name: stageOf
+    params: res *corenet.HTTP1ResponseValue
+    results: corenet.HTTP1AccessStage
+  - doc: |-
+      completionStatus is the status a deferred answer leaves with: the 500 the
+      adapter writes for one left deferred, or the handler's, zero meaning 200.
+    name: completionStatus
+    params: res *corenet.HTTP1ResponseValue
+    results: int
+  - name: Trace
+    results: corenet.Middleware[corenet.HTTP1Handler]
+  - name: RequestIDMint
+    results: RequestIDOption
+  - name: RequestID
+    params: opts ...RequestIDOption
+    results: corenet.Middleware[corenet.HTTP1Handler]
+  - doc: |-
+      mintRequestID writes req.ID as sixteen lowercase hexadecimal digits into
+      req.RequestID, the digits of the value being the only input: no clock, no
+      randomness, nothing shared between lanes.
+    name: mintRequestID
+    params: req *corenet.HTTP1RequestValue
+  - name: RateKeySubject
+    results: RateKey
+  - name: RateKeyRoute
+    results: RateKey
+  - name: RateKeyLane
+    results: RateKey
+  - name: RateKeyField
+    params: name string
+    results: RateKey
+  - name: RateExempt
+    params: ids ...int
+    results: RateOption
+  - name: RateClock
+    params: c clock.Clock
+    results: RateOption
+  - name: RateLimit
+    params: l corenet.HTTP1Limiter, key RateKey, opts ...RateOption
+    results: corenet.Middleware[corenet.HTTP1Handler], error
+  - doc: appendBE writes v big-endian into buf and returns it as a slice.
+    name: appendBE
+    params: buf *[routeKeyLen]byte, v uint64
+    results: "[]byte"
+  - doc: |-
+      findCanceller walks the chain down to the first link that holds job entries.
+
+      IFACE-OPAQUE: an internal capability of a chain link, found by the walk,
+      returned as the type it is tested for.
+    name: findCanceller
+    params: h corenet.HTTP1Handler
+    results: jobCanceller
+  - doc: |-
+      closeFileReader closes r when it can be closed, on every path a file's
+      answer ends; closing a nil reader changes nothing.
+    name: closeFileReader
+    params: r io.ReaderAt
+  - doc: |-
+      slotCopy returns slot's chunk job, its buffer of the chunk size kept from an
+      earlier one.
+    name: slotCopy
+    params: slot *pendSlot, chunk int64
+    results: "*copyJob"
+  - doc: |-
+      workCopy reads one chunk, on the lane's worker. A connection gone meanwhile
+      costs nothing but this read: OnDone gives the slot back.
+    name: workCopy
+    params: slot *pendSlot
+  - doc: |-
+      closedFile gives up a file still leaving when its connection closed: a chunk
+      out with the worker is dropped at its completion, anything else closes now; a
+      native file is the engine's.
+    name: closedFile
+    params: f *connFlag, st *loopState
+  - name: Files
+    params: route int, fsys fs.FS, cfg static.Config
+    results: corenet.Middleware[corenet.HTTP1Handler], error
+  - doc: |-
+      filesBase renders the fields every answer of the tree carries: the static
+      tree's policies, validated by its constructor, no control character in them.
+    name: filesBase
+    params: cfg static.Config
+    results: "[]byte"
+  - doc: filesAllowField is base with the Allow of a 405.
+    name: filesAllowField
+    params: base []byte
+    results: "[]byte"
+  - doc: |-
+      copyField appends the value of the named field to dst when it is present
+      and within the cap, else leaves dst empty.
+    name: copyField
+    params: dst []byte, req *corenet.HTTP1RequestValue, name string
+    results: "[]byte"
+  - doc: |-
+      appendDecoded appends p, percent-decoded, to dst: the codec has already
+      refused every escape of '/', '.', '\' and NUL and every malformed one.
+    name: appendDecoded
+    params: dst, p []byte
+    results: "[]byte"
+  - doc: unhex is a hexadecimal digit's value.
+    name: unhex
+    params: c byte
+    results: byte
+  - doc: |-
+      checkLinks lstats every element of name, without following, and refuses a
+      link (in or out of the root: the rule is the same) and anything but a
+      regular file or a directory, before any open that would follow or block.
+    name: checkLinks
+    params: lfs fs.ReadLinkFS, name string
+    results: error
+  - doc: |-
+      sameFile compares two infos of the same name by their sizes, modification
+      times and types: enough to catch a file swapped between check and open, the
+      os.SameFile identity being refused to a tree that may be embed.FS.
+    name: sameFile
+    params: a, b fs.FileInfo
+    results: bool
+  - doc: |-
+      filesLookupErr maps a failed lookup: a name the file system refuses is
+      absent, as the static tree's own rule has it, anything else the tree's.
+    name: filesLookupErr
+    params: err error
+    results: error
+  - doc: |-
+      redirectSlash sends a directory named without its slash to the name with
+      one, as the static tree does: the Location starts with "./" and is one
+      escaped segment, so no directory name reads as another host.
+    name: redirectSlash
+    params: res *corenet.HTTP1ResponseValue, name string
+  - doc: |-
+      appendEscaped appends the bytes of s, percent-encoded but for a path
+      segment's unreserved characters, as url.PathEscape does for a segment.
+    name: appendEscaped
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: unreservedByte reports a letter, a digit or an unreserved punctuation mark.
+    name: unreservedByte
+    params: c byte
+    results: bool
+  - doc: readerOf gives the file as an io.ReaderAt, seekable or sequential.
+    name: readerOf
+    params: f fs.File
+    results: io.ReaderAt, bool
+  - doc: |-
+      contentTypeOf is the type of name: the pinned ones, then the host's table,
+      else the type that promises nothing — nosniff means a browser will not guess.
+    name: contentTypeOf
+    params: name string
+    results: string
+  - doc: |-
+      pinnedType returns the Content-Type of the extensions a page cannot run
+      without, the same on every host — the static tree's table, copied here
+      because it is unexported there: a later change should share one table.
+    name: pinnedType
+    params: extension string
+    results: contentType string, pinned bool
+  - doc: |-
+      appendETag appends the file's weak validator, from what stat says of it:
+      its size and modification time, in hexadecimal.
+    name: appendETag
+    params: dst []byte, info fs.FileInfo
+    results: "[]byte"
+  - doc: |-
+      etagListed reports whether etag is in the comma-separated list, compared
+      weakly: a W/ prefix on either side changes nothing.
+    name: etagListed
+    params: list, etag []byte
+    results: bool
+  - doc: |-
+      parseRange reads one "bytes=first-last", "bytes=first-" or "bytes=-suffix"
+      over a file of size bytes and returns the range and its status: 206, 200
+      for another unit or several ranges, which a server may ignore (RFC 9110
+      §14.2), or 416 for one malformed or past the end.
+    name: parseRange
+    params: spec []byte, size int64
+    results: off, n int64, status int
+  - doc: |-
+      suffixRange is the last v bytes of a file of size bytes: 416 for a suffix of
+      nothing, an empty file, or not a number.
+    name: suffixRange
+    params: last []byte, size int64
+    results: off, n int64, status int
+  - doc: fromRange reads "first-" or "first-last" over a file of size bytes.
+    name: fromRange
+    params: first, last []byte, size int64
+    results: off, n int64, status int
+  - doc: parseOffset reads a run of decimal digits, refusing one past int64.
+    name: parseOffset
+    params: b []byte
+    results: int64, bool
+  - doc: appendContentRange appends a 206's Content-Range field.
+    name: appendContentRange
+    params: dst []byte, off, n, size int64
+    results: "[]byte"
+  - doc: |-
+      cleanName turns the decoded path under the route into a name of the tree,
+      rooted so no ".." survives, made relative as io/fs requires; a name io/fs
+      could not hold (invalid UTF-8) is left for the file system to refuse.
+    name: cleanName
+    params: p string
+    results: string
+  - doc: closeTreeFile closes an opened file the answer does not keep.
+    name: closeTreeFile
+    params: f fs.File
   - name: HandleLoop
     params: h corenet.HTTP1Handler, p Parser
     results: "*LoopHandler"
+  - doc: newLoopHandler finds h's optional capabilities once, never per batch.
+    name: newLoopHandler
+    params: h corenet.HTTP1Handler, p Parser
+    results: "*LoopHandler"
+  - doc: |-
+      findStreamer walks a chain of links down to the handler that speaks the
+      stream port, so a stream may run behind Routes, Bearer or Log. The chain was
+      built once, here it is read once.
+    name: findStreamer
+    params: h corenet.HTTP1Handler
+    results: corenet.HTTP1Streamer
+  - doc: |-
+      findWorker walks a chain of links down to the handler that takes a pending
+      answer's job, so a Files link or a worker sits behind Routes, Bearer or Log.
+    name: findWorker
+    params: h corenet.HTTP1Handler
+    results: corenet.HTTP1Worker
+  - doc: |-
+      strayFile answers a file set outside a worker's answer: a 500, its reader
+      closed, the connection closing. Only a worker's answer may hold one.
+    name: strayFile
+    params: res *corenet.HTTP1ResponseValue, closing bool
+    results: bool
   - doc: |-
       swallowErr intentionally discards a non-actionable error, recording the
       discard so the error audit treats it as deliberate: the adapter has no
@@ -542,7 +1261,7 @@ functions:
       is a 500 that closes it.
     name: appendHeld
     params: dst []byte, stub *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue, closing bool
-    results: "[]byte, bool"
+    results: appended []byte, closes, refused bool
   - doc: "tokenTable builds the tchar table: the alphanumerics and fifteen symbols."
     name: tokenTable
     results: "[byteValues]bool"
@@ -741,20 +1460,17 @@ functions:
     params: b T, lit string
     results: bool
     typeParams: T ~string | ~[]byte
+  - name: NewKeyedBuckets
+    params: cfg KeyedBucketsValue
+    results: "*KeyedBuckets, error"
+  - doc: ceilToInt rounds up a positive count of seconds.
+    name: ceilToInt
+    params: v float64
+    results: int
   - doc: hexTable builds hexDigits.
     name: hexTable
     results: "[byteValues]byte"
-  - doc: |-
-      canonical computes req.Path and req.Query from req.Target once the head is
-      whole, since an absolute-form target is judged against the Host field. It
-      refuses a target two readers could resolve to two resources: a dot-segment,
-      an empty segment, a backslash, an invalid escape, an encoded slash, dot,
-      backslash or NUL (RefusalTargetPath); a form the profile does not serve
-      (RefusalTargetForm); an absolute-form authority that is not the Host's
-      (RefusalTargetHost). Nothing is decoded and nothing allocates: both slices
-      alias the target, never a package value, so a link that writes into
-      req.Path writes into this request's bytes only.
-    name: canonical
+  - name: Canonical
     params: req *corenet.HTTP1RequestValue
     results: Refusal
   - doc: |-
@@ -836,23 +1552,75 @@ functions:
     params: dst []byte, req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue, closing bool
     results: "[]byte, error"
   - doc: |-
+      appendUpgrade appends a 101: the status line and Connection: Upgrade, then the
+      protocol's own fields, which the handler wrote into Header.
+    name: appendUpgrade
+    params: dst []byte, res *corenet.HTTP1ResponseValue
+    results: "[]byte, error"
+  - doc: |-
+      refusedBody reports a response the status or the method cannot carry: a body
+      on a 204 or 304, or a Stream of a HEAD or of a 204 or 304.
+    name: refusedBody
+    params: res *corenet.HTTP1ResponseValue, req *corenet.HTTP1RequestValue, bodiless bool
+    results: bool
+  - doc: |-
+      bodyLength is the answer's Content-Length: the file's when the body is one,
+      else the Body's.
+    name: bodyLength
+    params: res *corenet.HTTP1ResponseValue
+    results: int64
+  - doc: |-
+      appendLinkFields appends what the chain's links left the codec to write: the
+      CORS fields, a refusal's delay and the request's identifier, in that order.
+    name: appendLinkFields
+    params: dst []byte, res *corenet.HTTP1ResponseValue
+    results: "[]byte"
+  - doc: |-
       appendFraming appends Content-Length unless the status forbids it,
       Connection: close when asked, and the blank line that ends the head.
     name: appendFraming
-    params: dst []byte, n int, bodiless, closing bool
+    params: dst []byte, n int64, bodiless, closing bool
     results: "[]byte"
   - name: AppendRefusal
     params: dst []byte, r Refusal
     results: "[]byte"
+  - doc: |-
+      appendInternalError appends the whole answer to a response the writer refused
+      or a handler left deferred: a 500 with no body, the connection closed, and
+      the request's identifier when a link gave it one, so even this answer can be
+      joined to its access record.
+    name: appendInternalError
+    params: dst []byte, res *corenet.HTTP1ResponseValue
+    results: "[]byte"
+  - doc: appendRequestID appends the X-Request-Id field line of id.
+    name: appendRequestID
+    params: dst, id []byte
+    results: "[]byte"
+  - doc: appendRetryAfter appends the Retry-After field line of seconds.
+    name: appendRetryAfter
+    params: dst []byte, seconds int
+    results: "[]byte"
 imports:
   atomic: sync/atomic
   bytes: bytes
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
   corenet: github.com/kitsunium/sdk/internal/core/net
+  coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
+  errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fs: io/fs
+  io: io
+  maphash: hash/maphash
+  mime: mime
+  path: path
   slices: slices
+  static: github.com/kitsunium/sdk/internal/service/net/static
   strconv: strconv
+  strings: strings
   swar: github.com/kitsunium/sdk/internal/kernel/swar
   sync: sync
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/net/http1
@@ -907,6 +1675,12 @@ types:
         type: corenet.HTTP1Batcher
     kind: struct
     methods:
+      - doc: |-
+          wrapped returns the handler the link wraps, so the adapter can reach what a
+          chain ends in.
+        name: wrapped
+        recv: l *link
+        results: corenet.HTTP1Handler
       - doc: endBatch ends the next handler's batch when it is a batcher.
         name: endBatch
         params: lane int
@@ -969,27 +1743,560 @@ types:
         recv: l *HeadersLayer
     name: HeadersLayer
   - fields:
+      - doc: apply folds the option into the link's configuration, or refuses it.
+        name: apply
+        type: func(*logConfig) error
+    kind: struct
+    name: LogOption
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+      - doc: policy is the built cross-origin policy.
+        name: policy
+        type: "*corenet.CORSPolicy"
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *CORSLayer
+      - name: EndBatch
+        params: lane int
+        recv: l *CORSLayer
+    name: CORSLayer
+  - doc: logConfig is every option of a link, checked.
+    fields:
+      - doc: allow are the field names a record carries, as given; names their bytes.
+        name: allow
+        type: "[]string"
+      - name: names
+        type: "[][]byte"
+      - doc: slower is the slow threshold, zero when unset.
+        name: slower
+        type: time.Duration
+      - doc: sample keeps one record in sample, zero when unset.
+        name: sample
+        type: uint64
+      - doc: clk is the clock read.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    name: logConfig
+  - fields:
       - name: ""
         role: embedded
         type: link
       - doc: l receives the records.
         name: l
         type: corenet.HTTP1AccessLogger
-      - doc: allow are the field names a record carries, as given.
-        name: allow
-        type: "[]string"
-      - doc: names are allow's bytes, a record's field names.
-        name: names
-        type: "[][]byte"
+      - doc: cfg holds the link's options, read only.
+        name: cfg
+        type: "*logConfig"
+      - doc: lanes holds each lane's batch stamp and deferred records.
+        name: lanes
+        type: laneTable[logLane]
     kind: struct
     methods:
       - name: ServeHTTP1
         params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
         recv: l *LogLayer
+      - doc: emit hands rec to the logger when the link's filters keep it.
+        name: emit
+        params: rec *corenet.HTTP1AccessValue
+        recv: l *LogLayer
+      - doc: |-
+          keep reports whether a record passes the link's filters: every slow one, and
+          one in n of the rest; with neither filter, every record.
+        name: keep
+        params: rec *corenet.HTTP1AccessValue
+        recv: l *LogLayer
+        results: bool
       - name: EndBatch
         params: lane int
         recv: l *LogLayer
+      - doc: |-
+          finishBatch ends the next handler's batch, then writes the batch's deferred
+          answers their completion records and forgets its stamp.
+        name: finishBatch
+        params: lane int
+        recv: l *LogLayer
     name: LogLayer
+  - doc: logLane is what the link keeps per lane, between the requests of a batch.
+    fields:
+      - doc: start is when the batch's first request reached the link.
+        name: start
+        type: time.Time
+      - doc: started says whether start is this batch's.
+        name: started
+        type: bool
+      - doc: deferred are the batch's deferred answers still to complete.
+        name: deferred
+        type: "[]deferredAccess"
+    kind: struct
+    name: logLane
+  - doc: deferredAccess is a deferred answer's first record, kept for its second.
+    fields:
+      - doc: "rec is the first record: its slices live until the batch's end."
+        name: rec
+        type: corenet.HTTP1AccessValue
+      - doc: at is when the answer was deferred.
+        name: at
+        type: time.Time
+      - doc: res is the deferred answer, valid until EndBatch returns.
+        name: res
+        type: "*corenet.HTTP1ResponseValue"
+    kind: struct
+    name: deferredAccess
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *TraceLayer
+      - name: EndBatch
+        params: lane int
+        recv: l *TraceLayer
+    name: TraceLayer
+  - fields:
+      - doc: mint makes the link mint every identifier.
+        name: mint
+        type: bool
+    kind: struct
+    name: RequestIDOption
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+      - doc: mint makes the layer ignore the client's identifier.
+        name: mint
+        type: bool
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *RequestIDLayer
+      - doc: |-
+          accepted copies the client's identifier into req, and reports whether there
+          was one the link may keep.
+        name: accepted
+        params: req *corenet.HTTP1RequestValue
+        recv: l *RequestIDLayer
+        results: bool
+      - name: EndBatch
+        params: lane int
+        recv: l *RequestIDLayer
+    name: RequestIDLayer
+  - doc: rateKeyKind names what a RateKey keys on.
+    kind: named
+    name: rateKeyKind
+    underlying: uint8
+  - doc: rateLane is what RateLimit keeps per lane.
+    fields:
+      - doc: |-
+          key is the scratch a route's or a lane's key is written into, in the state
+          so its slice costs nothing on the interface call.
+        name: key
+        type: "[routeKeyLen]byte"
+      - doc: now is the clock's reading of this batch, in nanoseconds since the epoch.
+        name: now
+        type: int64
+      - doc: fresh says whether now is this batch's.
+        name: fresh
+        type: bool
+    kind: struct
+    name: rateLane
+  - fields:
+      - doc: kind is the kind of key, zero for none.
+        name: kind
+        type: rateKeyKind
+      - doc: field is the request field RateKeyField names.
+        name: field
+        type: string
+    kind: struct
+    name: RateKey
+  - fields:
+      - doc: apply folds the option into the link's configuration, or refuses it.
+        name: apply
+        type: func(*rateConfig) error
+    kind: struct
+    name: RateOption
+  - doc: rateConfig is every option of a RateLimit link, checked.
+    fields:
+      - doc: exempt are the routes never judged.
+        name: exempt
+        type: "[]int"
+      - doc: clk is the clock read once per batch.
+        name: clk
+        type: clock.Clock
+    kind: struct
+    name: rateConfig
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+      - doc: l decides.
+        name: l
+        type: corenet.HTTP1Limiter
+      - doc: key says what a request is keyed on.
+        name: key
+        type: RateKey
+      - doc: cfg holds the link's options, read only.
+        name: cfg
+        type: "*rateConfig"
+      - doc: "epoch is the link's zero instant: now is a monotonic count from it."
+        name: epoch
+        type: time.Time
+      - doc: lanes holds each lane's batch stamp and scratch.
+        name: lanes
+        type: laneTable[rateLane]
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *RateLimitLayer
+      - doc: |-
+          keyOf returns the bytes req is keyed on: a subject's or a field's own bytes, or
+          the lane's scratch for a number.
+        name: keyOf
+        params: req *corenet.HTTP1RequestValue, lane *rateLane
+        recv: l *RateLimitLayer
+        results: "[]byte"
+      - name: EndBatch
+        params: lane int
+        recv: l *RateLimitLayer
+      - doc: finishRateBatch ends the next handler's batch and forgets the batch's stamp.
+        name: finishRateBatch
+        params: lane int
+        recv: l *RateLimitLayer
+    name: RateLimitLayer
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+      - doc: route is the route it serves; tag its jobs' top bits.
+        name: route
+        type: int
+      - name: tag
+        type: uint64
+      - doc: fsys is the tree.
+        name: fsys
+        type: fs.FS
+      - doc: immutable and spa are the static tree's policies.
+        name: immutable
+        type: func(name string) bool
+      - name: spa
+        type: bool
+      - doc: base holds every answer's fields; allow base and a 405's.
+        name: base
+        type: "[]byte"
+      - name: allow
+        type: "[]byte"
+      - doc: |-
+          nextWorker and nextCanceller are what the handler behind it answers
+          jobs with, nil when it does not.
+        name: nextWorker
+        type: corenet.HTTP1Worker
+      - name: nextCanceller
+        type: jobCanceller
+      - doc: |-
+          lanes holds each lane's job table, built on its first request, replaced
+          and never written in place under mu; a lane reads it without the lock.
+        name: lanes
+        type: atomic.Pointer[[]*filesLane]
+      - name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *FilesLayer
+      - name: EndBatch
+        params: lane int
+        recv: l *FilesLayer
+      - doc: laneOf returns lane i's table, built on its first request.
+        name: laneOf
+        params: i int
+        recv: l *FilesLayer
+        results: "*filesLane"
+      - doc: growLane builds lane i's table and publishes a list that holds it.
+        name: growLane
+        params: i int
+        recv: l *FilesLayer
+        results: "*filesLane"
+      - name: CancelJob
+        params: lane int, job uint64
+        recv: l *FilesLayer
+      - name: WorkHTTP1
+        params: lane int, job uint64, res *corenet.HTTP1ResponseValue
+        recv: l *FilesLayer
+      - doc: |-
+          resolve fills res with what j's name is: a file, a directory's index, a
+          redirect, or nothing. Every failure says as little as the status can.
+        name: resolve
+        params: j *fileJob, res *corenet.HTTP1ResponseValue
+        recv: l *FilesLayer
+      - doc: |-
+          resolveFound answers a name that opened: a directory, a regular file, or
+          anything else, which is 404.
+        name: resolveFound
+        params: j *fileJob, res *corenet.HTTP1ResponseValue, name string, h treeFile
+        recv: l *FilesLayer
+      - doc: |-
+          resolveAbsent answers a name that did not open: the shell of a single-page
+          application's route, a 404, or the tree's own failure.
+        name: resolveAbsent
+        params: j *fileJob, res *corenet.HTTP1ResponseValue, name string, h treeFile
+        recv: l *FilesLayer
+      - doc: |-
+          spaRoute reports whether name, naming nothing, is a route of a single-page
+          application: a missing asset — anything with an extension — stays a 404.
+        name: spaRoute
+        params: name string
+        recv: l *FilesLayer
+        results: bool
+      - doc: |-
+          openName opens name in the tree, confined: a tree that can name its links
+          has every prefix of the name checked first, so a planted link inside the
+          root cannot lead anywhere, the final file re-checked against what the open
+          returned. A file that is not a regular one or a directory is refused before
+          any open, which on a FIFO would block the worker.
+        name: openName
+        params: name string
+        recv: l *FilesLayer
+        results: treeFile
+      - doc: |-
+          resolveDir serves a directory by its index.html: redirecting first to the
+          name with a trailing slash, so its page's relative links resolve inside it.
+          A directory with no index answers 404, never a listing.
+        name: resolveDir
+        params: j *fileJob, res *corenet.HTTP1ResponseValue, name string
+        recv: l *FilesLayer
+      - doc: resolveShell answers the single-page application's shell for a route.
+        name: resolveShell
+        params: j *fileJob, res *corenet.HTTP1ResponseValue
+        recv: l *FilesLayer
+      - doc: |-
+          fileAnswer writes h's response: the policies, the validators, 304 when they
+          match, 206 for one Range, 416 for an impossible one, else the whole file.
+        name: fileAnswer
+        params: j *fileJob, res *corenet.HTTP1ResponseValue, name string, h treeFile
+        recv: l *FilesLayer
+      - doc: |-
+          appendCommon appends the fields of the answer: Cache-Control, Content-Type,
+          Last-Modified, the validator and Accept-Ranges.
+        name: appendCommon
+        params: dst []byte, name string, info fs.FileInfo, etag []byte
+        recv: l *FilesLayer
+        results: "[]byte"
+    name: FilesLayer
+  - doc: |-
+      fileBody is a file answer whose body is still leaving: the connection's held
+      answers wait behind it. On the native path it is only its flags; on the
+      copy path it is the file the worker reads and the chunk the output refused.
+    fields:
+      - doc: flags holds the bodyActive, bodyNative, bodyClosing and bodyBusy bits.
+        name: flags
+        type: uint8
+      - doc: r reads the file; off is the next byte and left the bytes still to send.
+        name: r
+        type: io.ReaderAt
+      - name: "off"
+        type: int64
+      - name: left
+        type: int64
+      - doc: |-
+          slot holds a chunk the output refused, waiting for OnWritable; nil when
+          none.
+        name: slot
+        type: "*pendSlot"
+      - doc: |-
+          tail holds the parked bytes (bodyParked); its backing is kept for the
+          slot's next ones.
+        name: tail
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: |-
+          active reports whether a file's body is still leaving; a slot that never
+          sent a file has none.
+        name: active
+        recv: b *fileBody
+        results: bool
+    name: fileBody
+  - doc: |-
+      fileStart is one file answer about to leave: what startFile, startNative and
+      startCopy are passed.
+    fields:
+      - doc: io and ref are the connection.
+        name: io
+        type: corenet.LoopIO
+      - name: ref
+        type: corenet.LoopConnRef
+      - doc: st is the lane's state, f the connection's flag.
+        name: st
+        type: "*loopState"
+      - name: f
+        type: "*connFlag"
+      - doc: out holds the bytes before the file, the head included.
+        name: out
+        type: "[]byte"
+      - doc: file is the body.
+        name: file
+        type: corenet.HTTP1FileValue
+      - doc: closing says the connection closes after the file.
+        name: closing
+        type: bool
+      - doc: |-
+          parkable says the output may still hold a file that just left: a head
+          it refuses is parked (park), not the connection's end.
+        name: parkable
+        type: bool
+    kind: struct
+    name: fileStart
+  - doc: |-
+      jobCanceller is the internal capability of a link that lends a job an entry
+      of its own: told when the job will never run, so the entry goes back.
+    kind: named
+    name: jobCanceller
+    underlying: |-
+      interface {
+      	// CancelJob gives back the job's entry; the job's bits say whose it is.
+      	CancelJob(lane int, job uint64)
+      }
+  - doc: |-
+      fileJob is what a request hands its worker: every byte the request's answer
+      needs, copied, since the request does not outlive the batch.
+    fields:
+      - doc: name is the decoded path under the route, slash whether it ended in "/".
+        name: name
+        type: "[]byte"
+      - name: slash
+        type: bool
+      - doc: head is whether the method is HEAD.
+        name: head
+        type: bool
+      - doc: |-
+          rangeSpec, ifNoneMatch and ifModifiedSince are the fields' values, each
+          nil when absent or past filesFieldCap.
+        name: rangeSpec
+        type: "[]byte"
+      - doc: |-
+          rangeSpec, ifNoneMatch and ifModifiedSince are the fields' values, each
+          nil when absent or past filesFieldCap.
+        name: ifNoneMatch
+        type: "[]byte"
+      - doc: |-
+          rangeSpec, ifNoneMatch and ifModifiedSince are the fields' values, each
+          nil when absent or past filesFieldCap.
+        name: ifModifiedSince
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: fill copies what the answer needs out of req, whose bytes end with the batch.
+        name: fill
+        params: req *corenet.HTTP1RequestValue
+        recv: j *fileJob
+      - doc: |-
+          notModified reports whether the client's validators say it holds this
+          revision: If-None-Match first, by the weak comparison RFC 9110 §13.1.2
+          requires, and only without one If-Modified-Since, at the second a date holds.
+        name: notModified
+        params: etag []byte, info fs.FileInfo
+        recv: j *fileJob
+        results: bool
+    name: fileJob
+  - doc: |-
+      filesLane is one lane's job table: entries the lane fills and the worker
+      reads, and the free list both sides touch.
+    fields:
+      - doc: table holds the entries, replaced when it grows.
+        name: table
+        type: atomic.Pointer[[]*fileJob]
+      - doc: mu guards free, the worker returning what the lane takes.
+        name: mu
+        type: sync.Mutex
+      - name: free
+        type: "[]uint32"
+    kind: struct
+    methods:
+      - doc: take returns a free job entry, growing the table when none is.
+        name: take
+        recv: fl *filesLane
+        results: uint32, *fileJob
+      - doc: put gives entry idx back, on the worker or the lane's thread.
+        name: put
+        params: idx uint32
+        recv: fl *filesLane
+      - doc: grow doubles the table, the new entries free; mu held, or the lane new.
+        name: grow
+        recv: fl *filesLane
+    name: filesLane
+  - doc: treeFile is an opened name.
+    fields:
+      - name: file
+        type: fs.File
+      - name: info
+        type: fs.FileInfo
+      - name: found
+        type: bool
+      - name: err
+        type: error
+    kind: struct
+    name: treeFile
+  - doc: |-
+      sequentialFile is an fs.File read strictly in order as the copy path needs:
+      every ReadAt continues where the previous stopped.
+    fields:
+      - name: f
+        type: fs.File
+    kind: struct
+    methods:
+      - doc: "ReadAt implements io.ReaderAt, ignoring off: the copy path reads in order."
+        name: ReadAt
+        params: p []byte, _ int64
+        recv: s *sequentialFile
+        results: int, error
+      - doc: Close implements io.Closer.
+        name: Close
+        recv: s *sequentialFile
+        results: error
+    name: sequentialFile
+  - doc: |-
+      laneTable finds a link's state of a lane, built the first time the lane
+      comes, with no lock on any later call: a lane touches only its own entry, and
+      the table of pointers is replaced, never written in place, under mu.
+    fields:
+      - doc: states holds each lane's state at its index.
+        name: states
+        type: atomic.Pointer[[]*T]
+      - doc: mu serialises the first sight of a lane.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: get returns lane i's state, built on the lane's first call.
+        name: get
+        params: i int
+        recv: t *laneTable[T]
+        results: "*T"
+      - doc: grow builds lane i's state and publishes a table that holds it.
+        name: grow
+        params: i int
+        recv: t *laneTable[T]
+        results: "*T"
+    name: laneTable
+    typeParams: T any
+  - doc: stepKind is what one turn of OnData decided.
+    kind: named
+    name: stepKind
+    underlying: uint8
+  - doc: connMode is how a connection's input is ending.
+    kind: named
+    name: connMode
+    underlying: uint8
   - fields:
       - doc: h serves every request.
         name: h
@@ -1002,6 +2309,26 @@ types:
           answer is offloaded to (R3).
         name: worker
         type: corenet.HTTP1Worker
+      - doc: |-
+          upgrader is what an Upgrade answer hands the connection's bytes to; nil
+          when there is none.
+        name: upgrader
+        type: corenet.HTTP1Upgrader
+      - doc: |-
+          streamer is what a Stream answer speaks to: h itself, or the handler a
+          chain of links ends in; nil when there is none.
+        name: streamer
+        type: corenet.HTTP1Streamer
+      - doc: canceller gives back a job no worker will run, nil when no link holds one.
+        name: canceller
+        type: jobCanceller
+      - doc: |-
+          reader is h as an HTTP1BodyReader, nil when it takes bodies whole; aborter
+          is h as an HTTP1BodyAborter.
+        name: reader
+        type: corenet.HTTP1BodyReader
+      - name: aborter
+        type: corenet.HTTP1BodyAborter
       - doc: |-
           holdCap bounds what one connection holds back behind a pending answer:
           the group's OutputCap, given at OnOutbound.
@@ -1020,6 +2347,90 @@ types:
         type: sync.Mutex
     kind: struct
     methods:
+      - doc: |-
+          cancelJob gives back the entry of a job that will not run, when a link holds
+          one.
+        name: cancelJob
+        params: lane int, job uint64
+        recv: a *LoopHandler
+      - doc: |-
+          startFile sends s: by the backend's splice or sendfile when it has
+          LoopFileWriter and the reader a descriptor, else through the copy path.
+        name: startFile
+        params: s *fileStart
+        recv: a *LoopHandler
+      - doc: |-
+          startNative queues the head and the file on the engine and reports true, or
+          false for a refusal the copy path can still answer. The engine holds its own
+          duplicate once WriteFile returned, so the reader closes at once.
+        name: startNative
+        params: s *fileStart, fw corenet.LoopFileWriter, fd int
+        recv: a *LoopHandler
+        results: bool
+      - doc: |-
+          startCopy writes the head and starts the copy path: the file read in chunks
+          on the worker, each written through the output's ceiling.
+        name: startCopy
+        params: s *fileStart
+        recv: a *LoopHandler
+      - doc: |-
+          copyNext sends the next chunk's job to the lane's worker; a queue that is
+          full retries at the batch's end.
+        name: copyNext
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, f *connFlag
+        recv: a *LoopHandler
+      - doc: |-
+          chunk is the copy path's chunk size: at most half of the output ceiling, so
+          a chunk fits with its neighbour, bounded both ways.
+        name: chunk
+        recv: a *LoopHandler
+        results: int64
+      - doc: |-
+          copyDone hands the chunk the worker read to the output, or ends the file: a
+          connection gone closes the file, a short read closes the connection, the
+          declared length no longer honoured.
+        name: copyDone
+        params: io corenet.LoopIO, st *loopState, slot *pendSlot
+        recv: a *LoopHandler
+      - doc: |-
+          writeChunk writes the chunk the slot holds; a refused one stays there until
+          OnWritable, the output's bound doing the back-pressure.
+        name: writeChunk
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, f *connFlag
+        recv: a *LoopHandler
+      - doc: |-
+          endCopy closes the copy path's reader and ends the file: failed, the
+          connection closes with what it has, the short body showing; else the
+          answers behind it go on, or the close the answer asked.
+        name: endCopy
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, f *connFlag, failed bool
+        recv: a *LoopHandler
+      - doc: |-
+          fileWritable is OnWritable for a connection with a file leaving: a native
+          file is done; a copy resumes the chunk the output refused.
+        name: fileWritable
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, f *connFlag
+        recv: a *LoopHandler
+      - doc: retryCopies sends again the chunks a full worker queue refused.
+        name: retryCopies
+        params: io corenet.LoopIO, st *loopState
+        recv: a *LoopHandler
+      - doc: |-
+          park keeps s.out, which the output refused while a file that just left
+          still filled it, until OnWritable: the head of a file (s.file.R set), started
+          then, or the held answers behind the file, the connection closing after
+          them when s.closing says so. Everything behind it waits, as behind a file,
+          and the copy path's stall bounds the wait.
+        name: park
+        params: s *fileStart
+        recv: a *LoopHandler
+      - doc: |-
+          unpark writes what park kept, now that the output has room: a file's head
+          starts the file, the held answers go out and the ones after them follow, or
+          the close they asked comes. Refused again, it waits for the next room.
+        name: unpark
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, f *connFlag
+        recv: a *LoopHandler
       - name: OnOpen
         params: io corenet.LoopIO, ref corenet.LoopConnRef
         recv: a *LoopHandler
@@ -1027,6 +2438,15 @@ types:
         params: io corenet.LoopIO, ref corenet.LoopConnRef, buf []byte
         recv: a *LoopHandler
         results: int
+      - doc: |-
+          step frames, or feeds, at the start of buf, and reports the bytes it took and
+          what to do next: a body still arriving takes the bytes before any next
+          request, and a request is answered once whole, or read as it arrives when the
+          handler takes its body so.
+        name: step
+        params: c dataCall, buf []byte
+        recv: a *LoopHandler
+        results: int, stepKind
       - doc: |-
           serve hands the request framed into st.req to the handler and queues its
           answer, and reports whether the connection closes after it.
@@ -1036,13 +2456,29 @@ types:
         results: bool
       - name: OnTimeout
         params: io corenet.LoopIO, ref corenet.LoopConnRef
-        recv: "*LoopHandler"
+        recv: a *LoopHandler
+      - doc: timeout tells a stream's handler of its deadline, or closes the connection.
+        name: timeout
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: a *LoopHandler
       - name: OnWritable
         params: io corenet.LoopIO, ref corenet.LoopConnRef
-        recv: "*LoopHandler"
+        recv: a *LoopHandler
+      - doc: |-
+          writable resumes a file body once its connection has room or its native send
+          is over.
+        name: writable
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: a *LoopHandler
       - name: OnBatchEnd
         params: io corenet.LoopIO
         recv: a *LoopHandler
+      - name: MarkServed
+        params: lane int
+        recv: a *LoopHandler
+      - name: HTTPCounts
+        recv: a *LoopHandler
+        results: corenet.HTTPCountsValue
       - name: Unwrap
         recv: a *LoopHandler
         results: corenet.HTTP1Handler
@@ -1062,6 +2498,32 @@ types:
         params: i int
         recv: a *LoopHandler
         results: "*loopState"
+      - name: CheckSpill
+        params: spillCap int
+        recv: a *LoopHandler
+        results: error
+      - doc: |-
+          openBody moves a request whose body its handler reads as it arrives aside: the
+          head is copied out of the buffer, which will not outlive this call, and framed
+          again from the copy into the connection's own request value, so req's head
+          stays valid across OnData calls. It returns the head's bytes.
+        name: openBody
+        params: c dataCall, buf []byte
+        recv: a *LoopHandler
+        results: int
+      - doc: |-
+          feedBody gives the body's next bytes to the reader, and serves the request
+          once they are its last. It reports the bytes taken and what to do next.
+        name: feedBody
+        params: c dataCall, buf []byte
+        recv: a *LoopHandler
+        results: int, stepKind
+      - doc: |-
+          abortBody tells a handler that keeps something between chunks that a closing
+          connection's body will not arrive whole.
+        name: abortBody
+        params: f *connFlag, ref corenet.LoopConnRef
+        recv: a *LoopHandler
       - name: Worker
         recv: a *LoopHandler
         results: corenet.LoopWorker
@@ -1094,6 +2556,55 @@ types:
         recv: a *LoopHandler
       - doc: closed gives up the held answers of ref when the flag is still its own.
         name: closed
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, err error
+        recv: a *LoopHandler
+      - doc: |-
+          flushReady writes, for each connection queued, the answers it holds from
+          the first up to the first still out, in one Write, then closes it when one
+          of them asked to.
+        name: flushReady
+        params: io corenet.LoopIO, st *loopState
+        recv: a *LoopHandler
+      - doc: |-
+          flushHeld writes f's ready answers, in order, up to a file body, which it
+          starts behind them; a file still leaving holds everything behind it.
+        name: flushHeld
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, f *connFlag
+        recv: a *LoopHandler
+      - doc: |-
+          writeAfterFile writes s.out, the held answers that follow a file's body (no
+          file of their own): refused by an output the file still fills, they are
+          parked until OnWritable rather than ending the connection; written, the
+          connection closes when they asked.
+        name: writeAfterFile
+        params: s *fileStart
+        recv: a *LoopHandler
+      - doc: |-
+          openStream writes a Stream answer's head into the batch's output and records
+          the connection, or answers 500 when the stream cannot be: a misuse of the
+          response, or no handler that speaks the stream port. It reports whether the
+          connection stops being read, which is always: a stream is the connection's
+          last response.
+        name: openStream
+        params: ref corenet.LoopConnRef, st *loopState, res *corenet.HTTP1ResponseValue
+        recv: a *LoopHandler
+        results: bool
+      - doc: |-
+          feedUpgraded hands the bytes after a 101 to the handler, once the 101 has left
+          the adapter; bytes that came before the head left wait in the spill for the
+          next read, in order, and a client that does not wait for the 101 only delays
+          itself.
+        name: feedUpgraded
+        params: c dataCall, buf []byte
+        recv: a *LoopHandler
+        results: int, stepKind
+      - doc: |-
+          announceStreams tells the handler of each stream the batch opened, now that
+          the head has been written.
+        name: announceStreams
+        params: io corenet.LoopIO, st *loopState
+        recv: a *LoopHandler
+      - name: OnDrain
         params: io corenet.LoopIO, ref corenet.LoopConnRef
         recv: a *LoopHandler
     name: LoopHandler
@@ -1131,6 +2642,26 @@ types:
         name: served
         type: int
       - doc: |-
+          marked counts the requests an embedding adapter served in the batch
+          (MarkServed): the batch ends for them too.
+        name: marked
+        type: int
+      - doc: |-
+          requests counts the lane's requests served since Start, added at each
+          batch's end, read by HTTPCounts from any goroutine.
+        name: requests
+        type: atomic.Uint64
+      - doc: |-
+          opened are the connections whose stream's head this batch wrote: told of
+          their stream once it has left the adapter.
+        name: opened
+        type: "[]corenet.LoopConnRef"
+      - doc: |-
+          count numbers the lane's requests, from one: HTTP1RequestValue.ID's
+          counter.
+        name: count
+        type: uint64
+      - doc: |-
           outbound is the lane's outbound to its worker, nil when nothing
           offloads.
         name: outbound
@@ -1162,6 +2693,11 @@ types:
       - doc: unavailable is the 503 a pending answer refused by a full queue gets.
         name: unavailable
         type: corenet.HTTP1ResponseValue
+      - doc: |-
+          copyRetry are the connections whose copied file's next chunk the worker's
+          full queue refused: sent again at the batch's end.
+        name: copyRetry
+        type: "[]corenet.LoopConnRef"
       - doc: readyEpoch numbers the batches' ready lists, from one.
         name: readyEpoch
         type: uint64
@@ -1177,6 +2713,19 @@ types:
         type: corenet.HTTP1RequestValue
     kind: struct
     methods:
+      - doc: |-
+          endServed counts the batch's own requests into the lane's total, forgets
+          the batch's counts, and reports whether the batch served any request, its
+          own or an embedding adapter's.
+        name: endServed
+        recv: st *loopState
+        results: bool
+      - doc: |-
+          idle reports whether the lane's batch has nothing to end: no answer, no held
+          one ready, nothing served beside it.
+        name: idle
+        recv: st *loopState
+        results: bool
       - doc: |-
           complete writes the batch's answers again into spare, in request order,
           each deferred one in its place, and makes spare the batch's out: the
@@ -1272,24 +2821,31 @@ types:
         params: ref corenet.LoopConnRef, f *connFlag
         recv: st *loopState
       - doc: |-
-          flushReady writes, for each connection queued, the answers it holds from
-          the first up to the first still out, in one Write, then closes it when one
-          of them asked to.
-        name: flushReady
-        params: io corenet.LoopIO
-        recv: st *loopState
-      - doc: flushHeld writes f's ready answers, in order.
-        name: flushHeld
-        params: io corenet.LoopIO, ref corenet.LoopConnRef, f *connFlag
-        recv: st *loopState
-      - doc: |-
           appendItem appends one ready held answer to out and reports whether the
           connection closes after it; a pending one's slot is freed.
         name: appendItem
         params: out []byte, f *connFlag, it heldItem
         recv: st *loopState
-        results: "[]byte, bool"
+        results: "[]byte, bool, corenet.HTTP1FileValue"
     name: loopState
+  - doc: |-
+      dataCall is one OnData call's connection, what step and the body's two
+      helpers read of it.
+    fields:
+      - doc: io and ref are the callback's.
+        name: io
+        type: corenet.LoopIO
+      - name: ref
+        type: corenet.LoopConnRef
+      - doc: st is the lane's state, f the connection's flag, loop the lane.
+        name: st
+        type: "*loopState"
+      - name: f
+        type: "*connFlag"
+      - name: loop
+        type: int
+    kind: struct
+    name: dataCall
   - doc: item is one answer of a batch.
     fields:
       - doc: ref is the connection it answers on.
@@ -1322,28 +2878,88 @@ types:
         name: gen
         type: uint32
       - doc: |-
-          closing is set once an answer that closes the connection is queued:
-          nothing more is read from it.
-        name: closing
-        type: bool
+          mode is how the connection's input ends: read on, closed after the batch's
+          answer, or carried by a streamed response. In the last two nothing more is
+          read.
+        name: mode
+        type: connMode
       - doc: |-
           dead is set once a write was refused or the close was asked: nothing
           more is written to it.
         name: dead
         type: bool
       - doc: |-
+          upgradePending says the 101 is still in the batch's output: bytes after it
+          wait for it to have left.
+        name: upgradePending
+        type: bool
+      - doc: |-
           readyAt is the lane's readyEpoch the connection was last queued in,
           so it is queued once a batch.
         name: readyAt
         type: uint64
+      - doc: |-
+          file is a file answer whose body is still leaving (native or copy path):
+          every later answer waits behind it, in request order. It is allocated by
+          the slot's first file answer and kept for the slot's later connections,
+          as head and request are: a connection that never sends a file pays a
+          pointer, not the body's 48 bytes (the 512 B idle budget of #859).
+        name: file
+        type: "*fileBody"
       - doc: held are the answers held behind a pending one, in request order (R3).
         name: held
         type: "[]heldItem"
       - doc: buf holds the held answers' bytes.
         name: buf
         type: "[]byte"
+      - doc: |-
+          bodyLeft is the bytes still to come of a body the handler reads as it
+          arrives (#844); zero when none is arriving.
+        name: bodyLeft
+        type: int64
+      - doc: |-
+          head holds that request's head, and request the value framed from it:
+          both outlive OnData, and both are reused for the slot's next connection.
+        name: head
+        type: "[]byte"
+      - name: request
+        type: "*corenet.HTTP1RequestValue"
     kind: struct
     methods:
+      - doc: |-
+          setFile starts the connection's file body, in the slot's kept one when it
+          has one, its tail's backing kept.
+        name: setFile
+        params: b fileBody
+        recv: f *connFlag
+      - doc: |-
+          clearFile ends the connection's file body, the allocation and its tail's
+          backing kept.
+        name: clearFile
+        recv: f *connFlag
+      - doc: |-
+          fileLeft ends the connection's file body and, when answers wait behind it,
+          records that one just left (bodyAfter), so they park on a full output.
+        name: fileLeft
+        recv: f *connFlag
+      - doc: |-
+          afterFile reports whether a file's body just left and nothing was flushed
+          since; it forgets it, the next flush being the one it was for.
+        name: afterFile
+        recv: f *connFlag
+        results: bool
+      - doc: |-
+          holds reports whether an answer of the connection must wait in order behind
+          a pending answer or a file still leaving.
+        name: holds
+        params: res *corenet.HTTP1ResponseValue
+        recv: f *connFlag
+        results: bool
+      - doc: |-
+          endInput says nothing more is read from the connection; a stream keeps its
+          own, stronger, ending.
+        name: endInput
+        recv: f *connFlag
       - doc: |-
           reset makes f a new connection's, of generation gen, keeping the backing
           of its held answers and their buffer, so a slot's churn reallocates
@@ -1391,8 +3007,32 @@ types:
           and the answer is dropped.
         name: cancelled
         type: atomic.Bool
+      - doc: copy is a file chunk being read for the copy path, nil on an ordinary job.
+        name: copy
+        type: "*copyJob"
+      - doc: job and buf are the slot's chunk job and its read buffer, kept for reuse.
+        name: job
+        type: copyJob
+      - name: buf
+        type: "[]byte"
     kind: struct
     name: pendSlot
+  - doc: copyJob is what one chunk's job carries to the lane's worker.
+    fields:
+      - doc: r is the file, off the chunk's offset, buf where it lands.
+        name: r
+        type: io.ReaderAt
+      - name: "off"
+        type: int64
+      - name: buf
+        type: "[]byte"
+      - doc: n and err are the worker's answer.
+        name: "n"
+        type: int
+      - name: err
+        type: error
+    kind: struct
+    name: copyJob
   - doc: |-
       heldItem is one answer a connection holds back behind a pending one, in
       request order: a pending slot, a deferred response the batch's end
@@ -1488,6 +3128,135 @@ types:
         recv: p Parser
         results: int, Refusal
     name: Parser
+  - fields:
+      - doc: Rate is the refill, in tokens per second.
+        name: Rate
+        type: float64
+      - doc: Burst is the most tokens a key holds.
+        name: Burst
+        type: int
+      - doc: Keys is the table's capacity, the most keys it remembers at once.
+        name: Keys
+        type: int
+    kind: struct
+    name: KeyedBucketsValue
+  - fields:
+      - doc: seed makes the keys' hashes unpredictable to a client that chooses them.
+        name: seed
+        type: maphash.Seed
+      - doc: shards are the table's parts; a key's hash picks one.
+        name: shards
+        type: "[]bucketShard"
+      - doc: rate is the refill per nanosecond.
+        name: rate
+        type: float64
+      - doc: burst is a full bucket.
+        name: burst
+        type: float64
+    kind: struct
+    methods:
+      - name: Allow
+        params: key []byte, now int64
+        recv: b *KeyedBuckets
+        results: ok bool, retryAfter int
+    name: KeyedBuckets
+  - doc: |-
+      bucketShard is one part of the table: a fixed array of entries, an
+      open-addressed index into it, and an LRU list through it. Nothing past
+      construction allocates.
+    fields:
+      - doc: mu serialises the lanes that land on this shard.
+        name: mu
+        type: sync.Mutex
+      - doc: entries holds the keys; used of them are in use.
+        name: entries
+        type: "[]bucketEntry"
+      - name: used
+        type: int32
+      - doc: index maps a key's hash to an entry, by position in entries; noEntry is empty.
+        name: index
+        type: "[]int32"
+      - doc: mask keeps a hash inside index.
+        name: mask
+        type: uint64
+      - doc: head is the most recently used entry, tail the least.
+        name: head
+        type: int32
+      - doc: head is the most recently used entry, tail the least.
+        name: tail
+        type: int32
+    kind: struct
+    methods:
+      - doc: |-
+          init sizes the shard for capacity entries, its index at twice that, a power of
+          two.
+        name: init
+        params: capacity int
+        recv: s *bucketShard
+      - doc: |-
+          lookup returns key's entry, moved to the head of the LRU list, new and full
+          when key is unseen, the least recent entry evicted when the shard is full.
+        name: lookup
+        params: key uint64, burst float64, now int64
+        recv: s *bucketShard
+        results: "*bucketEntry"
+      - doc: touch moves entry id to the head of the LRU list.
+        name: touch
+        params: id int32
+        recv: s *bucketShard
+      - doc: link makes id, whose next is the old head, the list's head.
+        name: link
+        params: id int32
+        recv: s *bucketShard
+      - doc: unlink removes id from the LRU list.
+        name: unlink
+        params: id int32
+        recv: s *bucketShard
+      - doc: |-
+          evictTail forgets the least recently used entry, moving the last used entry
+          into its place so entries stay dense, and repairs the index by backward shift.
+        name: evictTail
+        recv: s *bucketShard
+      - doc: |-
+          moveEntry moves entry from to position to, relinking its neighbours and its
+          index slot.
+        name: moveEntry
+        params: from, to int32
+        recv: s *bucketShard
+      - doc: |-
+          removeIndex deletes key's slot from the open-addressed index by backward
+          shifting, so no tombstone ever lengthens a probe.
+        name: removeIndex
+        params: key uint64
+        recv: s *bucketShard
+      - doc: |-
+          movable reports whether an entry at next whose home slot is home may move into
+          the hole at pos: whether home lies at or before the hole, walking the ring from
+          next backwards.
+        name: movable
+        params: home, pos, next uint64
+        recv: s *bucketShard
+        results: bool
+    name: bucketShard
+  - doc: bucketEntry is one key's bucket, linked by position in the LRU list.
+    fields:
+      - doc: "key is the hash of the bucket's key: the key's bytes are never kept."
+        name: key
+        type: uint64
+      - doc: tokens are the tokens the bucket held at last.
+        name: tokens
+        type: float64
+      - doc: last is when the bucket was last refilled.
+        name: last
+        type: int64
+      - doc: prev and next link the LRU list.
+        name: prev
+        type: int32
+      - doc: prev and next link the LRU list.
+        name: next
+        type: int32
+    kind: struct
+    name: bucketEntry
   - kind: named
     methods:
       - name: String
@@ -1512,7 +3281,33 @@ vars:
       - doc: credentialFields are the request fields Log never records, lowercase.
         name: credentialFields
         value: "[...]string{\"authorization\", \"proxy-authorization\", \"cookie\"}"
+      - doc: traceLineStart opens the field line Trace writes on an answer.
+        name: traceLineStart
+        value: "[]byte(\"traceparent: \")"
+      - doc: traceLineEnd closes it.
+        name: traceLineEnd
+        value: "[]byte(\"\\r\\n\")"
     name: wwwAuthenticate
+  - grouped: true
+    items:
+      - doc: methodGet is the other method the tree serves.
+        name: methodGet
+        value: "[]byte(\"GET\")"
+      - doc: wildcardMatch is the value of an If-None-Match that matches any revision.
+        name: wildcardMatch
+        value: "[]byte(\"*\")"
+      - doc: |-
+          filesTags numbers the Files links of the process, the top bits of their
+          jobs.
+        name: filesTags
+        type: atomic.Uint64
+    name: methodGet
+  - doc: The Files link gives its entries back through the adapter.
+    items:
+      - name: _
+        type: jobCanceller
+        value: (*FilesLayer)(nil)
+    name: _
   - doc: |-
       retryAfter is the field a 503 for a full queue carries: one second, the
       least a client can be told.

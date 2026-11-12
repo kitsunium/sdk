@@ -653,3 +653,90 @@ sequences:
               do:
                 - return: "\"UNSET\""
           "on": c
+  - of: ParseTraceParentBytes
+    steps:
+      - opt:
+          do:
+            - return: SpanContextValue{}, false
+          when: |-
+            len(header) < traceParentLen || !versionTailOK(header) ||
+            		header[traceIDOffset-1] != '-' || header[parentIDOffset-1] != '-' || header[flagsOffset-1] != '-'
+      - var:
+          name: flags
+          type: "[1]byte"
+      - opt:
+          do:
+            - return: SpanContextValue{}, false
+          when: |-
+            !decodeHexID(context.TraceID[:], header[traceIDOffset:parentIDOffset-1]) ||
+            		!decodeHexID(context.SpanID[:], header[parentIDOffset:flagsOffset-1]) ||
+            		!decodeHex(flags[:], header[flagsOffset:traceParentLen])
+      - set: context.Flags, context.Remote
+        value: TraceFlags(flags[0]), true
+      - return: context, true
+  - of: versionTailOK
+    steps:
+      - var:
+          name: version
+          type: "[1]byte"
+      - opt:
+          do:
+            - return: "false"
+          when: "!decodeHex(version[:], header[:versionHexLen]) || version[0] == versionInvalid"
+      - opt:
+          do:
+            - return: len(header) == traceParentLen
+          when: version[0] == 0
+      - return: len(header) == traceParentLen || header[traceParentLen] == '-'
+  - of: nibble
+    steps:
+      - switch:
+          cases:
+            - case: c >= '0' && c <= '9'
+              do:
+                - return: c - '0'
+            - case: c >= 'a' && c <= 'f'
+              do:
+                - return: c - 'a' + 10
+            - default: true
+              do:
+                - return: badNibble
+  - of: AppendTraceParent
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendTraceParent
+        kind: self
+      - id: appendHex
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: "!context.IsValid()"
+      - set: dst
+        value: append(dst, '0', '0', '-')
+      - set: dst
+        to: appendHex
+        value: appendHex(dst, context.TraceID[:])
+      - set: dst
+        value: append(dst, '-')
+      - set: dst
+        to: appendHex
+        value: appendHex(dst, context.SpanID[:])
+      - set: dst
+        value: append(dst, '-')
+      - bind: flags
+        eval: "[1]byte{byte(context.Flags.Sanitized())}"
+      - return: appendHex(dst, flags[:])
+        to: appendHex
+  - of: appendHex
+    steps:
+      - loop:
+          do:
+            - set: dst
+              value: append(dst, hexDigits[b>>nibbleBits], hexDigits[b&0x0f])
+          key: _
+          range: src
+          value: b
+      - return: dst

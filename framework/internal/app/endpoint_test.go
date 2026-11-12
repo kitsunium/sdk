@@ -68,7 +68,11 @@ func TestQueryAndHeaderBinding(t *testing.T) {
 		if r.status != http.StatusBadRequest || r.errorCode(t) != "invalid_argument" {
 			t.Errorf("%s: %d %s", bad, r.status, r.body)
 		}
-		if strings.Contains(string(r.body), strings.SplitN(bad, "=", 2)[1]) {
+		// The request id the error carries is minted at random and may hold
+		// the value by chance ("300" in a UUIDv7's hex): it is cut out before
+		// the body is searched.
+		body := strings.ReplaceAll(string(r.body), r.errorRequestID(t), "")
+		if strings.Contains(body, strings.SplitN(bad, "=", 2)[1]) {
 			t.Errorf("%s: the error echoes the value: %s", bad, r.body)
 		}
 	}

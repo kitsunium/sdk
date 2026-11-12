@@ -1,0 +1,81 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "http2",
+    srcs = [
+        "conn.go",
+        "conn_control.go",
+        "conn_data.go",
+        "conn_feed.go",
+        "conn_headers.go",
+        "conn_send.go",
+        "conn_settings.go",
+        "doc.go",
+        "frame.go",
+        "hpack_decode.go",
+        "hpack_encode.go",
+        "hpack_huffman.go",
+        "hpack_huffman_table.go",
+        "hpack_static_table.go",
+        "hpack_table.go",
+        "hpack_valid.go",
+        "loop.go",
+        "loop_lane.go",
+        "loop_pending.go",
+        "loop_request.go",
+        "loop_serve.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/net/http2",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/net",
+        "//internal/core/net/http2",
+        "//internal/core/observe/trace",
+        "//internal/kernel/errs",
+        "//internal/kernel/swar",
+        "//internal/service/net/http1",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":http2",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "http2_test",
+    srcs = [
+        "conn_external_test.go",
+        "conn_goclient_external_test.go",
+        "conn_internal_test.go",
+        "differential_external_test.go",
+        "frame_external_test.go",
+        "fuzz_internal_test.go",
+        "gen_api_test.go",
+        "gen_perf_test.go",
+        "h2c_harness_test.go",
+        "hpack_decode_external_test.go",
+        "hpack_encode_external_test.go",
+        "hpack_huffman_internal_test.go",
+        "hpack_rfc_internal_test.go",
+        "http2_bench_test.go",
+        "loop_batch_external_test.go",
+        "loop_request_internal_test.go",
+        "perf_fixtures_test.go",
+    ],
+    embed = [":http2"],
+    deps = [
+        "//internal/core/net",
+        "//internal/core/net/http2",
+        "//internal/service/net/http1",
+    ],
+)

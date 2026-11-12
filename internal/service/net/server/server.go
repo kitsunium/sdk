@@ -10,9 +10,12 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/net/loop"
 )
 
 const (
@@ -124,6 +127,28 @@ type Server struct {
 	fallbacks corenet.FallbacksValue
 	// stall watches the loop groups for one every ring of which is drained.
 	stall stallWatch
+	// logger receives what net/http reports through http.Server.ErrorLog
+	// (WithLogger); nil discards it, counted.
+	logger corelogger.Logger
+	// errBudget is the cap on those records, shared by the HTTP groups, and
+	// the count of those it did not write.
+	errBudget errorLogBudget
+	// rxq is what the datagram sockets said of SO_RXQ_OVFL (#973).
+	rxq rxqProbe
+	// lanes is what the lanes of the groups HandleLoop serves said of
+	// io_uring (#852).
+	lanes laneProbe
+	// startLane starts a socket's io_uring lane: startPacketLane, which a
+	// test replaces to play a refused probe.
+	startLane func(s *Server, bound *boundPacketConn, group *PacketGroup) (loop.PacketLane, error)
+	// dst is what the wildcard datagram sockets said of IP_PKTINFO (#972).
+	dst destinationProbe
+	// steer is what the datagram groups said of their steering program (#977).
+	steer steerProbe
+	// metricsMu guards meters.
+	metricsMu sync.Mutex
+	// meters are the destinations RegisterMetrics took (#847).
+	meters []coremetrics.AsyncMeter
 }
 
 // newPooledConn mints an empty connection wrapper for the recycler.
@@ -157,6 +182,7 @@ func newServer(lookup lookupFunc, opts ...Option) *Server {
 	}
 	//: the operator's switches, read once and before any probe (ADR 0188).
 	s.operator = readOperator(s.lookup)
+	s.startLane = startPacketLane
 	s.platform = readPlatform()
 	//: a server that is never started still hands handlers a usable context.
 	s.runCtx = context.Background()
@@ -227,6 +253,8 @@ func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
 	group.limits = shim.limits
 	group.adopt = shim.adopt
 	group.batchReplies = shim.kinds.has(corenet.OptionBatchReplies)
+	group.kinds = shim.kinds
+	group.steer = shim.steer
 	s.packetByName[name] = group
 	s.packetGroups = append(s.packetGroups, group)
 	//: returned so the caller can attach a handler in the same expression.
@@ -257,6 +285,12 @@ func (s *Server) judgePacketOptions(shim *StreamGroup) {
 	if err := shim.protocolsRefusal(); err != nil {
 		s.recordDeclError(err)
 	}
+	//: an explicit shard count a Unix datagram socket cannot honour (#977),
+	//: or ShareAddress where the platform or the socket cannot share (#1330),
+	//: refused by name: SO_REUSEPORT is an IP-socket option.
+	if err := packetReuseRefusal(shim); err != nil {
+		s.recordDeclError(err)
+	}
 	//: every other kind the datagram engine does not apply (ADR 0187 §D4).
 	for _, k := range shim.kinds.list() {
 		//: the first one is refused, never dropped (R6).
@@ -276,12 +310,28 @@ func packetHonours(k corenet.OptionKind) bool {
 	//: what PacketGroup keeps of its shim.
 	switch k {
 	case corenet.OptionMaxPacketSize, corenet.OptionBatchSize, corenet.OptionBatchReplies, corenet.OptionAdopt,
-		corenet.OptionName, corenet.OptionEngine, corenet.OptionPlaintext:
+		corenet.OptionName, corenet.OptionEngine, corenet.OptionPlaintext,
+		corenet.OptionReceiveBuffer, corenet.OptionSendBuffer,
+		corenet.OptionShards, corenet.OptionSteer, corenet.OptionShareAddress:
 		//: honoured.
 		return true
 	default:
 		//: dropped with the shim: refused.
 		return false
+	}
+}
+
+// foldProxyRefused writes each ProxyProtocol group's refusals into its rows of
+// listeners. The caller holds s.mu.
+func (s *Server) foldProxyRefused(listeners []corenet.ListenerStateValue) {
+	//: every row; a group without the option has nothing to add.
+	for i := range listeners {
+		group, ok := s.byName[listeners[i].Group]
+		//: a datagram group, or a group with no such policy.
+		if !ok || group.proxyPolicy == nil {
+			continue
+		}
+		listeners[i].ProxyRefused = group.proxyPolicy.refused.Load()
 	}
 }
 
@@ -297,6 +347,8 @@ func (s *Server) recordDeclError(err error) {
 func (s *Server) State() corenet.StateValue {
 	s.mu.RLock()
 	listeners := slices.Clone(s.states)
+	s.foldProxyRefused(listeners)
+	s.foldHTTPCounts(listeners)
 	s.mu.RUnlock()
 	s.fallbackMu.Lock()
 	fallbacks := s.fallbacks
@@ -313,10 +365,13 @@ func (s *Server) State() corenet.StateValue {
 		RejectedConns:    s.rejected.Load(),
 		OversizedPackets: s.oversized.Load(),
 		AcceptBackoffs:   s.acceptBackoffs.Load(),
+		SuppressedLogs:   s.errBudget.suppressed.Load(),
 		Datagrams: corenet.DatagramStateValue{
 			TruncatedPackets: s.datagrams.truncated.Load(),
 			GSOOversized:     s.datagrams.gsoOversized.Load(),
 			ReplyFailures:    s.datagrams.replyFailures.Load(),
+			KernelDrops:      s.datagrams.kernelDrops.Load(),
+			Capabilities:     s.datagramCapabilities(),
 		},
 		Loops:     s.loopStates(),
 		Override:  override,

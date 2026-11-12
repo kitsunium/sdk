@@ -1,0 +1,167 @@
+package http2
+
+import (
+	"bytes"
+	"errors"
+	"math/rand/v2"
+	"testing"
+
+	corehttp2 "github.com/kitsunium/sdk/internal/core/net/http2"
+)
+
+// rfcCodes and rfcLens are RFC 7541 Appendix B: the Huffman code of each
+// symbol and its length in bits. The automaton in hpack_huffman_table.go is
+// held to them: it is generated, and this test reads it back symbol by symbol.
+var rfcCodes = [256]uint32{
+	0x00001ff8, 0x007fffd8, 0x0fffffe2, 0x0fffffe3, 0x0fffffe4, 0x0fffffe5,
+	0x0fffffe6, 0x0fffffe7, 0x0fffffe8, 0x00ffffea, 0x3ffffffc, 0x0fffffe9,
+	0x0fffffea, 0x3ffffffd, 0x0fffffeb, 0x0fffffec, 0x0fffffed, 0x0fffffee,
+	0x0fffffef, 0x0ffffff0, 0x0ffffff1, 0x0ffffff2, 0x3ffffffe, 0x0ffffff3,
+	0x0ffffff4, 0x0ffffff5, 0x0ffffff6, 0x0ffffff7, 0x0ffffff8, 0x0ffffff9,
+	0x0ffffffa, 0x0ffffffb, 0x00000014, 0x000003f8, 0x000003f9, 0x00000ffa,
+	0x00001ff9, 0x00000015, 0x000000f8, 0x000007fa, 0x000003fa, 0x000003fb,
+	0x000000f9, 0x000007fb, 0x000000fa, 0x00000016, 0x00000017, 0x00000018,
+	0x00000000, 0x00000001, 0x00000002, 0x00000019, 0x0000001a, 0x0000001b,
+	0x0000001c, 0x0000001d, 0x0000001e, 0x0000001f, 0x0000005c, 0x000000fb,
+	0x00007ffc, 0x00000020, 0x00000ffb, 0x000003fc, 0x00001ffa, 0x00000021,
+	0x0000005d, 0x0000005e, 0x0000005f, 0x00000060, 0x00000061, 0x00000062,
+	0x00000063, 0x00000064, 0x00000065, 0x00000066, 0x00000067, 0x00000068,
+	0x00000069, 0x0000006a, 0x0000006b, 0x0000006c, 0x0000006d, 0x0000006e,
+	0x0000006f, 0x00000070, 0x00000071, 0x00000072, 0x000000fc, 0x00000073,
+	0x000000fd, 0x00001ffb, 0x0007fff0, 0x00001ffc, 0x00003ffc, 0x00000022,
+	0x00007ffd, 0x00000003, 0x00000023, 0x00000004, 0x00000024, 0x00000005,
+	0x00000025, 0x00000026, 0x00000027, 0x00000006, 0x00000074, 0x00000075,
+	0x00000028, 0x00000029, 0x0000002a, 0x00000007, 0x0000002b, 0x00000076,
+	0x0000002c, 0x00000008, 0x00000009, 0x0000002d, 0x00000077, 0x00000078,
+	0x00000079, 0x0000007a, 0x0000007b, 0x00007ffe, 0x000007fc, 0x00003ffd,
+	0x00001ffd, 0x0ffffffc, 0x000fffe6, 0x003fffd2, 0x000fffe7, 0x000fffe8,
+	0x003fffd3, 0x003fffd4, 0x003fffd5, 0x007fffd9, 0x003fffd6, 0x007fffda,
+	0x007fffdb, 0x007fffdc, 0x007fffdd, 0x007fffde, 0x00ffffeb, 0x007fffdf,
+	0x00ffffec, 0x00ffffed, 0x003fffd7, 0x007fffe0, 0x00ffffee, 0x007fffe1,
+	0x007fffe2, 0x007fffe3, 0x007fffe4, 0x001fffdc, 0x003fffd8, 0x007fffe5,
+	0x003fffd9, 0x007fffe6, 0x007fffe7, 0x00ffffef, 0x003fffda, 0x001fffdd,
+	0x000fffe9, 0x003fffdb, 0x003fffdc, 0x007fffe8, 0x007fffe9, 0x001fffde,
+	0x007fffea, 0x003fffdd, 0x003fffde, 0x00fffff0, 0x001fffdf, 0x003fffdf,
+	0x007fffeb, 0x007fffec, 0x001fffe0, 0x001fffe1, 0x003fffe0, 0x001fffe2,
+	0x007fffed, 0x003fffe1, 0x007fffee, 0x007fffef, 0x000fffea, 0x003fffe2,
+	0x003fffe3, 0x003fffe4, 0x007ffff0, 0x003fffe5, 0x003fffe6, 0x007ffff1,
+	0x03ffffe0, 0x03ffffe1, 0x000fffeb, 0x0007fff1, 0x003fffe7, 0x007ffff2,
+	0x003fffe8, 0x01ffffec, 0x03ffffe2, 0x03ffffe3, 0x03ffffe4, 0x07ffffde,
+	0x07ffffdf, 0x03ffffe5, 0x00fffff1, 0x01ffffed, 0x0007fff2, 0x001fffe3,
+	0x03ffffe6, 0x07ffffe0, 0x07ffffe1, 0x03ffffe7, 0x07ffffe2, 0x00fffff2,
+	0x001fffe4, 0x001fffe5, 0x03ffffe8, 0x03ffffe9, 0x0ffffffd, 0x07ffffe3,
+	0x07ffffe4, 0x07ffffe5, 0x000fffec, 0x00fffff3, 0x000fffed, 0x001fffe6,
+	0x003fffe9, 0x001fffe7, 0x001fffe8, 0x007ffff3, 0x003fffea, 0x003fffeb,
+	0x01ffffee, 0x01ffffef, 0x00fffff4, 0x00fffff5, 0x03ffffea, 0x007ffff4,
+	0x03ffffeb, 0x07ffffe6, 0x03ffffec, 0x03ffffed, 0x07ffffe7, 0x07ffffe8,
+	0x07ffffe9, 0x07ffffea, 0x07ffffeb, 0x0ffffffe, 0x07ffffec, 0x07ffffed,
+	0x07ffffee, 0x07ffffef, 0x07fffff0, 0x03ffffee,
+}
+
+var rfcLens = [256]uint8{
+	13, 23, 28, 28, 28, 28, 28, 28, 28, 24, 30, 28, 28, 30, 28, 28, 28, 28, 28, 28,
+	28, 28, 30, 28, 28, 28, 28, 28, 28, 28, 28, 28, 6, 10, 10, 12, 13, 6, 8, 11,
+	10, 10, 8, 11, 8, 6, 6, 6, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 8,
+	15, 6, 12, 10, 13, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+	7, 7, 7, 7, 7, 7, 7, 7, 8, 7, 8, 13, 19, 13, 14, 6, 15, 5, 6, 5,
+	6, 5, 6, 6, 6, 5, 7, 7, 6, 6, 6, 5, 6, 7, 6, 5, 5, 6, 7, 7,
+	7, 7, 7, 15, 11, 14, 13, 28, 20, 22, 20, 20, 22, 22, 22, 23, 22, 23, 23, 23,
+	23, 23, 24, 23, 24, 24, 22, 23, 24, 23, 23, 23, 23, 21, 22, 23, 22, 23, 23, 24,
+	22, 21, 20, 22, 22, 23, 23, 21, 23, 22, 22, 24, 21, 22, 23, 23, 21, 21, 22, 21,
+	23, 22, 23, 23, 20, 22, 22, 22, 23, 22, 22, 23, 26, 26, 20, 19, 22, 23, 22, 25,
+	26, 26, 26, 27, 27, 26, 24, 25, 19, 21, 26, 27, 27, 26, 27, 24, 21, 21, 26, 26,
+	28, 27, 27, 27, 20, 24, 20, 21, 22, 21, 21, 23, 22, 22, 25, 25, 24, 24, 26, 23,
+	26, 27, 26, 26, 27, 27, 27, 27, 27, 28, 27, 27, 27, 27, 27, 26,
+}
+
+// encodeHuffman writes src with Appendix B's code and the EOS padding.
+func encodeHuffman(src []byte) []byte {
+	var dst []byte
+	var acc uint64
+	var bits uint
+	for _, c := range src {
+		acc = acc<<rfcLens[c] | uint64(rfcCodes[c])
+		bits += uint(rfcLens[c])
+		for bits >= 8 {
+			bits -= 8
+			dst = append(dst, byte(acc>>bits))
+		}
+	}
+	if bits > 0 {
+		pad := 8 - bits
+		dst = append(dst, byte(acc<<pad)|byte((1<<pad)-1))
+	}
+	return dst
+}
+
+// huffmanDecode runs the automaton the decoder runs over src.
+func huffmanDecode(t *testing.T, src []byte, budget int) ([]byte, error) {
+	t.Helper()
+	r := decodeRun{d: &Decoder{}}
+	return r.huffmanString(src, budget)
+}
+
+// TestHuffmanEverySymbol encodes each symbol by the RFC's code, alone, and
+// expects the automaton to decode exactly it: the table is the RFC's code
+// point by point.
+func TestHuffmanEverySymbol(t *testing.T) {
+	for s := range 256 {
+		got, err := huffmanDecode(t, encodeHuffman([]byte{byte(s)}), 1<<20)
+		if err != nil || len(got) != 1 || got[0] != byte(s) {
+			t.Fatalf("symbol %d: %q %v", s, got, err)
+		}
+	}
+}
+
+// TestHuffmanRoundTrip decodes random strings and every byte pair.
+func TestHuffmanRoundTrip(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	for range 2000 {
+		src := make([]byte, r.IntN(300))
+		for i := range src {
+			src[i] = byte(r.IntN(256))
+		}
+		got, err := huffmanDecode(t, encodeHuffman(src), 1<<20)
+		if err != nil || !bytes.Equal(got, src) {
+			t.Fatalf("%q: %q %v", src, got, err)
+		}
+	}
+	for a := range 256 {
+		for b := range 256 {
+			src := []byte{byte(a), byte(b)}
+			got, err := huffmanDecode(t, encodeHuffman(src), 1<<20)
+			if err != nil || !bytes.Equal(got, src) {
+				t.Fatalf("%q: %q %v", src, got, err)
+			}
+		}
+	}
+}
+
+// TestHuffmanRefusals holds RFC 7541 §5.2's three refusals: EOS inside a
+// string, padding longer than seven bits, padding that is not EOS's prefix.
+func TestHuffmanRefusals(t *testing.T) {
+	cases := map[string][]byte{
+		// the 30 bits of EOS and two of its padding: a whole EOS symbol.
+		"eos": {0xff, 0xff, 0xff, 0xff},
+		// eight one bits: longer than seven.
+		"long padding": {0xff},
+		// 'a' (00011) then three zero bits: padding that is not EOS's prefix.
+		"zero padding": {0x18},
+		// ends in the middle of a code longer than seven padding-compatible bits: non-accepting state.
+		"mid code": {0x0f << 4},
+	}
+	for name, raw := range cases {
+		if _, err := huffmanDecode(t, raw, 1<<20); !errors.Is(err, corehttp2.CompressionFailed) {
+			t.Fatalf("%s: %v, want CompressionFailed", name, err)
+		}
+	}
+}
+
+// TestHuffmanBudget holds the expansion bound: decoding stops at the ceiling.
+func TestHuffmanBudget(t *testing.T) {
+	raw := encodeHuffman(bytes.Repeat([]byte("a"), 400))
+	_, err := huffmanDecode(t, raw, 100)
+	if !errors.Is(err, corehttp2.HeadersTooLarge) {
+		t.Fatalf("got %v, want HeadersTooLarge", err)
+	}
+}

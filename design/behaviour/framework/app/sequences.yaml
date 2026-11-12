@@ -243,6 +243,8 @@ sequences:
     of: After
   - forward: iapp.Log
     of: Log
+  - forward: iapp.RequestID
+    of: RequestID
   - of: EraseAfter
     steps:
       - return: iapp.EraseAfter[T, D](delay, since)

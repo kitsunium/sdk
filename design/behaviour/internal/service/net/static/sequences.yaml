@@ -64,6 +64,8 @@ sequences:
         kind: value
       - id: pinnedType
         kind: internal
+      - id: header.Add
+        kind: value
       - id: http
         kind: stdlib
       - id: stream
@@ -88,6 +90,15 @@ sequences:
           when: pinned
       - opt:
           do:
+            - eval: header.Add("Vary", "Accept-Encoding")
+              to: header.Add
+            - opt:
+                do:
+                  - return: ""
+                when: h.serveSidecar(w, r, name, file)
+          when: h.precompressed
+      - opt:
+          do:
             - eval: http.ServeContent(w, r, name, info.ModTime(), content)
               to: http
             - return: ""
@@ -97,6 +108,117 @@ sequences:
           when: seekable
       - eval: stream(w, r, name, file, info)
         to: stream
+  - of: (*Handler).serveSidecar
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Handler).serveSidecar
+        kind: self
+      - id: w.Header
+        kind: value
+      - id: r.Header.Get
+        kind: value
+      - id: open
+        kind: internal
+      - id: closeQuietly
+        kind: internal
+      - id: typeOf
+        kind: internal
+      - id: header.Set
+        kind: value
+      - id: http
+        kind: stdlib
+    steps:
+      - bind: header
+        eval: w.Header()
+        to: w.Header
+      - bind: accept
+        eval: r.Header.Get("Accept-Encoding")
+        to: r.Header.Get
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!corenet.AcceptsEncoding(accept, sidecar.token)"
+            - bind: file, info, found
+              eval: open(h.fsys, name+sidecar.suffix)
+              to: open
+            - opt:
+                do:
+                  - continue: true
+                when: found != present
+            - defer: closeQuietly(file)
+              to: closeQuietly
+            - bind: content, seekable
+              eval: file.(io.ReadSeeker)
+            - opt:
+                do:
+                  - continue: true
+                when: "!info.Mode().IsRegular() || !seekable"
+            - opt:
+                do:
+                  - eval: header.Set("Content-Type", contentType)
+                    to: header.Set
+                init:
+                  bind: contentType, known
+                  eval: typeOf(header, name, identity)
+                  to: typeOf
+                when: known
+            - eval: header.Set("Content-Encoding", sidecar.token)
+              to: header.Set
+            - eval: http.ServeContent(w, r, name, info.ModTime(), content)
+              to: http
+            - return: "true"
+          key: _
+          range: sidecarCodings
+          value: sidecar
+      - return: "false"
+  - of: typeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: typeOf
+        kind: self
+      - id: header.Get
+        kind: value
+      - id: mime
+        kind: stdlib
+      - id: io
+        kind: stdlib
+      - id: http
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: contentType, true
+          init:
+            bind: contentType
+            eval: header.Get("Content-Type")
+            op: =
+            to: header.Get
+          when: contentType != ""
+      - opt:
+          do:
+            - return: contentType, true
+          init:
+            bind: contentType
+            eval: mime.TypeByExtension(path.Ext(name))
+            op: =
+            to: mime
+          when: contentType != ""
+      - var:
+          name: head
+          type: "[sniffBytes]byte"
+      - bind: n, err
+        eval: io.ReadFull(identity, head[:])
+        to: io
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF)
+      - return: http.DetectContentType(head[:n]), true
+        to: http
   - of: stream
     participants:
       - id: caller
@@ -232,7 +354,7 @@ sequences:
           do:
             - return: nil, misconfigured("referrer_policy")
           when: "!referrerPolicyKnown(referrer)"
-      - return: "&Handler{fsys: fsys, csp: csp, referrer: referrer, spa: cfg.SinglePageApp, immutable: cfg.Immutable}, nil"
+      - return: "&Handler{fsys: fsys, csp: csp, referrer: referrer, spa: cfg.SinglePageApp, immutable: cfg.Immutable, precompressed: cfg.Precompressed}, nil"
   - of: (*Handler).ServeHTTP
     participants:
       - id: caller

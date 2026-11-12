@@ -16,8 +16,18 @@ import (
 type bindReport struct {
 	// exclusive is ListenerStateValue.Exclusive.
 	exclusive bool
+	// shared is ListenerStateValue.Shared: the socket was bound for another
+	// process to join (ShareAddress, #1330).
+	shared bool
 	// wait is ListenerStateValue.BindWait.
 	wait time.Duration
+	// backlog is ListenerStateValue.Backlog, the accept queue's depth as
+	// applied; backlogReason says why it is not what was asked, "" when it is.
+	backlog       int
+	backlogReason string
+	// receiveBuffer and sendBuffer are ListenerStateValue's, read back after
+	// bind.
+	receiveBuffer, sendBuffer int
 }
 
 // exclusiveApplies reports whether a socket of network bound to address takes
@@ -88,39 +98,58 @@ func (s *Server) holdsPort(addr corenet.AddressValue) bool {
 	return false
 }
 
-// listenControl is net.ListenConfig.Control for one bind: SO_REUSEPORT when
-// the address is sharded, SO_EXCLUSIVEADDRUSE when it applies, both before
-// bind; nil when neither can, so the bind is the standard library's own.
-func listenControl(sharded bool) func(network, address string, rawConn syscall.RawConn) error {
+// listenControl is net.ListenConfig.Control for one bind: the buffers the
+// group asked for, SO_REUSEPORT when the address is sharded, SO_EXCLUSIVEADDRUSE
+// when it applies, all before bind; nil when none can, so the bind is the
+// standard library's own.
+func listenControl(sharded bool, spec socketSpec) func(network, address string, rawConn syscall.RawConn) error {
 	//: nothing to set before bind.
-	if !sharded && !exclusiveAddrSupported() {
+	if !sharded && !exclusiveAddrSupported() && spec.receiveBuffer <= 0 && spec.sendBuffer <= 0 && spec.userTimeout <= 0 {
 		//: the standard library's bind.
 		return nil
 	}
 	//: run with the descriptor, before bind.
 	return func(network, address string, rawConn syscall.RawConn) error {
-		//: sharding needs every listener on the address to opt in.
-		if sharded {
-			//: refused, the shard cannot bind.
-			if err := reusePortControl(network, address, rawConn); err != nil {
-				//: the setsockopt outcome.
-				return err
-			}
-		}
-		//: a unicast inet socket on Windows.
-		if !exclusiveApplies(network, address) {
-			//: nothing more.
-			return nil
-		}
-		var setErr error
-		//: the descriptor, before bind.
-		if err := rawConn.Control(func(fd uintptr) { setErr = setExclusiveAddr(fd) }); err != nil {
-			//: the descriptor could not be reached.
+		//: the options, in order.
+		return controlBeforeBind(sharded, spec, network, address, rawConn)
+	}
+}
+
+// controlBeforeBind sets, on one socket and before bind, the buffers the group
+// asked for, SO_REUSEPORT when the address is sharded and SO_EXCLUSIVEADDRUSE
+// when it applies.
+func controlBeforeBind(sharded bool, spec socketSpec, network, address string, rawConn syscall.RawConn) error {
+	//: the buffers the group asked for, before bind.
+	if err := bufferControl(spec, rawConn); err != nil {
+		//: the kernel refused one.
+		return err
+	}
+	//: sharding needs every listener on the address to opt in.
+	if sharded {
+		//: refused, the shard cannot bind.
+		if err := reusePortControl(network, address, rawConn); err != nil {
+			//: the setsockopt outcome.
 			return err
 		}
-		//: a socket that cannot hold its address exclusively is not bound.
-		return setErr
 	}
+	//: TCP_USER_TIMEOUT, inherited by every accepted socket (#971).
+	if err := userTimeoutControl(spec, network, rawConn); err != nil {
+		//: the kernel refused it.
+		return err
+	}
+	//: a unicast inet socket on Windows.
+	if !exclusiveApplies(network, address) {
+		//: nothing more.
+		return nil
+	}
+	var setErr error
+	//: the descriptor, before bind.
+	if err := rawConn.Control(func(fd uintptr) { setErr = setExclusiveAddr(fd) }); err != nil {
+		//: the descriptor could not be reached.
+		return err
+	}
+	//: a socket that cannot hold its address exclusively is not bound.
+	return setErr
 }
 
 // exclusiveOf reads SO_EXCLUSIVEADDRUSE back from an adopted socket: what a

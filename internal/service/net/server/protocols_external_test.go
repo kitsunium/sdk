@@ -178,7 +178,6 @@ func TestProtocols_refused(t *testing.T) {
 		{"an empty identifier beside a valid one", "empty identifier", httpGroup(server.TLS(plain), server.Protocols("h2", ""))},
 		{"an unknown identifier", "h3", httpGroup(server.TLS(plain), server.Protocols("h2", "h3"))},
 		{"a repeated identifier", "h2", httpGroup(server.TLS(plain), server.Protocols("h2", "h2"))},
-		{"h2 without TLS", "h2 without TLS", httpGroup(server.Plaintext(), server.Protocols("h2"))},
 		{"NextProtos naming an excluded version", "NextProtos h2", httpGroup(server.TLS(h2Only), server.Protocols("http/1.1"))},
 		{"NextProtos naming none served", "NextProtos", httpGroup(server.TLS(foreign))},
 		{"a group serving no http.Handler", "handler", func(srv *server.Server) {

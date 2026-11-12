@@ -4,9 +4,342 @@ sequences:
   - of: AddressValue.String
     steps:
       - return: a.Network + "://" + a.Addr
+  - of: AcceptsEncoding
+    participants:
+      - id: caller
+        kind: actor
+      - id: AcceptsEncoding
+        kind: self
+      - id: acceptElement
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(value) > acceptEncodingMaxBytes
+      - bind: named, star
+        eval: false, false
+      - bind: elements
+        eval: "0"
+      - loop:
+          do:
+            - op: ++
+              set: elements
+            - opt:
+                do:
+                  - return: "false"
+                when: elements > acceptEncodingMaxElements
+            - bind: token, quality
+              eval: acceptElement(element)
+              to: acceptElement
+            - opt:
+                do:
+                  - continue: true
+                when: token == ""
+            - opt:
+                do:
+                  - set: named
+                    value: "true"
+                  - set: star
+                    value: quality
+                  - continue: true
+                when: strings.EqualFold(token, coding)
+            - opt:
+                do:
+                  - set: star
+                    value: quality
+                when: token == "*" && !named
+          key: element
+          range: strings.SplitSeq(value, ",")
+      - return: star
+  - of: acceptElement
+    participants:
+      - id: caller
+        kind: actor
+      - id: acceptElement
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - bind: head, rest, hasParams
+        eval: strings.Cut(element, ";")
+        to: strings
+      - set: token
+        to: strings
+        value: strings.TrimSpace(head)
+      - opt:
+          do:
+            - return: token, true
+          when: "!hasParams"
+      - loop:
+          do:
+            - bind: name, val, ok
+              eval: strings.Cut(param, "=")
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok || !strings.EqualFold(strings.TrimSpace(name), \"q\")"
+            - bind: q, err
+              eval: strconv.ParseFloat(strings.TrimSpace(val), 64)
+              to: strconv
+            - opt:
+                do:
+                  - return: token, false
+                when: err != nil || q <= 0
+            - return: token, true
+          key: param
+          range: strings.SplitSeq(rest, ";")
+      - return: token, true
   - of: ConnHandlerFunc.ServeConn
     steps:
       - return: f(ctx, c)
+  - of: NewCORSPolicy
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewCORSPolicy
+        kind: self
+      - id: cfg.check
+        kind: internal
+      - id: cfg.answers
+        kind: internal
+    steps:
+      - bind: methods
+        eval: cfg.Methods
+      - opt:
+          do:
+            - set: methods
+              value: corsSafeMethods
+          when: len(methods) == 0
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: cfg.check(methods)
+            to: cfg.check
+          when: err != nil
+      - bind: p
+        eval: |-
+          &CORSPolicy{
+          		origins: make(map[string]*corsOrigin, len(cfg.Origins)),
+          		methods: make(map[string]struct{}, len(methods)),
+          		vary:    newCORSAnswer([]CORSFieldValue{{Name: corsVary, Value: "Origin"}}),
+          	}
+      - loop:
+          do:
+            - set: p.methods[m]
+              value: struct{}{}
+          key: _
+          range: methods
+          value: m
+      - opt:
+          do:
+            - set: p.any
+              to: cfg.answers
+              value: cfg.answers(corsWildcard, methods)
+            - return: p, nil
+          when: cfg.Origins[0] == corsWildcard
+      - loop:
+          do:
+            - set: p.origins[origin]
+              to: cfg.answers
+              value: cfg.answers(origin, methods)
+          key: _
+          range: cfg.Origins
+          value: origin
+      - return: p, nil
+  - of: (*CORSValue).answers
+    steps:
+      - bind: common
+        eval: "[]CORSFieldValue{{Name: corsVary, Value: \"Origin\"}, {Name: corsAllowOrigin, Value: origin}}"
+      - opt:
+          do:
+            - set: common
+              value: "append(common, CORSFieldValue{Name: corsAllowCredentials, Value: \"true\"})"
+          when: c.Credentials
+      - bind: actual
+        eval: common
+      - opt:
+          do:
+            - set: actual
+              value: |-
+                append(slices.Clone(common),
+                			CORSFieldValue{Name: corsExposeHeaders, Value: strings.Join(c.ExposeHeaders, fieldListSeparator)})
+          when: len(c.ExposeHeaders) > 0
+      - bind: preflight
+        eval: |-
+          append(slices.Clone(common),
+          		CORSFieldValue{Name: corsAllowMethods, Value: strings.Join(methods, fieldListSeparator)})
+      - opt:
+          do:
+            - set: preflight
+              value: "append(preflight, CORSFieldValue{Name: corsAllowHeaders, Value: strings.Join(c.Headers, fieldListSeparator)})"
+          when: len(c.Headers) > 0
+      - opt:
+          do:
+            - bind: seconds
+              eval: int64(min(c.MaxAge.Duration(), corsMaxAge) / time.Second)
+            - set: preflight
+              value: "append(preflight, CORSFieldValue{Name: corsMaxAgeField, Value: strconv.FormatInt(seconds, decimalBase)})"
+          when: c.MaxAge > 0
+      - return: "&corsOrigin{actual: newCORSAnswer(actual), preflight: newCORSAnswer(preflight)}"
+  - of: newCORSAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: newCORSAnswer
+        kind: self
+      - id: b.WriteString
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - loop:
+          do:
+            - eval: b.WriteString(f.Name)
+              to: b.WriteString
+            - eval: b.WriteString(nameValueSeparator)
+              to: b.WriteString
+            - eval: b.WriteString(f.Value)
+              to: b.WriteString
+            - eval: b.WriteString(fieldEnd)
+              to: b.WriteString
+          key: _
+          range: fields
+          value: f
+      - return: "CORSAnswerValue{Lines: []byte(b.String()), Fields: fields}"
+  - of: (*CORSValue).check
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CORSValue).check
+        kind: self
+      - id: corsRefusal
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "!c.originsValid()"
+              do:
+                - return: corsRefusal("origins")
+                  to: corsRefusal
+            - case: "!allTokens(methods)"
+              do:
+                - return: corsRefusal("methods")
+                  to: corsRefusal
+            - case: "!allTokens(c.Headers)"
+              do:
+                - return: corsRefusal("headers")
+                  to: corsRefusal
+            - case: "!allTokens(c.ExposeHeaders)"
+              do:
+                - return: corsRefusal("expose_headers")
+                  to: corsRefusal
+            - case: c.MaxAge < 0
+              do:
+                - return: corsRefusal("max_age")
+                  to: corsRefusal
+      - return: nil
+  - of: validOrigin
+    participants:
+      - id: caller
+        kind: actor
+      - id: validOrigin
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == corsNullOrigin
+      - bind: scheme, rest, ok
+        eval: strings.Cut(s, "://")
+        to: strings
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok || scheme == \"\" || rest == \"\""
+      - return: originText(scheme, false) && originText(rest, true)
+  - of: originByte
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+      - opt:
+          do:
+            - return: strings.IndexByte("-+.:[]", c) >= 0
+          when: authority
+      - return: strings.IndexByte("-+.", c) >= 0
+  - of: isTchar
+    steps:
+      - return: |-
+          (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+          		strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
+  - of: corsRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: corsRefusal
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(CORSMisconfigured, errs.WrapParams{}, errs.String("option", option))
+        to: errs
+  - of: (*CORSPolicy).Actual
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CORSPolicy).Actual
+        kind: self
+      - id: p.lookup
+        kind: internal
+    steps:
+      - bind: e
+        eval: p.lookup(origin)
+        to: p.lookup
+      - opt:
+          do:
+            - return: p.vary
+          when: e == nil
+      - return: e.actual
+  - of: (*CORSPolicy).Preflight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*CORSPolicy).Preflight
+        kind: self
+      - id: p.lookup
+        kind: internal
+    steps:
+      - bind: e
+        eval: p.lookup(origin)
+        to: p.lookup
+      - bind: _, allowed
+        eval: p.methods[string(method)]
+      - opt:
+          do:
+            - return: p.vary
+          when: e == nil || !allowed
+      - return: e.preflight
+  - of: (*CORSPolicy).lookup
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(origin) == 0
+      - opt:
+          do:
+            - return: p.any
+          when: p.any != nil
+      - return: p.origins[string(origin)]
   - of: WithDrainSignal
     participants:
       - id: caller
@@ -135,6 +468,39 @@ sequences:
             - return: c + 'a' - 'A'
           when: c >= 'A' && c <= 'Z'
       - return: c
+  - of: HTTP1StreamValue.Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: HTTP1StreamValue.Send
+        kind: self
+      - id: s.IO.Write
+        kind: internal
+    steps:
+      - return: s.IO.Write(s.Ref, p)
+        to: s.IO.Write
+  - of: HTTP1StreamValue.End
+    participants:
+      - id: caller
+        kind: actor
+      - id: HTTP1StreamValue.End
+        kind: self
+      - id: s.IO.Close
+        kind: internal
+    steps:
+      - return: s.IO.Close(s.Ref)
+        to: s.IO.Close
+  - of: HTTP1StreamValue.Deadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: HTTP1StreamValue.Deadline
+        kind: self
+      - id: s.IO.SetDeadline
+        kind: internal
+    steps:
+      - return: s.IO.SetDeadline(s.Ref, d)
+        to: s.IO.SetDeadline
   - of: HTTP1HandlerFunc.ServeHTTP1
     steps:
       - eval: f(req, res)
@@ -162,6 +528,13 @@ sequences:
     steps:
       - set: a.n, a.claims
         value: 0, 0
+  - of: (*HTTP1RequestIDValue).Bytes
+    steps:
+      - return: v.id[:v.n]
+  - of: (*HTTP1RequestIDValue).Reset
+    steps:
+      - set: v.n
+        value: "0"
   - of: IdentityValue.String
     steps:
       - return: "\"<redacted>\""
@@ -393,6 +766,23 @@ sequences:
             bind: s, ok
             eval: l.next.(LoopStarter)
           when: ok
+  - of: LoopLayer.OnDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopLayer.OnDrain
+        kind: self
+      - id: d.OnDrain
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.OnDrain(io, ref)
+              to: d.OnDrain
+          init:
+            bind: d, ok
+            eval: l.next.(LoopDrainer)
+          when: ok
   - of: LoopBackend.String
     steps:
       - switch:
@@ -409,6 +799,9 @@ sequences:
             - case: LoopBackendPortable
               do:
                 - return: "\"portable\""
+            - case: LoopBackendKqueue
+              do:
+                - return: "\"kqueue\""
             - default: true
               do:
                 - return: "\"unknown\""

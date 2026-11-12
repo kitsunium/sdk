@@ -69,8 +69,11 @@ func Test_httpAdapter_launchAppliesTheBounds(t *testing.T) {
 	if srv.ReadHeaderTimeout != 2*time.Second || srv.ReadTimeout != 0 {
 		t.Errorf("ReadHeaderTimeout = %v, ReadTimeout = %v; want 2s and 0", srv.ReadHeaderTimeout, srv.ReadTimeout)
 	}
-	if _, ok := srv.Handler.(readDeadlineHandler); !ok {
-		t.Errorf("Handler = %T, want the per-read body bound", srv.Handler)
+	//: the version counter first (#966), then the per-read body bound.
+	if vc, ok := srv.Handler.(versionCounter); !ok {
+		t.Errorf("Handler = %T, want the version counter", srv.Handler)
+	} else if _, ok := vc.next.(readDeadlineHandler); !ok {
+		t.Errorf("Handler's next = %T, want the per-read body bound", vc.next)
 	}
 	//: with no idle budget, the wait between requests keeps the read budget
 	//: net/http used to fall back to.

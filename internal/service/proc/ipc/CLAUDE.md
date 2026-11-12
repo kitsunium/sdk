@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-09T00:00:00Z -->
+<!-- updated: 2026-11-11T00:00:00Z -->
 # internal/service/proc/ipc/
 
 ## Purpose
@@ -25,12 +25,15 @@ sentinels — this package returns them and declares none.
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `ipc.go` | `Config` (the engine's, ADR 0074), `Listener` over an `acceptor` — the engine behind `coreipc.Listener` —, `NewListener`, `Accept` (refused peers closed and counted), `Dialer` + `NewDialer` — the engine behind `coreipc.Dialer`, its allow-lists copied —, `Dial`, `RuntimeDir` and `RuntimeDirOr` (the same chain ending on the caller's directory instead of `<tmp>/<app>-<uid>`, ADR 0182), `admit`, `closeBestEffort` |
 | `ipc_compliance.go` | the compile-time proof that `*Listener` satisfies `coreipc.Listener` and `*Dialer` satisfies `coreipc.Dialer` — a method renamed or retyped on either engine fails the build here, not in a caller holding the port |
-| `socket.go` (`!windows`) | the Unix socket: `listen` (dial-then-remove of a leftover socket — `nobodyListens`: refused or gone, nothing else —, `0600`), `socketAcceptor`, `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
+| `socket.go` (`!windows`) | the Unix socket: `socketPosture` (the mode and group the lists need, #1092), `checkReach` (a `0666` socket under a directory anybody searches refused where the kernel names no peer), `listen` (dial-then-remove of a leftover socket — `nobodyListens`: refused or gone, nothing else —, then `bindSocket` and `listenBound`), `socketAcceptor` (reads the peer's groups when `AllowGIDs` is set), `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
+| `bind_unix.go` | `bindSocket` (socket, bind, then `setPosture`: the group, then the mode — before any listen), `listenBound` (`listen(2)`, `net.FileListener`, unlink on close), `listenFailed` |
 | `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName` (the account's SID in the name, #1318), `pipeSDDL`, `listenAs`, `taken`/`holder`/`ownerOf` (a name that exists judged by its owner: `IN_USE` or `ENDPOINT_SQUATTED`), `pipeAcceptor` (descriptor `O:<SID>D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused); `pipeConn` keeps its peer and, for a named one, a handle on its process (`newPipeConn`, `openPeerProcess` — a process younger than the connection refused —, closed by `Close`) |
 | `files.go` (`unix \|\| windows`), `files_unix.go`, `files_windows.go`, `files_other.go` | file passing (#936): `fdPassRefused`; `SCM_RIGHTS` on Unix (`fileConn`); a frame and `DuplicateHandle` out of the sender's process on Windows, a socket by `WSADuplicateSocketW` and `WSASocketW` (`SendFiles`, `prepare`, `fileFrame`, `RecvFiles`, `readEntries`, `take`); none elsewhere |
 | `dir_unix.go` / `dir_other.go` | `prepareDir` (path audited before AND after the `Mkdir`), `checkDir` (path above, own entry, holder), `checkEntry` (mode, owner, not a link), `ownerOf`: on Unix; a refusal elsewhere |
 | `chain_unix.go` | `checkChain` over `pathchain.Resolve` of the socket directory's parent, `checkHolder`, `steerable` (the rule), `ours`, `pathUnsafe` — see §Why-this-shape |
 | `peer_linux.go` / `peer_other.go` (`!linux && !windows`) | `peerOf`: `SO_PEERCRED`, or an unverified peer |
+| `peergroups_linux.go`, `sockopt_linux.go` / `sockopt_linux_386.go` | `peerGroups`: `SO_PEERGROUPS` through `getsockopt(2)` — its own syscall on i386 (365), where the syscall package has only `socketcall` |
+| `peer_bsd.go`, `peer_xucred.go`, `peer_unpcbid.go` | `peerOf` and `peerGroups` over one `peerBuffer`: the `xucred`'s uid, groups and pid (FreeBSD, DragonFly), the `unpcbid`'s uid, egid and pid (NetBSD, no groups) |
 
 The codes — `0.3.91.1`–`11`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
 `LISTEN_FAILED`, `PEER_REFUSED`, `DIAL_FAILED`, `ENDPOINT_FOREIGN`, `CLOSED`,
@@ -111,6 +114,29 @@ The codes — `0.3.91.1`–`11`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
 - **Group search is allowed, group write is not.** A deployment that admits an
   on-call group gives the directory `0750` and its group; nobody but the owner
   can plant an entry. This package never widens a directory.
+- **The socket is opened to the lists, no wider (#1092, ADR 0148 amendment
+  2026-11-11).** `connect(2)` needs write permission on the socket, so a
+  `0600` socket admitted nobody the lists named but root. `socketPosture`:
+  `0600` when they name nobody but this account and root; `0660` and the one
+  group they name when they name no other user — the kernel's own check then
+  admits that group's members, supplementary ones included, and nobody else,
+  even where no peer is named —; `0666` for another user or several groups. A
+  group the socket cannot take (this account not in it) is `LISTEN_FAILED`.
+  The group and mode are set between `bind(2)` and `listen(2)`
+  (`bind_unix.go`): a connect to a socket that does not listen is refused, so
+  the umask's mode never admits anyone, and the process's umask is never
+  touched. Where the kernel names no peer, a `0666` socket under a directory
+  anybody may search is `DIRECTORY_UNSAFE` (`checkReach`): nothing would gate
+  it.
+- **A supplementary group admits, read from the kernel (#1092).** `admit`
+  takes the peer's groups beside its `PeerValue`: `SO_PEERGROUPS` on Linux —
+  the group list of the credentials `SO_PEERCRED` reads, recorded at connect,
+  so no pid is read again and no `/proc` file can name another process —, the
+  `xucred`'s sixteen on FreeBSD and DragonFly, none on NetBSD (`unpcbid` has
+  the egid alone). They are read only when `AllowGIDs` is set, and a kernel
+  that does not answer leaves the effective group alone: fewer admitted, never
+  more. `PeerValue` does not carry them — a slice would make it
+  incomparable — so a caller still sees the effective group only.
 - **Files pass to a named peer only (#936).** On Unix `Conn.Conn` is a
   `fileConn` (`files_unix.go`) embedding the `*net.UnixConn`, offering the core
   siblings `FileSender` and `FileReceiver` (ADR 0039): `SendFiles` writes
@@ -198,7 +224,14 @@ The codes — `0.3.91.1`–`11`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   outside the group is refused by the kernel at the 0750 directory
   (`DIAL_FAILED`). `dialWith` takes `lstat` and the effective uid so
   `TestDialAnotherAccountsSocket` stands as euid 1001 before user 1000's
-  daemon; the root e2e row with two real accounts is not written.
+  daemon. The row with two real accounts is
+  `TestAnAllowedAccountExchangesALineAndAStrangerIsRefused`
+  (`account_linux_external_test.go`, root only — the linux-init lane): copies
+  of the test binary run as uids 61000 (the daemon), 61001 (in group 61100,
+  supplementary) and 61002, guarded by `TestMain` (a helper starts nothing,
+  and a process a helper started plays no role and runs no test). A user
+  namespace mapping one uid cannot stand in: the kernel's uid stays the
+  test's, so `SO_PEERCRED` and the socket's mode would see one account.
 - **Dial, then remove.** A socket at the path is dialled first: one that
   answers belongs to a live process and is refused (`IN_USE`), one that does
   not is a leftover and is removed — only when it is a socket this account

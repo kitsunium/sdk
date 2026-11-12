@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	corehttp2 "github.com/kitsunium/sdk/internal/core/net/http2"
+
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
@@ -88,6 +90,10 @@ func TestGroupOption_recordsItsKind(t *testing.T) {
 	table := map[string]tc{
 		"ReadHeaderTimeout": {ReadHeaderTimeout(0), corenet.OptionReadHeaderTimeout},
 		"MaxHeaderBytes":    {MaxHeaderBytes(0), corenet.OptionMaxHeaderBytes},
+		"Steer":             {Steer(corenet.SteerCPU), corenet.OptionSteer},
+		"KeepAlive":         {KeepAlive(0), corenet.OptionKeepAlive},
+		"UserTimeout":       {UserTimeout(0), corenet.OptionUserTimeout},
+		"ProxyProtocol":     {ProxyProtocol(corenet.ProxyProtocolValue{}), corenet.OptionProxyProtocol},
 		"TLS":               {TLS(corenet.IdentityValue{}), corenet.OptionTLS},
 		"ReadTimeout":       {ReadTimeout(0), corenet.OptionReadTimeout},
 		"WriteTimeout":      {WriteTimeout(0), corenet.OptionWriteTimeout},
@@ -98,6 +104,7 @@ func TestGroupOption_recordsItsKind(t *testing.T) {
 		"BatchSize":         {BatchSize(0), corenet.OptionBatchSize},
 		"MaxConns":          {MaxConns(0), corenet.OptionMaxConns},
 		"Shards":            {Shards(0), corenet.OptionShards},
+		"ShareAddress":      {ShareAddress(), corenet.OptionShareAddress},
 		"Adopt":             {Adopt(), corenet.OptionAdopt},
 		"PreHandshake":      {PreHandshake(nil), corenet.OptionPreHandshake},
 		"Plaintext":         {Plaintext(), corenet.OptionPlaintext},
@@ -105,6 +112,11 @@ func TestGroupOption_recordsItsKind(t *testing.T) {
 		"Engine":            {Engine(corenet.EngineAuto), corenet.OptionEngine},
 		"BatchReplies":      {BatchReplies(), corenet.OptionBatchReplies},
 		"Protocols":         {Protocols(), corenet.OptionProtocols},
+		"HTTP2":             {HTTP2(corehttp2.LimitsValue{}), corenet.OptionHTTP2},
+		"MaxBodyBytes":      {MaxBodyBytes(0), corenet.OptionMaxBodyBytes},
+		"Backlog":           {Backlog(0), corenet.OptionBacklog},
+		"ReceiveBuffer":     {ReceiveBuffer(0), corenet.OptionReceiveBuffer},
+		"SendBuffer":        {SendBuffer(0), corenet.OptionSendBuffer},
 	}
 	facade := groupOptionFuncs(t, facadeFile)
 	//: the facade's fifteen, ReadHeaderTimeout through Adopt, and the three of

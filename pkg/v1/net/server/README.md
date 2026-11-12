@@ -81,16 +81,22 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Adopt\(names ...string\) GroupOption](<#Adopt>)
+- [func Backlog\(n int\) GroupOption](<#Backlog>)
 - [func BatchReplies\(\) GroupOption](<#BatchReplies>)
 - [func BatchSize\(n int\) GroupOption](<#BatchSize>)
+- [func CORS\(cfg CORSValue\) \(HTTPMiddleware, error\)](<#CORS>)
 - [func Chain\(h Handler, middlewares ...Middleware\) Handler](<#Chain>)
 - [func ChainPacket\(h PacketHandler, middlewares ...PacketMiddleware\) PacketHandler](<#ChainPacket>)
+- [func Compress\(v corenet.CompressValue\) \(func\(http.Handler\) http.Handler, error\)](<#Compress>)
 - [func DrainSignal\(ctx context.Context\) \<-chan struct{}](<#DrainSignal>)
 - [func Engine\(e EngineValue\) GroupOption](<#Engine>)
+- [func HTTP2\(v HTTP2Limits\) GroupOption](<#HTTP2>)
 - [func HandshakeTimeout\(d time.Duration\) GroupOption](<#HandshakeTimeout>)
 - [func IdleTimeout\(d time.Duration\) GroupOption](<#IdleTimeout>)
+- [func KeepAlive\(d time.Duration\) GroupOption](<#KeepAlive>)
 - [func Listen\(network string, addr string\) GroupOption](<#Listen>)
 - [func Loop\(v LoopValue\) GroupOption](<#Loop>)
+- [func MaxBodyBytes\(n int64\) GroupOption](<#MaxBodyBytes>)
 - [func MaxConns\(n int\) GroupOption](<#MaxConns>)
 - [func MaxHeaderBytes\(n int\) GroupOption](<#MaxHeaderBytes>)
 - [func MaxPacketSize\(n int\) GroupOption](<#MaxPacketSize>)
@@ -99,20 +105,34 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func NewLoopLayer\(next LoopHandler\) LoopLayer](<#NewLoopLayer>)
 - [func Plaintext\(\) GroupOption](<#Plaintext>)
 - [func Protocols\(protos ...string\) GroupOption](<#Protocols>)
+- [func ProxyProtocol\(v corenet.ProxyProtocolValue\) GroupOption](<#ProxyProtocol>)
+- [func RateKeyHeader\(name string\) HTTPRateKeyValue](<#RateKeyHeader>)
+- [func RateKeyRemoteAddr\(\) HTTPRateKeyValue](<#RateKeyRemoteAddr>)
+- [func RateLimit\(l Limiter, key HTTPRateKeyValue\) \(HTTPMiddleware, error\)](<#RateLimit>)
 - [func ReadBufferSize\(n int\) GroupOption](<#ReadBufferSize>)
 - [func ReadHeaderTimeout\(d time.Duration\) GroupOption](<#ReadHeaderTimeout>)
 - [func ReadTimeout\(d time.Duration\) GroupOption](<#ReadTimeout>)
+- [func ReceiveBuffer\(n int\) GroupOption](<#ReceiveBuffer>)
+- [func SendBuffer\(n int\) GroupOption](<#SendBuffer>)
 - [func Shards\(n int\) GroupOption](<#Shards>)
+- [func ShareAddress\(\) GroupOption](<#ShareAddress>)
+- [func Steer\(v corenet.SteerValue\) GroupOption](<#Steer>)
 - [func TLS\(id tlsid.Identity\) GroupOption](<#TLS>)
+- [func UserTimeout\(d time.Duration\) GroupOption](<#UserTimeout>)
 - [func WithDrainGrace\(d time.Duration\) Option](<#WithDrainGrace>)
 - [func WithDrainTimeout\(d time.Duration\) Option](<#WithDrainTimeout>)
+- [func WithLogger\(l corelogger.Logger\) Option](<#WithLogger>)
 - [func WriteTimeout\(d time.Duration\) GroupOption](<#WriteTimeout>)
+- [type CORSValue](<#CORSValue>)
 - [type Capability](<#Capability>)
 - [type CapabilityValue](<#CapabilityValue>)
+- [type CompressValue](<#CompressValue>)
 - [type Conn](<#Conn>)
   - [func \(Conn\) Buffer\(\) \[\]byte](<#Conn.Buffer>)
   - [func \(Conn\) Group\(\) string](<#Conn.Group>)
   - [func \(Conn\) ID\(\) uint64](<#Conn.ID>)
+- [type ConnUnwrapper](<#ConnUnwrapper>)
+  - [func \(ConnUnwrapper\) Unwrap\(\) stdnet.Conn](<#ConnUnwrapper.Unwrap>)
 - [type DatagramState](<#DatagramState>)
 - [type EngineValue](<#EngineValue>)
   - [func \(EngineValue\) String\(\) string](<#EngineValue.String>)
@@ -127,14 +147,29 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(\*Group\) Use\(middlewares ...corenet.Middleware\[corenet.ConnHandler\]\) \*StreamGroup](<#Group.Use>)
   - [func \(\*Group\) UseLoop\(middlewares ...corenet.Middleware\[corenet.LoopHandler\]\) \*StreamGroup](<#Group.UseLoop>)
 - [type GroupOption](<#GroupOption>)
+- [type HTTP2ErrorCount](<#HTTP2ErrorCount>)
+- [type HTTP2ErrorType](<#HTTP2ErrorType>)
+  - [func \(HTTP2ErrorType\) MarshalText\(\) \(\[\]byte, error\)](<#HTTP2ErrorType.MarshalText>)
+  - [func \(HTTP2ErrorType\) String\(\) string](<#HTTP2ErrorType.String>)
+- [type HTTP2Limits](<#HTTP2Limits>)
+  - [func \(HTTP2Limits\) Resolve\(\) \(LimitsValue, error\)](<#HTTP2Limits.Resolve>)
+- [type HTTPMiddleware](<#HTTPMiddleware>)
+- [type HTTPRateKeyValue](<#HTTPRateKeyValue>)
 - [type Handler](<#Handler>)
   - [func \(Handler\) ServeConn\(ctx context.Context, c Conn\) error](<#Handler.ServeConn>)
 - [type HandlerFunc](<#HandlerFunc>)
   - [func \(HandlerFunc\) ServeConn\(ctx context.Context, c Conn\) error](<#HandlerFunc.ServeConn>)
+- [type Limiter](<#Limiter>)
+  - [func \(Limiter\) Allow\(key \[\]byte, now int64\) \(ok bool, retryAfter int\)](<#Limiter.Allow>)
 - [type ListenerState](<#ListenerState>)
 - [type LoopBackend](<#LoopBackend>)
   - [func \(LoopBackend\) String\(\) string](<#LoopBackend.String>)
 - [type LoopConnRef](<#LoopConnRef>)
+- [type LoopHTTPCodec](<#LoopHTTPCodec>)
+  - [func \(LoopHTTPCodec\) Draining\(\)](<#LoopHTTPCodec.Draining>)
+  - [func \(LoopHTTPCodec\) InFlight\(lane int, ref LoopConnRef\) bool](<#LoopHTTPCodec.InFlight>)
+  - [func \(LoopHTTPCodec\) SetHTTP\(v LoopHTTPValue\)](<#LoopHTTPCodec.SetHTTP>)
+- [type LoopHTTPValue](<#LoopHTTPValue>)
 - [type LoopHandler](<#LoopHandler>)
   - [func \(LoopHandler\) OnBatchEnd\(io LoopIO\)](<#LoopHandler.OnBatchEnd>)
   - [func \(LoopHandler\) OnClose\(io LoopIO, ref LoopConnRef, err error\)](<#LoopHandler.OnClose>)
@@ -156,6 +191,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(LoopLayer\) OnBatchEnd\(io LoopIO\)](<#LoopLayer.OnBatchEnd>)
   - [func \(LoopLayer\) OnClose\(io LoopIO, ref LoopConnRef, err error\)](<#LoopLayer.OnClose>)
   - [func \(LoopLayer\) OnData\(io LoopIO, ref LoopConnRef, buf \[\]byte\) int](<#LoopLayer.OnData>)
+  - [func \(LoopLayer\) OnDrain\(io LoopIO, ref LoopConnRef\)](<#LoopLayer.OnDrain>)
   - [func \(LoopLayer\) OnOpen\(io LoopIO, ref LoopConnRef\)](<#LoopLayer.OnOpen>)
   - [func \(LoopLayer\) OnStart\(lanes int\)](<#LoopLayer.OnStart>)
   - [func \(LoopLayer\) OnTimeout\(io LoopIO, ref LoopConnRef\)](<#LoopLayer.OnTimeout>)
@@ -173,6 +209,9 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type LoopOutbound](<#LoopOutbound>)
   - [func \(LoopOutbound\) Send\(io LoopIO, job LoopJobValue\) error](<#LoopOutbound.Send>)
 - [type LoopOutboundValue](<#LoopOutboundValue>)
+- [type LoopPeer](<#LoopPeer>)
+  - [func \(LoopPeer\) Peer\(ref LoopConnRef\) \(LoopPeerValue, bool\)](<#LoopPeer.Peer>)
+- [type LoopPeerValue](<#LoopPeerValue>)
 - [type LoopRingState](<#LoopRingState>)
 - [type LoopStarter](<#LoopStarter>)
   - [func \(LoopStarter\) OnStart\(lanes int\)](<#LoopStarter.OnStart>)
@@ -195,23 +234,32 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type PacketGroup](<#PacketGroup>)
   - [func \(\*PacketGroup\) Handle\(h corenet.PacketHandler\) \*PacketGroup](<#PacketGroup.Handle>)
   - [func \(\*PacketGroup\) HandleFunc\(f corenet.PacketHandlerFunc\) \*PacketGroup](<#PacketGroup.HandleFunc>)
+  - [func \(\*PacketGroup\) HandleLoop\(h corenet.PacketLoopHandler\) \*PacketGroup](<#PacketGroup.HandleLoop>)
   - [func \(\*PacketGroup\) Name\(\) string](<#PacketGroup.Name>)
   - [func \(\*PacketGroup\) Use\(middlewares ...corenet.Middleware\[corenet.PacketHandler\]\) \*PacketGroup](<#PacketGroup.Use>)
 - [type PacketHandler](<#PacketHandler>)
   - [func \(PacketHandler\) ServePacket\(ctx context.Context, p Packet\) error](<#PacketHandler.ServePacket>)
 - [type PacketHandlerFunc](<#PacketHandlerFunc>)
   - [func \(PacketHandlerFunc\) ServePacket\(ctx context.Context, p Packet\) error](<#PacketHandlerFunc.ServePacket>)
+- [type PacketLoopHandler](<#PacketLoopHandler>)
+  - [func \(PacketLoopHandler\) OnBatchEnd\(io PacketLoopIO\)](<#PacketLoopHandler.OnBatchEnd>)
+  - [func \(PacketLoopHandler\) OnPacket\(io PacketLoopIO, from netip.AddrPort, buf \[\]byte\)](<#PacketLoopHandler.OnPacket>)
+- [type PacketLoopIO](<#PacketLoopIO>)
+  - [func \(PacketLoopIO\) Loop\(\) int](<#PacketLoopIO.Loop>)
+  - [func \(PacketLoopIO\) Reply\(to netip.AddrPort, p \[\]byte\) error](<#PacketLoopIO.Reply>)
 - [type PacketMiddleware](<#PacketMiddleware>)
 - [type Phase](<#Phase>)
   - [func \(Phase\) String\(\) string](<#Phase.String>)
 - [type Platform](<#Platform>)
 - [type PostFunc](<#PostFunc>)
+- [type ProxyProtocolValue](<#ProxyProtocolValue>)
 - [type Server](<#Server>)
   - [func \(\*Server\) Close\(\) error](<#Server.Close>)
   - [func \(\*Server\) Group\(name string, opts ...GroupOption\) \*StreamGroup](<#Server.Group>)
   - [func \(\*Server\) HTTP\(addr string, h any, opts ...GroupOption\) \*StreamGroup](<#Server.HTTP>)
   - [func \(\*Server\) PacketGroup\(name string, opts ...GroupOption\) \*PacketGroup](<#Server.PacketGroup>)
   - [func \(\*Server\) RegisterHealth\(h corehealth.Health\) error](<#Server.RegisterHealth>)
+  - [func \(\*Server\) RegisterMetrics\(m coremetrics.AsyncMeter, attrs ...coreotel.AttrValue\) error](<#Server.RegisterMetrics>)
   - [func \(\*Server\) Serve\(ctx context.Context\) error](<#Server.Serve>)
   - [func \(\*Server\) Shutdown\(ctx context.Context\) error](<#Server.Shutdown>)
   - [func \(\*Server\) Start\(ctx context.Context\) error](<#Server.Start>)
@@ -220,8 +268,19 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(\*Server\) UDP\(addr string, h any, opts ...GroupOption\) \*PacketGroup](<#Server.UDP>)
 - [type State](<#State>)
   - [func \(State\) Degraded\(\) bool](<#State.Degraded>)
+- [type SteerValue](<#SteerValue>)
+- [type ZCRXValue](<#ZCRXValue>)
 
 ## Constants
+
+<a name="CapabilityBusyPoll"></a>
+```go
+const CapabilityBusyPoll Capability = "busy-poll"
+```
+
+CapabilityBusyPoll opts a loop group into busy-poll, a class A-code kernel capability, its window LoopValue.BusyPoll.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityBusyPoll`.
 
 <a name="CapabilityEpoll"></a>
 ```go
@@ -241,6 +300,15 @@ CapabilityGoroutine is the goroutine engine, the bottom of the lattice.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityGoroutine`.
 
+<a name="CapabilityHTTP2Loop"></a>
+```go
+const CapabilityHTTP2Loop Capability = "http2-loop"
+```
+
+CapabilityHTTP2Loop names a loop group's HTTP/2 adapter, a class A-code capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityHTTP2Loop`.
+
 <a name="CapabilityIOURing"></a>
 ```go
 const CapabilityIOURing Capability = "iouring"
@@ -250,6 +318,24 @@ CapabilityIOURing is io\_uring, the top of the lattice.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityIOURing`.
 
+<a name="CapabilityKqueue"></a>
+```go
+const CapabilityKqueue Capability = "kqueue"
+```
+
+CapabilityKqueue is kqueue, at epoll's rank on darwin and the BSDs.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityKqueue`.
+
+<a name="CapabilityLoopAffinity"></a>
+```go
+const CapabilityLoopAffinity Capability = "loop-affinity"
+```
+
+CapabilityLoopAffinity names loop-affinity, the row of LoopValue.Affinity, a class A-code kernel capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityLoopAffinity`.
+
 <a name="CapabilityPortable"></a>
 ```go
 const CapabilityPortable Capability = "portable"
@@ -258,6 +344,42 @@ const CapabilityPortable Capability = "portable"
 CapabilityPortable is the portable loop backend, the loop family's floor.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityPortable`.
+
+<a name="CapabilityReuseportLoops"></a>
+```go
+const CapabilityReuseportLoops Capability = "reuseport-loops"
+```
+
+CapabilityReuseportLoops names reuseport-loops, the row of a loop group's one SO\_REUSEPORT listener per loop, opted into with Shards(0).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityReuseportLoops`.
+
+<a name="CapabilitySOIncomingCPU"></a>
+```go
+const CapabilitySOIncomingCPU Capability = "so-incoming-cpu"
+```
+
+CapabilitySOIncomingCPU opts a loop group into so-incoming-cpu, a class A-code kernel capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilitySOIncomingCPU`.
+
+<a name="CapabilityTCPFastOpen"></a>
+```go
+const CapabilityTCPFastOpen Capability = "tcp-fastopen"
+```
+
+CapabilityTCPFastOpen names tcp-fastopen, a class B kernel capability, declared, not built.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityTCPFastOpen`.
+
+<a name="CapabilityTCPNotsentLowat"></a>
+```go
+const CapabilityTCPNotsentLowat Capability = "tcp-notsent-lowat"
+```
+
+CapabilityTCPNotsentLowat opts a loop group into tcp-notsent-lowat, a class A-code kernel capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityTCPNotsentLowat`.
 
 <a name="CapabilityURingDeferTaskrun"></a>
 ```go
@@ -376,6 +498,15 @@ LoopBackendIOURing is io\_uring, after the kernel's staged probe.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendIOURing`.
 
+<a name="LoopBackendKqueue"></a>
+```go
+const LoopBackendKqueue LoopBackend = 4
+```
+
+LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe, when named: LoopBackendAuto does not choose it yet.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendKqueue`.
+
 <a name="LoopBackendPortable"></a>
 ```go
 const LoopBackendPortable LoopBackend = 3
@@ -394,6 +525,150 @@ LoopsAuto, as LoopValue.Loops, runs one loop per GOMAXPROCS but one, at least on
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopsAuto`.
 
+<a name="MetricAcceptBackoffs"></a>
+```go
+const MetricAcceptBackoffs string = "net_server_accept_backoffs_total"
+```
+
+MetricAcceptBackoffs names the waits the accept loops took after a failed Accept: State's AcceptBackoffs.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricAcceptBackoffs`.
+
+<a name="MetricConnsActive"></a>
+```go
+const MetricConnsActive string = "net_server_conns_active"
+```
+
+MetricConnsActive names the connections a stream group is serving now, a gauge per group (attribute group).
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricConnsActive`.
+
+<a name="MetricConnsRejected"></a>
+```go
+const MetricConnsRejected string = "net_server_conns_rejected_total"
+```
+
+MetricConnsRejected names the connections a stream group's ceiling turned away, a counter per group (attribute group): State's RejectedConns, split by group.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricConnsRejected`.
+
+<a name="MetricConnsTotal"></a>
+```go
+const MetricConnsTotal string = "net_server_conns_total"
+```
+
+MetricConnsTotal names the connections a stream group served since the server started - accepted, then past a PROXY header and the ceiling -, a counter per group (attribute group): a connection MetricConnsRejected counts is not in it, although State's TotalConns counts it too (#847).
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricConnsTotal`.
+
+<a name="MetricDatagramsTruncated"></a>
+```go
+const MetricDatagramsTruncated string = "net_server_datagrams_truncated_total"
+```
+
+MetricDatagramsTruncated names the datagrams the batched read cut: State's Datagrams.TruncatedPackets.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricDatagramsTruncated`.
+
+<a name="MetricDegraded"></a>
+```go
+const MetricDegraded string = "net_server_degraded"
+```
+
+MetricDegraded names 1 while State reports the server degraded - a fallback, a fault, a listener below what it asked for -, 0 otherwise.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricDegraded`.
+
+<a name="MetricGSOOversized"></a>
+```go
+const MetricGSOOversized string = "net_server_gso_oversized_total"
+```
+
+MetricGSOOversized names the GSO sends the device refused: State's Datagrams.GSOOversized.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricGSOOversized`.
+
+<a name="MetricLoopBatchP99"></a>
+```go
+const MetricLoopBatchP99 string = "net_loop_batch_p99_seconds"
+```
+
+MetricLoopBatchP99 names the 99th percentile of a loop group's batch duration, in seconds, a gauge per group (attribute group).
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricLoopBatchP99`.
+
+<a name="MetricLoopBatches"></a>
+```go
+const MetricLoopBatches string = "net_loop_batches_total"
+```
+
+MetricLoopBatches names the batches a loop ring ran, a counter per ring (attributes group, loop, ring).
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricLoopBatches`.
+
+<a name="MetricLoopBatchesCut"></a>
+```go
+const MetricLoopBatchesCut string = "net_loop_batches_cut_total"
+```
+
+MetricLoopBatchesCut names the batches a loop ring's budget cut short, a counter per ring (attributes group, loop, ring).
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricLoopBatchesCut`.
+
+<a name="MetricLoopBufferStarved"></a>
+```go
+const MetricLoopBufferStarved string = "net_loop_buffer_starved_total"
+```
+
+MetricLoopBufferStarved names the receives a loop ring found no provided buffer for, a counter per ring (attributes group, loop, ring).
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricLoopBufferStarved`.
+
+<a name="MetricLoopCompletions"></a>
+```go
+const MetricLoopCompletions string = "net_loop_completions_total"
+```
+
+MetricLoopCompletions names the completions a loop ring reaped, a counter per ring (attributes group, loop, ring).
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricLoopCompletions`.
+
+<a name="MetricLoopOutboundRefused"></a>
+```go
+const MetricLoopOutboundRefused string = "net_loop_outbound_refused_total"
+```
+
+MetricLoopOutboundRefused names the offloaded answers a loop group refused, a counter per group (attribute group): LoopStateValue.OutboundRefused.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricLoopOutboundRefused`.
+
+<a name="MetricLoopRingsDrained"></a>
+```go
+const MetricLoopRingsDrained string = "net_loop_rings_drained"
+```
+
+MetricLoopRingsDrained names the rings of a loop group the accept watchdog has drained, a gauge per group (attribute group): all of them is a stalled group.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricLoopRingsDrained`.
+
+<a name="MetricReplyFailures"></a>
+```go
+const MetricReplyFailures string = "net_server_datagram_reply_failures_total"
+```
+
+MetricReplyFailures names the replies that did not leave: State's Datagrams.ReplyFailures.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricReplyFailures`.
+
+<a name="MetricSuppressedLogs"></a>
+```go
+const MetricSuppressedLogs string = "net_server_suppressed_logs_total"
+```
+
+MetricSuppressedLogs names the lines of net/http's own log the server did not write: State's SuppressedLogs.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricSuppressedLogs`.
+
 <a name="OptionAdopt"></a>
 ```go
 const OptionAdopt OptionKind = 14
@@ -402,6 +677,15 @@ const OptionAdopt OptionKind = 14
 OptionAdopt is Adopt. The loop engine honours it.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionAdopt`.
+
+<a name="OptionBacklog"></a>
+```go
+const OptionBacklog OptionKind = 23
+```
+
+OptionBacklog is Backlog. Only a stream group honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionBacklog`.
 
 <a name="OptionBatchReplies"></a>
 ```go
@@ -430,6 +714,15 @@ OptionEngine is Engine. Every engine honours it, or refuses the group.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionEngine`.
 
+<a name="OptionHTTP2"></a>
+```go
+const OptionHTTP2 OptionKind = 30
+```
+
+OptionHTTP2 is HTTP2.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionHTTP2`.
+
 <a name="OptionHandshakeTimeout"></a>
 ```go
 const OptionHandshakeTimeout OptionKind = 8
@@ -448,6 +741,15 @@ OptionIdleTimeout is IdleTimeout. The loop engine honours it.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionIdleTimeout`.
 
+<a name="OptionKeepAlive"></a>
+```go
+const OptionKeepAlive OptionKind = 28
+```
+
+OptionKeepAlive is KeepAlive. Every stream engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionKeepAlive`.
+
 <a name="OptionLoopMiddleware"></a>
 ```go
 const OptionLoopMiddleware OptionKind = 19
@@ -456,6 +758,15 @@ const OptionLoopMiddleware OptionKind = 19
 OptionLoopMiddleware is UseLoop. A group no loop handler serves refuses it.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionLoopMiddleware`.
+
+<a name="OptionMaxBodyBytes"></a>
+```go
+const OptionMaxBodyBytes OptionKind = 22
+```
+
+OptionMaxBodyBytes is MaxBodyBytes. Only an HTTP group served by net/http honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionMaxBodyBytes`.
 
 <a name="OptionMaxConns"></a>
 ```go
@@ -538,6 +849,15 @@ OptionProtocols is Protocols. Only an HTTP group honours it.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionProtocols`.
 
+<a name="OptionProxyProtocol"></a>
+```go
+const OptionProxyProtocol OptionKind = 26
+```
+
+OptionProxyProtocol is ProxyProtocol. Only a goroutine-engine TCP group honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionProxyProtocol`.
+
 <a name="OptionReadBufferSize"></a>
 ```go
 const OptionReadBufferSize OptionKind = 9
@@ -565,6 +885,24 @@ OptionReadTimeout is ReadTimeout.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionReadTimeout`.
 
+<a name="OptionReceiveBuffer"></a>
+```go
+const OptionReceiveBuffer OptionKind = 24
+```
+
+OptionReceiveBuffer is ReceiveBuffer. Every engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionReceiveBuffer`.
+
+<a name="OptionSendBuffer"></a>
+```go
+const OptionSendBuffer OptionKind = 25
+```
+
+OptionSendBuffer is SendBuffer. Every engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionSendBuffer`.
+
 <a name="OptionShards"></a>
 ```go
 const OptionShards OptionKind = 12
@@ -574,6 +912,24 @@ OptionShards is Shards.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionShards`.
 
+<a name="OptionShareAddress"></a>
+```go
+const OptionShareAddress OptionKind = 31
+```
+
+OptionShareAddress is ShareAddress.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionShareAddress`.
+
+<a name="OptionSteer"></a>
+```go
+const OptionSteer OptionKind = 27
+```
+
+OptionSteer is Steer. Only a datagram group honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionSteer`.
+
 <a name="OptionTLS"></a>
 ```go
 const OptionTLS OptionKind = 1
@@ -582,6 +938,15 @@ const OptionTLS OptionKind = 1
 OptionTLS is TLS. A loop group always refuses it.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionTLS`.
+
+<a name="OptionUserTimeout"></a>
+```go
+const OptionUserTimeout OptionKind = 29
+```
+
+OptionUserTimeout is UserTimeout. Every stream engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionUserTimeout`.
 
 <a name="OptionWriteTimeout"></a>
 ```go
@@ -637,7 +1002,36 @@ PhaseStopped has released every listener.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.PhaseStopped`.
 
+<a name="SteerCPU"></a>
+```go
+const SteerCPU SteerValue = 1
+```
+
+SteerCPU hands each datagram to shard cpu mod n.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.SteerCPU`.
+
+<a name="SteerHash"></a>
+```go
+const SteerHash SteerValue = 0
+```
+
+SteerHash spreads a group's datagrams with the kernel's 4-tuple hash.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.SteerHash`.
+
 ## Variables
+
+<a name="AddressInUse"></a>
+```go
+var AddressInUse *errs.Error
+```
+
+AddressInUse reports a listen address another socket already holds.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.AddressInUse`.
+
+Code `0.2.11.96` · reason `ADDRESS_IN_USE` · public "The listening address is already in use"
 
 <a name="AlreadyStarted"></a>
 ```go
@@ -649,6 +1043,28 @@ AlreadyStarted reports a second Start on a running server.
 Initialised with `github.com/kitsunium/sdk/internal/core/net.AlreadyStarted`.
 
 Code `0.2.11.5` · reason `ALREADY_STARTED` · public "The server is already started"
+
+<a name="CORSMisconfigured"></a>
+```go
+var CORSMisconfigured *errs.Error
+```
+
+CORSMisconfigured reports a CORS policy refused when the middleware is built: no origin, a wildcard with credentials, or an origin, method, field or age it cannot honour. Its "option" field names which.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CORSMisconfigured`.
+
+Code `0.2.11.80` · reason `CORS_MISCONFIGURED` · public "The CORS policy is not valid"
+
+<a name="CompressInvalid"></a>
+```go
+var CompressInvalid *errs.Error
+```
+
+CompressInvalid reports a compression configuration outside its range.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CompressInvalid`.
+
+Code `0.2.11.73` · reason `COMPRESS_INVALID` · public "A response compression option is out of range"
 
 <a name="ConnLimitReached"></a>
 ```go
@@ -903,6 +1319,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopTLSUnsupported`
 
 Code `0.2.11.35` · reason `LOOP_TLS_UNSUPPORTED` · public "The loop engine does not serve TLS"
 
+<a name="LoopValueInvalid"></a>
+```go
+var LoopValueInvalid *errs.Error
+```
+
+LoopValueInvalid reports a LoopValue field a loop group cannot take — Affinity, NotsentLowat, SlabBudget, the busy-poll fields or ZCRX.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopValueInvalid`.
+
+Code `0.2.11.88` · reason `LOOP_VALUE_INVALID` · public "The loop group's configuration is invalid"
+
 <a name="LoopWrongThread"></a>
 ```go
 var LoopWrongThread *errs.Error
@@ -913,6 +1340,28 @@ LoopWrongThread reports, under loopdebug, a loop operation off the loop's thread
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopWrongThread`.
 
 Code `0.2.11.43` · reason `LOOP_WRONG_THREAD` · public "The operation was called outside its loop"
+
+<a name="MetricsRefused"></a>
+```go
+var MetricsRefused *errs.Error
+```
+
+MetricsRefused reports a RegisterMetrics the meter cannot take, a nil one or one the server is already registered on.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.MetricsRefused`.
+
+Code `0.2.11.69` · reason `METRICS_REFUSED` · public "The server's metrics cannot be registered on this meter"
+
+<a name="OptionValueInvalid"></a>
+```go
+var OptionValueInvalid *errs.Error
+```
+
+OptionValueInvalid reports a group option given a value outside its range.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionValueInvalid`.
+
+Code `0.2.11.68` · reason `OPTION_VALUE_INVALID` · public "A group option's value is out of range"
 
 <a name="PacketOptionUnsupported"></a>
 ```go
@@ -958,6 +1407,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.ProtocolsRefused`.
 
 Code `0.2.11.62` · reason `PROTOCOLS_REFUSED` · public "The group's HTTP protocols are misconfigured"
 
+<a name="ProxyHeaderInvalid"></a>
+```go
+var ProxyHeaderInvalid *errs.Error
+```
+
+ProxyHeaderInvalid reports a connection refused for its PROXY protocol header.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.ProxyHeaderInvalid`.
+
+Code `0.2.11.72` · reason `PROXY_HEADER_INVALID` · public "The connection's PROXY protocol header is invalid"
+
 <a name="UnsupportedNetwork"></a>
 ```go
 var UnsupportedNetwork *errs.Error
@@ -982,6 +1442,15 @@ Socket activation is what makes a zero-downtime restart possible: the supervisor
 
 A named socket the supervisor did not pass is SocketAdoptFailed, never a silent fallback to binding: a service that quietly binds its own port has lost exactly the property activation exists to provide. The same holds on Windows, which has no socket activation at all: Start fails there with SocketAdoptFailed, whose cause field names UNSUPPORTED\_PLATFORM.
 
+<a name="Backlog"></a>
+## func [Backlog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Backlog(n int) GroupOption
+```
+
+Backlog sets the depth the kernel queues established connections at before the group's accept loop takes them: zero keeps the host's somaxconn, the kernel clamps a larger value to it, and State reports the depth applied in ListenerStateValue.Backlog. A negative value fails Start with OptionValueInvalid; a datagram group refuses the option.
+
 <a name="BatchReplies"></a>
 ## func [BatchReplies](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -999,6 +1468,15 @@ func BatchSize(n int) GroupOption
 ```
 
 BatchSize sets how many datagrams one read attempts to collect. One disables batching; zero selects the platform default. Where the platform cannot batch, State reports the degradation rather than hiding it.
+
+<a name="CORS"></a>
+## func [CORS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func CORS(cfg CORSValue) (HTTPMiddleware, error)
+```
+
+CORS returns the cross-origin middleware of an HTTP group: a preflight answered 204 with the policy's fields, those fields on every other answer, nothing for an origin not listed. A value it cannot honour is CORSMisconfigured.
 
 <a name="Chain"></a>
 ## func [Chain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1019,6 +1497,15 @@ func ChainPacket(h PacketHandler, middlewares ...PacketMiddleware) PacketHandler
 ```
 
 ChainPacket applies middlewares to a datagram handler, outermost first.
+
+<a name="Compress"></a>
+## func [Compress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Compress(v corenet.CompressValue) (func(http.Handler) http.Handler, error)
+```
+
+Compress returns a middleware for a Group.HandleHTTP handler that answers in gzip what the client admits, for an allowlist of types and bodies of at least v.MinBytes, Flush reaching the client through the gzip stream. It never compresses a text/event-stream, an already encoded body or a response marked Cache-Control: no-transform. A value out of range is CompressInvalid.
 
 <a name="DrainSignal"></a>
 ## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1042,6 +1529,15 @@ func Engine(e EngineValue) GroupOption
 
 Engine names the engine family the group runs on: EngineGoroutine, one goroutine per connection, or EngineLoop, the loop engine; Loop then picks the loop's backend. The zero value, EngineAuto, lets the handler's type choose. An engine the group's handler cannot run on, or that another option contradicts — EngineGoroutine with Loop or HandleLoop, EngineLoop with Handle, HandleFunc or HandleHTTP or on a datagram group — fails Start with EngineUnsupported, and is never replaced by the other engine.
 
+<a name="HTTP2"></a>
+## func [HTTP2](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func HTTP2(v HTTP2Limits) GroupOption
+```
+
+HTTP2 sets the HTTP/2 bounds of a group serving HTTP: an HTTP group's and the http2 loop adapter's. A zero field is its default; out of bounds, Start fails with LimitsRefused, its name in reason.
+
 <a name="HandshakeTimeout"></a>
 ## func [HandshakeTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1064,6 +1560,15 @@ IdleTimeout bounds how long a connection may sit with no traffic at all.
 
 It is enforced on the read side, where silence is observable: a read is bounded by whichever of ReadTimeout and IdleTimeout is tighter. Setting both therefore narrows the bound rather than replacing it, which is what the two options together are asking for.
 
+<a name="KeepAlive"></a>
+## func [KeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func KeepAlive(d time.Duration) GroupOption
+```
+
+KeepAlive sets a group's TCP keepalive: zero is the standard library's 15 s, negative sets none. A datagram group refuses it.
+
 <a name="Listen"></a>
 ## func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1083,6 +1588,15 @@ func Loop(v LoopValue) GroupOption
 ```
 
 Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops and rings, and its per-connection and pressure bounds. It is judged at Start, once the group's handler is known: a group served by HandleLoop runs on it, and a group served by Handle, HandleFunc or HandleHTTP refuses it with LoopOptionUnsupported, whichever order the declarations came in. A group with no handler fails with HandlerMissing instead, and one given a second handler with HandlerAlreadySet. A datagram group refuses it with LoopOptionUnsupported too. A group served by HandleLoop without it runs on the zero LoopValue.
+
+<a name="MaxBodyBytes"></a>
+## func [MaxBodyBytes](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func MaxBodyBytes(n int64) GroupOption
+```
+
+MaxBodyBytes bounds the request body a group serves through net/http: a declared Content-Length past n is answered 413 on the head, before the handler runs, and a body of no declared length ends the handler's read in \*http.MaxBytesError. Zero selects 1 MiB, -1 states no bound, any other negative value fails Start with OptionValueInvalid. A loop group or a datagram group refuses it at Start.
 
 <a name="MaxConns"></a>
 ## func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1160,9 +1674,45 @@ Plaintext declares that the group serves no TLS. Every engine honours it. A grou
 func Protocols(protos ...string) GroupOption
 ```
 
-Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier — "http/1.1" and "h2" — in the order its TLS listeners prefer them, unless the identity names NextProtos, whose order then wins over the entries the list holds. Unset, a group with TLS serves both, h2 first, and one without serves HTTP/1.1. Start refuses with ProtocolsRefused an empty list, an empty, repeated or unknown identifier, h2 without TLS, an identity whose NextProtos names a version the list excludes or none it includes, and a group that serves no http.Handler; the http1 codec given TLS honours "http/1.1" alone and refuses any other list with ProtocolsRefused (ADR 0198); any other loop group refuses it with LoopOptionUnsupported unless its handler or a layer honours it (LoopOptionHonourer).
+Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier — "http/1.1" and "h2" — in the order its TLS listeners prefer them, unless the identity names NextProtos, whose order then wins over the entries the list holds. Unset, a group with TLS serves both, h2 first, and one without serves HTTP/1.1. Start refuses with ProtocolsRefused an empty list, an empty, repeated or unknown identifier, h2 without TLS on a group not given Plaintext, an identity whose NextProtos names a version the list excludes or none it includes, and a group that serves no http.Handler; the http1 codec given TLS honours "http/1.1" alone and refuses any other list with ProtocolsRefused (ADR 0198); any other loop group refuses it with LoopOptionUnsupported unless its handler or a layer honours it (LoopOptionHonourer).
 
 A request that arrived over HTTP/2 has no http.Hijacker: a handler that hijacks its connection serves HTTP/1.1 clients only, and a TLS group that relies on it for every client says Protocols("http/1.1").
+
+<a name="ProxyProtocol"></a>
+## func [ProxyProtocol](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func ProxyProtocol(v corenet.ProxyProtocolValue) GroupOption
+```
+
+ProxyProtocol makes a TCP group read the PROXY protocol header of a trusted balancer before it serves the connection: RemoteAddr then reports the announced client, PreHandshake's budgets included. Any other peer, or a header that is missing, malformed or past its Timeout, is closed and counted in ListenerState.ProxyRefused. An empty Trusted fails Start.
+
+<a name="RateKeyHeader"></a>
+## func [RateKeyHeader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func RateKeyHeader(name string) HTTPRateKeyValue
+```
+
+RateKeyHeader keys a request on a field a trusted proxy sets.
+
+<a name="RateKeyRemoteAddr"></a>
+## func [RateKeyRemoteAddr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func RateKeyRemoteAddr() HTTPRateKeyValue
+```
+
+RateKeyRemoteAddr keys a request on its peer address, without the port.
+
+<a name="RateLimit"></a>
+## func [RateLimit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func RateLimit(l Limiter, key HTTPRateKeyValue) (HTTPMiddleware, error)
+```
+
+RateLimit returns the middleware that answers 429 with Retry-After a request past its key's budget, by l.
 
 <a name="ReadBufferSize"></a>
 ## func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1195,6 +1745,24 @@ ReadTimeout bounds one read from the peer.
 
 It is refreshed per read, not installed once when the connection is accepted: a deadline set at accept time would be a budget for the connection's whole life, which a peer trickling one byte at a time stays comfortably inside. On a group serving an http.Handler it bounds three things: each read of a request body, refreshed before every read — never net/http's own ReadTimeout, which budgets the whole request and would cut off a peer whose every read is inside the bound —, the header phase, unless [ReadHeaderTimeout](#ReadHeaderTimeout) sets it apart, and the wait for the next request when no [IdleTimeout](#IdleTimeout) is set. The time a handler spends between two reads is its own, and the deadline is cleared once the body has ended.
 
+<a name="ReceiveBuffer"></a>
+## func [ReceiveBuffer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func ReceiveBuffer(n int) GroupOption
+```
+
+ReceiveBuffer asks the kernel for a receive buffer of n bytes on the group's sockets, before bind (SO\_RCVBUF); a stream group's accepted sockets inherit the listener's. Zero keeps the default; the kernel doubles the value and clamps it to rmem\_max, and State reports what the socket holds. A negative value fails Start with OptionValueInvalid.
+
+<a name="SendBuffer"></a>
+## func [SendBuffer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func SendBuffer(n int) GroupOption
+```
+
+SendBuffer asks the kernel for a send buffer of n bytes, as ReceiveBuffer asks for a receive one (SO\_SNDBUF, wmem\_max).
+
 <a name="Shards"></a>
 ## func [Shards](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1204,7 +1772,27 @@ func Shards(n int) GroupOption
 
 Shards sets how many listeners to open on each of the group's addresses.
 
-Zero selects one per core; one disables sharding. Where the platform (Windows has no SO\_REUSEPORT) or the socket family (a Unix socket) cannot shard, the count collapses to one. An explicit count that collapses is reported in State with the reason; zero collapsing is not, since it asked for nothing a single listener fails to give.
+Zero selects one per core; one disables sharding. Where the platform (Windows has no SO\_REUSEPORT) or the socket family (a Unix socket) cannot shard, the count collapses to one. An explicit count that collapses is reported in State with the reason; zero collapsing is not, since it asked for nothing a single listener fails to give. On a loop group only Shards(0) is honoured, one SO\_REUSEPORT listener per loop; any other count is refused with LoopOptionUnsupported.
+
+Before the shards are opened, a plain bind without SO\_REUSEPORT probes the address and is closed at once: an address another socket holds — another process's shards included — fails Start with AddressInUse, naming it (#1330). A window remains between the probe and the shards, in which a process binding with SO\_REUSEPORT can still join them; ShareAddress asks for that sharing on purpose. An address asked with port 0 is not probed. On the BSDs and darwin a listener on the wildcard address does not stop one on a precise address, there as for a single listener.
+
+<a name="ShareAddress"></a>
+## func [ShareAddress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func ShareAddress() GroupOption
+```
+
+ShareAddress lets another process that shares too bind a group's addresses and take part of their connections, for a progressive restart (ADR 0196): every socket is bound with SO\_REUSEPORT and Shards' probe is skipped. State reports the listener Shared. A Unix socket's address is refused with LoopOptionUnsupported, or PacketOptionUnsupported on a datagram group, and a platform without SO\_REUSEPORT (Windows, Solaris, illumos) with UnsupportedPlatform.
+
+<a name="Steer"></a>
+## func [Steer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Steer(v corenet.SteerValue) GroupOption
+```
+
+Steer chooses how a datagram group spreads over its shards: the zero value is the kernel's hash, SteerCPU hands each datagram to shard cpu mod n.
 
 <a name="TLS"></a>
 ## func [TLS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1214,6 +1802,15 @@ func TLS(id tlsid.Identity) GroupOption
 ```
 
 TLS turns the group's listeners into TLS listeners, or mutual-TLS ones when the identity requires a client certificate.
+
+<a name="UserTimeout"></a>
+## func [UserTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func UserTimeout(d time.Duration) GroupOption
+```
+
+UserTimeout sets TCP\_USER\_TIMEOUT on a group's TCP listeners, inherited by every accepted socket: zero is the WriteTimeout when one is set, otherwise none. Linux only. A datagram group refuses it.
 
 <a name="WithDrainGrace"></a>
 ## func [WithDrainGrace](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1233,6 +1830,15 @@ func WithDrainTimeout(d time.Duration) Option
 
 WithDrainTimeout bounds how long Shutdown waits for in-flight connections before severing them.
 
+<a name="WithLogger"></a>
+## func [WithLogger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func WithLogger(l corelogger.Logger) Option
+```
+
+WithLogger gives the server the logger that carries what net/http reports through http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream error, a superfluous WriteHeader, a failed accept — as warn records with source=net/http, at most ten a second; State counts the rest in SuppressedLogs. Without a logger, or with a nil one, nothing is written to stderr or anywhere else, and every line is counted there.
+
 <a name="WriteTimeout"></a>
 ## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1242,10 +1848,45 @@ func WriteTimeout(d time.Duration) GroupOption
 
 WriteTimeout bounds one write to the peer, refreshed per write.
 
+<a name="CORSValue"></a>
+## type [CORSValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+CORSValue is a cross-origin policy: exact origins, methods, fields, credentials and a preflight's lifetime.
+
+```go
+type CORSValue = corenet.CORSValue
+```
+
+CORSValue is an alias of `github.com/kitsunium/sdk/internal/core/net.CORSValue`, declared as:
+
+```go
+type CORSValue struct {
+	// Origins are the exact origins allowed, as a browser serializes them:
+	// scheme://host[:port], in lower case, with no path. "*" allows any origin,
+	// alone in the list and without Credentials. "null" is refused: it is what a
+	// sandboxed page and a local file both send.
+	Origins       []string
+	// Methods are the methods a preflight may ask for; empty selects the
+	// CORS-safelisted GET, HEAD and POST, never every method.
+	Methods       []string
+	// Headers are the request fields a preflight may ask for; empty allows only
+	// the CORS-safelisted fields.
+	Headers       []string
+	// ExposeHeaders are the response fields a page may read.
+	ExposeHeaders []string
+	// Credentials lets a page send cookies and read the answer. It is refused
+	// with "*": that combination publishes every user's answers to every site.
+	Credentials   bool
+	// MaxAge is how long a browser may keep a preflight's answer, clamped to 24
+	// hours; zero writes no Access-Control-Max-Age, negative is refused.
+	MaxAge        DurationValue
+}
+```
+
 <a name="Capability"></a>
 ## type [Capability](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
-Capability names one engine of the lattice iouring > epoll > portable > goroutine; its values are the operator's tokens.
+Capability names one engine of the lattice iouring > epoll = kqueue > portable > goroutine; its values are the operator's tokens.
 
 ```go
 type Capability = corenet.Capability
@@ -1283,6 +1924,35 @@ type CapabilityValue struct {
 	Status string     `json:"status"`
 	// Reason names the probe stage and the kernel's answer, or the switch.
 	Reason string     `json:"reason,omitempty"`
+}
+```
+
+<a name="CompressValue"></a>
+## type [CompressValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+CompressValue configures Compress.
+
+```go
+type CompressValue = corenet.CompressValue
+```
+
+CompressValue is an alias of `github.com/kitsunium/sdk/internal/core/net.CompressValue`, declared as:
+
+```go
+type CompressValue struct {
+	// Types lists the Content-Types, without parameters, that may be compressed.
+	// Empty selects text/plain, text/css, text/javascript, text/csv, text/xml,
+	// application/json, application/javascript, application/xml, image/svg+xml
+	// and application/wasm. text/html is not among them: a page that reflects a
+	// request's input beside a secret is what BREACH reads, and a caller who
+	// compresses HTML names it here, knowing it does not do that.
+	Types    []string `json:"types"`
+	// Level is gzip's level, 1 to 9 or -1 for its default; zero selects -1.
+	Level    int      `json:"level"`
+	// MinBytes is the smallest body compressed: a smaller one is sent as it is,
+	// as its gzip container would cost more than it saves. Zero selects 1024; a
+	// negative value is refused.
+	MinBytes int      `json:"min_bytes"`
 }
 ```
 
@@ -1340,6 +2010,33 @@ func (Conn) ID() uint64
 
 ID returns the monotonic identifier assigned at accept time, for correlating log lines belonging to one connection.
 
+<a name="ConnUnwrapper"></a>
+## type [ConnUnwrapper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+ConnUnwrapper is the optional capability of a Conn that hands out the socket under it.
+
+```go
+type ConnUnwrapper = corenet.ConnUnwrapper
+```
+
+ConnUnwrapper is an alias of `github.com/kitsunium/sdk/internal/core/net.ConnUnwrapper`, declared as:
+
+```go
+type ConnUnwrapper interface {
+	// Unwrap returns the socket beneath the connection.
+	Unwrap() stdnet.Conn
+}
+```
+
+<a name="ConnUnwrapper.Unwrap"></a>
+### func \(ConnUnwrapper\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (ConnUnwrapper) Unwrap() stdnet.Conn
+```
+
+Unwrap returns the socket beneath the connection.
+
 <a name="DatagramState"></a>
 ## type [DatagramState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1357,13 +2054,27 @@ type DatagramState struct {
 	// them: a coalesced message past its buffer (MSG_TRUNC under UDP GRO), or a
 	// message whose control data did not fit (MSG_CTRUNC). Neither can be split
 	// into whole datagrams, so none of what survives is delivered.
-	TruncatedPackets uint64 `json:"truncated_packets"`
+	TruncatedPackets uint64            `json:"truncated_packets"`
 	// GSOOversized is the number of GSO sends the kernel refused with EMSGSIZE:
 	// a sizing bug, counted, which leaves GSO on.
-	GSOOversized     uint64 `json:"gso_oversized"`
+	GSOOversized     uint64            `json:"gso_oversized"`
 	// ReplyFailures is the number of replies a BatchReplies group queued during
 	// a batch that did not leave: Reply had already reported them sent.
-	ReplyFailures    uint64 `json:"reply_failures"`
+	ReplyFailures    uint64            `json:"reply_failures"`
+	// KernelDrops is the number of datagrams the kernel dropped before a read
+	// could see them, for want of room in a socket's receive buffer: the last
+	// SO_RXQ_OVFL count of each batched UDP socket, summed (#973). A gauge of the
+	// kernel's own counter, read from the messages that arrive, so a drop after
+	// the last message is seen with the next one. The kernel counts what it
+	// refused to queue, so under UDP GRO a coalesced message of N datagrams is
+	// one drop: the count then stands below the datagrams lost. Zero where the
+	// socket is not batched, and under KITSUNIUM_NET_DISABLE=udp-rxq-ovfl.
+	KernelDrops      uint64            `json:"kernel_drops"`
+	// Capabilities reports the optional kernel capabilities of the datagram
+	// sockets — udp-rxq-ovfl and udp-pktinfo, and uring-multishot-recvmsg for the
+	// groups PacketGroup.HandleLoop serves — as a loop group's do: on, absent, disabled by the
+	// operator, or unprobed while no batched socket exists.
+	Capabilities     []CapabilityValue `json:"capabilities,omitempty"`
 }
 ```
 
@@ -1493,7 +2204,7 @@ func (*Group) HandleLoop(h corenet.LoopHandler) *StreamGroup
 
 HandleLoop serves the group on the loop engine (ADR 0186): h is called on the loop's own thread for every connection of the group, with the bytes each one receives, instead of a goroutine per connection. It is opt-in, and plaintext, but for the http1 codec (http1.HandleLoop), which takes TLS: crypto/tls negotiates each connection on its own goroutine, bounded by HandshakeTimeout, never below TLS 1.2, offering HTTP/1.1 alone — Protocols("http/1.1") is honoured, a list naming anything else refused with ProtocolsRefused — and the cleartext reaches the codec on the portable backend's lanes (ADR 0198).
 
-The group keeps the server's lifecycle — the bind, the adoption of inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and places the engine: io\_uring after a probe of the running kernel, then epoll, on Linux, and the portable backend, the default engine's accept path serialised onto one handler goroutine, everywhere else. Start refuses a loop group given TLS it cannot take with LoopTLSUnsupported, one given Use or an option neither the engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h, through LoopOptionHonourer, honours with LoopOptionUnsupported — an option given counts, its zero value included —, and an explicit backend the platform or the kernel cannot run with UnsupportedPlatform or LoopBackendUnavailable.
+The group keeps the server's lifecycle — the bind, the adoption of inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and places the engine: io\_uring after a probe of the running kernel, then epoll, on Linux, and the portable backend, the default engine's accept path serialised onto one handler goroutine, everywhere else. Start refuses a loop group given TLS it cannot take with LoopTLSUnsupported, one given Use or an option neither the engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine, Shards(0)) nor h, through LoopOptionHonourer, honours with LoopOptionUnsupported — an option given counts, its zero value included —, and an explicit backend the platform or the kernel cannot run with UnsupportedPlatform or LoopBackendUnavailable.
 
 A callback of h runs on the loop's thread and must not block it: a blocking call stalls every connection of its loop. h is declared once, like every handler: a second declaration of any kind makes Start return HandlerAlreadySet.
 
@@ -1537,6 +2248,135 @@ GroupOption is an alias of `github.com/kitsunium/sdk/internal/service/net/server
 
 ```go
 type GroupOption func(*StreamGroup)
+```
+
+<a name="HTTP2ErrorCount"></a>
+## type [HTTP2ErrorCount](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+HTTP2ErrorCount is one row of ListenerState.HTTP2Errors: an HTTP/2 error type and how many times the group counted it.
+
+```go
+type HTTP2ErrorCount = corehttp2.ErrorCountValue
+```
+
+HTTP2ErrorCount is an alias of `github.com/kitsunium/sdk/internal/core/net/http2.ErrorCountValue`, declared as:
+
+```go
+type HTTP2ErrorCount struct {
+	// Type is the error counted.
+	Type  ErrorType `json:"type"`
+	// Count is how many times it was.
+	Count uint64    `json:"count"`
+}
+```
+
+<a name="HTTP2ErrorType"></a>
+## type [HTTP2ErrorType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+HTTP2ErrorType names an HTTP/2 error a group counts, one per RFC 9113 code and header\_list, ping\_timeout and other; String gives its name.
+
+```go
+type HTTP2ErrorType = corehttp2.ErrorType
+```
+
+HTTP2ErrorType is an alias of `github.com/kitsunium/sdk/internal/core/net/http2.ErrorType`, declared as:
+
+```go
+type HTTP2ErrorType uint8
+```
+
+<a name="HTTP2ErrorType.MarshalText"></a>
+### func \(HTTP2ErrorType\) [MarshalText](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http2/error_type.go>)
+
+```go
+func (HTTP2ErrorType) MarshalText() ([]byte, error)
+```
+
+MarshalText implements encoding.TextMarshaler: the name String gives.
+
+<a name="HTTP2ErrorType.String"></a>
+### func \(HTTP2ErrorType\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http2/error_type.go>)
+
+```go
+func (HTTP2ErrorType) String() string
+```
+
+String names the type in lower snake case — "frame\_size", "header\_list", "ping\_timeout" —, "other" for a value outside the vocabulary.
+
+<a name="HTTP2Limits"></a>
+## type [HTTP2Limits](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+HTTP2Limits are HTTP/2's bounds, what HTTP2 sets; a zero field is its default.
+
+```go
+type HTTP2Limits = corehttp2.LimitsValue
+```
+
+HTTP2Limits is an alias of `github.com/kitsunium/sdk/internal/core/net/http2.LimitsValue`, declared as:
+
+```go
+type HTTP2Limits struct {
+	// MaxStreams is how many streams a connection may hold open at once: the
+	// next one is refused with REFUSED_STREAM. Zero selects DefaultMaxStreams.
+	MaxStreams       int `json:"max_streams"`
+	// ReceivePerStream is the window one stream's body may hold unread. Zero
+	// selects DefaultReceivePerStream.
+	ReceivePerStream int `json:"receive_per_stream"`
+	// ReceivePerConn is the window all of a connection's streams share. Zero
+	// selects four ReceivePerStream, so a handler that never reads its body
+	// does not stop the others.
+	ReceivePerConn   int `json:"receive_per_conn"`
+	// MaxFrame is the largest frame the codec accepts, between
+	// DefaultMaxFrame and MaxFrameLimit. Zero selects DefaultMaxFrame.
+	MaxFrame         int `json:"max_frame"`
+	// HeaderTable is the HPACK dynamic table the server advertises, at most
+	// MaxHeaderTable. Zero selects DefaultHeaderTable; NoDynamicTable
+	// advertises none.
+	HeaderTable      int `json:"header_table"`
+	// MaxHeaderList bounds a request's header list as RFC 9113 §6.5.2 counts
+	// it, the name and value of each field plus 32. Zero selects
+	// DefaultMaxHeaderList.
+	MaxHeaderList    int `json:"max_header_list"`
+}
+```
+
+<a name="HTTP2Limits.Resolve"></a>
+### func \(HTTP2Limits\) [Resolve](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http2/values.go>)
+
+```go
+func (HTTP2Limits) Resolve() (LimitsValue, error)
+```
+
+Resolve returns v with each zero field replaced by its default. A negative field, a MaxFrame outside the protocol's range or a ReceivePerConn below ReceivePerStream is refused with LimitsRefused, naming the field in reason.
+
+<a name="HTTPMiddleware"></a>
+## type [HTTPMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+HTTPMiddleware wraps an http.Handler, as CORS and RateLimit do.
+
+```go
+type HTTPMiddleware = corenet.Middleware[http.Handler]
+```
+
+HTTPMiddleware is an alias of `github.com/kitsunium/sdk/internal/core/net.Middleware`, declared as:
+
+```go
+type HTTPMiddleware[H any] func(next H) H
+```
+
+<a name="HTTPRateKeyValue"></a>
+## type [HTTPRateKeyValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+HTTPRateKeyValue is what RateLimit keys a request on.
+
+```go
+type HTTPRateKeyValue = svcserver.HTTPRateKeyValue
+```
+
+HTTPRateKeyValue is an alias of `github.com/kitsunium/sdk/internal/service/net/server.HTTPRateKeyValue`, declared as:
+
+```go
+type HTTPRateKeyValue struct{}
 ```
 
 <a name="Handler"></a>
@@ -1587,6 +2427,36 @@ func (HandlerFunc) ServeConn(ctx context.Context, c Conn) error
 
 ServeConn implements ConnHandler by calling f.
 
+<a name="Limiter"></a>
+## type [Limiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+Limiter decides whether one more request under a key may be served.
+
+```go
+type Limiter = corenet.HTTP1Limiter
+```
+
+Limiter is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1Limiter`, declared as:
+
+```go
+type Limiter interface {
+	// Allow reports whether one more request under key may be served, and when
+	// it may not, after how many seconds a client should try again. now is a
+	// monotonic count of nanoseconds: an instant that moves backwards refills
+	// nothing. key is valid for this call only.
+	Allow(key []byte, now int64) (ok bool, retryAfter int)
+}
+```
+
+<a name="Limiter.Allow"></a>
+### func \(Limiter\) [Allow](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (Limiter) Allow(key []byte, now int64) (ok bool, retryAfter int)
+```
+
+Allow reports whether one more request under key may be served, and when it may not, after how many seconds a client should try again. now is a monotonic count of nanoseconds: an instant that moves backwards refills nothing. key is valid for this call only.
+
 <a name="ListenerState"></a>
 ## type [ListenerState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1601,34 +2471,89 @@ ListenerState is an alias of `github.com/kitsunium/sdk/internal/core/net.Listene
 ```go
 type ListenerState struct {
 	// Group is the listener group's name.
-	Group          string        `json:"group"`
+	Group          string                      `json:"group"`
 	// Address is the address actually bound, which for a port of zero is the
 	// one the kernel chose rather than the one requested.
-	Address        string        `json:"address"`
+	Address        string                      `json:"address"`
 	// Network is the socket family.
-	Network        string        `json:"network"`
+	Network        string                      `json:"network"`
 	// Shards is how many listeners were actually opened on this address.
-	Shards         int           `json:"shards"`
+	Shards         int                         `json:"shards"`
 	// Degraded reports that a requested optimisation was unavailable and the
 	// server fell back. It is surfaced rather than logged once at startup,
 	// because a silent fallback is indistinguishable from a working one and
 	// nobody re-reads yesterday's logs to find out.
-	Degraded       bool          `json:"degraded"`
+	Degraded       bool                        `json:"degraded"`
 	// DegradedReason names the fallback in plain words when Degraded is set.
-	DegradedReason string        `json:"degraded_reason,omitempty"`
+	DegradedReason string                      `json:"degraded_reason,omitempty"`
 	// Adopted reports a listener inherited from a supervisor rather than bound
 	// by this process.
-	Adopted        bool          `json:"adopted"`
+	Adopted        bool                        `json:"adopted"`
 	// Exclusive reports that no other socket can bind the listener's address
 	// while it lives: SO_EXCLUSIVEADDRUSE on Windows, set on a unicast TCP or
 	// UDP socket this process binds and read back, never set, on an adopted
 	// one. It is false on every other platform, which has no such option.
-	Exclusive      bool          `json:"exclusive"`
+	Exclusive      bool                        `json:"exclusive"`
+	// Shared reports a listener its group bound with ShareAddress: SO_REUSEPORT
+	// set on every socket of the address and no probe made, so another process
+	// that shares too may bind the same address and take part of its
+	// connections (#1330). It is false on a listener bound without the option,
+	// whose sharded sockets were opened only once a plain bind found the
+	// address free, and on an adopted one.
+	Shared         bool                        `json:"shared,omitempty"`
 	// BindWait is how long the bind waited for its address to come free: on
 	// Windows, a restarted server's address stays taken until the previous
 	// process's connections end, and the bind is retried, bounded. Zero when
 	// the first attempt bound.
-	BindWait       DurationValue `json:"bind_wait"`
+	BindWait       DurationValue               `json:"bind_wait"`
+	// H2C reports an HTTP group serving HTTP/2 in cleartext, by prior knowledge alone.
+	H2C            bool                        `json:"h2c,omitempty"`
+	// HTTP2 is the HTTP/2 bounds the group serves with, resolved: a group given
+	// none reads ADR 0195's numbers. Nil for a listener that serves no HTTP.
+	HTTP2          *corehttp2.LimitsValue      `json:"http2,omitempty"`
+	// MaxBodyBytes is the request-body bound an HTTP group served by net/http
+	// holds on this listener: the default's 1 MiB, the option's value, or -1
+	// for none. Zero on every other listener, which has no such bound.
+	MaxBodyBytes   int64                       `json:"max_body_bytes"`
+	// Backlog is the depth of the listener's accept queue as applied: the
+	// Backlog option's value, or the host's somaxconn for the default, and the
+	// clamp when the host's somaxconn is below what was asked (Degraded, with
+	// its reason). Zero for an adopted socket, whose queue the supervisor sized,
+	// and for a datagram socket.
+	Backlog        int                         `json:"backlog"`
+	// ReceiveBuffer is the socket's receive buffer as the kernel holds it,
+	// read back after bind, or after the group's size was applied to an
+	// adopted socket (SO_RCVBUF): on Linux twice what was asked, clamped to
+	// rmem_max, the kernel's default when nothing was asked. Zero where the
+	// platform cannot say. A clamp is reported here and is no fault.
+	ReceiveBuffer  int                         `json:"receive_buffer"`
+	// SendBuffer is the socket's send buffer as the kernel holds it, read back
+	// as ReceiveBuffer is (SO_SNDBUF, wmem_max).
+	SendBuffer     int                         `json:"send_buffer"`
+	// ProxyRefused counts the connections a ProxyProtocol group refused — peers
+	// outside Trusted, and headers malformed or not finished within Timeout. It
+	// is the group's count, on each of its listeners' rows.
+	ProxyRefused   uint64                      `json:"proxy_refused,omitempty"`
+	// HTTP1Requests counts the HTTP/1.1 requests the group served since Start
+	// (#966): one count per request on net/http's engine, one per batch on the
+	// loop engine, whose adapter counts them. It is the group's count, on each
+	// of its listeners' rows; zero on a group that serves no HTTP.
+	HTTP1Requests  uint64                      `json:"http1_requests,omitempty"`
+	// HTTP2Requests counts the HTTP/2 requests the group served, as HTTP1Requests does.
+	HTTP2Requests  uint64                      `json:"http2_requests,omitempty"`
+	// HTTP2Errors counts the group's HTTP/2 protocol errors by type, a row for
+	// each type counted at least once, in the vocabulary's order: on net/http's
+	// engine what its CountError reports, an unanswered PING included; on the
+	// loop engine each RST_STREAM and GOAWAY its codec answers with an error
+	// and each header list past its bound. net/http counts neither a header
+	// list past MaxHeaderBytes, which it answers 431 itself, nor a frame past
+	// its frame bound.
+	HTTP2Errors    []corehttp2.ErrorCountValue `json:"http2_errors,omitempty"`
+	// ALPN is the protocol list a TLS HTTP group's listeners offer, in the
+	// order offered (#964): the group's versions intersected with its
+	// identity's NextProtos, on net/http's engine and on a TLS loop codec
+	// group alike. Nil for a group that negotiates nothing.
+	ALPN           []string                    `json:"alpn,omitempty"`
 }
 ```
 
@@ -1676,6 +2601,80 @@ type LoopConnRef struct {
 	// Gen is the slot's generation. It is never zero for a live connection, so
 	// the zero LoopConnRef is stale on every loop.
 	Gen  uint32
+}
+```
+
+<a name="LoopHTTPCodec"></a>
+## type [LoopHTTPCodec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopHTTPCodec is the optional capability of a LoopHandler that serves more than one HTTP version on a group.
+
+```go
+type LoopHTTPCodec = corenet.LoopHTTPCodec
+```
+
+LoopHTTPCodec is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopHTTPCodec`, declared as:
+
+```go
+type LoopHTTPCodec interface {
+	// Draining announces the group's drain. It is called once, from any
+	// goroutine, before the engine starts closing connections for the drain.
+	Draining()
+	// InFlight reports whether ref's connection, of lane, holds requests the
+	// drain must leave open: true keeps it past the drain's first sweep, and
+	// eviction passes it by.
+	InFlight(lane int, ref LoopConnRef) bool
+	// SetHTTP is called once, before any other callback, with the group's HTTP settings.
+	SetHTTP(v LoopHTTPValue)
+}
+```
+
+<a name="LoopHTTPCodec.Draining"></a>
+### func \(LoopHTTPCodec\) [Draining](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHTTPCodec) Draining()
+```
+
+Draining announces the group's drain. It is called once, from any goroutine, before the engine starts closing connections for the drain.
+
+<a name="LoopHTTPCodec.InFlight"></a>
+### func \(LoopHTTPCodec\) [InFlight](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHTTPCodec) InFlight(lane int, ref LoopConnRef) bool
+```
+
+InFlight reports whether ref's connection, of lane, holds requests the drain must leave open: true keeps it past the drain's first sweep, and eviction passes it by.
+
+<a name="LoopHTTPCodec.SetHTTP"></a>
+### func \(LoopHTTPCodec\) [SetHTTP](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHTTPCodec) SetHTTP(v LoopHTTPValue)
+```
+
+SetHTTP is called once, before any other callback, with the group's HTTP settings.
+
+<a name="LoopHTTPValue"></a>
+## type [LoopHTTPValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopHTTPValue is what a group tells a LoopHTTPCodec at Start.
+
+```go
+type LoopHTTPValue = corenet.LoopHTTPValue
+```
+
+LoopHTTPValue is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopHTTPValue`, declared as:
+
+```go
+type LoopHTTPValue struct {
+	// Protocols is the group's Protocols list, nil when the group gave none.
+	Protocols []string
+	// HTTP2Off is set when KITSUNIUM_NET_DISABLE switched http2-loop off.
+	HTTP2Off  bool
+	// HTTP2 is the HTTP2 option's bounds, the zero value when the group gave none.
+	HTTP2     corehttp2.LimitsValue
 }
 ```
 
@@ -1968,6 +2967,15 @@ func (LoopLayer) OnData(io LoopIO, ref LoopConnRef, buf []byte) int
 
 OnData forwards to the wrapped handler and returns what it consumed.
 
+<a name="LoopLayer.OnDrain"></a>
+### func \(LoopLayer\) [OnDrain](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) OnDrain(io LoopIO, ref LoopConnRef)
+```
+
+OnDrain forwards to the wrapped handler when it is a LoopDrainer.
+
 <a name="LoopLayer.OnOpen"></a>
 ### func \(LoopLayer\) [OnOpen](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
 
@@ -2183,6 +3191,60 @@ type LoopOutboundValue struct {
 }
 ```
 
+<a name="LoopPeer"></a>
+## type [LoopPeer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopPeer is the optional capability of a LoopIO that names the process on the other side of a Unix connection.
+
+```go
+type LoopPeer = corenet.LoopPeer
+```
+
+LoopPeer is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopPeer`, declared as:
+
+```go
+type LoopPeer interface {
+	// Peer returns the credentials the kernel recorded for ref's peer when the
+	// connection was made (SO_PEERCRED), with Verified set, and true; false for a
+	// connection that is not a Unix one, for a stale ref and for one whose
+	// descriptor the backend cannot ask.
+	Peer(ref LoopConnRef) (LoopPeerValue, bool)
+}
+```
+
+<a name="LoopPeer.Peer"></a>
+### func \(LoopPeer\) [Peer](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopPeer) Peer(ref LoopConnRef) (LoopPeerValue, bool)
+```
+
+Peer returns the credentials the kernel recorded for ref's peer when the connection was made (SO\_PEERCRED), with Verified set, and true; false for a connection that is not a Unix one, for a stale ref and for one whose descriptor the backend cannot ask.
+
+<a name="LoopPeerValue"></a>
+## type [LoopPeerValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopPeerValue is the user, group and process a Unix connection's peer is.
+
+```go
+type LoopPeerValue = corenet.LoopPeerValue
+```
+
+LoopPeerValue is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopPeerValue`, declared as:
+
+```go
+type LoopPeerValue struct {
+	// UID is the peer's user id.
+	UID      uint32
+	// GID is the peer's group id.
+	GID      uint32
+	// PID is the peer's process id.
+	PID      uint32
+	// Verified is true when the kernel named the peer.
+	Verified bool
+}
+```
+
 <a name="LoopRingState"></a>
 ## type [LoopRingState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -2227,6 +3289,24 @@ type LoopRingState struct {
 	// BatchesCut is the number of batches BatchBudget stopped while this ring
 	// still had completions to reap (ADR 0206).
 	BatchesCut    uint64 `json:"batches_cut"`
+	// BytesIn is the number of bytes the ring received and delivered to the handler.
+	BytesIn       uint64 `json:"bytes_in"`
+	// BytesOut is the number of bytes the ring sent: the answers the kernel took, a short
+	// send counted as it left.
+	BytesOut      uint64 `json:"bytes_out"`
+	// OutputRefused is the number of Writes the ring refused with LoopOutputFull: the
+	// connection's output ceiling, or the slab's budget, reached.
+	OutputRefused uint64 `json:"output_refused"`
+	// SpillClosed is the number of connections the ring closed with LoopSpillFull:
+	// unconsumed input past SpillCap, or the slab's budget spent.
+	SpillClosed   uint64 `json:"spill_closed"`
+	// Timeouts is the number of deadlines of SetDeadline that fired (OnTimeout calls).
+	Timeouts      uint64 `json:"timeouts"`
+	// IdleClosed is the number of connections the ring closed for IdleTimeout.
+	IdleClosed    uint64 `json:"idle_closed"`
+	// PendingOutput is the bytes written and not yet sent, a gauge: what the ring's
+	// connections still owe their peers at the last batch's end.
+	PendingOutput int64  `json:"pending_output"`
 	// Draining reports a ring the watchdog judged sick: it accepts nothing new
 	// and closes its connections as they fall idle.
 	Draining      bool   `json:"draining"`
@@ -2276,47 +3356,63 @@ LoopState is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopStateVa
 ```go
 type LoopState struct {
 	// Group is the loop group's name.
-	Group           string               `json:"group"`
+	Group            string               `json:"group"`
 	// Backend is the backend in use.
-	Backend         LoopBackend          `json:"backend"`
+	Backend          LoopBackend          `json:"backend"`
 	// ProbeStage names the last stage of the kernel probe the backend passed,
 	// or the stage that failed when the group fell back.
-	ProbeStage      string               `json:"probe_stage"`
+	ProbeStage       string               `json:"probe_stage"`
 	// Degraded reports that the group runs on a backend other than the best one
 	// it asked for: auto fell back from io_uring, say.
-	Degraded        bool                 `json:"degraded"`
+	Degraded         bool                 `json:"degraded"`
 	// DegradedReason names the fallback and its cause when Degraded is set.
-	DegradedReason  string               `json:"degraded_reason,omitempty"`
+	DegradedReason   string               `json:"degraded_reason,omitempty"`
 	// Loops is the number of loops running.
-	Loops           int                  `json:"loops"`
+	Loops            int                  `json:"loops"`
 	// LoopsSource says where Loops came from: "explicit", "auto" — LoopsAuto,
 	// GOMAXPROCS read at Start — or "single" when Loops was zero.
-	LoopsSource     string               `json:"loops_source"`
+	LoopsSource      string               `json:"loops_source"`
 	// Rings is the number of rings per loop.
-	Rings           int                  `json:"rings"`
+	Rings            int                  `json:"rings"`
 	// RingsSource says where Rings came from: "explicit", "derived" from the
 	// connection bounds and the descriptor limit, or "single" when no bound was
 	// set or the backend runs one ring.
-	RingsSource     string               `json:"rings_source"`
+	RingsSource      string               `json:"rings_source"`
 	// RLimitNoFile is the effective RLIMIT_NOFILE soft limit read at Start. The
 	// SDK never raises it; the Go runtime already lifts the soft limit to the
 	// hard one.
-	RLimitNoFile    uint64               `json:"rlimit_nofile"`
+	RLimitNoFile     uint64               `json:"rlimit_nofile"`
 	// GOMAXPROCS is runtime.GOMAXPROCS(0) read at Start. The SDK never sets it.
-	GOMAXPROCS      int                  `json:"gomaxprocs"`
+	GOMAXPROCS       int                  `json:"gomaxprocs"`
 	// BatchP99 is the 99th percentile of one loop iteration's duration, over the
 	// loops' recent batches.
-	BatchP99        DurationValue        `json:"batch_p99"`
+	BatchP99         DurationValue        `json:"batch_p99"`
 	// OutboundRefused counts the jobs a full queue to a worker refused
 	// (LoopOutboundFull), every lane's: for the http1 adapter, the 503s it
 	// answered for them. Zero when the group offloads nothing.
-	OutboundRefused uint64               `json:"outbound_refused"`
+	OutboundRefused  uint64               `json:"outbound_refused"`
+	// SlabInUse is the bytes of the spill and output chunks every loop's slab holds at
+	// the last batches' end, chunk sizes counted, a gauge.
+	SlabInUse        int64                `json:"slab_in_use"`
+	// SlabMapped is the bytes every loop's slab has mapped outside the Go heap. A size
+	// class keeps one wholly free arena and unmaps the others on the loop's tick
+	// (#809), so it falls back after a burst.
+	SlabMapped       int64                `json:"slab_mapped"`
+	// SlabBudget is the ceiling of SlabInUse, every loop's summed: past it a Write is
+	// refused and a spill closes its connection, by name, never by the kernel's OOM
+	// killer.
+	SlabBudget       int64                `json:"slab_budget"`
+	// SlabBudgetSource says where each loop's slab budget came from (#809):
+	// "explicit" for LoopValue.SlabBudget, "derived" from the cgroup allowance
+	// memlimit read, "default" for 128 MiB a loop; empty on the portable
+	// backend, which has no slab.
+	SlabBudgetSource string               `json:"slab_budget_source"`
 	// RingStates reports every ring of every loop, loop by loop.
-	RingStates      []LoopRingStateValue `json:"ring_states"`
+	RingStates       []LoopRingStateValue `json:"ring_states"`
 	// Capabilities reports every optional kernel capability the group's backend
 	// probed or was told not to, the server's socket probes merged in
 	// (ADR 0189).
-	Capabilities    []CapabilityValue    `json:"capabilities,omitempty"`
+	Capabilities     []CapabilityValue    `json:"capabilities,omitempty"`
 }
 ```
 
@@ -2336,14 +3432,14 @@ type LoopValue struct {
 	// Backend is the mechanic to run on. LoopBackendAuto takes the best one the
 	// platform's probe reaches and reports any fallback in State; an explicit
 	// backend the platform cannot run is refused at Start.
-	Backend      LoopBackend   `json:"backend"`
+	Backend        LoopBackend   `json:"backend"`
 	// Loops is the number of loops, each one goroutine locked to its OS thread
 	// on a native backend. Zero selects one; LoopsAuto selects GOMAXPROCS less
 	// one, at least one, read once at Start. The SDK never sets GOMAXPROCS:
 	// sizing the process against its loops is the consumer's policy, and State
 	// reports both. A native loop yields to the Go scheduler every 5 ms of
 	// serving while GOMAXPROCS exceeds the group's loops (ADR 0199).
-	Loops        int           `json:"loops"`
+	Loops          int           `json:"loops"`
 	// Rings is the number of descriptor shards inside one loop, each with its
 	// own table of at most min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES) entries:
 	// what lets io_uring serve more connections than RLIMIT_NOFILE. Zero
@@ -2351,40 +3447,43 @@ type LoopValue struct {
 	// IORING_MAX_FIXED_FILES)⌉, and one when both are zero; that is the only
 	// formula, and State says where the value came from. epoll and the portable
 	// backend run one ring whatever it says.
-	Rings        int           `json:"rings"`
+	Rings          int           `json:"rings"`
 	// CQBatch bounds the completions or events one loop iteration reaps before
 	// it calls OnBatchEnd. Zero selects the domain default.
-	CQBatch      int           `json:"cq_batch"`
+	CQBatch        int           `json:"cq_batch"`
 	// SpillCap is the most unconsumed input, in bytes, one connection may hold
 	// between OnData calls. Past it the connection is closed with
-	// LoopSpillFull. Zero selects the domain default.
-	SpillCap     int           `json:"spill_cap"`
+	// LoopSpillFull. Zero selects the domain default. It is the ceiling on a
+	// request's head and body together for an http1 handler that takes the
+	// body whole (a LoopSpillChecker adapts to it at Start); an
+	// HTTP1BodyReader's spill holds only the head.
+	SpillCap       int           `json:"spill_cap"`
 	// OutputCap is the most written and unsent output, in bytes, one
 	// connection may hold. A Write past it is refused with LoopOutputFull. Zero
 	// selects the domain default.
-	OutputCap    int           `json:"output_cap"`
+	OutputCap      int           `json:"output_cap"`
 	// SoftConns is the soft connection bound: a connection accepted while the
 	// group serves more is flagged under pressure (LoopIO.Pressure), so a
 	// protocol can ask its peer to leave. It refuses nothing; MaxConns does.
 	// Zero sets no soft bound.
-	SoftConns    int           `json:"soft_conns"`
+	SoftConns      int           `json:"soft_conns"`
 	// EvictIdle is how long a connection must have been idle before the loop
 	// may close it to admit another under hard pressure — the process out of
 	// descriptors, or MaxConns reached. A connection with unread bytes is
 	// never evicted. Zero evicts nothing.
-	EvictIdle    DurationValue `json:"evict_idle"`
+	EvictIdle      DurationValue `json:"evict_idle"`
 	// Capabilities opts the group into kernel capabilities of class A-code
 	// (ADR 0189). Each is probed and used where the kernel has it, reported
 	// "missing" and as a fault where it does not, and never used once
 	// KITSUNIUM_NET_DISABLE names it. An engine, a class B capability or an
 	// unknown token is refused at Start with LoopCapabilityRefused. Nil asks
 	// for none; the class A-kernel capabilities need no opt-in.
-	Capabilities []Capability  `json:"capabilities,omitempty"`
+	Capabilities   []Capability  `json:"capabilities,omitempty"`
 	// Outbound is how many jobs one lane's queue to its worker holds (R3),
 	// when the group's handler offloads (LoopOffloader). A Send past it is
 	// refused with LoopOutboundFull and counted in LoopStateValue. Zero
 	// selects 256.
-	Outbound     int           `json:"outbound"`
+	Outbound       int           `json:"outbound"`
 	// BatchWait bounds how long an io_uring loop holds its wait for
 	// BatchWaitMin completions while it is loaded: its previous batch reaped
 	// at least four, or two receives carrying bytes at least come within the
@@ -2394,10 +3493,10 @@ type LoopValue struct {
 	// several batches may meet one at each. Zero selects 250 µs,
 	// a negative value turns the grouped wait off, and anything past the 10 ms
 	// tick is the tick. epoll and the portable backend ignore it.
-	BatchWait    DurationValue `json:"batch_wait"`
+	BatchWait      DurationValue `json:"batch_wait"`
 	// BatchWaitMin is how many completions the grouped wait waits for before
 	// BatchWait runs out. Zero selects 32; past CQBatch it is CQBatch.
-	BatchWaitMin int           `json:"batch_wait_min"`
+	BatchWaitMin   int           `json:"batch_wait_min"`
 	// BatchBudget bounds how long an io_uring loop reaps completions in one
 	// batch: past it, a ring stops reaping, and a ring after it reaps at most one
 	// more lot of 16 before it stops too — a bounded overrun, not a hard stop.
@@ -2409,7 +3508,60 @@ type LoopValue struct {
 	// instead of at the next wait. Zero, or a negative value, bounds nothing:
 	// the batch reaps up to four CQBatch a ring, as before. epoll and the
 	// portable backend ignore it.
-	BatchBudget  DurationValue `json:"batch_budget"`
+	BatchBudget    DurationValue `json:"batch_budget"`
+	// SendZCMin is the smallest flight an io_uring loop sends zero-copy, in
+	// bytes, once the group opted into uring-send-zc (#969): a flight of at least
+	// that many bytes leaves by IORING_OP_SEND_ZC and its slab chunk stays the
+	// kernel's until the notification says the pages are free, a shorter one by
+	// IORING_OP_SEND as before. Zero selects 16 KiB; a negative value is refused
+	// with LoopValueInvalid. epoll and the portable backend ignore it, and so
+	// does a group that did not opt in.
+	SendZCMin      int           `json:"send_zc_min,omitempty"`
+	// Affinity pins each loop's thread to one CPU, Affinity[i] for loop i, with
+	// sched_setaffinity once the thread is locked (loop-affinity, class A-code,
+	// #857). Nil pins nothing; otherwise it names one CPU per loop, from 0 to
+	// 8191, or Start refuses it with LoopValueInvalid. A CPU the kernel refuses —
+	// offline, outside the process's set, or a seccomp filter — leaves that loop
+	// unpinned, serving, and the row missing, a fault. With Shards(0) and
+	// so-incoming-cpu opted into, each loop's listener asks the kernel for the
+	// connections its CPU received. The portable backend ignores it.
+	Affinity       []int         `json:"affinity,omitempty"`
+	// NotsentLowat is TCP_NOTSENT_LOWAT, in bytes, on the group's TCP listeners,
+	// inherited by each accepted socket (tcp-notsent-lowat, class A-code, Linux
+	// 3.12, #857): the kernel takes at most that many unsent bytes, so a write
+	// is short and OnWritable fires once the peer drained, not once megabytes
+	// of socket buffer emptied. Zero sets nothing unless Capabilities opts into
+	// tcp-notsent-lowat, which selects 128 KiB; a positive value opts in;
+	// negative is refused with LoopValueInvalid. The portable backend ignores it.
+	NotsentLowat   int           `json:"notsent_lowat"`
+	// SlabBudget is the most payload memory, in bytes, one loop maps outside the
+	// Go heap for its connections' spill and output together (#809): past it a
+	// Write is refused with LoopOutputFull and a spill closes its connection
+	// with LoopSpillFull. Zero derives it from the cgroup allowance the server
+	// reads with memlimit, a quarter of the allowance shared by the loops and
+	// at most 128 MiB, and is 128 MiB where no allowance is found; negative is
+	// refused with LoopValueInvalid. A size class's wholly free arenas past the
+	// first are unmapped on the loop's tick. The portable backend ignores it.
+	SlabBudget     int           `json:"slab_budget"`
+	// BusyPoll is busy-poll's window (class A-code, #979): how long a loop's wait
+	// polls the device queues of its sockets before it sleeps, io_uring's
+	// busy_poll_to and epoll's busy_poll_usecs, rounded up to whole
+	// microseconds. Zero selects 50 µs once Capabilities opts into busy-poll; it
+	// opts nothing in by itself. Negative, or past one second, is refused with
+	// LoopValueInvalid. The portable backend ignores it.
+	BusyPoll       DurationValue `json:"busy_poll"`
+	// BusyPollBudget is how many packets one poll of busy-poll may take, epoll's
+	// busy_poll_budget: zero is the kernel's, and past 64 the kernel asks for
+	// CAP_NET_ADMIN, its refusal reading the row missing. Negative, or past
+	// 65535, is refused with LoopValueInvalid. io_uring always takes the
+	// kernel's; the portable backend ignores it.
+	BusyPollBudget int           `json:"busy_poll_budget"`
+	// ZCRX names the NIC receive queue uring-zcrx would serve (class B, #980). A
+	// zero Interface keeps the row off. While the row is class B a named queue
+	// is only probed — registered on a throwaway ring that is closed at once,
+	// the kernel's answer in the row's reason — and no byte is received through
+	// it.
+	ZCRX           ZCRXValue     `json:"zcrx"`
 }
 ```
 
@@ -2544,9 +3696,14 @@ type Packet interface {
 	// ID returns the monotonic identifier assigned at read time.
 	ID() uint64
 	// Reply writes a datagram back to the sender. It exists so the common case
-	// needs no reference to the underlying connection.
+	// needs no reference to the underlying connection. On a socket bound to a
+	// wildcard address it leaves from the address To reports, so a multi-homed
+	// host answers from the address the client used.
 	Reply(b []byte) (n int, err error)
-	// To returns the local address the datagram arrived on.
+	// To returns the local address the datagram arrived on: on a UDP socket
+	// bound to a wildcard address the address the sender used, read from the
+	// datagram (IP_PKTINFO, IPV6_RECVPKTINFO; Linux), with the socket's port;
+	// otherwise the socket's bound address.
 	To() stdnet.Addr
 }
 ```
@@ -2594,7 +3751,7 @@ ID returns the monotonic identifier assigned at read time.
 func (Packet) Reply(b []byte) (n int, err error)
 ```
 
-Reply writes a datagram back to the sender. It exists so the common case needs no reference to the underlying connection.
+Reply writes a datagram back to the sender. It exists so the common case needs no reference to the underlying connection. On a socket bound to a wildcard address it leaves from the address To reports, so a multi-homed host answers from the address the client used.
 
 <a name="Packet.To"></a>
 ### func \(Packet\) [To](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
@@ -2603,7 +3760,7 @@ Reply writes a datagram back to the sender. It exists so the common case needs n
 func (Packet) To() stdnet.Addr
 ```
 
-To returns the local address the datagram arrived on.
+To returns the local address the datagram arrived on: on a UDP socket bound to a wildcard address the address the sender used, read from the datagram (IP\_PKTINFO, IPV6\_RECVPKTINFO; Linux), with the socket's port; otherwise the socket's bound address.
 
 <a name="PacketGroup"></a>
 ## type [PacketGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -2637,6 +3794,15 @@ func (*PacketGroup) HandleFunc(f corenet.PacketHandlerFunc) *PacketGroup
 ```
 
 HandleFunc sets the group's handler from a plain function.
+
+<a name="PacketGroup.HandleLoop"></a>
+### func \(PacketGroup\) [HandleLoop](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/packet_group.go>)
+
+```go
+func (*PacketGroup) HandleLoop(h corenet.PacketLoopHandler) *PacketGroup
+```
+
+HandleLoop serves the group's datagrams on the loop engine (#852): one lane a socket, h called on the lane's own thread with every datagram and once a batch, its replies queued and sent together after the batch. On Linux a lane runs on io\_uring after a probe of the running kernel — a multishot RECVMSG into provided buffers, SENDMSG replies, UDP\_SEGMENT runs —, the row uring-multishot-recvmsg on in State; a probe that fails, the operator's KITSUNIUM\_NET\_DISABLE=uring-multishot-recvmsg, or an engine capped below io\_uring, serve it on the batched reader of ADR 0192 (recvmmsg, GRO, sendmmsg under BatchReplies), the row absent or disabled and no fault. Every other platform serves it on that reader. A lane serves a UDP socket: a unixgram address is refused with LoopOptionUnsupported. Use's middlewares decorate a PacketHandler and are refused with it the same way, and a group given Handle or HandleFunc too is refused with HandlerAlreadySet. A panic of h is contained on the batched reader, as Handle's is: the datagram is lost and the lane goes on. On io\_uring it is not, as on every loop thread: it ends the process, so a handler that may panic recovers itself.
 
 <a name="PacketGroup.Name"></a>
 ### func \(PacketGroup\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/packet_group.go>)
@@ -2703,6 +3869,100 @@ func (PacketHandlerFunc) ServePacket(ctx context.Context, p Packet) error
 ```
 
 ServePacket implements PacketHandler by calling f.
+
+<a name="PacketLoopHandler"></a>
+## type [PacketLoopHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+PacketLoopHandler serves a datagram group on the loop engine, a lane a socket.
+
+```go
+type PacketLoopHandler = corenet.PacketLoopHandler
+```
+
+PacketLoopHandler is an alias of `github.com/kitsunium/sdk/internal/core/net.PacketLoopHandler`, declared as:
+
+```go
+type PacketLoopHandler interface {
+	// OnBatchEnd is called once a batch, after its OnPacket calls and before any
+	// buffer handed to them goes back to the kernel; the batch's replies leave
+	// after it returns.
+	OnBatchEnd(io PacketLoopIO)
+	// OnPacket hands the handler one datagram: buf is its payload and from its
+	// sender. A coalesced message (UDP GRO) is one call a datagram, in order; a
+	// message the kernel cut, or a datagram past the group's MaxPacketSize, is
+	// counted in State and never handed on. buf stays valid until the lane's next
+	// OnBatchEnd returns, never later, and the handler must not write to it.
+	OnPacket(io PacketLoopIO, from netip.AddrPort, buf []byte)
+}
+```
+
+<a name="PacketLoopHandler.OnBatchEnd"></a>
+### func \(PacketLoopHandler\) [OnBatchEnd](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (PacketLoopHandler) OnBatchEnd(io PacketLoopIO)
+```
+
+OnBatchEnd is called once a batch, after its OnPacket calls and before any buffer handed to them goes back to the kernel; the batch's replies leave after it returns.
+
+<a name="PacketLoopHandler.OnPacket"></a>
+### func \(PacketLoopHandler\) [OnPacket](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (PacketLoopHandler) OnPacket(io PacketLoopIO, from netip.AddrPort, buf []byte)
+```
+
+OnPacket hands the handler one datagram: buf is its payload and from its sender. A coalesced message (UDP GRO) is one call a datagram, in order; a message the kernel cut, or a datagram past the group's MaxPacketSize, is counted in State and never handed on. buf stays valid until the lane's next OnBatchEnd returns, never later, and the handler must not write to it.
+
+<a name="PacketLoopIO"></a>
+## type [PacketLoopIO](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+PacketLoopIO is what a datagram lane offers its handler, Reply and Loop.
+
+```go
+type PacketLoopIO = corenet.PacketLoopIO
+```
+
+PacketLoopIO is an alias of `github.com/kitsunium/sdk/internal/core/net.PacketLoopIO`, declared as:
+
+```go
+type PacketLoopIO interface {
+	// Loop returns the lane's index, from 0 to the group's lane count less one,
+	// fixed for the lane's life.
+	Loop() int
+	// Reply queues p for to, from the lane's socket, and returns: the batch's
+	// replies leave together once OnBatchEnd returns — on io_uring as SENDMSG,
+	// a run to one peer of one size as one UDP_SEGMENT send (ADR 0192) — and p
+	// may be reused once Reply returns. It is refused with LoopOutputFull,
+	// copying nothing, when the lane's reply queue has no room; a queued reply
+	// the kernel refuses is counted in Datagrams.ReplyFailures. On a socket bound
+	// to a wildcard address that reads each datagram's destination (udp-pktinfo),
+	// a reply to a peer that sent a datagram in the batch being handed on leaves
+	// from the address that datagram reached, the newest one's, as Packet.Reply
+	// does (#972); a source the kernel refuses is sent from its own choice, and a
+	// reply to a peer that sent nothing in the batch leaves from the kernel's
+	// choice.
+	Reply(to netip.AddrPort, p []byte) error
+}
+```
+
+<a name="PacketLoopIO.Loop"></a>
+### func \(PacketLoopIO\) [Loop](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (PacketLoopIO) Loop() int
+```
+
+Loop returns the lane's index, from 0 to the group's lane count less one, fixed for the lane's life.
+
+<a name="PacketLoopIO.Reply"></a>
+### func \(PacketLoopIO\) [Reply](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (PacketLoopIO) Reply(to netip.AddrPort, p []byte) error
+```
+
+Reply queues p for to, from the lane's socket, and returns: the batch's replies leave together once OnBatchEnd returns — on io\_uring as SENDMSG, a run to one peer of one size as one UDP\_SEGMENT send (ADR 0192) — and p may be reused once Reply returns. It is refused with LoopOutputFull, copying nothing, when the lane's reply queue has no room; a queued reply the kernel refuses is counted in Datagrams.ReplyFailures. On a socket bound to a wildcard address that reads each datagram's destination (udp-pktinfo), a reply to a peer that sent a datagram in the batch being handed on leaves from the address that datagram reached, the newest one's, as Packet.Reply does (#972); a source the kernel refuses is sent from its own choice, and a reply to a peer that sent nothing in the batch leaves from the kernel's choice.
 
 <a name="PacketMiddleware"></a>
 ## type [PacketMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -2785,6 +4045,28 @@ PostFunc is an alias of `github.com/kitsunium/sdk/internal/core/net.PostFunc`, d
 type PostFunc func(io LoopIO, arg uintptr)
 ```
 
+<a name="ProxyProtocolValue"></a>
+## type [ProxyProtocolValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+ProxyProtocolValue configures the PROXY protocol on a TCP group.
+
+```go
+type ProxyProtocolValue = corenet.ProxyProtocolValue
+```
+
+ProxyProtocolValue is an alias of `github.com/kitsunium/sdk/internal/core/net.ProxyProtocolValue`, declared as:
+
+```go
+type ProxyProtocolValue struct {
+	// Trusted lists the CIDRs of the balancers. Empty, or a range that does not
+	// parse, fails Start with OptionValueInvalid.
+	Trusted []string      `json:"trusted"`
+	// Timeout bounds the header's arrival, on the server's clock. Zero selects
+	// 3 s; a negative value fails Start with OptionValueInvalid.
+	Timeout DurationValue `json:"timeout"`
+}
+```
+
 <a name="Server"></a>
 ## type [Server](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -2846,6 +4128,15 @@ func (*Server) RegisterHealth(h corehealth.Health) error
 ```
 
 RegisterHealth registers the server's readiness and liveness checks on h, both named "net/server" (ADR 0188). Readiness is built from State: ready while serving with no stalled loop group. Liveness fails once a loop group has stayed stalled for the stall grace, 30 seconds. A receive that never completes on a live ring is not watched.
+
+<a name="Server.RegisterMetrics"></a>
+### func \(Server\) [RegisterMetrics](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/metrics.go>)
+
+```go
+func (*Server) RegisterMetrics(m coremetrics.AsyncMeter, attrs ...coreotel.AttrValue) error
+```
+
+RegisterMetrics registers the server's counters on m as observables (#847), mirroring RegisterHealth: one State read per collection, no cost per request. The caller's attrs ride on every series; a stream group's connections (MetricConnsActive, MetricConnsTotal, MetricConnsRejected) add the group, a loop group's rings (MetricLoopBatches and its siblings) the group, the loop and the ring, and the server's own (MetricAcceptBackoffs, MetricDegraded and the others) nothing. The names are the Metric constants. A nil m, or an m the server is already registered on, is refused with MetricsRefused; another meter is another destination.
 
 <a name="Server.Serve"></a>
 ### func \(Server\) [Serve](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/lifecycle.go>)
@@ -2943,6 +4234,11 @@ type State struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs   uint64               `json:"accept_backoffs"`
+	// SuppressedLogs counts the lines of net/http's own log the server did not
+	// write: over the cap of ten records a second, or with no logger to write
+	// them to (WithLogger). A count that rises is a port being probed, or a
+	// handler that panics.
+	SuppressedLogs   uint64               `json:"suppressed_logs"`
 	// Datagrams counts what the batched datagram paths drop (ADR 0192).
 	Datagrams        DatagramStateValue   `json:"datagrams"`
 	// Loops reports every loop group (ADR 0186 §D8). It is empty while the
@@ -2969,5 +4265,45 @@ func (State) Degraded() bool
 ```
 
 Degraded reports whether the server runs with any fault — a listener or loop group that fell back from a requested optimisation, a drained ring, a stalled loop group, an unknown environment token — so a caller can assert "no silent degradation" in one call. It reads Faults, and still the Degraded flags of Listeners and Loops for a value built by hand (ADR 0188).
+
+<a name="SteerValue"></a>
+## type [SteerValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+SteerValue says how a datagram group spreads over its shards.
+
+```go
+type SteerValue = corenet.SteerValue
+```
+
+SteerValue is an alias of `github.com/kitsunium/sdk/internal/core/net.SteerValue`, declared as:
+
+```go
+type SteerValue uint8
+```
+
+<a name="ZCRXValue"></a>
+## type [ZCRXValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+ZCRXValue names the device queue io\_uring's zero-copy receive registers, LoopValue.ZCRX.
+
+```go
+type ZCRXValue = corenet.ZCRXValue
+```
+
+ZCRXValue is an alias of `github.com/kitsunium/sdk/internal/core/net.ZCRXValue`, declared as:
+
+```go
+type ZCRXValue struct {
+	// Interface is the network interface's name; empty names none.
+	Interface string `json:"interface"`
+	// Queue is the index of the interface's receive queue; negative is refused
+	// with LoopValueInvalid.
+	Queue     int    `json:"queue"`
+	// AreaBytes is the size of the area the kernel lands payloads in, rounded up
+	// to whole pages: zero selects 4 MiB, negative is refused with
+	// LoopValueInvalid.
+	AreaBytes int    `json:"area_bytes"`
+}
+```
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

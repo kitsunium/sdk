@@ -368,7 +368,7 @@ func (a *App) ports(productHTTP bool) []model.Port {
 	}
 	port := model.Port{
 		Owner: model.PortOwnerApp, Serves: serves,
-		Settings: []string{a.variable(varAddr), a.variable(varAllowedHosts), a.variable(varTrustProxy)},
+		Settings: []string{a.variable(varAddr), a.variable(varAllowedHosts), a.variable(varTrustProxy), a.variable(varTrustedProxies)},
 	}
 	if a.cfg.env == EnvDev {
 		port.Address = a.listenAddr()

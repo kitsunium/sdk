@@ -11,6 +11,7 @@
   ([ADR 0040](0040-changing-a-published-shape-while-v0.md)): everything it adds
   is opt-in, and the default engine does not change.
 - **Deciders**: SDK maintainers, owner
+- **Amended 2026-11-10** (#809, #856, #857): §D7's slab is sized per loop by `LoopValue.SlabBudget`, else a quarter of the cgroup allowance memlimit reads shared by the loops (at most 128 MiB), else 128 MiB, its source in State; a class's wholly free arenas but one are unmapped on the tick. `Shards(0)` binds one SO_REUSEPORT listener per loop (§D3's listener hand-off names its loop), and a loop's thread may be pinned to a CPU (`LoopValue.Affinity`).
 - **Amended by**: [ADR 0187](0187-the-handler-type-chooses-the-engine.md) — D1 (the
   engine chosen by the handler's type, every option judged by its kind, a
   zero value included), D2 and D3 (an `http1` handler served behind
@@ -192,7 +193,7 @@ read `ReadHeaderTimeout`, which only the `http1` adapter honours.
 | io_uring | `linux && (amd64 \|\| arm64 \|\| riscv64 \|\| loong64)`, after a staged probe of the running kernel | 1 |
 | epoll | every Linux architecture, and every io_uring probe failure | 1 |
 | portable | every other GOOS, and `Backend: portable` anywhere | 1 |
-| kqueue | darwin and the BSDs | deferred |
+| kqueue | darwin and the BSDs | deferred; wave 2 since ADR 0222 (amended 2026-11-11) |
 | IOCP | windows | deferred |
 
 `LoopValue.Backend` is `auto` (the zero), `iouring`, `epoll` or `portable`.
@@ -432,7 +433,7 @@ contract.
 
 ## Deferred
 
-- kqueue (darwin, the BSDs) and IOCP (windows), each in its own measured change.
+- kqueue (darwin, the BSDs) and IOCP (windows), each in its own measured change. kqueue: resolved by ADR 0222 (2026-11-11).
 - TLS on the loop, and HTTP/2, `CONNECT` and `Upgrade` in the `http1` profile.
 - `DEFER_TASKRUN` as io_uring's default: an option until it passes the whole
   conformance suite.
@@ -449,3 +450,104 @@ contract.
 - Impl, to come: `internal/core/net/`, `internal/service/net/{loop,http1}/`,
   `internal/service/net/server/`, `pkg/v1/net/{server,http1}/`,
   `internal/kernel/{swar,jsonenc}/`, `internal/core/security/token/`.
+
+## Amended 2026-11-10 — a body the spill cannot hold (kitsunium/sdk#844)
+
+Two bounds of one profile disagreed: `Parse` admitted a body up to
+`HTTP1LimitsValue.Body`, 1 MiB by default, while `Continue` waits for the whole
+body in the spill, whose `LoopValue.SpillCap` defaults to 64 KiB, so a POST
+between the two was accepted by the parser and reset by the engine, with no
+status. Two things now hold:
+
+- A group's spill and a whole-body handler's bound agree at Start. A loop group
+  with a handler that is a `corenet.LoopSpillChecker` tells it the effective
+  `SpillCap` before any address is bound. For an http1 handler that takes its
+  bodies whole, a default bound is capped at `SpillCap` less the head bound, so
+  a `Content-Length` past it is refused 413 on the head, and an explicit `Body`
+  past it fails `Start` with `HTTP1Misconfigured` naming `body`. The native
+  backends' default spill is `net/loop`'s, the portable's `portableSpillCap`, the
+  same 64 KiB; the server passes that.
+- A handler that needs a larger body reads it as it arrives. A sibling port,
+  `corenet.HTTP1BodyReader` (`OnBody(req, chunk, last)`, found on the handler
+  given to `HandleLoop`, so chain links do not stream), receives each chunk while
+  the spill holds only the head; `ServeHTTP1` then runs with `Body` nil. The head
+  is copied into the connection's own request value so `req` stays valid across
+  `OnData` calls, reused for the slot's next connection, and a batch of chunks
+  allocates nothing. `HTTP1BodyAborter.AbortBody` tells a handler a body will not
+  arrive whole when its connection closes first. `Limits.Body` still bounds the
+  `Content-Length` the parser admits; the spill no longer does. Not gated by a
+  benchmark here: the whole-body path gains one branch, the P2 gate re-runs in CI.
+
+
+## Amended 2026-11-10 — a response delimited by close, and an Upgrade (kitsunium/sdk#858, #859)
+
+§D6 stays what it decides for requests and for chunked encoding, which is still
+refused in both directions. It gains one framing for responses: RFC 9112 §6.3 item
+8's, a response delimited by the connection's close, asked for by the handler with
+`HTTP1ResponseValue.Stream`. The codec writes the status line and the fields with
+`Connection: close` and no `Content-Length`, a HEAD, a 204 and a 304 refused with
+`HTTP1ResponseInvalid`. The handler then writes through `HTTP1StreamValue`, the
+`LoopIO`'s own bounded, copying `Write`, on the lane's thread, the connection's
+timer and its drain reaching it through the optional port `HTTP1Streamer`; the
+adapter finds it through a chain of links. `sse.NewLoopHandler` is the first user:
+an event stream on the loop, the keep-alive comments on the loop's timer, 303 to 313
+B of Go heap an open stream against 8 112 on the goroutine engine. Requests
+pipelined behind a stream are dropped with the connection, stated. The drain's
+last word is a sibling port of the loop itself, `LoopDrainer`: `closeSettled` asks
+it once per connection before closing it, on every backend. §D2's sentence on
+which engine serves the static tree, SSE and WebSocket is amended accordingly
+(the file tree lands separately).
+
+The profile's `Upgrade` refusal moves for WebSocket alone (#859): `CONNECT` stays
+refused and HTTP/2 stays elsewhere. A handler answers `HTTP1ResponseValue.Upgrade`
+and implements `HTTP1Upgrader`: the codec writes the 101 with `Connection: Upgrade`
+and the protocol's own fields, and every later byte goes to the upgraded protocol.
+`websocket.NewLoopHandler` runs on that hook: the same handshake rules as `Upgrade`
+through `verifyHandshake` over a shim request (ADR 0069's origin rule included), a
+frame reader per connection with no goroutine, a message whole in one read handed
+out in place. `TestAdversarial_onTheLoop` is the goroutine engine's table replayed
+on epoll and io_uring, with the same close codes; 423 to 432 B of Go heap a
+connection, `BenchmarkWSLoopReceive4KiB` at 419 ns and no allocation against the
+goroutine engine's 3 274 ns.
+
+## Amended 2026-11-10 — a route's file tree on the loop (kitsunium/sdk#982)
+
+§D2's sentence on which engine serves the static tree is amended again: a
+loop group now serves a file tree through `http1.Files(route, fsys, cfg)` —
+the static tree's policies (its constructor judges them, its CSP, Referrer-Policy
+and Cache-Control are read), its name rules and its no-listing rule re-applied
+in `http1` because they are unexported (`net/static` is kept untouched; sharing
+`pinnedType` and the name cleaning is left to a later change). What the issue
+proposed was checked against the code and three points changed: **one pipe per
+in-flight file**, not one per ring — one per ring mixes two connections' bytes
+and lets a stalled client hold every other file up; a dup'd descriptor owned by
+the engine rather than the caller's kept open until `OnClose` — an SQE already
+named by an unsubmitted fd number must not see the number reused; and the head
+travels with the file in `LoopFileWriter.WriteFile`, so a backend's refusal is
+total and the copy path can still answer. Open and stat run on the lane's worker
+(ADR 0194); a body leaves by sendfile on epoll (one 1 MiB step a turn), by a
+linked `IORING_OP_SPLICE` pair on io_uring (file to pipe, pipe to socket,
+`SPLICE_F_NONBLOCK`, `POLLOUT` armed when the socket is full), and through a
+bounded chunked copy on the worker — on portable, on embed.FS, on any refusal.
+A file that shrinks during the send closes the connection with
+`LoopFileTruncated` (`0.2.11.82`); `LoopFileRefused` (`0.2.11.81`) sends the
+answer to the copy path. The confinement of a name is the tree's: a symbolic link
+anywhere in the name is refused when the file system can name one, and
+`http1.Files` asks for an os.Root's FS where the tree is not one's own alone.
+
+### Deferred
+
+`net/server`'s portable backend does not implement `LoopFileWriter`, so it takes
+the copy path; and the paired `goroutine-static:loop-files` load gate and its
+BENCH.md row (`tools/netgate`, ADR 0190) are not written. Sendfile on a cold page
+blocks the epoll lane on disk (io_uring's io-wq does not); each is a later change.
+
+## Amended 2026-11-11 — kqueue on darwin and the BSDs (kitsunium/sdk#976)
+
+§D5's deferred kqueue is built: [ADR 0222](0222-a-loop-runs-on-kqueue-on-darwin-and-the-bsds-beside-epoll.md)
+adds `LoopBackendKqueue` and the engine token `kqueue` at epoll's rank, a
+level-triggered driver on the shared core, a staged probe, and the
+backend-neutral conformance cases on kqueue. kqueue is opt-in until ADR 0222
+§D6's paired gate holds: `auto` keeps the portable backend on darwin and the
+BSDs, and kqueue runs when the code names `LoopBackendKqueue` (ADR 0222,
+amended 2026-11-11). IOCP and illumos event ports stay rejected.

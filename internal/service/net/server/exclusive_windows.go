@@ -57,6 +57,13 @@ func addrInUse(err error) bool {
 	return errors.Is(err, wsaeAddrInUse)
 }
 
+// bindConflict reports a bind refused because another socket holds the
+// address: WSAEADDRINUSE, the refusal a rebind waits out first (#1330).
+func bindConflict(err error) bool {
+	//: the same errno.
+	return addrInUse(err)
+}
+
 // closeConn closes c gracefully — at once when hard, for a connection
 // nothing was said on: shutdown(SD_SEND), then a read until the
 // peer's zero, bounded by closeLinger and closeDrainMax, then the close. A

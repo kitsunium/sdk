@@ -147,3 +147,22 @@ them in the house style (cf. ADR 0012 amending 0005/0006, ADR 0020 amending
 - ADR 0027 §Decision 2 — "a stdlib text Exporter (registered to stdout on import)", the clause this ADR amends.
 - ADR 0015 §D3 — default-active writers (console AND file).
 - ADR 0007 §Bump semantics — why this is a minor, not a patch.
+
+## Amended 2026-11-09 — net/http's own log (kitsunium/sdk#846)
+
+`http.Server` falls back to the process's standard logger, stderr, for what it
+reports from its own goroutines: a recovered handler panic, an HTTP/2 stream
+error, a superfluous `WriteHeader`, a failed accept. `net/server` now gives each
+HTTP group's `http.Server.ErrorLog` a writer of its own: with `WithLogger`, each
+line becomes one warn record with `source=net/http` and the group (the lines
+after the first, a panic's stack, in a clipped `detail`), at most ten records a
+second across the server's HTTP groups on the server's clock; the lines over that
+budget, and every line when no logger was given, are counted in
+`StateValue.SuppressedLogs` and written nowhere. net/http's log is never
+stderr's.
+
+Not covered: the engine performs the TLS handshake itself, before net/http sees
+the connection, so a failed handshake — a plaintext ClientHello on a TLS
+listener included — is never a net/http log line here. It reaches neither
+stderr nor the logger, and is not counted; whether the engine should record it
+under the same budget is open in kitsunium/sdk#846.

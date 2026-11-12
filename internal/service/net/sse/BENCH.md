@@ -610,3 +610,15 @@ five sizes, 80 rows, all zero-allocation — is summarised in §Two obvious scan
 are quadratic. The 64 KiB column is reproduced there in full; the smaller sizes
 scale linearly for every strategy except the three diagnosed blow-ups, which
 scale with the SQUARE of the payload and are the reason the sweep exists.
+
+## On the loop (#858)
+
+`BenchmarkSSELoopSend` is one small event on an open stream, on a fake `LoopIO`: the
+frame written into the lane's buffer and handed to its copying `Write`. Measured on
+2026-11-10, AMD EPYC 7351P (linux/amd64, busy VM, `GOMAXPROCS=4`), go1.27.3,
+`-benchtime=300ms -count=3`, median. `TestLoopSSE_tenThousandStreams`: 303 B of Go
+heap a stream on epoll, 313 B on io_uring (budget 512 B).
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| `SSELoopSend` | 182 | 0 | 0 |

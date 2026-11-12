@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/swar"
 )
@@ -31,6 +32,8 @@ const (
 	// knownMaxLen is one past the longest name the profile reads,
 	// transfer-encoding.
 	knownMaxLen int = len("transfer-encoding") + 1
+	// protoMajor is what Parse sets Proto to: the profile's one version.
+	protoMajor uint8 = 1
 )
 
 // fieldKind names the fields the profile reads; kindOther is every other one.
@@ -150,7 +153,9 @@ func NewParser(l corenet.HTTP1LimitsValue) (Parser, error) {
 	return Parser{
 		head:   head,
 		target: orDefault(l.Target, min(corenet.HTTP1DefaultTarget, head)),
-		body:   orDefault(l.Body, corenet.HTTP1DefaultBody),
+		//: kept as given: zero still means the default at Parse, and an
+		//: explicit bound stays distinguishable from it (CheckSpill).
+		body: l.Body,
 	}, nil
 }
 
@@ -194,6 +199,7 @@ func (p Parser) Limits() corenet.HTTP1LimitsValue {
 func (p Parser) Parse(buf []byte, req *corenet.HTTP1RequestValue) (int, Refusal) {
 	//: a reused value is reset field by field: clearing the 64-entry array would cost more than the parse.
 	reset(req)
+	req.Scheme, req.Stream, req.Proto = nil, 0, protoMajor
 	head := orDefault(p.head, corenet.HTTP1DefaultHead)
 	//: no byte past the head bound is ever read as head.
 	limit := min(len(buf), head)
@@ -210,7 +216,7 @@ func (p Parser) Parse(buf []byte, req *corenet.HTTP1RequestValue) (int, Refusal)
 		return 0, ranOut(r, len(buf), head)
 	}
 	//: the head is whole, Host known: the one canonical target, or a refusal.
-	if r := canonical(req); r != RefusalNone {
+	if r := Canonical(req); r != RefusalNone {
 		//: refused like any other rule, before any handler.
 		return 0, r
 	}
@@ -265,8 +271,11 @@ func reset(req *corenet.HTTP1RequestValue) {
 	req.Method, req.Target, req.Host, req.Authorization, req.Body = nil, nil, nil, nil, nil
 	req.Path, req.Query = nil, nil
 	req.ContentLength, req.HeadLen, req.Consumed, req.NFields, req.Route = 0, 0, 0, 0, 0
+	req.RoutePrefix = 0
 	req.HasHost, req.HasAuthorization, req.Close, req.Authenticated = false, false, false, false
 	req.Auth.Reset()
+	req.Trace = coretrace.SpanContextValue{}
+	req.RequestID.Reset()
 }
 
 // requestLine reads "method SP target SP HTTP/1.1 CRLF" from the start of

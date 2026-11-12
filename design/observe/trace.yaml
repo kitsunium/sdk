@@ -627,6 +627,34 @@ packages:
           - name: err
             type: error
       - doc: |-
+          ParseTraceParentBytes reads a traceparent header value from bytes, with the
+          rules of service/observe/trace.ParseTraceParent and without converting it to
+          a string, for the hot paths that hold a header as bytes: ok is false for
+          anything else, never an error, because a malformed traceparent is a new
+          trace (W3C Trace Context §4.3) and a request is never refused for it. The
+          context returned is marked Remote.
+        in:
+          - name: header
+            type: "[]byte"
+        name: ParseTraceParentBytes
+        out:
+          - name: context
+            type: SpanContextValue
+          - name: ok
+            type: bool
+      - doc: |-
+          AppendTraceParent appends a version-00 traceparent for context to dst, the
+          flags sanitized as FormatTraceParent sanitizes them: the header a caller
+          writes without an allocation. An invalid context appends nothing.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: context
+            type: SpanContextValue
+        name: AppendTraceParent
+        out:
+          - type: "[]byte"
+      - doc: |-
           NormalizeScope returns the ScopeValue a Tracer publishes, filling an empty Name
           with DefaultScopeName. Version is left exactly as supplied: it is optional in
           the specification, and inventing one would be a claim about code this package

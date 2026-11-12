@@ -37,6 +37,35 @@ type datagram struct {
 	cut bool
 	// addr is the sender of the last read.
 	addr stdnet.Addr
+	// local is the datagram's own destination, as IP_PKTINFO or IPV6_PKTINFO
+	// read it; zero when the socket did not ask (#972).
+	local localAddress
+}
+
+// localAddress is what a datagram's destination control message said (#972): the
+// address the sender used, and the address a reply should leave from, which for
+// a broadcast or a multicast destination is not that one. A length of zero means
+// unknown, and each field is 4 or 16 bytes long, in the socket's family.
+type localAddress struct {
+	// to and source are the addresses, in their first toLen and sourceLen
+	// bytes.
+	to, source [16]byte
+	// toLen and sourceLen are their lengths, 0, 4 or 16.
+	toLen, sourceLen uint8
+}
+
+// addrOf returns the destination as a net.UDPAddr with port, or nil when it is
+// unknown. It allocates, and runs only when a handler asks.
+func (l *localAddress) addrOf(port int) *stdnet.UDPAddr {
+	//: no control message was read.
+	if l.toLen == 0 {
+		//: the caller falls back on the bound address.
+		return nil
+	}
+	ip := make(stdnet.IP, l.toLen)
+	copy(ip, l.to[:l.toLen])
+	//: the address the sender used, with the socket's own port.
+	return &stdnet.UDPAddr{IP: ip, Port: port}
 }
 
 // payload returns the bytes of the last read.
@@ -109,6 +138,9 @@ type datagramSink interface {
 	begin()
 	// reply sends b to to, or queues it until flush while a batch is open.
 	reply(b []byte, to stdnet.Addr) (n int, err error)
+	// replyFrom is reply leaving from source, where the socket can name one
+	// (#972); a sink that cannot sends it as reply does.
+	replyFrom(b []byte, to stdnet.Addr, source localAddress) (n int, err error)
 	// flush sends what the batch queued and closes it.
 	flush()
 }
@@ -124,6 +156,10 @@ type datagramCounters struct {
 	gsoOversized atomic.Uint64
 	// replyFailures counts queued replies that did not leave.
 	replyFailures atomic.Uint64
+	// kernelDrops is the datagrams the kernel dropped for want of receive
+	// buffer, which each batched socket adds the growth of its SO_RXQ_OVFL count
+	// to (#973).
+	kernelDrops atomic.Uint64
 }
 
 // newSlots allocates a read batch sized for the group.

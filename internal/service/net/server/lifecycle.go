@@ -120,6 +120,19 @@ func (g *StreamGroup) startRefusal() error {
 		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
 			errs.String("group", g.name), errs.String("option", corenet.OptionBatchReplies.String()))
 	}
+	//: ShareAddress where the platform or a Unix socket cannot share (#1330),
+	//: on either engine.
+	if err := shareRefusal(g, corenet.LoopOptionUnsupported); err != nil {
+		//: refused by name.
+		return err
+	}
+	//: nor is a stream's accept queue steered by this option (#857 is the
+	//: loop's to build).
+	if g.kinds.has(corenet.OptionSteer) {
+		//: refuse rather than ignore a configuration the group cannot apply.
+		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+			errs.String("group", g.name), errs.String("option", corenet.OptionSteer.String()))
+	}
 	//: a loop group judges every option it was given against the engine and
 	//: its handler.
 	if g.loopHandler != nil {
@@ -137,6 +150,11 @@ func (g *StreamGroup) startRefusal() error {
 		//: refused rather than dropped (R6).
 		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
 			errs.String("group", g.name), errs.String("option", corenet.OptionLoopMiddleware.String()))
+	}
+	//: every option's value in range.
+	if err := g.valueRefusal(); err != nil {
+		//: refused by name.
+		return err
 	}
 	//: the HTTP versions it serves, computed once (ADR 0195).
 	return g.protocolsRefusal()
@@ -159,16 +177,22 @@ func (s *Server) bindPacketAll(ctx context.Context, groups []*PacketGroup) error
 	//: bind in declaration order so a failure is reproducible.
 	for _, group := range groups {
 		//: a group with no handler would read datagrams and drop them.
-		if group.handler == nil {
+		if group.handler == nil && group.loopHandler == nil {
 			//: refuse rather than discard traffic silently.
 			return errs.Wrap(corenet.HandlerMissing, errs.WrapParams{},
 				errs.String("group", group.name))
 		}
-		//: a group with no address is almost always a wiring mistake.
-		if len(group.addrs) == 0 {
+		//: a group with no address and no socket to adopt is almost always a
+		//: wiring mistake.
+		if len(group.addrs) == 0 && len(group.adopt) == 0 {
 			//: refuse rather than start a group that listens nowhere.
 			return errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
 				errs.String("group", group.name), errs.String("why", "no listen address"))
+		}
+		//: a loop handler's own refusals, before anything is bound (#852).
+		if err := packetLoopRefusal(group); err != nil {
+			//: refused by name.
+			return err
 		}
 		//: propagate the first bind failure.
 		if err := s.bindPacketGroup(ctx, group); err != nil {
@@ -186,40 +210,107 @@ func (s *Server) bindPacketAll(ctx context.Context, groups []*PacketGroup) error
 // owned by the Server, holds an inFlight token released on exit, and terminates
 // when Close or Shutdown closes its socket.
 func (s *Server) bindPacketGroup(ctx context.Context, group *PacketGroup) error {
-	handler := group.resolved()
+	var handler corenet.PacketHandler
+	//: a PacketHandler; a loop group's lanes start once all are bound.
+	if group.loopHandler == nil {
+		handler = group.resolved()
+	}
+	group.lanes = nil
 	//: inherited sockets are taken over before any address is bound.
 	if err := s.adoptPacketSockets(group, handler); err != nil {
 		//: an activation mismatch aborts startup.
 		return err
 	}
-	//: one socket and one read goroutine per address.
+	//: one socket and one read goroutine per shard of each address.
 	for _, addr := range group.addrs {
-		pc, rep, err := listenPacket(ctx, addr)
-		//: surface the address that could not be bound.
-		if err != nil {
+		//: every shard of this address, the steering program last.
+		if err := s.bindPacketShards(ctx, group, addr, handler); err != nil {
 			//: abort startup; Start unwinds whatever is already bound.
 			return err
 		}
-		bound := s.newBoundPacket(group, addr, pc)
-		degraded, reason := batchDegradation(group.limits)
-		s.mu.Lock()
-		s.packetConns = append(s.packetConns, bound)
-		s.states = append(s.states, corenet.ListenerStateValue{
-			Group:          group.name,
-			Address:        pc.LocalAddr().String(),
-			Network:        addr.Network,
-			Shards:         1,
-			Exclusive:      rep.exclusive,
-			BindWait:       corenet.DurationValue(rep.wait),
-			Degraded:       degraded,
-			DegradedReason: reason,
-		})
-		s.mu.Unlock()
-		s.inFlight.Add(1)
-		go s.readLoop(bound, group, handler)
+	}
+	//: a loop group's lanes, their count known.
+	if group.loopHandler != nil {
+		s.startPacketLanes(group)
 	}
 	//: every address in the group is bound.
 	return nil
+}
+
+// bindPacketShards binds one datagram address: count sockets sharing it through
+// SO_REUSEPORT (#977), one read loop each, the first row in State carrying the
+// count, and last the steering program, once every socket is bound. A group
+// without Shards keeps one socket and no SO_REUSEPORT.
+//
+// Goroutine lifecycle: it starts exactly one readLoop per shard, each owned by
+// the Server and holding an inFlight token until Close or Shutdown closes its
+// socket, exactly as a single bound socket's does.
+func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr corenet.AddressValue, handler corenet.PacketHandler) error {
+	count, shardDegraded, shardReason := 1, false, ""
+	//: only a group that asked for shards gets them.
+	if group.kinds.has(corenet.OptionShards) {
+		count, shardDegraded, shardReason = resolveShards(group.limits.Shards, addr.Network)
+	}
+	share := group.kinds.has(corenet.OptionShareAddress)
+	spec := socketSpec{reuse: reuseOf(count, share), receiveBuffer: group.limits.ReceiveBuffer, sendBuffer: group.limits.SendBuffer}
+	//: an address another process holds is refused before the shards could
+	//: join it (#1330).
+	if mustProbe(addr, count, share) {
+		//: AddressInUse, naming it.
+		if err := probeAddress(ctx, addr, false); err != nil {
+			//: Start unwinds whatever is already bound.
+			return err
+		}
+	}
+	degraded, reason := batchDegradation(group.limits)
+	degraded = degraded || shardDegraded
+	reason = joinReason(reason, shardReason)
+	bindAddr := addr
+	sockets := make([]stdnet.PacketConn, 0, count)
+	//: the shards, the first naming the port the others join.
+	for i := range count {
+		pc, rep, err := listenPacket(ctx, bindAddr, spec)
+		//: a shard that will not bind aborts startup rather than serving a
+		//: quietly smaller set than the operator asked for.
+		if err != nil {
+			//: surface the address that could not be bound.
+			return err
+		}
+		sockets = append(sockets, pc)
+		bound := s.newBoundPacket(group, addr, pc)
+		s.mu.Lock()
+		s.packetConns = append(s.packetConns, bound)
+		//: only the first shard is reported, carrying the real count — N rows
+		//: for one address would read as N separate addresses, as for a stream.
+		if i == 0 {
+			s.states = append(s.states, corenet.ListenerStateValue{
+				Group:          group.name,
+				Address:        pc.LocalAddr().String(),
+				Network:        addr.Network,
+				Shards:         count,
+				Exclusive:      rep.exclusive,
+				Shared:         rep.shared,
+				BindWait:       corenet.DurationValue(rep.wait),
+				Degraded:       degraded,
+				DegradedReason: reason,
+				ReceiveBuffer:  rep.receiveBuffer,
+				SendBuffer:     rep.sendBuffer,
+			})
+			bindAddr = pinPort(addr, pc)
+		}
+		s.mu.Unlock()
+		s.startReader(bound, group, handler)
+	}
+	s.probeSteer(group.steer, sockets)
+	//: every shard of this address is reading.
+	return nil
+}
+
+// pinPort returns addr with the port pc bound, so the other shards of an address
+// asked as ":0" join it instead of drawing their own.
+func pinPort(addr corenet.AddressValue, pc stdnet.PacketConn) corenet.AddressValue {
+	//: the datagram socket's port.
+	return withBoundPort(addr, pc.LocalAddr())
 }
 
 // adoptPacketSockets takes over the group's inherited datagram sockets.
@@ -240,6 +331,8 @@ func (s *Server) adoptPacketSockets(group *PacketGroup, handler corenet.PacketHa
 		for _, pc := range conns {
 			addr := corenet.AddressValue{Network: pc.LocalAddr().Network(), Addr: pc.LocalAddr().String()}
 			bound := s.newBoundPacket(group, addr, pc)
+			//: the group's buffers, which no bind set on this socket.
+			rcvbuf, sndbuf, why := adoptedBuffers(packetSocket(pc), bufferSpec(group.limits))
 			s.mu.Lock()
 			s.packetConns = append(s.packetConns, bound)
 			s.states = append(s.states, corenet.ListenerStateValue{
@@ -249,12 +342,13 @@ func (s *Server) adoptPacketSockets(group *PacketGroup, handler corenet.PacketHa
 				Shards:         1,
 				Adopted:        true,
 				Exclusive:      exclusiveOf(packetSocket(pc)),
-				Degraded:       degraded,
-				DegradedReason: reason,
+				Degraded:       degraded || why != "",
+				DegradedReason: joinReason(reason, why),
+				ReceiveBuffer:  rcvbuf,
+				SendBuffer:     sndbuf,
 			})
 			s.mu.Unlock()
-			s.inFlight.Add(1)
-			go s.readLoop(bound, group, handler)
+			s.startReader(bound, group, handler)
 		}
 	}
 	//: every named socket was taken over.
@@ -309,6 +403,10 @@ func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
 		return s.bindLoopGroup(ctx, group)
 	}
 	handler := group.resolved()
+	//: net/http's own log goes to the server's logger, not to stderr.
+	if group.httpAdapter != nil {
+		group.httpAdapter.errorLog = s.errorLog(group.name)
+	}
 	//: built once per group, so the ceiling is shared by every shard and
 	//: every address the group listens on — one budget, not one per socket.
 	group.limiter = newConnLimiter(group.limits)
@@ -350,9 +448,11 @@ func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHand
 			//: an inherited socket gets exactly the layers a bound one does —
 			//: counted by the ceiling, hijacked connections included, and
 			//: served over TLS when the group carries an identity.
-			ln := layered(raw, group.serverTLS(), group.tracksCloses())
+			ln := layered(raw, group.serverTLS(), group.tracksCloses(), group.proxyPolicy)
 			addr := corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}
 			bound := &boundListener{group: group.name, addr: addr, ln: ln}
+			//: the group's buffers, which no bind set on this socket.
+			rcvbuf, sndbuf, why := adoptedBuffers(listenerSocket(raw), bufferSpec(group.limits))
 			s.mu.Lock()
 			s.listeners = append(s.listeners, bound)
 			s.states = append(s.states, corenet.ListenerStateValue{
@@ -361,8 +461,15 @@ func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHand
 				Network: addr.Network,
 				Shards:  1,
 				Adopted: true,
+				H2C:     group.servesH2C(),
+				HTTP2:   group.http2Bounds(),
 				//: read from the raw socket: TLS hides its descriptor.
-				Exclusive: exclusiveOf(listenerSocket(raw)),
+				Exclusive:      exclusiveOf(listenerSocket(raw)),
+				Degraded:       why != "",
+				DegradedReason: why,
+				MaxBodyBytes:   group.reportedBodyBound(),
+				ReceiveBuffer:  rcvbuf,
+				SendBuffer:     sndbuf,
 			})
 			s.mu.Unlock()
 			s.inFlight.Add(1)
@@ -386,10 +493,26 @@ func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHand
 // interrupts a blocking Accept.
 func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corenet.AddressValue, handler corenet.ConnHandler) error {
 	count, degraded, reason := resolveShards(group.limits.Shards, addr.Network)
+	share := group.kinds.has(corenet.OptionShareAddress)
+	//: an address another process holds is refused before the shards could
+	//: join it (#1330).
+	if mustProbe(addr, count, share) {
+		//: AddressInUse, naming it.
+		if err := probeAddress(ctx, addr, true); err != nil {
+			//: Start unwinds whatever is already bound.
+			return err
+		}
+	}
 	opened := 0
-	//: every shard binds the same address; the kernel spreads accepts across them.
+	target := addr
+	//: every shard binds the same address — the first's port for an address
+	//: asked as host:0 (#1331) —; the kernel spreads accepts across them.
 	for range count {
-		ln, rep, err := listen(ctx, addr, group.serverTLS(), count > 1, group.tracksCloses(), s.rebindAttempts(addr))
+		ln, rep, err := listen(ctx, target, group.serverTLS(), socketSpec{
+			reuse: reuseOf(count, share), trackCloses: group.tracksCloses(), attempts: s.rebindAttempts(target), backlog: group.limits.Backlog,
+			receiveBuffer: group.limits.ReceiveBuffer, sendBuffer: group.limits.SendBuffer, proxy: group.proxyPolicy,
+			keepAlive: s.keepAliveOf(group), userTimeout: s.userTimeoutOf(group),
+		})
 		//: a shard that will not bind aborts startup rather than serving a
 		//: quietly smaller set than the operator asked for.
 		if err != nil {
@@ -407,11 +530,19 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 				Address:        ln.Addr().String(),
 				Network:        addr.Network,
 				Shards:         count,
+				H2C:            group.servesH2C(),
+				HTTP2:          group.http2Bounds(),
 				Exclusive:      rep.exclusive,
+				Shared:         rep.shared,
 				BindWait:       corenet.DurationValue(rep.wait),
-				Degraded:       degraded,
-				DegradedReason: reason,
+				Degraded:       degraded || rep.backlogReason != "",
+				DegradedReason: joinReason(reason, rep.backlogReason),
+				MaxBodyBytes:   group.reportedBodyBound(),
+				Backlog:        rep.backlog,
+				ReceiveBuffer:  rep.receiveBuffer,
+				SendBuffer:     rep.sendBuffer,
 			})
+			target = pinnedAddr(addr, ln)
 		}
 		s.mu.Unlock()
 		opened++
@@ -467,7 +598,9 @@ func (s *Server) acceptLoop(bound *boundListener, group *StreamGroup, handler co
 		}
 		failures = 0
 		var release func()
-		if group.admission != nil {
+		//: a proxied group admits after its header names the client, on the
+		//: connection's own goroutine (admitProxied).
+		if group.admission != nil && group.proxyPolicy == nil {
 			ok := false
 			//: refused before any TLS byte is read (ADR 0174).
 			if release, ok = group.admission.Admit(raw.RemoteAddr()); !ok {
@@ -477,6 +610,7 @@ func (s *Server) acceptLoop(bound *boundListener, group *StreamGroup, handler co
 		}
 		s.total.Add(1)
 		s.active.Add(1)
+		group.conns.active.Add(1)
 		s.inFlight.Add(1)
 		go s.serve(raw, group, handler, release)
 	}
@@ -506,6 +640,25 @@ func (s *Server) backOff(bound *boundListener, delay time.Duration) bool {
 // cannot leak either.
 func (s *Server) serve(raw stdnet.Conn, group *StreamGroup, handler corenet.ConnHandler, release func()) {
 	defer s.inFlight.Done()
+	defer s.active.Add(-1)
+	defer group.conns.active.Add(-1)
+	c := s.acquire(raw, group)
+	defer s.release(c)
+	//: a proxied group's header is read first, before a TLS byte: its socket
+	//: is registered already, so a drain's expiry can sever a stalled balancer.
+	if group.proxyPolicy != nil {
+		var ok bool
+		//: a refused header ends the connection here, closed at once.
+		if release, ok = s.admitProxied(raw, group); !ok {
+			c.refused = true
+			return
+		}
+	}
+	s.serveAdmitted(c, group, handler, release)
+}
+
+// serveAdmitted runs the handler for one connection already admitted.
+func (s *Server) serveAdmitted(c *conn, group *StreamGroup, handler corenet.ConnHandler, release func()) {
 	ctx := s.runCtx
 	//: a connection under admission gives its slot back when its handshake
 	//: completes, or at the latest when it ends.
@@ -513,9 +666,6 @@ func (s *Server) serve(raw stdnet.Conn, group *StreamGroup, handler corenet.Conn
 		defer release()
 		ctx = context.WithValue(ctx, admissionReleaseKey{}, release)
 	}
-	defer s.active.Add(-1)
-	c := s.acquire(raw, group)
-	defer s.release(c)
 	//: a panicking handler closes its own connection and nothing more; one
 	//: malformed peer must never be able to take the process down.
 	defer recoverHandler()
@@ -524,7 +674,12 @@ func (s *Server) serve(raw stdnet.Conn, group *StreamGroup, handler corenet.Conn
 	//: goroutine to return it to, and one peer's failure is not the server's.
 	//: A ceiling rejection lands here too, and closes the connection the same
 	//: way — which is the intended answer to "we are full".
-	swallowErr(s.admit(ctx, group.limiter, c, handler))
+	err := s.admit(ctx, group.limiter, &group.conns.admitted, c, handler)
+	//: the ceiling turned this connection away: the group's count says so.
+	if c.refused {
+		group.conns.rejected.Add(1)
+	}
+	swallowErr(err)
 }
 
 // recoverHandler swallows a handler panic so it cannot unwind past the

@@ -14,7 +14,9 @@ type LoopBackend uint8
 // The loop backends. The zero value is LoopBackendAuto.
 const (
 	// LoopBackendAuto takes the best backend the platform's probe reaches:
-	// io_uring, then epoll on Linux, the portable backend elsewhere.
+	// io_uring, then epoll on Linux, the portable backend elsewhere. On darwin
+	// and the BSDs it stays portable until kqueue's paired gate holds: kqueue
+	// runs there when named, LoopBackendKqueue (ADR 0222).
 	LoopBackendAuto LoopBackend = iota
 	// LoopBackendIOURing is io_uring, on linux/amd64, arm64, riscv64 and loong64,
 	// after the kernel's staged probe.
@@ -24,6 +26,10 @@ const (
 	// LoopBackendPortable is the default engine's accept path and goroutines,
 	// serialised onto one handler goroutine, on every platform.
 	LoopBackendPortable
+	// LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and
+	// DragonFly, after a staged probe (ADR 0222). It runs only when named:
+	// LoopBackendAuto does not choose it until its paired gate holds.
+	LoopBackendKqueue
 )
 
 // String renders the backend as State and the start line spell it.
@@ -47,6 +53,10 @@ func (b LoopBackend) String() string {
 	case LoopBackendPortable:
 		//: the spelling State and the start line use.
 		return "portable"
+	//: kqueue, on darwin and the BSDs.
+	case LoopBackendKqueue:
+		//: the spelling State and the start line use.
+		return "kqueue"
 	//: an out-of-range value is reported rather than hidden.
 	default:
 		//: report the out-of-range value rather than hiding it.
@@ -83,7 +93,10 @@ type LoopValue struct {
 	CQBatch int `json:"cq_batch"`
 	// SpillCap is the most unconsumed input, in bytes, one connection may hold
 	// between OnData calls. Past it the connection is closed with
-	// LoopSpillFull. Zero selects the domain default.
+	// LoopSpillFull. Zero selects the domain default. It is the ceiling on a
+	// request's head and body together for an http1 handler that takes the
+	// body whole (a LoopSpillChecker adapts to it at Start); an
+	// HTTP1BodyReader's spill holds only the head.
 	SpillCap int `json:"spill_cap"`
 	// OutputCap is the most written and unsent output, in bytes, one
 	// connection may hold. A Write past it is refused with LoopOutputFull. Zero
@@ -136,4 +149,73 @@ type LoopValue struct {
 	// the batch reaps up to four CQBatch a ring, as before. epoll and the
 	// portable backend ignore it.
 	BatchBudget DurationValue `json:"batch_budget"`
+	// SendZCMin is the smallest flight an io_uring loop sends zero-copy, in
+	// bytes, once the group opted into uring-send-zc (#969): a flight of at least
+	// that many bytes leaves by IORING_OP_SEND_ZC and its slab chunk stays the
+	// kernel's until the notification says the pages are free, a shorter one by
+	// IORING_OP_SEND as before. Zero selects 16 KiB; a negative value is refused
+	// with LoopValueInvalid. epoll and the portable backend ignore it, and so
+	// does a group that did not opt in.
+	SendZCMin int `json:"send_zc_min,omitempty"`
+	// Affinity pins each loop's thread to one CPU, Affinity[i] for loop i, with
+	// sched_setaffinity once the thread is locked (loop-affinity, class A-code,
+	// #857). Nil pins nothing; otherwise it names one CPU per loop, from 0 to
+	// 8191, or Start refuses it with LoopValueInvalid. A CPU the kernel refuses —
+	// offline, outside the process's set, or a seccomp filter — leaves that loop
+	// unpinned, serving, and the row missing, a fault. With Shards(0) and
+	// so-incoming-cpu opted into, each loop's listener asks the kernel for the
+	// connections its CPU received. The portable backend ignores it.
+	Affinity []int `json:"affinity,omitempty"`
+	// NotsentLowat is TCP_NOTSENT_LOWAT, in bytes, on the group's TCP listeners,
+	// inherited by each accepted socket (tcp-notsent-lowat, class A-code, Linux
+	// 3.12, #857): the kernel takes at most that many unsent bytes, so a write
+	// is short and OnWritable fires once the peer drained, not once megabytes
+	// of socket buffer emptied. Zero sets nothing unless Capabilities opts into
+	// tcp-notsent-lowat, which selects 128 KiB; a positive value opts in;
+	// negative is refused with LoopValueInvalid. The portable backend ignores it.
+	NotsentLowat int `json:"notsent_lowat"`
+	// SlabBudget is the most payload memory, in bytes, one loop maps outside the
+	// Go heap for its connections' spill and output together (#809): past it a
+	// Write is refused with LoopOutputFull and a spill closes its connection
+	// with LoopSpillFull. Zero derives it from the cgroup allowance the server
+	// reads with memlimit, a quarter of the allowance shared by the loops and
+	// at most 128 MiB, and is 128 MiB where no allowance is found; negative is
+	// refused with LoopValueInvalid. A size class's wholly free arenas past the
+	// first are unmapped on the loop's tick. The portable backend ignores it.
+	SlabBudget int `json:"slab_budget"`
+	// BusyPoll is busy-poll's window (class A-code, #979): how long a loop's wait
+	// polls the device queues of its sockets before it sleeps, io_uring's
+	// busy_poll_to and epoll's busy_poll_usecs, rounded up to whole
+	// microseconds. Zero selects 50 µs once Capabilities opts into busy-poll; it
+	// opts nothing in by itself. Negative, or past one second, is refused with
+	// LoopValueInvalid. The portable backend ignores it.
+	BusyPoll DurationValue `json:"busy_poll"`
+	// BusyPollBudget is how many packets one poll of busy-poll may take, epoll's
+	// busy_poll_budget: zero is the kernel's, and past 64 the kernel asks for
+	// CAP_NET_ADMIN, its refusal reading the row missing. Negative, or past
+	// 65535, is refused with LoopValueInvalid. io_uring always takes the
+	// kernel's; the portable backend ignores it.
+	BusyPollBudget int `json:"busy_poll_budget"`
+	// ZCRX names the NIC receive queue uring-zcrx would serve (class B, #980). A
+	// zero Interface keeps the row off. While the row is class B a named queue
+	// is only probed — registered on a throwaway ring that is closed at once,
+	// the kernel's answer in the row's reason — and no byte is received through
+	// it.
+	ZCRX ZCRXValue `json:"zcrx"`
+}
+
+// ZCRXValue names the network device queue io_uring's zero-copy receive registers
+// (uring-zcrx, class B, ADR 0189 amended 2026-11-11): the interface, the receive
+// queue its operator steered to the group's port, and the size of the area the
+// payloads land in. Its zero value names none.
+type ZCRXValue struct {
+	// Interface is the network interface's name; empty names none.
+	Interface string `json:"interface"`
+	// Queue is the index of the interface's receive queue; negative is refused
+	// with LoopValueInvalid.
+	Queue int `json:"queue"`
+	// AreaBytes is the size of the area the kernel lands payloads in, rounded up
+	// to whole pages: zero selects 4 MiB, negative is refused with
+	// LoopValueInvalid.
+	AreaBytes int `json:"area_bytes"`
 }

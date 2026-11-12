@@ -891,6 +891,7 @@ files:
       - NewTicker
       - After
       - Log
+      - RequestID
     name: request.go
   - decls:
       - EraseAfter
@@ -1319,6 +1320,9 @@ functions:
   - name: Log
     params: ctx context.Context
     results: logger.Logger
+  - name: RequestID
+    params: ctx context.Context
+    results: string
   - name: EraseAfter
     params: delay D, since func(T) (time.Time, bool)
     results: StoreOption

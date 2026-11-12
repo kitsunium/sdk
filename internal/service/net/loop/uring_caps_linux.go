@@ -55,6 +55,13 @@ func (ul *uLoop) probe() error {
 	defer probed.close()
 	ul.stage = "setup"
 	ok, perr := probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop, opShutdown)
+	if ok && perr == 0 {
+		splice, serr := probed.supports(opSplice)
+		//: the feature bit, absent on a kernel before 5.7.
+		if splice && serr == 0 {
+			ul.features |= ulSplice
+		}
+	}
 	//: stage 3: the ops this backend issues.
 	if perr != 0 || !ok || ul.hooks.failStage == "probe" {
 		//: named.
@@ -267,6 +274,12 @@ func (ul *uLoop) reportSelfTest(direct bool) {
 	//: the operator's switch: the release check never ran.
 	if ul.sw.disabled(corenet.CapabilityURingDirect) {
 		//: disabled.
+		return
+	}
+	//: a Unix listener keeps the group on process descriptors, never probed.
+	if unixListener(ul.lfds) {
+		ul.rep.set(corenet.CapabilityURingDirect, statusUnprobed, "a Unix listener: LoopPeer asks the process descriptor")
+		//: not judged.
 		return
 	}
 	reason := ""

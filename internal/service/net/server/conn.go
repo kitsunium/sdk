@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io"
 	stdnet "net"
 	"time"
 
@@ -60,6 +61,79 @@ func (c *conn) Write(p []byte) (n int, err error) {
 	c.boundWrite()
 	//: the socket's own outcome, now under a deadline that belongs to THIS write.
 	return c.Conn.Write(p)
+}
+
+// ReadFrom implements io.ReaderFrom: a copy into the connection reaches the
+// socket's own, so a plaintext TCP socket chooses sendfile or splice (#970). A
+// group with a write bound keeps it per write, as its contract says, so the copy
+// then goes one bounded write at a time: one deadline for the whole of it would
+// be the lifetime budget this type exists to refuse, and would end a long copy
+// to a healthy peer.
+func (c *conn) ReadFrom(r io.Reader) (n int64, err error) {
+	socket, zeroCopy := c.Conn.(io.ReaderFrom)
+	//: no bound to refresh, so the socket's own path takes the whole copy.
+	if zeroCopy && c.timeouts.Write.Duration() <= 0 {
+		//: the socket's own copy, with no deadline installed.
+		return socket.ReadFrom(r)
+	}
+	//: a socket with no copy of its own, or a bounded one: Write per chunk.
+	return io.Copy(connWriter{c: c}, r)
+}
+
+// WriteTo implements io.WriterTo, as ReadFrom does for the other direction: the
+// bound it keeps is the one boundRead installs.
+func (c *conn) WriteTo(w io.Writer) (n int64, err error) {
+	socket, zeroCopy := c.Conn.(io.WriterTo)
+	//: no bound to refresh, so the socket's own path takes the whole copy.
+	if zeroCopy && tighterBudget(c.timeouts.Read.Duration(), c.timeouts.Idle.Duration()) <= 0 {
+		//: the socket's own copy, with no deadline installed.
+		return socket.WriteTo(w)
+	}
+	//: a socket with no copy of its own, or a bounded one: Read per chunk.
+	return io.Copy(w, connReader{c: c})
+}
+
+// Unwrap implements corenet.ConnUnwrapper: the socket under the engine's
+// layers, the close tracker included, so the standard library sees the concrete
+// type it asserts on. A TLS group's is its *tls.Conn.
+func (c *conn) Unwrap() stdnet.Conn {
+	socket := c.Conn
+	//: the engine's own layers, down to the first the caller may assert on.
+	for {
+		layer, wrapped := socket.(corenet.ConnUnwrapper)
+		//: the socket itself.
+		if !wrapped {
+			//: nothing beneath it.
+			return socket
+		}
+		socket = layer.Unwrap()
+	}
+}
+
+// connWriter hides ReadFrom, so io.Copy into it uses conn.Write's per-operation
+// bound and cannot come back into conn.ReadFrom.
+type connWriter struct {
+	// c is the connection written to.
+	c *conn
+}
+
+// Write implements io.Writer.
+func (w connWriter) Write(p []byte) (n int, err error) {
+	//: the bounded write.
+	return w.c.Write(p)
+}
+
+// connReader hides WriteTo, so io.Copy out of it uses conn.Read's per-operation
+// bound and cannot come back into conn.WriteTo.
+type connReader struct {
+	// c is the connection read from.
+	c *conn
+}
+
+// Read implements io.Reader.
+func (r connReader) Read(p []byte) (n int, err error) {
+	//: the bounded read.
+	return r.c.Read(p)
 }
 
 // boundRead installs the deadline for the read about to start.

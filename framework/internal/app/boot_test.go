@@ -11,6 +11,7 @@ import (
 // sequence, and shows the configuration it read.
 func TestTheStartIsRecordedStepByStep(t *testing.T) {
 	t.Setenv("SHOP_TRUST_PROXY", "on")
+	t.Setenv("SHOP_TRUSTED_PROXIES", "10.0.0.0/8")
 	app := start(t)
 	rt := app.Graph().Runtime
 	if rt == nil {
@@ -70,6 +71,9 @@ func TestTheStartIsRecordedStepByStep(t *testing.T) {
 	}
 	if s := setting("SHOP_TRUST_PROXY"); s.Value != "on" || s.From != model.SettingEnv {
 		t.Errorf("KIT_TRUST_PROXY: %+v", s)
+	}
+	if s := setting("SHOP_TRUSTED_PROXIES"); s.Value != "10.0.0.0/8" || s.From != model.SettingEnv {
+		t.Errorf("SHOP_TRUSTED_PROXIES: %+v", s)
 	}
 	if s := setting("SHOP_SMTP_URL"); !s.Secret || s.Value != "" {
 		t.Errorf("KIT_SMTP_URL is a secret: %+v", s)

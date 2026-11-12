@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"cmp"
 	"slices"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -37,6 +38,10 @@ const (
 // reasonClassB is the reason every class B row gives.
 const reasonClassB string = "class B: declared, not built until BENCH.md shows its threshold"
 
+// maxAffinityCPU bounds LoopValue.Affinity: the CPU mask pinThread hands
+// sched_setaffinity has that many bits.
+const maxAffinityCPU int = 8191
+
 // capClass is one capability the loop reports and its class, in the order
 // State lists them.
 type capClass struct {
@@ -46,27 +51,41 @@ type capClass struct {
 	class string
 }
 
-// loopCaps are the capabilities a loop group reports, class A-kernel first.
-// tcp-nodelay is server's socket probe, merged into the report by server.
-var loopCaps = [...]capClass{
-	{corenet.CapabilityURingMultishotRecv, classKernel},
-	{corenet.CapabilityURingPbuf, classKernel},
-	{corenet.CapabilityURingPbufInc, classKernel},
-	{corenet.CapabilityURingDirect, classKernel},
-	{corenet.CapabilityEpollExclusive, classKernel},
-	{corenet.CapabilityURingDeferTaskrun, classCode},
-	{corenet.CapabilityURingNoSQArray, classCode},
-	{corenet.CapabilityURingRingFDs, classCode},
-	{corenet.CapabilityURingSQRewind, classCode},
-	{corenet.CapabilityURingRecvBundle, classCode},
-	{corenet.CapabilityURingSendZC, classB},
-	{corenet.CapabilityURingBundle, classB},
-	{corenet.CapabilityBusyPoll, classB},
-	{corenet.CapabilityURingZCRX, classB},
-	{corenet.CapabilityReuseportCBPF, classB},
-	{corenet.CapabilityTCPDeferAccept, classB},
-	{corenet.CapabilityURingMinTimeout, classB},
-}
+var (
+	// optedElsewhere are the class A-code rows a loop group reports whose
+	// opt-in is not LoopValue.Capabilities: reuseport-loops is Shards(0)'s
+	// (#856), and reuseport-cbpf a datagram group's Steer (#977) — a loop
+	// group attaches no steering program (#857).
+	optedElsewhere = [...]corenet.Capability{corenet.CapabilityReuseportLoops, corenet.CapabilityReuseportCBPF}
+	// loopCaps are the capabilities a loop group reports, class A-kernel first.
+	// tcp-nodelay is server's socket probe, merged into the report by server.
+	loopCaps = [...]capClass{
+		{corenet.CapabilityURingMultishotRecv, classKernel},
+		{corenet.CapabilityURingPbuf, classKernel},
+		{corenet.CapabilityURingPbufInc, classKernel},
+		{corenet.CapabilityURingDirect, classKernel},
+		{corenet.CapabilityEpollExclusive, classKernel},
+		{corenet.CapabilityTCPKeepAlive, classKernel},
+		{corenet.CapabilityTCPUserTimeout, classKernel},
+		{corenet.CapabilityURingDeferTaskrun, classCode},
+		{corenet.CapabilityURingNoSQArray, classCode},
+		{corenet.CapabilityURingRingFDs, classCode},
+		{corenet.CapabilityURingSQRewind, classCode},
+		{corenet.CapabilityURingRecvBundle, classCode},
+		{corenet.CapabilityTCPDeferAccept, classCode},
+		{corenet.CapabilityReuseportCBPF, classCode},
+		{corenet.CapabilityReuseportLoops, classCode},
+		{corenet.CapabilityLoopAffinity, classCode},
+		{corenet.CapabilitySOIncomingCPU, classCode},
+		{corenet.CapabilityTCPNotsentLowat, classCode},
+		{corenet.CapabilityBusyPoll, classCode},
+		{corenet.CapabilityURingSendZC, classCode},
+		{corenet.CapabilityURingBundle, classB},
+		{corenet.CapabilityURingZCRX, classB},
+		{corenet.CapabilityURingMinTimeout, classB},
+		{corenet.CapabilityTCPFastOpen, classB},
+	}
+)
 
 // capClassOf is c's class, and false for a capability the loop does not report.
 func capClassOf(c corenet.Capability) (string, bool) {
@@ -93,11 +112,16 @@ func capClassOf(c corenet.Capability) (string, bool) {
 // opt-in and is accepted as it is. server calls it for the portable backend,
 // which never reaches Start.
 func CheckCapabilities(group string, v corenet.LoopValue) error {
+	//: the fields #857 added.
+	if err := checkValue(group, v, v.Loops); err != nil {
+		//: refused by name.
+		return err
+	}
 	//: each entry.
 	for _, c := range v.Capabilities {
 		class, ok := capClassOf(c)
-		//: anything but class A.
-		if !ok || class == classB {
+		//: anything but class A, or a row another option opts into.
+		if !ok || class == classB || slices.Contains(optedElsewhere[:], c) {
 			//: refused by name.
 			return errs.Wrap(corenet.LoopCapabilityRefused, errs.WrapParams{},
 				errs.String("group", group), errs.String("capability", string(c)))
@@ -105,6 +129,40 @@ func CheckCapabilities(group string, v corenet.LoopValue) error {
 	}
 	//: every entry is one the group may ask for.
 	return nil
+}
+
+// checkValue refuses Affinity and NotsentLowat out of their ranges; loops is
+// the group's loop count, a non-positive one not resolved yet, and then the
+// count of Affinity is not judged.
+func checkValue(group string, v corenet.LoopValue, loops int) error {
+	field := ""
+	//: by the first field out of range.
+	switch {
+	//: not one CPU per loop, once the count is known, or a CPU the mask has
+	//: no bit for.
+	case len(v.Affinity) > 0 && loops > 0 && len(v.Affinity) != loops,
+		slices.ContainsFunc(v.Affinity, func(cpu int) bool { return cpu < 0 || cpu > maxAffinityCPU }):
+		field = "Affinity"
+	//: no negative byte count.
+	case v.NotsentLowat < 0:
+		field = "NotsentLowat"
+	//: no negative budget (#809).
+	case v.SlabBudget < 0:
+		field = "SlabBudget"
+	//: no negative floor (#969).
+	case v.SendZCMin < 0:
+		field = "SendZCMin"
+	//: busy-poll's window and budget (#979), then ZCRX's fields (#980).
+	default:
+		field = cmp.Or(busyPollField(v), zcrxField(v))
+	}
+	//: in range.
+	if field == "" {
+		return nil
+	}
+	//: refused by name.
+	return errs.Wrap(corenet.LoopValueInvalid, errs.WrapParams{},
+		errs.String("group", group), errs.String("field", field), errs.Int("loops", loops))
 }
 
 // capSwitches is what the group may use: the operator's switches and the
@@ -124,8 +182,17 @@ func newSwitches(cfg *Config) capSwitches {
 	if by == "" {
 		by = corenet.EnvDisable
 	}
+	want := slices.Clone(cfg.Value.Capabilities)
+	//: a field that asks for its row opts into it.
+	if len(cfg.Value.Affinity) > 0 {
+		want = append(want, corenet.CapabilityLoopAffinity)
+	}
+	//: a positive lowat asks for its row.
+	if cfg.Value.NotsentLowat > 0 {
+		want = append(want, corenet.CapabilityTCPNotsentLowat)
+	}
 	//: as configured.
-	return capSwitches{off: cfg.Disabled, offBy: by, want: cfg.Value.Capabilities}
+	return capSwitches{off: cfg.Disabled, offBy: by, want: want}
 }
 
 // disabled reports whether the operator switched c off.

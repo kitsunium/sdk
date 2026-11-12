@@ -669,7 +669,7 @@
       "name": "ClientIP",
       "spelled": "func(ctx context.Context) string",
       "canonical": "func(ctx context.Context) string",
-      "doc": "ClientIP returns the address of the client of the request ctx serves: the\nconnection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of\nX-Forwarded-For, the one the trusted proxy appended. It is \"\" outside an HTTP request.\n",
+      "doc": "ClientIP returns the address of the client of the request ctx serves: the\nconnection's peer, or — only when <PRODUCT>_TRUST_PROXY=on, and the peer is one\nof the proxies <PRODUCT>_TRUSTED_PROXIES lists — the first address of\nX-Forwarded-For, read from its right, outside that list. A peer outside the list\nis the client, whatever header it sends. It is \"\" outside an HTTP request.\n",
       "file": "framework/app/request.go",
       "layer": "framework"
     },
@@ -4018,6 +4018,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.RequestID",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "RequestID",
+      "spelled": "func(ctx context.Context) string",
+      "canonical": "func(ctx context.Context) string",
+      "doc": "RequestID returns the identifier of the request ctx serves: the X-Request-Id\nits caller sent — a short run of letters, digits, '.', '_' and '-', else\nignored — or a UUIDv7 the framework minted. The response carries it as\nX-Request-Id, an error body as requestId, the span as http.request_id and the\naccess record as request_id. It is \"\" outside an HTTP request.\n",
+      "file": "framework/app/request.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Required",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -6729,7 +6740,7 @@
       "name": "ClientIP",
       "spelled": "func(ctx context.Context) string",
       "canonical": "func(ctx context.Context) string",
-      "doc": "ClientIP returns the address of the client of the request ctx serves: the\nconnection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of\nX-Forwarded-For, the one the trusted proxy appended. It is \"\" outside an HTTP request.\n",
+      "doc": "ClientIP returns the address of the client of the request ctx serves: the\nconnection's peer, or — only when <PRODUCT>_TRUST_PROXY=on, and the peer is one\nof the proxies <PRODUCT>_TRUSTED_PROXIES lists — the first address of\nX-Forwarded-For, read from its right, outside that list. A peer outside the list\nis the client, whatever header it sends. It is \"\" outside an HTTP request.\n",
       "file": "framework/internal/app/request.go",
       "layer": "framework"
     },
@@ -10746,6 +10757,17 @@
       "canonical": "func[Req, Resp any](op github.com/kitsunium/sdk/framework/internal/app.Operation[Req, Resp], fn func(context.Context, Req) (Resp, error)) github.com/kitsunium/sdk/framework/internal/app.AppConfigurer",
       "doc": "Replace runs fn in place of op's code, in the app it is given to: an\nendpoint's handler — or, with ADR 0005, a command's or a query's — or what\na port calls. It replaces the code, not the mechanics: authentication,\ndecoding, validation and the policies still run, and a replaced port needs\nno binding, so a module's tests run without a host. fn takes op's request\nand returns its response, or it does not compile.\n\nA replaced run's span carries mock: replace, and runtime.mocks lists the\nreplacement. It is for tests: the start refuses it in a program go test\ndid not build — neither a production binary nor kit dev can carry one.\nGiven twice for one operation, the last wins.\n\n\tapp := App.With(app.Replace(apps.AppAPI, func(ctx context.Context, in apps.IDInput) (apps.Profile, error) {\n\t\treturn apps.Profile{ID: in.AppID}, nil\n\t}))\n",
       "file": "framework/internal/app/replace.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.RequestID",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "RequestID",
+      "spelled": "func(ctx context.Context) string",
+      "canonical": "func(ctx context.Context) string",
+      "doc": "RequestID returns the identifier of the request ctx serves: the X-Request-Id\nits caller sent — a short run of letters, digits, '.', '_' and '-', else\nignored — or a UUIDv7 the framework minted. The response carries it as\nX-Request-Id, an error body as requestId, the span as http.request_id and the\naccess record as request_id. It is \"\" outside an HTTP request.\n",
+      "file": "framework/internal/app/request_id.go",
       "layer": "framework"
     },
     {

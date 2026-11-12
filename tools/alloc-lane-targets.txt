@@ -164,7 +164,7 @@
 //framework/telemetry:telemetry_test
 
 # internal/service/net/loop — the idle-connection memory budget of ADR 0186
-# §D7 (memory_linux_test.go, //go:build linux && !race): heap measured after
+# §D7 (memory_native_test.go, //go:build (linux || the BSDs) && !race): heap measured after
 # two collections through runtime/metrics, clients in a re-executed child.
 # Its own target, so the lane runs the one test; the race detector's shadow
 # memory would measure itself.
@@ -209,6 +209,9 @@
 //internal/service/data/docstore:docstore_test
 //internal/service/data/queue:queue_test
 //internal/service/net/http1:http1_test
+//internal/service/net/http2:http2_test
+//internal/service/net/sse:sse_test
+//internal/service/net/websocket:websocket_test
 //internal/service/observe/logger/middleware/encwrite:encwrite_test
 //internal/service/observe/logger/middleware/sample:sample_test
 //internal/service/observe/metrics:metrics_test

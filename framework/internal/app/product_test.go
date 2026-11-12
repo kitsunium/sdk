@@ -638,6 +638,19 @@ func (r response) errorCode(t *testing.T) string {
 	return e.Error.Code
 }
 
+// errorRequestID is the request id an error response carries, "" when it
+// carries none.
+func (r response) errorRequestID(t *testing.T) string {
+	t.Helper()
+	var e struct {
+		Error struct {
+			RequestID string `json:"requestId"`
+		} `json:"error"`
+	}
+	r.json(t, &e)
+	return e.Error.RequestID
+}
+
 // none is the type of noBody.
 type none struct{}
 

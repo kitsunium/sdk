@@ -9,12 +9,18 @@
 # regression case. Local: scripts/ci/codec-fuzz.sh 30s. A new Fuzz function in
 # these trees gets its line here; this grep lists them all:
 #   grep -rn '^func Fuzz' --include='*_test.go' internal/service/data/codec \
-#     internal/service/data/transform pkg/v1/data/codec third-party/codec third-party/transform
+#     internal/service/data/transform pkg/v1/data/codec third-party/codec third-party/transform \
+#     internal/service/net/http2
 set -euo pipefail
 per="${1:-${FUZZ_TIME:-1m}}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 targets=(
+	"./internal/service/net/http2 FuzzDecode"
+	"./internal/service/net/http2 FuzzDifferential"
+	"./internal/service/net/http2 FuzzEncoderDecoderRoundTrip"
+	"./internal/service/net/http2 FuzzFeed"
+	"./internal/service/net/http2 FuzzParseFrameHeader"
 	"./internal/service/data/codec/asn1 FuzzUnmarshal"
 	"./internal/service/data/codec/baseenc FuzzBase45Decode"
 	"./internal/service/data/codec/baseenc FuzzBase45RoundTrip"

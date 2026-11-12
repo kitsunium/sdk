@@ -185,7 +185,7 @@ func startSparseChild(b testing.TB, spec string) *loadChild {
 		args = append([]string{"taskset", "-c", cpus}, args...)
 	}
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env = append(os.Environ(), sparseChildEnv+"="+spec, "GOMAXPROCS=2")
+	cmd.Env = append(unsharded(os.Environ()), sparseChildEnv+"="+spec, "GOMAXPROCS=2")
 	cmd.Stderr = os.Stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {

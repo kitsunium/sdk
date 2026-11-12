@@ -109,6 +109,24 @@ func (t *trackedConn) ReadFrom(r io.Reader) (n int64, err error) {
 	return io.Copy(t.Conn, r)
 }
 
+// WriteTo copies the socket to w through the socket's own WriteTo when it has
+// one, as ReadFrom does the other way (#970).
+func (t *trackedConn) WriteTo(w io.Writer) (n int64, err error) {
+	//: a TCP socket's WriteTo chooses splice where it can.
+	if writerTo, ok := t.Conn.(io.WriterTo); ok {
+		//: the socket's own copy.
+		return writerTo.WriteTo(w)
+	}
+	//: the plain copy; the socket has no WriteTo, so this cannot recurse.
+	return io.Copy(w, t.Conn)
+}
+
+// Unwrap implements corenet.ConnUnwrapper: the socket beneath the tracker.
+func (t *trackedConn) Unwrap() stdnet.Conn {
+	//: what the listener accepted.
+	return t.Conn
+}
+
 // hijackedTracker returns the tracker under c's socket when a handler has
 // taken that socket over, or nil — when nothing was hijacked, or the group
 // does not track closes.

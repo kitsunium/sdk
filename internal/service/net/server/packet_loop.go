@@ -7,7 +7,8 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
-// readLoop serves datagrams until its socket is closed.
+// readLoop serves datagrams until its socket is closed: to handler, or with a
+// nil handler to the group's PacketLoopHandler, the lane's epoll lane (#852).
 //
 // Goroutine lifecycle: one per datagram socket, started by bindPacketGroup and
 // owned by the Server. It exits when Close or Shutdown closes the socket — the
@@ -26,7 +27,8 @@ func (s *Server) readLoop(bound *boundPacketConn, group *PacketGroup, handler co
 	ceiling := packetSize(group.limits)
 	reader := bound.source
 	slots := newSlots(batchSize(group.limits), reader.slotSize(ceiling))
-	held := &packet{conn: bound.pc, sink: bound.sink, group: group.name}
+	held := &packet{conn: bound.pc, sink: bound.sink, group: group.name, port: boundPort(bound.pc)}
+	lane := &packetLoopLane{sink: bound.sink, lane: bound.laneIndex}
 	//: a handler that kept the Packet past its call must not pin the socket
 	//: or the last read buffer once the loop is gone.
 	defer held.reset()
@@ -44,7 +46,12 @@ func (s *Server) readLoop(bound *boundPacketConn, group *PacketGroup, handler co
 			continue
 		}
 		bound.sink.begin()
-		s.dispatch(slots[:count], held, handler, ceiling)
+		//: a PacketHandler, or the group's PacketLoopHandler on its epoll lane.
+		if handler != nil {
+			s.dispatch(slots[:count], held, handler, ceiling)
+		} else {
+			s.dispatchLoop(slots[:count], lane, group.loopHandler, ceiling)
+		}
 		//: the batch's replies leave together, before the next read.
 		bound.sink.flush()
 	}
@@ -75,6 +82,7 @@ func (s *Server) dispatch(slots []datagram, held *packet, handler corenet.Packet
 	//: reused packet value.
 	held.data = nil
 	held.from = nil
+	held.local = localAddress{}
 }
 
 // serveMessage serves each datagram of one message, one Packet each.
@@ -96,6 +104,7 @@ func (s *Server) serveMessage(slot *datagram, held *packet, handler corenet.Pack
 		}
 		held.data = data
 		held.from = slot.addr
+		held.local = slot.local
 		held.id = s.nextID.Add(1)
 		//: the handler's error ends this datagram and nothing else; there is
 		//: nobody above a read loop to return it to, and one peer's malformed
@@ -111,4 +120,16 @@ func (s *Server) servePacket(p *packet, handler corenet.PacketHandler) error {
 	defer recoverHandler()
 	//: the handler's own outcome, contained by the deferred recover above.
 	return handler.ServePacket(s.runCtx, p)
+}
+
+// boundPort returns the port pc holds, or zero when it holds none.
+func boundPort(pc stdnet.PacketConn) int {
+	udp, ok := pc.LocalAddr().(*stdnet.UDPAddr)
+	//: a Unix datagram socket has none.
+	if !ok {
+		//: reported with the read's address.
+		return 0
+	}
+	//: the port the socket was bound to.
+	return udp.Port
 }

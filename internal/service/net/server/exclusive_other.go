@@ -2,7 +2,11 @@
 
 package server
 
-import stdnet "net"
+import (
+	"errors"
+	stdnet "net"
+	"syscall"
+)
 
 // rebindAttempts is one: an address in use elsewhere is a real conflict, and
 // a TIME_WAIT connection does not hold a listener's address (Go binds with
@@ -25,6 +29,13 @@ func setExclusiveAddr(_ uintptr) error {
 func exclusiveAddrOf(_ uintptr) (bool, error) {
 	//: no such option.
 	return false, nil
+}
+
+// bindConflict reports a bind refused because another socket holds the
+// address: EADDRINUSE (#1330).
+func bindConflict(err error) bool {
+	//: the errno the net package wraps.
+	return errors.Is(err, syscall.EADDRINUSE)
 }
 
 // addrInUse never asks for a rebind: rebindAttempts is one.
