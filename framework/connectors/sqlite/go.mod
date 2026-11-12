@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk/framework/connectors/sqlite
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
