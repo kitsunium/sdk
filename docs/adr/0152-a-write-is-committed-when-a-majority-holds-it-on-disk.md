@@ -2497,6 +2497,7 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_proposals_failed_total`, `consensus_proposals_pending` | counter by code, gauge (R2-28) |
 | `consensus_fs_free_bytes`, `consensus_cluster_version`, `consensus_protocol_version` | gauges, `fs_free` by declared filesystem (R2-28, R7-33) |
 | `consensus_tls_reload_failures_total`, `consensus_tls_peer_cert_expiry_seconds` | counter, gauge by peer (R2-28) |
+| `consensus_links_aborted_total` | counter by reason: the sender links the kernel aborted for bytes left unacknowledged (`user_timeout`) and those closed after their peer stayed silent for twice the maximum election timeout while written to (`read_silence`, #1116) |
 | `consensus_loop_turn_seconds` | histogram (R7-20) |
 | `consensus_chain_refusals_total`, `consensus_snapshot_pins`, `consensus_snapshot_pin_age_seconds` | counter by leader, gauge, gauge by peer: how long each pin has held since its offer (R7-19, R7-38, #914) |
 | `consensus_stopped` | gauge by `StopReason`, set before the process exits (R7-37) |

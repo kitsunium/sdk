@@ -64,6 +64,7 @@ const (
 	mCertExpiry       = "consensus_tls_cert_expiry_seconds"
 	mPeerCertExpiry   = "consensus_tls_peer_cert_expiry_seconds"
 	mReloadFailures   = "consensus_tls_reload_failures_total"
+	mLinksAborted     = "consensus_links_aborted_total"
 )
 
 // departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads
@@ -108,8 +109,10 @@ type obs struct {
 	// recorded: a sample is recorded once (D13).
 	rttSeen map[coreconsensus.NodeID]uint64
 	// seenTails, seenReloads, seenRounds and seenPreVotes are the running
-	// totals already added to their counters.
+	// totals already added to their counters, as seenTimedOut and
+	// seenSilenced are consensus_links_aborted_total's by reason.
 	seenTails, seenReloads, seenRounds, seenPreVotes int64
+	seenTimedOut, seenSilenced                       int64
 }
 
 // newObs binds a node's instruments to its configured Meter, Tracer and
@@ -175,18 +178,18 @@ func (o *obs) inc(name string, attrs ...coreotel.AttrValue) {
 	c.Inc()
 }
 
-// addTo brings a counter up to a running total kept elsewhere. The series
-// exists from the first call, at 0, so an alert on its increase has a
-// series to read before the first event.
-func (o *obs) addTo(name string, seen *int64, total int64) {
+// addTo brings a counter series up to a running total kept elsewhere. The
+// series exists from the first call, at 0, so an alert on its increase has
+// a series to read before the first event.
+func (o *obs) addTo(name string, seen *int64, total int64, attrs ...coreotel.AttrValue) {
 	if o.meter == nil {
 		return
 	}
-	k := key(name, nil)
+	k := key(name, attrs)
 	o.mu.Lock()
 	c, ok := o.count[k]
 	if !ok {
-		c = o.meter.Counter(name, o.group)
+		c = o.meter.Counter(name, append([]coreotel.AttrValue{o.group}, attrs...)...)
 		o.count[k] = c
 	}
 	o.mu.Unlock()
@@ -462,4 +465,15 @@ func (n *Node) observeResources() {
 		o.certsPub = seen
 		o.addTo(mReloadFailures, &o.seenReloads, int64(ct.ReloadFailures()))
 	}
+	if la, ok := n.cfg.Transport.(linkAborter); ok {
+		timedOut, silenced := la.linksAborted()
+		o.addTo(mLinksAborted, &o.seenTimedOut, timedOut, coreotel.String("reason", "user_timeout"))
+		o.addTo(mLinksAborted, &o.seenSilenced, silenced, coreotel.String("reason", "read_silence"))
+	}
+}
+
+// linkAborter is a transport that counts the sender links it aborted for
+// bytes left unacknowledged and for read silence (#1116).
+type linkAborter interface {
+	linksAborted() (userTimeout, readSilence int64)
 }

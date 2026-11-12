@@ -1373,9 +1373,16 @@ func (n *Node) checkTurn(turn time.Time) {
 // unanswered two maximum election timeouts after it was sent is answered
 // OUTCOME_UNKNOWN: the leader may have appended it, and a resend is only
 // deduplicated while the leader still remembers the first. What a caller
-// gave up on is dropped. Reads are swept by sweepReads.
+// gave up on is dropped. Reads are swept by sweepReads. The transport's
+// sender links get the same two maximum election timeouts as their bound
+// on read silence (#1116).
 func (n *Node) sweep() {
 	grace := 2 * n.r.Status().Timing.ElectionTimeoutMax
+	if s, ok := n.cfg.Transport.(silenceBounder); ok {
+		// A peer silent that long while written to is behind a stream
+		// that died quietly (#1116).
+		s.boundSilence(grace)
+	}
 	now := n.clk.Now()
 	for ctx, p := range n.forwards {
 		switch {
@@ -1391,6 +1398,12 @@ func (n *Node) sweep() {
 	}
 	n.sweepReads(now)
 	n.sweepWaiters(now, grace)
+}
+
+// silenceBounder is a transport whose sender links a node bounds by read
+// silence (TCPTransport.boundSilence, #1116).
+type silenceBounder interface {
+	boundSilence(d time.Duration)
 }
 
 // sweepReads resends a follower's read the leader has not answered within

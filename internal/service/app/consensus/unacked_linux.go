@@ -12,6 +12,10 @@ import (
 // does not name.
 const tcpUserTimeout int = 0x12
 
+// errTimedOut is the error a read or write on a connection the kernel
+// aborted under TCP_USER_TIMEOUT returns.
+const errTimedOut = syscall.ETIMEDOUT
+
 // boundUnacknowledged makes the kernel abort c once bytes written on it
 // stay unacknowledged for d (TCP_USER_TIMEOUT): the next write then fails,
 // and the sender dials again. Without it, a link whose peer vanished and

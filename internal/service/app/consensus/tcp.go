@@ -373,6 +373,21 @@ type TCPTransport struct {
 	// dialled, this node's own link to that member having carried none
 	// (#748).
 	sentBack atomic.Int64
+	// silence is the read-silence bound of the sender links, in
+	// nanoseconds: a link written on while nothing was read from its peer
+	// for that long is closed and dialled again at its next batch (retire,
+	// #1116). 0, until a node sets it (boundSilence), bounds nothing.
+	silence atomic.Int64
+	// heard is, per member key, when a frame of that member was last read,
+	// on any connection, under mu.
+	heard map[[32]byte]time.Time
+	// timedOut and silenced count the sender links aborted for bytes left
+	// unacknowledged, by the kernel's bound (boundUnacknowledged), and for
+	// read silence (#1116).
+	timedOut, silenced atomic.Int64
+	// wrapDialled wraps each connection the transport dials, under its TLS;
+	// nil outside the package's own tests.
+	wrapDialled func(net.Conn) net.Conn
 }
 
 // backLink is a member's lane as this node reads it, on the connection the
@@ -793,6 +808,12 @@ func (t *TCPTransport) deliverTo(spki [32]byte) (func(coreconsensus.Authenticate
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	_, still := t.bySPKI[spki]
+	if still {
+		if t.heard == nil {
+			t.heard = map[[32]byte]time.Time{}
+		}
+		t.heard[spki] = t.cfg.Clock.Now()
+	}
 	return t.deliver, still
 }
 
@@ -967,6 +988,9 @@ func (t *TCPTransport) dialVerified(ctx context.Context, addr string, lane byte,
 	if err != nil {
 		return nil, err
 	}
+	if t.wrapDialled != nil {
+		raw = t.wrapDialled(raw)
+	}
 	// The identity verifies the chain, roots and extended key usage first,
 	// then the transport's SAN and pin check runs (R2-21, ADR 0174 D1).
 	c := tls.Client(raw, t.id.ClientConfig(verify))
@@ -1136,6 +1160,10 @@ type senderLink struct {
 	// and notAfter the end of the certificate it presented.
 	pin      [32]byte
 	notAfter time.Time
+	// unanswered is when the first batch written on the connection since
+	// its peer was last heard went out; zero while nothing awaits an
+	// answer (#1116).
+	unanswered time.Time
 }
 
 // close drops the link's connection: the sender is stopping, or the
@@ -1145,6 +1173,7 @@ func (l *senderLink) close() {
 		abandon(l.conn.Close())
 		l.conn = nil
 	}
+	l.unanswered = time.Time{}
 }
 
 // takeBatch adds to batch every frame already queued, up to maxSenderBatch,
@@ -1187,7 +1216,9 @@ func queuedFrame(pc *peerConn) (outFrame, bool) {
 // reset it, or the kernel aborted it under the user timeout
 // (boundUnacknowledged) — and the batch, an election's vote among others,
 // would otherwise wait for Raft's next round. A failed dial or write is
-// reported as before, whether the back link carried the batch or not.
+// reported as before, whether the back link carried the batch or not. A
+// batch written starts the link's wait for its peer (unanswered), which
+// retire bounds.
 func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch []outFrame) {
 	t.retire(k, link)
 	reused := link.conn != nil
@@ -1210,6 +1241,10 @@ func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch []outFrame) {
 		link.close()
 		t.reportUnreachable(k.to)
 		t.sendBack(k, batch)
+		return
+	}
+	if link.unanswered.IsZero() {
+		link.unanswered = t.cfg.Clock.Now()
 	}
 }
 
@@ -1217,14 +1252,61 @@ func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch []outFrame) {
 // retired by age, every frame of it flushed, so the next batch dials a
 // fresh one; or its key is no longer the member's — denied, replaced or
 // gone — or its certificate expired, so nothing more is written on it and
-// the redial checks the current pin (#551).
+// the redial checks the current pin (#551); or it was written on while
+// its peer stayed silent for the read-silence bound (silent).
 func (t *TCPTransport) retire(k outKey, link *senderLink) {
 	if link.conn == nil {
 		return
 	}
 	if t.cfg.Clock.Since(link.created) > t.cfg.MaxConnectionAge || !t.stillAdmitted(k.to, link) {
 		link.close()
+		return
 	}
+	if t.silent(link) {
+		t.silenced.Add(1)
+		link.close()
+	}
+}
+
+// silent reports whether nothing was read from the link's peer, on any
+// connection, for the read-silence bound since a batch was written on the
+// link (#1116). A peer answers what this node sends it, a heartbeat or a
+// vote, within an election timeout: one silent for two of them while
+// written to is behind a stream that died quietly, which the kernel bound
+// does not cover where the platform has none (the BSDs, illumos) or
+// before it fires. A peer heard since the wait began ends the wait: the
+// next batch starts a new one.
+func (t *TCPTransport) silent(link *senderLink) bool {
+	bound := time.Duration(t.silence.Load())
+	if bound <= 0 || link.unanswered.IsZero() {
+		return false
+	}
+	t.mu.Lock()
+	heard := t.heard[link.pin]
+	t.mu.Unlock()
+	if heard.After(link.unanswered) {
+		link.unanswered = time.Time{}
+		return false
+	}
+	return t.cfg.Clock.Since(link.unanswered) >= bound
+}
+
+// boundSilence raises the read-silence bound of the sender links to d: a
+// node sets it to twice its maximum election timeout at each sweep, and a
+// transport the groups of several nodes share keeps the longest (#1116).
+func (t *TCPTransport) boundSilence(d time.Duration) {
+	for {
+		cur := t.silence.Load()
+		if int64(d) <= cur || t.silence.CompareAndSwap(cur, int64(d)) {
+			return
+		}
+	}
+}
+
+// linksAborted returns how many sender links the kernel aborted for bytes
+// left unacknowledged and how many the read-silence bound closed (#1116).
+func (t *TCPTransport) linksAborted() (userTimeout, readSilence int64) {
+	return t.timedOut.Load(), t.silenced.Load()
 }
 
 // writeBatch writes the batch on the link's connection and flushes it,
@@ -1314,10 +1396,13 @@ func (t *TCPTransport) watchLink(c linkConn, k outKey, pin [32]byte) {
 		// past it.
 		t.readFrames(bufio.NewReaderSize(c, backReadBytes), peer, t.laneBound(k.lane))
 	}
-	// Whatever the reads returned, the link is over: nothing reads this
-	// result, and the socket is closed so that no write lands in it.
-	_, err := io.Copy(io.Discard, c)
-	abandon(err)
+	// Whatever the reads returned, the link is over, and the socket is
+	// closed so that no write lands in it. A read the kernel ended for
+	// bytes left unacknowledged is counted (#1116); TLS keeps a read's
+	// error, so the frames read above leave it to this one.
+	if _, err := io.Copy(io.Discard, c); kernelTimedOut(err) {
+		t.timedOut.Add(1)
+	}
 	abandon(c.NetConn().Close())
 }
 
@@ -1383,6 +1468,11 @@ func (t *TCPTransport) setMembershipAt(group coreconsensus.GroupID, admitted []c
 	byID, bySPKI := indexMembers(admittedUnion(t.members, t.membersAt))
 	t.byID, t.bySPKI = byID, bySPKI
 	t.reserveAddresses(byID)
+	for spki := range t.heard {
+		if _, ok := bySPKI[spki]; !ok {
+			delete(t.heard, spki)
+		}
+	}
 	for id := range t.peerExpiry {
 		if _, ok := byID[id]; !ok {
 			// A member that left has no certificate to expire here: its

@@ -191,13 +191,19 @@ func TestResourceMetrics(t *testing.T) {
 		_, own := snap.Gauges[mCertExpiry]
 		_, peer := snap.Gauges[mPeerCertExpiry]
 		_, quota := snap.Gauges[mLogQuota]
-		if own && peer && quota {
+		aborted := snap.Sums[mLinksAborted]
+		if own && peer && quota && len(aborted.Points) == 2 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("certificate gauges missing: own %v peer %v quota %v", own, peer, quota)
+			t.Fatalf("certificate gauges missing: own %v peer %v quota %v, %d aborted-link series", own, peer, quota, len(aborted.Points))
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	// The node hands its transport two maximum election timeouts as the
+	// sender links' read-silence bound (#1116).
+	if got, want := time.Duration(tn.tr.silence.Load()), 2*testTimingFast().ElectionTimeoutMax; got != want {
+		t.Fatalf("read-silence bound %v, want %v", got, want)
 	}
 
 	c, nodes := threeOnDisk(t, 5)

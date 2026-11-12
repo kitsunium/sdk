@@ -32,7 +32,22 @@ that refusal and skips what needs a directory. The free-space gauge
 (`consensus_fs_free_bytes`, `fsfree_*.go`) is read with statfs(2) on Linux,
 macOS, FreeBSD, DragonFly and OpenBSD and with GetDiskFreeSpaceEx on Windows;
 on NetBSD, illumos and Solaris, whose statvfs(2) the standard library does not
-wrap, it is not published (`TestResourceMetrics` asserts both).
+wrap, it is not published (`TestResourceMetrics` asserts both). A sender
+link (control or data lane) is held to three bounds on bytes its peer never
+acknowledges (#1116). The write deadline (`WriteTimeout`) holds everywhere,
+for a write that blocks. The kernel's bound, `WriteTimeout` again, set by
+`boundUnacknowledged` at each dial: TCP_USER_TIMEOUT on Linux
+(`unacked_linux.go`), TCP_RXT_CONNDROPTIME on macOS (`unacked_darwin.go`) and
+TCP_MAXRT on Windows (`unacked_windows.go`), the last two in whole seconds
+rounded up; FreeBSD, OpenBSD, NetBSD, DragonFly, illumos and Solaris have
+none (`unacked_other.go`). The read-silence bound holds everywhere, and is
+the only one on those: a link written on while nothing was read from its
+peer, on any connection, for twice the maximum election timeout (the node
+sets it at each sweep, `boundSilence`) is closed and the next batch dialled
+again (`TCPTransport.silent`, `TestTCPLinkSilentPastTheBoundIsDialledAgain`).
+`consensus_links_aborted_total{reason}` counts the links the kernel aborted
+(`user_timeout`, a read ended by ETIMEDOUT, or WSAETIMEDOUT) and those the
+silence closed (`read_silence`).
 
 ## Lanes
 
@@ -438,8 +453,11 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   or drop the batch a reused connection failed: a link quiet since a
   partition keeps taking small writes into a stream the kernel retransmits
   under exponential backoff, and an election waited 15 s for it
-  (`TestTCPFrameOnALinkThatDiedQuietlyIsDelivered`). The snapshot and JOIN
-  lanes stay unbounded: a receiver writing a snapshot may stop reading.
+  (`TestTCPFrameOnALinkThatDiedQuietlyIsDelivered`). Nor keep writing on
+  one whose peer stayed silent for the read-silence bound (`retire`,
+  `silent`): where the platform has no kernel bound, the BSDs and illumos,
+  nothing else sees that stream (#1116). The snapshot and JOIN lanes stay
+  unbounded: a receiver writing a snapshot may stop reading.
 - Drop a snapshot trigger that falls while a cut is in flight: D7 coalesces
   it (`snapState.pending`, `cutPending`), and the cut is made once the one in
   flight is written. Dropped, a node that applied nothing more kept its tail
