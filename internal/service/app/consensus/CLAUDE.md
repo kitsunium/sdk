@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T22:00:00Z -->
+<!-- updated: 2026-11-11T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -41,6 +41,8 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | unit, cluster, disk, TCP | `go test -race ./...` |
 | simulator soak | `CONSENSUS_SIM_SOAK=1 go test -run TestSimSoak ./raft/`; a seed replays with `CONSENSUS_SIM_SEED` |
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
+| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt`: `filelog_alloc_internal_test.go` and the package's copy of `allocwindow_test.go`, nothing else of the suite |
+| bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`); numbers in `BENCH.md` |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
 Under Bazel `consensus_test` has 24 shards: under race and coverage the suite
@@ -199,6 +201,25 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   to `appendForced`. Count what a reader holds with `fileLog.afterEntries`,
   not a sampled heap (`TestRecoverHoldsOneBatchOfTheLogAtATime`,
   `TestTheHistoryInForceIsReadPastTheSnapshot`).
+- Read synced entries one pread of a header and one of a record at a time:
+  past a batch's sync every read of its entries goes to the segment, and a
+  1 MiB fetch of 256-byte entries was 8 192 syscalls and as many
+  allocations (#913). Each slot keeps its record's aligned `length`, and
+  `readRun` reads a run of one segment — contiguous but for gaps of
+  `rangeGapBytes`, at most `rangeReadBytes`, cut where the least payload
+  the lengths allow passes `maxBytes` — with ONE pread into one buffer,
+  parsed in place: each entry's `Data` aliases it, capped at its length
+  (`entryOf`), and a record that does not parse is LOG_CORRUPT at its own
+  offset. `readEntry` stays the single-entry read, header first, for a slot
+  with no length. The slot grew from 32 to 40 bytes
+  (`TestEntriesReadASyncedRunOfOneSegmentInOnePread`,
+  `TestEntriesReadOnePreadPerSegment`,
+  `TestADamagedRecordInsideARunIsCorruptAtItsOwnOffset`,
+  `TestAnEntryReadFromARunDoesNotReachIntoTheNext`, and in the alloc lane
+  `TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice`; `BENCH.md`). Nor
+  keep an entry read back past the read that returned it without copying
+  its `Data`: it holds that read's whole buffer (`readBack` and `fetch`
+  clone).
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.

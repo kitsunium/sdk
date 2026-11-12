@@ -227,11 +227,15 @@ func encodeHS(hs coreconsensus.HardState) []byte {
 }
 
 // slot locates one retained entry: on disk once synced, in memory before.
+// length is its record's aligned length on disk, so Entries reads a run of
+// records in one pread without reading a header first (#913); 0 for a slot
+// in memory.
 type slot struct {
-	seg  uint64
-	off  int64
-	term uint64
-	mem  *coreconsensus.EntryValue
+	seg    uint64
+	off    int64
+	term   uint64
+	mem    *coreconsensus.EntryValue
+	length uint32
 }
 
 type segment struct {
@@ -291,6 +295,9 @@ type fileLog struct {
 	// it returns it: a test counts what a reader of the log holds at once
 	// (#700). Only a test sets it, before the reads it counts.
 	afterEntries func(es []coreconsensus.EntryValue)
+	// readAt replaces a segment's ReadAt on the entry reads when a test
+	// sets it, to count the preads Entries issues (#913); nil otherwise.
+	readAt func(f *os.File, b []byte, off int64) (int, error)
 	// occupied is the bytes the segments occupy, kept beside segs wherever
 	// a segment is added or dropped, so the event loop reads it without mu:
 	// a rotation holds mu across an fsync (D5b).
@@ -897,7 +904,7 @@ func (l *fileLog) applyEntry(seg uint64, r *scanRec) error {
 	if r.index != l.first+uint64(len(l.slots)) {
 		return l.quarantine(seg, r.off, "index out of sequence")
 	}
-	l.slots = append(l.slots, slot{seg: seg, off: r.off, term: r.term})
+	l.slots = append(l.slots, slot{seg: seg, off: r.off, term: r.term, length: r.length})
 	return nil
 }
 
@@ -1479,7 +1486,46 @@ func (l *fileLog) usable() error {
 
 // ---- LogReader ----
 
-// Entries implements LogReader.
+// The bounds of one range read of Entries (#913).
+const (
+	// rangeReadBytes is the most bytes one read takes past its first
+	// record: a run of synced entries longer than this is read in several.
+	rangeReadBytes int64 = 4 << 20
+	// rangeGapBytes is the most bytes of other records, the hard states and
+	// commits a follower writes between its entries, one read crosses
+	// between two entries; a wider gap, a suffix truncated and written
+	// again further on, starts another read.
+	rangeGapBytes int64 = 4 << 10
+)
+
+// rangeRead is one Entries call under way: its bounds, the payload bytes
+// taken so far, and the entries taken.
+type rangeRead struct {
+	lo, hi   uint64
+	maxBytes int
+	size     int
+	// full is set once the next entry would pass maxBytes: the call
+	// returns what it took.
+	full bool
+	dst  []coreconsensus.EntryValue
+}
+
+// take appends entry i unless it passes maxBytes, which only the first
+// entry of the call may do; false once the call is full.
+func (rr *rangeRead) take(i uint64, e coreconsensus.EntryValue) bool {
+	rr.size += len(e.Data)
+	if i > rr.lo && rr.size > rr.maxBytes {
+		rr.full = true
+		return false
+	}
+	rr.dst = append(rr.dst, e)
+	return true
+}
+
+// Entries implements LogReader. A run of synced entries of one segment is
+// read with ONE pread into one buffer and parsed in place: their Data alias
+// that buffer, capped at their own length, and the buffer is never written
+// again nor reused (#913). An entry still in memory is the one appended.
 func (l *fileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.EntryValue) ([]coreconsensus.EntryValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -1492,45 +1538,142 @@ func (l *fileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry
 	if hi > l.first+uint64(len(l.slots)) {
 		return dst, storageFailed("entries", errImpossible)
 	}
-	before, size := len(dst), 0
-	for i := lo; i < hi; i++ {
-		s := l.slots[i-l.first]
-		var e coreconsensus.EntryValue
+	before := len(dst)
+	rr := rangeRead{lo: lo, hi: hi, maxBytes: maxBytes, dst: dst}
+	for i := lo; i < hi && !rr.full; {
+		s := &l.slots[i-l.first]
 		if s.mem != nil {
-			e = *s.mem
-		} else {
-			var err error
-			if e, err = l.readEntry(s); err != nil {
-				return dst, err
-			}
+			rr.take(i, *s.mem)
+			i++
+			continue
 		}
-		size += len(e.Data)
-		if i > lo && size > maxBytes {
-			break
+		next, err := l.readRun(&rr, i)
+		if err != nil {
+			return rr.dst, err
 		}
-		dst = append(dst, e)
+		i = next
 	}
 	if l.afterEntries != nil {
-		l.afterEntries(dst[before:])
+		l.afterEntries(rr.dst[before:])
 	}
-	return dst, nil
+	return rr.dst, nil
 }
 
-// readEntry reads the synced entry s locates from its segment. A record
-// that does not parse as an entry there is LOG_CORRUPT: the log disagrees
-// with what it recorded.
-func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
-	var seg *segment
-	for _, x := range l.segs {
-		if x.n == s.seg {
-			seg = x
+// lowPayload is the least payload a record of this aligned length holds.
+func lowPayload(length uint32) int64 {
+	return max(0, int64(length)-int64(recHeader+recFixed+recAlign-1))
+}
+
+// readRun reads the synced entries from i on that lie in one interval of
+// one segment, in one pread, and takes them into rr; it returns the index
+// of the first entry it did not take. The interval stops at the first
+// entry of another segment, in memory, past a gap of rangeGapBytes, past
+// rangeReadBytes, or whose payload, at least lowPayload, would pass
+// maxBytes: every entry the call takes was read, and an entry it does not
+// take is read at most once more than needed. A record that does not
+// parse as an entry is LOG_CORRUPT at its own offset, as readEntry's. The
+// caller holds mu.
+func (l *fileLog) readRun(rr *rangeRead, i uint64) (uint64, error) {
+	first := l.slots[i-l.first]
+	if first.length == 0 {
+		// No length known: the single-entry read, header first.
+		e, err := l.readEntry(first)
+		if err != nil {
+			return i, err
+		}
+		rr.take(i, e)
+		return i + 1, nil
+	}
+	low := int64(rr.size) + lowPayload(first.length)
+	if i > rr.lo && low > int64(rr.maxBytes) {
+		rr.full = true
+		return i, nil
+	}
+	seg := l.segmentNumbered(first.seg)
+	if seg == nil {
+		return i, storageFailed("read", errImpossible)
+	}
+	// Bounded by the segment, and by what an int holds, before the
+	// conversion, as readEntry's (#422).
+	if int64(first.length) > min(seg.size-first.off, math.MaxInt) {
+		return i, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(first.seg)), errs.Int64("offset", first.off))
+	}
+	start, end := first.off, first.off+int64(first.length)
+	k := i + 1
+	for ; k < rr.hi; k++ {
+		s := &l.slots[k-l.first]
+		if s.mem != nil || s.seg != first.seg || s.length == 0 || s.off < end || s.off-end > rangeGapBytes {
+			break
+		}
+		next := s.off + int64(s.length)
+		if next-start > rangeReadBytes || next > seg.size {
+			break
+		}
+		if low += lowPayload(s.length); low > int64(rr.maxBytes) {
+			break
+		}
+		end = next
+	}
+	b := make([]byte, end-start)
+	if _, err := l.pread(seg, b, start); err != nil && !errors.Is(err, io.EOF) {
+		return i, storageFailed("read", err)
+	}
+	rr.dst = slices.Grow(rr.dst, int(k-i))
+	for j := i; j < k; j++ {
+		s := &l.slots[j-l.first]
+		o := s.off - start
+		r, ok := parseRecord(b[o : o+int64(s.length)])
+		if !ok || r.kind != recEntry {
+			// A log that cannot be read cannot be trusted to agree with itself.
+			return j, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
+		}
+		if !rr.take(j, entryOf(&r)) {
+			return j, nil
 		}
 	}
+	return k, nil
+}
+
+// segmentNumbered is the open segment numbered n, nil for none.
+func (l *fileLog) segmentNumbered(n uint64) *segment {
+	for _, x := range l.segs {
+		if x.n == n {
+			return x
+		}
+	}
+	return nil
+}
+
+// pread reads b at off in seg: through readAt when a test set it.
+func (l *fileLog) pread(seg *segment, b []byte, off int64) (int, error) {
+	if l.readAt != nil {
+		return l.readAt(seg.f, b, off)
+	}
+	return seg.f.ReadAt(b, off)
+}
+
+// entryOf is the entry a parsed entry record holds; its Data is capped at
+// its own length, so an append to it never writes over the next record of
+// the buffer it aliases.
+func entryOf(r *record) coreconsensus.EntryValue {
+	return coreconsensus.EntryValue{
+		Position: coreconsensus.PositionValue{Term: r.term, Index: r.index},
+		Kind:     coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain,
+		Data: r.data[:len(r.data):len(r.data)],
+	}
+}
+
+// readEntry reads the synced entry s locates from its segment, its header
+// first: the single-entry read, for a slot whose length is not known. A
+// record that does not parse as an entry there is LOG_CORRUPT: the log
+// disagrees with what it recorded.
+func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
+	seg := l.segmentNumbered(s.seg)
 	if seg == nil {
 		return coreconsensus.EntryValue{}, storageFailed("read", errImpossible)
 	}
 	var h [recHeader]byte
-	if _, err := seg.f.ReadAt(h[:], s.off); err != nil {
+	if _, err := l.pread(seg, h[:], s.off); err != nil {
 		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}
 	// Bounded by the segment, and by what an int holds, before the
@@ -1542,7 +1685,7 @@ func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
 		return coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
 	}
 	b := make([]byte, recHeader+int(ln))
-	if _, err := seg.f.ReadAt(b, s.off); err != nil && !errors.Is(err, io.EOF) {
+	if _, err := l.pread(seg, b, s.off); err != nil && !errors.Is(err, io.EOF) {
 		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}
 	r, ok := parseRecord(b)
@@ -1550,10 +1693,7 @@ func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
 		// A log that cannot be read cannot be trusted to agree with itself.
 		return coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
 	}
-	return coreconsensus.EntryValue{
-		Position: coreconsensus.PositionValue{Term: r.term, Index: r.index},
-		Kind:     coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain, Data: r.data,
-	}, nil
+	return entryOf(&r), nil
 }
 
 // Term implements LogReader.
@@ -1715,7 +1855,7 @@ func (l *fileLog) relocate(seg uint64) {
 		if r.kind == recEntry && r.index >= l.first && r.index < l.first+uint64(len(l.slots)) {
 			s := &l.slots[r.index-l.first]
 			if s.mem != nil && s.term == r.term {
-				s.seg, s.off, s.mem = seg, l.off+off, nil
+				s.seg, s.off, s.mem, s.length = seg, l.off+off, nil, uint32(r.length)
 			}
 		}
 		off += int64(r.length)

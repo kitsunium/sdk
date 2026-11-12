@@ -667,7 +667,10 @@ packages:
           - doc: |-
               Entries returns entries in [lo, hi), at most maxBytes, and always at
               least one entry when lo < hi, even above maxBytes. lo below first is
-              COMPACTED.
+              COMPACTED. Entry data may alias a buffer the store read for the whole
+              call, each payload capped at its own length: it is never written again,
+              but a caller that keeps one entry's data keeps that buffer, and copies
+              the data to hold it apart.
             in:
               - name: lo
               - name: hi

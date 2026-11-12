@@ -2819,10 +2819,12 @@ transport. The cross-field rules are checked after defaults are applied
   defaults and two peers, that is under 1 GiB. `NewRaft` reports the total,
   so a product can check it against its own limit.
 - **Opening the log is outside that sum**: about one segment and 80 bytes
-  per record of one segment, plus 72 bytes per entry, before any of these
+  per record of one segment, plus 80 bytes per entry, before any of these
   bounds holds anything (amendments of 2026-10-24 and 2026-10-25,
   [#630](https://github.com/kitsunium/sdk/issues/630),
-  [#660](https://github.com/kitsunium/sdk/issues/660)).
+  [#660](https://github.com/kitsunium/sdk/issues/660); 72 until the index
+  kept each record's length, amendment of 2026-11-11,
+  [#913](https://github.com/kitsunium/sdk/issues/913)).
 - **Snapshot slots are bounded and enforced, and the disk reservation is
   their actual maximum (R4-28, R5-01, R6-02).** At most FOUR snapshots exist
   at once: the two retained, one being written, and one being received.
@@ -3068,6 +3070,7 @@ across changes.
 | encode / decode of a log record and a frame | 0 allocs/op |
 | `Propose` → applied, 3 in-process nodes, memory log and transport | ≤ 4 allocs/op |
 | segmented log, `Append` 64 × 256 B + one `Sync` | reported per device, as ADR 0056's `BENCH.md` reports publication |
+| segmented log, `Entries` of 64 × 256 B synced in one segment | 1 pread, ≤ 2 allocs/op (the read's buffer and the entry slice), the entries' data aliasing the buffer; the fetch cost per entry in the package's `BENCH.md` (amendment of 2026-11-11, [#913](https://github.com/kitsunium/sdk/issues/913)) |
 | first consumer's table checksum, one update, at 10³ to 10⁶ repositories | constant time across sizes (R5-07) |
 
 **The implementing change's verifiers (R7-00f).** Each acceptance criterion

@@ -3433,7 +3433,7 @@ sequences:
               to: l.quarantine
           when: r.index != l.first+uint64(len(l.slots))
       - set: l.slots
-        value: "append(l.slots, slot{seg: seg, off: r.off, term: r.term})"
+        value: "append(l.slots, slot{seg: seg, off: r.off, term: r.term, length: r.length})"
       - return: nil
   - of: knownLayout
     participants:
@@ -4319,6 +4319,20 @@ sequences:
             - return: l.refuse
           when: l.refuse != nil
       - return: l.failed
+  - of: (*rangeRead).take
+    steps:
+      - op: +=
+        set: rr.size
+        value: len(e.Data)
+      - opt:
+          do:
+            - set: rr.full
+              value: "true"
+            - return: "false"
+          when: i > rr.lo && rr.size > rr.maxBytes
+      - set: rr.dst
+        value: append(rr.dst, e)
+      - return: "true"
   - of: (*fileLog).Entries
     participants:
       - id: caller
@@ -4327,7 +4341,9 @@ sequences:
         kind: self
       - id: l.usable
         kind: internal
-      - id: l.readEntry
+      - id: rr.take
+        kind: internal
+      - id: l.readRun
         kind: internal
     steps:
       - lock:
@@ -4349,77 +4365,198 @@ sequences:
           do:
             - return: dst, storageFailed("entries", errImpossible)
           when: hi > l.first+uint64(len(l.slots))
-      - bind: before, size
-        eval: len(dst), 0
+      - bind: before
+        eval: len(dst)
+      - bind: rr
+        eval: "rangeRead{lo: lo, hi: hi, maxBytes: maxBytes, dst: dst}"
       - loop:
-          cond: i < hi
+          cond: i < hi && !rr.full
           do:
             - bind: s
-              eval: l.slots[i-l.first]
-            - var:
-                name: e
-                type: coreconsensus.EntryValue
-            - alt:
-                - do:
-                    - set: e
-                      value: "*s.mem"
-                  when: s.mem != nil
-                - do:
-                    - var:
-                        name: err
-                        type: error
-                    - opt:
-                        do:
-                          - return: dst, err
-                        init:
-                          bind: e, err
-                          eval: l.readEntry(s)
-                          op: =
-                          to: l.readEntry
-                        when: err != nil
-                  else: true
-            - op: +=
-              set: size
-              value: len(e.Data)
+              eval: "&l.slots[i-l.first]"
+            - opt:
+                do:
+                  - eval: rr.take(i, *s.mem)
+                    to: rr.take
+                  - op: ++
+                    set: i
+                  - continue: true
+                when: s.mem != nil
+            - bind: next, err
+              eval: l.readRun(&rr, i)
+              to: l.readRun
+            - opt:
+                do:
+                  - return: rr.dst, err
+                when: err != nil
+            - set: i
+              value: next
+          init: i := lo
+      - opt:
+          do:
+            - eval: l.afterEntries(rr.dst[before:])
+          when: l.afterEntries != nil
+      - return: rr.dst, nil
+  - of: lowPayload
+    steps:
+      - return: max(0, int64(length)-int64(recHeader+recFixed+recAlign-1))
+  - of: (*fileLog).readRun
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).readRun
+        kind: self
+      - id: l.readEntry
+        kind: internal
+      - id: rr.take
+        kind: internal
+      - id: l.segmentNumbered
+        kind: internal
+      - id: l.pread
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: parseRecord
+        kind: internal
+    steps:
+      - bind: first
+        eval: l.slots[i-l.first]
+      - opt:
+          do:
+            - bind: e, err
+              eval: l.readEntry(first)
+              to: l.readEntry
+            - opt:
+                do:
+                  - return: i, err
+                when: err != nil
+            - eval: rr.take(i, e)
+              to: rr.take
+            - return: i + 1, nil
+          when: first.length == 0
+      - bind: low
+        eval: int64(rr.size) + lowPayload(first.length)
+      - opt:
+          do:
+            - set: rr.full
+              value: "true"
+            - return: i, nil
+          when: i > rr.lo && low > int64(rr.maxBytes)
+      - bind: seg
+        eval: l.segmentNumbered(first.seg)
+        to: l.segmentNumbered
+      - opt:
+          do:
+            - return: i, storageFailed("read", errImpossible)
+          when: seg == nil
+      - opt:
+          do:
+            - return: i, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(first.seg)), errs.Int64("offset", first.off))
+          when: int64(first.length) > min(seg.size-first.off, math.MaxInt)
+      - bind: start, end
+        eval: first.off, first.off+int64(first.length)
+      - bind: k
+        eval: i + 1
+      - loop:
+          cond: k < rr.hi
+          do:
+            - bind: s
+              eval: "&l.slots[k-l.first]"
             - opt:
                 do:
                   - break: true
-                when: i > lo && size > maxBytes
-            - set: dst
-              value: append(dst, e)
-          init: i := lo
-          post: i++
+                when: s.mem != nil || s.seg != first.seg || s.length == 0 || s.off < end || s.off-end > rangeGapBytes
+            - bind: next
+              eval: s.off + int64(s.length)
+            - opt:
+                do:
+                  - break: true
+                when: next-start > rangeReadBytes || next > seg.size
+            - leaf: an if whose init is no assignment
+              stmt: |-
+                if low += lowPayload(s.length); low > int64(rr.maxBytes) {
+                			break
+                		}
+            - set: end
+              value: next
+          post: k++
+      - bind: b
+        eval: make([]byte, end-start)
       - opt:
           do:
-            - eval: l.afterEntries(dst[before:])
-          when: l.afterEntries != nil
-      - return: dst, nil
+            - return: i, storageFailed("read", err)
+          init:
+            bind: _, err
+            eval: l.pread(seg, b, start)
+            to: l.pread
+          when: err != nil && !errors.Is(err, io.EOF)
+      - set: rr.dst
+        to: slices
+        value: slices.Grow(rr.dst, int(k-i))
+      - loop:
+          cond: j < k
+          do:
+            - bind: s
+              eval: "&l.slots[j-l.first]"
+            - bind: o
+              eval: s.off - start
+            - bind: r, ok
+              eval: "parseRecord(b[o : o+int64(s.length)])"
+              to: parseRecord
+            - opt:
+                do:
+                  - return: j, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
+                when: "!ok || r.kind != recEntry"
+            - opt:
+                do:
+                  - return: j, nil
+                when: "!rr.take(j, entryOf(&r))"
+          init: j := i
+          post: j++
+      - return: k, nil
+  - of: (*fileLog).pread
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).pread
+        kind: self
+      - id: seg.f.ReadAt
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: l.readAt(seg.f, b, off)
+          when: l.readAt != nil
+      - return: seg.f.ReadAt(b, off)
+        to: seg.f.ReadAt
+  - of: entryOf
+    steps:
+      - return: |-
+          coreconsensus.EntryValue{
+          		Position: coreconsensus.PositionValue{Term: r.term, Index: r.index},
+          		Kind:     coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain,
+          		Data: r.data[:len(r.data):len(r.data)],
+          	}
   - of: (*fileLog).readEntry
     participants:
       - id: caller
         kind: actor
       - id: (*fileLog).readEntry
         kind: self
-      - id: seg.f.ReadAt
-        kind: value
+      - id: l.segmentNumbered
+        kind: internal
+      - id: l.pread
+        kind: internal
       - id: binary.LittleEndian.Uint32
         kind: value
       - id: parseRecord
         kind: internal
+      - id: entryOf
+        kind: internal
     steps:
-      - var:
-          name: seg
-          type: "*segment"
-      - loop:
-          do:
-            - opt:
-                do:
-                  - set: seg
-                    value: x
-                when: x.n == s.seg
-          key: _
-          range: l.segs
-          value: x
+      - bind: seg
+        eval: l.segmentNumbered(s.seg)
+        to: l.segmentNumbered
       - opt:
           do:
             - return: coreconsensus.EntryValue{}, storageFailed("read", errImpossible)
@@ -4432,8 +4569,8 @@ sequences:
             - return: coreconsensus.EntryValue{}, storageFailed("read", err)
           init:
             bind: _, err
-            eval: seg.f.ReadAt(h[:], s.off)
-            to: seg.f.ReadAt
+            eval: l.pread(seg, h[:], s.off)
+            to: l.pread
           when: err != nil
       - bind: ln
         eval: binary.LittleEndian.Uint32(h[:])
@@ -4449,8 +4586,8 @@ sequences:
             - return: coreconsensus.EntryValue{}, storageFailed("read", err)
           init:
             bind: _, err
-            eval: seg.f.ReadAt(b, s.off)
-            to: seg.f.ReadAt
+            eval: l.pread(seg, b, s.off)
+            to: l.pread
           when: err != nil && !errors.Is(err, io.EOF)
       - bind: r, ok
         eval: parseRecord(b)
@@ -4459,11 +4596,8 @@ sequences:
           do:
             - return: coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
           when: "!ok || r.kind != recEntry"
-      - return: |-
-          coreconsensus.EntryValue{
-          		Position: coreconsensus.PositionValue{Term: r.term, Index: r.index},
-          		Kind:     coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain, Data: r.data,
-          	}, nil
+      - return: entryOf(&r), nil
+        to: entryOf
   - of: (*fileLog).Term
     steps:
       - lock:
@@ -4746,8 +4880,8 @@ sequences:
                     eval: "&l.slots[r.index-l.first]"
                   - opt:
                       do:
-                        - set: s.seg, s.off, s.mem
-                          value: seg, l.off+off, nil
+                        - set: s.seg, s.off, s.mem, s.length
+                          value: seg, l.off+off, nil, uint32(r.length)
                       when: s.mem != nil && s.term == r.term
                 when: r.kind == recEntry && r.index >= l.first && r.index < l.first+uint64(len(l.slots))
             - op: +=

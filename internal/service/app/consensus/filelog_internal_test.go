@@ -846,7 +846,7 @@ func fillLog(t *testing.T, l *fileLog, payload int, size int64) uint64 {
 // whose log grew while its compaction stalled was OOM-killed at every
 // restart on a small host, Inspect and WipeAndRejoin with it (#630). The
 // open reads one segment at a time into the same buffer and keeps 40 bytes
-// per record past it, beside the index's 32 per entry: a 32 MiB log in
+// per record past it, beside the index's 40 per entry: a 32 MiB log in
 // 4 MiB segments, of entries of 4 KiB, where the open costs about a
 // segment, and of 64 B, where the per-record cost dominates. What the
 // reopen allocates in all bounds its peak from above, whenever the

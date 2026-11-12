@@ -189,6 +189,13 @@
 # 4 KiB and 4 MiB.
 //third-party/transform:transform_test
 
+# internal/service/app/consensus — the file log's range read (#913,
+# filelog_alloc_internal_test.go, //go:build !race): Entries over 64 synced
+# entries of 256 B of one segment is one pread and at most two allocations,
+# the read's buffer and the entry slice (ADR 0152 D15). Its own target, so the
+# lane runs the gate and not the whole consensus suite.
+//internal/service/app/consensus:consensus_alloc_test
+
 # internal/service/data/vfs — an uncontended publication on the disk engine
 # (kitsunium/sdk#813, alloc_external_test.go, //go:build !race): at most 22
 # allocations on the caller's stack, 19 here — os.Root's confinement 18, the

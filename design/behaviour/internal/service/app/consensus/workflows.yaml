@@ -150,6 +150,18 @@ workflows:
           range: b
           value: x
       - return: "true"
+  - of: (*fileLog).segmentNumbered
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: x
+                when: x.n == n
+          key: _
+          range: l.segs
+          value: x
+      - return: nil
   - of: (*fileLog).retainsEntryIn
     steps:
       - loop:

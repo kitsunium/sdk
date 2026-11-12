@@ -95,6 +95,7 @@ go_test(
         "acceptbound_internal_test.go",
         "admissiondurable_internal_test.go",
         "adoptedfrom_internal_test.go",
+        "allocwindow_test.go",
         "allpeersgone_internal_test.go",
         "cancel_internal_test.go",
         "catchuppin_internal_test.go",
@@ -115,8 +116,11 @@ go_test(
         "failclosed_internal_test.go",
         "failclosed_unix_internal_test.go",
         "fetchframe_internal_test.go",
+        "filelog_alloc_internal_test.go",
+        "filelog_bench_test.go",
         "filelog_fuzz_internal_test.go",
         "filelog_internal_test.go",
+        "filelog_range_internal_test.go",
         "founding_internal_test.go",
         "gen_api_test.go",
         "groupcommit_internal_test.go",
@@ -227,5 +231,24 @@ go_test(
         "//internal/service/data/transform",
         "//internal/service/net/server",
         "//internal/service/observe/metrics",
+    ],
+)
+
+# The range read's allocation gate (filelog_alloc_internal_test.go,
+# //go:build !race, #913), its own target so the race-off lane
+# (tools/alloc-lane-targets.txt) runs it alone, not the whole suite; under
+# race it compiles to nothing it runs.
+# keep
+go_test(
+    name = "consensus_alloc_test",
+    srcs = [
+        "allocwindow_test.go",
+        "filelog_alloc_internal_test.go",
+    ],
+    embed = [":consensus"],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/kernel/fs/flock",
+        "//internal/service/app/consensus/wire",
     ],
 )

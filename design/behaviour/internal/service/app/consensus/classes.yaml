@@ -204,6 +204,24 @@ constants:
         type: int64
         value: 64 << 20
     name: recHeader
+  - doc: The bounds of one range read of Entries (#913).
+    grouped: true
+    items:
+      - doc: |-
+          rangeReadBytes is the most bytes one read takes past its first
+          record: a run of synced entries longer than this is read in several.
+        name: rangeReadBytes
+        type: int64
+        value: 4 << 20
+      - doc: |-
+          rangeGapBytes is the most bytes of other records, the hard states and
+          commits a follower writes between its entries, one read crosses
+          between two entries; a wider gap, a suffix truncated and written
+          again further on, starts another read.
+        name: rangeGapBytes
+        type: int64
+        value: 4 << 10
+    name: rangeReadBytes
   - doc: |-
       supersededWhy is the SNAPSHOT_CORRUPT of a sink another install of the
       same id superseded: the leader answers it with a new offer.
@@ -1087,7 +1105,15 @@ files:
       - (*fileLog).publishNext
       - (*fileLog).termLocked
       - (*fileLog).usable
+      - rangeReadBytes
+      - rangeRead
+      - (*rangeRead).take
       - (*fileLog).Entries
+      - lowPayload
+      - (*fileLog).readRun
+      - (*fileLog).segmentNumbered
+      - (*fileLog).pread
+      - entryOf
       - (*fileLog).readEntry
       - (*fileLog).Term
       - (*fileLog).Bounds
@@ -2489,6 +2515,17 @@ functions:
     name: writeSynced
     params: path string, data []byte
     results: err error
+  - doc: lowPayload is the least payload a record of this aligned length holds.
+    name: lowPayload
+    params: length uint32
+    results: int64
+  - doc: |-
+      entryOf is the entry a parsed entry record holds; its Data is capped at
+      its own length, so an append to it never writes over the next record of
+      the buffer it aliases.
+    name: entryOf
+    params: r *record
+    results: coreconsensus.EntryValue
   - doc: |-
       compactionTerm is the term a compaction through index through records,
       over a log whose last index is last and which answers held for that
@@ -4585,7 +4622,11 @@ types:
         recv: c checkpoint
         results: "[]byte"
     name: checkpoint
-  - doc: "slot locates one retained entry: on disk once synced, in memory before."
+  - doc: |-
+      slot locates one retained entry: on disk once synced, in memory before.
+      length is its record's aligned length on disk, so Entries reads a run of
+      records in one pread without reading a header first (#913); 0 for a slot
+      in memory.
     fields:
       - name: seg
         type: uint64
@@ -4595,6 +4636,8 @@ types:
         type: uint64
       - name: mem
         type: "*coreconsensus.EntryValue"
+      - name: length
+        type: uint32
     kind: struct
     name: slot
   - fields:
@@ -4691,6 +4734,11 @@ types:
           (#700). Only a test sets it, before the reads it counts.
         name: afterEntries
         type: func(es []coreconsensus.EntryValue)
+      - doc: |-
+          readAt replaces a segment's ReadAt on the entry reads when a test
+          sets it, to count the preads Entries issues (#913); nil otherwise.
+        name: readAt
+        type: func(f *os.File, b []byte, off int64) (int, error)
       - doc: |-
           occupied is the bytes the segments occupy, kept beside segs wherever
           a segment is added or dropped, so the event loop reads it without mu:
@@ -5003,15 +5051,44 @@ types:
         name: usable
         recv: l *fileLog
         results: error
-      - doc: Entries implements LogReader.
+      - doc: |-
+          Entries implements LogReader. A run of synced entries of one segment is
+          read with ONE pread into one buffer and parsed in place: their Data alias
+          that buffer, capped at their own length, and the buffer is never written
+          again nor reused (#913). An entry still in memory is the one appended.
         name: Entries
         params: lo, hi uint64, maxBytes int, dst []coreconsensus.EntryValue
         recv: l *fileLog
         results: "[]coreconsensus.EntryValue, error"
       - doc: |-
-          readEntry reads the synced entry s locates from its segment. A record
-          that does not parse as an entry there is LOG_CORRUPT: the log disagrees
-          with what it recorded.
+          readRun reads the synced entries from i on that lie in one interval of
+          one segment, in one pread, and takes them into rr; it returns the index
+          of the first entry it did not take. The interval stops at the first
+          entry of another segment, in memory, past a gap of rangeGapBytes, past
+          rangeReadBytes, or whose payload, at least lowPayload, would pass
+          maxBytes: every entry the call takes was read, and an entry it does not
+          take is read at most once more than needed. A record that does not
+          parse as an entry is LOG_CORRUPT at its own offset, as readEntry's. The
+          caller holds mu.
+        name: readRun
+        params: rr *rangeRead, i uint64
+        recv: l *fileLog
+        results: uint64, error
+      - doc: segmentNumbered is the open segment numbered n, nil for none.
+        name: segmentNumbered
+        params: n uint64
+        recv: l *fileLog
+        results: "*segment"
+      - doc: "pread reads b at off in seg: through readAt when a test set it."
+        name: pread
+        params: seg *segment, b []byte, off int64
+        recv: l *fileLog
+        results: int, error
+      - doc: |-
+          readEntry reads the synced entry s locates from its segment, its header
+          first: the single-entry read, for a slot whose length is not known. A
+          record that does not parse as an entry there is LOG_CORRUPT: the log
+          disagrees with what it recorded.
         name: readEntry
         params: s slot
         recv: l *fileLog
@@ -5453,6 +5530,35 @@ types:
         type: error
     kind: struct
     name: prepared
+  - doc: |-
+      rangeRead is one Entries call under way: its bounds, the payload bytes
+      taken so far, and the entries taken.
+    fields:
+      - name: lo
+        type: uint64
+      - name: hi
+        type: uint64
+      - name: maxBytes
+        type: int
+      - name: size
+        type: int
+      - doc: |-
+          full is set once the next entry would pass maxBytes: the call
+          returns what it took.
+        name: full
+        type: bool
+      - name: dst
+        type: "[]coreconsensus.EntryValue"
+    kind: struct
+    methods:
+      - doc: |-
+          take appends entry i unless it passes maxBytes, which only the first
+          entry of the call may do; false once the call is full.
+        name: take
+        params: i uint64, e coreconsensus.EntryValue
+        recv: rr *rangeRead
+        results: bool
+    name: rangeRead
   - doc: |-
       fileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
       applied to a stream (D4). A snapshot is spooled to <id>.spool, synced,

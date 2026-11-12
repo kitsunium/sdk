@@ -4584,7 +4584,7 @@
       "recv": "LogReader",
       "spelled": "func(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)",
       "canonical": "func(lo uint64, hi uint64, maxBytes int, dst []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) ([]github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, error)",
-      "doc": "Entries returns entries in [lo, hi), at most maxBytes, and always at\nleast one entry when lo < hi, even above maxBytes. lo below first is\nCOMPACTED.\n",
+      "doc": "Entries returns entries in [lo, hi), at most maxBytes, and always at\nleast one entry when lo < hi, even above maxBytes. lo below first is\nCOMPACTED. Entry data may alias a buffer the store read for the whole\ncall, each payload capped at its own length: it is never written again,\nbut a caller that keeps one entry's data keeps that buffer, and copies\nthe data to hold it apart.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
