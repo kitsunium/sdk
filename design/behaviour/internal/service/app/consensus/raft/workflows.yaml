@@ -226,6 +226,31 @@ workflows:
           range: r.voters()
           value: id
       - return: max(n-r.quorum(), -1)
+  - of: (*SessionTable).evictFor
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(t.byID) < MaxSessions
+      - var:
+          name: oldest
+          type: core.SessionID
+      - bind: first
+        eval: "true"
+      - var:
+          name: at
+          type: uint64
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: oldest, at, first
+                    value: id, v.Last, false
+                when: first || v.Last < at
+          key: id
+          range: t.byID
+          value: v
+      - eval: delete(t.byID, oldest)
   - of: (*Raft).countVotes
     steps:
       - loop:

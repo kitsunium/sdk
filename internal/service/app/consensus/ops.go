@@ -35,19 +35,20 @@ func (n *Node) Propose(ctx context.Context, data []byte) (coreconsensus.TokenVal
 // because the entry may still commit. An admin entry bypasses the pending
 // and apply-lag budgets, so an operator can always reach a saturated node.
 func (n *Node) submit(ctx context.Context, e coreconsensus.EntryValue, admin bool) (coreconsensus.TokenValue, any, error) {
-	return n.submitProposal(ctx, &proposal{entry: e, admin: admin, done: make(chan propResult, 1)})
+	r := n.submitProposal(ctx, &proposal{entry: e, admin: admin, done: make(chan propResult, 1)})
+	return r.tok, r.val, r.err
 }
 
 // submitProposal is submit over a proposal its caller built and keeps: once
 // it returns, a proposal whose stage is stageAppended holds the position it
 // was appended at, which an OUTCOME_UNKNOWN does not carry (the stream
 // adapter's token, #832).
-func (n *Node) submitProposal(ctx context.Context, p *proposal) (coreconsensus.TokenValue, any, error) {
+func (n *Node) submitProposal(ctx context.Context, p *proposal) propResult {
 	if err := ctx.Err(); err != nil {
-		return coreconsensus.TokenValue{}, nil, err
+		return propResult{err: err}
 	}
 	if n.stopped.Load() {
-		return coreconsensus.TokenValue{}, nil, n.stoppedErr()
+		return propResult{err: n.stoppedErr()}
 	}
 	start := n.clk.Now()
 	span := n.obs.span(ctx, "consensus.Propose")
@@ -58,7 +59,7 @@ func (n *Node) submitProposal(ctx context.Context, p *proposal) (coreconsensus.T
 		n.pendingProp.Add(-1)
 		n.obs.setGauge(mProposalsPending, float64(n.pendingProp.Load()))
 	}()
-	finish := func(r propResult) (coreconsensus.TokenValue, any, error) {
+	finish := func(r propResult) propResult {
 		if r.err != nil {
 			n.obs.inc(mProposalsFailed, codeAttr(r.err))
 		} else {
@@ -66,7 +67,7 @@ func (n *Node) submitProposal(ctx context.Context, p *proposal) (coreconsensus.T
 			spanEvent(span, "applied", coreotel.Int64("index", int64(r.tok.Index)))
 		}
 		spanEnd(span, r.err)
-		return r.tok, r.val, r.err
+		return r
 	}
 	select {
 	case n.propc <- p:
@@ -145,6 +146,13 @@ func (n *Node) handleProposals(ps []*proposal) {
 		if p.admin {
 			flush()
 			n.proposeAlone(now, p)
+			continue
+		}
+		if p.isSession() {
+			// Each is judged against what the leader holds of its session,
+			// so it is appended alone (#918).
+			flush()
+			n.proposeSessionAt(now, p)
 			continue
 		}
 		batch = append(batch, p)
@@ -356,7 +364,12 @@ func (n *Node) forwardAnswered(m coreconsensus.MessageValue) {
 		p.done <- propResult{err: origin(sentinelOf(m.Code), errs.String("leader", coreconsensus.NodeID(m.RejectHint).String()))}
 		return
 	}
-	n.appended(p, coreconsensus.PositionValue{Term: m.LogTerm, Index: m.Index}, false)
+	pos := coreconsensus.PositionValue{Term: m.LogTerm, Index: m.Index}
+	if p.isSession() {
+		n.appendedSession(p, pos, m.Commit, false)
+		return
+	}
+	n.appended(p, pos, false)
 }
 
 // ProposeAs types the Apply result. A result of another dynamic type is
@@ -376,142 +389,6 @@ func ProposeAs[R any](ctx context.Context, r coreconsensus.Replicated, data []by
 		return tok, zero, withToken(coreconsensus.ResultTypeMismatch, tok)
 	}
 	return tok, out, nil
-}
-
-// Barrier returns once the local state machine reflects every write
-// committed before the call (D9).
-// Reads queued in one turn share one round.
-func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
-	if n.stopped.Load() {
-		return coreconsensus.TokenValue{}, n.stoppedErr()
-	}
-	w := &readWait{done: make(chan readResult, 1)}
-	noLease := n.cfg.Reads != ReadLease
-	start := n.clk.Now()
-	mode := "read_index"
-	if !noLease {
-		mode = "lease"
-	}
-	defer func() { n.obs.record(mBarrierLatency, n.clk.Since(start).Seconds(), coreotel.String("mode", mode)) }()
-	// The loop registers every read queued before its turn and opens one
-	// round for them all (onReads, #1108).
-	n.readq.push(w)
-	res, ok := n.awaitRead(ctx, w)
-	if !ok {
-		if ctx.Err() != nil {
-			return coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
-		}
-		return coreconsensus.TokenValue{}, n.stoppedErr()
-	}
-	switch res.code {
-	case 0:
-	case coreconsensus.CodeNodeStopped:
-		return coreconsensus.TokenValue{}, n.stoppedErr()
-	default:
-		return coreconsensus.TokenValue{}, origin(sentinelOf(res.code), errs.String("leader", n.Status().Leader.String()))
-	}
-	if !n.waitApplied(ctx.Done(), res.index) {
-		if ctx.Err() != nil {
-			return coreconsensus.TokenValue{}, ctx.Err()
-		}
-		return coreconsensus.TokenValue{}, n.stoppedErr()
-	}
-	n.am.Lock()
-	tok := n.token(coreconsensus.PositionValue{Term: n.appliedTerm, Index: n.applied})
-	n.am.Unlock()
-	return tok, nil
-}
-
-// awaitRead waits for the loop's answer to w. It reports false when ctx
-// ended first, or when the loop ended without answering: a read queued after
-// the loop's last turn is answered by no one.
-func (n *Node) awaitRead(ctx context.Context, w *readWait) (readResult, bool) {
-	select {
-	case res := <-w.done:
-		return res, true
-	case <-ctx.Done():
-		w.gone.Store(true)
-		return readResult{}, false
-	case <-n.loopDone:
-		select {
-		case res := <-w.done:
-			return res, true
-		default:
-			return readResult{}, false
-		}
-	}
-}
-
-// WaitApplied returns once the local node has applied t, the entry of t's
-// term at t's index. A token of another lineage is LINEAGE_MISMATCH. A token
-// whose index holds an entry of another term is ENTRY_SUPERSEDED, carrying
-// the token of the entry applied there, or LINEAGE_MISMATCH when it is one of
-// the predecessor's within the index Recover kept, as is a token of the
-// predecessor's whose term this node can no longer read there.
-func (n *Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) error {
-	want := n.token(t.Position())
-	if t.Cluster != want.Cluster || t.Epoch != want.Epoch {
-		return origin(coreconsensus.LineageMismatch)
-	}
-	if !n.waitApplied(ctx.Done(), t.Index) {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return n.stoppedErr()
-	}
-	return n.appliedAs(t)
-}
-
-// appliedAs checks that the entry applied at t's index is t's: the index
-// alone named the predecessor's identity, and since Recover adopts the
-// verified suffix past the commit the survivor persisted (D17), an entry it
-// kept there may be of another term than the write the old cluster
-// committed and acknowledged at that index. That write is lost, and
-// WaitApplied reported it applied (#509). Where the term cannot be read any
-// more, a token of the current history is trusted by Log Matching, and so
-// is one of the predecessor's at or below the index the predecessor had
-// committed there (AdoptedFrom, #509 phase 2); one in the adopted range
-// above it is not: that range may hold such a suffix.
-func (n *Node) appliedAs(t coreconsensus.TokenValue) error {
-	term, known, ok := n.appliedTermAt(t.Index)
-	if !ok {
-		return n.stoppedErr()
-	}
-	l := n.lineage()
-	kept := l.Predecessor != (coreconsensus.ClusterID{}) && t.Index <= l.KeptIndex && t.Index > l.AdoptedFrom
-	switch {
-	case known && term == t.Term, !known && !kept:
-		return nil
-	case !known:
-		return origin(coreconsensus.LineageMismatch, errs.String("why", "the predecessor's entry at this index can no longer be read"))
-	case kept:
-		return origin(coreconsensus.LineageMismatch, errs.String("why", "the predecessor's entry at this index is not the one kept"))
-	default:
-		return withToken(coreconsensus.EntrySuperseded, n.token(coreconsensus.PositionValue{Term: term, Index: t.Index}))
-	}
-}
-
-// appliedTermAt is the term of the entry applied at index, which the caller
-// waited for: from the step function, whose committed log is the truth, then
-// from the store while index is one this node applied from its log, which
-// the store holds as committed. known is false when neither holds it any
-// more; ok is false when the node stopped.
-func (n *Node) appliedTermAt(index uint64) (term uint64, known, ok bool) {
-	if !n.exec(func() {
-		if index <= n.r.Status().Commit {
-			term, known = n.r.TermAt(index)
-		}
-	}) {
-		return 0, false, false
-	}
-	if known || index > n.logApplied.Load() {
-		return term, known, true
-	}
-	if first, _ := n.cfg.Log.Bounds(); index+1 < first {
-		return 0, false, true
-	}
-	t, err := n.cfg.Log.Term(index)
-	return t, err == nil, true
 }
 
 // ---- administration (D17): every operation takes its operator, can be

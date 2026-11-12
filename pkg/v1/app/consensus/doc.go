@@ -15,6 +15,21 @@
 // decide, or carry a per-key revision in the command, because a replayed
 // compare-and-swap is not harmless under ABA (D6, R1-04).
 //
+// # Exactly once, through a client session
+//
+// A command without a natural key — an event appended, a counter moved —
+// is retried through a client session instead (ADR 0241). Once the
+// cluster version is 4, a client opens a session it names with 16 random
+// bytes, Node.OpenSession, then submits each command under the next
+// sequence, Node.ProposeSession, and retries it after OUTCOME_UNKNOWN with
+// the same session, sequence and command, through any node: the state
+// machine applies it once, and the retry is answered with the first
+// one's token. The same sequence with another command is
+// SESSION_DIGEST_MISMATCH. The cluster keeps 1024 sessions, the one used
+// least recently evicted first, and a command of a session
+// evicted, or of a sequence below its last, is SESSION_EXPIRED: read the
+// state through Barrier, then open a new session.
+//
 // # Reads
 //
 // Barrier returns once the local state machine reflects every write

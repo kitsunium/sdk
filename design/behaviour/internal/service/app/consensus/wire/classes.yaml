@@ -106,6 +106,33 @@ constants:
         name: metaProtocol3
         type: uint32
         value: "3"
+      - doc: |-
+          metaVersion4 is the leading byte of a SnapshotMeta that records the
+          client sessions: the fields of version 3, then the sessions, then the
+          CRC-32C of every byte before it. It is written for a cluster at
+          protocol version 4, which every member announced (#918); a node of
+          protocol 3 stops on an offer it cannot decode.
+        name: metaVersion4
+        type: byte
+        value: "4"
+      - doc: |-
+          metaProtocol4 is the cluster version from which a SnapshotMeta is
+          written in version 4.
+        name: metaProtocol4
+        type: uint32
+        value: "4"
+      - doc: |-
+          sessionLen is one session's encoding in a SnapshotMeta: its ID, its
+          sequence, its body sum, its position and its last index.
+        name: sessionLen
+        type: int
+        value: 16 + 8 + 4 + 8 + 8 + 8
+      - doc: |-
+          sessionHeaderLen is the header of an EntrySessionCommand's payload:
+          the session, then the sequence.
+        name: sessionHeaderLen
+        type: int
+        value: 16 + 8
       - doc: keyLen is the length of one retired key, an SPKI pin.
         name: keyLen
         type: int
@@ -131,6 +158,12 @@ constants:
         name: traceLen
         type: int
         value: 16 + 8 + 1
+      - doc: |-
+          chainHeaderLen is the header ChainSum folds after the previous chain
+          value: that value, term, index, kind, version and body sum.
+        name: chainHeaderLen
+        type: int
+        value: 4 + 8 + 8 + 1 + 4 + 4
     name: frameHeaderLen
   - doc: |-
       MessageHeaderLen is the length AppendHeader writes: the frame header and
@@ -154,12 +187,12 @@ files:
     name: admin.go
   - decls:
       - frameHeaderLen
+      - MessageHeaderLen
       - castagnoli
       - BodySum
       - ChainSum
       - headerSum
       - Lane
-      - MessageHeaderLen
       - AppendMessage
       - AppendHeader
       - AppendEntries
@@ -182,6 +215,9 @@ files:
       - appendLogIdentity
       - appendString
       - appendKeys
+      - appendSessions
+      - AppendSession
+      - ParseSession
       - appendBytes
       - boolByte
       - frameInvalid
@@ -197,6 +233,7 @@ files:
       - (*reader).timing
       - (*reader).membership
       - (*reader).keys
+      - (*reader).sessions
     name: codec.go
   - decls: []
     name: doc.go
@@ -230,7 +267,8 @@ functions:
       crc32.Checksum moves its argument to the heap (its update is called
       through a function variable), which made every ChainSum allocate, twice
       an entry on the leader's propose and the follower's verify (#921). The
-      header is 29 bytes, so the table loop costs what the allocation did not.
+      header is chainHeaderLen bytes, so the table loop costs what the
+      allocation did not.
     name: headerSum
     params: b []byte
     results: uint32
@@ -332,6 +370,18 @@ functions:
     name: appendKeys
     params: dst []byte, keys [][32]byte
     results: "[]byte"
+  - doc: |-
+      appendSessions appends a u32-counted list of client sessions, in their
+      order, which a table writes by ID.
+    name: appendSessions
+    params: dst []byte, vs []coreconsensus.SessionValue
+    results: "[]byte"
+  - name: AppendSession
+    params: dst []byte, s coreconsensus.SessionID, seq uint64, data []byte
+    results: "[]byte"
+  - name: ParseSession
+    params: b []byte
+    results: id coreconsensus.SessionID, seq uint64, cmd []byte, err error
   - doc: appendBytes appends u32-length-prefixed bytes.
     name: appendBytes
     params: dst, b []byte
@@ -453,6 +503,12 @@ types:
         name: keys
         recv: r *reader
         results: "[][32]byte"
+      - doc: |-
+          sessions reads the layout appendSessions writes, nil for none. The count is
+          bounded by the bytes left before anything is allocated, as keys' is.
+        name: sessions
+        recv: r *reader
+        results: "[]coreconsensus.SessionValue"
     name: reader
 vars:
   - doc: castagnoli is the CRC-32C table every checksum of the domain uses.

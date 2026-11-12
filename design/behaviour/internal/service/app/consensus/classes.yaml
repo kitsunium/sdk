@@ -3,39 +3,73 @@ apiVersion: design/behaviour/v1
 constants:
   - grouped: true
     items:
-      - name: backupMagic
+      - doc: backupMagic opens every backup file, export or tail.
+        name: backupMagic
         value: "\"KSBK\""
-      - name: backupVersion1
+      - doc: backupVersion1 is the only layout version; a reader refuses any other.
+        name: backupVersion1
+        type: byte
         value: "1"
-      - name: backupExport
-        value: "'F'"
-      - name: backupTail
-        value: "'T'"
-      - name: backupHeadLen
-        value: len(backupMagic) + 2
-      - name: recSnapshot
-        value: "1"
-      - name: recMeta
-        value: "2"
-      - name: recEntries
-        value: "3"
-      - name: recTrailer
-        value: "4"
-      - doc: recHeadLen is a record's type and length; recSumLen its CRC-32C.
-        name: recHeadLen
-        value: "5"
-      - name: recSumLen
-        value: "4"
       - doc: |-
-          backupChunk bounds a snapshot record, backupBatchBytes the payloads
-          of one entry record, backupMaxRecord any record a reader accepts.
+          backupExport is the file kind, written after the version, of an
+          export: a snapshot, then the committed tail after it.
+        name: backupExport
+        type: byte
+        value: "'F'"
+      - doc: |-
+          backupTail is the file kind of a tail: entries alone, after a point
+          an earlier file ended at.
+        name: backupTail
+        type: byte
+        value: "'T'"
+      - doc: backupHeadLen is the magic, the version and the kind.
+        name: backupHeadLen
+        type: int
+        value: len(backupMagic) + 2
+      - doc: |-
+          recSnapshot is a record of the snapshot's bytes, the first records
+          of an export (the record types are listed in the order an export
+          writes them).
+        name: recSnapshot
+        type: byte
+        value: "1"
+      - doc: recMeta is the snapshot's metadata, or a tail's starting point.
+        name: recMeta
+        type: byte
+        value: "2"
+      - doc: recEntries is one batch of committed entries.
+        name: recEntries
+        type: byte
+        value: "3"
+      - doc: "recTrailer is the last record: the file's end point and entry count."
+        name: recTrailer
+        type: byte
+        value: "4"
+      - doc: recHeadLen is a record's type and length.
+        name: recHeadLen
+        type: int
+        value: "5"
+      - doc: recSumLen is a record's CRC-32C, after its payload.
+        name: recSumLen
+        type: int
+        value: "4"
+      - doc: backupChunk bounds a snapshot record.
         name: backupChunk
+        type: int
         value: 64 << 10
-      - name: backupBatchBytes
+      - doc: backupBatchBytes bounds the payloads of one entry record.
+        name: backupBatchBytes
+        type: int
         value: 1 << 20
-      - name: backupMaxRecord
+      - doc: backupMaxRecord bounds any record a reader accepts.
+        name: backupMaxRecord
+        type: uint32
         value: 64 << 20
-      - name: trailerLen
+      - doc: |-
+          trailerLen is two points (term and index, 8 bytes each, and the 4-byte
+          chain value) then the 8-byte entry count.
+        name: trailerLen
+        type: int
         value: 2*(8+8+4) + 8
     name: backupMagic
   - doc: |-
@@ -272,17 +306,14 @@ constants:
         name: DefaultSegmentBytes
         type: int64
         value: 64 << 20
-    name: recHeader
-  - doc: The bounds of one range read of Entries (#913).
-    grouped: true
-    items:
       - doc: |-
-          rangeReadBytes is the most bytes one read takes past its first
-          record: a run of synced entries longer than this is read in several.
+          rangeReadBytes is the most bytes one range read of Entries takes past
+          its first record: a run of synced entries longer than this is read in
+          several (#913).
         name: rangeReadBytes
         type: int64
         value: 4 << 20
-    name: rangeReadBytes
+    name: recHeader
   - doc: |-
       indexEntryBytes is what the index keeps resident for one synced entry: its
       offset in its segment's table. MemoryBudget counts it for every record
@@ -496,14 +527,13 @@ constants:
         name: handOffWindow
         type: time.Duration
         value: "2"
-    name: inboxDepth
-  - doc: |-
-      resultRing is how many Apply results a node keeps for its outstanding
-      forwards.
-    items:
-      - name: resultRing
+      - doc: |-
+          resultRing is how many Apply results a node keeps for its
+          outstanding forwards; a uint64, as the entry index that picks a slot.
+        name: resultRing
+        type: uint64
         value: "4096"
-    name: resultRing
+    name: inboxDepth
   - doc: |-
       paceSlices is how many reads a second of a paced stream is cut into: a
       read is at most a tenth of the rate, so a stream that waits for its
@@ -789,6 +819,7 @@ constants:
       syscall package does not name.
     items:
       - name: fallocZeroRange
+        type: uint32
         value: "0x10"
     name: fallocZeroRange
   - doc: |-
@@ -805,10 +836,13 @@ constants:
     grouped: true
     items:
       - name: preflightSyncs
+        type: int
         value: "256"
       - name: preflightRecordBytes
+        type: int
         value: "4096"
       - name: preflightMaxSyncs
+        type: int
         value: 1 << 16
       - doc: preflightReserve is Config's default LogReserveBytes.
         name: preflightReserve
@@ -819,6 +853,7 @@ constants:
           two durable writes, and an ElectionTimeoutMin not above three times
           the fdatasync p99 stayed leaderless through 41 terms (#598).
         name: preflightElectionFactor
+        type: time.Duration
         value: "3"
     name: preflightSyncs
   - doc: The verdicts' fields and rules, spelled as Config spells the field.
@@ -907,9 +942,11 @@ constants:
           recordHeaderBytes is the most a record's frame adds to its key and
           payload: magic, version, the append instant and the key's length.
         name: recordHeaderBytes
+        type: int
         value: 2 + 8 + binary.MaxVarintLen64
       - doc: maxStreamReadBytes bounds what one ReadCommitted of a Read asks for.
         name: maxStreamReadBytes
+        type: int
         value: 4 << 20
     name: recordMagic
   - doc: |-
@@ -925,8 +962,31 @@ constants:
       if fdatasync(2) followed it.
     items:
       - name: rwfDsync
+        type: uintptr
         value: "0x2"
     name: rwfDsync
+  - doc: The kernel's __NR_pwritev2 per architecture family (see sysPwritev2).
+    grouped: true
+    items:
+      - doc: nrPwritev2AMD64 is __NR_pwritev2 of arch/x86/entry/syscalls (x86-64).
+        name: nrPwritev2AMD64
+        type: uintptr
+        value: "328"
+      - doc: nrPwritev2I386 is __NR_pwritev2 of the 32-bit x86 table.
+        name: nrPwritev2I386
+        type: uintptr
+        value: "379"
+      - doc: nrPwritev2ARM is __NR_pwritev2 of arch/arm/tools/syscall.tbl.
+        name: nrPwritev2ARM
+        type: uintptr
+        value: "393"
+      - doc: |-
+          nrPwritev2Generic is __NR_pwritev2 of include/uapi/asm-generic/unistd.h,
+          which arm64, riscv64 and loong64 share.
+        name: nrPwritev2Generic
+        type: uintptr
+        value: "287"
+    name: nrPwritev2AMD64
   - doc: |-
       The lane is the first byte a dialer writes after the handshake: it says
       what the connection carries, so control traffic never queues behind
@@ -1160,6 +1220,7 @@ files:
       - (*Node).safeApply
       - (*Node).answerCovered
       - (*Node).applied1
+      - (*Node).appliedAnswer
       - (*Node).keptResult
       - (*Node).releaseApplied
       - (*Node).waitApplied
@@ -1168,7 +1229,7 @@ files:
   - decls:
       - backupMagic
       - backupTable
-      - BackupPoint
+      - BackupPointValue
       - BackupParams
       - (*Node).ExportBackup
       - (*Node).AppendBackup
@@ -1178,6 +1239,9 @@ files:
       - scanBackup
       - backupScan
       - (*backupScan).file
+      - backupFile
+      - (*backupScan).record
+      - recordInPlace
       - (*backupScan).entries
       - (*backupScan).trailer
       - checkBackupBatch
@@ -1241,8 +1305,8 @@ files:
   - decls:
       - fileLock
       - PreallocateZeroFill
-      - Preallocate
       - SyncFdatasync
+      - Preallocate
       - SyncPath
       - DataDirOptions
       - dataDir
@@ -1391,12 +1455,16 @@ files:
       - (*fileLog).publishNext
       - (*fileLog).termLocked
       - (*fileLog).usable
-      - rangeReadBytes
       - rangeRead
       - (*rangeRead).take
       - (*fileLog).Entries
       - lowPayload
       - (*fileLog).readRun
+      - runSpan
+      - runRange
+      - (*fileLog).readLone
+      - (*fileLog).growRun
+      - (*fileLog).takeRun
       - (*fileLog).segmentNumbered
       - (*fileLog).pread
       - entryOf
@@ -1408,6 +1476,8 @@ files:
       - (*fileLog).Sync
       - (*fileLog).writeBatch
       - (*fileLog).writeAndSync
+      - (*fileLog).syncStart
+      - (*fileLog).syncDone
       - (*fileLog).settleBatch
       - (*fileLog).markDurable
       - (*fileLog).restamp
@@ -1435,7 +1505,6 @@ files:
       - entryLoc
       - (*fileLog).memFirst
       - (*fileLog).tableOf
-      - (*fileLog).locate
       - (*fileLog).spanEnd
       - (*fileLog).pushDisk
       - (*fileLog).pushTerm
@@ -1447,8 +1516,8 @@ files:
       - (*fileLog).lastTerm
       - (*fileLog).clearIndex
       - (*fileLog).relocate
+      - (*fileLog).relocateRecord
       - (*fileLog).retainsEntryIn
-      - (*fileLog).indexBytes
       - (*fileLog).memEntry
     name: filelog_index.go
   - decls:
@@ -1494,6 +1563,9 @@ files:
       - (*fileSnapshots).removeFiles
     name: filesnap.go
   - decls:
+      - _#2
+    name: filesnap_compliance.go
+  - decls:
       - fsFree
     name: fsfree_unix.go
   - decls:
@@ -1522,6 +1594,7 @@ files:
       - onThisLeader
       - (*Node).warnHandOver
       - (*Node).peerHealth
+      - peerRoleFlags
       - (*Node).peerUnreachable
     name: health.go
   - decls:
@@ -1647,11 +1720,14 @@ files:
       - stageUnsent
       - inboxDepth
       - Node
+      - traceState
+      - fwdTraceKey
+      - fwdSpan
       - snapState
-      - resultRing
       - applyResult
       - appliedWaiter
       - proposal
+      - (*proposal).isSession
       - propResult
       - readWait
       - readResult
@@ -1660,7 +1736,6 @@ files:
       - storeDone
       - newSubEpoch
       - NewNode
-      - dirHolder
       - newRaft
       - startStamp
       - refuseStamp
@@ -1670,7 +1745,12 @@ files:
       - lineageAccepts
       - silenceOf
       - (*Node).bindTransport
+      - (*Node).bindUnreachable
+      - (*Node).bindServed
+      - (*Node).bindWarners
       - (*Node).load
+      - (*Node).startPoint
+      - (*Node).refuseMemberless
       - stepApplied
       - termless
       - (*Node).durablePosition
@@ -1709,7 +1789,6 @@ files:
       - (*Node).queuedControl
       - (*Node).checkTurn
       - (*Node).sweep
-      - silenceBounder
       - (*Node).sweepReads
       - (*Node).sweepWaiters
       - (*Node).dropForward
@@ -1736,8 +1815,9 @@ files:
       - (*Node).answerReady
       - (*Node).checkAdmission
       - (*Node).setMembership
-      - joinReleaser
       - (*Node).leadershipChanged
+      - (*Node).endForwardTraces
+      - (*Node).restartPrefer
       - (*Node).startGrace
       - preferWatch
       - (*Node).watchPreferred
@@ -1777,6 +1857,11 @@ files:
       - (*Node).Membership
       - (*Node).WatchMembership
     name: node.go
+  - decls:
+      - dirHolder
+      - silenceBounder
+      - joinReleaser
+    name: node_interface.go
   - decls:
       - leaderContact
       - (*Node).probeLeader
@@ -1869,7 +1954,9 @@ files:
       - (*Node).observePeer
       - (*obs).resetDeparted
       - (*Node).observeResources
-      - linkAborter
+      - (*Node).observeLogStats
+      - (*Node).observeCerts
+      - (*Node).observeLinkAborts
     name: observe.go
   - decls:
       - (*Node).ReadCommitted
@@ -1879,6 +1966,7 @@ files:
       - ImportParams
       - ImportObserved
       - replayObserved
+      - observedCommand
       - encodeObserved
       - checkObservedTail
     name: observed.go
@@ -2017,11 +2105,6 @@ files:
       - (*Node).nextID
       - (*Node).forwardAnswered
       - ProposeAs
-      - (*Node).Barrier
-      - (*Node).awaitRead
-      - (*Node).WaitApplied
-      - (*Node).appliedAs
-      - (*Node).appliedTermAt
       - (*Node).admin
       - (*Node).AddLearner
       - (*Node).Promote
@@ -2041,6 +2124,13 @@ files:
       - (*Node).awaitLeader
     name: ops.go
   - decls:
+      - (*Node).Barrier
+      - (*Node).awaitRead
+      - (*Node).WaitApplied
+      - (*Node).appliedAs
+      - (*Node).appliedTermAt
+    name: ops_wait.go
+  - decls:
       - PEMIdentity
       - NewPEMIdentity
       - (*PEMIdentity).Roots
@@ -2050,7 +2140,6 @@ files:
     name: pem.go
   - decls:
       - preallocEverywhere
-      - probePreallocate
       - (*fileLog).resolvePreallocate
       - (*fileLog).bindWarn
       - (*diskFS).fallocateFill
@@ -2067,13 +2156,16 @@ files:
       - verdictElectionField
       - PreflightOptions
       - PreflightValue
-      - PreflightVerdict
+      - PreflightVerdictValue
       - Preflight
       - preflight
       - completePreflight
+      - checkPreflightBounds
       - preflightLock
       - scratchDir
       - measureSyncs
+      - zeroFill
+      - timeSyncs
       - nearestRank
       - judgePreflight
       - warnVerdicts
@@ -2084,6 +2176,18 @@ files:
       - (*fifo).push
       - (*fifo).take
     name: queue.go
+  - decls:
+      - (*Node).OpenSession
+      - (*Node).ProposeSession
+      - (*Node).proposeSession
+      - (*Node).submitSession
+      - (*Node).proposeSessionAt
+      - (*Node).appendedSession
+      - (*Node).answerCommittedCopy
+      - (*Node).applySession
+      - sessionsAt
+      - (*Node).sessionTable
+    name: session.go
   - decls:
       - chunkHeaderLen
       - castagnoli
@@ -2148,6 +2252,10 @@ files:
       - (*Node).save
       - (*Node).snapshotToSend
       - (*Node).sendSnapshot
+      - (*Node).openSnapshotFor
+      - (*Node).cancelOnStop
+      - (*Node).closeSent
+      - (*Node).transferDone
     name: snapshot.go
   - decls:
       - spaceCheckEvery
@@ -2180,8 +2288,12 @@ files:
       - (*Node).proposeRecord
       - appendFailed
       - (*nodeStream).Read
+      - (*nodeStream).readFrom
+      - (*nodeStream).compactedAt
+      - appendStreamRecords
       - (*nodeStream).Bounds
       - (*nodeStream).Wake
+      - closedWake
       - (*nodeStream).signal
       - frameStreamRecord
       - readStreamRecord
@@ -2203,15 +2315,16 @@ files:
   - decls:
       - rwfDsyncProbeName
       - syncEverywhere
-      - probeSyncPath
       - (*fileLog).resolveSyncPath
     name: syncpath.go
   - decls:
       - rwfDsync
+      - nrPwritev2AMD64
       - sysPwritev2
       - pwritev2Number
       - rwfDsyncProbe
       - writeDsync
+      - dsyncOutcome
     name: syncpath_linux.go
   - decls:
       - laneControl
@@ -2235,6 +2348,7 @@ files:
       - backLink
       - outKey
       - (*TransportConfig).validate
+      - (*TransportConfig).refusal
       - clampDuration
       - NewTCPTransport
       - newTCPTransport
@@ -2288,6 +2402,8 @@ files:
       - (*TCPTransport).Bind
       - (*TCPTransport).SetMembership
       - (*TCPTransport).setMembershipAt
+      - (*TCPTransport).forgetDeparted
+      - (*TCPTransport).cutDeparted
       - admittedUnion
       - recordAt
       - newestRecords
@@ -2308,6 +2424,9 @@ files:
       - boundedWriter.CloseWrite
       - installResult
       - (*TCPTransport).serveSnapshot
+      - (*TCPTransport).receiveSnapshot
+      - (*TCPTransport).installHooks
+      - installCode
       - drainHalfClose
       - encodeAccept
       - (*TCPTransport).refuseOffer
@@ -2342,6 +2461,9 @@ files:
       - (*TCPTransport).maxFrameBytes
     name: tcp.go
   - decls:
+      - _#3
+    name: tcp_compliance.go
+  - decls:
       - laneSnapshotGroup
       - binding
       - groupBinder
@@ -2351,7 +2473,6 @@ files:
       - (*TCPTransport).legacyBinding
       - frameGroup
       - (*TCPTransport).unroutedGroup
-      - (*TCPTransport).unroutedFrames
       - (*TCPTransport).unreachableFor
       - (*TCPTransport).undecodableFor
       - (*TCPTransport).membershipFor
@@ -2360,9 +2481,6 @@ files:
       - (*TCPTransport).offerBinding
     name: tcp_groups.go
   - decls:
-      - traceState
-      - fwdTraceKey
-      - fwdSpan
       - (*Node).traceAppended
       - traceForwardFlags
       - (*Node).traceForward
@@ -2392,7 +2510,7 @@ functions:
     results: error
   - name: VerifyBackup
     params: p *BackupParams, opt *RestoreOptions
-    results: BackupPoint, error
+    results: BackupPointValue, error
   - name: RestoreBackup
     params: d DataDir, p *BackupParams, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions
     results: coreconsensus.SnapshotMetaValue, error
@@ -2402,12 +2520,19 @@ functions:
       file ends at and, when keep, the entries in order.
     name: scanBackup
     params: p *BackupParams, keep bool
-    results: coreconsensus.SnapshotMetaValue, BackupPoint, []coreconsensus.EntryValue, error
+    results: meta coreconsensus.SnapshotMetaValue, at BackupPointValue, tail []coreconsensus.EntryValue, err error
+  - doc: |-
+      recordInPlace reports whether a record of type typ may come next in f:
+      snapshot bytes in an export before its metadata, the metadata once, then
+      entries and the trailer after it.
+    name: recordInPlace
+    params: typ byte, f *backupFile
+    results: bool
   - doc: |-
       checkBackupBatch checks that es continues at, as ImportObserved checks a
       tail against a snapshot.
     name: checkBackupBatch
-    params: at BackupPoint, es []coreconsensus.EntryValue
+    params: at BackupPointValue, es []coreconsensus.EntryValue
     results: error
   - doc: |-
       backupSnapshot rewinds an export and returns the reader of its snapshot
@@ -2417,12 +2542,12 @@ functions:
     results: io.Reader, error
   - doc: appendTrailer appends a trailer's payload.
     name: appendTrailer
-    params: dst []byte, from, to BackupPoint, count uint64
+    params: dst []byte, from, to BackupPointValue, count uint64
     results: "[]byte"
   - doc: parseTrailer reads a trailer's payload.
     name: parseTrailer
     params: b []byte
-    results: from, to BackupPoint, count uint64, ok bool
+    results: from, to BackupPointValue, count uint64, ok bool
   - doc: |-
       foundingDigest is the digest of the founding member list, so that a rerun
       with another list is refused.
@@ -2486,9 +2611,18 @@ functions:
     results: coreconsensus.TimingContractSpec, error
   - doc: |-
       writeFoundingEntry writes the founding configuration as entry 1, at term
-      1 and committed, with the generation 1 contract timing, then syncs it; a
-      log that already holds an entry is left alone, which is what makes a
-      rerun idempotent.
+      1, with the generation 1 contract timing, then syncs it; a log that
+      already holds an entry is left alone, which is what makes a rerun
+      idempotent.
+
+      Entry 1 is left uncommitted. Bootstrap contacts no peer, and entry 1
+      carries this founder's own InitialTiming, so founders given different
+      timings write different entries at (1, 1). Written committed, each
+      founder committed its own, the one entry no majority ever held, and the
+      odd ones refused every leader's chain for good (#698). Uncommitted, it
+      commits as any entry does, once the first leader holds its own on a
+      majority, and a founder that holds another one takes the leader's
+      (raft's replacesFounding): one entry 1, one generation 1 contract.
     name: writeFoundingEntry
     params: cfg *Config, members []coreconsensus.MemberValue, timing coreconsensus.TimingContractSpec
     results: error
@@ -2670,6 +2804,10 @@ functions:
   - doc: |-
       openOSFile is os.OpenFile as a segFile; a failed open is a nil interface,
       never a typed nil.
+
+      IFACE-PLUGIN: segFile is the disk fault seam (ADR 0152 D15): an *os.File in
+      production, the fault-injecting wrapper under test, so the result cannot be
+      one concrete type.
     name: openOSFile
     params: name string, flag int, perm os.FileMode
     results: segFile, error
@@ -3108,6 +3246,13 @@ functions:
     name: onThisLeader
     params: vs []raft.IsolationValue
     results: bool
+  - doc: |-
+      peerRoleFlags carries the facts of the leader's view a verdict repeats
+      as they are: whether the peer votes and whether a snapshot is under way
+      to it.
+    name: peerRoleFlags
+    params: f raft.PeerStatFlags
+    results: PeerFlags
   - doc: drawID draws a random NodeID, never 0.
     name: drawID
     results: coreconsensus.NodeID
@@ -3390,10 +3535,21 @@ functions:
   - doc: |-
       replayObserved restores p.Snapshot into p.Machine, reads the stream to its
       digest whatever the machine left unread, then applies the tail's commands
-      with the tokens the snapshot's lineage gives them.
+      with the tokens the snapshot's lineage gives them. A session command is
+      folded into the snapshot's sessions and applied, as the command it
+      carries, only when the fold says so, as a node applies it (#918); the
+      sessions it returns are the ones the tail left.
     name: replayObserved
     params: p *ImportParams, opt *RestoreOptions
-    results: error
+    results: "[]coreconsensus.SessionValue, error"
+  - doc: |-
+      observedCommand reports whether e, an entry of an observed tail, is a
+      command to apply: an EntryCommand, or a session command sessions folds in
+      and applies, which e is then made the command it carries of. Any other
+      entry is the engine's own and is not applied.
+    name: observedCommand
+    params: sessions *raft.SessionTable, e *coreconsensus.EntryValue
+    results: bool
   - doc: |-
       encodeObserved encodes the state p.Machine reached as a snapshot stream,
       and the metadata that describes it: exp's, moved to the tail's last entry.
@@ -3808,10 +3964,16 @@ functions:
       preflight is Preflight with the sync it times, which a test replaces to
       drive the measurement on a ManualClock.
     name: preflight
-    params: dir string, opts PreflightOptions, sync func(*os.File) error
-    results: v PreflightValue, err error
+    params: dir string, opts *PreflightOptions, sync func(*os.File) error
+    results: measured PreflightValue, err error
   - doc: completePreflight gives opts its defaults and refuses its bounds.
     name: completePreflight
+    params: opts *PreflightOptions
+    results: error
+  - doc: |-
+      checkPreflightBounds refuses the options a default cannot repair: a
+      negative size or a count above preflightMaxSyncs.
+    name: checkPreflightBounds
     params: opts *PreflightOptions
     results: error
   - doc: |-
@@ -3822,7 +3984,7 @@ functions:
       where the platform has none (ADR 0144).
     name: preflightLock
     params: dir string
-    results: func() error, error
+    results: release func() error, err error
   - doc: |-
       scratchDir is where the scratch file goes: the log directory of dir when
       it exists, the disk the log trusts, else dir itself.
@@ -3836,25 +3998,45 @@ functions:
       happened; a failed removal is a storage failure too, since it would leave
       a file behind.
     name: measureSyncs
-    params: dir string, opts PreflightOptions, sync func(*os.File) error
+    params: dir string, opts *PreflightOptions, sync func(*os.File) error
     results: lat []time.Duration, err error
+  - doc: |-
+      zeroFill writes n zero records of len(rec) into f and syncs it, as a
+      segment is prepared, so the timed writes below overwrite allocated blocks.
+    name: zeroFill
+    params: f segFile, rec []byte, n int
+    results: error
+  - doc: |-
+      timeSyncs overwrites each of opts.Syncs records of f with rec, times the
+      sync that follows each, and returns the latencies, sorted.
+    name: timeSyncs
+    params: f *os.File, rec []byte, opts *PreflightOptions, sync func(*os.File) error
+    results: "[]time.Duration, error"
   - doc: nearestRank is the p-th percentile of sorted by nearest rank.
     name: nearestRank
     params: sorted []time.Duration, p int
     results: time.Duration
   - doc: judgePreflight lists the rules v breaks.
     name: judgePreflight
-    params: v PreflightValue, opts PreflightOptions
-    results: "[]PreflightVerdict"
+    params: v *PreflightValue, opts *PreflightOptions
+    results: "[]PreflightVerdictValue"
   - doc: warnVerdicts logs each verdict at Warn, with the measurement it rests on.
     name: warnVerdicts
-    params: log corelogger.Logger, v PreflightValue
+    params: log corelogger.Logger, v *PreflightValue
   - doc: |-
       newFifo returns an empty queue whose signal holds at most one pending
       wake-up: a consumer that drains with take after each wake-up misses none.
     name: newFifo
     results: "*fifo[T]"
     typeParams: T any
+  - doc: |-
+      sessionsAt is the session table as the entries through applied left it:
+      the snapshot's, then every session command the start's tail holds past it
+      through the index a durable machine resumes from. The start loads every
+      session command with its payload (readTail drops only a command's).
+    name: sessionsAt
+    params: base *coreconsensus.SnapshotMetaValue, ents []coreconsensus.EntryValue, applied uint64
+    results: "*raft.SessionTable"
   - doc: |-
       newChunkWriter returns a writer that encodes every chunk bytes of decoded
       stream with codec and emits it to w; the last, partial chunk is emitted
@@ -4043,6 +4225,17 @@ functions:
     params: err error, index int, done corestream.AppendValue, tok coreconsensus.TokenValue, known bool
     results: error
   - doc: |-
+      appendStreamRecords appends to out the records among ents, skipping the
+      entries that are not records.
+    name: appendStreamRecords
+    params: out []corestream.EntryValue, ents []coreconsensus.EntryValue
+    results: "[]corestream.EntryValue"
+  - doc: |-
+      closedWake is the wake of a stream whose node ended: closed already, as
+      it stays.
+    name: closedWake
+    results: <-chan struct{}
+  - doc: |-
       frameStreamRecord frames r as a record entry appended at at: magic, version,
       the instant in Unix nanoseconds, the key's length, the key, the payload.
     name: frameStreamRecord
@@ -4122,6 +4315,14 @@ functions:
     name: writeDsync
     params: f *os.File, b []byte, off int64
     results: ok bool, err error
+  - doc: |-
+      dsyncOutcome judges one answer of pwritev2(2): retry on EINTR; unsupported
+      when the kernel has no pwritev2 or no RWF_DSYNC, which only the first call
+      of a write can say, since a later one follows a call that worked; else the
+      error the call failed with, io.ErrShortWrite for a call that wrote nothing.
+    name: dsyncOutcome
+    params: first bool, n uintptr, errno syscall.Errno
+    results: retry, unsupported bool, err error
   - doc: |-
       transportMisconfigured refuses a TransportConfig, naming the field and
       the reason, never the value.
@@ -4278,6 +4479,12 @@ functions:
     name: installResult
     params: c *tls.Conn
     results: error
+  - doc: |-
+      installCode is the code an install's error ends its stream with: 0 for
+      none, SNAPSHOT_CORRUPT for an error that carries no code.
+    name: installCode
+    params: err error
+    results: errs.Code
   - doc: |-
       drainHalfClose reads what the sender wrote after the body, its TLS
       close_notify, before serve closes the socket. Left unread in the receive
@@ -4534,7 +4741,7 @@ types:
         name: ChainTip
         type: uint32
     kind: struct
-    name: BackupPoint
+    name: BackupPointValue
   - fields:
       - doc: Export is the file ExportBackup wrote.
         name: Export
@@ -4554,7 +4761,7 @@ types:
       - name: meta
         type: coreconsensus.SnapshotMetaValue
       - name: at
-        type: BackupPoint
+        type: BackupPointValue
       - name: tail
         type: "[]coreconsensus.EntryValue"
       - name: msg
@@ -4566,6 +4773,13 @@ types:
         params: r io.Reader, kind byte
         recv: s *backupScan
         results: error
+      - doc: |-
+          record applies one record of a file to the scan and to f, and reports
+          done once the trailer, the last record, has been checked.
+        name: record
+        params: br *backupReader, f *backupFile, typ byte, payload []byte
+        recv: s *backupScan
+        results: done bool, err error
       - doc: entries checks one entry record against the chain and keeps its entries.
         name: entries
         params: payload []byte
@@ -4575,10 +4789,25 @@ types:
           trailer checks a file's trailer against what the file held, and that
           nothing follows it.
         name: trailer
-        params: br *backupReader, payload []byte, base BackupPoint, count uint64
+        params: br *backupReader, payload []byte, base BackupPointValue, count uint64
         recv: s *backupScan
         results: error
     name: backupScan
+  - doc: |-
+      backupFile is what file has read of one backup file so far: its kind, the
+      point it starts from, whether the metadata record came and how many
+      entries it held.
+    fields:
+      - name: kind
+        type: byte
+      - name: base
+        type: BackupPointValue
+      - name: count
+        type: uint64
+      - name: metaSeen
+        type: bool
+    kind: struct
+    name: backupFile
   - doc: backupWriter writes a backup file's header and records.
     fields:
       - name: w
@@ -5412,7 +5641,7 @@ types:
           when the damage is at its start, and zeroes segN from off otherwise.
         name: truncateAtDamage
         params: logDir string, segN uint64, off int64
-        recv: disk *diskFS
+        recv: d *diskFS
         results: error
       - doc: |-
           truncateSegment applies the truncation at (segN, off) to segment n of
@@ -5420,7 +5649,7 @@ types:
           from off when the damage is inside it, untouched before it.
         name: truncateSegment
         params: path string, n, segN uint64, off, size int64
-        recv: disk *diskFS
+        recv: d *diskFS
         results: error
       - doc: |-
           zeroSegmentFrom zeroes and syncs the segment at path from off to size.
@@ -5428,7 +5657,7 @@ types:
           zeroing's.
         name: zeroSegmentFrom
         params: path string, off, size int64
-        recv: disk *diskFS
+        recv: d *diskFS
         results: err error
       - doc: |-
           fallocateFill is zeroFrom's counterpart in PreallocateFallocate: f's
@@ -5900,6 +6129,10 @@ types:
           segmentFile is the zero-filled .tmp of segment n at size: the prepared
           one when it is that segment at that size, else one created and zeroed now,
           on the writer's path, where a failure stops the log.
+
+          IFACE-PLUGIN: segFile is the disk fault seam (ADR 0152 D15): an *os.File in
+          production, the fault-injecting wrapper under test, so the result cannot be
+          one concrete type.
         name: segmentFile
         params: n uint64, size int64, tmp string
         recv: l *fileLog
@@ -5932,6 +6165,10 @@ types:
       - doc: |-
           takePrepared waits for the prepared segment n, when it is the one wanted
           at that size; nil means prepare it now.
+
+          IFACE-PLUGIN: segFile is the disk fault seam (ADR 0152 D15): an *os.File in
+          production, the fault-injecting wrapper under test, so the result cannot be
+          one concrete type.
         name: takePrepared
         params: n uint64, size int64
         recv: l *fileLog
@@ -5987,6 +6224,29 @@ types:
           holds mu.
         name: readRun
         params: rr *rangeRead, i uint64
+        recv: l *fileLog
+        results: uint64, error
+      - doc: |-
+          readLone is readRun's single-entry read, for an entry whose extent is not
+          known: it takes entry i and returns i+1.
+        name: readLone
+        params: rr *rangeRead, i uint64, sp runSpan
+        recv: l *fileLog
+        results: uint64, error
+      - doc: |-
+          growRun extends sp.end over the entries after i that the interval may
+          still take, and returns the index one past the last of them; low is the
+          payload estimate of what sp already covers.
+        name: growRun
+        params: rr *rangeRead, sp *runSpan, i uint64, low int64
+        recv: l *fileLog
+        results: uint64
+      - doc: |-
+          takeRun parses the records of the run in b, which holds sp from its start,
+          and takes their entries into rr; it returns the index of the first entry
+          it did not take.
+        name: takeRun
+        params: rr *rangeRead, sp runSpan, run runRange, b []byte
         recv: l *fileLog
         results: uint64, error
       - doc: segmentNumbered is the open segment numbered n, nil for none.
@@ -6059,6 +6319,18 @@ types:
         params: cur *segment, b []byte, off int64, end bool
         recv: l *fileLog
         results: error
+      - doc: |-
+          syncStart is the clock reading a durability point is timed from: the zero
+          time when no one times them.
+        name: syncStart
+        recv: l *fileLog
+        results: time.Time
+      - doc: |-
+          syncDone reports to the timing hook, when set, how long the durability
+          point that began at start took; end says it was a batch's end record.
+        name: syncDone
+        params: start time.Time, end bool
+        recv: l *fileLog
       - doc: |-
           settleBatch records the pending batch, now synced in segment seg, as
           durable: its entries are read from disk from here on, the write offset
@@ -6177,14 +6449,7 @@ types:
         name: tableOf
         params: i uint64
         recv: l *fileLog
-        results: t, p int
-      - doc: |-
-          locate is where synced entry i lies; the caller checked that it is synced
-          and retained.
-        name: locate
-        params: i uint64
-        recv: l *fileLog
-        results: entryLoc
+        results: tab, pos int
       - doc: |-
           spanEnd bounds from above the end of the record at position p of table t:
           the next entry's offset, or the table's end for its last one.
@@ -6262,19 +6527,21 @@ types:
         recv: l *fileLog
         results: bool
       - doc: |-
+          relocateRecord points the index at record r, which lies at off in the
+          pending batch, when it is the in-memory entry the batch just synced, and
+          returns how many in-memory entries have moved so far (moved, from mf on);
+          false when a table cannot hold the offset.
+        name: relocateRecord
+        params: r *record, seg uint64, off int64, mf uint64, moved int
+        recv: l *fileLog
+        results: int, bool
+      - doc: |-
           retainsEntryIn reports whether a retained entry still lives in segment
           seg.
         name: retainsEntryIn
         params: seg uint64
         recv: l *fileLog
         results: bool
-      - doc: |-
-          indexBytes is the bytes the index keeps resident, the entries in memory
-          aside, which the unsynced batch bounds: the tables' offsets, the tables,
-          and the term runs (#1111).
-        name: indexBytes
-        recv: l *fileLog
-        results: int64
       - doc: memEntry is entry i of the unsynced tail; the caller checked i >= memFirst.
         name: memEntry
         params: i uint64
@@ -6605,6 +6872,30 @@ types:
         recv: rr *rangeRead
         results: bool
     name: rangeRead
+  - doc: |-
+      runSpan is the extent readRun reads: the table and position of its first
+      entry, its segment once found, and its byte range [start, end) in it.
+    fields:
+      - name: tab
+        type: "*segIndex"
+      - name: seg
+        type: "*segment"
+      - name: pos
+        type: int
+      - name: start
+        type: int64
+      - name: end
+        type: int64
+    kind: struct
+    name: runSpan
+  - doc: runRange is the entries [from, to) one run takes.
+    fields:
+      - name: from
+        type: uint64
+      - name: to
+        type: uint64
+    kind: struct
+    name: runRange
   - doc: |-
       segIndex locates the retained entries one segment holds, from index first
       on: offs[k] is entry first+k's record offset over recAlign, and end bounds
@@ -7576,6 +7867,12 @@ types:
         type: atomic.Pointer[coreconsensus.LogIdentityValue]
       - name: stamp
         type: coreconsensus.StampValue
+      - doc: |-
+          sessions are the client sessions as the entries applied left them
+          (#918): the apply goroutine folds every session command before it
+          decides what the machine is handed, and a cut records them.
+        name: sessions
+        type: "*raft.SessionTable"
       - name: inCtrl
         type: chan coreconsensus.MessageValue
       - name: inData
@@ -7939,6 +8236,15 @@ types:
         params: e *coreconsensus.EntryValue, val any
         recv: n *Node
       - doc: |-
+          appliedAnswer records one applied entry and answers the Propose that
+          created it on this node: with the token of answer, the entry's own
+          position or, for a session command already applied, the copy's, whose
+          value is the one recorded there while the node still holds it; or with
+          the refusal code a session command's fold decided (#918).
+        name: appliedAnswer
+        params: e *coreconsensus.EntryValue, val any, answer coreconsensus.PositionValue, code errs.Code
+        recv: n *Node
+      - doc: |-
           keptResult is the Apply result kept at index, if its ring slot still
           holds that index's. The caller holds am.
         name: keptResult
@@ -7963,18 +8269,18 @@ types:
       - name: ExportBackup
         params: ctx context.Context, op coreconsensus.Operator, w io.Writer
         recv: n *Node
-        results: BackupPoint, error
+        results: BackupPointValue, error
       - name: AppendBackup
-        params: ctx context.Context, since BackupPoint, w io.Writer
+        params: ctx context.Context, since BackupPointValue, w io.Writer
         recv: n *Node
-        results: BackupPoint, error
+        results: BackupPointValue, error
       - doc: |-
           writeBackupTail writes the entries after base up to the commit a barrier
           reads now, checked against base's chain, then the trailer.
         name: writeBackupTail
-        params: ctx context.Context, bw *backupWriter, base BackupPoint
+        params: ctx context.Context, bw *backupWriter, base BackupPointValue
         recv: n *Node
-        results: BackupPoint, error
+        results: BackupPointValue, error
       - name: Health
         recv: n *Node
         results: HealthValue
@@ -8337,11 +8643,45 @@ types:
         recv: n *Node
         results: error
       - doc: |-
+          bindUnreachable hands the transport the unreachable report, under the
+          node's group when it serves several (gb, grouped).
+        name: bindUnreachable
+        params: gb groupBinder, grouped bool
+        recv: n *Node
+      - doc: |-
+          bindServed hands the transport the read of the configuration a member
+          asks (#763) and the offer it could not decode (#665), under the node's
+          group when it serves several (gb, grouped), else through the siblings
+          that name none when it supports them.
+        name: bindServed
+        params: gb groupBinder, grouped bool
+        recv: n *Node
+      - doc: |-
+          bindWarners hands the transport and the log the node's Warn line, to
+          those that take it.
+        name: bindWarners
+        recv: n *Node
+      - doc: |-
           load restores the latest snapshot whose checksums pass and reads the log
           after it.
         name: load
         recv: n *Node
         results: raft.StartState, error
+      - doc: |-
+          startPoint is what load starts from: the snapshots the store lists and
+          the position a durable machine resumes at.
+        name: startPoint
+        recv: n *Node
+        results: "[]coreconsensus.SnapshotMetaValue, coreconsensus.PositionValue, error"
+      - doc: |-
+          refuseMemberless refuses a start that nothing names the members of: no
+          snapshot is left, and the log begins past a compaction with no
+          configuration entry after it. Started, the node would admit nobody, never
+          be installed again and say nothing; it is refused, and says why (#526).
+        name: refuseMemberless
+        params: base *coreconsensus.SnapshotMetaValue, ents []coreconsensus.EntryValue
+        recv: n *Node
+        results: error
       - doc: |-
           durablePosition is the position a DurableStateMachine already holds
           applied, counted only when it was applied in this log's lineage, or in the
@@ -8701,7 +9041,9 @@ types:
           that committed past an index this node holds committed and carried
           another entry there (#698), and reports whether it did: no majority holds
           this node's entry. It stops BOOTSTRAP_REFUSED at the founding entry, the
-          founders having passed different initial timings, LOG_CORRUPT past it.
+          founders having passed different member lists (or, in a data directory
+          founded before Bootstrap left entry 1 uncommitted, different initial
+          timings), LOG_CORRUPT past it.
           That Ready is then not carried out at all.
         name: stopOnDivergence
         params: rd *raft.ReadyValue
@@ -8784,6 +9126,19 @@ types:
         recv: n *Node
       - doc: leadershipChanged answers what a change of leader or term made unknown.
         name: leadershipChanged
+        recv: n *Node
+      - doc: |-
+          endForwardTraces ends the traces of the forwards this node served while
+          it led, once st says it no longer does: a forward answered with a
+          position may never commit now.
+        name: endForwardTraces
+        params: st *raft.StatusValue
+        recv: n *Node
+      - doc: |-
+          restartPrefer starts the watch of the preferred nodes over with the
+          leadership st describes.
+        name: restartPrefer
+        params: st *raft.StatusValue
         recv: n *Node
       - doc: |-
           startGrace starts the grace period of every unresolved proposal.
@@ -9176,7 +9531,7 @@ types:
           its stream is due (streamDue), or once it was lifted. No pin holds once
           the log is tight. It runs on the loop.
         name: pinAt
-        params: to coreconsensus.NodeID, pin sendPin, now time.Time
+        params: to coreconsensus.NodeID, pin *sendPin, now time.Time
         recv: n *Node
         results: uint64, bool
       - doc: |-
@@ -9207,7 +9562,7 @@ types:
           byte only, and one removed while it was sent the snapshot, whose stream
           only its end released (#623). It runs on the loop.
         name: streamDue
-        params: to coreconsensus.NodeID, pin sendPin, now time.Time
+        params: to coreconsensus.NodeID, pin *sendPin, now time.Time
         recv: n *Node
         results: bool
       - doc: |-
@@ -9354,6 +9709,27 @@ types:
           the loop (D13).
         name: observeResources
         recv: n *Node
+      - doc: |-
+          observeLogStats publishes the log's size, the free space of its
+          filesystem and the tails it truncated, for a log that keeps them.
+        name: observeLogStats
+        params: o *obs
+        recv: n *Node
+      - doc: |-
+          observeCerts publishes how long this node's certificate and each peer's
+          remain valid at now, and the reloads that failed, for a transport that
+          holds certificates. A peer no longer seen has its gauge set to
+          departedCertExpiry.
+        name: observeCerts
+        params: o *obs, now time.Time
+        recv: n *Node
+      - doc: |-
+          observeLinkAborts publishes the sender links the transport aborted for
+          bytes left unacknowledged and for read silence, for a transport that
+          counts them (#1116).
+        name: observeLinkAborts
+        params: o *obs
+        recv: n *Node
       - name: ReadCommitted
         params: ctx context.Context, from, to uint64, maxBytes int
         recv: n *Node
@@ -9380,7 +9756,7 @@ types:
         name: submitProposal
         params: ctx context.Context, p *proposal
         recv: n *Node
-        results: coreconsensus.TokenValue, any, error
+        results: propResult
       - doc: |-
           awaitProposal waits for the loop's answer to a proposal it already holds.
           A ctx that ends first is ctx.Err() only while the proposal is provably
@@ -9469,47 +9845,6 @@ types:
         name: forwardAnswered
         params: m coreconsensus.MessageValue
         recv: n *Node
-      - name: Barrier
-        params: ctx context.Context
-        recv: n *Node
-        results: coreconsensus.TokenValue, error
-      - doc: |-
-          awaitRead waits for the loop's answer to w. It reports false when ctx
-          ended first, or when the loop ended without answering: a read queued after
-          the loop's last turn is answered by no one.
-        name: awaitRead
-        params: ctx context.Context, w *readWait
-        recv: n *Node
-        results: readResult, bool
-      - name: WaitApplied
-        params: ctx context.Context, t coreconsensus.TokenValue
-        recv: n *Node
-        results: error
-      - doc: |-
-          appliedAs checks that the entry applied at t's index is t's: the index
-          alone named the predecessor's identity, and since Recover adopts the
-          verified suffix past the commit the survivor persisted (D17), an entry it
-          kept there may be of another term than the write the old cluster
-          committed and acknowledged at that index. That write is lost, and
-          WaitApplied reported it applied (#509). Where the term cannot be read any
-          more, a token of the current history is trusted by Log Matching, and so
-          is one of the predecessor's at or below the index the predecessor had
-          committed there (AdoptedFrom, #509 phase 2); one in the adopted range
-          above it is not: that range may hold such a suffix.
-        name: appliedAs
-        params: t coreconsensus.TokenValue
-        recv: n *Node
-        results: error
-      - doc: |-
-          appliedTermAt is the term of the entry applied at index, which the caller
-          waited for: from the step function, whose committed log is the truth, then
-          from the store while index is one this node applied from its log, which
-          the store holds as committed. known is false when neither holds it any
-          more; ok is false when the node stopped.
-        name: appliedTermAt
-        params: index uint64
-        recv: n *Node
-        results: term uint64, known, ok bool
       - doc: |-
           admin validates the operator, then submits an administrative entry and
           logs it at Warn with its outcome whatever that outcome is, so every
@@ -9633,6 +9968,109 @@ types:
         params: ctx context.Context, to coreconsensus.NodeID
         recv: n *Node
         results: error
+      - name: Barrier
+        params: ctx context.Context
+        recv: n *Node
+        results: coreconsensus.TokenValue, error
+      - doc: |-
+          awaitRead waits for the loop's answer to w. It reports false when ctx
+          ended first, or when the loop ended without answering: a read queued after
+          the loop's last turn is answered by no one.
+        name: awaitRead
+        params: ctx context.Context, w *readWait
+        recv: n *Node
+        results: readResult, bool
+      - name: WaitApplied
+        params: ctx context.Context, t coreconsensus.TokenValue
+        recv: n *Node
+        results: error
+      - doc: |-
+          appliedAs checks that the entry applied at t's index is t's: the index
+          alone named the predecessor's identity, and since Recover adopts the
+          verified suffix past the commit the survivor persisted (D17), an entry it
+          kept there may be of another term than the write the old cluster
+          committed and acknowledged at that index. That write is lost, and
+          WaitApplied reported it applied (#509). Where the term cannot be read any
+          more, a token of the current history is trusted by Log Matching, and so
+          is one of the predecessor's at or below the index the predecessor had
+          committed there (AdoptedFrom, #509 phase 2); one in the adopted range
+          above it is not: that range may hold such a suffix.
+        name: appliedAs
+        params: t coreconsensus.TokenValue
+        recv: n *Node
+        results: error
+      - doc: |-
+          appliedTermAt is the term of the entry applied at index, which the caller
+          waited for: from the step function, whose committed log is the truth, then
+          from the store while index is one this node applied from its log, which
+          the store holds as committed. known is false when neither holds it any
+          more; ok is false when the node stopped.
+        name: appliedTermAt
+        params: index uint64
+        recv: n *Node
+        results: term uint64, known, ok bool
+      - name: OpenSession
+        params: ctx context.Context, s coreconsensus.SessionID
+        recv: n *Node
+        results: error
+      - name: ProposeSession
+        params: ctx context.Context, s coreconsensus.SessionID, seq uint64, data []byte
+        recv: n *Node
+        results: coreconsensus.TokenValue, any, error
+      - doc: |-
+          proposeSession submits the session entry of command seq of s, the
+          opening for seq 0.
+        name: proposeSession
+        params: ctx context.Context, s coreconsensus.SessionID, seq uint64, data []byte
+        recv: n *Node
+        results: propResult
+      - doc: submitSession is submit for a session command.
+        name: submitSession
+        params: ctx context.Context, e coreconsensus.EntryValue
+        recv: n *Node
+        results: propResult
+      - doc: |-
+          proposeSessionAt appends a session command at this leader, or answers it
+          with the copy it already knows: one at or below the commit is applied,
+          or about to be on this node, and is answered as applied once it is.
+        name: proposeSessionAt
+        params: now time.Time, p *proposal
+        recv: n *Node
+      - doc: |-
+          appendedSession registers a session command at pos, which the leader
+          answered with commit as its commit: a position past it is waited on as
+          any proposal's; one at or below it is the committed copy of an earlier
+          submission, whose waiter is gone, and is answered once this node applied
+          it, with its value while the node holds it. That answer waits on a
+          goroutine of its own, counted in n.wg as every goroutine the loop starts,
+          so Close outlives it: it ends once the copy is applied or the loop is
+          done. It runs on the loop.
+        name: appendedSession
+        params: p *proposal, pos coreconsensus.PositionValue, commit uint64, local bool
+        recv: n *Node
+      - doc: |-
+          answerCommittedCopy answers p once this node applied the committed copy
+          at pos, off the loop: the apply may lag the commit. A node that stops
+          first answers its stop.
+        name: answerCommittedCopy
+        params: p *proposal, pos coreconsensus.PositionValue
+        recv: n *Node
+      - doc: |-
+          applySession folds the committed session command e into the node's table
+          and applies it, or answers it, as the table says: a command it has not
+          seen is handed to the machine as the command it carries, once; an opening
+          and a copy are answered and applied nowhere. It returns false when the
+          machine failed and the node is stopping.
+        name: applySession
+        params: e *coreconsensus.EntryValue
+        recv: n *Node
+        results: bool
+      - doc: |-
+          sessionTable is the node's session table, an empty one before a start
+          set it.
+        name: sessionTable
+        recv: n *Node
+        results: "*raft.SessionTable"
       - doc: |-
           restoreFrom verifies a snapshot's digest, then restores the state machine
           from it, serialised with Apply.
@@ -9889,6 +10327,37 @@ types:
         params: to coreconsensus.NodeID
         recv: n *Node
       - doc: |-
+          openSnapshotFor opens the snapshot sendSnapshot streams to peer to, and
+          tells raft at once when there is none to send it: none cut yet, which it
+          asks for so that the next probe sends it, one withheld from that peer,
+          or one that does not open. It runs on the loop.
+        name: openSnapshotFor
+        params: to coreconsensus.NodeID
+        recv: n *Node
+        results: coreconsensus.SnapshotMetaValue, coreconsensus.SnapshotHandle, bool
+      - doc: |-
+          cancelOnStop cancels a snapshot stream when the node stops, and returns
+          once the stream's ctx ended either way.
+        name: cancelOnStop
+        params: ctx context.Context, cancel context.CancelFunc
+        recv: n *Node
+      - doc: |-
+          closeSent closes the handle a stream of snapshot id read. The transfer is
+          over whatever the read handle says; the pin it held is released either
+          way, and a failure is only logged.
+        name: closeSent
+        params: h coreconsensus.SnapshotHandle, id string
+        recv: n *Node
+      - doc: |-
+          transferDone settles, on the loop, the stream of the snapshot at index to
+          peer to that ended with err: a stream that completed leaves the pin a
+          streamed snapshot holds, aged from the offer (D13); one that failed drops
+          its pin and lets compaction run. raft hears the outcome, and the next
+          waiting peer is served.
+        name: transferDone
+        params: to coreconsensus.NodeID, index uint64, err error
+        recv: n *Node
+      - doc: |-
           trailingKept is how many entries compaction keeps behind its point, the
           older retained snapshot (afterCut): SnapshotTrailing, or none once the
           log has no room for them, this node's disk short or its log half way to
@@ -10011,6 +10480,48 @@ types:
         params: err error
         recv: n *Node
     name: Node
+  - doc: |-
+      traceState is what the loop holds of D13's spans between the turn that
+      learns a position and the commit that covers it: the proposals of this
+      node whose span waits for its "committed" event, and on a leader the
+      spans of the forwards it handles, opened at the forward and ended at the
+      commit of the position it answered (#1115). It is touched only when a
+      span exists, so a node with no Tracer pays nothing for it.
+    fields:
+      - doc: |-
+          commit is the highest commit index a Ready handed; every waiter at
+          or below it was committed before the apply goroutine was handed it.
+        name: commit
+        type: uint64
+      - doc: waits are this node's proposals appended and not yet committed.
+        name: waits
+        type: "[]*proposal"
+      - doc: |-
+          answers are the forwards stepped and not yet answered, by sender
+          and submission id; made at the first traced forward.
+        name: answers
+        type: map[fwdTraceKey]coretrace.Span
+      - doc: open are the answered forwards waiting for their commit.
+        name: open
+        type: "[]fwdSpan"
+    kind: struct
+    name: traceState
+  - doc: "fwdTraceKey names a forward as its answer does: its sender, its id."
+    fields:
+      - name: from
+        type: coreconsensus.NodeID
+      - name: ctx
+        type: uint64
+    kind: struct
+    name: fwdTraceKey
+  - doc: fwdSpan is a leader's span of a forward whose position is known.
+    fields:
+      - name: index
+        type: uint64
+      - name: span
+        type: coretrace.Span
+    kind: struct
+    name: fwdSpan
   - doc: "snapState tracks the cuts: at most one in flight, coalesced (D7)."
     fields:
       - name: mu
@@ -10111,6 +10622,16 @@ types:
         name: span
         type: coretrace.Span
     kind: struct
+    methods:
+      - doc: |-
+          isSession reports whether p is a session command (#918): a position the
+          leader answers at or below its commit is the copy already committed, and
+          answered as applied. Its entry's kind says it, and is the only thing that
+          does: submitSession is the one path that builds a proposal of that kind,
+          and every other builds an EntryCommand or an admin kind.
+        name: isSession
+        recv: p *proposal
+        results: bool
     name: proposal
   - fields:
       - name: tok
@@ -10171,16 +10692,6 @@ types:
     kind: struct
     name: storeDone
   - doc: |-
-      dirHolder is the shipped log's hold on its data directory: a DataDir
-      refuses offline work and Close while a Node holds it (D11, R3-18).
-    kind: named
-    name: dirHolder
-    underlying: |-
-      interface {
-      	acquire() error
-      	release()
-      }
-  - doc: |-
       tailLoad is the tail readTail loads: the entries read from lo on, the
       payload bytes they hold past the last index whose payload was dropped,
       the commit index no drop passes, and the payload of the entries through
@@ -10216,25 +10727,6 @@ types:
         recv: t *tailLoad
         results: uint64
     name: tailLoad
-  - doc: |-
-      silenceBounder is a transport whose sender links a node bounds by read
-      silence (TCPTransport.boundSilence, #1116).
-    kind: named
-    name: silenceBounder
-    underlying: |-
-      interface {
-      	boundSilence(d time.Duration)
-      }
-  - doc: |-
-      joinReleaser is a transport that keeps a JOIN answer's members admitted
-      apart from the engine's configuration until the joiner is admitted
-      (#552).
-    kind: named
-    name: joinReleaser
-    underlying: |-
-      interface {
-      	releaseJoinAnswer()
-      }
   - doc: |-
       preferWatch is a leader's watch of PreferredLeaders, reset at every
       change of leadership.
@@ -10284,6 +10776,35 @@ types:
         type: bool
     kind: struct
     name: storeState
+  - doc: |-
+      dirHolder is the shipped log's hold on its data directory: a DataDir
+      refuses offline work and Close while a Node holds it (D11, R3-18).
+    kind: named
+    name: dirHolder
+    underlying: |-
+      interface {
+      	acquire() error
+      	release()
+      }
+  - doc: |-
+      silenceBounder is a transport whose sender links a node bounds by read
+      silence (TCPTransport.boundSilence, #1116).
+    kind: named
+    name: silenceBounder
+    underlying: |-
+      interface {
+      	boundSilence(d time.Duration)
+      }
+  - doc: |-
+      joinReleaser is a transport that keeps a JOIN answer's members admitted
+      apart from the engine's configuration until the joiner is admitted
+      (#552).
+    kind: named
+    name: joinReleaser
+    underlying: |-
+      interface {
+      	releaseJoinAnswer()
+      }
   - doc: |-
       leaderContact is what a node that does not lead knows of whether its
       leader hears it: a heartbeat only says the leader reaches this node, and
@@ -10697,15 +11218,6 @@ types:
       	bindWarn(warn func(msg string, attrs ...corelogger.AttrValue))
       }
   - doc: |-
-      linkAborter is a transport that counts the sender links it aborted for
-      bytes left unacknowledged and for read silence (#1116).
-    kind: named
-    name: linkAborter
-    underlying: |-
-      interface {
-      	linksAborted() (userTimeout, readSilence int64)
-      }
-  - doc: |-
       snapshotReader is OpenSnapshot's reader: a chunk reader whose end is
       checked against the metadata.
     fields:
@@ -11071,7 +11583,7 @@ types:
         type: bool
       - doc: Verdicts lists each rule broken, empty when none is.
         name: Verdicts
-        type: "[]PreflightVerdict"
+        type: "[]PreflightVerdictValue"
     kind: struct
     name: PreflightValue
   - fields:
@@ -11080,7 +11592,7 @@ types:
       - name: Rule
         type: string
     kind: struct
-    name: PreflightVerdict
+    name: PreflightVerdictValue
   - doc: |-
       fifo is a queue a producer never blocks on: the event loop pushes to the
       storage actor and the apply goroutine without ever waiting for them (D5b).
@@ -11313,6 +11825,21 @@ types:
         recv: s *nodeStream
         results: "[]corestream.EntryValue, error"
       - doc: |-
+          readFrom reads the records of the entries lo through last, at most max,
+          as Read does once it checked its offset against the bounds.
+        name: readFrom
+        params: ctx context.Context, lo, last uint64, max int
+        recv: s *nodeStream
+        results: "[]corestream.EntryValue, error"
+      - doc: |-
+          compactedAt answers a read the log was compacted under at lo: what was
+          read before it, the next Read reporting the gap, or OFFSET_TRIMMED when
+          nothing was.
+        name: compactedAt
+        params: out []corestream.EntryValue, lo uint64
+        recv: s *nodeStream
+        results: "[]corestream.EntryValue, error"
+      - doc: |-
           Bounds is the log's first index and the index after the one this node
           applied last.
         name: Bounds
@@ -11323,13 +11850,15 @@ types:
           Wake implements corestream.Waker: the channel is closed by the next
           status the node publishes — an apply, a commit, a leadership change — or
           by the next Append through this stream, and stays closed once the node's
-          event loop has ended.
+          event loop has ended. The first call launches the goroutine that signals
+          each status: it runs until the node's event loop ends, which closes its
+          watch, and signals once more on its way out, the last wake it closes.
         name: Wake
         recv: s *nodeStream
         results: <-chan struct{}
       - doc: |-
           signal closes the wake handed out and arms the next one, unless the node
-          ended and the wake stays closed.
+          ended and every wake is closed.
         name: signal
         recv: s *nodeStream
     name: nodeStream
@@ -11391,6 +11920,12 @@ types:
     methods:
       - doc: validate applies the defaults and the refusals of the configuration.
         name: validate
+        recv: c *TransportConfig
+        results: error
+      - doc: |-
+          refusal is the first refusal of a configuration validate defaulted, nil
+          for none.
+        name: refusal
         recv: c *TransportConfig
         results: error
     name: TransportConfig
@@ -11780,7 +12315,7 @@ types:
         params: to coreconsensus.NodeID, frame []byte
         recv: t *TCPTransport
       - name: SendShared
-        params: to coreconsensus.NodeID, header []byte, body []byte
+        params: to coreconsensus.NodeID, header, body []byte
         recv: t *TCPTransport
       - doc: |-
           enqueue queues f for its peer and lane, read from its header; it never
@@ -11937,6 +12472,20 @@ types:
         params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue, at []uint64
         recv: t *TCPTransport
       - doc: |-
+          forgetDeparted drops what the transport recorded of the members that are
+          in neither index of the admitted set: the handshakes heard from them and
+          the expiry of their certificates. It runs under mu.
+        name: forgetDeparted
+        params: byID map[coreconsensus.NodeID]coreconsensus.MemberValue, bySPKI map[[32]byte]coreconsensus.MemberValue
+        recv: t *TCPTransport
+      - doc: |-
+          cutDeparted closes the inbound connections and halts the outbound
+          senders of the members that are in neither index of the admitted set. It
+          runs under mu.
+        name: cutDeparted
+        params: byID map[coreconsensus.NodeID]coreconsensus.MemberValue, bySPKI map[[32]byte]coreconsensus.MemberValue
+        recv: t *TCPTransport
+      - doc: |-
           reserveAddresses gives the members' addresses their reserved admission
           budget; one that does not resolve gets none (ADR 0174 D2). Resolving may
           block, and SetMembership runs on the engine's event loop, so it runs on a
@@ -11985,6 +12534,23 @@ types:
         name: serveSnapshot
         params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, lane byte
         recv: t *TCPTransport
+      - doc: |-
+          receiveSnapshot hands o, the offer serveSnapshot decoded, to the node bd
+          binds, and once that node accepted it streams the body to its install,
+          then writes the install's code as the stream's last word.
+        name: receiveSnapshot
+        params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, o coreconsensus.InstallOfferValue, bd *binding
+        recv: t *TCPTransport
+      - doc: |-
+          installHooks reads the offer and install hooks bd binds, nil for a
+          binding that holds none or no binding at all.
+        name: installHooks
+        params: bd *binding
+        recv: t *TCPTransport
+        results: |2
+
+          	of func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
+          	in func(coreconsensus.InstallParams) error,
       - doc: |-
           refuseOffer ends an offer from peer at term that was not read, or did
           not decode, err. One whose metadata is of a version this build does not
@@ -12124,10 +12690,6 @@ types:
         name: unroutedGroup
         params: from coreconsensus.NodeID, group coreconsensus.GroupID, lane byte
         recv: t *TCPTransport
-      - doc: unroutedFrames is the count of unroutedGroup.
-        name: unroutedFrames
-        recv: t *TCPTransport
-        results: int64
       - doc: unreachableFor implements groupBinder.
         name: unreachableFor
         params: group coreconsensus.GroupID, f func(coreconsensus.NodeID)
@@ -12152,12 +12714,12 @@ types:
           offerBinding reads the offer chunk of a snapshot connection on lane and
           the binding it is served to: laneSnapshot's to legacyBinding, and
           laneSnapshotGroup's to the group it names, whose prefix is cut off the
-          chunk returned. group is the one named, 0 on laneSnapshot; b is nil when
-          that group is not bound.
+          chunk returned. group is the one named, 0 on laneSnapshot; bound is nil
+          when that group is not bound.
         name: offerBinding
         params: r io.Reader, lane byte
         recv: t *TCPTransport
-        results: chunk []byte, group coreconsensus.GroupID, b *binding, err error
+        results: chunk []byte, group coreconsensus.GroupID, bound *binding, err error
     name: TCPTransport
   - doc: |-
       backLink is a member's lane as this node reads it, on the connection the
@@ -12349,48 +12911,6 @@ types:
       interface {
       	streamGroup(ctx context.Context, group coreconsensus.GroupID, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error
       }
-  - doc: |-
-      traceState is what the loop holds of D13's spans between the turn that
-      learns a position and the commit that covers it: the proposals of this
-      node whose span waits for its "committed" event, and on a leader the
-      spans of the forwards it handles, opened at the forward and ended at the
-      commit of the position it answered (#1115). It is touched only when a
-      span exists, so a node with no Tracer pays nothing for it.
-    fields:
-      - doc: |-
-          commit is the highest commit index a Ready handed; every waiter at
-          or below it was committed before the apply goroutine was handed it.
-        name: commit
-        type: uint64
-      - doc: waits are this node's proposals appended and not yet committed.
-        name: waits
-        type: "[]*proposal"
-      - doc: |-
-          answers are the forwards stepped and not yet answered, by sender
-          and submission id; made at the first traced forward.
-        name: answers
-        type: map[fwdTraceKey]coretrace.Span
-      - doc: open are the answered forwards waiting for their commit.
-        name: open
-        type: "[]fwdSpan"
-    kind: struct
-    name: traceState
-  - doc: "fwdTraceKey names a forward as its answer does: its sender, its id."
-    fields:
-      - name: from
-        type: coreconsensus.NodeID
-      - name: ctx
-        type: uint64
-    kind: struct
-    name: fwdTraceKey
-  - doc: fwdSpan is a leader's span of a forward whose position is known.
-    fields:
-      - name: index
-        type: uint64
-      - name: span
-        type: coretrace.Span
-    kind: struct
-    name: fwdSpan
 vars:
   - doc: backupTable is the CRC-32C table of the records' sums.
     items:
@@ -12428,6 +12948,9 @@ vars:
           (ADR 0039, #915).
         name: _
         type: coreconsensus.MembershipWatcher
+        value: (*Node)(nil)
+      - name: _
+        type: coreconsensus.SessionProposer
         value: (*Node)(nil)
       - name: _
         type: |-
@@ -12596,11 +13119,24 @@ vars:
           	coreconsensus.CodeJoinRefused:             coreconsensus.JoinRefused,
           	coreconsensus.CodeNoSpace:                 coreconsensus.NoSpace,
           	coreconsensus.CodeLeadershipUnconfirmed:   coreconsensus.LeadershipUnconfirmed,
+          	coreconsensus.CodePayloadVersionRefused:   coreconsensus.PayloadVersionRefused,
+          	coreconsensus.CodeSessionDigestMismatch:   coreconsensus.SessionDigestMismatch,
+          	coreconsensus.CodeSessionExpired:          coreconsensus.SessionExpired,
           	// A receiver's answer to a snapshot offer for a group it does not
           	// serve (#925).
           	coreconsensus.CodePeerRejected: coreconsensus.PeerRejected,
           }
     name: sentinelByCode
+  - doc: |-
+      A snapshot handle is handed to the engine as a snapshot, but it also
+      satisfies segFile through the *os.File it embeds. The assertion pins that
+      down: a change to the handle's method set that dropped one of segFile's
+      methods would otherwise surface only where a test wraps it.
+    items:
+      - name: _
+        type: segFile
+        value: (*fileHandle)(nil)
+    name: _#2
   - doc: |-
       isolationCauses names each isolation cause, in the order isolatedText
       writes them.
@@ -12633,24 +13169,23 @@ vars:
         name: latencyBuckets
         value: "[]float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}"
     name: peerGauges
-  - doc: |-
-      preallocEverywhere opens every log in PreallocateFallocate, whatever its
-      options say. Only a test binary sets it, run with
-      CONSENSUS_PREALLOCATE=fallocate, so the whole suite runs on fallocated
-      segments (#922); it is read by openFileLog alone.
+  - grouped: true
     items:
-      - name: preallocEverywhere
+      - doc: |-
+          preallocEverywhere opens every log in PreallocateFallocate, whatever its
+          options say. Only a test binary sets it, run with
+          CONSENSUS_PREALLOCATE=fallocate, so the whole suite runs on fallocated
+          segments (#922); it is read by openFileLog alone.
+        name: preallocEverywhere
         type: bool
-    name: preallocEverywhere
-  - doc: |-
-      probePreallocate answers why fallocate(2) cannot reserve a segment in
-      dir, empty when it can: fallocateProbe, unless a test replaces it to
-      answer as a filesystem without fallocate does. Only an open's own
-      goroutine reads it.
-    items:
-      - name: probePreallocate
+      - doc: |-
+          probePreallocate answers why fallocate(2) cannot reserve a segment in
+          dir, empty when it can: fallocateProbe, unless a test replaces it to
+          answer as a filesystem without fallocate does. Only an open's own
+          goroutine reads it.
+        name: probePreallocate
         value: fallocateProbe
-    name: probePreallocate
+    name: preallocEverywhere
   - doc: |-
       castagnoli is the CRC-32C table every checksum of the log, the stamp and
       the snapshot stream is computed with: built once, read concurrently.
@@ -12668,24 +13203,23 @@ vars:
       - name: unmarked
         type: sync.Map
     name: unmarked
-  - doc: |-
-      syncEverywhere opens every log in SyncRWFDsync, whatever its options
-      say. Only a test binary sets it, run with CONSENSUS_SYNC_PATH=rwfdsync,
-      so the whole suite runs on writes flagged RWF_DSYNC (#923); it is read
-      by openFileLog alone.
+  - grouped: true
     items:
-      - name: syncEverywhere
+      - doc: |-
+          syncEverywhere opens every log in SyncRWFDsync, whatever its options
+          say. Only a test binary sets it, run with CONSENSUS_SYNC_PATH=rwfdsync,
+          so the whole suite runs on writes flagged RWF_DSYNC (#923); it is read
+          by openFileLog alone.
+        name: syncEverywhere
         type: bool
-    name: syncEverywhere
-  - doc: |-
-      probeSyncPath answers why pwritev2(2) with RWF_DSYNC cannot write in
-      dir, empty when it can: rwfDsyncProbe, unless a test replaces it to
-      answer as a kernel without it does. Only an open's own goroutine reads
-      it.
-    items:
-      - name: probeSyncPath
+      - doc: |-
+          probeSyncPath answers why pwritev2(2) with RWF_DSYNC cannot write in
+          dir, empty when it can: rwfDsyncProbe, unless a test replaces it to
+          answer as a kernel without it does. Only an open's own goroutine reads
+          it.
+        name: probeSyncPath
         value: rwfDsyncProbe
-    name: probeSyncPath
+    name: syncEverywhere
   - doc: |-
       sysPwritev2 is __NR_pwritev2 on this architecture, 0 where the SDK does
       not know it: there the log syncs with fdatasync. The numbers are the
@@ -12702,3 +13236,20 @@ vars:
       - name: listenTCP
         value: net.Listen
     name: listenTCP
+  - doc: |-
+      The node reaches these capabilities of the TCP transport by type
+      assertion alone, so a transport that stopped satisfying one would quietly
+      lose the behaviour: links no longer bounded by read silence (#1116), their
+      aborts no longer counted. Each line turns that into a compile error.
+    grouped: true
+    items:
+      - name: _
+        type: silenceBounder
+        value: (*TCPTransport)(nil)
+      - name: _
+        type: |-
+          interface {
+          		linksAborted() (userTimeout, readSilence int64)
+          	}
+        value: (*TCPTransport)(nil)
+    name: _#3

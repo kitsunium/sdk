@@ -28,6 +28,12 @@ constants:
         name: EntryNoSpaceClear
       - doc: EntryTransfer records a leadership transfer and its operator.
         name: EntryTransfer
+      - doc: |-
+          EntrySessionCommand carries a caller's command under a client session: the
+          session, its sequence and the command (ADR 0241). It is written only once
+          the cluster version is 4, and the state machine is handed the command it
+          carries at most once per session and sequence, as an EntryCommand.
+        name: EntrySessionCommand
     name: EntryCommand
   - doc: |-
       exitCantCreate matches sysexits EX_CANTCREAT (73): a storage failure whose
@@ -182,10 +188,12 @@ constants:
           FlagProtocol4 marks a frame from a node that speaks protocol version
           4, which sets FlagProtocol2 and FlagProtocol3 beside it. A leader of
           protocol 4 carries its last index in the RejectHint of every
-          heartbeat, which a follower reads only beside this flag: a node of
-          protocol 3 or below ignores both, and a leader refuses to raise the
-          cluster version to 4 while a member's last frame of the term lacks it
-          (#919).
+          heartbeat, which a follower reads only beside this flag (#919); a
+          forward may carry a trace context (FlagTrace, #1115) and a session
+          command is appended (#918) only once the committed cluster version is
+          4. A node of protocol 3 or below tests the bits it names only and
+          ignores it, and a leader refuses to raise the cluster version to 4
+          while a member's last frame of the term lacks it.
         name: FlagProtocol4
       - doc: |-
           FlagTrace marks a forward that carries its proposer's trace context
@@ -296,6 +304,8 @@ files:
     name: position.go
   - decls:
       - SnapshotMetaValue
+      - SessionID
+      - SessionValue
       - InstallOfferValue
       - InstallAcceptValue
       - InstallParams
@@ -732,11 +742,39 @@ types:
       - doc: NoSpace is the no-space alarm raised at Position, 0 for none.
         name: NoSpace
         type: AlarmID
+      - doc: |-
+          Sessions are the client sessions recorded at Position, ordered by ID.
+          They are encoded from metadata version 4, at cluster version 4.
+        name: Sessions
+        type: "[]SessionValue"
       - doc: Reserved is carried uninterpreted for ADR 0173.
         name: Reserved
         type: "[]byte"
     kind: struct
     name: SnapshotMetaValue
+  - kind: named
+    name: SessionID
+    underlying: "[16]byte"
+  - fields:
+      - doc: ID names the session.
+        name: ID
+        type: SessionID
+      - doc: Seq is the last sequence the session applied, 0 for none yet.
+        name: Seq
+        type: uint64
+      - doc: BodySum is the CRC-32C of that command's entry payload.
+        name: BodySum
+        type: uint32
+      - doc: |-
+          Position is where that command was applied, or where the session was
+          opened while Seq is 0.
+        name: Position
+        type: PositionValue
+      - doc: Last is the index of the session's last committed entry.
+        name: Last
+        type: uint64
+    kind: struct
+    name: SessionValue
   - fields:
       - doc: Term is the sender's term.
         name: Term

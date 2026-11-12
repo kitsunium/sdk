@@ -26,10 +26,16 @@ const (
 	EntryNoSpaceClear
 	// EntryTransfer records a leadership transfer and its operator.
 	EntryTransfer
+	// EntrySessionCommand carries a caller's command under a client session: the
+	// session, its sequence and the command (ADR 0241). It is written only once
+	// the cluster version is 4, and the state machine is handed the command it
+	// carries at most once per session and sequence, as an EntryCommand.
+	EntrySessionCommand
 )
 
-// Known reports whether the kind is one protocol version 1 defines.
-func (k EntryKind) Known() bool { return k >= EntryCommand && k <= EntryTransfer }
+// Known reports whether the kind is one this release defines: those of
+// protocol version 1, and EntrySessionCommand of protocol version 4.
+func (k EntryKind) Known() bool { return k >= EntryCommand && k <= EntrySessionCommand }
 
 // EntryValue is one record of the replicated log. Data is immutable once appended:
 // the store and the engine never write into it, and a caller that hands bytes

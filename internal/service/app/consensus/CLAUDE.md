@@ -25,8 +25,11 @@ the token `TokenOf` reads when this node appended it, no cursor — a
 consumer's `Committer` is its own store), the incremental backup that
 pairs the snapshot's export with the log's (`Node.ExportBackup`, a snapshot and the committed tail
 after it in one framed file; `Node.AppendBackup`, the tail since a
-`BackupPoint`; `VerifyBackup` and `RestoreBackup` over a `BackupParams`,
-`backup.go`, #927), the mTLS TCP transport over `net/tlsid` and
+`BackupPointValue`; `VerifyBackup` and `RestoreBackup` over a `BackupParams`,
+`backup.go`, #927), the client sessions of ADR 0241 (`Node.OpenSession`,
+`Node.ProposeSession`, `session.go`: a command applied at most once per
+session and sequence, whatever its retries, #918), the mTLS TCP transport
+over `net/tlsid` and
 `net/server.Admission` (ADR 0174), and the in-memory doubles. It declares no
 code: it raises the core's. The state machines a product plugs in — the
 durable, batching `SQL` machine and the reference `KV` — are `machine/`'s
@@ -130,6 +133,24 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
 
 ## Do NOT
 
+- Hand the machine a session command the apply's table did not admit, or
+  decide it anywhere but on the apply goroutine: `applySession` folds every
+  `EntrySessionCommand` into `n.sessions` (raft's `SessionTable`) and hands
+  the machine, as an `EntryCommand` of the command alone, only one of a
+  sequence its session has not applied; an opening, a copy and a refusal
+  are answered and applied nowhere. The table is the machine's companion:
+  a cut records it at the applied index (`cut`, on that goroutine), a
+  restore takes the snapshot's with the machine (`restoreFrom`), a start
+  folds the session commands the tail holds through the index a durable
+  machine resumes from (`sessionsAt` — `readTail` drops a command's
+  payload only, never a session command's), and an offline import folds
+  the tail it replays (`replayObserved`). A copy the leader answers at or
+  below its commit (a forward's answer carries it) is the committed one,
+  answered once this node applied it with its value while `results` holds
+  it, nil otherwise (`appendedSession`); answered OUTCOME_UNKNOWN, the
+  blind retry would loop (#918,
+  `TestASessionCommandIsAppliedOnceThroughRetriesSnapshotsAndRestarts`;
+  the fault schedule is raft's `TestBlindSessionRetriesAreAppliedOnce`).
 - Let the event loop wait on storage or a socket (D5b).
 - Propose a stream's records concurrently, or hand its `OUTCOME_UNKNOWN`
   back without the token: concurrent proposals, forwarded from a follower,
@@ -1610,6 +1631,6 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `TestTheResultRingAnswersOnlyItsOwnIndex`,
   `TestApplied1KeepsAResultWithoutAllocating`).
 - Pack commands into one entry inside the engine: a product of many tiny
-  commands packs them with `multi/`'s `Packer` and `MultiMachine`, on top of
+  commands packs them with `multi/`'s `Packer` and `Machine`, on top of
   `Replicated`, and the log, wire and apply code stay as they are (#926,
   `multi/CLAUDE.md`, `multi/BENCH.md`).

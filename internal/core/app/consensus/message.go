@@ -84,10 +84,12 @@ const (
 	// FlagProtocol4 marks a frame from a node that speaks protocol version
 	// 4, which sets FlagProtocol2 and FlagProtocol3 beside it. A leader of
 	// protocol 4 carries its last index in the RejectHint of every
-	// heartbeat, which a follower reads only beside this flag: a node of
-	// protocol 3 or below ignores both, and a leader refuses to raise the
-	// cluster version to 4 while a member's last frame of the term lacks it
-	// (#919).
+	// heartbeat, which a follower reads only beside this flag (#919); a
+	// forward may carry a trace context (FlagTrace, #1115) and a session
+	// command is appended (#918) only once the committed cluster version is
+	// 4. A node of protocol 3 or below tests the bits it names only and
+	// ignores it, and a leader refuses to raise the cluster version to 4
+	// while a member's last frame of the term lacks it.
 	FlagProtocol4
 	// FlagTrace marks a forward that carries its proposer's trace context
 	// after its entry (Trace). A follower sets it only once the committed
@@ -162,8 +164,8 @@ type MessageValue struct {
 
 // TraceContextValue is the span context a forwarded proposal travels with:
 // the W3C trace and parent span identifiers and the proposer's sampling
-// decision, 25 bytes on the wire after the forward's entry (ADR 0152
-// D13, #1115).
+// decision, written on the wire after the forward's entry, in that order
+// (ADR 0152 D13, #1115).
 type TraceContextValue struct {
 	// TraceID identifies the whole trace.
 	TraceID [16]byte

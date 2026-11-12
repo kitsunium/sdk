@@ -23,16 +23,17 @@ import (
 // on a metadata that decodes, never ran: the node left replication without
 // a word and the leader offered it the snapshot again at every probe. That
 // release is shipped; this build is the old reader of the next protocol,
-// and meets a metadata version it does not know, 4, as that release meets
-// 3. These tests are the issue's, run against this build at version 4.
+// and meets a metadata version it does not know, 5, as that release meets
+// 3. These tests are the issue's, run against this build at version 5:
+// version 4, the client sessions' (#918), is this build's own.
 
 // metaOfUnknownVersion is m in a metadata version this build does not know,
-// 4: version 3's encoding with the version byte 4 and its CRC-32C computed
+// 5: version 3's encoding with the version byte 5 and its CRC-32C computed
 // again, the shape every version from 2 keeps (D18). It is what a build
 // past ProtocolMax may write, as version 3 is to the protocol 2 release.
 func metaOfUnknownVersion(m *coreconsensus.SnapshotMetaValue) []byte {
 	b := wire.AppendSnapshotMeta(nil, m)
-	b[0] = 4
+	b[0] = 5
 	end := len(b) - 4
 	binary.LittleEndian.PutUint32(b[end:], wire.BodySum(b[:end]))
 	return b
@@ -91,7 +92,7 @@ func TestAnOfferOfAMetadataVersionThisBuildCannotReadStopsTheNode(t *testing.T) 
 	}
 	enc := metaOfUnknownVersion(&meta)
 	if err := wire.ParseSnapshotMeta(enc, new(coreconsensus.SnapshotMetaValue)); !errors.Is(err, coreconsensus.VersionUnsupported) {
-		t.Fatalf("setup: this build parses the version 4 metadata: %v", err)
+		t.Fatalf("setup: this build parses the version 5 metadata: %v", err)
 	}
 
 	// A term below the follower's is never its leader's now, whatever
@@ -101,7 +102,7 @@ func TestAnOfferOfAMetadataVersionThisBuildCannotReadStopsTheNode(t *testing.T) 
 	if r, stopped := f.node.StopReason(); stopped {
 		t.Fatalf("an offer at a term the follower is not in stopped it: %v", r.Err)
 	}
-	t.Logf("version 4 metadata at an earlier term: accept refused %v (%v)", acceptCode(acc), err)
+	t.Logf("version 5 metadata at an earlier term: accept refused %v (%v)", acceptCode(acc), err)
 	if acceptCode(acc) != coreconsensus.CodeNotLeader {
 		t.Errorf("an offer at an earlier term was answered %v, want NOT_LEADER", acceptCode(acc))
 	}
@@ -123,7 +124,7 @@ func TestAnOfferOfAMetadataVersionThisBuildCannotReadStopsTheNode(t *testing.T) 
 		time.Sleep(5 * time.Millisecond)
 	}
 	r, stopped := f.node.StopReason()
-	t.Logf("version 4 metadata from the leader: accept refused %v (%v), follower stopped=%v %v", acceptCode(acc), err, stopped, r.Err)
+	t.Logf("version 5 metadata from the leader: accept refused %v (%v), follower stopped=%v %v", acceptCode(acc), err, stopped, r.Err)
 	if !stopped {
 		t.Fatalf("a follower offered by its leader a metadata of a version it does not know never stopped: its transport refuses the offer before its node judges it, and the leader offers it again at every probe")
 	}
@@ -179,10 +180,10 @@ func TestAMetaOfAVersionThisBuildCannotReadRefusesTheOpen(t *testing.T) {
 		s, err := newFileSnapshots(dir, storageFailed)
 		if err == nil {
 			got, lerr := s.List()
-			t.Fatalf("the store opened over a version 4 .meta: List() = %d snapshots, err %v", len(got), lerr)
+			t.Fatalf("the store opened over a version 5 .meta: List() = %d snapshots, err %v", len(got), lerr)
 		}
 		if !errors.Is(err, coreconsensus.VersionUnsupported) {
-			t.Fatalf("open over a version 4 .meta: %v, want VERSION_UNSUPPORTED", err)
+			t.Fatalf("open over a version 5 .meta: %v, want VERSION_UNSUPPORTED", err)
 		}
 		for _, name := range []string{m.ID + ".snap", m.ID + ".meta", orphan, older, newest} {
 			if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
@@ -219,10 +220,10 @@ func TestAMetaOfAVersionThisBuildCannotReadRefusesTheOpen(t *testing.T) {
 		d, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: seg, RuntimeDir: testRuntimeDir()})
 		if err == nil {
 			_ = d.Close()
-			t.Fatal("the data directory opened over a version 4 .meta")
+			t.Fatal("the data directory opened over a version 5 .meta")
 		}
 		if !errors.Is(err, coreconsensus.VersionUnsupported) {
-			t.Fatalf("data directory over a version 4 .meta: %v, want VERSION_UNSUPPORTED", err)
+			t.Fatalf("data directory over a version 5 .meta: %v, want VERSION_UNSUPPORTED", err)
 		}
 	})
 	t.Run("listing", func(t *testing.T) {
@@ -234,13 +235,13 @@ func TestAMetaOfAVersionThisBuildCannotReadRefusesTheOpen(t *testing.T) {
 		writeSnapshotFiles(t, dir, &m, newer)
 		got, err := s.List()
 		if !errors.Is(err, coreconsensus.VersionUnsupported) {
-			t.Fatalf("a version 4 .meta listed: %d snapshots, err %v, want VERSION_UNSUPPORTED", len(got), err)
+			t.Fatalf("a version 5 .meta listed: %d snapshots, err %v, want VERSION_UNSUPPORTED", len(got), err)
 		}
 	})
 	t.Run("rotted", func(t *testing.T) {
 		dir := t.TempDir()
 		rotted := wire.AppendSnapshotMeta(nil, &m)
-		rotted[0] = 4 // the sum, over version 3's bytes, now fails
+		rotted[0] = 5 // the sum, over version 3's bytes, now fails
 		writeSnapshotFiles(t, dir, &m, rotted)
 		s, err := newFileSnapshots(dir, storageFailed)
 		if err != nil {

@@ -25,6 +25,8 @@ var (
 	// (ADR 0039, #915).
 	_ coreconsensus.MembershipWatcher = (*Node)(nil)
 
+	_ coreconsensus.SessionProposer = (*Node)(nil)
+
 	_ interface {
 		compactPrefixAt(through, term uint64) error
 	} = (*fileLog)(nil)

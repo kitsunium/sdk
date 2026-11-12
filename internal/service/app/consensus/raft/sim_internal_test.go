@@ -165,6 +165,8 @@ type simOptions struct {
 	// index trailed its log without moving for ElectionTimeoutMax hands
 	// its leadership to the most caught-up voter.
 	watch bool
+	// sessionUnchecked appends every session command unasked (#918).
+	sessionUnchecked bool
 }
 
 type sim struct {
@@ -263,7 +265,7 @@ func (s *sim) cfg(id core.NodeID) Config {
 		ID: id, Group: 1, Seed: s.opt.seed*31 + uint64(id), Timing: s.timing,
 		MaxInflight: 16, MaxInflightBytes: 1 << 20, MaxBatchBytes: 64 << 10, MinVoters: 1,
 		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent,
-		MaxApplyLagBytes: s.opt.applyLag, speaks: s.opt.speaks[id],
+		MaxApplyLagBytes: s.opt.applyLag, speaks: s.opt.speaks[id], sessionUnchecked: s.opt.sessionUnchecked,
 	}
 }
 
@@ -876,6 +878,9 @@ func (s *sim) cutSnapshot(n *simNode, force bool) {
 		Membership: n.r.ConfAt(c), Timing: eng.Timing, ClusterVersion: eng.Cluster,
 		ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
 	}
+	if s.kv != nil {
+		s.kv.cut(n)
+	}
 	n.r.Compact(c)
 }
 
@@ -944,6 +949,9 @@ func (s *sim) install(n *simNode, e *event) {
 	n.noTable = false
 	n.applied, n.appliedFrom = nil, idx
 	n.hs.Commit = max(n.hs.Commit, idx)
+	if s.kv != nil {
+		s.kv.reload(n)
+	}
 	n.r.InstallSnapshot(meta)
 	s.process(n)
 	ok = true

@@ -43,7 +43,10 @@ const (
 // committed cluster version is 2 (lot S3). Version 3 adds the retired keys
 // of the configuration, written only once it is 3 (#648). Version 4 adds
 // the leader's last index to every heartbeat, which a follower reads
-// beside FlagProtocol4 at any cluster version (#919).
+// beside FlagProtocol4 at any cluster version (#919), the trace context of
+// a forward (#1115), and the client sessions, their entry kind and the
+// metadata that records them (#918), those two written only once the
+// committed cluster version is 4.
 const ProtocolMax uint32 = 4
 
 // Protocol2 is the protocol version whose formats a node writes once the
@@ -56,8 +59,22 @@ const Protocol2 uint32 = 2
 const Protocol3 uint32 = 3
 
 // Protocol4 is the protocol version whose heartbeats carry the leader's
-// last index, announced by FlagProtocol4 (#919).
+// last index, announced by FlagProtocol4 (#919), and from which a forward
+// carries its trace context (#1115), a session command is appended and a
+// snapshot records the client sessions (#918).
 const Protocol4 uint32 = 4
+
+// MaxSessions is how many client sessions the cluster keeps: opening one
+// more evicts the one whose last entry is the oldest. It is part of
+// protocol version 4, the same on every node, since the eviction is
+// replicated state; it bounds the table each node holds and the metadata
+// a snapshot carries (ADR 0241).
+const MaxSessions int = 1024
+
+// rttRounds is how many heartbeat rounds keep their send time for the
+// round trips (Raft.sentRounds). It is a uint64 because it indexes that
+// ring by a round id, which is one.
+const rttRounds uint64 = 64
 
 // raftFacts are the step function's own yes/no state, one bit each.
 type raftFacts uint8
@@ -126,6 +143,11 @@ type Config struct {
 	// of ProtocolMax: the package's own tests run a node of the previous
 	// release with it.
 	speaks uint32
+	// sessionUnchecked, set by the package's own tests alone, appends every
+	// session command without asking the table, so the apply's fold is
+	// shown to be the safety on its own (#918); the mutations' type is
+	// full.
+	sessionUnchecked bool
 }
 
 // fwdEntry is one forwarded command a leader appended.
@@ -358,9 +380,16 @@ type readReq struct {
 	round uint64
 }
 
-// rttRounds is how many heartbeat rounds keep their send time for the
-// round trips (Raft.sentRounds).
-const rttRounds = 64
+// leaderHeard is what a node that does not lead last heard of the leader
+// of a term: the leader's last index, as a heartbeat of protocol 4
+// carried it, and the instant of the last append with entries it took
+// (#919). It is read only while from leads the node's term.
+type leaderHeard struct {
+	from     core.NodeID
+	term     uint64
+	last     uint64
+	appended time.Time
+}
 
 // sentRound is when heartbeat round id left.
 type sentRound struct {
@@ -491,6 +520,11 @@ type Raft struct {
 	noSpace    core.AlarmID
 	engBase    EngineValue
 	engines    []engineAt
+	// sessions are the client sessions as the committed entries left them
+	// (#918): the leader answers a retry from them before it appends. Not
+	// an EngineAt record: a cut reads the driver's own table, at its
+	// applied index.
+	sessions *SessionTable
 	// refusedLead is the leader this node refused for the rest of
 	// refusedTerm after MaxChainRefusals refusals of its chain (#508).
 	refusedLead core.NodeID
@@ -567,6 +601,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 		node.ownTiming = node.timing.Generation
 	}
 	node.noSpace = sm.NoSpace
+	node.sessions = NewSessionTable(sm.Sessions)
 	node.adoptClusterVersion(&sm)
 	node.voteWindow = node.timing.ElectionTimeoutMin
 	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
@@ -1342,6 +1377,14 @@ func (r *Raft) applyCommitEffects(lo, hi uint64) {
 // parse changes nothing, whatever its kind. It reports whether the walk
 // must stop because the entry is one this version cannot apply.
 func (r *Raft) applyCommitEffect(i uint64, e *core.EntryValue) bool {
+	if e.Kind == core.EntrySessionCommand {
+		// A payload the start or the store evicted cannot be folded: the
+		// table answers retries only, and the apply's fold decides.
+		if e.Data != nil {
+			r.sessions.Apply(e)
+		}
+		return false
+	}
 	if !actsAtCommit(e.Kind) {
 		return false
 	}

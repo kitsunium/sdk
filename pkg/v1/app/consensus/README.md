@@ -19,6 +19,10 @@ tok, result, err := node.Propose(ctx, command)
 
 NOT\_LEADER means the proposal was certainly NOT appended and is safe to retry. OUTCOME\_UNKNOWN means it was appended, or possibly delivered, and the answer was lost: it may still commit. Read the state through Barrier and decide, or carry a per-key revision in the command, because a replayed compare-and-swap is not harmless under ABA (D6, R1-04).
 
+### Exactly once, through a client session
+
+A command without a natural key — an event appended, a counter moved — is retried through a client session instead (ADR 0241). Once the cluster version is 4, a client opens a session it names with 16 random bytes, Node.OpenSession, then submits each command under the next sequence, Node.ProposeSession, and retries it after OUTCOME\_UNKNOWN with the same session, sequence and command, through any node: the state machine applies it once, and the retry is answered with the first one's token. The same sequence with another command is SESSION\_DIGEST\_MISMATCH. The cluster keeps 1024 sessions, the one used least recently evicted first, and a command of a session evicted, or of a sequence below its last, is SESSION\_EXPIRED: read the state through Barrier, then open a new session.
+
 ### Reads
 
 Barrier returns once the local state machine reflects every write committed before the call: ReadIndex by default, confirmed by a heartbeat round started after the read arrived. ReadLease is opt-in and sound only under the four conditions of D9; a leader paused after its lease check serves a stale read, which ReadIndex never does.
@@ -78,11 +82,11 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func SPKIOf\(c \*x509.Certificate\) \[32\]byte](<#SPKIOf>)
 - [func TimingDefaults\(\) TimingContractSpec](<#TimingDefaults>)
 - [func TokenOf\(err error\) \(TokenValue, bool\)](<#TokenOf>)
-- [func VerifyBackup\(p \*BackupParams, opt \*RestoreOptions\) \(BackupPoint, error\)](<#VerifyBackup>)
+- [func VerifyBackup\(p \*BackupParams, opt \*RestoreOptions\) \(BackupPointValue, error\)](<#VerifyBackup>)
 - [type AlarmID](<#AlarmID>)
 - [type AuthenticatedPeerValue](<#AuthenticatedPeerValue>)
 - [type BackupParams](<#BackupParams>)
-- [type BackupPoint](<#BackupPoint>)
+- [type BackupPointValue](<#BackupPointValue>)
 - [type BatchSender](<#BatchSender>)
   - [func \(BatchSender\) SendShared\(to NodeID, header \[\]byte, body \[\]byte\)](<#BatchSender.SendShared>)
 - [type BatchingStateMachine](<#BatchingStateMachine>)
@@ -188,17 +192,19 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type MessageValue](<#MessageValue>)
 - [type Node](<#Node>)
   - [func \(\*Node\) AddLearner\(ctx context.Context, op coreconsensus.Operator, m coreconsensus.MemberValue\) error](<#Node.AddLearner>)
-  - [func \(\*Node\) AppendBackup\(ctx context.Context, since BackupPoint, w io.Writer\) \(BackupPoint, error\)](<#Node.AppendBackup>)
+  - [func \(\*Node\) AppendBackup\(ctx context.Context, since BackupPointValue, w io.Writer\) \(BackupPointValue, error\)](<#Node.AppendBackup>)
   - [func \(\*Node\) Barrier\(ctx context.Context\) \(coreconsensus.TokenValue, error\)](<#Node.Barrier>)
   - [func \(\*Node\) ClearNoSpace\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec\) error](<#Node.ClearNoSpace>)
   - [func \(\*Node\) Close\(ctx context.Context\) error](<#Node.Close>)
   - [func \(\*Node\) DenyPin\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID\) error](<#Node.DenyPin>)
-  - [func \(\*Node\) ExportBackup\(ctx context.Context, op coreconsensus.Operator, w io.Writer\) \(BackupPoint, error\)](<#Node.ExportBackup>)
+  - [func \(\*Node\) ExportBackup\(ctx context.Context, op coreconsensus.Operator, w io.Writer\) \(BackupPointValue, error\)](<#Node.ExportBackup>)
   - [func \(\*Node\) HardClose\(\) error](<#Node.HardClose>)
   - [func \(\*Node\) Health\(\) HealthValue](<#Node.Health>)
   - [func \(\*Node\) Membership\(\) coreconsensus.MembershipValue](<#Node.Membership>)
+  - [func \(\*Node\) OpenSession\(ctx context.Context, s coreconsensus.SessionID\) error](<#Node.OpenSession>)
   - [func \(\*Node\) Promote\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID\) error](<#Node.Promote>)
   - [func \(\*Node\) Propose\(ctx context.Context, data \[\]byte\) \(coreconsensus.TokenValue, any, error\)](<#Node.Propose>)
+  - [func \(\*Node\) ProposeSession\(ctx context.Context, s coreconsensus.SessionID, seq uint64, data \[\]byte\) \(coreconsensus.TokenValue, any, error\)](<#Node.ProposeSession>)
   - [func \(\*Node\) ProposeTimingContract\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, c coreconsensus.TimingContractSpec\) error](<#Node.ProposeTimingContract>)
   - [func \(\*Node\) RaiseClusterVersion\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, v uint32\) error](<#Node.RaiseClusterVersion>)
   - [func \(\*Node\) ReadCommitted\(ctx context.Context, from uint64, to uint64, maxBytes int\) \(\[\]coreconsensus.EntryValue, error\)](<#Node.ReadCommitted>)
@@ -227,7 +233,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type PreconditionSpec](<#PreconditionSpec>)
 - [type PreflightOptions](<#PreflightOptions>)
 - [type PreflightValue](<#PreflightValue>)
-- [type PreflightVerdict](<#PreflightVerdict>)
+- [type PreflightVerdictValue](<#PreflightVerdictValue>)
 - [type QuarantineExit](<#QuarantineExit>)
 - [type QuarantineOptions](<#QuarantineOptions>)
 - [type ReadMode](<#ReadMode>)
@@ -241,6 +247,11 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type RestoreOptions](<#RestoreOptions>)
 - [type Role](<#Role>)
   - [func \(Role\) String\(\) string](<#Role.String>)
+- [type SessionID](<#SessionID>)
+- [type SessionProposer](<#SessionProposer>)
+  - [func \(SessionProposer\) OpenSession\(ctx context.Context, s SessionID\) error](<#SessionProposer.OpenSession>)
+  - [func \(SessionProposer\) ProposeSession\(ctx context.Context, s SessionID, seq uint64, data \[\]byte\) \(TokenValue, any, error\)](<#SessionProposer.ProposeSession>)
+- [type SessionValue](<#SessionValue>)
 - [type Snapshot](<#Snapshot>)
   - [func \(Snapshot\) Release\(\)](<#Snapshot.Release>)
   - [func \(Snapshot\) WriteTo\(w io.Writer\) \(int64, error\)](<#Snapshot.WriteTo>)
@@ -327,6 +338,15 @@ const EntryCommand coreconsensus.EntryKind = 1
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.EntryCommand`.
+
+<a name="EntrySessionCommand"></a>
+```go
+const EntrySessionCommand coreconsensus.EntryKind = 9
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.EntrySessionCommand`.
 
 <a name="FlagNeedSnapshot"></a>
 ```go
@@ -1164,6 +1184,28 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.ResultTyp
 
 Code `0.2.57.18` · reason `RESULT_TYPE_MISMATCH` · public "The entry was committed but its result has an unexpected type"
 
+<a name="SessionDigestMismatch"></a>
+```go
+var SessionDigestMismatch *errs.Error
+```
+
+The sentinels a caller matches with errors.Is or errs.HasCode.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.SessionDigestMismatch`.
+
+Code `0.2.57.26` · reason `SESSION_DIGEST_MISMATCH` · public "This session sequence was already used for another command"
+
+<a name="SessionExpired"></a>
+```go
+var SessionExpired *errs.Error
+```
+
+The sentinels a caller matches with errors.Is or errs.HasCode.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.SessionExpired`.
+
+Code `0.2.57.27` · reason `SESSION_EXPIRED` · public "The client session is no longer recorded"
+
 <a name="SnapshotCorrupt"></a>
 ```go
 var SnapshotCorrupt *errs.Error
@@ -1502,7 +1544,7 @@ ParseMessage decodes a frame: FRAME\_INVALID, VERSION\_UNSUPPORTED.
 func ParseSnapshotMeta(b []byte, m *SnapshotMetaValue) error
 ```
 
-ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2 or 3 once its trailing CRC-32C holds.
+ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2, 3 or 4 once its trailing CRC-32C holds.
 
 <a name="ParseToken"></a>
 ## func [ParseToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -1625,7 +1667,7 @@ TokenOf reads the committed token an error carries (R7-10).
 ## func [VerifyBackup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 ```go
-func VerifyBackup(p *BackupParams, opt *RestoreOptions) (BackupPoint, error)
+func VerifyBackup(p *BackupParams, opt *RestoreOptions) (BackupPointValue, error)
 ```
 
 VerifyBackup checks a backup's files offline, its snapshot's digest and its chain, writing nothing.
@@ -1691,19 +1733,19 @@ type BackupParams struct {
 }
 ```
 
-<a name="BackupPoint"></a>
-## type [BackupPoint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+<a name="BackupPointValue"></a>
+## type [BackupPointValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type BackupPoint = svcconsensus.BackupPoint
+type BackupPointValue = svcconsensus.BackupPointValue
 ```
 
-BackupPoint is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.BackupPoint`, declared as:
+BackupPointValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.BackupPointValue`, declared as:
 
 ```go
-type BackupPoint struct {
+type BackupPointValue struct {
 	// Position is the last entry the backup holds.
 	Position coreconsensus.PositionValue
 	// ChainTip is the ChainSum at Position, which the next entry continues.
@@ -1890,7 +1932,7 @@ type Config struct {
 func (*Config) MemoryBudget(peers int) int64
 ```
 
-MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14) and of the file log's index: 4 bytes for each record MaxLogBytes holds at most, one of 56 bytes, an empty payload's.
+MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14) and of the file log's index: 4 bytes for each record MaxLogBytes holds at most, each at least an empty payload's record (minRecordBytes).
 
 <a name="DataDir"></a>
 ## type [DataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -2048,7 +2090,7 @@ type EntryKind uint8
 func (EntryKind) Known() bool
 ```
 
-Known reports whether the kind is one protocol version 1 defines.
+Known reports whether the kind is one this release defines: those of protocol version 1, and EntrySessionCommand of protocol version 4.
 
 <a name="EntryValue"></a>
 ## type [EntryValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -3315,13 +3357,13 @@ AddLearner adds a non-voting member that receives the log (D8).
 ### func \(Node\) [AppendBackup](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/backup.go>)
 
 ```go
-func (*Node) AppendBackup(ctx context.Context, since BackupPoint, w io.Writer) (BackupPoint, error)
+func (*Node) AppendBackup(ctx context.Context, since BackupPointValue, w io.Writer) (BackupPointValue, error)
 ```
 
 AppendBackup writes to w the committed entries after since, the point a previous ExportBackup or AppendBackup returned, up to the commit at the call, once applied here, then a trailer, and returns the point it ends at. since below the first entry the log keeps is COMPACTED: export again. An entry that does not continue since's chain is RESTORE\_REFUSED.
 
 <a name="Node.Barrier"></a>
-### func \(Node\) [Barrier](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
+### func \(Node\) [Barrier](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops_wait.go>)
 
 ```go
 func (*Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error)
@@ -3360,7 +3402,7 @@ DenyPin withdraws a member's SPKI pin (R9-18). The transport refuses the member 
 ### func \(Node\) [ExportBackup](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/backup.go>)
 
 ```go
-func (*Node) ExportBackup(ctx context.Context, op coreconsensus.Operator, w io.Writer) (BackupPoint, error)
+func (*Node) ExportBackup(ctx context.Context, op coreconsensus.Operator, w io.Writer) (BackupPointValue, error)
 ```
 
 ExportBackup writes a full backup to w: the snapshot SaveSnapshot cuts now, then the committed entries after it up to the commit at the call, once applied here, then a trailer. It returns the point the file ends at, for AppendBackup. A tail entry that changes the engine's own state (a cluster version, a timing contract, the no-space alarm) is refused, as ImportObserved would refuse it: export again once it is in a snapshot.
@@ -3392,6 +3434,15 @@ func (*Node) Membership() coreconsensus.MembershipValue
 
 Membership returns the configuration the node last appended, as its last turn published it; it never waits for the event loop.
 
+<a name="Node.OpenSession"></a>
+### func \(Node\) [OpenSession](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/session.go>)
+
+```go
+func (*Node) OpenSession(ctx context.Context, s coreconsensus.SessionID) error
+```
+
+OpenSession opens client session s for ProposeSession (ADR 0241). It is refused PAYLOAD\_VERSION\_REFUSED before the cluster version is 4, and opening an open session again is a no-op, so the call is retried blindly.
+
 <a name="Node.Promote"></a>
 ### func \(Node\) [Promote](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
 
@@ -3409,6 +3460,15 @@ func (*Node) Propose(ctx context.Context, data []byte) (coreconsensus.TokenValue
 ```
 
 Propose replicates data and returns, once the entry is applied locally, its token and the value Apply returned. NOT\_LEADER means certainly not appended; OUTCOME\_UNKNOWN means it may still commit: read the state through Barrier before deciding, never retry blindly (D6, R1-04).
+
+<a name="Node.ProposeSession"></a>
+### func \(Node\) [ProposeSession](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/session.go>)
+
+```go
+func (*Node) ProposeSession(ctx context.Context, s coreconsensus.SessionID, seq uint64, data []byte) (coreconsensus.TokenValue, any, error)
+```
+
+ProposeSession replicates data as command seq of the open session s and returns, once it is applied, its token and the value Apply returned: the state machine applies it at most once, whatever the retries. A retry after OUTCOME\_UNKNOWN, with the same arguments, through any node, is answered with the first one's token and, while this node holds it, its value (ADR 0241). SESSION\_DIGEST\_MISMATCH and SESSION\_EXPIRED apply nothing.
 
 <a name="Node.ProposeTimingContract"></a>
 ### func \(Node\) [ProposeTimingContract](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -3492,7 +3552,7 @@ func (*Node) UpdateAddress(ctx context.Context, op coreconsensus.Operator, id co
 UpdateAddress changes where a member listens.
 
 <a name="Node.WaitApplied"></a>
-### func \(Node\) [WaitApplied](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
+### func \(Node\) [WaitApplied](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops_wait.go>)
 
 ```go
 func (*Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) error
@@ -3787,23 +3847,23 @@ type PreflightValue struct {
 	// closed by the read-silence bound alone (#1116).
 	UserTimeout bool
 	// Verdicts lists each rule broken, empty when none is.
-	Verdicts    []PreflightVerdict
+	Verdicts    []PreflightVerdictValue
 }
 ```
 
-<a name="PreflightVerdict"></a>
-## type [PreflightVerdict](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+<a name="PreflightVerdictValue"></a>
+## type [PreflightVerdictValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type PreflightVerdict = svcconsensus.PreflightVerdict
+type PreflightVerdictValue = svcconsensus.PreflightVerdictValue
 ```
 
-PreflightVerdict is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PreflightVerdict`, declared as:
+PreflightVerdictValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PreflightVerdictValue`, declared as:
 
 ```go
-type PreflightVerdict struct {
+type PreflightVerdictValue struct {
 	Field string
 	Rule  string
 }
@@ -4044,6 +4104,97 @@ func (Role) String() string
 
 String names the role.
 
+<a name="SessionID"></a>
+## type [SessionID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type SessionID = coreconsensus.SessionID
+```
+
+SessionID is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.SessionID`, declared as:
+
+```go
+type SessionID[16] byte
+```
+
+<a name="SessionProposer"></a>
+## type [SessionProposer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type SessionProposer = coreconsensus.SessionProposer
+```
+
+SessionProposer is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.SessionProposer`, declared as:
+
+```go
+type SessionProposer interface {
+	// OpenSession opens session s, a random identifier the client draws once.
+	// Opening an open session again is a no-op, so the call is retried
+	// blindly. A session that answered SESSION_EXPIRED is never opened
+	// again: the client draws another identifier.
+	OpenSession(ctx context.Context, s SessionID) error
+	// ProposeSession replicates data as command seq of session s, seq from 1
+	// and increasing, and returns, once it is applied, its token and the
+	// value Apply returned. A retry of the same session, sequence and data
+	// is answered with the first one's token, applying nothing again, and
+	// with its value while the node still holds it, nil otherwise. The same
+	// session and sequence with other data is SESSION_DIGEST_MISMATCH, a
+	// session not open or a sequence below the last one is
+	// SESSION_EXPIRED, and neither appends anything once the first one is
+	// committed. OUTCOME_UNKNOWN is retried with the same arguments.
+	ProposeSession(ctx context.Context, s SessionID, seq uint64, data []byte) (TokenValue, any, error)
+}
+```
+
+<a name="SessionProposer.OpenSession"></a>
+### func \(SessionProposer\) [OpenSession](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
+
+```go
+func (SessionProposer) OpenSession(ctx context.Context, s SessionID) error
+```
+
+OpenSession opens session s, a random identifier the client draws once. Opening an open session again is a no-op, so the call is retried blindly. A session that answered SESSION\_EXPIRED is never opened again: the client draws another identifier.
+
+<a name="SessionProposer.ProposeSession"></a>
+### func \(SessionProposer\) [ProposeSession](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
+
+```go
+func (SessionProposer) ProposeSession(ctx context.Context, s SessionID, seq uint64, data []byte) (TokenValue, any, error)
+```
+
+ProposeSession replicates data as command seq of session s, seq from 1 and increasing, and returns, once it is applied, its token and the value Apply returned. A retry of the same session, sequence and data is answered with the first one's token, applying nothing again, and with its value while the node still holds it, nil otherwise. The same session and sequence with other data is SESSION\_DIGEST\_MISMATCH, a session not open or a sequence below the last one is SESSION\_EXPIRED, and neither appends anything once the first one is committed. OUTCOME\_UNKNOWN is retried with the same arguments.
+
+<a name="SessionValue"></a>
+## type [SessionValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type SessionValue = coreconsensus.SessionValue
+```
+
+SessionValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.SessionValue`, declared as:
+
+```go
+type SessionValue struct {
+	// ID names the session.
+	ID       SessionID
+	// Seq is the last sequence the session applied, 0 for none yet.
+	Seq      uint64
+	// BodySum is the CRC-32C of that command's entry payload.
+	BodySum  uint32
+	// Position is where that command was applied, or where the session was
+	// opened while Seq is 0.
+	Position PositionValue
+	// Last is the index of the session's last committed entry.
+	Last     uint64
+}
+```
+
 <a name="Snapshot"></a>
 ## type [Snapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
 
@@ -4165,6 +4316,9 @@ type SnapshotMetaValue struct {
 	ClusterGeneration uint64
 	// NoSpace is the no-space alarm raised at Position, 0 for none.
 	NoSpace           AlarmID
+	// Sessions are the client sessions recorded at Position, ordered by ID.
+	// They are encoded from metadata version 4, at cluster version 4.
+	Sessions          []SessionValue
 	// Reserved is carried uninterpreted for ADR 0173.
 	Reserved          []byte
 }

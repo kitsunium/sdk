@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-12T02:00:00Z -->
+<!-- updated: 2026-11-12T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -115,7 +115,28 @@ under coverage before touching `shard_count`.
   hands copies them first, as the simulator does at each delivery
   (`ownEntries`).
 - Iterate a map where the order reaches a message: a run must stay a pure
-  function of its seed.
+  function of its seed. `SessionTable.evictFor` scans its map for the
+  session whose last entry is the oldest: each index is the last of one
+  session at most, so the choice is order-free.
+- Append a session command below cluster version 4, from `ProposeSession`,
+  `Propose` or a forward: a node of protocol 3 does not know the kind
+  (`checkProposed`, PAYLOAD_VERSION_REFUSED; the raise to 4 waits for
+  every member's `FlagProtocol4`, `announcedAt`), nor append a copy the
+  leader knows: `sessionKnown` reads the latest entry of the session in
+  its tail past the commit, then the table the committed entries left
+  (`r.sessions`, folded in `applyCommitEffect`, from the snapshot at
+  `NewRaft` and `installEngine`), and answers its position, or refuses
+  another payload SESSION_DIGEST_MISMATCH and an older sequence or a
+  session not open SESSION_EXPIRED, appending nothing. That check is an
+  answer, never the safety: the driver's fold at apply is, which
+  `Config.sessionUnchecked` (a test-only switch, the mutations' type being
+  full) proves on its own (#918, ADR 0241,
+  `TestBlindSessionRetriesAreAppliedOnce`,
+  `TestBlindSessionRetriesWithoutTheTableAreCaught`,
+  `TestASessionSequenceWithAnotherPayloadIsRefusedAndAppendsNothing`,
+  `TestANodeOfProtocol3IsNeverSentASessionCommandBeforeTheRaise`). Nor
+  make `MaxSessions` a node's setting: two nodes evicting differently
+  apply differently.
 - Hand apply more than `MaxApplyLagBytes` past what the driver reports it
   holds (`SetApplyLag`), but one entry when it holds nothing, or anything
   in memory while it reads back entries handed by index: a follower slower

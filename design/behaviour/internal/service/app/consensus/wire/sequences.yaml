@@ -206,7 +206,7 @@ sequences:
     steps:
       - var:
           name: b
-          type: "[4 + 8 + 8 + 1 + 4 + 4]byte"
+          type: "[chainHeaderLen]byte"
       - eval: binary.LittleEndian.PutUint32(b[0:], prev)
         to: binary.LittleEndian.PutUint32
       - eval: binary.LittleEndian.PutUint64(b[4:], e.Position.Term)
@@ -673,6 +673,10 @@ sequences:
     steps:
       - switch:
           cases:
+            - case: m.ClusterVersion >= metaProtocol4
+              do:
+                - return: appendMeta(dst, metaVersion4, m)
+                  to: appendMeta
             - case: m.ClusterVersion >= metaProtocol3
               do:
                 - return: appendMeta(dst, metaVersion3, m)
@@ -706,6 +710,8 @@ sequences:
       - id: appendBytes
         kind: internal
       - id: appendKeys
+        kind: internal
+      - id: appendSessions
         kind: internal
     steps:
       - bind: start
@@ -766,13 +772,19 @@ sequences:
             - set: dst
               to: appendKeys
               value: appendKeys(dst, m.Membership.RetiredKeys)
-          when: v == metaVersion3
+          when: v >= metaVersion3
+      - opt:
+          do:
+            - set: dst
+              to: appendSessions
+              value: appendSessions(dst, m.Sessions)
+          when: v == metaVersion4
       - opt:
           do:
             - set: dst
               to: binary.LittleEndian.AppendUint32
               value: binary.LittleEndian.AppendUint32(dst, crc32.Checksum(dst[start:], castagnoli))
-          when: v == metaVersion2 || v == metaVersion3
+          when: v >= metaVersion2
       - return: dst
   - of: ParseSnapshotMeta
     participants:
@@ -803,6 +815,8 @@ sequences:
       - id: slices
         kind: stdlib
       - id: r.keys
+        kind: internal
+      - id: r.sessions
         kind: internal
       - id: frameInvalid
         kind: internal
@@ -877,7 +891,13 @@ sequences:
             - set: out.Membership.RetiredKeys
               to: r.keys
               value: r.keys()
-          when: b[0] == metaVersion3
+          when: b[0] >= metaVersion3
+      - opt:
+          do:
+            - set: out.Sessions
+              to: r.sessions
+              value: r.sessions()
+          when: b[0] == metaVersion4
       - opt:
           do:
             - set: r.err
@@ -902,7 +922,7 @@ sequences:
             - case: metaVersion1
               do:
                 - return: b[1:], nil
-            - case: metaVersion2, metaVersion3
+            - case: metaVersion2, metaVersion3, metaVersion4
               do:
                 - opt:
                     do:
@@ -1101,6 +1121,74 @@ sequences:
           key: i
           range: keys
       - return: dst
+  - of: appendSessions
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendSessions
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(vs)))
+      - loop:
+          do:
+            - bind: v
+              eval: "&vs[i]"
+            - set: dst
+              value: append(dst, v.ID[:]...)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, v.Seq)
+            - set: dst
+              to: binary.LittleEndian.AppendUint32
+              value: binary.LittleEndian.AppendUint32(dst, v.BodySum)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, v.Position.Term)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, v.Position.Index)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, v.Last)
+          key: i
+          range: vs
+      - return: dst
+  - of: AppendSession
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendSession
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, s[:]...)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, seq)
+      - return: append(dst, data...)
+  - of: ParseSession
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseSession
+        kind: self
+      - id: coreconsensus
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: coreconsensus.SessionID{}, 0, nil, frameInvalid("short session command", len(b))
+          when: len(b) < sessionHeaderLen
+      - return: coreconsensus.SessionID(b[:16]), binary.LittleEndian.Uint64(b[16:]), b[sessionHeaderLen:], nil
+        to: coreconsensus
   - of: appendBytes
     participants:
       - id: caller
@@ -1439,5 +1527,64 @@ sequences:
           do:
             - set: out
               value: append(out, [32]byte(r.n(keyLen)))
+          range: k
+      - return: out
+  - of: (*reader).sessions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).sessions
+        kind: self
+      - id: r.u32
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+      - id: coreconsensus
+        kind: package
+      - id: r.u64
+        kind: internal
+    steps:
+      - bind: k
+        eval: r.u32()
+        to: r.u32
+      - opt:
+          do:
+            - return: nil
+          when: r.err != nil
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("session count", len(r.b))
+            - return: nil
+          when: uint64(k)*uint64(sessionLen) > uint64(len(r.b))
+      - var:
+          name: out
+          type: "[]coreconsensus.SessionValue"
+      - loop:
+          do:
+            - var:
+                name: v
+                type: coreconsensus.SessionValue
+            - set: v.ID
+              to: coreconsensus
+              value: coreconsensus.SessionID(r.n(16))
+            - set: v.Seq
+              to: r.u64
+              value: r.u64()
+            - set: v.BodySum
+              to: r.u32
+              value: r.u32()
+            - set: v.Position.Term
+              to: r.u64
+              value: r.u64()
+            - set: v.Position.Index
+              to: r.u64
+              value: r.u64()
+            - set: v.Last
+              to: r.u64
+              value: r.u64()
+            - set: out
+              value: append(out, v)
           range: k
       - return: out

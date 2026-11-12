@@ -62,6 +62,9 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 		if err := n.cfg.Machine.Restore(cr, m); err != nil {
 			return err
 		}
+		// The sessions are the machine's companions: restored with it, at
+		// the same index (#918).
+		n.sessions = raft.NewSessionTable(m.Sessions)
 		n.am.Lock()
 		n.applied, n.appliedTerm = m.Position.Index, m.Position.Term
 		n.answerCovered(m.Position.Index)
@@ -275,6 +278,9 @@ func (n *Node) cut(idx, term uint64, wait bool) error {
 		n.giveSinceBytes(taken)
 		return err
 	}
+	// The cut runs on the apply goroutine, at the applied index: the table
+	// is the one the entries through idx left (#918).
+	meta.Sessions = n.sessionTable().Values()
 	snap, err := n.cfg.Machine.Snapshot()
 	if err != nil {
 		n.giveSinceBytes(taken)
@@ -544,7 +550,7 @@ func (n *Node) afterCut() {
 		now := n.clk.Now()
 		for to, pin := range n.sending {
 			pin = n.renewPin(to, pin, now)
-			at, held := n.pinAt(to, pin, now)
+			at, held := n.pinAt(to, &pin, now)
 			if !held {
 				n.releasePin(to, pin, now)
 				continue
@@ -894,20 +900,8 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.queueStream(to)
 		return
 	}
-	meta, ok := n.snapshotToSend()
+	meta, h, ok := n.openSnapshotFor(to)
 	if !ok {
-		// None to send: cut one now, and the next probe sends it.
-		n.requestCut()
-		n.r.SnapshotDone(to, 0, false)
-		return
-	}
-	if n.withholds(to, &meta) {
-		n.r.SnapshotDone(to, 0, false)
-		return
-	}
-	h, err := n.cfg.Snapshots.Open(meta.ID)
-	if err != nil {
-		n.r.SnapshotDone(to, 0, false)
 		return
 	}
 	sent, moved, progress := new(atomic.Int64), new(atomic.Int64), new(atomic.Int64)
@@ -917,13 +911,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	ctx, cancel := context.WithCancel(context.Background())
 	n.sendStop[to] = cancel
 	n.wg.Go(func() {
-		go func() {
-			select {
-			case <-n.stopc:
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
+		go n.cancelOnStop(ctx, cancel)
 		// The handle pins the snapshot until the transfer completes, so
 		// compaction cannot delete it mid-transfer (R3-16).
 		var accepted time.Time
@@ -943,28 +931,73 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		if err == nil && !accepted.IsZero() {
 			n.streamRate(progress.Load()-from, n.clk.Since(accepted))
 		}
-		if cerr := h.Close(); cerr != nil {
-			// The transfer is over whatever the read handle says; the pin
-			// it held is released either way.
-			n.obs.warn("consensus: snapshot handle close failed", lstr("id", meta.ID), lstr("error", cerr.Error()))
-		}
+		n.closeSent(h, meta.ID)
 		n.streamEnded(meta, to, err)
-		n.exec(func() {
-			if err == nil {
-				pin := n.streamedPin(to, meta.Position.Index, n.r.Status().Last, n.clk.Now())
-				if held, ok := n.sending[to]; ok && held.since != 0 {
-					// The pin's age counts from the offer (D13).
-					pin.since = held.since
-				}
-				n.sending[to] = pin
-			} else {
-				delete(n.sending, to)
-				n.aq.push(applyItem{compact: true})
-			}
-			delete(n.sendStop, to)
-			n.r.SnapshotDone(to, meta.Position.Index, err == nil)
-			n.serveWaiting()
-			n.handleReady()
-		})
+		n.exec(func() { n.transferDone(to, meta.Position.Index, err) })
 	})
+}
+
+// openSnapshotFor opens the snapshot sendSnapshot streams to peer to, and
+// tells raft at once when there is none to send it: none cut yet, which it
+// asks for so that the next probe sends it, one withheld from that peer,
+// or one that does not open. It runs on the loop.
+func (n *Node) openSnapshotFor(to coreconsensus.NodeID) (coreconsensus.SnapshotMetaValue, coreconsensus.SnapshotHandle, bool) {
+	meta, ok := n.snapshotToSend()
+	if !ok {
+		n.requestCut()
+		n.r.SnapshotDone(to, 0, false)
+		return meta, nil, false
+	}
+	if n.withholds(to, &meta) {
+		n.r.SnapshotDone(to, 0, false)
+		return meta, nil, false
+	}
+	h, err := n.cfg.Snapshots.Open(meta.ID)
+	if err != nil {
+		n.r.SnapshotDone(to, 0, false)
+		return meta, nil, false
+	}
+	return meta, h, true
+}
+
+// cancelOnStop cancels a snapshot stream when the node stops, and returns
+// once the stream's ctx ended either way.
+func (n *Node) cancelOnStop(ctx context.Context, cancel context.CancelFunc) {
+	select {
+	case <-n.stopc:
+		cancel()
+	case <-ctx.Done():
+	}
+}
+
+// closeSent closes the handle a stream of snapshot id read. The transfer is
+// over whatever the read handle says; the pin it held is released either
+// way, and a failure is only logged.
+func (n *Node) closeSent(h coreconsensus.SnapshotHandle, id string) {
+	if err := h.Close(); err != nil {
+		n.obs.warn("consensus: snapshot handle close failed", lstr("id", id), lstr("error", err.Error()))
+	}
+}
+
+// transferDone settles, on the loop, the stream of the snapshot at index to
+// peer to that ended with err: a stream that completed leaves the pin a
+// streamed snapshot holds, aged from the offer (D13); one that failed drops
+// its pin and lets compaction run. raft hears the outcome, and the next
+// waiting peer is served.
+func (n *Node) transferDone(to coreconsensus.NodeID, index uint64, err error) {
+	if err == nil {
+		pin := n.streamedPin(to, index, n.r.Status().Last, n.clk.Now())
+		if held, ok := n.sending[to]; ok && held.since != 0 {
+			// The pin's age counts from the offer (D13).
+			pin.since = held.since
+		}
+		n.sending[to] = pin
+	} else {
+		delete(n.sending, to)
+		n.aq.push(applyItem{compact: true})
+	}
+	delete(n.sendStop, to)
+	n.r.SnapshotDone(to, index, err == nil)
+	n.serveWaiting()
+	n.handleReady()
 }

@@ -47,6 +47,21 @@ const (
 	// metaProtocol3 is the cluster version from which a SnapshotMeta is
 	// written in version 3.
 	metaProtocol3 uint32 = 3
+	// metaVersion4 is the leading byte of a SnapshotMeta that records the
+	// client sessions: the fields of version 3, then the sessions, then the
+	// CRC-32C of every byte before it. It is written for a cluster at
+	// protocol version 4, which every member announced (#918); a node of
+	// protocol 3 stops on an offer it cannot decode.
+	metaVersion4 byte = 4
+	// metaProtocol4 is the cluster version from which a SnapshotMeta is
+	// written in version 4.
+	metaProtocol4 uint32 = 4
+	// sessionLen is one session's encoding in a SnapshotMeta: its ID, its
+	// sequence, its body sum, its position and its last index.
+	sessionLen int = 16 + 8 + 4 + 8 + 8 + 8
+	// sessionHeaderLen is the header of an EntrySessionCommand's payload:
+	// the session, then the sequence.
+	sessionHeaderLen int = 16 + 8
 	// keyLen is the length of one retired key, an SPKI pin.
 	keyLen int = 32
 	// metaSumLen is the length of version 2's trailing CRC-32C.
@@ -60,7 +75,14 @@ const (
 	// traceLen is a forward's trace context after its entry, beside
 	// FlagTrace: trace id, parent span id, sampled (#1115).
 	traceLen int = 16 + 8 + 1
+	// chainHeaderLen is the header ChainSum folds after the previous chain
+	// value: that value, term, index, kind, version and body sum.
+	chainHeaderLen int = 4 + 8 + 8 + 1 + 4 + 4
 )
+
+// MessageHeaderLen is the length AppendHeader writes: the frame header and
+// a message's fixed fields, up to and including its entry count.
+const MessageHeaderLen int = 112
 
 // castagnoli is the CRC-32C table every checksum of the domain uses.
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
@@ -73,7 +95,7 @@ func BodySum(data []byte) uint32 { return crc32.Checksum(data, castagnoli) }
 // entry's chain value and of this entry's header fields. The LEADER computes
 // it at its serialized append point; followers verify it.
 func ChainSum(prev uint32, e *coreconsensus.EntryValue) uint32 {
-	var b [4 + 8 + 8 + 1 + 4 + 4]byte
+	var b [chainHeaderLen]byte
 	binary.LittleEndian.PutUint32(b[0:], prev)
 	binary.LittleEndian.PutUint64(b[4:], e.Position.Term)
 	binary.LittleEndian.PutUint64(b[12:], e.Position.Index)
@@ -87,7 +109,8 @@ func ChainSum(prev uint32, e *coreconsensus.EntryValue) uint32 {
 // crc32.Checksum moves its argument to the heap (its update is called
 // through a function variable), which made every ChainSum allocate, twice
 // an entry on the leader's propose and the follower's verify (#921). The
-// header is 29 bytes, so the table loop costs what the allocation did not.
+// header is chainHeaderLen bytes, so the table loop costs what the
+// allocation did not.
 func headerSum(b []byte) uint32 {
 	crc := ^uint32(0)
 	for _, v := range b {
@@ -104,10 +127,6 @@ func Lane(frame []byte) (coreconsensus.FrameLane, error) {
 	}
 	return coreconsensus.FrameLane(frame[5] >> 6), nil
 }
-
-// MessageHeaderLen is the length AppendHeader writes: the frame header and
-// a message's fixed fields, up to and including its entry count.
-const MessageHeaderLen int = 112
 
 // AppendMessage appends m's encoding, frame header included, to dst.
 func AppendMessage(dst []byte, m *coreconsensus.MessageValue) []byte {
@@ -328,12 +347,15 @@ func ParseToken(b []byte) (coreconsensus.TokenValue, error) {
 // AppendSnapshotMeta appends the versioned encoding of m. The version
 // follows the cluster version m carries: a meta of a cluster below protocol
 // version 2 is written in version 1, one of a cluster at 2 in version 2,
-// checksummed, which the release before already reads (D18, #546), and one
-// of a cluster at 3 or above in version 3, which adds the retired keys of
-// its configuration (#648). Only a cluster whose every member announced a
-// protocol reaches its version.
+// checksummed, which the release before already reads (D18, #546), one
+// of a cluster at 3 in version 3, which adds the retired keys of its
+// configuration (#648), and one of a cluster at 4 or above in version 4,
+// which adds the client sessions (#918). Only a cluster whose every member
+// announced a protocol reaches its version.
 func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	switch {
+	case m.ClusterVersion >= metaProtocol4:
+		return appendMeta(dst, metaVersion4, m)
 	case m.ClusterVersion >= metaProtocol3:
 		return appendMeta(dst, metaVersion3, m)
 	case m.ClusterVersion >= metaProtocol2:
@@ -366,18 +388,21 @@ func appendMeta(dst []byte, v byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	dst = binary.LittleEndian.AppendUint64(dst, m.ClusterGeneration)
 	dst = binary.LittleEndian.AppendUint64(dst, uint64(m.NoSpace))
 	dst = appendBytes(dst, m.Reserved)
-	if v == metaVersion3 {
+	if v >= metaVersion3 {
 		dst = appendKeys(dst, m.Membership.RetiredKeys)
 	}
-	if v == metaVersion2 || v == metaVersion3 {
+	if v == metaVersion4 {
+		dst = appendSessions(dst, m.Sessions)
+	}
+	if v >= metaVersion2 {
 		dst = binary.LittleEndian.AppendUint32(dst, crc32.Checksum(dst[start:], castagnoli))
 	}
 	return dst
 }
 
 // ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:
-// version 1, or version 2 or 3 once its trailing CRC-32C holds. Another
-// version is VERSION_UNSUPPORTED, a version 2 or 3 whose sum fails
+// version 1, or version 2, 3 or 4 once its trailing CRC-32C holds. Another
+// version is VERSION_UNSUPPORTED, a version 2, 3 or 4 whose sum fails
 // FRAME_INVALID.
 func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMetaValue) error {
 	body, err := metaFields(b)
@@ -407,8 +432,11 @@ func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMetaValue) error {
 	if reserved := r.bytes(); len(reserved) != 0 {
 		out.Reserved = slices.Clone(reserved)
 	}
-	if b[0] == metaVersion3 {
+	if b[0] >= metaVersion3 {
 		out.Membership.RetiredKeys = r.keys()
+	}
+	if b[0] == metaVersion4 {
+		out.Sessions = r.sessions()
 	}
 	if r.err == nil && len(r.b) != 0 {
 		r.err = frameInvalid("snapshot meta trailing bytes", len(b))
@@ -435,7 +463,7 @@ func metaFields(b []byte) ([]byte, error) {
 	switch b[0] {
 	case metaVersion1:
 		return b[1:], nil
-	case metaVersion2, metaVersion3:
+	case metaVersion2, metaVersion3, metaVersion4:
 		if len(b) < 1+metaSumLen {
 			return nil, frameInvalid("short field", len(b)-1)
 		}
@@ -525,6 +553,39 @@ func appendKeys(dst []byte, keys [][32]byte) []byte {
 		dst = append(dst, keys[i][:]...)
 	}
 	return dst
+}
+
+// appendSessions appends a u32-counted list of client sessions, in their
+// order, which a table writes by ID.
+func appendSessions(dst []byte, vs []coreconsensus.SessionValue) []byte {
+	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(vs)))
+	for i := range vs {
+		v := &vs[i]
+		dst = append(dst, v.ID[:]...)
+		dst = binary.LittleEndian.AppendUint64(dst, v.Seq)
+		dst = binary.LittleEndian.AppendUint32(dst, v.BodySum)
+		dst = binary.LittleEndian.AppendUint64(dst, v.Position.Term)
+		dst = binary.LittleEndian.AppendUint64(dst, v.Position.Index)
+		dst = binary.LittleEndian.AppendUint64(dst, v.Last)
+	}
+	return dst
+}
+
+// AppendSession appends the payload of an EntrySessionCommand: the session,
+// the sequence, then the command (#918).
+func AppendSession(dst []byte, s coreconsensus.SessionID, seq uint64, data []byte) []byte {
+	dst = append(dst, s[:]...)
+	dst = binary.LittleEndian.AppendUint64(dst, seq)
+	return append(dst, data...)
+}
+
+// ParseSession decodes the payload of an EntrySessionCommand. The command
+// aliases b. A payload shorter than its header is FRAME_INVALID.
+func ParseSession(b []byte) (id coreconsensus.SessionID, seq uint64, cmd []byte, err error) {
+	if len(b) < sessionHeaderLen {
+		return coreconsensus.SessionID{}, 0, nil, frameInvalid("short session command", len(b))
+	}
+	return coreconsensus.SessionID(b[:16]), binary.LittleEndian.Uint64(b[16:]), b[sessionHeaderLen:], nil
 }
 
 // appendBytes appends u32-length-prefixed bytes.
@@ -687,6 +748,31 @@ func (r *reader) keys() [][32]byte {
 	var out [][32]byte
 	for range k {
 		out = append(out, [32]byte(r.n(keyLen)))
+	}
+	return out
+}
+
+// sessions reads the layout appendSessions writes, nil for none. The count is
+// bounded by the bytes left before anything is allocated, as keys' is.
+func (r *reader) sessions() []coreconsensus.SessionValue {
+	k := r.u32()
+	if r.err != nil {
+		return nil
+	}
+	if uint64(k)*uint64(sessionLen) > uint64(len(r.b)) {
+		r.err = frameInvalid("session count", len(r.b))
+		return nil
+	}
+	var out []coreconsensus.SessionValue
+	for range k {
+		var v coreconsensus.SessionValue
+		v.ID = coreconsensus.SessionID(r.n(16))
+		v.Seq = r.u64()
+		v.BodySum = r.u32()
+		v.Position.Term = r.u64()
+		v.Position.Index = r.u64()
+		v.Last = r.u64()
+		out = append(out, v)
 	}
 	return out
 }

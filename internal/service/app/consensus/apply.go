@@ -245,6 +245,13 @@ func (n *Node) applyEntries(es []coreconsensus.EntryValue) bool {
 			n.stop(unsupportedKind(e.Kind, e.Position.Index), false)
 			return false
 		}
+		if e.Kind == coreconsensus.EntrySessionCommand {
+			if !n.applySession(e) {
+				return false
+			}
+			i++
+			continue
+		}
 		if e.Kind != coreconsensus.EntryCommand {
 			n.applyLag.Add(-int64(len(e.Data)))
 			n.applied1(e, nil)
@@ -369,12 +376,24 @@ func (n *Node) answerCovered(index uint64) {
 // releases only the parked ones its index reaches, and keeps its result in
 // a ring slot while a forward is outstanding (#1109).
 func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
+	n.appliedAnswer(e, val, e.Position, 0)
+}
+
+// appliedAnswer records one applied entry and answers the Propose that
+// created it on this node: with the token of answer, the entry's own
+// position or, for a session command already applied, the copy's, whose
+// value is the one recorded there while the node still holds it; or with
+// the refusal code a session command's fold decided (#918).
+func (n *Node) appliedAnswer(e *coreconsensus.EntryValue, val any, answer coreconsensus.PositionValue, code errs.Code) {
 	n.am.Lock()
 	n.applied = e.Position.Index
 	n.appliedTerm = e.Position.Term
 	n.logApplied.Store(e.Position.Index)
 	w := n.waiters[e.Position.Index]
 	delete(n.waiters, e.Position.Index)
+	if r, ok := n.keptResult(answer.Index); ok && answer != e.Position && r.term == answer.Term {
+		val = r.val
+	}
 	if n.keepResults > 0 {
 		n.results[e.Position.Index%resultRing] = applyResult{index: e.Position.Index, term: e.Position.Term, val: val}
 	}
@@ -386,14 +405,17 @@ func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
 	if w.local {
 		n.pendingBytes.Add(-int64(len(w.entry.Data)))
 	}
-	tok := n.token(e.Position)
-	if w.pos.Term != e.Position.Term {
+	switch {
+	case w.pos.Term != e.Position.Term:
 		// Another entry is COMMITTED at its position: certainly not
 		// committed (R7-15).
-		w.done <- propResult{err: withToken(coreconsensus.EntrySuperseded, tok)}
-		return
+		w.done <- propResult{err: withToken(coreconsensus.EntrySuperseded, n.token(e.Position))}
+	case code != 0:
+		// The session refused it: committed, and never applied (#918).
+		w.done <- propResult{err: origin(sentinelOf(code), errs.String("index", u64s(e.Position.Index)))}
+	default:
+		w.done <- propResult{tok: n.token(answer), val: val}
 	}
-	w.done <- propResult{tok: tok, val: val}
 }
 
 // keptResult is the Apply result kept at index, if its ring slot still

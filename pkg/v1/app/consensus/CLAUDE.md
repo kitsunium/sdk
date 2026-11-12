@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-18T15:00:00Z -->
+<!-- updated: 2026-11-12T12:00:00Z -->
 # pkg/v1/app/consensus/
 
 ## Purpose
@@ -21,7 +21,11 @@ state machines (`NewSQL`, `NewKV`) are `machine/`'s facade (#916).
 ## Conventions
 
 - **Type aliases, not new types.**
-- **After OUTCOME_UNKNOWN, never retry blindly**: read through `Barrier`.
+- **After OUTCOME_UNKNOWN, never retry `Propose` blindly**: read through
+  `Barrier`. A command under a client session (`Node.OpenSession`,
+  `Node.ProposeSession`, the `SessionProposer` alias, ADR 0241) is retried
+  with the same arguments; the package doc's section on it is the
+  consumer's account.
 - README written by `tools/genindex` from `docs/api`; edit the design, run
   `kit gen`, then `make api` and `make docs-readme`.
 

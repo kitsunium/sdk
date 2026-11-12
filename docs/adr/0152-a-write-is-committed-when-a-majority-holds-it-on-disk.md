@@ -2439,6 +2439,8 @@ Core `0.2.57.*` (`0x00_02_39_*`):
 | `0.2.57.23` | reserved | `APPLY_FINGERPRINT_REFUSED`, moved to ADR 0173 with its meaning (Q12) |
 | `0.2.57.24` | reserved | `SELF_TEST_FAILED`, moved to ADR 0173 with its meaning (Q12) |
 | `0.2.57.25` | `ADMIN_PRECONDITION_FAILED` | a clearing or raising operation named an alarm, version or contract that is not the current one (D17, R4-06) |
+| `0.2.57.26` | `SESSION_DIGEST_MISMATCH` | a session command whose session and sequence were recorded with another payload; never applied (ADR 0241) |
+| `0.2.57.27` | `SESSION_EXPIRED` | a session command whose session is not open, or whose sequence is below its last; never applied (ADR 0241) |
 
 **Reserved serials (R6-13, R7-04).** The five serials reserved for ADR 0173
 are declared in the same design file and the same package,
@@ -4371,7 +4373,11 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
   identifier and FNV-64a content give the same answer, different content
   gives `0x0031`). Until then, a caller never retries blindly after
   `OUTCOME_UNKNOWN` (D6, R1-04): a compare-and-swap does not make a duplicate
-  harmless under ABA.
+  harmless under ABA. **Resolved by ADR 0241 (2026-11-12, #918):** a
+  `SessionProposer` sibling, `EntrySessionCommand` at protocol version 4, a
+  replicated session table recorded in the snapshot metadata, bounded by
+  count rather than by a TTL, `SESSION_DIGEST_MISMATCH` (`0.2.57.26`) and
+  `SESSION_EXPIRED` (`0.2.57.27`).
 - **A streaming publication sibling in `vfs`** (D4), with the snapshot store
   as its second consumer.
 - **Witness / non-data voters**, which would let two data nodes and a cheap

@@ -1617,6 +1617,14 @@ codes:
     const: CodeAdminPreconditionFailed
     hex: "0x00_02_39_19"
     package: internal/core/app/consensus
+  - code: "0.2.57.26"
+    const: CodeSessionDigestMismatch
+    hex: "0x00_02_39_1A"
+    package: internal/core/app/consensus
+  - code: "0.2.57.27"
+    const: CodeSessionExpired
+    hex: "0x00_02_39_1B"
+    package: internal/core/app/consensus
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"

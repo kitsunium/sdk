@@ -697,7 +697,12 @@ func (r *Raft) propose(now time.Time, es []core.EntryValue, origin core.NodeID) 
 // (D17, R2-29). It used to admit every command (#515).
 func (r *Raft) checkProposed(e *core.EntryValue, index uint64, origin core.NodeID) (core.NodeID, errs.Code) {
 	switch {
-	case e.Kind == core.EntryCommand:
+	case e.Kind == core.EntryCommand, e.Kind == core.EntrySessionCommand:
+		if e.Kind == core.EntrySessionCommand && !r.atProtocol4() {
+			// A member of protocol 3 does not know the kind: it is never
+			// appended before every member announced 4 (D18, #918).
+			return 0, core.CodePayloadVersionRefused
+		}
 		if r.noSpace != 0 && !r.mutated(mutNoSpaceAdmits) {
 			return 0, core.CodeNoSpace
 		}
@@ -1451,6 +1456,9 @@ type fwdAnswer struct {
 	hint    uint64
 	index   uint64
 	logTerm uint64
+	// commit is the leader's commit when it answered a session command:
+	// a position at or below it was committed (#918).
+	commit uint64
 }
 
 // fwdTable keeps the answers given to forwards, bounded by maxFwdAnswers,
@@ -1505,7 +1513,7 @@ func (r *Raft) handleForward(m core.MessageValue) {
 	}
 	r.send(core.MessageValue{
 		Kind: resp, To: m.From, Context: m.Context,
-		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm,
+		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm, Commit: a.commit,
 	})
 }
 
@@ -1521,23 +1529,47 @@ func (r *Raft) answerForward(m core.MessageValue) fwdAnswer {
 	if wire.BodySum(e.Data) != e.BodySum {
 		return fwdAnswer{reject: true, code: core.CodeFrameInvalid}
 	}
-	if (m.Kind == core.MsgForward) != (e.Kind == core.EntryCommand) {
+	command := e.Kind == core.EntryCommand || e.Kind == core.EntrySessionCommand
+	if (m.Kind == core.MsgForward) != command {
 		return fwdAnswer{reject: true, code: codeVersion}
 	}
-	if e.Kind == core.EntryCommand {
+	if command {
 		if code := r.admitForward(len(e.Data)); code != 0 {
 			return fwdAnswer{reject: true, code: code}
 		}
+	}
+	if e.Kind == core.EntrySessionCommand {
+		return r.answerSessionForward(e, m.From)
 	}
 	pos, code := r.propose(r.now, []core.EntryValue{e}, m.From)
 	if code != 0 {
 		return fwdAnswer{reject: true, code: code, hint: uint64(r.lead)}
 	}
-	if e.Kind == core.EntryCommand {
-		r.fwd = append(r.fwd, fwdEntry{index: pos[0].Index, size: int64(len(e.Data))})
-		r.fwdBytes += int64(len(e.Data))
-	}
+	r.noteForwarded(pos[0].Index, len(e.Data))
 	return fwdAnswer{index: pos[0].Index, logTerm: pos[0].Term}
+}
+
+// answerSessionForward proposes a forwarded session command, or answers it
+// with the position this leader already knows for it. The answer carries
+// the commit as it stands, so the follower tells a copy already committed,
+// whose position is the answer, from one appended and still to wait for.
+func (r *Raft) answerSessionForward(e core.EntryValue, from core.NodeID) fwdAnswer {
+	last := r.log.lastIndex()
+	pos, code := r.proposeSession(r.now, e, from)
+	if code != 0 {
+		return fwdAnswer{reject: true, code: code, hint: uint64(r.lead)}
+	}
+	if pos.Index > last {
+		r.noteForwarded(pos.Index, len(e.Data))
+	}
+	return fwdAnswer{index: pos.Index, logTerm: pos.Term, commit: r.log.committed}
+}
+
+// noteForwarded counts a forwarded command appended at index against the
+// forward bounds until it commits.
+func (r *Raft) noteForwarded(index uint64, size int) {
+	r.fwd = append(r.fwd, fwdEntry{index: index, size: int64(size)})
+	r.fwdBytes += int64(size)
 }
 
 // admitForward applies to a forwarded command the bounds the driver applies
@@ -1894,6 +1926,7 @@ func (r *Raft) installEngine(meta *core.SnapshotMetaValue) {
 		r.voteWindow = meta.Timing.ElectionTimeoutMin
 	}
 	r.clusterVer, r.clusterGen, r.noSpace = meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
+	r.sessions = NewSessionTable(meta.Sessions)
 	r.resetEngines()
 	r.applyCommitEffects(meta.Position.Index+1, r.log.committed)
 }

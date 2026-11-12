@@ -40,6 +40,7 @@ go_test(
         "meta_external_test.go",
         "metav2_external_test.go",
         "metav3_external_test.go",
+        "metav4_external_test.go",
         "perf_fixtures_test.go",
         "split_external_test.go",
         "trace_external_test.go",
@@ -48,5 +49,6 @@ go_test(
     embed = [":wire"],
     deps = [
         "//internal/core/app/consensus",
+        "//internal/kernel/errs",
     ],
 )

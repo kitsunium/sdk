@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-12T10:00:00Z -->
+<!-- updated: 2026-11-12T12:00:00Z -->
 # internal/service/app/consensus/wire/
 
 ## Purpose
@@ -9,7 +9,9 @@ the timing contract, the admin payload, and the CRC-32C body and chain sums.
 They are not codec formats: two nodes must write the same bytes.
 `EntryLen` is an entry's length in an append, its 33-byte header and its
 payload: what the leader cuts a batch by, a store counting the payloads
-alone (#683).
+alone (#683). `AppendSession` / `ParseSession` are the payload of an
+`EntrySessionCommand`: the 16-byte session, the sequence (u64), then the
+command (#918, ADR 0241).
 `AppendHeader` and `AppendEntries` write an append's frame in two parts,
 its `MessageHeaderLen` bytes of header and its entries body, header then
 body being `AppendMessage`'s bytes: the leader encodes the body once per
@@ -40,7 +42,9 @@ chain value, each 0 allocations in the race-off lane (`gen_perf_test.go`).
   non-canonical input, and the fuzz targets require every accepted frame
   to round-trip in the version it was written in. `SnapshotMeta` is read
   in version 1, version 2 (version 1's fields, then their CRC-32C) and
-  version 3 (version 1's fields, the retired keys, then the CRC-32C); the
+  version 3 (version 1's fields, the retired keys, then the CRC-32C) and
+  version 4 (version 3's fields, the client sessions, then the CRC-32C,
+  #918); the
   reader of version 2 shipped one release before the writer (#546, ADR
   0152 amendments of 2026-10-22 and 2026-10-23), and version 3 is written
   only at a cluster version every member announced (#648). No reader of
@@ -59,8 +63,8 @@ chain value, each 0 allocations in the race-off lane (`gen_perf_test.go`).
   earlier release adopting it as a follower (#677).
 - Choose a layout's version by anything but the value or the entry it
   belongs to: `AppendSnapshotMeta` writes version 2 exactly when the
-  meta's ClusterVersion is 2 (#546 phase 2) and version 3 when it is 3 or
-  more (#648), an admin payload carries Origin exactly when its entry's
+  meta's ClusterVersion is 2 (#546 phase 2), version 3 when it is 3
+  (#648) and version 4 when it is 4 or more (#918), an admin payload carries Origin exactly when its entry's
   Version is AdminVersion2 or AdminVersion3 (#561) and the membership's
   retired keys exactly when it is AdminVersion3 (#648), so a node of a
   previous protocol never meets one before the raise.
