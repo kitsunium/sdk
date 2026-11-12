@@ -588,10 +588,10 @@ func benchMemoryTransport(net *MemoryNetwork, wrap func(*MemoryTransport, *bench
 // ─── BenchmarkThreeNodePropose ───────────────────────────────────────────
 
 // BenchmarkThreeNodePropose measures one Propose → applied on the leader
-// of three in-process nodes over the memory log and transport, the row D15
-// budgets at ≤ 4 allocs/op (counted over every goroutine of the three
-// nodes). The design's budget is kit's (ADR 0165); this row is its
-// hand-run measurement.
+// of three in-process nodes over the memory log and transport (allocations
+// counted over every goroutine of the three nodes). It is no kit budget
+// (#921): kit's 60 000 calls with the collector off would hold some 2 GB, so
+// this hand-run row is where its allocs/op are measured.
 func BenchmarkThreeNodePropose(b *testing.B) {
 	ms := benchCluster(b, benchClusterSpec{
 		cid: coreconsensus.ClusterID{0xbe, 0x11, 0x01}, timing: TimingDefaults(), seed: 1,
@@ -1168,7 +1168,7 @@ func (rep *benchReport) render(env benchEnvelope) string {
 	}
 
 	b.WriteString("\n## `Propose` → applied, three in-process nodes over the memory doubles (`BenchmarkThreeNodePropose`)\n\n")
-	b.WriteString("Allocations are counted over every goroutine of the three nodes. D15 budgets the row at ≤ 4 allocs/op; the budget itself is kit's (ADR 0165).\n\n")
+	b.WriteString("Allocations are counted over every goroutine of the three nodes. The row is no kit budget: kit's 60 000 calls with the collector off would hold some 2 GB on three nodes, so its allocs/op are compared here, wave to wave (D15's 4, ADR 0152's amendment of 2026-11-12, #921).\n\n")
 	b.WriteString("| Row | Proposals | ns/op | B/op | allocs/op |\n|---|---|---|---|---|\n")
 	fmt.Fprintf(&b, "| `MEM/propose` | %d | %d | %d | %d |\n", rep.propose.N, rep.propose.NsPerOp(),
 		rep.propose.AllocedBytesPerOp(), rep.propose.AllocsPerOp())

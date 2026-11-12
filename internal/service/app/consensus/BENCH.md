@@ -52,7 +52,7 @@ Commit is `Propose` on the leader, from the proposal's due time to its return (c
 
 ## `Propose` → applied, three in-process nodes over the memory doubles (`BenchmarkThreeNodePropose`)
 
-Allocations are counted over every goroutine of the three nodes. D15 budgets the row at ≤ 4 allocs/op; the budget itself is kit's (ADR 0165).
+Allocations are counted over every goroutine of the three nodes. The row is no kit budget: kit's 60 000 calls with the collector off would hold some 2 GB on three nodes, so its allocs/op are compared here, wave to wave (D15's 4, ADR 0152's amendment of 2026-11-12, #921).
 
 | Row | Proposals | ns/op | B/op | allocs/op |
 |---|---|---|---|---|

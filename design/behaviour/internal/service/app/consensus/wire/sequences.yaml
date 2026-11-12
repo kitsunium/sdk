@@ -201,8 +201,8 @@ sequences:
         kind: value
       - id: binary.LittleEndian.PutUint64
         kind: value
-      - id: crc32
-        kind: stdlib
+      - id: headerSum
+        kind: internal
     steps:
       - var:
           name: b
@@ -219,8 +219,20 @@ sequences:
         to: binary.LittleEndian.PutUint32
       - eval: binary.LittleEndian.PutUint32(b[25:], e.BodySum)
         to: binary.LittleEndian.PutUint32
-      - return: crc32.Checksum(b[:], castagnoli)
-        to: crc32
+      - return: headerSum(b[:])
+        to: headerSum
+  - of: headerSum
+    steps:
+      - bind: crc
+        eval: ^uint32(0)
+      - loop:
+          do:
+            - set: crc
+              value: castagnoli[byte(crc)^v] ^ (crc >> 8)
+          key: _
+          range: b
+          value: v
+      - return: ^crc
   - of: Lane
     participants:
       - id: caller

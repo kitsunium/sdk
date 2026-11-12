@@ -157,6 +157,7 @@ files:
       - castagnoli
       - BodySum
       - ChainSum
+      - headerSum
       - Lane
       - MessageHeaderLen
       - AppendMessage
@@ -223,6 +224,15 @@ functions:
     results: uint32
   - name: ChainSum
     params: prev uint32, e *coreconsensus.EntryValue
+    results: uint32
+  - doc: |-
+      headerSum is the CRC-32C of a chain header, byte by byte over the table:
+      crc32.Checksum moves its argument to the heap (its update is called
+      through a function variable), which made every ChainSum allocate, twice
+      an entry on the leader's propose and the follower's verify (#921). The
+      header is 29 bytes, so the table loop costs what the allocation did not.
+    name: headerSum
+    params: b []byte
     results: uint32
   - name: Lane
     params: frame []byte

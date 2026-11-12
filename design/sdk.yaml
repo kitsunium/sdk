@@ -875,6 +875,42 @@ budgets:
     fixture: CallRoundTrip
     bench:
       nsop: {maxDelta: 3%, vs: base}
+  # Consensus, ADR 0152 D15's table (issue #921), each bound what its
+  # fixture measured on 2026-11-12 (darwin/arm64, three runs alike) where it
+  # differs from D15's, which the ADR's amendment of that day records. The
+  # leader handling one append response in a full pipeline: 1, the next
+  # batch's entries cloned out of the log (memLog.slice), D15's 0 revised.
+  - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Step
+    allocs: 1
+    fixture: StepAppResp
+  # A follower taking an append of 64 entries of 256 B into the memory log:
+  # 65, the entry slice and one copy of each payload (appendNew's ownCopy,
+  # which #1110 removes, D15's "0 per entry" then holding); D15's 1 revised
+  # until then. ChainSum allocated twice an entry more until this budget
+  # found it.
+  - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Step
+    allocs: 65
+    fixture: StepApp64
+  # The frame codec and the chain sum allocate nothing (D15's 0): an append
+  # of 64 entries encoded into a warm buffer and decoded into a warm
+  # MessageValue, and one entry's chain value. The log record codec's 0,
+  # appendRecord and parseRecord unexported, is the hand-written
+  # TestTheRecordCodecAllocatesNothing (ADR 0165 §6).
+  - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AppendMessage
+    allocs: 0
+    fixture: AppendMessage
+  - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.ParseMessage
+    allocs: 0
+    fixture: ParseMessage
+  - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.ChainSum
+    allocs: 0
+    fixture: ChainSum
+  # Propose → applied on the leader of three in-process nodes is no budget
+  # (#921): kit's harness makes 60 000 calls with the collector off, and at
+  # some 37 KB a proposal the window holds about 2 GB — out of memory under
+  # OpenBSD's data size limit, past the timeout on NetBSD. It is reported in
+  # the consensus BENCH.md's MEM/propose row instead (ADR 0152, amendment of
+  # 2026-11-12).
   # The logger: an emit is not allocation-free (at least the handler's attrs
   # clone, V116 — the floor of "one alloc per emit"), and reading the span
   # off a context allocates nothing (ADR 0062).

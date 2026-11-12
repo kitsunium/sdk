@@ -230,6 +230,8 @@
 //internal/kernel/jsonenc:jsonenc_test
 //internal/kernel/semver:semver_test
 //internal/kernel/swar:swar_test
+//internal/service/app/consensus/raft:raft_test
+//internal/service/app/consensus/wire:wire_test
 //internal/service/data/docstore:docstore_test
 //internal/service/data/queue:queue_test
 //internal/service/net/http1:http1_test

@@ -21,6 +21,15 @@ asynchronous, the entries handed by index read back from the disk model
 and a restart loading the committed commands past `recent` without their
 payloads, as the driver does (`TestSimBoundedApply*`, #663, #664).
 
+`perf_fixtures_test.go` (`//go:build !race`) holds the fixtures of
+`Step`'s two budgets in `design/sdk.yaml` (ADR 0152 D15, #921), which kit
+gen's `gen_perf_test.go` counts in the alloc lane: a leader acknowledged
+the oldest append of a full window (1, the next append's entries cloned by
+`memLog.slice`) and a follower taking 64 entries (65, the entry slice and
+`ownCopy`'s copy of each payload). Each fixture drains the outbox and lets
+the log go in place, the driver's part, so the count is `Step`'s alone.
+Both files are race off: the race suite's shards never see them.
+
 `walkthrough_internal_test.go` is D15's datadriven reader (#1112),
 stdlib only: `TestDataDriven` runs every `testdata/*.txt`, each a list of
 commands to the step function — `add-nodes`, `campaign`, `tick`,

@@ -80,7 +80,20 @@ func ChainSum(prev uint32, e *coreconsensus.EntryValue) uint32 {
 	b[20] = byte(e.Kind)
 	binary.LittleEndian.PutUint32(b[21:], e.Version)
 	binary.LittleEndian.PutUint32(b[25:], e.BodySum)
-	return crc32.Checksum(b[:], castagnoli)
+	return headerSum(b[:])
+}
+
+// headerSum is the CRC-32C of a chain header, byte by byte over the table:
+// crc32.Checksum moves its argument to the heap (its update is called
+// through a function variable), which made every ChainSum allocate, twice
+// an entry on the leader's propose and the follower's verify (#921). The
+// header is 29 bytes, so the table loop costs what the allocation did not.
+func headerSum(b []byte) uint32 {
+	crc := ^uint32(0)
+	for _, v := range b {
+		crc = castagnoli[byte(crc)^v] ^ (crc >> 8)
+	}
+	return ^crc
 }
 
 // Lane reads the lane of an encoded frame from its frozen header alone, so a

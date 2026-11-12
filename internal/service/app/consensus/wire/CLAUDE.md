@@ -16,6 +16,13 @@ body being `AppendMessage`'s bytes: the leader encodes the body once per
 Ready and shares it across followers (#912,
 `TestAHeaderThenItsEntriesAreTheMessagesBytes`).
 
+## Tests
+
+`perf_fixtures_test.go` holds the fixtures of the frame codec's budgets in
+`design/sdk.yaml` (ADR 0152 D15, #921): an append of 64 entries of 256 B
+encoded into a warm buffer and decoded into a warm `MessageValue`, and one
+chain value, each 0 allocations in the race-off lane (`gen_perf_test.go`).
+
 ## Do NOT
 
 - Grow `ParseMessage`'s entry slice entry by entry: it is sized once for
@@ -23,6 +30,12 @@ Ready and shares it across followers (#912,
   body, so a frame of 64 entries costs one allocation for its entries, and
   their `Data` alias the frame (#1110, `TestAFollowerStepKeepsTheFramesPayloads`
   in the parent's alloc lane).
+- Hand a stack buffer to `crc32.Checksum` or `crc32.Update` on a hot path:
+  the update is called through a function variable, so the buffer moves to
+  the heap, and `ChainSum` allocated at every entry the leader proposes and
+  the follower verifies until its budget found it. `headerSum` sums the
+  header over the table itself, the same CRC-32C
+  (`TestChainSumIsTheCRC32COfItsHeader`, #921).
 - Accept two encodings of one value in one version: a decoder refuses a
   non-canonical input, and the fuzz targets require every accepted frame
   to round-trip in the version it was written in. `SnapshotMeta` is read

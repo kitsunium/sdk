@@ -7344,6 +7344,76 @@ the revised one with room: the revision stands as the target for a disk
 whose flush is as slow as APFS's `F_FULLFSYNC`, and the OVH VPS remain to
 measure.
 
+## Amendment — D15's allocation budgets are the design's, measured (2026-11-12, #921)
+
+D15 sends its allocation budgets to `design/sdk.yaml`'s `budgets:`, and none
+was there ([#921](https://github.com/kitsunium/sdk/issues/921)): no consensus
+package had a `gen_perf_test.go` and none was in the race-off lane, so an
+allocation added per entry on the hot path would have passed every gate.
+They are now, each with its fixture in the package's `perf_fixtures_test.go`
+(`//go:build !race`), and kit gen names `consensus_test`, `raft_test` and
+`wire_test` in the lane's section of `tools/alloc-lane-targets.txt`. The
+budgets sit in `design/sdk.yaml`, not in `design/app/consensus.yaml`: kit
+reads `budgets` from the file that declares the project alone. Measured on
+an Apple M1 Pro, darwin/arm64, go1.27.3, as totals over kit's 30 000 calls
+after as many warm-up calls (ADR 0165), three runs alike:
+
+| D15 row | Budget (`fn`, fixture) | D15 | Measured | Bound |
+|---|---|---|---|---|
+| leader handling one `AppendEntries` response | `raft.(*Raft).Step`, `StepAppResp` | 0 | 1 | **1, revised** |
+| follower handling 64 entries, memory log | `raft.(*Raft).Step`, `StepApp64` | ≤ 1 amortized, 0 per entry | 65 | **65, revised** |
+| encode / decode of a frame | `wire.AppendMessage`, `wire.ParseMessage` | 0 | 0 | 0 |
+| encode / decode of a log record | `TestTheRecordCodecAllocatesNothing` (hand-written) | 0 | 0 | 0 |
+| `Propose` → applied, 3 nodes, memory doubles | `BENCH.md`, `MEM/propose` (#911) | ≤ 4 | 183 to 184 | **not a budget** (below) |
+| segmented log, `Append` 64 × 256 B + one `Sync` | `BENCH.md`, `LOG/<device>` (#911) | reported per device | — | not a budget |
+
+- **Propose is reported, not budgeted.** It was a kit budget of 190 a call
+  until the BSD lanes ran it: kit's harness makes 30 000 warm-up and 30 000
+  counted calls with the collector held off, and a proposal on three nodes
+  allocates some 37 KB, so the window held about 2 GB that nothing freed —
+  out of memory under OpenBSD's default data size limit, and past the
+  5-minute test timeout on NetBSD, where it also measured 190.6 a call. A
+  hand-written gate cannot count it either: a proposal allocates on the three
+  nodes' goroutines, and the repository's gates count their own call stack
+  alone (`allocwindow_test.go`, `check-alloc-lane-coverage.sh`). Its
+  allocations stay measured in `BENCH.md`'s `MEM/propose` row (186 a call),
+  compared wave to wave with `make benchstat-diff`; a kit harness whose call
+  count a budget can lower would make it a budget again.
+- **The response.** The leader's fixture is a full pipeline: peer 2 in
+  replicate with its window of `MaxInflight` appends, each call acknowledging
+  the oldest. The slot it frees sends the next append, whose entries
+  `memLog.slice` clones out of the log: one allocation a response, whatever
+  the batch holds. A response that frees no slot allocates nothing. The
+  clone is what keeps an append valid while the log is compacted or
+  truncated under it; sharing it is the send side's work (#912), not this
+  budget's.
+- **The follower's append.** 65 is the entry slice `appendNew` makes and one
+  copy of each payload (`ownCopy`), the copy #1110 removes; the budget is
+  lowered to 1, D15's figure, with it. Measuring it found two more an entry:
+  `wire.ChainSum` handed its stack header to `crc32.Checksum`, whose update
+  is called through a function variable, so the header moved to the heap at
+  every chain value the leader computes and the follower verifies. It sums
+  the 29 bytes over the CRC-32C table itself now, the same value
+  (`TestChainSumIsTheCRC32COfItsHeader`), and `wire.ChainSum` has its own
+  budget of 0.
+- **The log record.** `appendRecord` and `parseRecord` are unexported, so
+  their bound is the hand-written gate ADR 0165 §6 keeps for unexported
+  paths, counted with `allocwindow_test.go`, and mutation-checked.
+- **`Propose`.** The fixture runs on the real clock, not in the simulator:
+  kit's generated test calls the fixture's call from its own goroutine, which
+  cannot enter a synctest bubble. Every goroutine of the three nodes is
+  counted (GOMAXPROCS pinned to 1). D15's 4 was written before the engine
+  existed; over a third of the 184 is the configuration cloned
+  (`MembershipValue.Clone`, first among its callers `Raft.Status` at each
+  Ready's publish), a fifth the frames' encoding, and the rest the
+  proposal's own path through the loop, the storage actor and apply. The
+  bound holds what is there so that a change that adds to it says so; a
+  change that removes some lowers it.
+- **Negative control.** One allocation added to `wire.AppendMessage` (its
+  version and kind bytes appended through `slices.Clone`) failed
+  `TestPerfAllocsAppendMessage` with 30 000 allocations over the 30 000
+  calls, and the change was reverted.
+
 ## Revision history
 
 | Version | Round | What changed |
