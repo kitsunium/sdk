@@ -738,8 +738,61 @@ packages:
             type: corestream.Stream
           - name: err
             type: error
+      - doc: |-
+          NewSQL returns a stream kept in three tables of the caller's database,
+          created by [SQLMigration]: the records, one head row per partition and the
+          groups' cursors. It sends no statement: everything decidable without a
+          database is decided here.
+
+          An Append inside a transaction its context carries is a savepoint of that
+          transaction (ADR 0151): its records exist if and only if the transaction
+          commits, and the stream's Waker fires only after the commit. The head row
+          of the partition is locked for the rest of that transaction, so the
+          appenders of one partition are serialised and its offsets commit in
+          order, with no gap a reader could skip. A Commit made on a handler's own
+          transaction commits the group's offset with the handler's effect.
+
+          It refuses a policy it cannot honour with the core's Validate, as every
+          engine does, and a RetainBytes or MaxBytes, which it does not keep, with
+          [corestream.SQLStreamMisconfigured]; a transactor, dialect or table it
+          cannot use the same way. The stream it returns also answers
+          [corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and
+          [corestream.Committer].
+        in:
+          - name: cfg
+            type: SQLConfig
+        name: NewSQL
+        out:
+          - name: s
+            type: corestream.Stream
+          - name: err
+            type: error
+      - doc: |-
+          SQLMigration returns the migration that creates the three tables an SQL
+          stream named table keeps on dialect — table, table__heads and
+          table__cursors —, as a core/data/sql MigrationValue numbered version, for
+          the caller's Migrator to run under the caller's version table. Its Down
+          drops the three, and every record and cursor in them.
+
+          The SDK numbers nothing (ADR 0055 §D12). Each statement does nothing when
+          its table already exists, or is already gone, so applying it over tables a
+          previous deployment made changes nothing. Its Checksum fingerprints the
+          statements Up runs, which are therefore never edited: a later column
+          comes as a migration of its own.
+        in:
+          - name: dialect
+            type: coresql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLMigration
+        out:
+          - type: coresql.MigrationValue
+          - type: error
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coresql: github.com/kitsunium/sdk/internal/core/data/sql
       corestream: github.com/kitsunium/sdk/internal/core/data/stream
     path: github.com/kitsunium/sdk/internal/service/data/stream
     types:
@@ -795,3 +848,51 @@ packages:
                 forever, never full.
               name: Policy
               type: corestream.PolicyValue
+      - doc: |-
+          SQLConfig configures [NewSQL]: the database the stream lives in, its
+          tables, the clock that stamps its records, and the policy it enforces.
+          Transactor, Dialect and Table are required; Policy's zero value works.
+        name: SQLConfig
+        struct:
+          fields:
+            - doc: |-
+                Transactor is the transaction manager of the database the stream
+                lives in — the one the caller's own transactions are opened with, so
+                a call made under one of them joins it. It must also be a
+                core/data/sql Joiner and Deferrer, which the SDK's own transactor
+                is: the first is how an Append or a Commit joins the caller's
+                transaction, the second how the Waker fires only once that
+                transaction has committed.
+              name: Transactor
+              type: coresql.Transactor
+            - doc: |-
+                Dialect is the engine's, and must be the Transactor's own: the SQL
+                the stream speaks to it.
+              name: Dialect
+              type: coresql.Dialect
+            - doc: |-
+                Table names the records' table; the heads and the cursors are kept
+                in Table__heads and Table__cursors, which [SQLMigration] creates
+                with it. It is a lower-case SQL identifier of at most 54 bytes —
+                PostgreSQL's 63 less the longest suffix —, words of letters and
+                digits joined by single underscores, starting with a letter and not
+                with "sqlite_". Two streams over one database and one Table, in one
+                process or in twenty, are ONE stream.
+              name: Table
+              type: string
+            - doc: |-
+                Policy is what the stream enforces; its zero value works. Its
+                RetainBytes and MaxBytes must be zero: the engine keeps no byte
+                count. Its Partitions must stay the same for the life of the
+                tables: a key's partition is its hash modulo that number.
+              name: Policy
+              type: corestream.PolicyValue
+            - doc: |-
+                Clock stamps [corestream.EntryValue].AppendedAt and ages records for
+                [corestream.PolicyValue].RetainFor. The instants are the ENGINE's,
+                never the database's NOW(), so a test drives retention with a
+                ManualClock; engines in several processes over one table compare
+                instants their own clocks wrote, and a batch is never stamped before
+                the partition's previous one. Nil means clock.System.
+              name: Clock
+              type: clock.Clock

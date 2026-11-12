@@ -5,7 +5,10 @@ import (
 	"testing"
 	"time"
 
+	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
 
 	corestream "github.com/kitsunium/sdk/internal/core/data/stream"
 	svcstream "github.com/kitsunium/sdk/internal/service/data/stream"
@@ -26,12 +29,73 @@ type streamFactory struct {
 }
 
 // everyStream is the table every conformance case ranges over: the memory
-// engine and the file engine (#821); the SQL engine (#822) joins it.
+// engine, the file engine (#821) and the SQL engine on each dialect's
+// statements over the fake engine (#822).
 func everyStream() []streamFactory {
 	return []streamFactory{
 		{name: "memory", make: makeMemory},
 		{name: "file", make: makeFile},
+		{name: "sql-postgres", make: makeSQL(coresql.DialectPostgres)},
+		{name: "sql-mysql", make: makeSQL(coresql.DialectMySQL)},
+		{name: "sql-sqlite", make: makeSQL(coresql.DialectSQLite)},
 	}
+}
+
+// eventsTable is the records' table every SQL case keeps its stream in.
+const eventsTable = "app_events"
+
+// makeSQL returns the factory of the SQL engine on dialect. A policy with a
+// byte bound, which the engine refuses, skips the case once the refusal is
+// checked: the engine keeps no byte count, and says so at construction.
+func makeSQL(dialect coresql.Dialect) func(*testing.T, clock.Timed, corestream.PolicyValue) corestream.Stream {
+	return func(t *testing.T, clk clock.Timed, policy corestream.PolicyValue) corestream.Stream {
+		t.Helper()
+		if policy.RetainBytes != 0 || policy.MaxBytes != 0 {
+			_, err := svcstream.NewSQL(svcstream.SQLConfig{
+				Transactor: sqlTransactor(t, newSQLEngine(dialect, eventsTable), dialect),
+				Dialect:    dialect, Table: eventsTable, Policy: policy, Clock: clk,
+			})
+			if !errs.HasCode(err, corestream.CodeSQLStreamMisconfigured) {
+				t.Fatalf("NewSQL(byte bound) = %v, want SQL_STREAM_MISCONFIGURED", err)
+			}
+			t.Skip("the SQL engine refuses a byte bound at construction")
+		}
+		return newSQLFixture(t, dialect, clk, policy).stream
+	}
+}
+
+// sqlFixture is one dialect's SQL stream over a fresh fake engine, with the
+// transactor it runs on.
+type sqlFixture struct {
+	engine *sqlEngine
+	tm     coresql.Transactor
+	stream corestream.Stream
+}
+
+// newSQLFixture builds the SQL engine on dialect over a fresh fake engine.
+func newSQLFixture(t *testing.T, dialect coresql.Dialect, clk clock.Clock, policy corestream.PolicyValue) *sqlFixture {
+	t.Helper()
+	engine := newSQLEngine(dialect, eventsTable)
+	tm := sqlTransactor(t, engine, dialect)
+	s, err := svcstream.NewSQL(svcstream.SQLConfig{
+		Transactor: tm, Dialect: dialect, Table: eventsTable, Policy: policy, Clock: clk,
+	})
+	if err != nil {
+		t.Fatalf("NewSQL() = %v, want nil", err)
+	}
+	return &sqlFixture{engine: engine, tm: tm, stream: s}
+}
+
+// sqlTransactor returns the SDK's transactor over engine.
+func sqlTransactor(t testing.TB, engine *sqlEngine, dialect coresql.Dialect) coresql.Transactor {
+	t.Helper()
+	tm, err := svcsql.NewTransactor(svcsql.Config{
+		DB: engine.open(t), Dialect: dialect, Pool: svcsql.PoolConfig{MaxOpen: 8},
+	})
+	if err != nil {
+		t.Fatalf("NewTransactor() = %v", err)
+	}
+	return tm
 }
 
 // makeMemory builds the memory engine.

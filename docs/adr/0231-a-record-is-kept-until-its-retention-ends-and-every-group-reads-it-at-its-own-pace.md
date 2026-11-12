@@ -156,3 +156,49 @@ per group and partition published by `vfs.WriteAtomic`. Decided with it:
    a link or a non-directory refused by shape, the DACL read on Windows.
 6. **A partition count cannot shrink**: a directory holding `p<N>` with N at
    or past `Partitions` is `STREAM_MISCONFIGURED` (`field=Partitions`).
+
+## Amendment — the SQL engine (#822), 2026-11-12
+
+`NewSQL(SQLConfig{Transactor, Dialect, Table, Policy, Clock})` keeps a
+stream in three tables of the caller's database, created by
+`SQLMigration(dialect, table, version)`: `<table>` (one row per record, keyed
+`(part, record_offset)`), `<table>__heads` (per partition the next offset,
+the floor a `Trim` raised and the last batch's instant) and
+`<table>__cursors` (per group digest and partition the next offset). Decided
+with it:
+
+1. **ADR 0151's pattern, unchanged.** The transactor must be a `Joiner` and
+   a `Deferrer`; inside the caller's transaction an `Append`, a `Trim` and a
+   `Commit` are savepoints of it, outside one an `Append` or a `Trim` runs in
+   a transaction of the engine's own (READ COMMITTED on MySQL) and a `Commit`
+   on the pool; the `Waker` fires through `Defer`, after the commit; a
+   driver's error is joined under `Withheld`, never rendered. A `Commit` on a
+   handler's own transaction's context commits the handler's effect and the
+   group's offset together — exactly-once in effect (#823 builds on it).
+2. **A partition's appenders are serialised on its head row**, so offsets
+   commit in order and no reader can pass a record that commits later. The
+   first statement of an `Append` is an upsert that creates the head row or
+   writes it back unchanged — the row lock on PostgreSQL and MySQL (an
+   exclusive lock, so the head's first creation by racing appenders does not
+   deadlock), and on SQLite the write that takes the database's lock before
+   anything is read (ADR 0140) —, then the head is read `FOR UPDATE`, the
+   records are inserted 199 per statement (995 parameters, under SQLite's
+   999) and the head is advanced: 3 + chunks statements. Appenders of
+   different partitions do not wait on one another.
+3. **A `Read` is one unlocked statement**: the head row LEFT JOINed with the
+   readable records, so the next offset and the records arrive together and
+   `OFFSET_TRIMMED` / `OFFSET_AHEAD` need no second round trip.
+4. **Every bound acts on the first offset at once; the rows follow.** A
+   `Trim` raises the head's floor in one statement under its lock, then
+   deletes the rows below in statements of at most 1 024 offsets. The age
+   bound is read-time, `appended_at` after `now − RetainFor` on the engine's
+   clock, never the database's; an `Append` deletes the expired rows of its
+   partition at most once per `min(RetainFor, 1 min)`.
+5. **No byte bound.** The tables keep no count of a partition's bytes, so a
+   `RetainBytes` or a `MaxBytes` is refused at construction
+   (`SQL_STREAM_MISCONFIGURED`) rather than ignored; the conformance suite
+   checks the refusal and skips those cases for the SQL rows.
+6. **A table name is lower-case words joined by single underscores**, at
+   most 54 bytes (PostgreSQL's 63 less `__cursors`): with no double
+   underscore, no stream's table is another stream's derived one. A group's
+   cursor is keyed by the SHA-256 of its name, the name kept beside it.

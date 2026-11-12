@@ -82459,6 +82459,69 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.NewSQL",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "NewSQL",
+      "spelled": "func(cfg SQLConfig) (s corestream.Stream, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/data/stream.SQLConfig) (s github.com/kitsunium/sdk/internal/core/data/stream.Stream, err error)",
+      "doc": "NewSQL returns a stream kept in three tables of the caller's database,\ncreated by [SQLMigration]: the records, one head row per partition and the\ngroups' cursors. It sends no statement: everything decidable without a\ndatabase is decided here.\n\nAn Append inside a transaction its context carries is a savepoint of that\ntransaction (ADR 0151): its records exist if and only if the transaction\ncommits, and the stream's Waker fires only after the commit. The head row\nof the partition is locked for the rest of that transaction, so the\nappenders of one partition are serialised and its offsets commit in\norder, with no gap a reader could skip. A Commit made on a handler's own\ntransaction commits the group's offset with the handler's effect.\n\nIt refuses a policy it cannot honour with the core's Validate, as every\nengine does, and a RetainBytes or MaxBytes, which it does not keep, with\n[corestream.SQLStreamMisconfigured]; a transactor, dialect or table it\ncannot use the same way. The stream it returns also answers\n[corestream.Waker], [corestream.Seeker], [corestream.Trimmer] and\n[corestream.Committer].\n",
+      "file": "service/data/stream/sql.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.SQLConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "SQLConfig",
+      "spelled": "struct{Transactor coresql.Transactor; Dialect coresql.Dialect; Table string; Policy corestream.PolicyValue; Clock clock.Clock}",
+      "canonical": "struct{Transactor github.com/kitsunium/sdk/internal/core/data/sql.Transactor; Dialect github.com/kitsunium/sdk/internal/core/data/sql.Dialect; Table string; Policy github.com/kitsunium/sdk/internal/core/data/stream.PolicyValue; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock}",
+      "fields": [
+        {
+          "name": "Transactor",
+          "type": "coresql.Transactor",
+          "doc": "Transactor is the transaction manager of the database the stream\nlives in — the one the caller's own transactions are opened with, so\na call made under one of them joins it. It must also be a\ncore/data/sql Joiner and Deferrer, which the SDK's own transactor\nis: the first is how an Append or a Commit joins the caller's\ntransaction, the second how the Waker fires only once that\ntransaction has committed.\n"
+        },
+        {
+          "name": "Dialect",
+          "type": "coresql.Dialect",
+          "doc": "Dialect is the engine's, and must be the Transactor's own: the SQL\nthe stream speaks to it.\n"
+        },
+        {
+          "name": "Table",
+          "type": "string",
+          "doc": "Table names the records' table; the heads and the cursors are kept\nin Table__heads and Table__cursors, which [SQLMigration] creates\nwith it. It is a lower-case SQL identifier of at most 54 bytes —\nPostgreSQL's 63 less the longest suffix —, words of letters and\ndigits joined by single underscores, starting with a letter and not\nwith \"sqlite_\". Two streams over one database and one Table, in one\nprocess or in twenty, are ONE stream.\n"
+        },
+        {
+          "name": "Policy",
+          "type": "corestream.PolicyValue",
+          "doc": "Policy is what the stream enforces; its zero value works. Its\nRetainBytes and MaxBytes must be zero: the engine keeps no byte\ncount. Its Partitions must stay the same for the life of the\ntables: a key's partition is its hash modulo that number.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Clock",
+          "doc": "Clock stamps [corestream.EntryValue].AppendedAt and ages records for\n[corestream.PolicyValue].RetainFor. The instants are the ENGINE's,\nnever the database's NOW(), so a test drives retention with a\nManualClock; engines in several processes over one table compare\ninstants their own clocks wrote, and a batch is never stamped before\nthe partition's previous one. Nil means clock.System.\n"
+        }
+      ],
+      "doc": "SQLConfig configures [NewSQL]: the database the stream lives in, its\ntables, the clock that stamps its records, and the policy it enforces.\nTransactor, Dialect and Table are required; Policy's zero value works.\n",
+      "file": "service/data/stream/sql_config.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/stream.SQLMigration",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/data/stream",
+      "name": "SQLMigration",
+      "spelled": "func(dialect coresql.Dialect, table string, version uint64) (coresql.MigrationValue, error)",
+      "canonical": "func(dialect github.com/kitsunium/sdk/internal/core/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/internal/core/data/sql.MigrationValue, error)",
+      "doc": "SQLMigration returns the migration that creates the three tables an SQL\nstream named table keeps on dialect — table, table__heads and\ntable__cursors —, as a core/data/sql MigrationValue numbered version, for\nthe caller's Migrator to run under the caller's version table. Its Down\ndrops the three, and every record and cursor in them.\n\nThe SDK numbers nothing (ADR 0055 §D12). Each statement does nothing when\nits table already exists, or is already gone, so applying it over tables a\nprevious deployment made changes nothing. Its Checksum fingerprints the\nstatements Up runs, which are therefore never edited: a later column\ncomes as a migration of its own.\n",
+      "file": "service/data/stream/sql_dialect.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/transform.FlateCompressor",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/service/data/transform",
