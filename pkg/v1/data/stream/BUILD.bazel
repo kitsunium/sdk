@@ -1,0 +1,42 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "stream",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/data/stream",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/stream",
+        "//internal/kernel/errs",
+        "//internal/service/data/stream",
+        "//pkg/v1/data/sql",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":stream",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "stream_test",
+    srcs = [
+        "gen_api_test.go",
+        "stream_external_test.go",
+    ],
+    deps = [
+        ":stream",
+        "//internal/core/data/stream",
+        "//internal/kernel/errs",
+        "//internal/service/data/stream",
+        "//pkg/v1/data/sql",
+        "//pkg/v1/data/vfs",
+        "//pkg/v1/errs",
+    ],
+)

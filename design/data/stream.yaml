@@ -769,7 +769,7 @@ packages:
         type: CommitMode
         value: "1"
     doc: |-
-      Package stream holds the engines of core/data/stream's [Stream] port —
+      Package stream holds the engines of core/data/stream's [corestream.Stream] port —
       memory, a directory of segments over kernel/fs/seglog, and a SQL table
       joined to the caller's transaction — and the subscriber that reads a stream
       on behalf of a consumer group (ADR 0231). The engines arrive one per
@@ -792,6 +792,13 @@ packages:
           io.Closer; Close releases the directory. A compaction rewrites the
           segments holding a record it drops, each published by a rename then a
           directory sync, a dropped record leaving its offset and instant behind.
+
+          The groups' cursors are published through vfs's disk filesystem, so
+          where vfs has none — Windows, illumos and Solaris, which lack a
+          flushable directory handle or a mode that is an access rule (ADR 0018)
+          — NewFile refuses with proc.UnsupportedPlatform, under
+          StreamBackendFailed, before it reads the policy or the directory, and
+          returns no stream.
         in:
           - name: cfg
             type: FileConfig
@@ -1170,3 +1177,537 @@ packages:
                 sent once ctx has ended, on Clock. Zero, or negative, means 5 s.
               name: SettleTimeout
               type: time.Duration
+  - doc: |-
+      Package stream is the public facade for the SDK's durable, partitioned,
+      offset-addressed log: a producer appends records, and any number of
+      consumer groups read every one of them, each at its own pace, until the
+      stream's retention removes it (ADR 0231).
+
+      	s, err := stream.NewFile(stream.FileConfig{
+      		Dir:    "/var/lib/myapp/orders",
+      		Policy: stream.Policy{Partitions: 8, RetainFor: 7 * 24 * time.Hour},
+      	})
+
+      	// …in the producer: one batch, one partition, one sync.
+      	appended, err := s.Append(ctx, []stream.Record{{Key: orderID, Payload: body}})
+
+      	// …in each consumer group, possibly in another process:
+      	err = stream.Subscribe(ctx, s, stream.SubscriberConfig{
+      		Group:               "billing",
+      		Handler:             bill, // one partition's records, in offset order
+      		HandlerIsIdempotent: true, // required; see below
+      	})
+
+      # This is not a queue, and the difference is the whole design
+
+      pkg/v1/data/queue and this package both carry bytes from one process to
+      another, durably. They keep them for opposite reasons:
+
+      	                  | queue                      | stream (this package)
+      	------------------|----------------------------|---------------------------
+      	A record is kept  | until a consumer acks it   | until its retention ends
+      	Readers           | compete for each message   | every group reads every one
+      	Position          | a lease the broker holds   | an offset the reader names
+      	Order             | none past the first retry  | per partition, per key
+      	Replay            | impossible: Ack removed it | read from an older offset
+      	A failing record  | dead-lettered, others pass | blocks its partition, or is
+      	                  |                            | parked by the subscriber
+      	Backpressure      | none on Publish            | MaxBytes, then STREAM_FULL
+
+      If several workers should share a pile of jobs and each job be done once,
+      you want a queue. If several independent readers — billing, search, an
+      audit — must each see every record, in order, and a new reader must be able
+      to start from the beginning, you want a stream.
+
+      # Keys, partitions and order
+
+      A record's partition is its key's, by [PartitionOf]: FNV-1a modulo
+      [Policy].Partitions, the same on every engine, so the records of one key
+      are read in the order they were appended wherever they are kept. Order
+      holds within a partition and nowhere else. An [Stream].Append is one batch
+      on one partition under one sync: records whose keys hash apart are refused
+      with [PartitionsMixed], and a batch of unkeyed records is spread
+      round-robin. [Policy].Partitions cannot change for the life of a stream: a
+      key's partition is its hash modulo that number.
+
+      # Reading is by offset, and nothing is removed by reading
+
+      [Stream].Read returns the entries of one partition from an offset, at most
+      max of them, and returns at once — empty at the end. [Stream].Bounds says
+      the first offset still retained and the next one to be assigned; a read
+      below the first is [OffsetTrimmed], past the next [OffsetAhead]. The
+      siblings, reached by type assertion on every engine here, do the rest: a
+      [Waker] signal ends an idle reader's wait on the next Append in this
+      process, a [Seeker] turns an instant into an offset, a [Trimmer] drops a
+      partition's prefix, a [Compactor] keeps the last record of each key and a
+      [Committer] keeps each group's offset.
+
+      # A consumer group commits its offset, at least once by default
+
+      [Subscribe] runs one worker per partition for a group, hands the handler
+      the partition's records in offset order, and commits the offset after a
+      batch the handler accepted. A crash between the handler's return and that
+      commit delivers the batch again, so [SubscriberConfig].HandlerIsIdempotent
+      must be true: its zero is refused, as the queue's is. A handler that keeps
+      failing blocks its partition and only its partition — that is what
+      per-key order costs —, unless [SubscriberConfig].Park sends the record to a
+      queue as a dead letter and moves on.
+
+      # Exactly once in effect, in your own database
+
+      [NewSQL] keeps the stream in three tables of the database your application
+      already writes, created by [SQLMigration]. An Append made inside your
+      transaction is a savepoint of it: its records exist if and only if your
+      transaction commits, which makes the stream an outbox. Under
+      [CommitByHandler] the handler commits the group's offset itself, through
+      the stream's [Committer], in the transaction that holds its effect: the
+      effect and the offset commit or roll back together — exactly once in
+      effect, the one guarantee no transport alone can give.
+
+      # Retention, backpressure and compaction
+
+      [Policy].RetainFor and [Policy].RetainBytes bound what a partition keeps;
+      zero keeps everything. [Policy].MaxBytes bounds the whole stream: above it
+      an Append waits up to [Policy].BlockTimeout for retention to free room,
+      then is refused with [StreamFull]. A [Compactor] keeps a key's last record
+      and drops the older ones — a record with a key and no payload is a
+      tombstone — leaving their offsets as holes a read skips, never renumbered.
+
+      # Three engines
+
+      [NewFile] keeps the stream in a directory of segments, one log per
+      partition, and survives the process; one engine opens a directory at a
+      time. [NewSQL] keeps it in your database, joined to your transaction.
+      [NewMemory] is the test double: the port's full semantics and the same
+      refusals, through the same guard, with nothing that survives the process.
+    facade:
+      - const:
+          - doc: |-
+              DefaultMaxRecordBytes bounds one record when [Policy].MaxRecordBytes is
+              left at zero: one mebibyte, as the queue's DefaultMaxMessageBytes.
+            name: DefaultMaxRecordBytes
+            reexport: corestream.DefaultMaxRecordBytes
+            type: int
+            typed: true
+            value: 1 << 20
+      - const:
+          - doc: |-
+              DefaultSegmentBytes is a segment's size when [Policy].SegmentBytes is
+              left at zero: 64 MiB.
+            name: DefaultSegmentBytes
+            reexport: corestream.DefaultSegmentBytes
+            type: int64
+            typed: true
+            value: 64 << 20
+      - const:
+          - doc: |-
+              CommitAfterHandler is the zero [CommitMode]: [Subscribe] commits the
+              offset after a batch once the handler returns nil. A crash between the
+              two delivers the batch again — at least once, on every engine.
+            name: CommitAfterHandler
+            reexport: svcstream.CommitAfterHandler
+            type: CommitMode
+            typed: true
+            value: "0"
+          - doc: |-
+              CommitByHandler leaves the commit to the handler, through the stream's
+              [Committer], in the transaction that holds its effect: exactly once in
+              effect on [NewSQL], at least once on the engines whose cursors live
+              apart from it.
+            name: CommitByHandler
+            reexport: svcstream.CommitByHandler
+            type: CommitMode
+            typed: true
+            value: "1"
+        doc: The two ways [Subscribe] moves a group's offset past a batch its handler accepted.
+      - const:
+          - doc: CodeStreamMisconfigured is [StreamMisconfigured]'s code.
+            name: CodeStreamMisconfigured
+            reexport: corestream.CodeStreamMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_01"
+          - doc: CodeRecordTooLarge is [RecordTooLarge]'s code.
+            name: CodeRecordTooLarge
+            reexport: corestream.CodeRecordTooLarge
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_02"
+          - doc: CodeOffsetTrimmed is [OffsetTrimmed]'s code.
+            name: CodeOffsetTrimmed
+            reexport: corestream.CodeOffsetTrimmed
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_03"
+          - doc: CodeOffsetAhead is [OffsetAhead]'s code.
+            name: CodeOffsetAhead
+            reexport: corestream.CodeOffsetAhead
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_04"
+          - doc: CodeUnknownPartition is [UnknownPartition]'s code.
+            name: CodeUnknownPartition
+            reexport: corestream.CodeUnknownPartition
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_05"
+          - doc: CodeInvalidBatchSize is [InvalidBatchSize]'s code.
+            name: CodeInvalidBatchSize
+            reexport: corestream.CodeInvalidBatchSize
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_06"
+          - doc: CodeStreamFull is [StreamFull]'s code.
+            name: CodeStreamFull
+            reexport: corestream.CodeStreamFull
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_07"
+          - doc: CodeUnknownGroup is [UnknownGroup]'s code.
+            name: CodeUnknownGroup
+            reexport: corestream.CodeUnknownGroup
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_08"
+          - doc: CodePartitionsMixed is [PartitionsMixed]'s code.
+            name: CodePartitionsMixed
+            reexport: corestream.CodePartitionsMixed
+            type: errs.Code
+            typed: true
+            value: "0x00_02_26_09"
+          - doc: CodeStreamBackendFailed is [StreamBackendFailed]'s code.
+            name: CodeStreamBackendFailed
+            reexport: corestream.CodeStreamBackendFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5E_01"
+          - doc: CodeStreamDirectoryUnusable is [StreamDirectoryUnusable]'s code.
+            name: CodeStreamDirectoryUnusable
+            reexport: corestream.CodeStreamDirectoryUnusable
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5E_02"
+          - doc: CodeSQLStreamMisconfigured is [SQLStreamMisconfigured]'s code.
+            name: CodeSQLStreamMisconfigured
+            reexport: corestream.CodeSQLStreamMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5E_03"
+          - doc: CodeSubscriberMisconfigured is [SubscriberMisconfigured]'s code.
+            name: CodeSubscriberMisconfigured
+            reexport: corestream.CodeSubscriberMisconfigured
+            type: errs.Code
+            typed: true
+            value: "0x00_03_5E_04"
+        doc: The codes of the sentinels, for errs.HasCode.
+      - alias:
+          - doc: |-
+              Stream is the public alias for one named, partitioned log. It is FROZEN
+              at four methods — Append, Read, Bounds, Partitions —; capabilities arrive
+              as siblings ([Waker], [Seeker], [Trimmer], [Compactor], [Committer])
+              reached by type assertion, and every engine here implements all five.
+            name: Stream
+            target: corestream.Stream
+      - alias:
+          - doc: |-
+              Offset is the public alias for a record's position in its partition:
+              assigned by the engine, increasing by one per record, never reused.
+            name: Offset
+            target: corestream.Offset
+      - alias:
+          - doc: |-
+              Record is the public alias for what a producer appends: a key, which
+              places it on a partition, and a payload. A keyed record with no payload
+              is a tombstone to a [Compactor].
+            name: Record
+            target: corestream.RecordValue
+      - alias:
+          - doc: |-
+              Entry is the public alias for a record as a reader receives it: its
+              partition, its offset and the instant its batch was appended.
+            name: Entry
+            target: corestream.EntryValue
+      - alias:
+          - doc: |-
+              Appended is the public alias for what [Stream].Append answers: the
+              partition the batch went to and the offsets of its first and last
+              records.
+            name: Appended
+            target: corestream.AppendValue
+      - alias:
+          - doc: |-
+              Bounds is the public alias for a partition's first retained offset and
+              the next one it will assign.
+            name: Bounds
+            target: corestream.BoundsValue
+      - alias:
+          - doc: |-
+              Policy is the public alias for what a stream enforces: its partitions,
+              its record bound, its retention, its backpressure, its segment size and
+              its compaction window. Its zero value works.
+            name: Policy
+            target: corestream.PolicyValue
+      - alias:
+          - doc: |-
+              Waker is the public alias for the sibling whose signal is closed by the
+              next Append in this process: what ends an idle reader's wait.
+            name: Waker
+            target: corestream.Waker
+      - alias:
+          - doc: |-
+              Seeker is the public alias for the sibling that answers the first
+              offset of a partition appended at or after an instant.
+            name: Seeker
+            target: corestream.Seeker
+      - alias:
+          - doc: |-
+              Trimmer is the public alias for the sibling that drops a partition's
+              records below an offset.
+            name: Trimmer
+            target: corestream.Trimmer
+      - alias:
+          - doc: |-
+              Compactor is the public alias for the sibling that keeps the last record
+              of each key of a partition and drops the older ones, offsets kept.
+            name: Compactor
+            target: corestream.Compactor
+      - alias:
+          - doc: |-
+              Compacted is the public alias for what [Compactor].Compact answers: the
+              records it scanned, kept and dropped.
+            name: Compacted
+            target: corestream.CompactValue
+      - alias:
+          - doc: |-
+              Committer is the public alias for the sibling that keeps each consumer
+              group's offset per partition. On [NewSQL] a Commit made inside the
+              caller's transaction commits with it.
+            name: Committer
+            target: corestream.Committer
+      - alias:
+          - doc: FileConfig is the public alias for what [NewFile] is configured with.
+            name: FileConfig
+            target: svcstream.FileConfig
+      - alias:
+          - doc: SQLConfig is the public alias for what [NewSQL] is configured with.
+            name: SQLConfig
+            target: svcstream.SQLConfig
+      - alias:
+          - doc: MemoryConfig is the public alias for what [NewMemory] is configured with.
+            name: MemoryConfig
+            target: svcstream.MemoryConfig
+      - alias:
+          - doc: |-
+              SubscriberConfig is the public alias for what [Subscribe] is configured
+              with: the group, the handler and its idempotence, the partitions, the
+              commit mode, the retry, the park and the fence.
+            name: SubscriberConfig
+            target: svcstream.SubscriberConfig
+      - alias:
+          - doc: |-
+              ParkConfig is the public alias for where [Subscribe] sends a record its
+              handler keeps refusing: a queue, as a dead letter, the offset committed
+              past it.
+            name: ParkConfig
+            target: svcstream.ParkConfig
+      - alias:
+          - doc: |-
+              Handler is the public alias for the function that processes one batch of
+              one partition's entries, in offset order.
+            name: Handler
+            target: svcstream.Handler
+      - alias:
+          - doc: CommitMode is the public alias for who moves a group's offset past a batch.
+            name: CommitMode
+            target: svcstream.CommitMode
+      - var:
+          - doc: StreamMisconfigured refuses a Policy field, or an argument, an engine cannot honour.
+            name: StreamMisconfigured
+            reexport: corestream.StreamMisconfigured
+            type: "*errs.Error"
+          - doc: RecordTooLarge refuses a record above [Policy].MaxRecordBytes.
+            name: RecordTooLarge
+            reexport: corestream.RecordTooLarge
+            type: "*errs.Error"
+          - doc: OffsetTrimmed refuses a read below the first offset its partition retains.
+            name: OffsetTrimmed
+            reexport: corestream.OffsetTrimmed
+            type: "*errs.Error"
+          - doc: OffsetAhead refuses an offset past the next one its partition will assign.
+            name: OffsetAhead
+            reexport: corestream.OffsetAhead
+            type: "*errs.Error"
+          - doc: UnknownPartition refuses a partition outside [0, Partitions()).
+            name: UnknownPartition
+            reexport: corestream.UnknownPartition
+            type: "*errs.Error"
+          - doc: InvalidBatchSize refuses an Append of no record, or a Read of a non-positive number.
+            name: InvalidBatchSize
+            reexport: corestream.InvalidBatchSize
+            type: "*errs.Error"
+          - doc: |-
+              StreamFull refuses an Append the stream held [Policy].MaxBytes for
+              longer than [Policy].BlockTimeout.
+            name: StreamFull
+            reexport: corestream.StreamFull
+            type: "*errs.Error"
+          - doc: UnknownGroup reports a Committed for a group that never committed on that partition.
+            name: UnknownGroup
+            reexport: corestream.UnknownGroup
+            type: "*errs.Error"
+          - doc: PartitionsMixed refuses an Append whose records' keys hash to more than one partition.
+            name: PartitionsMixed
+            reexport: corestream.PartitionsMixed
+            type: "*errs.Error"
+          - doc: |-
+              StreamBackendFailed reports a filesystem call or an SQL statement a
+              durable engine depends on that its storage refused.
+            name: StreamBackendFailed
+            reexport: corestream.StreamBackendFailed
+            type: "*errs.Error"
+          - doc: |-
+              StreamDirectoryUnusable refuses a stream directory that cannot be
+              prepared, is not a directory, is writable by accounts that must not
+              write it, or is held open by another engine.
+            name: StreamDirectoryUnusable
+            reexport: corestream.StreamDirectoryUnusable
+            type: "*errs.Error"
+          - doc: |-
+              SQLStreamMisconfigured refuses an [SQLConfig] at construction: its
+              transactor, dialect, table, or a byte bound the SQL engine does not keep.
+            name: SQLStreamMisconfigured
+            reexport: corestream.SQLStreamMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              SubscriberMisconfigured refuses a [SubscriberConfig]: no handler, no
+              group, or a handler whose author has not asserted that it is idempotent.
+            name: SubscriberMisconfigured
+            reexport: corestream.SubscriberMisconfigured
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            PartitionOf returns the partition a record keyed key is appended to among
+            partitions: the 32-bit FNV-1a hash of the key modulo partitions, the
+            placement every engine applies. A partitions below one is read as one.
+          forward: corestream.PartitionOf
+          in:
+            - name: key
+              type: "[]byte"
+            - name: partitions
+              type: int
+          name: PartitionOf
+          out:
+            - type: int
+      - func:
+          doc: |-
+            NewMemory returns the in-process test double: the port's full semantics,
+            its five siblings, no directory and nothing that survives the process.
+            It refuses the policies every engine refuses, through the same guard.
+          forward: svcstream.NewMemory
+          in:
+            - name: cfg
+              type: MemoryConfig
+          name: NewMemory
+          out:
+            - name: s
+              type: Stream
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewFile opens the durable stream kept in cfg.Dir, creating it when absent,
+            and recovers it: one segmented log per partition and the groups' cursors.
+
+            It refuses at construction a policy it cannot honour, a directory it
+            cannot trust or another engine holds open ([StreamDirectoryUnusable]),
+            and a segment it cannot trust ([StreamBackendFailed]). Where the
+            disk filesystem of package vfs does not exist — Windows, illumos and
+            Solaris (ADR 0018) — it refuses with proc.UnsupportedPlatform, before
+            anything else: the groups' cursors are kept there. The stream also answers io.Closer by
+            type assertion, which releases the directory:
+
+            	if closer, ok := s.(io.Closer); ok { defer closer.Close() }
+          forward: svcstream.NewFile
+          in:
+            - name: cfg
+              type: FileConfig
+          name: NewFile
+          out:
+            - name: s
+              type: Stream
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            NewSQL returns a stream kept in three tables of the caller's database,
+            created by [SQLMigration]. An Append or a Commit inside a transaction its
+            context carries for cfg.Transactor is a savepoint of it, and the [Waker]
+            fires only once that transaction commits. It sends no statement.
+
+            It refuses at construction a policy it cannot honour, a RetainBytes or a
+            MaxBytes it does not keep, and a transactor, dialect or table it cannot use
+            ([SQLStreamMisconfigured]). The transactor must be the SDK's, or another
+            sql Joiner and Deferrer.
+          forward: svcstream.NewSQL
+          in:
+            - name: cfg
+              type: SQLConfig
+          name: NewSQL
+          out:
+            - name: s
+              type: Stream
+            - name: err
+              type: error
+      - func:
+          doc: |-
+            SQLMigration returns the migration that creates the three tables an SQL
+            stream named table keeps on dialect — table, table__heads and
+            table__cursors —, numbered version for the caller's own version table. Its
+            Down drops them, and every record and cursor in them. Its statements do
+            nothing when the tables exist.
+          forward: svcstream.SQLMigration
+          in:
+            - name: dialect
+              type: sql.Dialect
+            - name: table
+              type: string
+            - name: version
+              type: uint64
+          name: SQLMigration
+          out:
+            - type: sql.Migration
+            - type: error
+      - func:
+          doc: |-
+            Subscribe reads s on behalf of the consumer group cfg.Group until ctx
+            ends: one worker per partition, each handing cfg.Handler the partition's
+            records in offset order and moving the group's offset past each batch the
+            handler accepted. A worker starts at the offset the group committed, or
+            at the partition's first retained one.
+
+            A batch the handler refuses is handed back after cfg.Retry's wait, and its
+            partition goes no further until it is accepted or, with cfg.Park, parked;
+            the other partitions carry on. A batch accepted as the stop lands is still
+            committed, within cfg.SettleTimeout.
+
+            It returns nil when ctx ends, [SubscriberMisconfigured] for a
+            configuration it cannot run, and the storage's error when the stream, the
+            park's queue or the fence refuses. cfg.HandlerIsIdempotent must be true;
+            see the package documentation.
+          forward: svcstream.Subscribe
+          in:
+            - name: ctx
+              type: context.Context
+            - name: s
+              type: Stream
+            - name: cfg
+              type: SubscriberConfig
+          name: Subscribe
+          out:
+            - type: error
+    imports:
+      corestream: github.com/kitsunium/sdk/internal/core/data/stream
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+      svcstream: github.com/kitsunium/sdk/internal/service/data/stream
+    path: github.com/kitsunium/sdk/pkg/v1/data/stream
