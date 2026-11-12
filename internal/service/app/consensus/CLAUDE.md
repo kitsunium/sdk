@@ -66,6 +66,7 @@ silence closed (`read_silence`).
 | alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt` (`bazel test --config=alloc` it, or `go test -run 'TestALeaderTurnEncodes|TestApplied1Keeps' .` race off): `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go`, the leader turn's budget of #912 and applied1's of #1109 (`applied_alloc_internal_test.go`, with `appliedwait_internal_test.go`; `sendshared_alloc_internal_test.go`, with `sendshared_internal_test.go` for its helpers, the target's `-test.run` naming the gates) and the package's copy of `allocwindow_test.go`, nothing else of the suite |
 | bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`), `-bench BenchmarkApplied1` (`applied_bench_test.go`); numbers in `BENCH.md` |
 | dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate] [fdatasync\|rwfdsync]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922), G1's paired sync path row (`TestDMCryptSyncPathBench`, ADR 0190's shape, #923) and power cuts through LUKS, on ext4 or xfs; with `fallocate` or `rwfdsync` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`) or writing `RWF_DSYNC` (`CONSENSUS_SYNC_PATH=rwfdsync`), and with `rwfdsync` the power cuts too; results in `testdata/dmcrypt/RESULTS.md` |
+| bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911) |
 
 Under Bazel `consensus_test` has 24 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
@@ -111,6 +112,15 @@ of the 298 and the rest 135; `TestTheStartHoldsNoMoreOfTheTailThanItsBudget`
 took 18 s there (2 s on a Linux workstation) and
 `TestHealthWarnsBeforeTheSnapshotLimit` 13 s, settling its cuts after each
 of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
+
+`consensus_bench_test.go` is gazelle-excluded and compiled only into
+`consensus_bench_test` (rule 12): it uses the package's production code and
+none of its test files, so that target needs no other source, and it must
+stay so. Under `go test` it joins the package's binary, where its generator
+returns at once unless `-run` names it and its benchmarks run only under
+`-bench`. The fdatasyncs are timed through `fileLog.timedSync`, which only
+the lane sets. Its numbers are a host's, never a budget (D15): the verdicts
+on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
 
 ## Do NOT
 

@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check lint-ktn-install ci-scripts-check vuln-install vuln-check doclinks api api-check regen from-zero kit-coverage models models-check
+.PHONY: help build test test-framework lint guard bench bench-codec bench-consensus profile-consensus cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check lint-ktn-install ci-scripts-check vuln-install vuln-check doclinks api api-check regen from-zero kit-coverage models models-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -42,6 +42,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "models"       "$(DIM)derive design/behaviour's models from the code again, after a body changed (local: needs the pinned kit)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "models-check" "$(DIM)fail when a behaviour model is missing, not the current code's, or left over (local)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile-consensus" "$(DIM)capture a consensus bench wave, race off (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench-profile" "$(DIM)capture cpu+mem+block+mutex pprof per kernel package → profiles/<pkg>/$(RST)"
@@ -474,8 +475,22 @@ pre-commit-check:
 # `bazel run` (not `bazel test`) is the entry point so BUILD_WORKSPACE_DIRECTORY
 # is set + the sandbox is lifted; that lets the test write BENCH.md back
 # into the source tree at pkg/v1/data/codec/BENCH.md.
-bench:
+bench: bench-codec bench-consensus
+
+bench-codec:
 	bazel run //pkg/v1/data/codec:codec_bench_test -- \
+		-test.run=TestGenerateBenchMD \
+		-test.bench=^$$ \
+		-test.timeout=2h \
+		-test.benchtime=$${BENCH_TIME:-1s} \
+		-test.v
+
+# The consensus lane of ADR 0152 D15/D16 (#911): the race-off, `manual`
+# target writes internal/service/app/consensus/BENCH.md, on the devices
+# CONSENSUS_BENCH_DEVICES names (name=dir,...), else the checkout's disk
+# (.bench/consensus) and /dev/shm.
+bench-consensus:
+	bazel run //internal/service/app/consensus:consensus_bench_test -- \
 		-test.run=TestGenerateBenchMD \
 		-test.bench=^$$ \
 		-test.timeout=2h \
@@ -643,6 +658,18 @@ profile:
 	  | tee $(CURDIR)/.bench/profiles/$(WAVE)/bench.txt
 	@echo "→ .bench/profiles/$(WAVE)/ {cpu,mem,block,mutex}.out + bench.txt"
 
+# `profile-consensus` captures one wave of the consensus lane's benchmarks,
+# race off, into .bench/profiles/$(WAVE)/consensus.txt for benchstat-diff.
+# The data-disk rows write under .bench/consensus.
+profile-consensus:
+	@mkdir -p .bench/profiles/$(WAVE)
+	cd internal && GOWORK=off go test -run='^$$' \
+	  -bench='^Benchmark(SegmentedLogAppendSync|ThreeNodePropose|TCPCommit)$$' -benchmem \
+	  -count=$${COUNT:-10} -benchtime=$${BENCHTIME:-1s} -timeout=2h \
+	  ./service/app/consensus/ \
+	  > $(CURDIR)/.bench/profiles/$(WAVE)/consensus.txt
+	@echo "→ .bench/profiles/$(WAVE)/consensus.txt"
+
 # `benchstat-install` installs the analysis CLI when missing. Pinned
 # to whatever golang.org/x/perf publishes on @latest; the CLI is
 # backwards-stable on its flag surface so this is safe.
@@ -650,15 +677,21 @@ benchstat-install:
 	@command -v benchstat >/dev/null 2>&1 \
 	  || GOTOOLCHAIN=auto go install golang.org/x/perf/cmd/benchstat@latest
 
-# `benchstat-diff` compares two wave directories. Mann-Whitney with
+# `benchstat-diff` compares two wave directories, suite by suite: the
+# codec's bench.txt (`make profile`) and the consensus lane's consensus.txt
+# (`make profile-consensus`), each present in both waves. Mann-Whitney with
 # 95% confidence per the benchstat docs; the p<0.05 cells become the
 # ship-gate signal for Phase B agent commits.
 benchstat-diff: benchstat-install
-	@test -f .bench/profiles/$(BEFORE)/bench.txt || { echo "✗ .bench/profiles/$(BEFORE)/bench.txt missing — run: make profile WAVE=$(BEFORE)"; exit 1; }
-	@test -f .bench/profiles/$(AFTER)/bench.txt  || { echo "✗ .bench/profiles/$(AFTER)/bench.txt missing — run: make profile WAVE=$(AFTER)"; exit 1; }
-	benchstat -confidence=0.95 -delta-test=mannwhitney \
-	  .bench/profiles/$(BEFORE)/bench.txt \
-	  .bench/profiles/$(AFTER)/bench.txt
+	@found=0; \
+	for suite in bench consensus; do \
+	  before=.bench/profiles/$(BEFORE)/$$suite.txt; after=.bench/profiles/$(AFTER)/$$suite.txt; \
+	  if [ -f "$$before" ] && [ -f "$$after" ]; then \
+	    found=1; echo "── $$suite: $(BEFORE) → $(AFTER)"; \
+	    benchstat -confidence=0.95 -delta-test=mannwhitney "$$before" "$$after" || exit 1; \
+	  fi; \
+	done; \
+	[ "$$found" = 1 ] || { echo "✗ no suite captured in both .bench/profiles/$(BEFORE) and .bench/profiles/$(AFTER) — run: make profile WAVE=<slug> (codec) or make profile-consensus WAVE=<slug>"; exit 1; }
 
 # ── Kernel benchmarks (tracker #16 / tooling #21) ───────────────────────
 # `sdk-bench` runs every kernel *_bench_test.go via go test (NOT bazel) so the

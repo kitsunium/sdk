@@ -1,5 +1,11 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+# gazelle:exclude consensus_bench_test.go
+# Reason: the bench lane of ADR 0152 D15/D16 (#911) is its own `manual`,
+# race-off target below, never part of consensus_test: its benchmarks write
+# real data directories and its generator rewrites BENCH.md. Rule 12: the
+# lane is `make bench` (bench-consensus), TestGenerateBenchMD opt-in by name.
+
 package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
@@ -309,6 +315,31 @@ go_test(
         "//internal/core/app/consensus",
         "//internal/kernel/fs/flock",
         "//internal/service/app/consensus/raft",
+        "//internal/service/app/consensus/wire",
+    ],
+)
+
+# The hand-run bench lane (#911): `make bench-consensus` runs
+# `bazel run` on it with -test.run=TestGenerateBenchMD, which writes BENCH.md
+# under $BUILD_WORKSPACE_DIRECTORY. `manual` keeps it out of
+# `bazel test //...`; race off, as the alloc lane, because the numbers are
+# the engine's and not the race detector's. The file uses the package's
+# production code alone, so it is its only source.
+go_test(
+    name = "consensus_bench_test",
+    size = "enormous",
+    timeout = "eternal",
+    srcs = ["consensus_bench_test.go"],
+    args = ["-test.run=^$$"],
+    embed = [":consensus"],
+    race = "off",
+    tags = [
+        "benchmark",
+        "manual",
+    ],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/kernel/errs",
         "//internal/service/app/consensus/wire",
     ],
 )

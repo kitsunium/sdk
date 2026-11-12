@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -284,6 +285,11 @@ type fileLog struct {
 	// after each write flagged RWF_DSYNC (#923), the lock released: twice
 	// for a batch of several records. Only a test sets it.
 	duringSync func()
+	// timedSync, when set, is handed how long each fdatasync of a batch
+	// took, end true for the end record's (the last of the batch): the
+	// bench lane's fdatasync distribution and syncs per batch (#911). Only
+	// a benchmark sets it, before the node starts; nil otherwise.
+	timedSync func(took time.Duration, end bool)
 	// fill replaces zeroFrom when a test sets it, to fail as a full disk
 	// does; nil otherwise.
 	fill func(f *os.File, off, size int64) error
@@ -1817,19 +1823,23 @@ func (l *fileLog) Sync() error {
 func (l *fileLog) writeBatch(cur *segment) error {
 	body := l.pending[:l.pendingLast]
 	if len(body) > 0 {
-		if err := l.writeAndSync(cur, body, l.off); err != nil {
+		if err := l.writeAndSync(cur, body, l.off, false); err != nil {
 			return err
 		}
 	}
-	return l.writeAndSync(cur, l.pending[l.pendingLast:], l.off+int64(len(body)))
+	return l.writeAndSync(cur, l.pending[l.pendingLast:], l.off+int64(len(body)), true)
 }
 
 // writeAndSync writes b at off in segment cur and makes it durable: one
 // pwritev2 flagged RWF_DSYNC in SyncRWFDsync, pwrite then fdatasync
 // otherwise, or when the kernel stops answering to the flag after the
-// open's probe (#923).
-func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64) error {
+// open's probe (#923); end says the write is the batch's end record.
+func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64, end bool) error {
 	if l.syncPath == SyncRWFDsync {
+		var start time.Time
+		if l.timedSync != nil {
+			start = time.Now()
+		}
 		ok, err := writeDsync(cur.f, b, off)
 		if err != nil {
 			return storageFailed("pwritev2", err)
@@ -1837,6 +1847,9 @@ func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64) error {
 		if ok {
 			if l.duringSync != nil {
 				l.duringSync()
+			}
+			if l.timedSync != nil {
+				l.timedSync(time.Since(start), end)
 			}
 			return nil
 		}
@@ -1847,8 +1860,15 @@ func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64) error {
 	if l.duringSync != nil {
 		l.duringSync()
 	}
+	var start time.Time
+	if l.timedSync != nil {
+		start = time.Now()
+	}
 	if err := datasync(cur.f); err != nil {
 		return storageFailed("fdatasync", err)
+	}
+	if l.timedSync != nil {
+		l.timedSync(time.Since(start), end)
 	}
 	return nil
 }

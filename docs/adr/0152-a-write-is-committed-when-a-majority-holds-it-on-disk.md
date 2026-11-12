@@ -3109,8 +3109,8 @@ fixture (R8-36). The three-node `Propose` row runs in the simulator under
 measures them in the race-off lane (`tools/alloc-lane-targets.txt`, rule 12).
 The absolute numbers of D16, `fdatasync` p99, commit p99 and entries per
 second, are NEVER design budgets. They go into a hand-run `BENCH.md` (rule 9)
-that `make bench` writes. That target runs only the codec's generator today,
-and the implementing change extends it. Only benchstat deltas are compared
+that `make bench` writes: its `bench-consensus` half, since #911 (the
+amendment of 2026-11-11). Only benchstat deltas are compared
 across changes.
 
 | Benchmark | Budget |
@@ -3192,11 +3192,15 @@ Provisional targets, to be confirmed or revised from the two measurements and
 recorded in `BENCH.md`:
 
 - p99 quorum commit from an FRA or RBX leader ≤ 2 × the nearest RTT + 2 ×
-  the measured fsync p99, at 1 000 proposals/s;
+  the measured fsync p99, at 1 000 proposals/s — **revised** on 2026-11-11
+  to 2 × the nearest RTT + 4 × the fsync p99 (`BENCH.md` rows `SIM/commit`
+  and `TCP/data-disk/paced`, the amendment of that date);
 - sustained ≥ 10 000 entries/s of 256 B committed with two `fdatasync` per
-  batch, the end record after the rest ([#417](https://github.com/kitsunium/sdk/issues/417));
+  batch, the end record after the rest ([#417](https://github.com/kitsunium/sdk/issues/417))
+  — **confirmed** on 2026-11-11 (`BENCH.md` row `TCP/data-disk/saturated`);
 - failover (leader killed, then first commit under the new leader): **p99 ≤
-  3.5 s, provisional**. The final number is derived from the simulator's
+  3.5 s, provisional** — **confirmed** on 2026-11-11 (`BENCH.md` row
+  `SIM/failover`). The final number is derived from the simulator's
   distribution with the chosen timeouts, not chosen first. The first draft's
   2.5 s did not account for detection, PreVote, the vote round and the
   no-op commit on a 27 ms link;
@@ -7268,6 +7272,78 @@ allocated, as D7 requires of every snapshot codec.
   time, every node linking the module before the first sets it, since a
   node that does not link it stops on the first zstd snapshot it is offered.
 
+## Amendment — D16's targets against the bench lane's first `BENCH.md` (2026-11-11, #911)
+
+D15 sends D16's absolute numbers to a hand-run `BENCH.md` that `make bench`
+writes, and the target ran only the codec's generator
+([#911](https://github.com/kitsunium/sdk/issues/911)): every target was still
+provisional, and no later change to the engine could be judged.
+
+**The lane.** `internal/service/app/consensus/consensus_bench_test.go`, built
+only into the `manual`, race-off Bazel target `consensus_bench_test`, and run
+by `make bench-consensus` (part of `make bench`):
+
+- `BenchmarkSegmentedLogAppendSync`, D15's row: the shipped log, `Append` of
+  64 × 256 B then one `Sync`, per device (`LOG/<device>`);
+- `BenchmarkThreeNodePropose`, `Propose` → applied over the memory doubles,
+  with its allocations (`MEM/propose`); the budget stays kit's;
+- `BenchmarkTCPCommit`, three nodes over loopback mTLS, each on a real data
+  directory of the device, paced at 1 000 proposals/s and saturated by 4 096
+  writers (`TCP/<device>/paced`, `TCP/<device>/saturated`): commit p50/p99,
+  the leader's fdatasync p50/p99, entries per second and fdatasyncs per
+  batch, the fdatasyncs timed through the log's `timedSync`, which only the
+  lane sets;
+- the simulator distributions D16 asks for, in a synctest bubble (a
+  Benchmark cannot open one): three memory nodes, every frame delayed by half
+  its pair's RTT of Context's matrix, each `Sync` the data disk's measured
+  `Sync` p99, FRA and RBX preferred (D8), D5's timing — commit at 1 000
+  proposals/s (`SIM/commit`) and failover over 60 seeds (`SIM/failover`).
+
+`TestGenerateBenchMD` writes `BENCH.md` with the device named and a table of
+the targets below; `make profile-consensus` captures a wave and `make
+benchstat-diff` compares two, the only comparison across changes (D15).
+
+**The verdicts**, on the first `BENCH.md` (an Apple M1 Pro, APFS on its
+internal disk, where Go's `Sync` is `F_FULLFSYNC`; the three nodes of a TCP
+row share that disk):
+
+- **Commit — revised.** The target was written before #417 made a batch cost
+  two fdatasyncs, and an entry proposed while its leader's `Sync` runs waits
+  for it, then for its own: two batches, four fdatasyncs. `SIM/commit`
+  measured p99 332 ms against 183 ms for 2 × RTT + 2 × fsync p99 (fsync p99
+  82 ms on `LOG/data-disk`), and 346 ms for the revised bound;
+  `TCP/data-disk/paced` 255 ms against 197 ms and 394 ms. The target is now
+  **p99 quorum commit ≤ 2 × the nearest RTT + 4 × the fsync p99**, at
+  1 000 proposals/s.
+- **Throughput — confirmed.** `TCP/data-disk/saturated` committed 25 954
+  entries/s of 256 B at 2.00 fdatasyncs per batch, three nodes on one disk.
+  A closed loop's rate is its writers over its latency: an earlier run of
+  the lane at 64 writers measured 534 entries/s, which said nothing of the
+  engine, so the saturated row runs 4 096.
+- **Failover — confirmed.** `SIM/failover`: p99 2 381 ms, the max of 60
+  seeds, under the 3.5 s target with D5's 1–2 s election timeout.
+
+**What stays to measure.** D16's second measurement, `fdatasync` on each of
+the three VPS under Consul, Nomad and Vault, is not in this `BENCH.md`: it is
+`make bench-consensus` run there, with `CONSENSUS_BENCH_DEVICES` naming the
+data disk, and a new verdict if a row moves. Run on one host, the TCP rows
+put three fdatasyncs on one disk at once; on three VPS each node has its own,
+and the RTT is Context's. The `Barrier`, restart and backfill targets are
+not measured by this lane.
+
+**The same lane on Linux** (devbox, 2026-11-13: AMD EPYC 7351P, 8 cores,
+Debian 13, kernel 6.12.101, ext4 on a virtual disk, where `fdatasync` is a
+real flush; `BENCH.md` now carries this host; the Apple figures above are in the
+history of that file): `LOG/data-disk` fdatasync p99 1.69 ms and `Sync` p99
+3.78 ms; `SIM/commit` p99 17.1 ms against 22.6 ms for the original bound
+(2 × RTT + 2 × fsync p99) and 25.9 ms for the revised one, `TCP/data-disk/
+paced` 12.5 ms against 13.7 ms and 27.4 ms; `TCP/data-disk/saturated`
+130 271 entries/s at 1.99 fdatasyncs per batch; `SIM/failover` p99
+3 211 ms against 3.5 s. The original commit bound is met on this host and
+the revised one with room: the revision stands as the target for a disk
+whose flush is as slow as APFS's `F_FULLFSYNC`, and the OVH VPS remain to
+measure.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7322,6 +7398,7 @@ allocated, as D7 requires of every snapshot codec.
 | #773 (c) | the owner's decision, 2026-11-01 | a `DenyPin` that leaves a stopped voter no voucher is admitted, and said: `Raft.Isolated` names, by #603's own judgement, every voter the leader may never reach again and the withdrawn pin that leaves it so; the health's `PeerStranded` and `PeerPinDenied`, the audit line's `isolated`, and the `why` and `isolated` of a refusal the guard decides; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #773) |
 | #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
 | #763 (c) | the owner's decision, 2026-11-01 | a member's `TruncateAndStaySilent` reads the configuration the cluster runs with from a live member, every other member its log names asked under the key the log pins, the newest answer judged, and is refused `RECOVER_REFUSED`, its log and silence condition untouched (the audit line is written first), when that configuration lists none of the kept members, no longer lists the node, or when no member answers; `QuarantineOptions`, `ClearQuarantineWith` and `AskMembership` added, a transport lane `laneMembership` (5) that an older member ends unanswered; no raft frame, payload or record change, nothing persisted, no protocol raise, no raft mutation (amendment of 2026-11-01, #763) |
+| #911 | bench lane, 2026-11-11 | `make bench` runs the consensus lane (`consensus_bench_test`, race off, `manual`) and writes `internal/service/app/consensus/BENCH.md`; D16's commit target is revised to 2 × the nearest RTT + 4 × the fsync p99, its throughput and failover targets confirmed, each on the `BENCH.md` row it rests on |
 
 ## raft-sql-poc (owner's prior Raft)
 
