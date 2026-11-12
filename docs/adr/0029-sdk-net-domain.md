@@ -6,6 +6,8 @@
 - **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the facades move under `pkg/v1/net`
 - **Amended by**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md) — D1, D2, D3 and D4: an opt-in, plaintext-only loop engine entered by `StreamGroup.HandleLoop`, and a restricted HTTP/1.1 profile for it
 - **Amended by**: [ADR 0192](0192-a-datagram-socket-reads-coalesced-and-its-replies-may-leave-per-batch.md) — the datagram engine reads with UDP GRO, one `Packet` a datagram of a coalesced message, and a group's replies may leave per batch (`BatchReplies`)
+- **Amended**: 2026-11-11 (#1331) — the shards of an address asked as `host:0` share the port the first drew (§Amendment 2026-11-11)
+- **Amended**: 2026-11-12 (#1330) — an address another process holds is refused before the shards, and shared only on `ShareAddress` (§Amendment 2026-11-12)
 - **Related**: ADR 0016 (proc — the one-sibling/many-facades precedent), ADR 0018
   (portability — the build-bar/runtime-bar contract and the `x/sys` ban),
   ADR 0026 (resilience — bulkhead/timeout policies reused here), ADR 0027
@@ -540,3 +542,85 @@ Sequenced so the real consumer is unblocked first.
   ADR 0026 (resilience policies), ADR 0027 (metrics), ADR 0028 (config).
 - Linux `include/asm-generic/socket.h` — `SO_REUSEPORT` = 15.
 - `recvmmsg(2)`, `struct mmsghdr` — `<sys/socket.h>`.
+
+## Amendment 2026-11-11 (#1331): the shards of a port 0 share the port drawn
+
+`Shards(n)` binds n `SO_REUSEPORT` sockets on one address. An address asked as
+`host:0` used to give each shard a port of its own on the goroutine engine's
+streams — every bind of `:0` draws again —, so State's one row named the first
+shard's port while the others listened on ports nobody knew, and its `Shards`
+counted sockets that did not share an accept queue. Every engine that shards
+now binds the first socket, reads the port the kernel drew, and binds the others
+on that port, the host as asked (`withBoundPort`): the goroutine engine's
+streams, the datagram groups (#977) and a loop group's per-loop listeners
+(#856) alike. A later shard that cannot bind that port is the startup refusal
+any shard's bind failure already was. Nothing changes for an address that names
+its port, nor for which groups shard by default — that is #1330's, undecided.
+`TestShards_portZeroIsOnePort` counts, in the kernel's own `/proc/net` tables,
+N sockets on the one port State reports, on `127.0.0.1:0` and `[::1]:0`.
+
+## Amendment 2026-11-12 (#1330): an address another process holds is refused, and shared only on request
+
+D5 chose `SO_REUSEPORT` for accept throughput, and `Shards` defaults to one
+listener per core where the platform has it. It never discussed what the option
+admits besides our own shards: any other socket that sets it on the address —
+on Linux under the same effective user — binds too, and the kernel splits the
+connections. A second copy of a program, an old version not yet stopped, a
+development server started twice: both started, both reported the address in
+State, each served half the traffic, and nothing said so. `Shards(1)` restored
+the "address in use" refusal and gave up the sharding.
+
+The owner's decision of 2026-11-11 is the issue's first option with an explicit
+opt-in:
+
+- **A probe before the shards.** Before an address's sockets are opened with
+  `SO_REUSEPORT`, the server binds it once plainly — no `SO_REUSEPORT`, the
+  options the standard library gives a single listener — and closes it at once,
+  on every engine that shards: the goroutine engine's streams, a loop group's
+  per-loop listeners (#856) and a datagram group's `Shards` (#977). An address
+  another socket holds fails `Start` with `AddressInUse` (`0.2.11.96`), its
+  "address" field naming it. A bind the OS refuses with `EADDRINUSE` —
+  `WSAEADDRINUSE` on Windows — is the same refusal, so `Shards(1)` and every
+  single socket say it the same way; any other refusal stays `ListenFailed`.
+  The probe of a stream address is a listen for the instant between its bind
+  and its close, which the standard library does not separate; nobody else
+  serves the address then, so a connection arriving in that instant is refused
+  either way. An address asked with port 0 draws a port nobody holds and is not
+  probed: #1331's one port is unchanged.
+- **The window is left, and said.** Between the probe and the shards a process
+  binding the address with `SO_REUSEPORT` can still join them. Closing it would
+  take a bind that the kernel refuses to anyone after us, which `SO_REUSEPORT`
+  is precisely not; the `Shards` doc names it.
+- **What the probe guarantees depends on the platform's bind.** On Linux a
+  plain bind conflicts with any listener on the port it overlaps, the wildcard
+  address's included, so the probe refuses a second process whatever address it
+  serves on. On the BSDs and darwin the bind sets `SO_REUSEADDR`, under which a
+  listener on the wildcard address does not stop a bind on a precise one: the
+  probe refuses an exact holder and, as a single listener's bind does, lets a
+  precise address take its traffic from a wildcard one. It guarantees what a
+  plain bind refuses, no more. Windows has no `SO_REUSEPORT` and never shards:
+  its addresses are held with `SO_EXCLUSIVEADDRUSE` (ADR 0193), unchanged.
+- **Sharing on purpose: `ShareAddress`.** A progressive restart starts the new
+  process on the address the old one still serves, then drains the old one
+  (ADR 0196 §D4, where Linux 5.14's `tcp_migrate_req` moves its queue to the
+  group's other listeners). That needs the opposite of the default, said by the
+  operator: the group option `ShareAddress` (`OptionShareAddress`, 31) binds
+  every socket of the group's addresses with `SO_REUSEPORT` — a single listener
+  included — and skips the probe; the kernel admits the other process only if it
+  shares too. `ListenerStateValue.Shared` reports such a listener. Every engine
+  honours it on an IP address where the platform has `SO_REUSEPORT`; a Unix
+  socket's address is refused with `LoopOptionUnsupported`
+  (`PacketOptionUnsupported` on a datagram group), and a platform without the
+  option — Windows, Solaris, illumos — with `UnsupportedPlatform`, rather than
+  dropped: a restart that cannot overlap must not believe it does.
+
+The other two options were set aside: defaulting `Shards` to one gives up the
+throughput D5 measured for every program to spare the ones started twice, and
+keeping the default while saying it in State leaves the silent split in place.
+`share_external_test.go` runs two processes on one loopback address: under the
+default options — a stream group, `Shards(1)`, a datagram group's `Shards(2)` —
+the second `Start` fails with `AddressInUse` naming the address; with
+`ShareAddress` on both the second starts, State says `Shared`, and on Linux both
+serve. `share_linux_internal_test.go` holds a port with a `SO_REUSEPORT` socket
+and checks each engine refused, then joining with `ShareAddress`, and that a
+free named port still gets its N shards.

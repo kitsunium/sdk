@@ -233,6 +233,363 @@ sequences:
           range: x.allowed
           value: p
       - return: out
+  - of: accessPolicy.String
+    steps:
+      - switch:
+          cases:
+            - case: accessErrors
+              do:
+                - return: "\"errors\""
+            - case: accessSlow
+              do:
+                - return: slowPrefix + p.slow.String()
+            - case: accessOff
+              do:
+                - return: "\"off\""
+            - default: true
+              do:
+                - return: "\"all\""
+          "on": p.mode
+  - of: accessPolicy.logs
+    steps:
+      - switch:
+          cases:
+            - case: accessErrors
+              do:
+                - return: status >= http.StatusBadRequest
+            - case: accessSlow
+              do:
+                - return: took > p.slow
+            - case: accessOff
+              do:
+                - return: "false"
+            - default: true
+              do:
+                - return: "true"
+          "on": p.mode
+  - of: parseAccessLog
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseAccessLog
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: time
+        kind: stdlib
+    steps:
+      - set: raw
+        to: strings
+        value: strings.ToLower(strings.TrimSpace(raw))
+      - switch:
+          cases:
+            - case: "\"all\""
+              do:
+                - return: "accessPolicy{mode: accessAll}, true"
+            - case: "\"errors\""
+              do:
+                - return: "accessPolicy{mode: accessErrors}, true"
+            - case: "\"off\""
+              do:
+                - return: "accessPolicy{mode: accessOff}, true"
+          "on": raw
+      - bind: text, found
+        eval: strings.CutPrefix(raw, slowPrefix)
+        to: strings
+      - opt:
+          do:
+            - return: accessPolicy{}, false
+          when: "!found"
+      - bind: d, err
+        eval: time.ParseDuration(text)
+        to: time
+      - opt:
+          do:
+            - return: accessPolicy{}, false
+          when: err != nil || d <= 0
+      - return: "accessPolicy{mode: accessSlow, slow: d}, true"
+  - of: resolveAccessLog
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveAccessLog
+        kind: self
+      - id: parseAccessLog
+        kind: internal
+      - id: productVariable
+        kind: internal
+    steps:
+      - bind: raw
+        eval: own(varAccessLog)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "accessPolicy{mode: accessErrors}, nil"
+                when: dev
+            - return: "accessPolicy{mode: accessAll}, nil"
+          when: strings.TrimSpace(raw) == ""
+      - bind: p, ok
+        eval: parseAccessLog(raw)
+        to: parseAccessLog
+      - opt:
+          do:
+            - bind: variable
+              eval: productVariable(name, varAccessLog)
+              to: productVariable
+            - return: |-
+                accessPolicy{}, failure(CodeAppConfig, "ACCESS_LOG_INVALID",
+                			variable+" is all, errors, off or slow:<duration>, such as slow:100ms", nil,
+                			errs.String("variable", variable), errs.String("value", clip(raw)))
+          when: "!ok"
+      - return: p, nil
+  - of: (*countingBody).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*countingBody).Read
+        kind: self
+      - id: b.ReadCloser.Read
+        kind: value
+    steps:
+      - bind: n, err
+        eval: b.ReadCloser.Read(p)
+        to: b.ReadCloser.Read
+      - op: +=
+        set: b.n
+        value: int64(n)
+      - return: n, err
+  - of: (*accessWriter).WriteHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*accessWriter).WriteHeader
+        kind: self
+      - id: w.ResponseWriter.WriteHeader
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: w.status
+              value: code
+          when: w.status == 0
+      - eval: w.ResponseWriter.WriteHeader(code)
+        to: w.ResponseWriter.WriteHeader
+  - of: (*accessWriter).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*accessWriter).Write
+        kind: self
+      - id: w.ResponseWriter.Write
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: w.status
+              value: http.StatusOK
+          when: w.status == 0
+      - bind: n, err
+        eval: w.ResponseWriter.Write(p)
+        to: w.ResponseWriter.Write
+      - op: +=
+        set: w.bytes
+        value: int64(n)
+      - return: n, err
+  - of: (*accessWriter).ReadFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*accessWriter).ReadFrom
+        kind: self
+      - id: rf.ReadFrom
+        kind: value
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - set: w.status
+              value: http.StatusOK
+          when: w.status == 0
+      - var:
+          name: "n"
+          type: int64
+      - var:
+          name: err
+          type: error
+      - alt:
+          - do:
+              - set: n, err
+                to: rf.ReadFrom
+                value: rf.ReadFrom(r)
+            init:
+              bind: rf, ok
+              eval: w.ResponseWriter.(io.ReaderFrom)
+            when: ok
+          - do:
+              - set: n, err
+                to: io
+                value: io.Copy(struct{ io.Writer }{w.ResponseWriter}, r)
+            else: true
+      - op: +=
+        set: w.bytes
+        value: "n"
+      - return: n, err
+  - of: (*accessWriter).Flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*accessWriter).Flush
+        kind: self
+      - id: http.NewResponseController(w.ResponseWriter).Flush
+        kind: value
+    steps:
+      - set: w.flushErr
+        to: http.NewResponseController(w.ResponseWriter).Flush
+        value: http.NewResponseController(w.ResponseWriter).Flush()
+  - of: (*accessWriter).Unwrap
+    steps:
+      - return: w.ResponseWriter
+  - of: (*App).account
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).account
+        kind: self
+      - id: a.clock.Now
+        kind: value
+      - id: requestIDOf
+        kind: internal
+      - id: mintRequestID
+        kind: internal
+      - id: w.Header().Set
+        kind: value
+      - id: r.WithContext
+        kind: value
+      - id: h.ServeHTTP
+        kind: value
+    steps:
+      - bind: begun
+        eval: a.clock.Now()
+        to: a.clock.Now
+      - bind: info
+        eval: "&requestInfo{}"
+      - alt:
+          - do:
+              - set: info.id
+                value: rid
+            init:
+              bind: rid, ok
+              eval: requestIDOf(r.Header)
+              to: requestIDOf
+            when: ok
+          - do:
+              - set: info.id
+                value: rid
+            init:
+              bind: rid, ok
+              eval: mintRequestID()
+              to: mintRequestID
+            when: ok
+      - opt:
+          do:
+            - eval: w.Header().Set(requestIDHeader, info.id)
+              to: w.Header().Set
+          when: info.id != ""
+      - set: r
+        to: r.WithContext
+        value: r.WithContext(context.WithValue(r.Context(), requestKey{}, info))
+      - var:
+          name: in
+          type: "*countingBody"
+      - opt:
+          do:
+            - set: in
+              value: "&countingBody{ReadCloser: r.Body}"
+            - set: r.Body
+              value: in
+          when: r.Body != nil && r.Body != http.NoBody
+      - bind: out
+        eval: "&accessWriter{ResponseWriter: w}"
+      - defer: |-
+          func() {
+          		var read int64
+          		if in != nil {
+          			read = in.n
+          		}
+          		a.writeAccess(r, info, out, read, a.clock.Now().Sub(begun))
+          	}()
+      - eval: h.ServeHTTP(out, r)
+        to: h.ServeHTTP
+  - of: (*App).writeAccess
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).writeAccess
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: trace
+        kind: package
+      - id: logger
+        kind: package
+    steps:
+      - bind: status
+        eval: out.status
+      - opt:
+          do:
+            - set: status
+              value: http.StatusOK
+          when: status == 0
+      - opt:
+          do:
+            - return: ""
+          when: "!a.cfg.accessLog.logs(status, took)"
+      - bind: attrs
+        eval: make([]logger.Attr, 0, 10)
+      - set: attrs
+        value: |-
+          append(attrs,
+          		logger.String("method", r.Method),
+          		logger.String("route", routeOf(r.Pattern)),
+          		logger.Int("status", status),
+          		logger.Float64("duration_ms", round2(float64(took)/float64(time.Millisecond))),
+          		logger.Int64("bytes_in", bytesIn),
+          		logger.Int64("bytes_out", out.bytes),
+          		logger.String("request_id", info.id),
+          		logger.String("client", clientAddr(r, a.cfg.trustedProxies)),
+          		logger.String("user_agent", clipRunes(r.UserAgent(), maxUserAgent)),
+          	)
+      - bind: ctx
+        eval: context.WithoutCancel(r.Context())
+        to: context
+      - opt:
+          do:
+            - set: ctx
+              to: trace
+              value: trace.ContextWithSpanContext(ctx, info.span)
+          when: info.span.IsValid()
+      - eval: logger.Info(ctx, a.productLog(), "request", attrs...)
+        to: logger
+  - of: routeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: routeOf
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: path
+          init:
+            bind: _, path, ok
+            eval: strings.Cut(pattern, " ")
+            to: strings
+          when: ok
+      - return: pattern
   - of: (*Service).Activity
     participants:
       - id: caller
@@ -412,6 +769,14 @@ sequences:
       - set: a.cfg
         to: resolveConfig
         value: resolveConfig(&a.opts, a.name, os.Getenv)
+      - opt:
+          do:
+            - return: a.cfg.trustErr
+          when: a.cfg.trustErr != nil
+      - opt:
+          do:
+            - return: a.cfg.accessErr
+          when: a.cfg.accessErr != nil
       - eval: a.remount(a.cfg.envName)
         to: a.remount
       - opt:
@@ -1444,8 +1809,8 @@ sequences:
         eval: http.NewCrossOriginProtection()
         to: http
       - eval: |-
-          cop.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-          		writeJSON(w, http.StatusForbidden, wireError{Error: wireBody{Code: WireForbidden, Message: "cross-origin request refused"}})
+          cop.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+          		writeJSON(w, http.StatusForbidden, wireError{Error: wireBody{Code: WireForbidden, Message: "cross-origin request refused", RequestID: RequestID(r.Context())}})
           	}))
         to: cop.SetDenyHandler
       - bind: protected
@@ -1459,7 +1824,7 @@ sequences:
           					panic(p)
           				}
           				logger.Error(r.Context(), a.log, "panic serving a request", logger.Any("panic", p), logger.String("stack", string(debug.Stack())))
-          				writeJSON(w, http.StatusInternalServerError, wireError{Error: wireBody{Code: WireInternal, Message: "internal error"}})
+          				writeJSON(w, http.StatusInternalServerError, wireError{Error: wireBody{Code: WireInternal, Message: "internal error", RequestID: RequestID(r.Context())}})
           			}
           		}()
           		protected.ServeHTTP(w, r)
@@ -3608,7 +3973,7 @@ sequences:
         eval: |-
           model.Port{
           		Owner: model.PortOwnerApp, Serves: serves,
-          		Settings: []string{a.variable(varAddr), a.variable(varAllowedHosts), a.variable(varTrustProxy)},
+          		Settings: []string{a.variable(varAddr), a.variable(varAllowedHosts), a.variable(varTrustProxy), a.variable(varTrustedProxies)},
           	}
       - opt:
           do:
@@ -7429,6 +7794,10 @@ sequences:
         kind: internal
       - id: resolveStudio
         kind: internal
+      - id: resolveTrust
+        kind: internal
+      - id: resolveAccessLog
+        kind: internal
       - id: resolveSecrets
         kind: internal
       - id: slices
@@ -7474,6 +7843,12 @@ sequences:
           when: "!dev && studioAsked(o, studio)"
       - set: cfg.trustProxy
         value: own(varTrustProxy) == "on"
+      - set: cfg.trustedProxies, cfg.trustErr
+        to: resolveTrust
+        value: resolveTrust(name, own)
+      - set: cfg.accessLog, cfg.accessErr
+        to: resolveAccessLog
+        value: resolveAccessLog(name, own, dev)
       - set: cfg.secrets
         to: resolveSecrets
         value: resolveSecrets(o, own)
@@ -7687,6 +8062,8 @@ sequences:
         kind: actor
       - id: settings
         kind: self
+      - id: productVariable
+        kind: internal
       - id: slices
         kind: stdlib
     steps:
@@ -7701,8 +8078,13 @@ sequences:
           when: o.memory
       - bind: env, addr, data
         eval: productVariable(name, varEnv), productVariable(name, varAddr), productVariable(name, varDataDir)
-      - bind: trust, hosts, level
-        eval: productVariable(name, varTrustProxy), productVariable(name, varAllowedHosts), productVariable(name, varLogLevel)
+      - bind: trust, proxies
+        eval: productVariable(name, varTrustProxy), productVariable(name, varTrustedProxies)
+      - bind: hosts, level
+        eval: productVariable(name, varAllowedHosts), productVariable(name, varLogLevel)
+      - bind: access
+        eval: productVariable(name, varAccessLog)
+        to: productVariable
       - return: |-
           slices.Concat([]model.Setting{
           		{Name: env, Value: c.env, From: src.from(o.env != nil, env), Option: "app.Env"},
@@ -7710,8 +8092,10 @@ sequences:
           		{Name: data, Value: cmp.Or(c.dataDir, "memory"), From: src.from(o.memory || o.dataDir != nil, data), Option: dataOption, Flag: "-data"},
           	}, studioSettings(o, getenv, c), []model.Setting{
           		{Name: trust, Value: onOff(c.trustProxy), From: src.from(false, trust)},
+          		{Name: proxies, Value: c.trustedProxies.String(), From: src.from(false, proxies)},
           		{Name: hosts, Value: strings.Join(c.allowedHosts, ","), From: src.from(false, hosts)},
           		{Name: level, Value: cmp.Or(c.logLevel, "info"), From: src.from(false, level)},
+          		{Name: access, Value: c.accessLog.String(), From: src.from(false, access)},
           	})
         to: slices
   - of: settingSources.from
@@ -8797,7 +9181,11 @@ sequences:
           		if a.hub != nil && a.hub.enabled {
           			r = r.WithContext(a.asLoop(r.Context(), "http"))
           		}
-          		h.ServeHTTP(w, r)
+          		if reservedPath(r.URL.Path) {
+          			h.ServeHTTP(w, r)
+          			return
+          		}
+          		a.account(w, r, h)
           	})
         to: http
   - of: (*App).instrumentHTTP
@@ -8923,8 +9311,8 @@ sequences:
         eval: |-
           []model.Mechanic{
           		{
-          			Kind: "observe", Label: "in-flight · served", Package: middlewarePkg,
-          			Doc: "Counts the requests being served and those served.",
+          			Kind: "observe", Label: "in-flight · served · access record", Package: middlewarePkg,
+          			Doc: "Counts the requests being served and those served, gives each the X-Request-Id its caller sent or a UUIDv7, and writes the access record <PRODUCT>_ACCESS_LOG asks for.",
           		},
           		{
           			Kind: "recover", Label: "panic → 500", Package: middlewarePkg,
@@ -14809,31 +15197,25 @@ sequences:
         kind: actor
       - id: (*EndpointService).requestSpan
         kind: self
-      - id: r.Context
-        kind: value
-      - id: trace
-        kind: package
+      - id: remoteTrace
+        kind: internal
       - id: a.begin
         kind: internal
+      - id: joinRequest
+        kind: internal
+      - id: trace
+        kind: package
       - id: w.Header().Set
         kind: value
     steps:
       - bind: ctx
-        eval: r.Context()
-        to: r.Context
-      - opt:
-          do:
-            - set: ctx
-              to: trace
-              value: trace.ContextWithSpanContext(ctx, sc)
-          init:
-            bind: sc
-            eval: trace.Extract(r.Header)
-            to: trace
-          when: sc.IsValid()
+        eval: remoteTrace(r.Context(), r.Header)
+        to: remoteTrace
       - bind: ctx, sp
         eval: "a.begin(ctx, &spanStart{node: e.id, from: a.clientOf(r), edge: model.EdgeCalls, op: model.OpRequest, name: name})"
         to: a.begin
+      - eval: joinRequest(ctx, sp)
+        to: joinRequest
       - opt:
           do:
             - eval: w.Header().Set("traceparent", h)
@@ -14920,6 +15302,8 @@ sequences:
         kind: value
       - id: describe
         kind: internal
+      - id: RequestID
+        kind: internal
       - id: logger
         kind: package
       - id: retryAfter
@@ -14941,6 +15325,9 @@ sequences:
             - bind: status, body
               eval: describe(err)
               to: describe
+            - set: body.RequestID
+              to: RequestID
+              value: RequestID(ctx)
             - switch:
                 cases:
                   - case: status >= http.StatusInternalServerError
@@ -36448,6 +36835,257 @@ sequences:
             - return: nil
           when: file == ""
       - return: "&model.Source{File: file, Line: p.line(), Func: p.fn()}"
+  - of: trustedProxies.String
+    participants:
+      - id: caller
+        kind: actor
+      - id: trustedProxies.String
+        kind: self
+      - id: p.String
+        kind: value
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: nets
+        eval: make([]string, len(t))
+      - loop:
+          do:
+            - set: nets[i]
+              to: p.String
+              value: p.String()
+          key: i
+          range: t
+          value: p
+      - return: strings.Join(nets, ",")
+        to: strings
+  - of: trustedProxies.contains
+    participants:
+      - id: caller
+        kind: actor
+      - id: trustedProxies.contains
+        kind: self
+      - id: ip.Unmap().WithZone
+        kind: value
+    steps:
+      - set: ip
+        to: ip.Unmap().WithZone
+        value: ip.Unmap().WithZone("")
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: p.Contains(ip)
+          key: _
+          range: t
+          value: p
+      - return: "false"
+  - of: parseTrustedProxies
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTrustedProxies
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: parseProxyEntry
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: entry
+              to: strings
+              value: strings.TrimSpace(entry)
+            - opt:
+                do:
+                  - continue: true
+                when: entry == ""
+            - bind: p, ok
+              eval: parseProxyEntry(entry)
+              to: parseProxyEntry
+            - opt:
+                do:
+                  - return: nil, entry
+                when: "!ok"
+            - set: proxies
+              value: append(proxies, p)
+          key: entry
+          range: strings.SplitSeq(list, ",")
+      - return: proxies, ""
+  - of: parseProxyEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseProxyEntry
+        kind: self
+      - id: netip
+        kind: stdlib
+      - id: a.Unmap().WithZone
+        kind: value
+      - id: p.Addr
+        kind: value
+      - id: p.Masked
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: a, err
+              eval: netip.ParseAddr(entry)
+              to: netip
+            - opt:
+                do:
+                  - return: netip.Prefix{}, false
+                when: err != nil
+            - set: a
+              to: a.Unmap().WithZone
+              value: a.Unmap().WithZone("")
+            - return: netip.PrefixFrom(a, a.BitLen()), true
+              to: netip
+          when: "!strings.Contains(entry, \"/\")"
+      - bind: p, err
+        eval: netip.ParsePrefix(entry)
+        to: netip
+      - opt:
+          do:
+            - return: netip.Prefix{}, false
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: netip.Prefix{}, false
+                when: p.Bits() < mappedPrefixBits
+            - return: netip.PrefixFrom(a.Unmap(), p.Bits()-mappedPrefixBits), true
+              to: netip
+          init:
+            bind: a
+            eval: p.Addr()
+            to: p.Addr
+          when: a.Is4In6()
+      - return: p.Masked(), true
+        to: p.Masked
+  - of: resolveTrust
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveTrust
+        kind: self
+      - id: productVariable
+        kind: internal
+      - id: parseTrustedProxies
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil
+          when: own(varTrustProxy) != "on"
+      - bind: variable
+        eval: productVariable(name, varTrustedProxies)
+        to: productVariable
+      - bind: proxies, bad
+        eval: parseTrustedProxies(own(varTrustedProxies))
+        to: parseTrustedProxies
+      - switch:
+          cases:
+            - case: bad != ""
+              do:
+                - return: |-
+                    nil, failure(CodeAppConfig, "TRUSTED_PROXIES_INVALID",
+                    			variable+" is a comma-separated list of addresses and networks, such as 10.0.0.0/8, 192.0.2.7", nil, errs.String("variable", variable), errs.String("entry", bad))
+            - case: len(proxies) == 0
+              do:
+                - return: |-
+                    nil, failure(CodeAppConfig, "TRUSTED_PROXIES_REQUIRED",
+                    			productVariable(name, varTrustProxy)+" is on: "+variable+" must list the proxies whose X-Forwarded-For is believed", nil, errs.String("variable", variable))
+      - return: proxies, nil
+  - of: clientAddr
+    participants:
+      - id: caller
+        kind: actor
+      - id: clientAddr
+        kind: self
+      - id: net
+        kind: stdlib
+      - id: netip
+        kind: stdlib
+      - id: peer.Unmap
+        kind: value
+      - id: client.String
+        kind: value
+      - id: hop.Unmap
+        kind: value
+    steps:
+      - bind: host, _, err
+        eval: net.SplitHostPort(r.RemoteAddr)
+        to: net
+      - opt:
+          do:
+            - set: host
+              value: r.RemoteAddr
+          when: err != nil
+      - bind: peer, err
+        eval: netip.ParseAddr(host)
+        to: netip
+      - opt:
+          do:
+            - return: host
+          when: err != nil
+      - bind: client
+        eval: peer.Unmap()
+        to: peer.Unmap
+      - opt:
+          do:
+            - return: client.String()
+              to: client.String
+          when: len(trusted) == 0 || !trusted.contains(peer)
+      - loop:
+          do:
+            - bind: hop, err
+              eval: netip.ParseAddr(text)
+              to: netip
+            - opt:
+                do:
+                  - break: true
+                when: err != nil
+            - set: client
+              to: hop.Unmap
+              value: hop.Unmap()
+            - opt:
+                do:
+                  - break: true
+                when: "!trusted.contains(hop)"
+          key: _
+          range: slices.Backward(forwardedHops(r))
+          value: text
+      - return: client.String()
+        to: client.String
+  - of: forwardedHops
+    participants:
+      - id: caller
+        kind: actor
+      - id: forwardedHops
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - var:
+          name: hops
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: hops
+                    value: append(hops, text)
+                init:
+                  bind: text
+                  eval: strings.TrimSpace(text)
+                  op: =
+                  to: strings
+                when: text != ""
+          key: text
+          range: strings.SplitSeq(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+      - return: hops
   - of: (*Service).Query
     participants:
       - id: caller
@@ -41471,7 +42109,7 @@ sequences:
         kind: stdlib
     steps:
       - bind: rs
-        eval: "&responseState{clientIP: clientAddr(r, a.cfg.trustProxy), userAgent: clipRunes(r.UserAgent(), maxUserAgent)}"
+        eval: "&responseState{clientIP: clientAddr(r, a.cfg.trustedProxies), userAgent: clipRunes(r.UserAgent(), maxUserAgent)}"
       - return: context.WithValue(ctx, responseKey{}, rs), rs
         to: context
   - of: (*responseState).add
@@ -41587,70 +42225,6 @@ sequences:
               value: "true"
           when: "!dev || h.SameSite == http.SameSiteNoneMode"
       - return: "&h"
-  - of: clientAddr
-    participants:
-      - id: caller
-        kind: actor
-      - id: clientAddr
-        kind: self
-      - id: r.Header.Values
-        kind: value
-      - id: strings
-        kind: stdlib
-      - id: netip
-        kind: stdlib
-      - id: ip.Unmap().String
-        kind: value
-      - id: net
-        kind: stdlib
-    steps:
-      - opt:
-          do:
-            - opt:
-                do:
-                  - bind: hops
-                    eval: strings.Join(values, ",")
-                    to: strings
-                  - opt:
-                      do:
-                        - opt:
-                            do:
-                              - return: ip.Unmap().String()
-                                to: ip.Unmap().String
-                            init:
-                              bind: ip, err
-                              eval: netip.ParseAddr(last)
-                              to: netip
-                            when: err == nil
-                      init:
-                        bind: last
-                        eval: strings.TrimSpace(hops[strings.LastIndexByte(hops, ',')+1:])
-                        to: strings
-                      when: last != ""
-                init:
-                  bind: values
-                  eval: r.Header.Values("X-Forwarded-For")
-                  to: r.Header.Values
-                when: len(values) > 0
-          when: trustProxy
-      - bind: host, _, err
-        eval: net.SplitHostPort(r.RemoteAddr)
-        to: net
-      - opt:
-          do:
-            - set: host
-              value: r.RemoteAddr
-          when: err != nil
-      - opt:
-          do:
-            - return: ip.Unmap().String()
-              to: ip.Unmap().String
-          init:
-            bind: ip, err
-            eval: netip.ParseAddr(host)
-            to: netip
-          when: err == nil
-      - return: host
   - of: clipRunes
     steps:
       - opt:
@@ -41658,6 +42232,136 @@ sequences:
             - return: s
           when: utf8.RuneCountInString(s) <= n
       - return: string([]rune(s)[:n])
+  - of: RequestID
+    participants:
+      - id: caller
+        kind: actor
+      - id: RequestID
+        kind: self
+      - id: requestInfoOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ri.id
+          init:
+            bind: ri
+            eval: requestInfoOf(ctx)
+            to: requestInfoOf
+          when: ri != nil
+      - return: "\"\""
+  - of: requestInfoOf
+    steps:
+      - bind: ri, _
+        eval: ctx.Value(requestKey{}).(*requestInfo)
+      - return: ri
+  - of: requestIDOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: requestIDOf
+        kind: self
+      - id: h.Get
+        kind: value
+    steps:
+      - bind: v
+        eval: h.Get(requestIDHeader)
+        to: h.Get
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: v == "" || len(v) > maxRequestID
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "\"\", false"
+                when: "!requestIDByte(v[i])"
+          key: i
+          range: len(v)
+      - return: v, true
+  - of: requestIDByte
+    steps:
+      - switch:
+          cases:
+            - case: c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9'
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: c == '.' || c == '_' || c == '-'
+  - of: mintRequestID
+    participants:
+      - id: caller
+        kind: actor
+      - id: mintRequestID
+        kind: self
+      - id: id
+        kind: package
+    steps:
+      - bind: rid, err
+        eval: id.UUIDv7()
+        to: id
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: err != nil
+      - return: rid, true
+  - of: joinRequest
+    participants:
+      - id: caller
+        kind: actor
+      - id: joinRequest
+        kind: self
+      - id: requestInfoOf
+        kind: internal
+      - id: trace
+        kind: package
+      - id: sp.attr
+        kind: internal
+      - id: sp.sdk.SetAttrs
+        kind: value
+    steps:
+      - bind: ri
+        eval: requestInfoOf(ctx)
+        to: requestInfoOf
+      - opt:
+          do:
+            - return: ""
+          when: ri == nil
+      - set: ri.span
+        to: trace
+        value: trace.SpanContextFromContext(ctx)
+      - opt:
+          do:
+            - return: ""
+          when: ri.id == ""
+      - eval: sp.attr("http.request_id", ri.id)
+        to: sp.attr
+      - opt:
+          do:
+            - eval: sp.sdk.SetAttrs(trace.String("http.request_id", ri.id))
+              to: sp.sdk.SetAttrs
+          when: sp.sdk != nil
+  - of: remoteTrace
+    participants:
+      - id: caller
+        kind: actor
+      - id: remoteTrace
+        kind: self
+      - id: trace
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: trace.ContextWithSpanContext(ctx, sc)
+              to: trace
+          init:
+            bind: sc
+            eval: trace.Extract(h)
+            to: trace
+          when: sc.IsValid()
+      - return: ctx
   - of: privacyFuncsOf
     steps:
       - return: |-
@@ -54700,7 +55404,9 @@ sequences:
       - bind: h
         eval: |-
           http.StripPrefix(strings.TrimSuffix(prefix, "/"), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-          		ctx, sp := a.begin(r.Context(), &spanStart{node: f.id, from: model.ExternalID, edge: model.EdgeCalls, op: model.OpRequest, name: "GET " + prefix})
+          		// A static request continues the caller's trace as an endpoint's does.
+          		ctx, sp := a.begin(remoteTrace(r.Context(), r.Header), &spanStart{node: f.id, from: model.ExternalID, edge: model.EdgeCalls, op: model.OpRequest, name: "GET " + prefix})
+          		joinRequest(ctx, sp)
           		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
           		files.ServeHTTP(rec, r.WithContext(ctx))
           		sp.attr("http.status", strconv.Itoa(rec.status))

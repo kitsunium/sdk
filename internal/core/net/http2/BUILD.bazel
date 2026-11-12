@@ -1,0 +1,44 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit: net/http2 declares the 0.3.109.* codes (ADR 0221).
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_library(
+    name = "http2",
+    srcs = [
+        "doc.go",
+        "error_type.go",
+        "gen_codes.go",
+        "values.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/net/http2",
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":http2",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "http2_test",
+    srcs = [
+        "gen_api_test.go",
+        "limits_external_test.go",
+    ],
+    deps = [
+        ":http2",
+        "//internal/kernel/errs",
+    ],
+)

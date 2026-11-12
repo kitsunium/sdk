@@ -22,4 +22,12 @@ type TimeoutsValue struct {
 	// the negotiation happens before any handler exists to notice it, so it
 	// falls back to the domain's default instead.
 	Handshake DurationValue `json:"handshake"`
+	// KeepAlive is the idle time before the first keepalive probe of an accepted
+	// socket, and the interval between probes: zero is 15 s, the standard
+	// library's, and negative sets none.
+	KeepAlive DurationValue `json:"keep_alive"`
+	// UserTimeout is TCP_USER_TIMEOUT, the time sent output may stay
+	// unacknowledged before the kernel closes the connection: zero is Write's
+	// bound when one is set, otherwise none.
+	UserTimeout DurationValue `json:"user_timeout"`
 }

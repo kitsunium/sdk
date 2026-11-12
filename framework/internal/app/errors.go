@@ -93,6 +93,9 @@ type wireBody struct {
 	Code       string             `json:"code"`
 	Message    string             `json:"message"`
 	Violations []ViolationMessage `json:"violations,omitempty"`
+	// RequestID is the identifier of the request the answer is for, as the
+	// X-Request-Id of the response says: what a support ticket quotes.
+	RequestID string `json:"requestId,omitempty"`
 }
 
 // Error renders the code and the message. It never renders the cause.

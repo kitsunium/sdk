@@ -42,7 +42,7 @@ func Test_trackedListener_Accept(t *testing.T) {
 		if c.secured {
 			cfg = testIdentity(t).ServerConfig()
 		}
-		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: "tcp", Addr: "127.0.0.1:0"}, cfg, false, true, 1)
+		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: "tcp", Addr: "127.0.0.1:0"}, cfg, socketSpec{trackCloses: true, attempts: 1})
 		if err != nil {
 			t.Fatalf("listen: %v", err)
 		}

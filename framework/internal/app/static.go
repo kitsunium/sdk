@@ -117,7 +117,9 @@ func (f *Frontend) mount(a *App, r *routes) phrase {
 	}
 	prefix := f.served(a)
 	h := http.StripPrefix(strings.TrimSuffix(prefix, "/"), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, sp := a.begin(r.Context(), &spanStart{node: f.id, from: model.ExternalID, edge: model.EdgeCalls, op: model.OpRequest, name: "GET " + prefix})
+		// A static request continues the caller's trace as an endpoint's does.
+		ctx, sp := a.begin(remoteTrace(r.Context(), r.Header), &spanStart{node: f.id, from: model.ExternalID, edge: model.EdgeCalls, op: model.OpRequest, name: "GET " + prefix})
+		joinRequest(ctx, sp)
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		files.ServeHTTP(rec, r.WithContext(ctx))
 		sp.attr("http.status", strconv.Itoa(rec.status))

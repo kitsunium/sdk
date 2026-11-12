@@ -225,6 +225,48 @@ constants:
       - doc: "StatusError is STATUS_CODE_ERROR (2): the operation failed."
         name: StatusError
     name: StatusUnset
+  - doc: |-
+      The traceparent grammar, in bytes; the service package's string parser
+      (service/observe/trace.ParseTraceParent) reads the same offsets.
+    grouped: true
+    items:
+      - doc: traceParentLen is a version-00 traceparent's exact length.
+        name: traceParentLen
+        type: int
+        value: "55"
+      - doc: versionHexLen is the width of the version field.
+        name: versionHexLen
+        type: int
+        value: "2"
+      - doc: versionInvalid is the version the specification declares invalid (§3.2.2.1).
+        name: versionInvalid
+        type: byte
+        value: "0xff"
+      - doc: traceIDOffset is where trace-id starts.
+        name: traceIDOffset
+        type: int
+        value: versionHexLen + 1
+      - doc: parentIDOffset is where parent-id starts.
+        name: parentIDOffset
+        type: int
+        value: traceIDOffset + TraceIDHexLen + 1
+      - doc: flagsOffset is where trace-flags starts.
+        name: flagsOffset
+        type: int
+        value: parentIDOffset + SpanIDHexLen + 1
+      - doc: hexDigits renders a nibble in the lowercase hex of the grammar.
+        name: hexDigits
+        type: string
+        value: "\"0123456789abcdef\""
+      - doc: badNibble is what nibble returns for a byte outside [0-9a-f].
+        name: badNibble
+        type: byte
+        value: "0xff"
+      - doc: nibbleBits is the width of one hex digit.
+        name: nibbleBits
+        type: byte
+        value: "4"
+    name: traceParentLen
 files:
   - decls:
       - ValidateAttrs
@@ -352,6 +394,16 @@ files:
   - decls:
       - traceStateEntry
     name: trace_state_entry.go
+  - decls:
+      - traceParentLen
+      - ParseTraceParentBytes
+      - versionTailOK
+      - decodeHexID
+      - decodeHex
+      - nibble
+      - AppendTraceParent
+      - appendHex
+    name: traceparent_bytes.go
 functions:
   - name: ValidateAttrs
     params: sorted []coreotel.AttrValue
@@ -487,6 +539,39 @@ functions:
     name: isDigit
     params: c byte
     results: bool
+  - name: ParseTraceParentBytes
+    params: header []byte
+    results: context SpanContextValue, ok bool
+  - doc: |-
+      versionTailOK reports whether header's version is one the grammar admits and
+      whatever follows the fixed prefix is legal for it: version 00 has no extension
+      point, and a higher one ends at 55 or continues after a dash (§3.2.4).
+    name: versionTailOK
+    params: header []byte
+    results: bool
+  - doc: |-
+      decodeHexID decodes hex into dst and refuses the all-zero value the
+      specification makes invalid.
+    name: decodeHexID
+    params: dst, hex []byte
+    results: bool
+  - doc: |-
+      decodeHex decodes 2*len(dst) lowercase hex digits from src into dst and
+      reports whether all of them were; dst is undefined on false.
+    name: decodeHex
+    params: dst, src []byte
+    results: bool
+  - doc: nibble is the value of a lowercase hex digit, or badNibble.
+    name: nibble
+    params: c byte
+    results: byte
+  - name: AppendTraceParent
+    params: dst []byte, context SpanContextValue
+    results: "[]byte"
+  - doc: appendHex appends src as lowercase hex.
+    name: appendHex
+    params: dst, src []byte
+    results: "[]byte"
 imports:
   context: context
   coreotel: github.com/kitsunium/sdk/internal/core/observe/otel

@@ -25,6 +25,10 @@ const (
 	loadL1 string = "L1"
 	// loadL2 is L1 with a Bearer token and routing.
 	loadL2 string = "L2"
+	// loadL1h2 is L1's request over h2c by prior knowledge: 1000 kept-alive
+	// connections, eight streams in flight on each, the client writing
+	// pre-encoded frames (#963).
+	loadL1h2 string = "L1h2"
 	// loadL3 is UDP, 1200-byte datagrams from a GSO sender of 54 segments, 4
 	// flows at a fixed rate, over a veth pair.
 	loadL3 string = "L3"
@@ -73,6 +77,9 @@ const (
 	// and L2: P2's 5 %, the tightest ratio either load is judged at that a
 	// faster B can meet (P5's 1.0 is a non-regression, met only below 1).
 	calibrationHTTP float64 = 1.05
+	// h2CPUCeiling is the reported h1-h2 row's: HTTP/2 costs no more CPU a
+	// request than HTTP/1.1 on the same chain. Reported until measured.
+	h2CPUCeiling float64 = 1.0
 	// calibrationUDP is the same on L3: P4a's 25 %.
 	calibrationUDP float64 = 1.25
 )
@@ -106,6 +113,9 @@ var (
 		{Metric: metricCPUPerReq, Op: opAtMost, Threshold: calibrationHTTP, Ratio: true},
 		{Metric: metricCPUPerReq, Op: opAtLeast, Threshold: 1 / calibrationHTTP, Ratio: true},
 	}
+	// h1h2Criteria: the loop's HTTP/2 against its HTTP/1.1, reported, no
+	// threshold binding until measured on the runner.
+	h1h2Criteria = []criterionEntity{{Metric: metricCPUPerReq, Op: opAtMost, Threshold: h2CPUCeiling, Ratio: true, Reported: true}}
 	// calUDPCriteria: the same on L3's two metrics, within calibrationUDP.
 	calUDPCriteria = []criterionEntity{
 		{Metric: metricCPUPerDatagram, Op: opAtMost, Threshold: calibrationUDP, Ratio: true},
@@ -138,5 +148,17 @@ var (
 		{Step: "cal-L1", Load: loadL1, A: "loop", B: "loop", Criteria: calHTTPCriteria, Active: true},
 		{Step: "cal-L2", Load: loadL2, A: "handwritten", B: "handwritten", Criteria: calHTTPCriteria, Active: true},
 		{Step: "cal-L3", Load: loadL3, A: "recvmmsg", B: "recvmmsg", Criteria: calUDPCriteria, Active: true},
+		{
+			Step: "P9", Load: loadL1h2, A: "goroutine-h2", B: "loop-h2", Criteria: p6Criteria,
+			Pending: "the h2 lane is measured on the runner first: cal-L1h2 within 1.05 over three runs, then P9 is turned on (#963)",
+		},
+		{
+			Step: "cal-L1h2", Load: loadL1h2, A: "loop-h2", B: "loop-h2", Criteria: calHTTPCriteria,
+			Pending: "three consecutive runner rounds within 0.952-1.05, as cal-L1's, before it gates (#963)",
+		},
+		{
+			Step: "h1-h2", Load: loadL1h2, A: "loop", B: "loop-h2", Criteria: h1h2Criteria,
+			Pending: "reported only: HTTP/2 against HTTP/1.1 on the loop, no threshold until measured (#963)",
+		},
 	}
 )

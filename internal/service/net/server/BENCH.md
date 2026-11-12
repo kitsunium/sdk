@@ -148,7 +148,10 @@ of either engine metered by the same function (ADR 0192 §D6): what GRO saves �
 each GSO send segmented again on receive — runs in softirq, charged mostly to
 whatever task the CPU was running, and the receiver's rusage alone, dominated
 by the copy-out both engines pay, missed it. Each part is reported beside as
-`rcv-`, `snd-` and `irq-cpu-ns/datagram`. P4a's gate and the calibration rows
+`rcv-`, `snd-` and `irq-cpu-ns/datagram`. `kernel-drops/op` is the socket's own
+SO_RXQ_OVFL count over the datagrams sent, beside `lost/op` (#973): the two agree
+on engine A, and under GRO the kernel counts a coalesced train as one drop, so
+the count stands below the loss; a round where it passes the loss is refused. P4a's gate and the calibration rows
 are required; every other waits for the step that builds its engine B
 (`netgate -list`).
 
@@ -162,6 +165,13 @@ only as the order of magnitude the gate starts from:
 | `LoadL1/engine=loop` | 4 282 |
 | `LoadL2/engine=handwritten` | 6 403 |
 | `LoadL3/engine=recvmmsg` (loopback, 55.7 datagrams a receive, receiver's rusage) | 621 |
+
+L1h2 (#963, `load_gate_h2_linux_test.go`) is L1's request over h2c by prior
+knowledge, 1 000 connections with eight streams in flight each, the client
+writing pre-encoded frames: `BenchmarkLoadL1h2/pair=goroutine-h2:loop-h2` (P9),
+`pair=loop-h2:loop-h2` (cal-L1h2) and `pair=loop:loop-h2` (h1-h2, reported). No
+number is recorded here yet: its rows are the runner's (net-kernel-gate), and
+all three stay inactive until cal-L1h2 has held within 1.05 on three runs.
 
 P4a's pair on the veth pair, the same Docker (Linux 7.0.14), the container
 held to 4 CPUs, ten paired rounds at `-benchtime=400000x`: medians of each
@@ -217,6 +227,96 @@ above, including the one that turned out not to help.
 - `AcquireRelease_ReadBuffer16K` above 0 allocs/op means the scratch buffer
   stopped coming from `kernel/concur/buffer`'s 16 KiB class — check that
   `acquire` still calls `buffer.GetSize(size)`.
+
+## Edition 2026-11-10 — the loop's counters (#975)
+
+`BenchmarkCore_batch` (`internal/service/net/loop`), the commit before the ring
+gained its counters (`fa2778cc7^`) against this one, one box (AMD EPYC 7351P,
+4 vCPU, go1.27.3, `-benchtime=200000x -count=8`, benchstat):
+
+| | ns/op (base) | ns/op (head) | B/op | allocs/op |
+|---|---|---|---|---|
+| `Core_batch/open=1` | 343.2 | 269.5 | 28 | 1 |
+| `Core_batch/open=10000` | 342.7 | 243.8 (−28.84 %, p = 0.000, n = 8) | 28 | 1 |
+
+The counters themselves are plain increments, on the loop's thread, of fields it
+already owns: the head is not slower, and the difference is the rest of the
+wave, not the counters. The portable backend's counters are atomics of its
+lanes (`loop_portable.go`), filled the same way: `Bytes*`, `OutputRefused`,
+`SpillClosed`, `Timeouts`, `IdleClosed` and `PendingOutput` in
+`TestPortable_*`; `Slab*` stay zero there, its buffers being the Go heap's.
+
+## Edition 2026-11-10 — response compression (#853)
+
+`BenchmarkCompress` (`compress_external_test.go`) is one request served by
+`Compress` over a recording writer, 64 KiB of `text/plain`, the box of the
+edition below, `-benchtime=2000x`:
+
+| Benchmark | ns/op | MB/s | B/op | allocs/op |
+|---|---|---|---|---|
+| `Compress/gzip` | 6 722 293 | 9.75 | 248 948 | 14 |
+| `Compress/declined` (no `Accept-Encoding`) | 4 183 | 15 667 | 1 296 | 8 |
+
+A declined request pays one header read and `net/http`'s own costs, which are
+what `declined` holds. The http1 chain has no `Compress` link: its P2 gate (ADR
+0186 §D10) would have to hold 1.05 cpu-ns/req on an uncompressible body, and no
+bench has shown that yet.
+
+## Edition 2026-11-10 — datagram sockets by shard (#977)
+
+`BenchmarkLoadL3/pair=recvmmsg:recvmmsg+shards` is the paired ratio of one
+socket against four SO_REUSEPORT sockets of one port, each with its own reader.
+`TestLoadL3_wired/recvmmsg+shards` proves the wiring on loopback: the pair itself
+runs where L3 runs, the veth lane (root, `scripts/ci/net-veth.sh`), so its numbers
+are the CI's to record here, and `Shards(0)` stays the opt-in it is until the
+1.8× saturation gate holds there.
+
+## Edition 2026-11-11 — datagrams on io_uring's multishot RECVMSG (#852)
+
+`BenchmarkLoadL3/pair=recvmmsg:uring-recvmsg` pairs the recvmmsg reader, GRO
+off, with the io_uring datagram lane of `PacketGroup.HandleLoop`, GRO on
+(`load_l3_uring_linux_internal_test.go`): its `datagrams/syscall` are datagrams
+a batch, one `io_uring_enter` each. P4a's threshold, `cpu-ns/datagram` ≤ 0.75,
+is reported first and gated once it holds, as #852 asks. It runs where L3 runs
+(root and `scripts/ci/net-veth.sh`): no number is recorded here from a machine
+without that lane. `TestLoadL3_wiredURing` reads one GSO send through the lane
+over loopback and pins that it counts every datagram and cuts none.
+
+## Edition 2026-11-10 — a PROXY protocol header (#841)
+
+`BenchmarkProxyHeader` (`proxy_bench_test.go`): one v2 header read and parsed
+from a stream, the connection's single cost on this path; no hot-path gate.
+Measured on the box of the edition below, `-benchtime=20000x`: about 1 µs,
+0 B/op, 0 allocs/op with the announced address held in the connection. A v1
+line allocates for its fields, three or four strings, and is a balancer's legacy.
+
+## Edition 2026-11-10 — a datagram's own destination (#972)
+
+`BenchmarkLoadL3/pair=recvmmsg:recvmmsg+pktinfo` reports the cost of one control
+message more per message, over the veth lane's paired rounds; it is not gated.
+It runs where L3 runs (root and `scripts/ci/net-veth.sh`), so no number is
+recorded here from a machine without that lane. `TestLoadL3_wired` reads the same
+reader over loopback and pins that the widened control room cuts nothing.
+
+## Edition 2026-11-10 — a handler's `io.Copy` reaches the socket's own copy (#970)
+
+`BenchmarkCopyFile` (`copy_bench_test.go`) is `io.Copy(c, f)` of a 64 MiB file to
+a loopback peer through a handler on a plaintext TCP group; `BenchmarkEcho` is
+`io.Copy(c, c)` over a 1 MiB round. `before_generic` hides the copies behind a
+plain `net.Conn`, which is what a handler got before this edition; every count
+includes opening the file, the rest being the standard library's `SyscallConn`.
+One box (AMD EPYC 7351P, 4 vCPU, go1.27.3, `-benchmem -benchtime=20x -count=3`):
+
+| Benchmark | MB/s | B/op | allocs/op |
+|---|---|---|---|
+| `CopyFile/after_ReadFrom` (sendfile) | 3 808–4 583 | 272–319 | 7 |
+| `CopyFile/before_generic` (32 KiB loop) | 1 133–1 236 | 32 957–32 980 | 4 |
+| `Echo/after_splice` | 1 343–1 720 | 200–377 | 4 |
+| `Echo/before_generic` | 1 005–1 183 | 200–250 | 4 |
+
+The copy's own 32 KiB buffer is gone; what remains is the file's open and
+`sendfile`'s standard-library set-up, a constant of the call, not of the bytes.
+A group with a `WriteTimeout` keeps its per-write bound and the before column.
 
 ## Edition 2026-11-03 — the read buffer from its size class (#810)
 

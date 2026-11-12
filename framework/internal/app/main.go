@@ -41,7 +41,17 @@ Environment:
       or %[1]s_SECRETS_KEY_FILE naming a file that holds it
       (unset: a key file beside the store, made on first use)
   %[1]s_TRUST_PROXY
-      on: app.ClientIP reads the last X-Forwarded-For address
+      on: app.ClientIP reads X-Forwarded-For, from the peers
+      %[1]s_TRUSTED_PROXIES lists (required when on)
+  %[1]s_TRUSTED_PROXIES
+      the proxies whose X-Forwarded-For is believed: comma-separated
+      addresses and CIDRs, such as 10.0.0.0/8,192.0.2.7. The client is the
+      first hop, from the right, outside the list; a peer outside it is the client
+  %[1]s_ACCESS_LOG
+      which requests are written down, one "request" record each: all (the
+      default outside dev), errors (the default in dev: 4xx and 5xx), off,
+      or slow:<duration> (slower than it, such as slow:100ms). The probes
+      under /_app/health/ are never logged
   %[1]s_RETENTION
       what the stores' retention does: on (default), dry-run or off
   %[1]s_INDEX_KEY

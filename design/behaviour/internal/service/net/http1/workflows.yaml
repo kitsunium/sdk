@@ -1,6 +1,40 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: newLogConfig
+    steps:
+      - bind: cfg
+        eval: "&logConfig{clk: clock.System}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: o.apply(cfg)
+                when: err != nil
+          key: _
+          range: opts
+          value: o
+      - opt:
+          do:
+            - return: nil, misconfigured("Log", "allow")
+          when: len(cfg.allow) > corenet.HTTP1MaxAccessFields
+      - set: cfg.names
+        value: make([][]byte, 0, len(cfg.allow))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, misconfigured("Log", name)
+                when: "!token(name) || credential(name) || repeated(name, cfg.allow[:i])"
+            - set: cfg.names
+              value: append(cfg.names, []byte(name))
+          key: i
+          range: cfg.allow
+          value: name
+      - return: cfg, nil
   - of: credential
     steps:
       - loop:
@@ -25,6 +59,95 @@ workflows:
           range: before
           value: b
       - return: "false"
+  - of: RateLimit
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("RateLimit", "limiter")
+          when: l == nil
+      - opt:
+          do:
+            - return: nil, misconfigured("RateLimit", "key")
+          when: key.kind == rateKeyNone || (key.kind == rateKeyField && !token(key.field))
+      - bind: cfg
+        eval: "&rateConfig{clk: clock.System}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: o.apply(cfg)
+                when: err != nil
+          key: _
+          range: opts
+          value: o
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: the configuration is shared, read only.
+          		return &RateLimitLayer{link: newLink(next), l: l, key: key, cfg: cfg, epoch: cfg.clk.Now()}
+          	}, nil
+  - of: appendDecoded
+    steps:
+      - loop:
+          cond: i < len(p)
+          do:
+            - bind: c
+              eval: p[i]
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, unhex(p[i+1])<<4|unhex(p[i+2]))
+                  - op: +=
+                    set: i
+                    value: escapeLen
+                  - continue: true
+                when: c == '%' && i+2 < len(p)
+            - set: dst
+              value: append(dst, c)
+            - op: ++
+              set: i
+          init: i := 0
+      - return: dst
+  - of: appendEscaped
+    steps:
+      - loop:
+          do:
+            - bind: c
+              eval: s[i]
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, c)
+                  - continue: true
+                when: unreservedByte(c)
+            - set: dst
+              value: append(dst, '%', hexUpper[c>>4], hexUpper[c&nibbleLow])
+          key: i
+          range: len(s)
+      - return: dst
+  - of: parseOffset
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(b) == 0 || len(b) > 19
+      - var:
+          name: v
+          type: int64
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: 0, false
+                when: c < '0' || c > '9'
+            - set: v
+              value: v*10 + int64(c-'0')
+          key: _
+          range: b
+          value: c
+      - return: v, v >= 0
   - of: (*connFlag).compact
     steps:
       - bind: base
@@ -138,6 +261,65 @@ workflows:
           key: k
           range: len(lit)
       - return: "true"
+  - of: (*bucketShard).moveEntry
+    steps:
+      - bind: e
+        eval: s.entries[from]
+      - set: s.entries[to]
+        value: e
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: s.index[pos]
+                    value: to
+                  - break: true
+                when: s.index[pos] == from
+          init: pos := e.key & s.mask
+          post: pos = (pos + 1) & s.mask
+      - alt:
+          - do:
+              - set: s.entries[e.prev].next
+                value: to
+            when: e.prev != noEntry
+          - do:
+              - set: s.head
+                value: to
+            else: true
+      - alt:
+          - do:
+              - set: s.entries[e.next].prev
+                value: to
+            when: e.next != noEntry
+          - do:
+              - set: s.tail
+                value: to
+            else: true
+  - of: (*bucketShard).removeIndex
+    steps:
+      - bind: pos
+        eval: key & s.mask
+      - loop:
+          cond: s.entries[s.index[pos]].key != key
+          do:
+            - set: pos
+              value: (pos + 1) & s.mask
+      - bind: hole
+        eval: pos
+      - loop:
+          cond: s.index[next] != noEntry
+          do:
+            - opt:
+                do:
+                  - set: s.index[hole]
+                    value: s.index[next]
+                  - set: hole
+                    value: next
+                when: s.movable(s.entries[s.index[next]].key&s.mask, hole, next)
+          init: next := (hole + 1) & s.mask
+          post: next = (next + 1) & s.mask
+      - set: s.index[hole]
+        value: noEntry
   - of: cutScheme
     steps:
       - loop:

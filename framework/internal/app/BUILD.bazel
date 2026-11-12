@@ -6,6 +6,7 @@ go_library(
     name = "app",
     srcs = [
         "access.go",
+        "access_log.go",
         "activity.go",
         "app.go",
         "app_analysis.go",
@@ -129,6 +130,7 @@ go_library(
         "privacycmd_rewrap.go",
         "privacycmd_seal.go",
         "profile.go",
+        "proxies.go",
         "query.go",
         "queue_later.go",
         "queue_plug.go",
@@ -146,6 +148,7 @@ go_library(
         "renamed_secrets.go",
         "replace.go",
         "request.go",
+        "request_id.go",
         "retention.go",
         "retention_loop.go",
         "retention_run.go",
@@ -269,6 +272,8 @@ alias(
 go_test(
     name = "app_test",
     srcs = [
+        "access_log_internal_test.go",
+        "access_log_test.go",
         "architecture_test.go",
         "auth_test.go",
         "bench_test.go",
@@ -365,6 +370,7 @@ go_test(
         "profile_test.go",
         "profiles_scope_test.go",
         "profiles_test.go",
+        "proxies_internal_test.go",
         "queue_later_internal_test.go",
         "queue_plug_internal_test.go",
         "queuecmd_internal_test.go",
@@ -419,6 +425,7 @@ go_test(
         "trash_versions_test.go",
         "trash_view_internal_test.go",
         "trash_view_test.go",
+        "trusted_proxies_test.go",
         "watch_graph_test.go",
         "watch_internal_test.go",
         "watch_own_test.go",

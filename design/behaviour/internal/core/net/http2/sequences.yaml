@@ -1,0 +1,97 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: ErrorType.String
+    steps:
+      - opt:
+          do:
+            - return: errorTypeNames[ErrorTypeOther]
+          when: int(t) >= ErrorTypes
+      - return: errorTypeNames[t]
+  - of: ErrorType.MarshalText
+    steps:
+      - return: "[]byte(t.String()), nil"
+  - of: ErrorTypeOf
+    steps:
+      - opt:
+          do:
+            - return: ErrorType(code)
+          when: code >= ErrCodeProtocol && code <= ErrCodeHTTP11Required
+      - return: ErrorTypeOther
+  - of: ErrCode.String
+    steps:
+      - opt:
+          do:
+            - return: errCodeNames[c]
+          when: int(c) < len(errCodeNames)
+      - return: "\"ERR_\" + strconv.FormatUint(uint64(c), 16)"
+  - of: LimitsValue.Resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: LimitsValue.Resolve
+        kind: self
+      - id: v.withDefaults
+        kind: internal
+    steps:
+      - bind: r
+        eval: v.withDefaults()
+        to: v.withDefaults
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: LimitsValue{}, errs.Wrap(LimitsRefused, errs.WrapParams{}, errs.String("reason", c.name))
+                when: c.value < c.low || c.value > c.high
+          key: _
+          range: limitChecks(&r)
+          value: c
+      - opt:
+          do:
+            - return: LimitsValue{}, errs.Wrap(LimitsRefused, errs.WrapParams{}, errs.String("reason", "receive_per_conn"))
+          when: r.ReceivePerConn < r.ReceivePerStream
+      - return: r, nil
+  - of: limitChecks
+    steps:
+      - return: |-
+          [5]limitCheck{
+          		{name: "max_streams", value: r.MaxStreams, low: 1, high: MaxWindow},
+          		{name: "receive_per_stream", value: r.ReceivePerStream, low: 1, high: MaxWindow},
+          		{name: "receive_per_conn", value: r.ReceivePerConn, low: 1, high: MaxWindow},
+          		{name: "max_frame", value: r.MaxFrame, low: DefaultMaxFrame, high: MaxFrameLimit},
+          		{name: "header_table", value: r.HeaderTable, low: 0, high: MaxHeaderTable},
+          	}
+  - of: LimitsValue.withDefaults
+    participants:
+      - id: caller
+        kind: actor
+      - id: LimitsValue.withDefaults
+        kind: self
+      - id: cmpOr
+        kind: internal
+    steps:
+      - bind: r
+        eval: |-
+          LimitsValue{
+          		MaxStreams:       cmpOr(v.MaxStreams, DefaultMaxStreams),
+          		ReceivePerStream: cmpOr(v.ReceivePerStream, DefaultReceivePerStream),
+          		MaxFrame:         cmpOr(v.MaxFrame, DefaultMaxFrame),
+          		HeaderTable:      cmpOr(v.HeaderTable, DefaultHeaderTable),
+          		MaxHeaderList:    cmpOr(v.MaxHeaderList, DefaultMaxHeaderList),
+          	}
+      - set: r.ReceivePerConn
+        to: cmpOr
+        value: cmpOr(v.ReceivePerConn, perConnFactor*r.ReceivePerStream)
+      - opt:
+          do:
+            - set: r.HeaderTable
+              value: "0"
+          when: v.HeaderTable == NoDynamicTable
+      - return: r
+  - of: cmpOr
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: v == 0
+      - return: v

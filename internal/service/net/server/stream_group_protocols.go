@@ -6,6 +6,8 @@ import (
 	"slices"
 	"time"
 
+	corehttp2 "github.com/kitsunium/sdk/internal/core/net/http2"
+
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -15,21 +17,6 @@ const (
 	protoHTTP1 string = "http/1.1"
 	// protoH2 is HTTP/2's ALPN identifier over TLS (RFC 9113 §3.2).
 	protoH2 string = "h2"
-	// h2MaxConcurrentStreams is how many streams one HTTP/2 connection may have
-	// open at once: net/http's own floor, set rather than left implicit.
-	h2MaxConcurrentStreams int = 100
-	// h2MaxReadFrameSize is the largest frame read, the protocol's minimum
-	// (RFC 9113 §4.2): a peer cannot make one frame cost more.
-	h2MaxReadFrameSize int = 16 << 10
-	// h2HeaderTableSize bounds both HPACK tables, the protocol's default
-	// (RFC 7541 §4.2).
-	h2HeaderTableSize int = 4 << 10
-	// h2ReceivePerStream is the flow-control window a stream's body may hold
-	// unread: what a handler that never reads its body costs at most.
-	h2ReceivePerStream int = 256 << 10
-	// h2ReceivePerConn is the window of a whole connection, four streams'
-	// worth, so one unread stream never stops the others.
-	h2ReceivePerConn int = 4 * h2ReceivePerStream
 )
 
 // httpProtocols is what an HTTP group serves, computed once at Start from its
@@ -49,7 +36,7 @@ type httpProtocols struct {
 // entries the list holds, in the identity's order (ADR 0195). Unset, a group
 // with TLS serves both, h2 first, and a group without serves HTTP/1.1. It is
 // judged at Start: an empty list, an empty, repeated or unknown identifier,
-// "h2" without TLS (cleartext HTTP/2 is not served), an identity
+// "h2" without TLS on a group not given Plaintext, an identity
 // whose NextProtos names a version the list excludes or none it includes, and
 // any group that does not serve an http.Handler are refused with
 // ProtocolsRefused. The http1 codec given TLS, which serves HTTP/1.1 alone,
@@ -77,6 +64,11 @@ func Protocols(protos ...string) GroupOption {
 // refusal of a combination it cannot serve. A group that serves no
 // http.Handler computes nothing; given Protocols it is refused.
 func (g *StreamGroup) protocolsRefusal() error {
+	//: the bounds the group was given, judged once for every engine.
+	if err := g.http2Refusal(); err != nil {
+		//: refused, the bound named.
+		return err
+	}
 	set := g.kinds.has(corenet.OptionProtocols)
 	//: the option means something only to net/http's adapter.
 	if g.httpAdapter == nil {
@@ -98,14 +90,22 @@ func (g *StreamGroup) protocolsRefusal() error {
 			protos = []string{protoH2, protoHTTP1}
 		}
 	}
-	//: the list itself.
-	if reason := checkProtocols(protos, tlsOn); reason != "" {
+	//: the list itself; h2 in cleartext is prior knowledge, on a group declared
+	//: Plaintext (ADR 0195 amended).
+	if reason := checkProtocols(protos, tlsOn || g.kinds.has(corenet.OptionPlaintext)); reason != "" {
 		//: refused by what is wrong with it.
 		return g.protocolsErr(reason)
 	}
+	//: the versions, and the ALPN list a TLS group offers.
+	return g.computeProtocols(protos, tlsOn)
+}
+
+// computeProtocols records what the group serves, from its checked list.
+func (g *StreamGroup) computeProtocols(protos []string, tlsOn bool) error {
 	var p httpProtocols
 	p.accepted.SetHTTP1(slices.Contains(protos, protoHTTP1))
 	p.accepted.SetHTTP2(slices.Contains(protos, protoH2))
+	p.accepted.SetUnencryptedHTTP2(!tlsOn && slices.Contains(protos, protoH2))
 	//: a cleartext group negotiates nothing.
 	if tlsOn {
 		alpn, reason := offered(g.identity.ServerConfig().NextProtos, protos)
@@ -148,6 +148,87 @@ func checkProtocols(protos []string, tlsOn bool) string {
 	}
 	//: servable.
 	return ""
+}
+
+// HTTP2 sets the HTTP/2 bounds of a group serving HTTP, resolving ADR 0195's
+// deferral: an HTTP group's net/http adapter and the http2 loop adapter serve
+// the same value. A zero field is its default (corehttp2's), and a field out
+// of its bound fails Start with corehttp2.LimitsRefused, its name in reason.
+// A datagram group refuses it with PacketOptionUnsupported, a loop group
+// whose handler does not honour it with LoopOptionUnsupported, any other
+// group with ProtocolsRefused. State reports the bounds the listeners serve.
+func HTTP2(v corehttp2.LimitsValue) GroupOption {
+	//: applied in declaration order; judged at Start.
+	return func(g *StreamGroup) {
+		g.http2Limits = v
+		g.kinds.add(corenet.OptionHTTP2)
+	}
+}
+
+// http2Refusal judges the HTTP2 option: the bounds, on a group that can serve
+// them. A group with no HTTP handler is refused here unless it is a loop
+// group, whose handler answers for it.
+func (g *StreamGroup) http2Refusal() error {
+	//: not asked.
+	if !g.kinds.has(corenet.OptionHTTP2) {
+		//: nothing to judge.
+		return nil
+	}
+	//: a handler of no HTTP at all.
+	if g.httpAdapter == nil && g.loopHandler == nil && g.handler != nil {
+		//: refused.
+		return g.protocolsErr("handler")
+	}
+	_, err := g.http2Limits.Resolve()
+	//: a bound out of its range, named by Resolve.
+	if err != nil {
+		//: refused, the group named.
+		return errs.Wrap(err, errs.WrapParams{}, errs.String("group", g.name))
+	}
+	//: servable.
+	return nil
+}
+
+// effectiveHTTP2 is the group's resolved bounds; http2Refusal has already
+// refused a value that does not resolve.
+func (g *StreamGroup) effectiveHTTP2() corehttp2.LimitsValue {
+	//: the defaults when no option was given.
+	l, err := g.http2Limits.Resolve()
+	//: refused at Start, so unreachable: a server still serves the defaults.
+	if err != nil {
+		//: an unset value resolves.
+		return corehttp2.LimitsValue{
+			MaxStreams: corehttp2.DefaultMaxStreams, ReceivePerStream: corehttp2.DefaultReceivePerStream,
+			ReceivePerConn: 4 * corehttp2.DefaultReceivePerStream, MaxFrame: corehttp2.DefaultMaxFrame,
+			HeaderTable: corehttp2.DefaultHeaderTable, MaxHeaderList: corehttp2.DefaultMaxHeaderList,
+		}
+	}
+	//: resolved.
+	return l
+}
+
+// http2Bounds returns the resolved bounds for a State row, nil on a group
+// serving no HTTP.
+func (g *StreamGroup) http2Bounds() *corehttp2.LimitsValue {
+	//: only HTTP groups and an HTTP/2 loop adapter hold bounds.
+	if g.httpAdapter == nil && findHTTPCodec(g.loopChain) == nil {
+		//: none.
+		return nil
+	}
+	l, err := g.http2Limits.Resolve()
+	//: a bad option fails Start; nothing to report past it.
+	if err != nil {
+		//: none.
+		return nil
+	}
+	//: effective.
+	return &l
+}
+
+// servesH2C reports whether the group's listeners serve HTTP/2 in cleartext.
+func (g *StreamGroup) servesH2C() bool {
+	//: an http.Handler group given no TLS whose list names h2.
+	return g.httpAdapter != nil && g.identity.IsZero() && g.httpProtos.accepted.UnencryptedHTTP2()
 }
 
 // offered is the ALPN list a TLS group offers: protos when the identity
@@ -208,25 +289,27 @@ func (g *StreamGroup) serverTLS() *tls.Config {
 	return tlsFloor(cfg)
 }
 
-// http2Config is the HTTP/2 bounds every HTTP group serves with: set, never
+// http2Config is the HTTP/2 bounds an HTTP group serves with: set, never
 // left to net/http's defaults, so a release of the standard library cannot
 // move them. silence is how long a connection may send no frame before the
 // server PINGs it, and how long the PING's answer may take before the
 // connection is closed: the one bound net/http's HTTP/2 server keeps while a
 // stream is open, its idle timer stopped — a header block left unfinished
 // behind an open stream is closed by it (ADR 0195 §D3). Zero sets none.
-func http2Config(write corenet.DurationValue, silence time.Duration) *http.HTTP2Config {
+func http2Config(write corenet.DurationValue, silence time.Duration, l corehttp2.LimitsValue, count func(string)) *http.HTTP2Config {
 	//: the same for every group; a write bound when the group has one.
 	return &http.HTTP2Config{
-		MaxConcurrentStreams:          h2MaxConcurrentStreams,
-		MaxReadFrameSize:              h2MaxReadFrameSize,
-		MaxDecoderHeaderTableSize:     h2HeaderTableSize,
-		MaxEncoderHeaderTableSize:     h2HeaderTableSize,
-		MaxReceiveBufferPerStream:     h2ReceivePerStream,
-		MaxReceiveBufferPerConnection: h2ReceivePerConn,
+		MaxConcurrentStreams:          l.MaxStreams,
+		MaxReadFrameSize:              l.MaxFrame,
+		MaxDecoderHeaderTableSize:     l.HeaderTable,
+		MaxEncoderHeaderTableSize:     l.HeaderTable,
+		MaxReceiveBufferPerStream:     l.ReceivePerStream,
+		MaxReceiveBufferPerConnection: l.ReceivePerConn,
 		WriteByteTimeout:              write.Duration(),
 		SendPingTimeout:               silence,
 		PingTimeout:                   silence,
+		//: every error net/http's HTTP/2 counts reaches State (#966).
+		CountError: count,
 	}
 }
 

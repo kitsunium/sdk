@@ -9,7 +9,9 @@ go_library(
         "call.go",
         "capability.go",
         "client_config.go",
+        "compress.go",
         "conn.go",
+        "cors.go",
         "doc.go",
         "drain.go",
         "duration.go",
@@ -24,8 +26,10 @@ go_library(
         "identity_params.go",
         "limits.go",
         "loop.go",
+        "loop_http.go",
         "loop_layer.go",
         "loop_outbound.go",
+        "loop_peer.go",
         "loop_state.go",
         "loop_value.go",
         "material.go",
@@ -34,11 +38,13 @@ go_library(
         "phase.go",
         "policy.go",
         "policy_compliance.go",
+        "proxy.go",
         "response.go",
         "sse.go",
         "state.go",
         "state_datagram.go",
         "state_report.go",
+        "steer.go",
         "timeouts.go",
         "websocket.go",
         "websocket_close.go",
@@ -51,7 +57,11 @@ go_library(
         "//:__subpackages__",
         "//internal/core:core_consumers",
     ],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/core/net/http2",
+        "//internal/core/observe/trace",
+        "//internal/kernel/errs",
+    ],
 )
 
 alias(
@@ -67,6 +77,7 @@ go_test(
     name = "net_test",
     srcs = [
         "address_external_test.go",
+        "compress_external_test.go",
         "conn_handler_external_test.go",
         "drain_external_test.go",
         "duration_external_test.go",
@@ -89,7 +100,11 @@ go_test(
         "wrap_internal_test.go",
     ],
     embed = [":net"],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/core/net/http2",
+        "//internal/core/observe/trace",
+        "//internal/kernel/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

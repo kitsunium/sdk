@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/service/net/http1"
@@ -175,3 +176,64 @@ func BenchmarkLoopHandler(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkChainLink is one request through a chain of one link, framed into a
+// reused value, the bare handler the baseline: what a link costs and that it
+// allocates nothing.
+func BenchmarkChainLink(b *testing.B) {
+	app := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Status = 204 })
+	in := []byte("GET /assets/app.js HTTP/1.1\r\nHost: h\r\nOrigin: https://a.example\r\nX-Request-Id: abc-123\r\n\r\n")
+	cases := []struct {
+		name string
+		h    corenet.HTTP1Handler
+	}{
+		{"none", app},
+		{"requestid", http1.RequestID()(app)},
+		{"requestid-mint", http1.RequestID(http1.RequestIDMint())(app)},
+		{"ratelimit", mustBenchLink(b, func() (corenet.Middleware[corenet.HTTP1Handler], error) {
+			buckets, err := http1.NewKeyedBuckets(http1.KeyedBucketsValue{Rate: 1e9, Burst: 1 << 20, Keys: 4096})
+			if err != nil {
+				return nil, err
+			}
+			return http1.RateLimit(buckets, http1.RateKeyField("X-Request-Id"))
+		})(app)},
+		{"cors", mustBenchLink(b, func() (corenet.Middleware[corenet.HTTP1Handler], error) {
+			return http1.CORS(corenet.CORSValue{Origins: []string{"https://a.example", "https://b.example"}, MaxAge: corenet.DurationValue(time.Minute)})
+		})(app)},
+		{"log", mustBenchLink(b, func() (corenet.Middleware[corenet.HTTP1Handler], error) {
+			return http1.Log(benchLogger{})
+		})(app)},
+		{"log-slow-sampled", mustBenchLink(b, func() (corenet.Middleware[corenet.HTTP1Handler], error) {
+			return http1.Log(benchLogger{}, http1.LogSlowerThan(time.Hour), http1.LogSample(1000))
+		})(app)},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			var p http1.Parser
+			var req corenet.HTTP1RequestValue
+			var res corenet.HTTP1ResponseValue
+			b.ReportAllocs()
+			for b.Loop() {
+				p.Parse(in, &req)
+				req.ID = 42
+				res = corenet.HTTP1ResponseValue{}
+				c.h.ServeHTTP1(&req, &res)
+			}
+		})
+	}
+}
+
+// mustBenchLink builds a link, failing the benchmark on a refusal.
+func mustBenchLink(b *testing.B, build func() (corenet.Middleware[corenet.HTTP1Handler], error)) corenet.Middleware[corenet.HTTP1Handler] {
+	b.Helper()
+	link, err := build()
+	if err != nil {
+		b.Fatal(err)
+	}
+	return link
+}
+
+// benchLogger drops every record.
+type benchLogger struct{}
+
+func (benchLogger) LogHTTP1(rec corenet.HTTP1AccessValue) { perfInt = rec.Status }

@@ -59,6 +59,13 @@ type Config struct {
 	// is asked about "index.html", the file actually served. Nil marks
 	// nothing.
 	Immutable func(name string) bool
+	// Precompressed serves a file's name.br or name.gz sidecar in its place when
+	// the tree holds one and Accept-Encoding admits it: typed as the file,
+	// sent with Content-Encoding and Vary: Accept-Encoding, ranged and
+	// conditional as any file, and never a sidecar that is not a regular file.
+	// A client that admits neither gets the file itself. brotli needs no encoder
+	// here: the bytes are the tree's own.
+	Precompressed bool
 }
 
 // Handler serves one file tree. It is safe for concurrent use.
@@ -71,6 +78,8 @@ type Handler struct {
 	referrer  string
 	spa       bool
 	immutable func(name string) bool
+	// precompressed serves a file's .br or .gz sidecar in its place.
+	precompressed bool
 }
 
 // NewHandler returns a Handler serving fsys as cfg says. It refuses, with the core
@@ -102,7 +111,7 @@ func NewHandler(fsys fs.FS, cfg Config) (*Handler, error) {
 		return nil, misconfigured("referrer_policy")
 	}
 	//: ready to serve.
-	return &Handler{fsys: fsys, csp: csp, referrer: referrer, spa: cfg.SinglePageApp, immutable: cfg.Immutable}, nil
+	return &Handler{fsys: fsys, csp: csp, referrer: referrer, spa: cfg.SinglePageApp, immutable: cfg.Immutable, precompressed: cfg.Precompressed}, nil
 }
 
 // ServeHTTP answers one request: the security headers first, then the method,

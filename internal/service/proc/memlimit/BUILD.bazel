@@ -37,6 +37,7 @@ go_test(
     name = "memlimit_test",
     srcs = [
         "cgroup_internal_test.go",
+        "derive_internal_test.go",
         "gen_api_test.go",
         "high_internal_test.go",
         "memlimit_internal_test.go",

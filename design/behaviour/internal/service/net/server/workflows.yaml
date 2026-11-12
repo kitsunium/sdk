@@ -45,6 +45,29 @@ workflows:
           value: slot
       - set: pl.compact
         value: pl.compact[:0]
+  - of: (*Server).groupConnections
+    steps:
+      - lock:
+          mutex: s.mu
+          read: true
+      - bind: out
+        eval: make([]groupConns, 0, len(s.groups))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: g.loopHandler != nil
+            - set: out
+              value: |-
+                append(out, groupConns{
+                			name: g.name, active: g.conns.active.Load(),
+                			admitted: g.conns.admitted.Load(), rejected: g.conns.rejected.Load(),
+                		})
+          key: _
+          range: s.groups
+          value: g
+      - return: out
   - of: (*multiWriter).left
     steps:
       - loop:
@@ -57,18 +80,6 @@ workflows:
                   - return: ""
                 when: w.spans[k].count > 1
           post: k++
-  - of: (*operatorEnv).applied
-    steps:
-      - loop:
-          do:
-            - opt:
-                do:
-                  - return: entry.token
-                when: "!entry.kernel && e.allows(entry.rank)"
-          key: _
-          range: capabilityRegistry
-          value: entry
-      - return: corenet.CapabilityGoroutine
   - of: lookupCapability
     steps:
       - loop:

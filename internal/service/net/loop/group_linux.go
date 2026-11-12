@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -32,6 +33,11 @@ const (
 // refused is LoopBackendUnavailable. The portable backend is server's, never
 // the leaf's (ADR 0186 §D3).
 func startNative(g *Group, cfg *Config) error {
+	//: records are not served as a stream.
+	if err := refuseSeqpacket(cfg); err != nil {
+		//: refused by name, whatever the backend.
+		return err
+	}
 	//: by the backend asked for.
 	switch cfg.Value.Backend {
 	//: the best one the probe reaches.
@@ -42,7 +48,7 @@ func startNative(g *Group, cfg *Config) error {
 			//: never probed.
 			return startEpoll(g, cfg)
 		}
-		err := startIOURing(g, cfg, cfg.hooks)
+		err := startIOURing(g, cfg)
 		//: io_uring runs.
 		if err == nil {
 			//: started.
@@ -55,12 +61,17 @@ func startNative(g *Group, cfg *Config) error {
 	//: io_uring, as asked: refused by the probe's reason when it fails.
 	case corenet.LoopBackendIOURing:
 		//: started, or refused.
-		return startIOURing(g, cfg, cfg.hooks)
+		return startIOURing(g, cfg)
 	//: epoll, as asked.
 	case corenet.LoopBackendEpoll:
 		g.stage = "epoll"
 		//: started.
 		return startEpoll(g, cfg)
+	//: kqueue is darwin's and the BSDs' (ADR 0222).
+	case corenet.LoopBackendKqueue:
+		//: the shared sentinel, wrapped, never redeclared (ADR 0018 §(a)).
+		return errs.Wrap(coreproc.UnsupportedPlatform, errs.WrapParams{},
+			errs.String("group", cfg.Group), errs.String("backend", cfg.Value.Backend.String()))
 	//: the portable backend is server's.
 	default:
 		//: refused by name.
@@ -99,6 +110,19 @@ func descriptorLimit() uint64 {
 func mmapAnon(n int) ([]byte, error) {
 	//: read-write, private, anonymous.
 	return syscall.Mmap(-1, 0, n, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+}
+
+// dupCloexec duplicates fd, close-on-exec from its birth, to the lowest free
+// number.
+func dupCloexec(fd int) (int, error) {
+	nfd, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_DUPFD_CLOEXEC, 0)
+	//: refused, or the new number.
+	if errno != 0 {
+		//: the kernel's refusal.
+		return -1, errno
+	}
+	//: the descriptor.
+	return int(nfd), nil
 }
 
 // closeFDs closes every valid descriptor of fds.

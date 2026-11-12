@@ -58,17 +58,36 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
 - [func AppendResponse\(dst \[\]byte, req \*Request, res \*Response, closing bool\) \(\[\]byte, error\)](<#AppendResponse>)
 - [func AppendStatusLine\(dst \[\]byte, status int\) \(\[\]byte, error\)](<#AppendStatusLine>)
 - [func Bearer\(v BearerVerifier, exempt ...int\) \(Middleware, error\)](<#Bearer>)
+- [func CORS\(cfg CORSValue\) \(Middleware, error\)](<#CORS>)
+- [func Canonical\(req \*Request\) Refusal](<#Canonical>)
 - [func Chain\(h Handler, links ...Middleware\) Handler](<#Chain>)
 - [func Continue\(buf \[\]byte, req \*Request\) int](<#Continue>)
+- [func Files\(route int, fsys fs.FS, cfg static.Config\) \(Middleware, error\)](<#Files>)
 - [func HandleLoop\(h Handler, p Parser\) \*LoopHandler](<#HandleLoop>)
 - [func Headers\(pairs ...string\) \(Middleware, error\)](<#Headers>)
-- [func Log\(l AccessLogger, allow ...string\) \(Middleware, error\)](<#Log>)
+- [func Log\(l AccessLogger, opts ...LogOption\) \(Middleware, error\)](<#Log>)
+- [func LogAllow\(names ...string\) LogOption](<#LogAllow>)
+- [func LogClock\(c clock.Clock\) LogOption](<#LogClock>)
+- [func LogSample\(n int\) LogOption](<#LogSample>)
+- [func LogSlowerThan\(d time.Duration\) LogOption](<#LogSlowerThan>)
+- [func NewKeyedBuckets\(cfg KeyedBucketsValue\) \(\*KeyedBuckets, error\)](<#NewKeyedBuckets>)
 - [func NewParser\(l Limits\) \(Parser, error\)](<#NewParser>)
 - [func Pending\(req \*Request, buffered int\) int](<#Pending>)
+- [func RateClock\(c clock.Clock\) RateOption](<#RateClock>)
+- [func RateExempt\(ids ...int\) RateOption](<#RateExempt>)
+- [func RateKeyField\(name string\) RateKey](<#RateKeyField>)
+- [func RateKeyLane\(\) RateKey](<#RateKeyLane>)
+- [func RateKeyRoute\(\) RateKey](<#RateKeyRoute>)
+- [func RateKeySubject\(\) RateKey](<#RateKeySubject>)
+- [func RateLimit\(l Limiter, key RateKey, opts ...RateOption\) \(Middleware, error\)](<#RateLimit>)
+- [func RequestID\(opts ...RequestIDOption\) Middleware](<#RequestID>)
+- [func RequestIDMint\(\) RequestIDOption](<#RequestIDMint>)
 - [func Routes\(routes ...Route\) \(Middleware, error\)](<#Routes>)
+- [func Trace\(\) Middleware](<#Trace>)
 - [type Access](<#Access>)
 - [type AccessLogger](<#AccessLogger>)
   - [func \(AccessLogger\) LogHTTP1\(rec HTTP1AccessValue\)](<#AccessLogger.LogHTTP1>)
+- [type AccessStage](<#AccessStage>)
 - [type Auth](<#Auth>)
   - [func \(\*Auth\) Claims\(\) uint64](<#Auth.Claims>)
   - [func \(\*Auth\) Reset\(\)](<#Auth.Reset>)
@@ -82,7 +101,21 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
   - [func \(\*BearerLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#BearerLayer.ServeHTTP1>)
 - [type BearerVerifier](<#BearerVerifier>)
   - [func \(BearerVerifier\) VerifyBearer\(token \[\]byte, auth \*HTTP1AuthValue\) bool](<#BearerVerifier.VerifyBearer>)
+- [type BodyAborter](<#BodyAborter>)
+  - [func \(BodyAborter\) AbortBody\(req \*HTTP1RequestValue\)](<#BodyAborter.AbortBody>)
+- [type BodyReader](<#BodyReader>)
+  - [func \(BodyReader\) OnBody\(req \*HTTP1RequestValue, chunk \[\]byte, last bool\)](<#BodyReader.OnBody>)
+- [type CORSLayer](<#CORSLayer>)
+  - [func \(\*CORSLayer\) EndBatch\(lane int\)](<#CORSLayer.EndBatch>)
+  - [func \(\*CORSLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#CORSLayer.ServeHTTP1>)
+- [type CORSValue](<#CORSValue>)
 - [type Field](<#Field>)
+- [type FileValue](<#FileValue>)
+- [type FilesLayer](<#FilesLayer>)
+  - [func \(\*FilesLayer\) CancelJob\(lane int, job uint64\)](<#FilesLayer.CancelJob>)
+  - [func \(\*FilesLayer\) EndBatch\(lane int\)](<#FilesLayer.EndBatch>)
+  - [func \(\*FilesLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#FilesLayer.ServeHTTP1>)
+  - [func \(\*FilesLayer\) WorkHTTP1\(lane int, job uint64, res \*corenet.HTTP1ResponseValue\)](<#FilesLayer.WorkHTTP1>)
 - [type Handler](<#Handler>)
   - [func \(Handler\) ServeHTTP1\(req \*HTTP1RequestValue, res \*HTTP1ResponseValue\)](<#Handler.ServeHTTP1>)
 - [type HandlerFunc](<#HandlerFunc>)
@@ -90,15 +123,25 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
 - [type HeadersLayer](<#HeadersLayer>)
   - [func \(\*HeadersLayer\) EndBatch\(lane int\)](<#HeadersLayer.EndBatch>)
   - [func \(\*HeadersLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#HeadersLayer.ServeHTTP1>)
+- [type KeyedBuckets](<#KeyedBuckets>)
+  - [func \(\*KeyedBuckets\) Allow\(key \[\]byte, now int64\) \(ok bool, retryAfter int\)](<#KeyedBuckets.Allow>)
+- [type KeyedBucketsValue](<#KeyedBucketsValue>)
+- [type Limiter](<#Limiter>)
+  - [func \(Limiter\) Allow\(key \[\]byte, now int64\) \(ok bool, retryAfter int\)](<#Limiter.Allow>)
 - [type Limits](<#Limits>)
 - [type LogLayer](<#LogLayer>)
   - [func \(\*LogLayer\) EndBatch\(lane int\)](<#LogLayer.EndBatch>)
   - [func \(\*LogLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#LogLayer.ServeHTTP1>)
+- [type LogOption](<#LogOption>)
 - [type LoopHandler](<#LoopHandler>)
+  - [func \(\*LoopHandler\) CheckSpill\(spillCap int\) error](<#LoopHandler.CheckSpill>)
+  - [func \(\*LoopHandler\) HTTPCounts\(\) corenet.HTTPCountsValue](<#LoopHandler.HTTPCounts>)
+  - [func \(\*LoopHandler\) MarkServed\(lane int\)](<#LoopHandler.MarkServed>)
   - [func \(\*LoopHandler\) OnBatchEnd\(io corenet.LoopIO\)](<#LoopHandler.OnBatchEnd>)
   - [func \(\*LoopHandler\) OnClose\(io corenet.LoopIO, ref corenet.LoopConnRef, err error\)](<#LoopHandler.OnClose>)
   - [func \(\*LoopHandler\) OnData\(io corenet.LoopIO, ref corenet.LoopConnRef, buf \[\]byte\) int](<#LoopHandler.OnData>)
   - [func \(\*LoopHandler\) OnDone\(io corenet.LoopIO, job corenet.LoopJobValue\)](<#LoopHandler.OnDone>)
+  - [func \(\*LoopHandler\) OnDrain\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnDrain>)
   - [func \(\*LoopHandler\) OnOpen\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnOpen>)
   - [func \(\*LoopHandler\) OnOutbound\(v corenet.LoopOutboundValue\)](<#LoopHandler.OnOutbound>)
   - [func \(\*LoopHandler\) OnStart\(lanes int\)](<#LoopHandler.OnStart>)
@@ -111,21 +154,73 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
 - [type Parser](<#Parser>)
   - [func \(Parser\) Limits\(\) corenet.HTTP1LimitsValue](<#Parser.Limits>)
   - [func \(Parser\) Parse\(buf \[\]byte, req \*corenet.HTTP1RequestValue\) \(int, Refusal\)](<#Parser.Parse>)
+- [type RateKey](<#RateKey>)
+- [type RateLimitLayer](<#RateLimitLayer>)
+  - [func \(\*RateLimitLayer\) EndBatch\(lane int\)](<#RateLimitLayer.EndBatch>)
+  - [func \(\*RateLimitLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#RateLimitLayer.ServeHTTP1>)
+- [type RateOption](<#RateOption>)
 - [type Refusal](<#Refusal>)
   - [func \(Refusal\) Err\(\) error](<#Refusal.Err>)
   - [func \(Refusal\) Status\(\) int](<#Refusal.Status>)
   - [func \(Refusal\) String\(\) string](<#Refusal.String>)
 - [type Request](<#Request>)
   - [func \(\*Request\) Field\(name string\) \(\[\]byte, bool\)](<#Request.Field>)
+- [type RequestIDLayer](<#RequestIDLayer>)
+  - [func \(\*RequestIDLayer\) EndBatch\(lane int\)](<#RequestIDLayer.EndBatch>)
+  - [func \(\*RequestIDLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#RequestIDLayer.ServeHTTP1>)
+- [type RequestIDOption](<#RequestIDOption>)
+- [type RequestIDValue](<#RequestIDValue>)
+  - [func \(\*RequestIDValue\) Bytes\(\) \[\]byte](<#RequestIDValue.Bytes>)
+  - [func \(\*RequestIDValue\) Reset\(\)](<#RequestIDValue.Reset>)
+  - [func \(\*RequestIDValue\) Set\(b \[\]byte\) bool](<#RequestIDValue.Set>)
 - [type Response](<#Response>)
 - [type Route](<#Route>)
 - [type RouteLayer](<#RouteLayer>)
   - [func \(\*RouteLayer\) EndBatch\(lane int\)](<#RouteLayer.EndBatch>)
   - [func \(\*RouteLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#RouteLayer.ServeHTTP1>)
+- [type TraceLayer](<#TraceLayer>)
+  - [func \(\*TraceLayer\) EndBatch\(lane int\)](<#TraceLayer.EndBatch>)
+  - [func \(\*TraceLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#TraceLayer.ServeHTTP1>)
 - [type Worker](<#Worker>)
   - [func \(Worker\) WorkHTTP1\(lane int, job uint64, res \*HTTP1ResponseValue\)](<#Worker.WorkHTTP1>)
 
 ## Constants
+
+<a name="AccessAnswered"></a>
+```go
+const AccessAnswered AccessStage = 0
+```
+
+AccessAnswered is an answer written when the handler returned.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.HTTP1AccessAnswered`.
+
+<a name="AccessCompleted"></a>
+```go
+const AccessCompleted AccessStage = 3
+```
+
+AccessCompleted is a deferred answer's second record.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.HTTP1AccessCompleted`.
+
+<a name="AccessDeferred"></a>
+```go
+const AccessDeferred AccessStage = 1
+```
+
+AccessDeferred is a deferred answer's first record, with no status yet.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.HTTP1AccessDeferred`.
+
+<a name="AccessPending"></a>
+```go
+const AccessPending AccessStage = 2
+```
+
+AccessPending is an answer handed to the lane's worker.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.HTTP1AccessPending`.
 
 <a name="DefaultBody"></a>
 ```go
@@ -190,6 +285,15 @@ MaxHead is the largest head bound Limits.Head may ask for.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.HTTP1MaxHead`.
 
+<a name="MaxRequestID"></a>
+```go
+const MaxRequestID int = 64
+```
+
+MaxRequestID is the longest request identifier RequestIDValue holds, in bytes; a longer X-Request-Id is replaced by a minted one.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.HTTP1MaxRequestID`.
+
 <a name="MaxSubject"></a>
 ```go
 const MaxSubject int = 128
@@ -220,6 +324,17 @@ BodyTooLarge is the refusal of a Content-Length past the body bound.
 Initialised with `github.com/kitsunium/sdk/internal/core/net.HTTP1BodyTooLarge`.
 
 Code `0.2.11.52` · reason `HTTP1_BODY_TOO_LARGE` · public "The request content is too large"
+
+<a name="CORSMisconfigured"></a>
+```go
+var CORSMisconfigured *errs.Error
+```
+
+CORSMisconfigured reports a CORS policy refused when the link is built: no origin, a wildcard with credentials, or an origin, method, field or age it cannot honour. Its "option" field names which.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CORSMisconfigured`.
+
+Code `0.2.11.80` · reason `CORS_MISCONFIGURED` · public "The CORS policy is not valid"
 
 <a name="ContentLengthInvalid"></a>
 ```go
@@ -376,6 +491,24 @@ func Bearer(v BearerVerifier, exempt ...int) (Middleware, error)
 
 Bearer returns the authenticating link: a request whose Route is not in exempt is answered 401 unless v verifies its Bearer token; v sets the subject and the claims on the request's Auth, a value.
 
+<a name="CORS"></a>
+## func [CORS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func CORS(cfg CORSValue) (Middleware, error)
+```
+
+CORS returns the cross-origin link: a preflight answered 204 by the link, the policy's fields on every other answer, nothing for an origin not listed.
+
+<a name="Canonical"></a>
+## func [Canonical](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func Canonical(req *Request) Refusal
+```
+
+Canonical computes a request's Path and Query from its Target and judges the target, the one reader of a target for a codec that frames some other way: an HTTP/2 request mapped onto a Request, for instance.
+
 <a name="Chain"></a>
 ## func [Chain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
 
@@ -393,6 +526,15 @@ func Continue(buf []byte, req *Request) int
 ```
 
 Continue returns req.Consumed and sets req.Body once buf holds the whole body of a request whose head Parse framed; until then it returns 0.
+
+<a name="Files"></a>
+## func [Files](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func Files(route int, fsys fs.FS, cfg static.Config) (Middleware, error)
+```
+
+Files returns the link that serves route's file tree on the lane's worker: confined to the tree, a body sent by sendfile or splice, one Range, 304 on the validators. Directories answer their index.html or 404, never a listing.
 
 <a name="HandleLoop"></a>
 ## func [HandleLoop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -416,10 +558,55 @@ Headers returns the link that gives every answer the field lines pairs names, na
 ## func [Log](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
 
 ```go
-func Log(l AccessLogger, allow ...string) (Middleware, error)
+func Log(l AccessLogger, opts ...LogOption) (Middleware, error)
 ```
 
-Log returns the access-log link: one Access record per request, with the request fields allow names. Authorization, Proxy-Authorization and Cookie are refused with Misconfigured: a credential is never logged.
+Log returns the access-log link: one Access record per request, a second when a deferred answer completes, filtered by LogSlowerThan and LogSample, with the fields LogAllow names. Authorization, Proxy-Authorization and Cookie are refused with Misconfigured: a credential is never logged.
+
+<a name="LogAllow"></a>
+## func [LogAllow](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func LogAllow(names ...string) LogOption
+```
+
+LogAllow names request fields a record carries; a credential is refused.
+
+<a name="LogClock"></a>
+## func [LogClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func LogClock(c clock.Clock) LogOption
+```
+
+LogClock is the clock Log reads for Elapsed.
+
+<a name="LogSample"></a>
+## func [LogSample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func LogSample(n int) LogOption
+```
+
+LogSample keeps one record in n, by the request's counter.
+
+<a name="LogSlowerThan"></a>
+## func [LogSlowerThan](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func LogSlowerThan(d time.Duration) LogOption
+```
+
+LogSlowerThan keeps only the records whose Elapsed reaches d.
+
+<a name="NewKeyedBuckets"></a>
+## func [NewKeyedBuckets](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func NewKeyedBuckets(cfg KeyedBucketsValue) (*KeyedBuckets, error)
+```
+
+NewKeyedBuckets returns a token-bucket table bounded at cfg.Keys keys, the least recently used evicted first, allocating nothing per call.
 
 <a name="NewParser"></a>
 ## func [NewParser](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -439,6 +626,87 @@ func Pending(req *Request, buffered int) int
 
 Pending returns how many bytes of req's body have yet to arrive when buffered bytes of the request are held.
 
+<a name="RateClock"></a>
+## func [RateClock](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RateClock(c clock.Clock) RateOption
+```
+
+RateClock is the clock RateLimit reads.
+
+<a name="RateExempt"></a>
+## func [RateExempt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RateExempt(ids ...int) RateOption
+```
+
+RateExempt names routes RateLimit never judges.
+
+<a name="RateKeyField"></a>
+## func [RateKeyField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RateKeyField(name string) RateKey
+```
+
+RateKeyField keys requests on a request field's value.
+
+<a name="RateKeyLane"></a>
+## func [RateKeyLane](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RateKeyLane() RateKey
+```
+
+RateKeyLane keys requests on the lane that serves them.
+
+<a name="RateKeyRoute"></a>
+## func [RateKeyRoute](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RateKeyRoute() RateKey
+```
+
+RateKeyRoute keys requests on the route a Routes link matched.
+
+<a name="RateKeySubject"></a>
+## func [RateKeySubject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RateKeySubject() RateKey
+```
+
+RateKeySubject keys requests on the subject a Bearer link verified.
+
+<a name="RateLimit"></a>
+## func [RateLimit](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RateLimit(l Limiter, key RateKey, opts ...RateOption) (Middleware, error)
+```
+
+RateLimit returns the link that answers 429 with Retry-After a request past its key's budget, by l.
+
+<a name="RequestID"></a>
+## func [RequestID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RequestID(opts ...RequestIDOption) Middleware
+```
+
+RequestID returns the link that gives every request a correlation identifier: its valid X-Request-Id, or one minted, written back on the answer and carried by the access record.
+
+<a name="RequestIDMint"></a>
+## func [RequestIDMint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func RequestIDMint() RequestIDOption
+```
+
+RequestIDMint makes RequestID mint every identifier, trusting none a client sent.
+
 <a name="Routes"></a>
 ## func [Routes](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
 
@@ -447,6 +715,15 @@ func Routes(routes ...Route) (Middleware, error)
 ```
 
 Routes returns the router link: Request.Route is the first route whose Method and Path match, zero for none, and the next handler runs either way. A bad ID, a repeated one, a Path not from "/" or a Method that is not a token is refused with Misconfigured.
+
+<a name="Trace"></a>
+## func [Trace](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+```go
+func Trace() Middleware
+```
+
+Trace returns the link that reads a request's traceparent into Request.Trace, invalid when absent or malformed and the request served, and writes the same trace's traceparent on the answer when the request had one.
 
 <a name="Access"></a>
 ## type [Access](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -476,8 +753,27 @@ type Access struct {
 	BodyLen       int
 	// Authenticated reports whether an authenticating link verified the request.
 	Authenticated bool
-	// Deferred reports whether the answer was deferred to the batch's end.
-	Deferred      bool
+	// TraceID is the trace the request joined, read from its traceparent by a
+	// Trace link in the same chain; the zero value without one.
+	TraceID       trace.TraceID
+	// Stage says what the record is: an answer written, one deferred or pending
+	// and so with no status yet, or a deferred answer's completion.
+	Stage         HTTP1AccessStage
+	// ID is the request's number (HTTP1RequestValue.ID): what a sampling decision
+	// or a slow-request record is keyed on, the same on both records of a deferred
+	// answer.
+	ID            uint64
+	// Elapsed is the time from the batch's start to this record, the wait behind
+	// the batch's earlier requests included; on a deferred answer's second record
+	// the time since it was deferred.
+	Elapsed       DurationValue
+	// RequestID is the request's correlation identifier, the one its answer
+	// carries in X-Request-Id; empty without a RequestID link in the chain.
+	RequestID     HTTP1RequestIDValue
+	// Proto is the request's HTTP major version, 1 or 2.
+	Proto         uint8
+	// Stream is the HTTP/2 stream the request arrived on, zero on HTTP/1.1.
+	Stream        uint32
 	// NFields is how many entries of Fields the record filled.
 	NFields       int
 	// Fields holds the allowed request fields the request carried, in the order
@@ -512,6 +808,21 @@ func (AccessLogger) LogHTTP1(rec HTTP1AccessValue)
 ```
 
 LogHTTP1 receives one request's record.
+
+<a name="AccessStage"></a>
+## type [AccessStage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+AccessStage says which moment of an answer's life an Access describes.
+
+```go
+type AccessStage = corenet.HTTP1AccessStage
+```
+
+AccessStage is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1AccessStage`, declared as:
+
+```go
+type AccessStage uint8
+```
 
 <a name="Auth"></a>
 ## type [Auth](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -662,6 +973,129 @@ func (BearerVerifier) VerifyBearer(token []byte, auth *HTTP1AuthValue) bool
 
 VerifyBearer reports whether token, the credentials after "Bearer ", is valid, and fills auth when it is.
 
+<a name="BodyAborter"></a>
+## type [BodyAborter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+BodyAborter is the optional capability of a BodyReader that keeps something between chunks: AbortBody says a request's body will not arrive whole.
+
+```go
+type BodyAborter = corenet.HTTP1BodyAborter
+```
+
+BodyAborter is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1BodyAborter`, declared as:
+
+```go
+type BodyAborter interface {
+	// AbortBody tells the handler a request's body will not arrive whole.
+	AbortBody(req *HTTP1RequestValue)
+}
+```
+
+<a name="BodyAborter.AbortBody"></a>
+### func \(BodyAborter\) [AbortBody](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (BodyAborter) AbortBody(req *HTTP1RequestValue)
+```
+
+AbortBody tells the handler a request's body will not arrive whole.
+
+<a name="BodyReader"></a>
+## type [BodyReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+BodyReader is the optional capability of a Handler that takes a request's body as it arrives: OnBody receives each chunk, the last one flagged, then ServeHTTP1 serves the request with Body nil. Limits.Body bounds the Content-Length and the loop's SpillCap does not: a handler without this capability keeps its whole request in the spill, so its body stays under SpillCap less the head.
+
+```go
+type BodyReader = corenet.HTTP1BodyReader
+```
+
+BodyReader is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1BodyReader`, declared as:
+
+```go
+type BodyReader interface {
+	// OnBody receives the body's next bytes, chunk valid for this call only.
+	// last is true exactly once, on the bytes that complete the Content-Length.
+	OnBody(req *HTTP1RequestValue, chunk []byte, last bool)
+}
+```
+
+<a name="BodyReader.OnBody"></a>
+### func \(BodyReader\) [OnBody](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (BodyReader) OnBody(req *HTTP1RequestValue, chunk []byte, last bool)
+```
+
+OnBody receives the body's next bytes, chunk valid for this call only. last is true exactly once, on the bytes that complete the Content-Length.
+
+<a name="CORSLayer"></a>
+## type [CORSLayer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+CORSLayer is the link CORS builds.
+
+```go
+type CORSLayer = svchttp1.CORSLayer
+```
+
+CORSLayer is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.CORSLayer`, declared as:
+
+```go
+type CORSLayer struct{}
+```
+
+<a name="CORSLayer.EndBatch"></a>
+### func \(CORSLayer\) [EndBatch](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
+
+```go
+func (*CORSLayer) EndBatch(lane int)
+```
+
+EndBatch implements corenet.HTTP1Batcher: it ends the next handler's batch when the next handler is a batcher, so a chain defers answers as its handler does.
+
+<a name="CORSLayer.ServeHTTP1"></a>
+### func \(CORSLayer\) [ServeHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
+
+```go
+func (*CORSLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)
+```
+
+ServeHTTP1 implements corenet.HTTP1Handler.
+
+<a name="CORSValue"></a>
+## type [CORSValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+CORSValue is a cross-origin policy: exact origins, methods, fields, credentials and a preflight's lifetime.
+
+```go
+type CORSValue = corenet.CORSValue
+```
+
+CORSValue is an alias of `github.com/kitsunium/sdk/internal/core/net.CORSValue`, declared as:
+
+```go
+type CORSValue struct {
+	// Origins are the exact origins allowed, as a browser serializes them:
+	// scheme://host[:port], in lower case, with no path. "*" allows any origin,
+	// alone in the list and without Credentials. "null" is refused: it is what a
+	// sandboxed page and a local file both send.
+	Origins       []string
+	// Methods are the methods a preflight may ask for; empty selects the
+	// CORS-safelisted GET, HEAD and POST, never every method.
+	Methods       []string
+	// Headers are the request fields a preflight may ask for; empty allows only
+	// the CORS-safelisted fields.
+	Headers       []string
+	// ExposeHeaders are the response fields a page may read.
+	ExposeHeaders []string
+	// Credentials lets a page send cookies and read the answer. It is refused
+	// with "*": that combination publishes every user's answers to every site.
+	Credentials   bool
+	// MaxAge is how long a browser may keep a preflight's answer, clamped to 24
+	// hours; zero writes no Access-Control-Max-Age, negative is refused.
+	MaxAge        DurationValue
+}
+```
+
 <a name="Field"></a>
 ## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
 
@@ -682,6 +1116,80 @@ type Field struct {
 	Value []byte
 }
 ```
+
+<a name="FileValue"></a>
+## type [FileValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+FileValue is a file body of a response a worker fills: the reader, the offset and the length.
+
+```go
+type FileValue = corenet.HTTP1FileValue
+```
+
+FileValue is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1FileValue`, declared as:
+
+```go
+type FileValue struct {
+	// R reads the file: *os.File where a descriptor is to be sent, or any other
+	// io.ReaderAt (an embed.FS file) through the copy path. Nil means no file.
+	R   io.ReaderAt
+	// Off is the offset of the first byte to send.
+	Off int64
+	// Len is how many bytes to send; what Content-Length says.
+	Len int64
+}
+```
+
+<a name="FilesLayer"></a>
+## type [FilesLayer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+FilesLayer is the link Files builds.
+
+```go
+type FilesLayer = svchttp1.FilesLayer
+```
+
+FilesLayer is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.FilesLayer`, declared as:
+
+```go
+type FilesLayer struct{}
+```
+
+<a name="FilesLayer.CancelJob"></a>
+### func \(FilesLayer\) [CancelJob](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/files.go>)
+
+```go
+func (*FilesLayer) CancelJob(lane int, job uint64)
+```
+
+CancelJob gives back the entry of a job that will never run: the loop adapter calls it when a queue refused the job or its connection closed first, and a link holding entries hands on a job that is not its own.
+
+<a name="FilesLayer.EndBatch"></a>
+### func \(FilesLayer\) [EndBatch](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/files.go>)
+
+```go
+func (*FilesLayer) EndBatch(lane int)
+```
+
+EndBatch implements corenet.HTTP1Batcher, forwarding to the next handler.
+
+<a name="FilesLayer.ServeHTTP1"></a>
+### func \(FilesLayer\) [ServeHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/files.go>)
+
+```go
+func (*FilesLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)
+```
+
+ServeHTTP1 implements corenet.HTTP1Handler.
+
+<a name="FilesLayer.WorkHTTP1"></a>
+### func \(FilesLayer\) [WorkHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/files.go>)
+
+```go
+func (*FilesLayer) WorkHTTP1(lane int, job uint64, res *corenet.HTTP1ResponseValue)
+```
+
+WorkHTTP1 implements corenet.HTTP1Worker on the lane's worker: it resolves the file job this link queued, and hands any other job to the next handler's worker.
 
 <a name="Handler"></a>
 ## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -764,6 +1272,82 @@ func (*HeadersLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTT
 
 ServeHTTP1 implements corenet.HTTP1Handler.
 
+<a name="KeyedBuckets"></a>
+## type [KeyedBuckets](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+KeyedBuckets is the token-bucket table a RateLimit link's Limiter usually is.
+
+```go
+type KeyedBuckets = svchttp1.KeyedBuckets
+```
+
+KeyedBuckets is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.KeyedBuckets`, declared as:
+
+```go
+type KeyedBuckets struct{}
+```
+
+<a name="KeyedBuckets.Allow"></a>
+### func \(KeyedBuckets\) [Allow](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/ratelimit.go>)
+
+```go
+func (*KeyedBuckets) Allow(key []byte, now int64) (ok bool, retryAfter int)
+```
+
+Allow implements corenet.HTTP1Limiter: it takes one token from key's bucket, a key seen for the first time starting full.
+
+<a name="KeyedBucketsValue"></a>
+## type [KeyedBucketsValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+KeyedBucketsValue configures NewKeyedBuckets.
+
+```go
+type KeyedBucketsValue = svchttp1.KeyedBucketsValue
+```
+
+KeyedBucketsValue is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.KeyedBucketsValue`, declared as:
+
+```go
+type KeyedBucketsValue struct {
+	// Rate is the refill, in tokens per second.
+	Rate  float64
+	// Burst is the most tokens a key holds.
+	Burst int
+	// Keys is the table's capacity, the most keys it remembers at once.
+	Keys  int
+}
+```
+
+<a name="Limiter"></a>
+## type [Limiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+Limiter decides whether one more request under a key may be served.
+
+```go
+type Limiter = corenet.HTTP1Limiter
+```
+
+Limiter is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1Limiter`, declared as:
+
+```go
+type Limiter interface {
+	// Allow reports whether one more request under key may be served, and when
+	// it may not, after how many seconds a client should try again. now is a
+	// monotonic count of nanoseconds: an instant that moves backwards refills
+	// nothing. key is valid for this call only.
+	Allow(key []byte, now int64) (ok bool, retryAfter int)
+}
+```
+
+<a name="Limiter.Allow"></a>
+### func \(Limiter\) [Allow](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (Limiter) Allow(key []byte, now int64) (ok bool, retryAfter int)
+```
+
+Allow reports whether one more request under key may be served, and when it may not, after how many seconds a client should try again. now is a monotonic count of nanoseconds: an instant that moves backwards refills nothing. key is valid for this call only.
+
 <a name="Limits"></a>
 ## type [Limits](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
 
@@ -811,7 +1395,7 @@ type LogLayer struct{}
 func (*LogLayer) EndBatch(lane int)
 ```
 
-EndBatch implements corenet.HTTP1Batcher: it ends the next handler's batch when the next handler is a batcher, so a chain defers answers as its handler does.
+EndBatch implements corenet.HTTP1Batcher: it ends the next handler's batch when the next handler is a batcher, so a chain defers answers as its handler does, then gives each answer deferred in the batch its completion record.
 
 <a name="LogLayer.ServeHTTP1"></a>
 ### func \(LogLayer\) [ServeHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
@@ -821,6 +1405,21 @@ func (*LogLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1Re
 ```
 
 ServeHTTP1 implements corenet.HTTP1Handler.
+
+<a name="LogOption"></a>
+## type [LogOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+LogOption tunes Log's link.
+
+```go
+type LogOption = svchttp1.LogOption
+```
+
+LogOption is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.LogOption`, declared as:
+
+```go
+type LogOption struct{}
+```
 
 <a name="LoopHandler"></a>
 ## type [LoopHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -837,6 +1436,33 @@ LoopHandler is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.
 type LoopHandler struct{}
 ```
 
+<a name="LoopHandler.CheckSpill"></a>
+### func \(LoopHandler\) [CheckSpill](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop_body.go>)
+
+```go
+func (*LoopHandler) CheckSpill(spillCap int) error
+```
+
+CheckSpill implements corenet.LoopSpillChecker: Start fails with HTTP1Misconfigured naming body for a Limits.Body the spill cannot hold beside the head, and a default bound is capped at what it can, so a Content-Length past it is refused 413 on the head. A handler that reads bodies as they arrive holds only heads in the spill, and is not bound by it.
+
+<a name="LoopHandler.HTTPCounts"></a>
+### func \(LoopHandler\) [HTTPCounts](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
+
+```go
+func (*LoopHandler) HTTPCounts() corenet.HTTPCountsValue
+```
+
+HTTPCounts implements corenet.LoopHTTPCounter: the HTTP/1.1 requests the adapter served, each lane's added at its batch's end; no HTTP/2.
+
+<a name="LoopHandler.MarkServed"></a>
+### func \(LoopHandler\) [MarkServed](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
+
+```go
+func (*LoopHandler) MarkServed(lane int)
+```
+
+MarkServed tells the adapter that an adapter embedding it, serving another version on the same lane, served a request of lane's current batch: the next OnBatchEnd then calls the handler's EndBatch even when no HTTP/1.1 request was served, and the embedding adapter does not call it, so a batch that served both versions ends once, as HTTP1Batcher's contract says. It is called on the lane's thread, before OnBatchEnd.
+
 <a name="LoopHandler.OnBatchEnd"></a>
 ### func \(LoopHandler\) [OnBatchEnd](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
 
@@ -844,7 +1470,7 @@ type LoopHandler struct{}
 func (*LoopHandler) OnBatchEnd(io corenet.LoopIO)
 ```
 
-OnBatchEnd implements corenet.LoopHandler. When the batch served a request, it calls the handler's EndBatch if it has one, then writes the batch's answers in order and closes the connections whose answer asked to.
+OnBatchEnd implements corenet.LoopHandler. When the batch served a request — its own, or one MarkServed reported —, it calls the handler's EndBatch if it has one, once, then writes the batch's answers in order and closes the connections whose answer asked to.
 
 <a name="LoopHandler.OnClose"></a>
 ### func \(LoopHandler\) [OnClose](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
@@ -872,6 +1498,15 @@ func (*LoopHandler) OnDone(io corenet.LoopIO, job corenet.LoopJobValue)
 ```
 
 OnDone implements corenet.LoopOffloader, on the lane's thread: the job's answer is ready, and its connection is flushed at the batch's end, in request order. A connection that closed meanwhile has its slot freed and nothing written.
+
+<a name="LoopHandler.OnDrain"></a>
+### func \(LoopHandler\) [OnDrain](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/stream.go>)
+
+```go
+func (*LoopHandler) OnDrain(io corenet.LoopIO, ref corenet.LoopConnRef)
+```
+
+OnDrain implements corenet.LoopDrainer: a connection streaming a response is told through its HTTP1Streamer; any other is left to the drain.
 
 <a name="LoopHandler.OnOpen"></a>
 ### func \(LoopHandler\) [OnOpen](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
@@ -999,6 +1634,69 @@ It returns 0 and the refusal when the bytes break the profile. A refusal never d
 
 Framing depends on neither the method nor the target: a request takes its head plus its Content-Length, a GET's included. Every slice in req aliases buf. Parse allocates nothing.
 
+<a name="RateKey"></a>
+## type [RateKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+RateKey is what RateLimit keys a request on.
+
+```go
+type RateKey = svchttp1.RateKey
+```
+
+RateKey is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.RateKey`, declared as:
+
+```go
+type RateKey struct{}
+```
+
+<a name="RateLimitLayer"></a>
+## type [RateLimitLayer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+RateLimitLayer is the link RateLimit builds.
+
+```go
+type RateLimitLayer = svchttp1.RateLimitLayer
+```
+
+RateLimitLayer is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.RateLimitLayer`, declared as:
+
+```go
+type RateLimitLayer struct{}
+```
+
+<a name="RateLimitLayer.EndBatch"></a>
+### func \(RateLimitLayer\) [EndBatch](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
+
+```go
+func (*RateLimitLayer) EndBatch(lane int)
+```
+
+EndBatch implements corenet.HTTP1Batcher: it ends the next handler's batch when the next handler is a batcher, so a chain defers answers as its handler does.
+
+<a name="RateLimitLayer.ServeHTTP1"></a>
+### func \(RateLimitLayer\) [ServeHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
+
+```go
+func (*RateLimitLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)
+```
+
+ServeHTTP1 implements corenet.HTTP1Handler.
+
+<a name="RateOption"></a>
+## type [RateOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+RateOption tunes RateLimit's link.
+
+```go
+type RateOption = svchttp1.RateOption
+```
+
+RateOption is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.RateOption`, declared as:
+
+```go
+type RateOption struct{}
+```
+
 <a name="Refusal"></a>
 ## type [Refusal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
 
@@ -1118,6 +1816,45 @@ type Request struct {
 	// Authenticated reports whether an authenticating link verified the
 	// request's credentials and filled Auth. Parse resets it to false.
 	Authenticated    bool
+	// Trace is the request's W3C trace context, as the http1 chain's Trace link
+	// read it from the traceparent field: invalid (IsValid false) when no such
+	// link ran, when the field is absent, or when it is malformed, a request
+	// being served either way (§4.3). tracestate is not read: a request carries
+	// the 25 bytes of the context and no list. Parse resets it.
+	Trace            trace.SpanContextValue
+	// Scheme is the :scheme pseudo-field of an HTTP/2 request, empty on HTTP/1.1.
+	// An HTTP/2 codec maps a request before Canonical (ADR 0221): Method from
+	// :method; Target from :path, origin-form or "*" (an absolute-form :path is
+	// RefusalTargetForm); Host from :authority, else the Host field, both present
+	// and different RefusalTargetHost, HasHost set; Fields the regular fields in
+	// arrival order with HPACK's lowercase names; Authorization, ContentLength and
+	// Body as on HTTP/1.1; Close, HeadLen and Consumed zero.
+	Scheme           []byte
+	// Proto is the request's HTTP major version, 1 or 2.
+	Proto            uint8
+	// Stream is the HTTP/2 stream the request arrived on, zero on HTTP/1.1.
+	Stream           uint32
+	// ID identifies the request on its lane — the lane in the top 16 bits, a
+	// counter from 1 in the rest — set by the loop adapter before the handler
+	// runs, so two lanes never hold the same one. It is a number the client
+	// never sees, what a sampling decision or a slow-request record is keyed on.
+	// Parse leaves it as it is; outside the loop adapter it is what the caller
+	// set.
+	ID               uint64
+	// Conn names the connection the request arrived on, set by the loop adapter
+	// before the handler runs: what a handler keeps to find, at
+	// HTTP1Streamer.OnStreamOpen, the stream this request opened. Parse leaves it
+	// as it is.
+	Conn             LoopConnRef
+	// RoutePrefix is how many leading bytes of Path the Prefix route a router link
+	// matched covers, zero for an exact route or none: what a file tree strips to
+	// find the name under its route. Parse resets it; only a link sets it.
+	RoutePrefix      int
+	// RequestID is the request's correlation identifier, as the http1 chain's
+	// RequestID link accepted it from X-Request-Id or minted it: copied by
+	// value, so a handler that needs it past the batch copies this value into
+	// its own job table. Parse resets it; it is empty when no such link ran.
+	RequestID        HTTP1RequestIDValue
 }
 ```
 
@@ -1129,6 +1866,96 @@ func (*Request) Field(name string) ([]byte, bool)
 ```
 
 Field returns the value of the first field named name and true, or nil and false when the request carries none. Names compare case-insensitively on A–Z only, so no locale or Unicode folding can make two names equal.
+
+<a name="RequestIDLayer"></a>
+## type [RequestIDLayer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+RequestIDLayer is the link RequestID builds.
+
+```go
+type RequestIDLayer = svchttp1.RequestIDLayer
+```
+
+RequestIDLayer is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.RequestIDLayer`, declared as:
+
+```go
+type RequestIDLayer struct{}
+```
+
+<a name="RequestIDLayer.EndBatch"></a>
+### func \(RequestIDLayer\) [EndBatch](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
+
+```go
+func (*RequestIDLayer) EndBatch(lane int)
+```
+
+EndBatch implements corenet.HTTP1Batcher: it ends the next handler's batch when the next handler is a batcher, so a chain defers answers as its handler does.
+
+<a name="RequestIDLayer.ServeHTTP1"></a>
+### func \(RequestIDLayer\) [ServeHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
+
+```go
+func (*RequestIDLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)
+```
+
+ServeHTTP1 implements corenet.HTTP1Handler.
+
+<a name="RequestIDOption"></a>
+## type [RequestIDOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+RequestIDOption tunes RequestID's link.
+
+```go
+type RequestIDOption = svchttp1.RequestIDOption
+```
+
+RequestIDOption is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.RequestIDOption`, declared as:
+
+```go
+type RequestIDOption struct{}
+```
+
+<a name="RequestIDValue"></a>
+## type [RequestIDValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+RequestIDValue is a request's correlation identifier, held by value: at most MaxRequestID bytes of visible ASCII.
+
+```go
+type RequestIDValue = corenet.HTTP1RequestIDValue
+```
+
+RequestIDValue is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1RequestIDValue`, declared as:
+
+```go
+type RequestIDValue struct{}
+```
+
+<a name="RequestIDValue.Bytes"></a>
+### func \(RequestIDValue\) [Bytes](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http1_auth.go>)
+
+```go
+func (*RequestIDValue) Bytes() []byte
+```
+
+Bytes returns the identifier, aliasing the value: valid while the value is, and empty when none was set.
+
+<a name="RequestIDValue.Reset"></a>
+### func \(RequestIDValue\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http1_auth.go>)
+
+```go
+func (*RequestIDValue) Reset()
+```
+
+Reset clears the identifier.
+
+<a name="RequestIDValue.Set"></a>
+### func \(RequestIDValue\) [Set](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http1_auth.go>)
+
+```go
+func (*RequestIDValue) Set(b []byte) bool
+```
+
+Set copies b into the value and reports true, or leaves the value as it is and reports false when b is empty, longer than HTTP1MaxRequestID or holds a byte outside 0x21 to 0x7E: the codec writes the value into a response head, so what the wire cannot carry never enters it.
 
 <a name="Response"></a>
 ## type [Response](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -1145,15 +1972,15 @@ Response is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1Respons
 type Response struct {
 	// Status is the status code, 200 to 999; zero means 200. The profile
 	// sends no interim response.
-	Status  int
+	Status     int
 	// Header holds the response's extra field lines, each written as
 	// "Name: value\r\n" by the codec's writer. It never holds Content-Length or
 	// Connection, which the codec writes.
-	Header  []byte
+	Header     []byte
 	// Body is the response content.
-	Body    []byte
+	Body       []byte
 	// Close asks the codec to close the connection after this response.
-	Close   bool
+	Close      bool
 	// Defer, set by the handler, holds the answer back until the end of the
 	// loop's batch, for work it batches — one database transaction for every
 	// request of the batch, say. The response value then stays valid, at the
@@ -1161,7 +1988,7 @@ type Response struct {
 	// completes it there: it fills it and clears Defer. An answer still
 	// deferred when EndBatch returns is answered 500 and its connection
 	// closed. Only the loop adapter reads it; AppendResponse does not.
-	Defer   bool
+	Defer      bool
 	// Pending, set by the handler, hands the answer to the lane's worker
 	// (HTTP1Worker, R3): the loop adapter sends Job to it and writes the
 	// answer the worker fills, from the loop's thread, once it comes back.
@@ -1170,11 +1997,49 @@ type Response struct {
 	// connection kept; a connection that closes first drops the answer. Pending
 	// with Defer, or with no worker, is answered 500 and the connection closed.
 	// Only the loop adapter reads it.
-	Pending bool
+	Pending    bool
 	// Job is the integer a pending answer's worker is given: the handler's own
 	// index of what the work needs, which it copied out of the request, since
 	// the request's bytes do not outlive the batch.
-	Job     uint64
+	Job        uint64
+	// TraceLine holds the traceparent field line the http1 chain's Trace link
+	// writes on this answer, Header pointing at it; a value, so a deferred
+	// answer keeps it past the request. Only the link sets it.
+	TraceLine  [70]byte
+	// RequestID is the identifier the codec writes as an X-Request-Id field after
+	// Header, when set: a value, so a deferred or a pending answer keeps it past
+	// the request, and a field written per request needs no slice to outlive the
+	// batch. The chain's RequestID link sets it.
+	RequestID  HTTP1RequestIDValue
+	// Stream answers with a response delimited by the connection's close (RFC 9112
+	// §6.3 item 8): the codec writes the status line and the fields with
+	// Connection: close and no Content-Length, refusing HEAD, 204 and 304 with
+	// HTTP1ResponseInvalid, and the handler keeps writing the body through
+	// HTTP1Streamer. Requests pipelined behind it are dropped with the connection.
+	// A Stream with Defer or Pending, behind a held answer, or with no
+	// HTTP1Streamer in the handler is answered 500 and the connection closed. It
+	// does not make a chunked answer: ADR 0186 §D6 still refuses every coding.
+	Stream     bool
+	// Upgrade answers 101 Switching Protocols: the codec writes the status line,
+	// Connection: Upgrade and Header — which holds the protocol's own fields —
+	// and no length, then every later byte of the connection goes to
+	// HTTP1Upgrader. It carries no body; with one, or with no HTTP1Upgrader in the
+	// handler, the answer is 500 and the connection closed.
+	Upgrade    bool
+	// RetryAfter, when above zero, is written by the codec as a Retry-After field
+	// in seconds after Header: a value, so a refusal needs no slice of its own.
+	// The chain's RateLimit link sets it.
+	RetryAfter int
+	// CORS holds the field lines the chain's CORS link gives this answer, written
+	// by the codec after Header: its own slot, so the link costs nothing beside a
+	// Headers link, and its bytes are the policy's, shared and read only.
+	CORS       []byte
+	// File, set by a pending answer's worker, makes the answer's body a file: the
+	// codec writes the head with Content-Length File.Len and no body bytes, and
+	// sends the file behind it. A HEAD answer closes File.R unsent. With Body, on a
+	// 204 or a 304, or outside a worker's answer it is answered 500 and the
+	// connection closed.
+	File       HTTP1FileValue
 }
 ```
 
@@ -1234,6 +2099,39 @@ EndBatch implements corenet.HTTP1Batcher: it ends the next handler's batch when 
 
 ```go
 func (*RouteLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)
+```
+
+ServeHTTP1 implements corenet.HTTP1Handler.
+
+<a name="TraceLayer"></a>
+## type [TraceLayer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+TraceLayer is the link Trace builds.
+
+```go
+type TraceLayer = svchttp1.TraceLayer
+```
+
+TraceLayer is an alias of `github.com/kitsunium/sdk/internal/service/net/http1.TraceLayer`, declared as:
+
+```go
+type TraceLayer struct{}
+```
+
+<a name="TraceLayer.EndBatch"></a>
+### func \(TraceLayer\) [EndBatch](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
+
+```go
+func (*TraceLayer) EndBatch(lane int)
+```
+
+EndBatch implements corenet.HTTP1Batcher: it ends the next handler's batch when the next handler is a batcher, so a chain defers answers as its handler does.
+
+<a name="TraceLayer.ServeHTTP1"></a>
+### func \(TraceLayer\) [ServeHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/chain.go>)
+
+```go
+func (*TraceLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)
 ```
 
 ServeHTTP1 implements corenet.HTTP1Handler.

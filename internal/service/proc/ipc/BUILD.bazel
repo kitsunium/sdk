@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "ipc",
     srcs = [
+        "bind_unix.go",
         "chain_unix.go",
         "dir_other.go",
         "dir_unix.go",
@@ -24,8 +25,11 @@ go_library(
         "peer_unnamed.go",
         "peer_unpcbid.go",
         "peer_xucred.go",
+        "peergroups_linux.go",
         "pipe_windows.go",
         "socket.go",
+        "sockopt_linux.go",
+        "sockopt_linux_386.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/ipc",
     visibility = [
@@ -85,6 +89,7 @@ alias(
 go_test(
     name = "ipc_test",
     srcs = [
+        "account_linux_external_test.go",
         "admit_internal_test.go",
         "chain_external_test.go",
         "chain_internal_test.go",
@@ -96,9 +101,12 @@ go_test(
         "files_windows_internal_test.go",
         "gen_api_test.go",
         "ipc_external_test.go",
+        "mode_external_test.go",
         "peer_bsd_internal_test.go",
+        "peergroups_linux_internal_test.go",
         "pipe_windows_external_test.go",
         "pipe_windows_internal_test.go",
+        "posture_internal_test.go",
         "socket_internal_test.go",
     ],
     embed = [":ipc"],

@@ -64,12 +64,27 @@ This package is the server half only. The SDK's outbound client returns a fully-
 - [func DrainSignal\(ctx context.Context\) \<-chan struct{}](<#DrainSignal>)
 - [func KeepAlive\(d time.Duration\) Option](<#KeepAlive>)
 - [func New\(w http.ResponseWriter, r \*http.Request, opts ...Option\) \(stream \*Stream, err error\)](<#New>)
+- [func NewLoopHandler\(src LoopSource, opts ...Option\) \(\*LoopHandler, error\)](<#NewLoopHandler>)
 - [func Retry\(d time.Duration\) Option](<#Retry>)
 - [func WithoutKeepAlive\(\) Option](<#WithoutKeepAlive>)
 - [func WriteTimeout\(d time.Duration\) Option](<#WriteTimeout>)
 - [type Event](<#Event>)
   - [func \(Event\) IsZero\(\) bool](<#Event.IsZero>)
   - [func \(Event\) Validate\(\) error](<#Event.Validate>)
+- [type LoopHandler](<#LoopHandler>)
+  - [func \(\*LoopHandler\) OnStreamClose\(s corenet.HTTP1StreamValue, err error\)](<#LoopHandler.OnStreamClose>)
+  - [func \(\*LoopHandler\) OnStreamDrain\(s corenet.HTTP1StreamValue\)](<#LoopHandler.OnStreamDrain>)
+  - [func \(\*LoopHandler\) OnStreamOpen\(s corenet.HTTP1StreamValue\)](<#LoopHandler.OnStreamOpen>)
+  - [func \(\*LoopHandler\) OnStreamTimeout\(s corenet.HTTP1StreamValue\)](<#LoopHandler.OnStreamTimeout>)
+  - [func \(\*LoopHandler\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#LoopHandler.ServeHTTP1>)
+- [type LoopSource](<#LoopSource>)
+  - [func \(LoopSource\) OpenSSE\(req \*corenet.HTTP1RequestValue, lastEventID \[\]byte\) int](<#LoopSource.OpenSSE>)
+  - [func \(LoopSource\) StreamClosed\(s LoopStreamValue, err error\)](<#LoopSource.StreamClosed>)
+  - [func \(LoopSource\) StreamOpened\(s LoopStreamValue\)](<#LoopSource.StreamOpened>)
+- [type LoopStreamValue](<#LoopStreamValue>)
+  - [func \(LoopStreamValue\) Conn\(\) corenet.LoopConnRef](<#LoopStreamValue.Conn>)
+  - [func \(LoopStreamValue\) End\(\) error](<#LoopStreamValue.End>)
+  - [func \(LoopStreamValue\) Send\(e corenet.SSEEventValue\) error](<#LoopStreamValue.Send>)
 - [type Option](<#Option>)
 - [type Stream](<#Stream>)
   - [func \(\*Stream\) Close\(\) error](<#Stream.Close>)
@@ -215,6 +230,15 @@ New starts an event stream on w and returns it.
 
 It writes the response headers and flushes them immediately, so the client connects at once rather than at the first event. It fails when the response cannot be flushed — checked before anything is written, so the handler is free to answer some other way.
 
+<a name="NewLoopHandler"></a>
+## func [NewLoopHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
+
+```go
+func NewLoopHandler(src LoopSource, opts ...Option) (*LoopHandler, error)
+```
+
+NewLoopHandler returns the handler serving src as Server-Sent Events on a loop group: pass it to http1.HandleLoop. Keep-alive comments run on the loop's timer, a drain sends a final retry: field, and WriteTimeout is refused.
+
 <a name="Retry"></a>
 ## func [Retry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
 
@@ -302,6 +326,160 @@ func (Event) Validate() error
 Validate reports whether the frame can be carried by the wire format.
 
 It is separate from the encoder (internal/service/net/sse.AppendEvent) so a caller can check a frame before committing to send it, and so the encoder can validate everything BEFORE it appends anything — a half-written frame on a stream is unrecoverable, since the peer has already read it.
+
+<a name="LoopHandler"></a>
+## type [LoopHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
+
+LoopHandler serves LoopSource as Server-Sent Events, for http1.HandleLoop to serve.
+
+```go
+type LoopHandler = svcsse.LoopHandler
+```
+
+LoopHandler is an alias of `github.com/kitsunium/sdk/internal/service/net/sse.LoopHandler`, declared as:
+
+```go
+type LoopHandler struct{}
+```
+
+<a name="LoopHandler.OnStreamClose"></a>
+### func \(LoopHandler\) [OnStreamClose](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/loop.go>)
+
+```go
+func (*LoopHandler) OnStreamClose(s corenet.HTTP1StreamValue, err error)
+```
+
+OnStreamClose implements corenet.HTTP1Streamer; the program's half is told.
+
+<a name="LoopHandler.OnStreamDrain"></a>
+### func \(LoopHandler\) [OnStreamDrain](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/loop.go>)
+
+```go
+func (*LoopHandler) OnStreamDrain(s corenet.HTTP1StreamValue)
+```
+
+OnStreamDrain implements corenet.HTTP1Streamer: a drain ends the stream with a final retry field, so the client reconnects somewhere else rather than at once.
+
+<a name="LoopHandler.OnStreamOpen"></a>
+### func \(LoopHandler\) [OnStreamOpen](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/loop.go>)
+
+```go
+func (*LoopHandler) OnStreamOpen(s corenet.HTTP1StreamValue)
+```
+
+OnStreamOpen implements corenet.HTTP1Streamer: the opening retry hint, the first keep-alive, then the program's half.
+
+<a name="LoopHandler.OnStreamTimeout"></a>
+### func \(LoopHandler\) [OnStreamTimeout](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/loop.go>)
+
+```go
+func (*LoopHandler) OnStreamTimeout(s corenet.HTTP1StreamValue)
+```
+
+OnStreamTimeout implements corenet.HTTP1Streamer: the keep-alive comment, and the next one armed.
+
+<a name="LoopHandler.ServeHTTP1"></a>
+### func \(LoopHandler\) [ServeHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/loop.go>)
+
+```go
+func (*LoopHandler) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)
+```
+
+ServeHTTP1 implements corenet.HTTP1Handler: it asks the source, then answers as a stream.
+
+<a name="LoopSource"></a>
+## type [LoopSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
+
+LoopSource is what a program serves event streams with on a loop group.
+
+```go
+type LoopSource = svcsse.LoopSource
+```
+
+LoopSource is an alias of `github.com/kitsunium/sdk/internal/service/net/sse.LoopSource`, declared as:
+
+```go
+type LoopSource interface {
+	// OpenSSE judges a request: zero accepts it as an event stream, anything else
+	// answers it with that status. It runs on the lane's thread, once per request,
+	// and may keep req.Conn to find the stream later; lastEventID is the
+	// Last-Event-ID field, empty when absent, valid for this call.
+	OpenSSE(req *corenet.HTTP1RequestValue, lastEventID []byte) int
+	// StreamClosed is told the stream ended, for whatever reason.
+	StreamClosed(s LoopStreamValue, err error)
+	// StreamOpened is told the stream opened; s is valid until StreamClosed.
+	StreamOpened(s LoopStreamValue)
+}
+```
+
+<a name="LoopSource.OpenSSE"></a>
+### func \(LoopSource\) [OpenSSE](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/gen_ports.go>)
+
+```go
+func (LoopSource) OpenSSE(req *corenet.HTTP1RequestValue, lastEventID []byte) int
+```
+
+OpenSSE judges a request: zero accepts it as an event stream, anything else answers it with that status. It runs on the lane's thread, once per request, and may keep req.Conn to find the stream later; lastEventID is the Last-Event-ID field, empty when absent, valid for this call.
+
+<a name="LoopSource.StreamClosed"></a>
+### func \(LoopSource\) [StreamClosed](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/gen_ports.go>)
+
+```go
+func (LoopSource) StreamClosed(s LoopStreamValue, err error)
+```
+
+StreamClosed is told the stream ended, for whatever reason.
+
+<a name="LoopSource.StreamOpened"></a>
+### func \(LoopSource\) [StreamOpened](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/gen_ports.go>)
+
+```go
+func (LoopSource) StreamOpened(s LoopStreamValue)
+```
+
+StreamOpened is told the stream opened; s is valid until StreamClosed.
+
+<a name="LoopStreamValue"></a>
+## type [LoopStreamValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)
+
+LoopStreamValue is one open event stream on the loop.
+
+```go
+type LoopStreamValue = svcsse.LoopStreamValue
+```
+
+LoopStreamValue is an alias of `github.com/kitsunium/sdk/internal/service/net/sse.LoopStreamValue`, declared as:
+
+```go
+type LoopStreamValue struct{}
+```
+
+<a name="LoopStreamValue.Conn"></a>
+### func \(LoopStreamValue\) [Conn](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/loop.go>)
+
+```go
+func (LoopStreamValue) Conn() corenet.LoopConnRef
+```
+
+Conn names the stream's connection, the req.Conn of the request that opened it.
+
+<a name="LoopStreamValue.End"></a>
+### func \(LoopStreamValue\) [End](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/loop.go>)
+
+```go
+func (LoopStreamValue) End() error
+```
+
+End closes the stream, once what was sent has left.
+
+<a name="LoopStreamValue.Send"></a>
+### func \(LoopStreamValue\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/sse/loop.go>)
+
+```go
+func (LoopStreamValue) Send(e corenet.SSEEventValue) error
+```
+
+Send writes one event's wire form, into the lane's reused buffer, nothing allocating once it has grown to the lane's largest frame. It returns what AppendEvent or the loop's Write returned: an invalid frame's refusal, LoopOutputFull past the connection's output ceiling, LoopStaleRef after a close.
 
 <a name="Option"></a>
 ## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/gen_facade.go>)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	stdnet "net"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,7 +109,7 @@ func Test_refusedClosesAtOnce(t *testing.T) {
 	}
 	raw := &halfCloseConn{}
 	c := &conn{Conn: raw}
-	if err := srv.admit(t.Context(), limiter, c, corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
+	if err := srv.admit(t.Context(), limiter, new(atomic.Uint64), c, corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
 		t.Fatal("a refused connection reached its handler")
 		return nil
 	})); err == nil || !c.refused {

@@ -25,11 +25,16 @@ const (
 // replies at once, or per batch under BatchReplies.
 func (s *Server) newBoundPacket(group *PacketGroup, addr corenet.AddressValue, pc stdnet.PacketConn) *boundPacketConn {
 	name := group.name
+	source := newDatagramSource(pc, true)
+	//: the kernel's drop count, asked for before the first read.
+	s.probeKernelDrops(source)
+	//: each datagram's own destination, on a wildcard socket (#972).
+	pinned := s.probeDestination(source, pc)
 	//: built once, before the read loop starts, so nothing races on them.
 	return &boundPacketConn{
 		group: name, addr: addr, pc: pc,
-		source: newDatagramSource(pc, true),
-		sink:   newDatagramSink(pc, group.batchReplies, &s.datagrams, func() { s.recordGSOOff(name) }),
+		source: source,
+		sink:   newDatagramSink(pc, group.batchReplies || group.loopHandler != nil, pinned, &s.datagrams, func() { s.recordGSOOff(name) }),
 		done:   make(chan struct{}),
 	}
 }

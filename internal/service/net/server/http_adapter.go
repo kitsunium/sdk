@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"log"
 	stdnet "net"
 	"net/http"
 	"sync"
+
+	corehttp2 "github.com/kitsunium/sdk/internal/core/net/http2"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
@@ -35,9 +38,17 @@ type httpAdapter struct {
 	// bounds are the HTTP-only options — the header phase's own deadline and
 	// the header size cap — set at Start with the timeouts above.
 	bounds httpBounds
+	// errorLog is http.Server.ErrorLog: what net/http reports from its own
+	// goroutines, handed to the server's logger (WithLogger); nil falls back to
+	// net/http's own, the process's standard logger.
+	errorLog *log.Logger
 	// protocols is http.Server.Protocols, computed once at Start with the ALPN
 	// list the group's listeners offer (ADR 0195); nil until then.
 	protocols *http.Protocols
+	// http2 is the group's HTTP/2 bounds, resolved at Start.
+	http2 corehttp2.LimitsValue
+	// counts are the group's requests per version and HTTP/2 errors (#966).
+	counts httpCounts
 	// start guarantees the serving goroutine is launched at most once.
 	start sync.Once
 	// mu guards waiters AND the lifecycle fields below. They are written by the
@@ -224,7 +235,8 @@ func (a *httpAdapter) launch(raw stdnet.Conn) {
 		//: the read bound is applied per read of the body (perReadBody), not
 		//: as http.Server.ReadTimeout: that one budgets the WHOLE request, and
 		//: cut off a peer whose every read was inside the bound (#454).
-		Handler:   perReadBody(a.handler, read),
+		//: every request is counted by its version first (#966).
+		Handler:   versionCounter{next: perReadBody(limitBody(a.handler, a.bounds.bodyBytes()), read), counts: &a.counts},
 		ConnState: a.onConnState,
 		//: net/http applies the write bound per response. Left at zero — as it
 		//: was — net/http bounds nothing at all.
@@ -240,11 +252,14 @@ func (a *httpAdapter) launch(raw stdnet.Conn) {
 		ReadHeaderTimeout: a.bounds.headerTimeout(read),
 		//: zero is net/http's own default (1 MiB); a caller's cap replaces it.
 		MaxHeaderBytes: a.bounds.headerBytes(),
+		//: what net/http reports from its own goroutines goes to the server's
+		//: logger, under its cap, never to the process's standard logger.
+		ErrorLog: a.errorLog,
 		//: the versions the group serves, from the same list as its ALPN, and
 		//: HTTP/2's bounds set rather than left to the standard library's.
 		//: TLSConfig stays unset: the listener's is the one that negotiates.
 		Protocols: a.protocols,
-		HTTP2:     http2Config(a.timeouts.Write, h2Silence(a.bounds, a.timeouts)),
+		HTTP2:     http2Config(a.timeouts.Write, h2Silence(a.bounds, a.timeouts), a.http2, a.counts.countError),
 		//: every request on this listener derives from a context carrying the
 		//: drain signal, which is the only way a handler holding a connection
 		//: open indefinitely can learn that the server is shutting down. A

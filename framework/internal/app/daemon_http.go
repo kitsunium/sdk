@@ -22,7 +22,11 @@ type httpStats struct {
 }
 
 // observeHTTP wraps the app's handler with the outermost middleware: the
-// in-flight and served counters.
+// in-flight and served counters, and — for everything but the framework's own
+// routes — the request's identifier and its access record (account). The
+// probes under reservedPrefix and the Studio's routes are counted and never
+// identified nor logged: a probe is called every few seconds, and the Studio
+// is the tool's.
 func (a *App) observeHTTP(h http.Handler) http.Handler {
 	st := &httpStats{}
 	a.mu.Lock()
@@ -39,7 +43,11 @@ func (a *App) observeHTTP(h http.Handler) http.Handler {
 		if a.hub != nil && a.hub.enabled {
 			r = r.WithContext(a.asLoop(r.Context(), "http"))
 		}
-		h.ServeHTTP(w, r)
+		if reservedPath(r.URL.Path) {
+			h.ServeHTTP(w, r)
+			return
+		}
+		a.account(w, r, h)
 	})
 }
 
@@ -115,8 +123,8 @@ func (a *App) describeHTTP() *model.HTTPServer {
 func (a *App) middleware() []model.Mechanic {
 	chain := []model.Mechanic{
 		{
-			Kind: "observe", Label: "in-flight · served", Package: middlewarePkg,
-			Doc: "Counts the requests being served and those served.",
+			Kind: "observe", Label: "in-flight · served · access record", Package: middlewarePkg,
+			Doc: "Counts the requests being served and those served, gives each the X-Request-Id its caller sent or a UUIDv7, and writes the access record <PRODUCT>_ACCESS_LOG asks for.",
 		},
 		{
 			Kind: "recover", Label: "panic → 500", Package: middlewarePkg,

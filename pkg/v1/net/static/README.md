@@ -150,6 +150,13 @@ type Config struct {
 	// is asked about "index.html", the file actually served. Nil marks
 	// nothing.
 	Immutable             func(name string) bool
+	// Precompressed serves a file's name.br or name.gz sidecar in its place when
+	// the tree holds one and Accept-Encoding admits it: typed as the file,
+	// sent with Content-Encoding and Vary: Accept-Encoding, ranged and
+	// conditional as any file, and never a sidecar that is not a regular file.
+	// A client that admits neither gets the file itself. brotli needs no encoder
+	// here: the bytes are the tree's own.
+	Precompressed         bool
 }
 ```
 

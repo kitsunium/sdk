@@ -108,6 +108,34 @@ constants:
         type: int
         value: 3 * maskWordWidth
     name: maskWordWidth
+  - doc: methodConnect is the extended CONNECT's method, RFC 8441 §4.
+    items:
+      - name: methodConnect
+        type: string
+        value: "\"CONNECT\""
+    name: methodConnect
+  - doc: |-
+      protocolPseudo is the request field net/http's HTTP/2 server carries the
+      :protocol pseudo-header in, when extended CONNECT is enabled.
+    items:
+      - name: protocolPseudo
+        type: string
+        value: "\":protocol\""
+    name: protocolPseudo
+  - doc: |-
+      protocolWebSocket is the one :protocol value a stream is accepted for: no
+      other tunnel is opened (RFC 8441 §4).
+    items:
+      - name: protocolWebSocket
+        type: string
+        value: "\"websocket\""
+    name: protocolWebSocket
+  - doc: h2ReadBuffer sizes the reader over an HTTP/2 stream's body.
+    items:
+      - name: h2ReadBuffer
+        type: int
+        value: "4096"
+    name: h2ReadBuffer
   - doc: |-
       switchingProtocols is the status line every successful upgrade begins with.
       It is written by hand because by then the response belongs to us: net/http's
@@ -141,6 +169,26 @@ constants:
         type: string
         value: "\"https\""
     name: httpsScheme
+  - doc: |-
+      smallMessageCap is the reassembly buffer an idle connection may keep: a
+      larger one is given back, so a burst does not stay on every connection.
+    items:
+      - name: smallMessageCap
+        type: int
+        value: "256"
+    name: smallMessageCap
+  - doc: The states of a connection's message reader.
+    grouped: true
+    items:
+      - doc: _ is no message open, the zero state.
+        name: _
+        type: uint8
+        value: iota
+      - doc: msgOpen is a message open, its current frame not ending it.
+        name: msgOpen
+      - doc: msgOpenFinal is a message open, its current frame ending it.
+        name: msgOpenFinal
+    name: _
   - doc: |-
       DefaultPingInterval is how often an idle connection proves the peer is still
       there. It sits under the idle timeout of every proxy worth naming (nginx and
@@ -216,6 +264,21 @@ files:
       - validateOutbound
     name: frame.go
   - decls:
+      - methodConnect
+      - protocolPseudo
+      - protocolWebSocket
+      - h2ReadBuffer
+      - isExtendedConnect
+      - verifyExtendedConnect
+      - upgradeExtendedConnect
+      - acceptExtendedConnect
+      - h2Stream
+      - (*h2Stream).Write
+      - (*h2Stream).SetDeadline
+      - (*h2Stream).SetWriteDeadline
+      - (*h2Stream).Close
+    name: h2stream.go
+  - decls:
       - switchingProtocols
       - crlf
       - nullOrigin
@@ -239,6 +302,50 @@ files:
       - AcceptKey
       - ValidateKey
     name: handshake_key.go
+  - decls:
+      - smallMessageCap
+      - _
+      - handshakeFields
+      - LoopHandler
+      - wsLane
+      - wsConn
+      - LoopConnValue
+      - NewLoopHandler
+      - statusRecorder
+      - (*statusRecorder).Header
+      - (*statusRecorder).Write
+      - (*statusRecorder).WriteHeader
+      - shimRequest
+      - copyField
+      - (*LoopHandler).ServeHTTP1
+      - appendRefusalFields
+      - (*LoopHandler).markSubprotocol
+      - (*LoopHandler).OnStreamOpen
+      - (*LoopHandler).armHeartbeat
+      - (*LoopHandler).OnStreamTimeout
+      - (*LoopHandler).OnStreamDrain
+      - (*LoopHandler).OnStreamClose
+      - (*LoopHandler).lane
+      - (*LoopHandler).growLane
+      - (*LoopHandler).conn
+      - NewLoopConnValue
+      - LoopConnValue.Conn
+      - LoopConnValue.Send
+      - LoopConnValue.Ping
+      - LoopConnValue.frame
+      - LoopConnValue.CloseWith
+      - (*LoopHandler).closeWith
+      - (*LoopHandler).OnUpgradedData
+      - (*LoopHandler).step
+      - (*LoopHandler).startData
+      - (*LoopHandler).payloadFrom
+      - (*LoopHandler).payload
+      - (*LoopHandler).complete
+      - (*LoopHandler).control
+      - (*LoopHandler).serveClose
+      - (*LoopHandler).fail
+      - applyMaskAt
+    name: loop.go
   - decls:
       - DefaultPingInterval
       - DefaultWriteTimeout
@@ -268,6 +375,8 @@ files:
       - initialWriteCapacity
       - Conn
       - NewConn
+      - transport
+      - newConn
       - (*Conn).Subprotocol
       - (*Conn).Done
       - (*Conn).PeerCloseCode
@@ -340,6 +449,34 @@ functions:
     name: validateOutbound
     params: op corenet.WSOpCode, final bool, size int
     results: error
+  - doc: |-
+      isExtendedConnect reports whether r is RFC 8441's WebSocket bootstrap: an
+      HTTP/2 CONNECT whose :protocol is exactly "websocket". A CONNECT naming
+      another protocol, or none, is not, and is refused as any non-GET is.
+    name: isExtendedConnect
+    params: r *http.Request
+    results: bool
+  - doc: |-
+      verifyExtendedConnect applies what RFC 8441 §5 keeps of RFC 6455 §4.2.1 to
+      an extended CONNECT: the version, then the origin rule. There is no
+      Upgrade, Connection, Sec-WebSocket-Key nor Accept on HTTP/2.
+    name: verifyExtendedConnect
+    params: w http.ResponseWriter, r *http.Request, cfg *config
+    results: error
+  - doc: |-
+      upgradeExtendedConnect is Upgrade for an extended CONNECT: the checks RFC
+      8441 keeps, then the 200 and the Conn.
+    name: upgradeExtendedConnect
+    params: w http.ResponseWriter, r *http.Request, cfg *config
+    results: "*Conn, error"
+  - doc: |-
+      acceptExtendedConnect answers an extended CONNECT 200 — never 101 — with
+      the agreed subprotocol, switches the stream to full duplex, and returns the
+      Conn over it. The stream ends, END_STREAM, when the handler returns: it must
+      not return before the Conn is done.
+    name: acceptExtendedConnect
+    params: w http.ResponseWriter, r *http.Request, cfg *config
+    results: "*Conn, error"
   - name: Upgrade
     params: w http.ResponseWriter, r *http.Request, opts ...Option
     results: conn *Conn, err error
@@ -462,6 +599,30 @@ functions:
   - name: ValidateKey
     params: key string
     results: error
+  - name: NewLoopHandler
+    params: src LoopConnHandler, opts ...Option
+    results: "*LoopHandler, error"
+  - doc: |-
+      shimRequest builds what verifyHandshake reads from a request framed by the
+      codec: only the fields the handshake looks at.
+    name: shimRequest
+    params: req *corenet.HTTP1RequestValue
+    results: "*http.Request"
+  - doc: |-
+      copyField copies one request field into h: absent stays absent, so a rule
+      that reads the field's presence keeps its meaning.
+    name: copyField
+    params: h http.Header, req *corenet.HTTP1RequestValue, name string
+  - doc: appendRefusalFields spells the fields a refusal carries.
+    name: appendRefusalFields
+    params: dst []byte, h http.Header
+    results: "[]byte"
+  - name: NewLoopConnValue
+    params: h *LoopHandler, s corenet.HTTP1StreamValue
+    results: LoopConnValue
+  - doc: applyMaskAt unmasks payload, which starts at offset pos of its frame.
+    name: applyMaskAt
+    params: payload []byte, key [MaskLen]byte, pos uint64
   - name: Subprotocols
     params: names ...string
     results: Option
@@ -523,6 +684,10 @@ functions:
     results: error
   - name: NewConn
     params: socket stdnet.Conn, buffered *bufio.Reader, subprotocol string, cfg *config, draining <-chan struct{}
+    results: "*Conn"
+  - doc: newConn is NewConn over any transport.
+    name: newConn
+    params: socket transport, buffered *bufio.Reader, subprotocol string, cfg *config, draining <-chan struct{}
     results: "*Conn"
   - doc: closeCodeFor picks the status a malformed Close payload deserves.
     name: closeCodeFor
@@ -592,6 +757,262 @@ types:
         recv: h FrameHeaderValue
         results: error
     name: FrameHeaderValue
+  - doc: |-
+      h2Stream is an extended CONNECT's stream as a Conn's transport: writes go
+      to the ResponseWriter, flushed one by one into DATA frames, deadlines
+      through its ResponseController, and Close ends the body, which unblocks a
+      read parked on it.
+    fields:
+      - doc: w is the stream's ResponseWriter.
+        name: w
+        type: http.ResponseWriter
+      - doc: rc sets its deadlines and flushes it.
+        name: rc
+        type: "*http.ResponseController"
+      - doc: "body is the request body: the peer's frames."
+        name: body
+        type: io.ReadCloser
+    kind: struct
+    methods:
+      - doc: "Write writes p and flushes it: a frame is sent whole, not buffered."
+        name: Write
+        params: p []byte
+        recv: s *h2Stream
+        results: int, error
+      - doc: SetDeadline bounds reads and writes; the zero time removes both bounds.
+        name: SetDeadline
+        params: t time.Time
+        recv: s *h2Stream
+        results: error
+      - doc: SetWriteDeadline bounds the writes.
+        name: SetWriteDeadline
+        params: t time.Time
+        recv: s *h2Stream
+        results: error
+      - doc: Close ends the request body, so a read parked on it returns.
+        name: Close
+        recv: s *h2Stream
+        results: error
+    name: h2Stream
+  - fields:
+      - doc: src is the program's half.
+        name: src
+        type: LoopConnHandler
+      - doc: cfg is the resolved option set.
+        name: cfg
+        type: config
+      - doc: lanes holds each lane's frame buffer and connection table.
+        name: lanes
+        type: atomic.Pointer[[]*wsLane]
+      - doc: mu serialises the first sight of a lane.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: h *LoopHandler
+      - doc: |-
+          markSubprotocol records the agreed subprotocol against the connection, by its
+          position in the configured list, for OnStreamOpen to name.
+        name: markSubprotocol
+        params: req *corenet.HTTP1RequestValue, chosen string, agreed bool
+        recv: h *LoopHandler
+      - name: OnStreamOpen
+        params: s corenet.HTTP1StreamValue
+        recv: h *LoopHandler
+      - doc: |-
+          armHeartbeat sets the connection's timer for the next heartbeat, unless asked
+          for none.
+        name: armHeartbeat
+        params: s corenet.HTTP1StreamValue
+        recv: h *LoopHandler
+      - name: OnStreamTimeout
+        params: s corenet.HTTP1StreamValue
+        recv: h *LoopHandler
+      - name: OnStreamDrain
+        params: s corenet.HTTP1StreamValue
+        recv: h *LoopHandler
+      - name: OnStreamClose
+        params: s corenet.HTTP1StreamValue, err error
+        recv: h *LoopHandler
+      - doc: lane returns lane i's state, built the first time it is asked for.
+        name: lane
+        params: i int
+        recv: h *LoopHandler
+        results: "*wsLane"
+      - doc: growLane builds lane i's state and publishes a table that holds it.
+        name: growLane
+        params: i int
+        recv: h *LoopHandler
+        results: "*wsLane"
+      - doc: |-
+          conn returns ref's state on lane, growing the table on first sight; a slot's
+          older generation starts clean.
+        name: conn
+        params: lane int, ref corenet.LoopConnRef
+        recv: h *LoopHandler
+        results: "*wsConn"
+      - doc: closeWith sends the close frame once and ends the connection.
+        name: closeWith
+        params: s corenet.HTTP1StreamValue, ws *wsConn, code corenet.WSCloseCode, reason string
+        recv: h *LoopHandler
+        results: error
+      - name: OnUpgradedData
+        params: s corenet.HTTP1StreamValue, buf []byte
+        recv: h *LoopHandler
+        results: int
+      - doc: |-
+          step advances the frame reader by whatever buf holds and reports the bytes it
+          took and whether to go on.
+        name: step
+        params: s corenet.HTTP1StreamValue, ws *wsConn, buf []byte
+        recv: h *LoopHandler
+        results: int, bool
+      - doc: startData applies §5.4's ordering rules and the message ceiling to a data frame.
+        name: startData
+        params: s corenet.HTTP1StreamValue, ws *wsConn, header FrameHeaderValue
+        recv: h *LoopHandler
+        results: bool
+      - doc: payloadFrom skips the header and takes the frame's payload from buf.
+        name: payloadFrom
+        params: s corenet.HTTP1StreamValue, ws *wsConn, buf []byte, header int
+        recv: h *LoopHandler
+        results: int, bool
+      - doc: |-
+          payload unmasks what buf holds of the current data frame into the message,
+          delivering a whole message that fits this read in place, without a copy.
+        name: payload
+        params: s corenet.HTTP1StreamValue, ws *wsConn, buf []byte
+        recv: h *LoopHandler
+        results: int, bool
+      - doc: |-
+          complete validates a whole message and hands it to the program; a large
+          reassembly buffer is given back so an idle connection stays small.
+        name: complete
+        params: s corenet.HTTP1StreamValue, ws *wsConn, data []byte
+        recv: h *LoopHandler
+      - doc: control serves one whole control frame in place, or waits for the rest of it.
+        name: control
+        params: s corenet.HTTP1StreamValue, ws *wsConn, buf []byte, header int, f FrameHeaderValue
+        recv: h *LoopHandler
+        results: int, bool
+      - doc: serveClose echoes a peer's close and ends the connection.
+        name: serveClose
+        params: s corenet.HTTP1StreamValue, ws *wsConn, payload []byte
+        recv: h *LoopHandler
+      - doc: |-
+          fail closes the connection with code, as failConnection does on the goroutine
+          engine.
+        name: fail
+        params: s corenet.HTTP1StreamValue, ws *wsConn, code corenet.WSCloseCode
+        recv: h *LoopHandler
+    name: LoopHandler
+  - doc: |-
+      wsLane is one lane's state: a reused frame buffer and a connection state by
+      ring and slot, pointer-free but for the message buffer a fragmented or large
+      message borrows.
+    fields:
+      - doc: out is the frame buffer every write of the lane reuses.
+        name: out
+        type: "[]byte"
+      - doc: conns is a state per connection, by ring and slot.
+        name: conns
+        type: "[][]wsConn"
+    kind: struct
+    name: wsLane
+  - doc: wsConn is one connection's frame reader.
+    fields:
+      - doc: gen is the generation of the connection the state describes.
+        name: gen
+        type: uint32
+      - doc: |-
+          msg reassembles a message that does not fit one read: nil while idle, so an
+          idle connection costs nothing but this value.
+        name: msg
+        type: "[]byte"
+      - doc: frameLeft is how much of the current data frame's payload is still to come.
+        name: frameLeft
+        type: uint64
+      - doc: maskPos is the mask's position within the current data frame.
+        name: maskPos
+        type: uint64
+      - doc: key is the current data frame's mask key.
+        name: key
+        type: "[MaskLen]byte"
+      - doc: op is the message's opcode, the first frame's, every continuation inheriting it.
+        name: op
+        type: corenet.WSOpCode
+      - doc: msgState is whether a message is open and whether the current frame ends it.
+        name: msgState
+        type: uint8
+      - doc: awaiting says a ping is out with no frame received since.
+        name: awaiting
+        type: bool
+      - doc: "dead says the connection is being closed: bytes are dropped."
+        name: dead
+        type: bool
+      - doc: subprotocol is the agreed subprotocol's index plus one, zero for none.
+        name: subprotocol
+        type: uint8
+    kind: struct
+    name: wsConn
+  - fields:
+      - doc: h is the handler that owns the lane's frame buffer.
+        name: h
+        type: "*LoopHandler"
+      - doc: s is the connection.
+        name: s
+        type: corenet.HTTP1StreamValue
+    kind: struct
+    methods:
+      - name: Conn
+        recv: c LoopConnValue
+        results: corenet.LoopConnRef
+      - name: Send
+        params: m corenet.WSMessageValue
+        recv: c LoopConnValue
+        results: error
+      - name: Ping
+        params: payload []byte
+        recv: c LoopConnValue
+        results: error
+      - doc: frame appends one frame to the lane's buffer and writes it.
+        name: frame
+        params: op corenet.WSOpCode, payload []byte
+        recv: c LoopConnValue
+        results: error
+      - name: CloseWith
+        params: code corenet.WSCloseCode, reason string
+        recv: c LoopConnValue
+        results: error
+    name: LoopConnValue
+  - doc: |-
+      statusRecorder is the small http.ResponseWriter verifyHandshake answers
+      through, so a handshake on the loop is judged by the same rules as Upgrade's.
+    fields:
+      - doc: header collects the refusal's fields.
+        name: header
+        type: http.Header
+      - doc: status is the refusal's status.
+        name: status
+        type: int
+    kind: struct
+    methods:
+      - doc: Header implements http.ResponseWriter.
+        name: Header
+        recv: r *statusRecorder
+        results: http.Header
+      - doc: Write implements http.ResponseWriter; a refusal's body is not this package's to send here.
+        name: Write
+        params: p []byte
+        recv: r *statusRecorder
+        results: int, error
+      - doc: WriteHeader implements http.ResponseWriter.
+        name: WriteHeader
+        params: status int
+        recv: r *statusRecorder
+    name: statusRecorder
   - kind: named
     name: Option
     underlying: func(*config)
@@ -647,9 +1068,9 @@ types:
       - doc: |-
           raw is the socket taken over from net/http at the upgrade. It is ours
           from that moment: the engine no longer closes it, and neither does
-          net/http.
+          net/http. Over HTTP/2 (RFC 8441) it is the stream, an h2Stream.
         name: raw
-        type: stdnet.Conn
+        type: transport
       - doc: |-
           br is the reader the hijack handed back. It MUST be used rather than the
           socket: net/http may have buffered bytes into it while parsing the
@@ -904,6 +1325,23 @@ types:
         recv: c *Conn
     name: Conn
   - doc: |-
+      transport is what a Conn writes frames to and closes: the hijacked socket
+      on HTTP/1.1, an extended CONNECT's stream on HTTP/2 (RFC 8441). Reads go
+      through the Conn's bufio.Reader over it.
+    kind: named
+    name: transport
+    underlying: |-
+      interface {
+      	// Write puts bytes on the wire, flushed.
+      	Write(p []byte) (int, error)
+      	// SetDeadline bounds reads and writes; the zero time removes the bound.
+      	SetDeadline(t time.Time) error
+      	// SetWriteDeadline bounds the writes.
+      	SetWriteDeadline(t time.Time) error
+      	// Close ends it, unblocking a read parked on it.
+      	Close() error
+      }
+  - doc: |-
       heartbeatState is what the heartbeat remembers between two ticks: the frame
       count the previous tick saw, and whether that tick's Ping went out.
     fields:
@@ -915,3 +1353,19 @@ types:
         type: bool
     kind: struct
     name: heartbeatState
+vars:
+  - grouped: true
+    items:
+      - doc: handshakeFields are the request fields verifyHandshake reads.
+        name: handshakeFields
+        value: "[...]string{\"Upgrade\", \"Connection\", corenet.WSVersionHeader, corenet.WSKeyHeader, \"Origin\", \"Forwarded\", \"X-Forwarded-Proto\", corenet.WSProtocolHeader}"
+      - doc: connectionUpgradeField is the field the handshake's 101 needs, written once.
+        name: upgradeField
+        value: "[]byte(\"Upgrade: websocket\\r\\nSec-WebSocket-Accept: \")"
+      - doc: protocolField opens the subprotocol's line.
+        name: protocolField
+        value: "[]byte(\"Sec-WebSocket-Protocol: \")"
+      - doc: fieldEnd closes a field line.
+        name: fieldEnd
+        value: "[]byte(\"\\r\\n\")"
+    name: handshakeFields

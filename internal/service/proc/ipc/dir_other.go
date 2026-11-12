@@ -5,6 +5,7 @@
 package ipc
 
 import (
+	"net"
 	"os"
 
 	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
@@ -32,3 +33,9 @@ func ownersOf(os.FileInfo) (uid, gid int, known bool) { return -1, -1, false }
 
 // endpointAdmitted admits nothing it cannot read.
 func endpointAdmitted(_, _, _ int, _ *Config) bool { return false }
+
+// bindSocket refuses: there is no Unix socket here (checkDir refused first).
+func bindSocket(path string, _ posture) (*os.File, error) { return nil, checkDir(path) }
+
+// listenBound refuses as bindSocket does.
+func listenBound(_ *os.File, path string) (*net.UnixListener, error) { return nil, checkDir(path) }

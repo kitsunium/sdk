@@ -21,7 +21,7 @@ var designFile = filepath.Join("..", "..", "..", "..", "design", "net.yaml")
 
 // designCapability matches one constant of the Capability blocks in the
 // design: its blockDoc, its name and its token.
-var designCapability = regexp.MustCompile(`(?m)^      - blockDoc: (.*)\n        doc: \|-\n(?:          .*\n)+        name: (\w+)\n        type: Capability\n        value: "\\"([a-z_-]+)\\""$`)
+var designCapability = regexp.MustCompile(`(?m)^      - blockDoc: (.*)\n        doc: \|-\n(?:          .*\n)+        name: (\w+)\n        type: Capability\n        value: "\\"([a-z0-9_-]+)\\""$`)
 
 // envOf is a lookup over a map, the injected environment.
 func envOf(vars map[string]string) lookupFunc {
@@ -72,7 +72,7 @@ func TestCapabilityRegistry_matchesTheDesign(t *testing.T) {
 	// Each constant the code declares is a row: the pins of gen_api_test.go
 	// hold the constants to the design, this holds the rows to the constants.
 	for _, c := range []corenet.Capability{
-		corenet.CapabilityIOURing, corenet.CapabilityEpoll,
+		corenet.CapabilityIOURing, corenet.CapabilityEpoll, corenet.CapabilityKqueue,
 		corenet.CapabilityPortable, corenet.CapabilityGoroutine,
 	} {
 		if _, ok := lookupCapability(string(c)); !ok {
@@ -104,7 +104,11 @@ func TestReadOperator(t *testing.T) {
 		},
 		{
 			name: "engine epoll", vars: map[string]string{corenet.EnvEngine: " epoll "},
-			source: "environment", raw: "KITSUNIUM_NET_ENGINE=epoll", applied: corenet.CapabilityEpoll,
+			source: "environment", raw: "KITSUNIUM_NET_ENGINE=epoll", applied: poller,
+		},
+		{
+			name: "engine kqueue, at epoll's rank", vars: map[string]string{corenet.EnvEngine: "kqueue"},
+			source: "environment", raw: "KITSUNIUM_NET_ENGINE=kqueue", applied: poller,
 		},
 		{
 			name: "engine portable", vars: map[string]string{corenet.EnvEngine: "portable"},
@@ -115,8 +119,8 @@ func TestReadOperator(t *testing.T) {
 			source: "environment", raw: "KITSUNIUM_NET_ENGINE=goroutine", applied: corenet.CapabilityGoroutine,
 		},
 		{
-			name: "engine unknown caps at portable", vars: map[string]string{corenet.EnvEngine: "kqueue"},
-			source: "environment", raw: "KITSUNIUM_NET_ENGINE=kqueue", applied: corenet.CapabilityPortable, faults: 1,
+			name: "engine unknown caps at portable", vars: map[string]string{corenet.EnvEngine: "iocp"},
+			source: "environment", raw: "KITSUNIUM_NET_ENGINE=iocp", applied: corenet.CapabilityPortable, faults: 1,
 		},
 		{
 			name: "engine is case-sensitive", vars: map[string]string{corenet.EnvEngine: "EPOLL"},
@@ -124,13 +128,23 @@ func TestReadOperator(t *testing.T) {
 		},
 		{
 			name: "disable iouring", vars: map[string]string{corenet.EnvDisable: "iouring"},
-			source: "environment", raw: "KITSUNIUM_NET_DISABLE=iouring", applied: corenet.CapabilityEpoll,
+			source: "environment", raw: "KITSUNIUM_NET_DISABLE=iouring", applied: poller,
 			disabled: []corenet.Capability{corenet.CapabilityIOURing},
 		},
 		{
 			name: "disable both, items trimmed, repeats once", vars: map[string]string{corenet.EnvDisable: " epoll,, iouring ,epoll"},
-			source: "environment", raw: "KITSUNIUM_NET_DISABLE=epoll,, iouring ,epoll", applied: corenet.CapabilityPortable,
+			source: "environment", raw: "KITSUNIUM_NET_DISABLE=epoll,, iouring ,epoll", applied: onKqueue(corenet.CapabilityPortable, corenet.CapabilityKqueue),
 			disabled: []corenet.Capability{corenet.CapabilityEpoll, corenet.CapabilityIOURing},
+		},
+		{
+			name: "disable kqueue leaves epoll, its sibling", vars: map[string]string{corenet.EnvDisable: "iouring,kqueue"},
+			source: "environment", raw: "KITSUNIUM_NET_DISABLE=iouring,kqueue", applied: onKqueue(corenet.CapabilityEpoll, corenet.CapabilityPortable),
+			disabled: []corenet.Capability{corenet.CapabilityIOURing, corenet.CapabilityKqueue},
+		},
+		{
+			name: "disable every native engine", vars: map[string]string{corenet.EnvDisable: "kqueue,epoll,iouring"},
+			source: "environment", raw: "KITSUNIUM_NET_DISABLE=kqueue,epoll,iouring", applied: corenet.CapabilityPortable,
+			disabled: []corenet.Capability{corenet.CapabilityKqueue, corenet.CapabilityEpoll, corenet.CapabilityIOURing},
 		},
 		{
 			name: "disable epoll alone keeps iouring on top", vars: map[string]string{corenet.EnvDisable: "epoll"},
@@ -148,7 +162,7 @@ func TestReadOperator(t *testing.T) {
 		},
 		{
 			name: "both, in order", vars: map[string]string{corenet.EnvEngine: "epoll", corenet.EnvDisable: "epoll"},
-			source: "environment", raw: "KITSUNIUM_NET_ENGINE=epoll KITSUNIUM_NET_DISABLE=epoll", applied: corenet.CapabilityPortable,
+			source: "environment", raw: "KITSUNIUM_NET_ENGINE=epoll KITSUNIUM_NET_DISABLE=epoll", applied: onKqueue(corenet.CapabilityPortable, corenet.CapabilityKqueue),
 			disabled: []corenet.Capability{corenet.CapabilityEpoll},
 		},
 	}
@@ -172,10 +186,33 @@ func TestReadOperator(t *testing.T) {
 	}
 }
 
+// poller is the engine applied names at epoll's rank on this platform.
+var poller = onKqueue(corenet.CapabilityEpoll, corenet.CapabilityKqueue)
+
+// onKqueue is other where this platform's poller is kqueue, linux elsewhere.
+func onKqueue(linux, other corenet.Capability) corenet.Capability {
+	if nativePoller == corenet.CapabilityKqueue {
+		return other
+	}
+	return linux
+}
+
+// engineOf is the engine of a native loop backend.
+func engineOf(b corenet.LoopBackend) corenet.Capability {
+	switch b {
+	case corenet.LoopBackendEpoll:
+		return corenet.CapabilityEpoll
+	case corenet.LoopBackendKqueue:
+		return corenet.CapabilityKqueue
+	default:
+		return corenet.CapabilityIOURing
+	}
+}
+
 // rankOf is the lattice rank of a loop backend; auto is io_uring, its top.
 func rankOf(b corenet.LoopBackend) int {
 	switch b {
-	case corenet.LoopBackendEpoll:
+	case corenet.LoopBackendEpoll, corenet.LoopBackendKqueue:
 		return rankEpoll
 	case corenet.LoopBackendPortable:
 		return rankPortable
@@ -190,35 +227,39 @@ func rankOf(b corenet.LoopBackend) int {
 // to portable only when the code asked for auto. Off Linux it is portable.
 func TestOperatorPlan(t *testing.T) {
 	t.Parallel()
-	codes := []corenet.LoopBackend{corenet.LoopBackendAuto, corenet.LoopBackendIOURing, corenet.LoopBackendEpoll, corenet.LoopBackendPortable}
-	engines := []string{"", "iouring", "epoll", "portable", "goroutine", "bogus"}
-	disables := []string{"", "iouring", "epoll", "iouring,epoll", "bogus"}
+	codes := []corenet.LoopBackend{corenet.LoopBackendAuto, corenet.LoopBackendIOURing, corenet.LoopBackendEpoll, corenet.LoopBackendPortable, corenet.LoopBackendKqueue}
+	engines := []string{"", "iouring", "epoll", "kqueue", "portable", "goroutine", "bogus"}
+	disables := []string{"", "iouring", "epoll", "kqueue", "iouring,epoll", "bogus"}
 	for _, code := range codes {
 		for _, engine := range engines {
 			for _, disable := range disables {
 				env := readOperator(envOf(map[string]string{corenet.EnvEngine: engine, corenet.EnvDisable: disable}))
 				name := code.String() + "/" + engine + "/" + disable
-				p := env.plan(code, true)
+				p := env.plan(code, corenet.CapabilityEpoll)
 				got := rankOf(p.backend)
-				if p.backend == corenet.LoopBackendAuto && !(env.allows(rankIOURing) && env.allows(rankEpoll)) {
+				if p.backend == corenet.LoopBackendAuto && !(env.allows(corenet.CapabilityIOURing) && env.allows(corenet.CapabilityEpoll)) {
 					t.Errorf("%s: auto kept although the environment rules a native backend out", name)
 				}
 				if got > rankOf(code) {
 					t.Errorf("%s: plan %v above the code's choice", name, p.backend)
 				}
-				if p.backend != corenet.LoopBackendPortable && !env.allows(got) {
+				if p.backend != corenet.LoopBackendPortable && p.backend != corenet.LoopBackendAuto && !env.allows(engineOf(p.backend)) {
 					t.Errorf("%s: plan %v is a backend the environment rules out", name, p.backend)
 				}
 				// The highest backend left: nothing allowed between the plan and the code.
-				for r := got + 1; r <= rankOf(code); r++ {
-					if r > rankPortable && env.allows(r) {
-						t.Errorf("%s: plan %v skips an allowed rank %d", name, p.backend, r)
+				for _, e := range []corenet.Capability{corenet.CapabilityEpoll, corenet.CapabilityIOURing} {
+					if r, _ := lookupCapability(string(e)); r.rank > got && r.rank <= rankOf(code) && code != corenet.LoopBackendKqueue && env.allows(e) {
+						t.Errorf("%s: plan %v skips an allowed engine %s", name, p.backend, e)
 					}
 				}
+				if code == corenet.LoopBackendKqueue && p.backend != corenet.LoopBackendPortable {
+					t.Errorf("%s: kqueue on Linux planned %v, not the floor startLoopEngine never reaches", name, p.backend)
+				}
+				checkKqueuePlan(t, name, env, code)
 				if p.fallback != (code == corenet.LoopBackendAuto && p.backend != corenet.LoopBackendPortable) {
 					t.Errorf("%s: fallback = %v", name, p.fallback)
 				}
-				if off := env.plan(code, false); code != corenet.LoopBackendIOURing && code != corenet.LoopBackendEpoll &&
+				if off := env.plan(code, ""); code != corenet.LoopBackendIOURing && code != corenet.LoopBackendEpoll && code != corenet.LoopBackendKqueue &&
 					(off.backend != corenet.LoopBackendPortable || off.fallback) {
 					t.Errorf("%s off Linux: %+v", name, off)
 				}
@@ -244,13 +285,67 @@ func TestOperatorPlan(t *testing.T) {
 		{corenet.LoopBackendIOURing, map[string]string{corenet.EnvDisable: "uring-pbuf"}, loopPlan{backend: corenet.LoopBackendEpoll}},
 		// Another kernel capability leaves the backend as it was.
 		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "uring-direct,tcp-nodelay"}, loopPlan{backend: corenet.LoopBackendAuto, fallback: true}},
+		// kqueue is epoll's sibling: switching it off, or naming it, leaves Linux
+		// as epoll's rank allows.
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "kqueue"}, loopPlan{backend: corenet.LoopBackendAuto, fallback: true}},
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvEngine: "kqueue"}, loopPlan{backend: corenet.LoopBackendEpoll, fallback: true}},
 		// A kernel capability is no engine: KITSUNIUM_NET_ENGINE takes it as unknown.
 		{corenet.LoopBackendAuto, map[string]string{corenet.EnvEngine: "uring-pbuf"}, loopPlan{backend: corenet.LoopBackendPortable}},
 	}
 	for _, tc := range spelled {
 		env := readOperator(envOf(tc.vars))
-		if got := env.plan(tc.code, true); got.backend != tc.want.backend || got.fallback != tc.want.fallback {
+		if got := env.plan(tc.code, corenet.CapabilityEpoll); got.backend != tc.want.backend || got.fallback != tc.want.fallback {
 			t.Errorf("%v under %v = %+v, want %+v", tc.code, tc.vars, got, tc.want)
+		}
+	}
+}
+
+// checkKqueuePlan holds plan on darwin and the BSDs to R5 and to kqueue's
+// opt-in (ADR 0222 §D6): kqueue exactly when the code named it and the
+// environment allows it, never a fallback, and the floor for everything else
+// — auto, which stays portable until kqueue's paired gate holds, and io_uring
+// and epoll, refused by startLoopEngine there.
+func checkKqueuePlan(t *testing.T, name string, env operatorEnv, code corenet.LoopBackend) {
+	t.Helper()
+	p := env.plan(code, corenet.CapabilityKqueue)
+	want := code == corenet.LoopBackendKqueue && env.allows(corenet.CapabilityKqueue)
+	switch {
+	case want && p.backend != corenet.LoopBackendKqueue:
+		t.Errorf("%s on kqueue: plan %v, want kqueue", name, p.backend)
+	case !want && p.backend != corenet.LoopBackendPortable:
+		t.Errorf("%s on kqueue: plan %v, want portable", name, p.backend)
+	case p.fallback:
+		t.Errorf("%s on kqueue: fallback set", name)
+	}
+}
+
+// TestOperatorPlan_kqueueIsOptIn pins, on any platform, what auto and an
+// explicit kqueue plan on darwin and the BSDs (ADR 0222 §D6): a backend that
+// has never run there is not their default, so auto plans the portable
+// backend whatever the environment, and kqueue runs only when the code names
+// it and the operator lets it through.
+func TestOperatorPlan_kqueueIsOptIn(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		code corenet.LoopBackend
+		vars map[string]string
+		want loopPlan
+	}{
+		{corenet.LoopBackendAuto, nil, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvEngine: "kqueue"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "epoll"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendKqueue, nil, loopPlan{backend: corenet.LoopBackendKqueue}},
+		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvEngine: "epoll"}, loopPlan{backend: corenet.LoopBackendKqueue}},
+		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvDisable: "epoll"}, loopPlan{backend: corenet.LoopBackendKqueue}},
+		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvDisable: "kqueue"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvEngine: "portable"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendEpoll, nil, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendIOURing, nil, loopPlan{backend: corenet.LoopBackendPortable}},
+	}
+	for _, tc := range cases {
+		env := readOperator(envOf(tc.vars))
+		if got := env.plan(tc.code, corenet.CapabilityKqueue); got.backend != tc.want.backend || got.fallback != tc.want.fallback {
+			t.Errorf("%v under %v on kqueue = %+v, want %+v", tc.code, tc.vars, got, tc.want)
 		}
 	}
 }
@@ -264,26 +359,37 @@ func TestOperator_servesTheLoopGroupBelowTheCeiling(t *testing.T) {
 	cases := []struct {
 		vars  map[string]string
 		linux corenet.LoopBackend
+		bsd   corenet.LoopBackend
 	}{
-		{map[string]string{corenet.EnvEngine: "epoll"}, corenet.LoopBackendEpoll},
-		{map[string]string{corenet.EnvDisable: "iouring"}, corenet.LoopBackendEpoll},
-		{map[string]string{corenet.EnvEngine: "portable"}, corenet.LoopBackendPortable},
-		{map[string]string{corenet.EnvEngine: "goroutine"}, corenet.LoopBackendPortable},
-		{map[string]string{corenet.EnvDisable: "iouring,epoll"}, corenet.LoopBackendPortable},
-		{map[string]string{corenet.EnvEngine: "unknown"}, corenet.LoopBackendPortable},
+		{map[string]string{corenet.EnvEngine: "epoll"}, corenet.LoopBackendEpoll, corenet.LoopBackendKqueue},
+		{map[string]string{corenet.EnvDisable: "iouring"}, corenet.LoopBackendEpoll, corenet.LoopBackendKqueue},
+		{map[string]string{corenet.EnvEngine: "portable"}, corenet.LoopBackendPortable, corenet.LoopBackendPortable},
+		{map[string]string{corenet.EnvEngine: "goroutine"}, corenet.LoopBackendPortable, corenet.LoopBackendPortable},
+		{map[string]string{corenet.EnvDisable: "iouring,epoll"}, corenet.LoopBackendPortable, corenet.LoopBackendKqueue},
+		{map[string]string{corenet.EnvEngine: "epoll", corenet.EnvDisable: "kqueue"}, corenet.LoopBackendEpoll, corenet.LoopBackendPortable},
+		{map[string]string{corenet.EnvEngine: "unknown"}, corenet.LoopBackendPortable, corenet.LoopBackendPortable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.vars[corenet.EnvEngine]+"|"+tc.vars[corenet.EnvDisable], func(t *testing.T) {
 			t.Parallel()
 			srv := newServer(envOf(tc.vars))
 			t.Cleanup(func() { swallowErr(srv.Close()) })
-			srv.Group("loop", Listen("tcp", "127.0.0.1:0")).HandleLoop(&loopLineH{})
+			// kqueue is opt-in (ADR 0222 §D6): named, so the operator's switches
+			// are what lowers it; auto there is portable whatever they say.
+			var lv corenet.LoopValue
+			if nativePoller == corenet.CapabilityKqueue {
+				lv.Backend = corenet.LoopBackendKqueue
+			}
+			srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(lv)).HandleLoop(&loopLineH{})
 			if err := srv.Start(t.Context()); err != nil {
 				t.Fatalf("Start: %v", err)
 			}
 			st := srv.State()
 			want := tc.linux
-			if runtime.GOOS != "linux" {
+			switch {
+			case nativePoller == corenet.CapabilityKqueue:
+				want = tc.bsd
+			case runtime.GOOS != "linux":
 				want = corenet.LoopBackendPortable
 			}
 			ls := st.Loops[0]
@@ -292,6 +398,9 @@ func TestOperator_servesTheLoopGroupBelowTheCeiling(t *testing.T) {
 			}
 			if want == corenet.LoopBackendEpoll && ls.ProbeStage != "epoll" {
 				t.Fatalf("probe stage %q: io_uring was probed", ls.ProbeStage)
+			}
+			if want == corenet.LoopBackendKqueue && ls.ProbeStage != "kqueue-socket" {
+				t.Fatalf("probe stage %q, want kqueue-socket, the last stage", ls.ProbeStage)
 			}
 			if st.Override.Source != "environment" || st.Override.Raw == "" {
 				t.Fatalf("override = %+v", st.Override)
@@ -333,7 +442,7 @@ func TestOperator_neverTouchesTheGoroutineEngine(t *testing.T) {
 func TestOperator_kernelSwitches(t *testing.T) {
 	t.Parallel()
 	env := readOperator(envOf(map[string]string{corenet.EnvDisable: "uring-direct,epoll,uring-direct,tcp-nodelay"}))
-	p := env.plan(corenet.LoopBackendAuto, true)
+	p := env.plan(corenet.LoopBackendAuto, corenet.CapabilityEpoll)
 	if !slices.Equal(p.disabled, []corenet.Capability{corenet.CapabilityURingDirect, corenet.CapabilityTCPNoDelay}) || p.disabledBy != corenet.EnvDisable {
 		t.Fatalf("listed: %v by %q", p.disabled, p.disabledBy)
 	}
@@ -344,7 +453,7 @@ func TestOperator_kernelSwitches(t *testing.T) {
 		t.Fatalf("faults = %v", env.faults)
 	}
 	unknown := readOperator(envOf(map[string]string{corenet.EnvDisable: "uring-sqpoll"}))
-	q := unknown.plan(corenet.LoopBackendAuto, true)
+	q := unknown.plan(corenet.LoopBackendAuto, corenet.CapabilityEpoll)
 	kernel := 0
 	for _, e := range capabilityRegistry {
 		if e.kernel {
@@ -355,7 +464,7 @@ func TestOperator_kernelSwitches(t *testing.T) {
 		t.Fatalf("unknown token: %d off of %d by %q on %v", len(q.disabled), kernel, q.disabledBy, q.backend)
 	}
 	none := readOperator(envOf(nil))
-	if p := none.plan(corenet.LoopBackendAuto, true); len(p.disabled) != 0 {
+	if p := none.plan(corenet.LoopBackendAuto, corenet.CapabilityEpoll); len(p.disabled) != 0 {
 		t.Fatalf("no variable: %v off", p.disabled)
 	}
 }

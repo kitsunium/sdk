@@ -1,0 +1,3502 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: The connection state machine's numbers, RFC 9113 and ADR 0221.
+    grouped: true
+    items:
+      - doc: clientPrefaceLen is the length of the client connection preface, §3.4.
+        name: clientPrefaceLen
+        type: int
+        value: "24"
+      - doc: noIndex marks the end of a stream list or a table not taken.
+        name: noIndex
+        type: int32
+        value: "-1"
+      - doc: |-
+          defaultHoldCap is the most DATA one connection may hold unsent: the
+          loop's OutputCap default, what the adapter names when it has none.
+        name: defaultHoldCap
+        type: int
+        value: 1 << 20
+      - doc: |-
+          controlPerBatch is how many frames that ask for an answer, or do no
+          useful work, one batch may carry on one connection: past it the
+          connection is ending the peer's flood, RFC 9113 §10.5.
+        name: controlPerBatch
+        type: int32
+        value: "1024"
+      - doc: |-
+          resetBudgetFactor sizes the Rapid Reset budget, in MaxStreams: the peer
+          resets at most that many unfinished streams net of those it let finish.
+        name: resetBudgetFactor
+        type: int32
+        value: "2"
+      - doc: |-
+          maxContinuationFrames bounds the frames of one field block: past them
+          it is a CONTINUATION flood, however few bytes each carries.
+        name: maxContinuationFrames
+        type: int32
+        value: "32"
+      - doc: |-
+          blockBoundFactor sizes the bytes of a whole field block, in the
+          header-list ceiling: Huffman coding can only expand a string so far.
+        name: blockBoundFactor
+        type: int
+        value: "4"
+      - doc: |-
+          creditDivisor is the fraction of a window consumed before a WINDOW_UPDATE
+          is written for it: small acknowledgments never leave.
+        name: creditDivisor
+        type: int32
+        value: "4"
+      - doc: holdKeepMax is the largest buffer the lane keeps for reuse.
+        name: holdKeepMax
+        type: int
+        value: 1 << 16
+      - doc: frameKnownMax is the largest frame type this package dispatches on.
+        name: frameKnownMax
+        type: corehttp2.FrameType
+        value: corehttp2.FrameContinuation
+      - doc: settingsAckLen is a SETTINGS ACK's payload length.
+        name: settingsAckLen
+        type: int
+        value: "0"
+      - doc: settingLenLocal is the wire size of one SETTINGS parameter.
+        name: settingLenLocal
+        type: int
+        value: "6"
+    name: clientPrefaceLen
+  - doc: tableChunk is how many tables one chunk of the table arena holds.
+    items:
+      - name: tableChunk
+        type: int32
+        value: "64"
+    name: tableChunk
+  - grouped: true
+    items:
+      - doc: flagPreface says the client preface has been read.
+        name: flagPreface
+        type: connFlags
+        value: 1 << iota
+      - doc: flagSettings says the client's first SETTINGS has been read.
+        name: flagSettings
+      - doc: "flagGoAway says a GOAWAY left: no new stream is admitted."
+        name: flagGoAway
+      - doc: "flagPeerGoAway says the client sent GOAWAY: it opens no new stream."
+        name: flagPeerGoAway
+      - doc: "flagClosing says the connection ended with an error: nothing more is read."
+        name: flagClosing
+    name: flagPreface
+  - grouped: true
+    items:
+      - doc: streamRemoteClosed says the peer's half is closed (END_STREAM received).
+        name: streamRemoteClosed
+        type: streamFlags
+        value: 1 << iota
+      - doc: "streamLocalClosed says our half is closed: END_STREAM sent."
+        name: streamLocalClosed
+      - doc: "streamOverBody says the body ran past the bound: nothing more is kept."
+        name: streamOverBody
+      - doc: streamHoldEnd says END_STREAM follows the held bytes.
+        name: streamHoldEnd
+    name: streamRemoteClosed
+  - grouped: true
+    items:
+      - doc: EventHeaders is a whole field block for a stream, to decode with Lane.Decode.
+        name: EventHeaders
+        type: EventKind
+        value: iota
+      - doc: EventData is a stream's DATA payload, padding removed.
+        name: EventData
+      - doc: EventReset is a stream the peer or the state machine ended.
+        name: EventReset
+      - doc: EventGoAway is the peer's GOAWAY; it opens no new stream.
+        name: EventGoAway
+    name: EventHeaders
+  - grouped: true
+    items:
+      - doc: EventEndStream reports the stream's last frame arrived with this event.
+        name: EventEndStream
+        type: EventFlags
+        value: 1 << iota
+      - doc: |-
+          EventDiscard reports an EventHeaders whose stream was refused: decoded only
+          to keep the connection's table in step, RFC 9113 §4.3, and dropped.
+        name: EventDiscard
+      - doc: |-
+          EventOverBody reports an EventData whose bytes passed the body bound: the
+          adapter refuses the request (413) and the codec keeps nothing more.
+        name: EventOverBody
+    name: EventEndStream
+  - doc: clientPrefaceText is the client connection preface, RFC 9113 §3.4.
+    items:
+      - name: clientPrefaceText
+        type: string
+        value: "\"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n\""
+    name: clientPrefaceText
+  - doc: The wire layouts of the frames the state machine reads, RFC 9113 §6.
+    grouped: true
+    items:
+      - doc: priorityFieldsLen is a HEADERS frame's priority field length.
+        name: priorityFieldsLen
+        type: int
+        value: "5"
+      - doc: priorityFrameLen is a PRIORITY frame's payload length.
+        name: priorityFrameLen
+        type: int
+        value: "5"
+      - doc: streamIDFieldLen is the bytes of a stream id or an error code.
+        name: streamIDFieldLen
+        type: int
+        value: "4"
+      - doc: goAwayMinLen is a GOAWAY's fixed payload.
+        name: goAwayMinLen
+        type: int
+        value: "8"
+      - doc: pingPayloadLen is a PING's fixed payload.
+        name: pingPayloadLen
+        type: int
+        value: "8"
+    name: priorityFieldsLen
+  - doc: The frame layer's wire numbers, RFC 9113 §4.1 and §6.
+    grouped: true
+    items:
+      - doc: streamIDMask clears the reserved bit of a frame header's stream field.
+        name: streamIDMask
+        type: uint32
+        value: 1<<31 - 1
+      - doc: paddedHeaderLen is the bytes a padded frame's pad length needs read.
+        name: paddedHeaderLen
+        type: int
+        value: "10"
+      - doc: settingLen is the wire length of one SETTINGS parameter.
+        name: settingLen
+        type: int
+        value: "6"
+      - doc: windowUpdateLen is the payload of a WINDOW_UPDATE frame.
+        name: windowUpdateLen
+        type: int
+        value: "4"
+      - doc: rstStreamLen is the payload of an RST_STREAM frame.
+        name: rstStreamLen
+        type: int
+        value: "4"
+      - doc: goAwayLen is the payload of a GOAWAY frame with no debug data.
+        name: goAwayLen
+        type: int
+        value: "8"
+      - doc: pingLen is the payload of a PING frame.
+        name: pingLen
+        type: int
+        value: "8"
+      - doc: byte0Shift and byte1Shift and byte2Shift place the frame length's bytes.
+        name: byte0Shift
+        type: uint
+        value: "16"
+      - name: byte1Shift
+        type: uint
+        value: "8"
+    name: streamIDMask
+  - doc: |-
+      The representation prefixes of RFC 7541 §6: which field a block's byte
+      opens.
+    grouped: true
+    items:
+      - doc: indexedPrefix is the indexed field's high bit (§6.1), an integer of 7 bits.
+        name: indexedPrefix
+        type: byte
+        value: "0x80"
+      - doc: |-
+          incrementalMask and incrementalBits recognise a literal with
+          incremental indexing (§6.2.1), an integer of 6 bits.
+        name: incrementalMask
+        type: byte
+        value: "0xc0"
+      - name: incrementalBits
+        type: byte
+        value: "0x40"
+      - doc: |-
+          sizeUpdateMask and sizeUpdateBits recognise a dynamic table size update
+          (§6.3), an integer of 5 bits.
+        name: sizeUpdateMask
+        type: byte
+        value: "0xe0"
+      - name: sizeUpdateBits
+        type: byte
+        value: "0x20"
+      - doc: integer prefix widths.
+        name: prefix7
+        type: uint8
+        value: "7"
+      - name: prefix6
+        type: uint8
+        value: "6"
+      - name: prefix5
+        type: uint8
+        value: "5"
+      - name: prefix4
+        type: uint8
+        value: "4"
+      - doc: huffmanBit marks a Huffman-coded string, §5.2.
+        name: huffmanBit
+        type: byte
+        value: "0x80"
+      - doc: continuationBit marks an integer's continuation byte, §5.1.
+        name: continuationBit
+        type: byte
+        value: "0x80"
+      - doc: continuationShift is the bits one continuation byte adds to an integer.
+        name: continuationShift
+        type: uint
+        value: "7"
+      - doc: |-
+          maxIntBytes is how many continuation bytes an integer may take: past
+          them it overflows anything a table or a block can hold.
+        name: maxIntBytes
+        type: int
+        value: "5"
+      - doc: "maxHpackInt bounds a decoded integer: well over any table or block."
+        name: maxHpackInt
+        type: int
+        value: 1 << 28
+      - doc: firstDynamicIndex is the table index of the newest dynamic entry.
+        name: firstDynamicIndex
+        type: int
+        value: "62"
+      - doc: staticOffsetSlots is how many staticOffsets entries one entry takes.
+        name: staticOffsetSlots
+        type: int
+        value: "4"
+      - doc: |-
+          listFieldOverhead is what RFC 9113 §6.5.2 adds to a field's name and
+          value: 32, the same as an entry's table overhead (RFC 7541 §4.1).
+        name: listFieldOverhead
+        type: int
+        value: "32"
+    name: indexedPrefix
+  - doc: |-
+      The response framing's values, mirroring http1's writer.
+      extraFieldMax is the room for a Retry-After or X-Request-Id line.
+    items:
+      - name: extraFieldMax
+        type: int
+        value: "128"
+    name: extraFieldMax
+  - grouped: true
+    items:
+      - doc: statusOK is what a zero HTTP1ResponseValue.Status means.
+        name: statusOK
+        type: int
+        value: "200"
+      - doc: statusNoContent carries neither a length nor a body.
+        name: statusNoContent
+        type: int
+        value: "204"
+      - doc: statusNotModified carries neither a length nor a body.
+        name: statusNotModified
+        type: int
+        value: "304"
+      - doc: statusMin is the lowest status the profile sends.
+        name: statusMin
+        type: int
+        value: "200"
+      - doc: statusMax is the highest three-digit status.
+        name: statusMax
+        type: int
+        value: "999"
+      - doc: |-
+          neverIndexedByte opens a never-indexed literal, RFC 7541 §6.2.3: four
+          high bits, then the name's index in a 4-bit integer.
+        name: neverIndexedByte
+        type: byte
+        value: "0x10"
+      - doc: prefix4Max is the largest index a 4-bit integer holds in one byte.
+        name: prefix4Max
+        type: int
+        value: "15"
+      - doc: statusNameIndex is :status's name index in the static table, Appendix A.
+        name: statusNameIndex
+        type: int
+        value: "8"
+      - doc: firstStaticStatus is the static index of the first of staticStatusCodes.
+        name: firstStaticStatus
+        type: int
+        value: "8"
+      - doc: contentLengthIndex is content-length's name index in the static table.
+        name: contentLengthIndex
+        type: int
+        value: "28"
+      - doc: "statusFieldLen is a three-digit status: the value's length in bytes."
+        name: statusFieldLen
+        type: byte
+        value: "3"
+      - doc: maxNameLen bounds a response field's name.
+        name: maxNameLen
+        type: int
+        value: "4096"
+      - doc: decimal is the base a status and a content length are written in.
+        name: decimal
+        type: int
+        value: "10"
+      - doc: |-
+          stringLenThreshold is the largest string length a 7-bit length integer
+          holds in one byte.
+        name: stringLenThreshold
+        type: int
+        value: "127"
+      - doc: asciiColonByte separates a header line's name and value.
+        name: asciiColonByte
+        type: byte
+        value: "':'"
+      - doc: toLower is the bit that folds an ASCII capital to lowercase.
+        name: toLower
+        type: byte
+        value: "0x20"
+    name: statusOK
+  - doc: The bits of a huffTable word.
+    grouped: true
+    items:
+      - doc: huffEmit says a symbol ended on this nibble.
+        name: huffEmit
+        type: uint32
+        value: 1 << 8
+      - doc: "huffFail says no code can take this nibble: an EOS, or too much padding."
+        name: huffFail
+        type: uint32
+        value: 1 << 9
+      - doc: huffStateMask extracts a word's next state.
+        name: huffStateMask
+        type: uint32
+        value: "0xff"
+      - doc: huffSymShift places the emitted symbol in a word.
+        name: huffSymShift
+        type: uint
+        value: "16"
+      - doc: nibbleShift places a byte's high nibble.
+        name: nibbleShift
+        type: uint
+        value: "4"
+      - doc: lowNibble extracts a byte's low nibble.
+        name: lowNibble
+        type: byte
+        value: "0x0f"
+    name: huffEmit
+  - doc: huffStates is how many states the automaton has.
+    items:
+      - name: huffStates
+        type: int
+        value: "256"
+    name: huffStates
+  - grouped: true
+    items:
+      - doc: |-
+          staticLen is the number of entries of the static table, RFC 7541
+          Appendix A; a dynamic entry's index starts one past it.
+        name: staticLen
+        type: int
+        value: "61"
+      - doc: staticNameMax is the longest name of the static table.
+        name: staticNameMax
+        type: int
+        value: "27"
+    name: staticLen
+  - doc: |-
+      The dynamic table's layout (RFC 7541 §4): mem[:capacity] is a byte ring of
+      entries, mem[capacity:] a ring of two-byte offsets, one slot per entry. An
+      entry's stored form is its five-byte header — a flag, the name's and the
+      value's lengths — then the name and the value, wrapping the ring. RFC 7541
+      §4.1 counts an entry at its name, its value and 32, so stored bytes never
+      fill the ring: 5 of those 32 hold the header.
+    grouped: true
+    items:
+      - doc: |-
+          entryFlagInvalid marks a stored field RFC 9113 §8.2.1 calls malformed: a
+          later reference to it is malformed too, with no second byte scan.
+        name: entryFlagInvalid
+        type: byte
+        value: "1"
+      - doc: entryHeaderLen is the bytes of a stored entry's header.
+        name: entryHeaderLen
+        type: int32
+        value: "5"
+      - doc: entryOverhead is what RFC 7541 §4.1 adds to an entry's name and value.
+        name: entryOverhead
+        type: int32
+        value: "32"
+      - doc: slotLen is the bytes of one offset slot.
+        name: slotLen
+        type: int32
+        value: "2"
+    name: entryFlagInvalid
+  - doc: The bytes RFC 9113 §8.2.1 looks at.
+    grouped: true
+    items:
+      - doc: |-
+          asciiTab and asciiSpace are the whitespace a value may not begin or end
+          with.
+        name: asciiTab
+        type: byte
+        value: "'\\t'"
+      - name: asciiSpace
+        type: byte
+        value: "' '"
+      - doc: asciiColon opens a pseudo-field's name and nothing else.
+        name: asciiColon
+        type: byte
+        value: "':'"
+      - doc: asciiLF and asciiCR are, with NUL, never in a value.
+        name: asciiLF
+        type: byte
+        value: "'\\n'"
+      - name: asciiCR
+        type: byte
+        value: "'\\r'"
+      - doc: firstUpper and lastUpper bound the capitals a field name may not hold.
+        name: firstUpper
+        type: byte
+        value: "'A'"
+      - name: lastUpper
+        type: byte
+        value: "'Z'"
+      - doc: firstVisible is the lowest byte a field name may hold.
+        name: firstVisible
+        type: byte
+        value: "0x21"
+      - doc: lastVisible is the highest byte a field name may hold.
+        name: lastVisible
+        type: byte
+        value: "0x7e"
+    name: asciiTab
+  - doc: What a connection's first bytes made of it.
+    grouped: true
+    items:
+      - doc: |-
+          kindSniffing is a connection whose bytes so far match the preface, or
+          which sent none.
+        name: kindSniffing
+        type: connKind
+        value: iota
+      - doc: kindHTTP1 is a connection the embedded HTTP/1.1 adapter serves.
+        name: kindHTTP1
+      - doc: kindHTTP2 is a connection speaking HTTP/2.
+        name: kindHTTP2
+      - doc: kindRefused is a connection answered 400 and closing.
+        name: kindRefused
+    name: kindSniffing
+  - doc: protoHTTP1 and protoH2 are the group's two ALPN identifiers.
+    grouped: true
+    items:
+      - doc: protoHTTP1 is HTTP/1.1's identifier.
+        name: protoHTTP1
+        type: string
+        value: "\"http/1.1\""
+      - doc: protoH2 is HTTP/2's identifier.
+        name: protoH2
+        type: string
+        value: "\"h2\""
+    name: protoHTTP1
+  - doc: connEntry's flags.
+    grouped: true
+    items:
+      - doc: entryLive is set between OnOpen and OnClose.
+        name: entryLive
+        type: entryFlags
+        value: 1 << iota
+      - doc: entryGoAway is set once a GOAWAY left on this connection.
+        name: entryGoAway
+      - doc: entryEnded is set when the connection's output was refused.
+        name: entryEnded
+    name: entryLive
+  - doc: requestState's flags.
+    grouped: true
+    items:
+      - doc: requestDeclared is set when a content-length was given.
+        name: requestDeclared
+        type: requestFlags
+        value: 1 << iota
+      - doc: requestHead is set when the request's method is HEAD.
+        name: requestHead
+      - doc: |-
+          requestRefused is set once an error answer went: its remaining bytes
+          are dropped.
+        name: requestRefused
+      - doc: requestReading is set once OnBody has been called.
+        name: requestReading
+    name: requestDeclared
+  - doc: The connection table's growth.
+    grouped: true
+    items:
+      - doc: entriesInitial is the first size of a ring's table.
+        name: entriesInitial
+        type: int
+        value: "16"
+      - doc: entriesDoubleBelow is the table size below which entriesGrowth doubles.
+        name: entriesDoubleBelow
+        type: int
+        value: "1024"
+    name: entriesInitial
+  - grouped: true
+    items:
+      - doc: |-
+          slotHTTP2 marks a job's Slot as this adapter's own, apart from the embedded
+          HTTP/1.1 adapter's jobs: both offload through the lane's one worker.
+        name: slotHTTP2
+        type: uint32
+        value: 1 << 31
+      - doc: statusUnavailable answers a pending request its lane's full queue refused.
+        name: statusUnavailable
+        type: int
+        value: "503"
+    name: slotHTTP2
+  - doc: Which pseudo-fields a request gave.
+    grouped: true
+    items:
+      - doc: seenMethod is :method.
+        name: seenMethod
+        type: pseudoSet
+        value: 1 << iota
+      - doc: seenTarget is :path.
+        name: seenTarget
+      - doc: seenScheme is :scheme.
+        name: seenScheme
+      - doc: seenAuthority is :authority.
+        name: seenAuthority
+    name: seenMethod
+  - doc: The mapping's constants.
+    grouped: true
+    items:
+      - doc: hostFieldName is the Host field, as Field looks it up.
+        name: hostFieldName
+        type: string
+        value: "\"host\""
+      - doc: maxDecimalDigits is the most digits an int64 surely holds.
+        name: maxDecimalDigits
+        type: int
+        value: "18"
+      - doc: protoMajorHTTP2 is what mapRequest sets Proto to.
+        name: protoMajorHTTP2
+        type: uint8
+        value: "2"
+      - doc: decimalBase is the radix of a Content-Length.
+        name: decimalBase
+        type: int64
+        value: "10"
+    name: hostFieldName
+  - doc: The statuses the adapter answers by itself.
+    grouped: true
+    items:
+      - doc: statusContentTooLarge answers a body past its bound.
+        name: statusContentTooLarge
+        type: int
+        value: "413"
+      - doc: statusInternal answers a response the writer refused.
+        name: statusInternal
+        type: int
+        value: "500"
+    name: statusContentTooLarge
+  - doc: |-
+      A request's ID, as http1's: the lane on top, a counter below, with one bit
+      apart so an HTTP/2 request never shares an ID with an HTTP/1.1 one of its lane.
+    grouped: true
+    items:
+      - doc: idLaneShift places the lane in an ID's top 16 bits.
+        name: idLaneShift
+        type: uint
+        value: "48"
+      - doc: idHTTP2Bit sets HTTP/2 apart.
+        name: idHTTP2Bit
+        type: uint64
+        value: 1 << 47
+      - doc: idCounterMask keeps the counter under idHTTP2Bit.
+        name: idCounterMask
+        type: uint64
+        value: idHTTP2Bit - 1
+    name: idLaneShift
+files:
+  - decls:
+      - clientPrefaceLen
+      - tableChunk
+      - flagPreface
+      - streamRemoteClosed
+      - EventHeaders
+      - EventEndStream
+      - clientPrefaceText
+      - clientPrefaceBytes
+      - connFlags
+      - streamFlags
+      - Conn
+      - (*Conn).has
+      - (*Conn).set
+      - streamState
+      - (*streamState).has
+      - (*streamState).set
+      - EventKind
+      - EventFlags
+      - Event
+      - holdBuffer
+      - Lane
+      - tableArena
+      - (*tableArena).get
+      - (*tableArena).mem
+      - (*tableArena).put
+      - NewLane
+      - newLaneResolved
+      - (*Lane).Open
+      - (*Lane).Close
+      - (*Lane).Events
+      - (*Lane).EndBatch
+      - (*Lane).TakeErrors
+      - (*Lane).countErr
+      - (*Lane).Decode
+      - (*Lane).Closing
+      - (*Lane).Done
+    name: conn.go
+  - decls:
+      - priorityFieldsLen
+      - (*feedRun).priorityFrame
+      - (*feedRun).rstFrame
+      - (*feedRun).rstOnAbsent
+      - (*feedRun).spendReset
+      - (*feedRun).pushFrame
+      - (*feedRun).pingFrame
+      - (*feedRun).goAwayFrame
+      - (*feedRun).windowFrame
+      - (*feedRun).connectionCredit
+      - (*feedRun).streamCredit
+      - (*feedRun).creditOnAbsent
+    name: conn_control.go
+  - decls:
+      - (*feedRun).dataFrame
+      - (*feedRun).dataOnAbsent
+      - (*feedRun).discardAgainstConn
+      - (*feedRun).dataOnStream
+      - (*feedRun).deliverData
+      - dataFlags
+    name: conn_data.go
+  - decls:
+      - feedRun
+      - (*Lane).Feed
+      - (*feedRun).startBatch
+      - (*feedRun).preface
+      - appendServerPreface
+      - (*feedRun).frame
+      - (*feedRun).dispatchLow
+      - (*feedRun).dispatchHigh
+      - (*feedRun).frameLen
+      - (*feedRun).spendControl
+      - (*feedRun).connError
+      - (*feedRun).streamError
+      - (*feedRun).emit
+      - (*Lane).find
+      - (*Lane).newStream
+      - (*Lane).closeStream
+      - (*Lane).freeStreamSlot
+      - (*Lane).releaseHold
+      - (*feedRun).finishIfDone
+      - (*feedRun).refundReset
+    name: conn_feed.go
+  - decls:
+      - headerSequence
+      - (*feedRun).headersFrame
+      - (*feedRun).readSequence
+      - (*feedRun).resumeScan
+      - (*feedRun).withinBlockBound
+      - (*feedRun).nextContinuation
+      - (*feedRun).joinSequence
+      - (*feedRun).fragmentOf
+      - (*feedRun).onHeaderBlock
+      - (*feedRun).headersOnOpenStream
+      - (*feedRun).continuationFrame
+      - endFlag
+    name: conn_headers.go
+  - decls:
+      - (*Lane).Headers
+      - (*Lane).Send
+      - (*feedRun).sendNow
+      - (*feedRun).appendData
+      - (*feedRun).hold
+      - (*Lane).holdOf
+      - (*Lane).takeHold
+      - (*Lane).flushHolds
+      - (*Lane).flushStream
+      - (*Lane).compactHold
+      - (*Lane).moveHoldDown
+      - (*Lane).lowestHold
+      - (*Lane).Consume
+      - (*Lane).AppendCredits
+      - (*Lane).GoAway
+      - (*Lane).Abort
+      - (*Lane).ResetStream
+      - (*Lane).OpenStreams
+    name: conn_send.go
+  - decls:
+      - (*feedRun).settingsFrame
+      - (*feedRun).settingsAck
+      - (*feedRun).applySettings
+      - (*feedRun).applySetting
+      - (*feedRun).applyEnablePush
+      - (*feedRun).applyMaxFrame
+      - (*feedRun).applyInitialWindow
+    name: conn_settings.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - streamIDMask
+      - ParseFrameHeader
+      - isPaddedFrame
+      - judgePadding
+      - AppendFrameHeader
+      - AppendSettings
+      - AppendSettingsAck
+      - AppendWindowUpdate
+      - AppendRSTStream
+      - AppendGoAway
+      - AppendPing
+    name: frame.go
+  - decls:
+      - indexedPrefix
+      - decodeRun
+      - decodedField
+      - (*Decoder).Decode
+      - (*decodeRun).step
+      - (*decodeRun).readInt
+      - (*decodeRun).readContinuation
+      - checkedInt
+      - (*decodeRun).indexed
+      - (*decodeRun).fieldByIndex
+      - staticField
+      - (*decodeRun).dynamicField
+      - (*decodeRun).emit
+      - (*decodeRun).sizeUpdate
+      - (*decodeRun).literal
+      - (*decodeRun).budget
+      - (*decodeRun).literalName
+      - (*decodeRun).dynamicName
+      - (*decodeRun).readString
+    name: hpack_decode.go
+  - decls:
+      - extraFieldMax
+      - statusOK
+      - tokenBits
+      - Encoder
+      - NewEncoder
+      - Encoder.AppendHeaders
+      - cmpInt
+      - sendableStatus
+      - appendStatus
+      - appendContentLength
+      - appendIndexedLiteralName
+      - appendExtraFields
+      - appendResponseFields
+      - appendField
+      - isToken
+      - isConnectionField
+      - appendNamedField
+      - equalFold
+      - lowerByte
+      - appendString
+      - appendIntOfLen
+      - foldToLower
+      - staticNameIndex
+      - equalFoldBytes
+      - Encoder.frameBlock
+      - Encoder.splitBlock
+    name: hpack_encode.go
+  - decls:
+      - huffEmit
+      - (*decodeRun).huffmanString
+      - huffStep
+    name: hpack_huffman.go
+  - decls:
+      - huffStates
+      - huffTable
+    name: hpack_huffman_table.go
+  - decls:
+      - staticLen
+      - staticBytes
+    name: hpack_static_table.go
+  - decls:
+      - entryFlagInvalid
+      - Decoder
+      - NewDecoder
+      - TableMem
+      - (*Decoder).acknowledge
+      - (*Decoder).slots
+      - (*Decoder).ringPut
+      - (*Decoder).ringGet
+      - (*Decoder).slotAt
+      - (*Decoder).storeSlot
+      - (*Decoder).entryAt
+      - (*Decoder).entrySize
+      - (*Decoder).nameAt
+      - (*Decoder).u16
+      - (*Decoder).evictOldest
+      - (*Decoder).shrinkTo
+      - (*Decoder).insert
+    name: hpack_table.go
+  - decls:
+      - asciiTab
+      - valueStop
+      - validField
+      - validName
+      - nameByte
+      - validValue
+      - isOWS
+    name: hpack_valid.go
+  - decls:
+      - kindSniffing
+      - protoHTTP1
+      - refusalPreface
+      - connKind
+      - HandleLoop
+      - NewLoopHandler
+      - LoopHandler
+      - (*LoopHandler).OnStart
+      - (*LoopHandler).Honours
+      - (*LoopHandler).SetHTTP
+      - (*LoopHandler).CheckSpill
+      - (*LoopHandler).checkH2Spill
+      - (*LoopHandler).Unwrap
+      - (*LoopHandler).OnOpen
+      - (*LoopHandler).OnData
+      - (*LoopHandler).sniff
+      - (*LoopHandler).writeClose
+      - (*LoopHandler).OnTimeout
+      - (*LoopHandler).OnWritable
+      - (*LoopHandler).OnClose
+      - (*LoopHandler).state
+      - (*LoopHandler).grow
+      - swallowErr
+    name: loop.go
+  - decls:
+      - entryLive
+      - requestDeclared
+      - entriesInitial
+      - defaultLaneLimits
+      - connEntry
+      - entryFlags
+      - (*connEntry).live
+      - requestState
+      - requestFlags
+      - (*requestState).has
+      - workSlot
+      - deferredAnswer
+      - write
+      - laneState
+      - postHolder
+      - newLaneState
+      - (*laneState).remember
+      - (*laneState).entry
+      - entriesGrowth
+      - (*laneState).take
+      - (*laneState).give
+      - (*laneState).takeRequest
+      - (*requestState).resetKeepingBuffers
+      - (*laneState).findRequest
+      - (*laneState).unlinkRequest
+      - (*laneState).release
+      - (*laneState).finishRequest
+      - (*laneState).closeRequests
+    name: loop_lane.go
+  - decls:
+      - slotHTTP2
+      - retryAfter
+      - h2Worker
+      - h2Worker.Work
+      - (*LoopHandler).Worker
+      - (*LoopHandler).OnOutbound
+      - (*LoopHandler).OnDone
+      - (*LoopHandler).answerSlot
+      - (*laneState).finishSlot
+      - (*laneState).releaseCompleted
+      - (*h2Call).offload
+      - (*h2Call).answerUnavailable
+      - (*laneState).takeSlot
+      - (*laneState).freeSlot
+      - (*LoopHandler).Draining
+      - (*LoopHandler).announce
+      - runDrainGoAway
+      - (*laneState).announceDrain
+      - (*laneState).announceConn
+      - (*LoopHandler).InFlight
+      - (*LoopHandler).Pending
+      - (*laneState).peek
+    name: loop_pending.go
+  - decls:
+      - seenMethod
+      - hostFieldName
+      - pseudoMethod
+      - pseudoSet
+      - mapVerdict
+      - mapState
+      - mapRequest
+      - resetMapped
+      - (*mapState).pseudo
+      - (*mapState).setOnce
+      - (*mapState).regular
+      - (*mapState).te
+      - connectionSpecific
+      - (*mapState).host1
+      - (*mapState).authorization
+      - (*mapState).contentLength
+      - (*mapState).refuse
+      - parseDecimal
+      - (*mapState).complete
+      - (*mapState).host
+      - (*mapState).hostConflict
+      - joinCookies
+      - (*mapState).judge
+      - copyRequest
+      - copyBytes
+    name: loop_request.go
+  - decls:
+      - statusContentTooLarge
+      - idLaneShift
+      - methodHEAD
+      - h2Call
+      - (*LoopHandler).feed
+      - (*laneState).pushWrite
+      - (*h2Call).event
+      - (*h2Call).onHeaders
+      - (*h2Call).open
+      - (*h2Call).keep
+      - (*h2Call).onData
+      - (*requestState).received
+      - (*h2Call).take
+      - (*h2Call).buffer
+      - (*h2Call).refuseBody
+      - (*h2Call).resetMalformed
+      - (*h2Call).onReset
+      - (*h2Call).serve
+      - (*h2Call).dispatch
+      - (*h2Call).answer
+      - unservable
+      - (*h2Call).answerStatus
+      - (*h2Call).goAway
+      - (*LoopHandler).OnBatchEnd
+      - (*LoopHandler).publish
+      - (*laneState).countAbort
+      - (*LoopHandler).HTTPCounts
+      - (*LoopHandler).completeDeferred
+      - (*LoopHandler).flush
+      - (*laneState).credit
+      - (*laneState).writeAll
+      - (*LoopHandler).closeIfDone
+      - (*laneState).endBatch
+    name: loop_serve.go
+functions:
+  - name: NewLane
+    params: v corehttp2.LimitsValue, maxBody int64, holdCap int
+    results: "*Lane, error"
+  - doc: newLaneResolved returns one lane's state for bounds already resolved.
+    name: newLaneResolved
+    params: resolved corehttp2.LimitsValue, maxBody int64, holdCap int
+    results: "*Lane"
+  - doc: dataFlags builds an EventData's flags.
+    name: dataFlags
+    params: end, over bool
+    results: EventFlags
+  - doc: |-
+      appendServerPreface writes the SETTINGS the server opens with: the bounds
+      that differ from the protocol's defaults, and the connection window raised.
+    name: appendServerPreface
+    params: dst []byte, l *Lane
+    results: "[]byte"
+  - doc: endFlag builds an event's END_STREAM flag.
+    name: endFlag
+    params: end bool
+    results: EventFlags
+  - name: ParseFrameHeader
+    params: buf []byte, maxFrame int
+    results: corehttp2.FrameValue, int, corehttp2.ErrCode
+  - doc: isPaddedFrame reports whether h is a frame that carries a pad length.
+    name: isPaddedFrame
+    params: h corehttp2.FrameValue
+    results: bool
+  - doc: |-
+      judgePadding reads a padded frame's pad length and refuses padding that does
+      not leave the rest of the payload shorter than the frame's length.
+    name: judgePadding
+    params: buf []byte, h corehttp2.FrameValue
+    results: corehttp2.FrameValue, int, corehttp2.ErrCode
+  - name: AppendFrameHeader
+    params: dst []byte, h corehttp2.FrameValue
+    results: "[]byte"
+  - name: AppendSettings
+    params: dst []byte, settings []corehttp2.SettingValue
+    results: "[]byte"
+  - name: AppendSettingsAck
+    params: dst []byte
+    results: "[]byte"
+  - name: AppendWindowUpdate
+    params: dst []byte, stream, increment uint32
+    results: "[]byte"
+  - name: AppendRSTStream
+    params: dst []byte, stream uint32, code corehttp2.ErrCode
+    results: "[]byte"
+  - name: AppendGoAway
+    params: dst []byte, last uint32, code corehttp2.ErrCode
+    results: "[]byte"
+  - name: AppendPing
+    params: dst []byte, ack bool, data *[8]byte
+    results: "[]byte"
+  - doc: checkedInt refuses an integer past any table or block.
+    name: checkedInt
+    params: value int
+    results: int, error
+  - doc: staticField returns a static entry's bytes, aliasing the immutable table.
+    name: staticField
+    params: index int
+    results: decodedField
+  - name: NewEncoder
+    params: maxFrame int
+    results: Encoder
+  - doc: cmpInt returns v unless it is zero, then def.
+    name: cmpInt
+    params: v, def int
+    results: int
+  - doc: |-
+      sendableStatus mirrors AppendResponse: a status of the profile, no body on
+      a status that carries none.
+    name: sendableStatus
+    params: status int, res *corenet.HTTP1ResponseValue
+    results: bool
+  - doc: appendStatus appends the :status field.
+    name: appendStatus
+    params: dst []byte, status int
+    results: "[]byte"
+  - doc: appendContentLength appends a content-length field.
+    name: appendContentLength
+    params: dst []byte, n int
+    results: "[]byte"
+  - doc: |-
+      appendIndexedLiteralName opens a never-indexed literal whose name is at
+      index in the static table.
+    name: appendIndexedLiteralName
+    params: dst []byte, index int
+    results: "[]byte"
+  - doc: |-
+      appendExtraFields appends the fields http1's writer adds after Header: the
+      CORS lines, Retry-After and X-Request-Id.
+    name: appendExtraFields
+    params: dst []byte, res *corenet.HTTP1ResponseValue
+    results: "[]byte, bool"
+  - doc: |-
+      appendResponseFields re-reads res.Header's lines as HPACK literals, false on
+      a malformed line.
+    name: appendResponseFields
+    params: dst, header []byte
+    results: "[]byte, bool"
+  - doc: "appendField appends one \"Name: value\" line as a literal field."
+    name: appendField
+    params: dst, line []byte
+    results: "[]byte, bool"
+  - doc: isToken reports whether name is an RFC 9110 token.
+    name: isToken
+    params: name []byte
+    results: bool
+  - doc: |-
+      isConnectionField reports whether name is one of the fields HTTP/2 does not
+      carry; the comparison folds, the line's case being a handler's.
+    name: isConnectionField
+    params: name []byte
+    results: bool
+  - doc: |-
+      appendNamedField appends a literal field: the name by static index when the
+      table has it, otherwise lowercased as a string; the value as a plain string.
+    name: appendNamedField
+    params: dst, name, value []byte
+    results: "[]byte"
+  - doc: equalFold reports whether name and s are equal once ASCII capitals fold.
+    name: equalFold
+    params: name []byte, s string
+    results: bool
+  - doc: lowerByte folds an ASCII capital to lowercase.
+    name: lowerByte
+    params: c byte
+    results: byte
+  - doc: |-
+      appendString appends a plain string, RFC 7541 §5.2: the length as a 7-bit
+      integer, no Huffman coding.
+    name: appendString
+    params: dst, s []byte
+    results: "[]byte"
+  - doc: |-
+      appendIntOfLen appends a string length as a 7-bit integer with the
+      Huffman bit clear, RFC 7541 §5.1.
+    name: appendIntOfLen
+    params: dst []byte, n int
+    results: "[]byte"
+  - doc: foldToLower lowercases ASCII capitals in place.
+    name: foldToLower
+    params: b []byte
+  - doc: |-
+      staticNameIndex returns the static table's lowest index for name, compared
+      without regard to ASCII case, zero when it has none.
+    name: staticNameIndex
+    params: name []byte
+    results: int
+  - doc: equalFoldBytes reports whether name equals the lowercase table name b.
+    name: equalFoldBytes
+    params: name, b []byte
+    results: bool
+  - doc: |-
+      huffStep runs the automaton over one nibble, appending the symbol a code
+      ended with, if any.
+    name: huffStep
+    params: scratch []byte, state uint32, nibble byte
+    results: "[]byte, uint32, error"
+  - name: NewDecoder
+    params: table, maxList int
+    results: Decoder
+  - name: TableMem
+    params: table int
+    results: int
+  - doc: |-
+      validField reports whether f's name and value are well-formed, RFC 9113
+      §8.2.1.
+    name: validField
+    params: f *decodedField
+    results: bool
+  - doc: |-
+      validName reports whether name is a well-formed field name: lowercase,
+      visible ASCII, the first colon of a pseudo-field only.
+    name: validName
+    params: name []byte
+    results: bool
+  - doc: nameByte reports whether c may be in a field name after its first colon.
+    name: nameByte
+    params: c byte
+    results: bool
+  - doc: |-
+      validValue reports whether value is a well-formed field value: no NUL, LF
+      or CR, no leading or trailing whitespace.
+    name: validValue
+    params: value []byte
+    results: bool
+  - doc: isOWS reports whether c is a space or a tab.
+    name: isOWS
+    params: c byte
+    results: bool
+  - name: HandleLoop
+    params: h corenet.HTTP1Handler, p http1.Parser
+    results: "*LoopHandler"
+  - name: NewLoopHandler
+    params: h corenet.HTTP1Handler, p http1.Parser
+    results: "*LoopHandler"
+  - doc: |-
+      swallowErr intentionally discards a non-actionable error: the adapter has
+      no caller to return a refused Close to.
+    name: swallowErr
+    params: err error
+  - doc: |-
+      newLaneState builds lane i's state. A bound Resolve refuses is judged at
+      Start, and the zero bounds resolve, so NewLane does not fail here.
+    name: newLaneState
+    params: a *LoopHandler, i int
+    results: "*laneState"
+  - doc: "entriesGrowth is the size a full table grows to: doubled, from sixteen."
+    name: entriesGrowth
+    params: n int
+    results: int
+  - doc: |-
+      runDrainGoAway is the op the drain posts: on the lane's thread, it writes
+      GOAWAY on every HTTP/2 connection and closes those with no open stream.
+    name: runDrainGoAway
+    params: io corenet.LoopIO, key uintptr
+  - doc: |-
+      mapRequest fills the request value's Method, Target, Host, Authorization and
+      ContentLength from its decoded fields, removes the pseudo-fields from
+      Fields, joins a split Cookie and computes the canonical target. It reports
+      what to do with the stream.
+    name: mapRequest
+    params: req *corenet.HTTP1RequestValue, st *laneState, stream uint32
+    results: mapVerdict
+  - doc: |-
+      resetMapped clears what mapRequest and a link may have left from the lane's
+      previous request.
+    name: resetMapped
+    params: req *corenet.HTTP1RequestValue
+  - doc: connectionSpecific reports a field RFC 9113 §8.2.2 forbids on HTTP/2.
+    name: connectionSpecific
+    params: name []byte
+    results: bool
+  - doc: parseDecimal reads a non-negative decimal integer that fits an int64.
+    name: parseDecimal
+    params: b []byte
+    results: int64, bool
+  - doc: |-
+      joinCookies concatenates the Cookie fields into the first, §8.2.3, and
+      removes the others.
+    name: joinCookies
+    params: req *corenet.HTTP1RequestValue, st *laneState
+  - doc: |-
+      copyRequest makes dst hold src, every slice repointed at bytes appended to
+      head: the request outlives the batch's buffers. It returns head grown.
+    name: copyRequest
+    params: dst, src *corenet.HTTP1RequestValue, head []byte
+    results: "[]byte"
+  - doc: |-
+      copyBytes appends b to head and returns the slice of head holding it, nil
+      for nil.
+    name: copyBytes
+    params: head, b []byte
+    results: dst, grown []byte
+  - doc: |-
+      unservable reports an answer HTTP/2 does not carry on the loop: a
+      close-delimited stream, an Upgrade or a file body; a file's reader is
+      closed, as http1 closes one it does not send.
+    name: unservable
+    params: res *corenet.HTTP1ResponseValue
+    results: bool
+imports:
+  atomic: sync/atomic
+  binary: encoding/binary
+  bytes: bytes
+  corehttp2: github.com/kitsunium/sdk/internal/core/net/http2
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  http1: github.com/kitsunium/sdk/internal/service/net/http1
+  io: io
+  slices: slices
+  strconv: strconv
+  swar: github.com/kitsunium/sdk/internal/kernel/swar
+  sync: sync
+  trace: github.com/kitsunium/sdk/internal/core/observe/trace
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/http2
+  name: http2
+  purpose: "Package http2 is the SDK's HTTP/2 codec for the loop engine's sibling profile (ADR 0221, amending ADR 0186 §D6): pure functions over []byte and no I/O, the shape http1 has."
+types:
+  - doc: connFlags are the booleans of a Conn, packed to keep it pointer-free and small.
+    kind: named
+    name: connFlags
+    underlying: uint8
+  - doc: streamFlags are the booleans of a streamState.
+    kind: named
+    name: streamFlags
+    underlying: uint8
+  - fields:
+      - doc: decoder is the connection's HPACK table's bookkeeping.
+        name: decoder
+        type: Decoder
+      - doc: peerWindow is what the peer may send on the connection.
+        name: peerWindow
+        type: int32
+      - doc: sendWindow is what we may send on the connection.
+        name: sendWindow
+        type: int32
+      - doc: peerCredit is consumed bytes not yet acknowledged on the connection.
+        name: peerCredit
+        type: int32
+      - doc: |-
+          initialSend is the stream send window a new stream starts with: the
+          peer's INITIAL_WINDOW_SIZE.
+        name: initialSend
+        type: int32
+      - doc: peerMaxFrame is the largest frame the peer accepts.
+        name: peerMaxFrame
+        type: int32
+      - doc: "head is the newest open stream, noIndex when none: the list by index."
+        name: head
+        type: int32
+      - doc: open counts the streams on the list.
+        name: open
+        type: int32
+      - doc: |-
+          lastStream is the highest stream id the peer has used: a new stream
+          must be above it, §5.1.1, refused or not.
+        name: lastStream
+        type: uint32
+      - doc: "lastOpen is the highest stream id admitted: what GOAWAY names, §6.8."
+        name: lastOpen
+        type: uint32
+      - doc: |-
+          table is the dynamic table's block in the lane's arena; noIndex until
+          the connection's first field block.
+        name: table
+        type: int32
+      - doc: |-
+          hold is the connection's held-bytes buffer in the lane's arena; noIndex
+          when nothing is held.
+        name: hold
+        type: int32
+      - doc: held counts the bytes held unsent, all streams.
+        name: held
+        type: int32
+      - doc: resets is what is left of the Rapid Reset budget.
+        name: resets
+        type: int32
+      - doc: control counts this batch's frames that ask for an answer or do no work.
+        name: control
+        type: int32
+      - doc: epoch is the batch control was counted in.
+        name: epoch
+        type: uint32
+      - doc: |-
+          scanFrames is how many CONTINUATION frames of the field block waiting
+          at the front of the input are already known good.
+        name: scanFrames
+        type: int32
+      - doc: scanOff is where they end, relative to the HEADERS frame's first byte.
+        name: scanOff
+        type: int32
+      - doc: scanBlock counts the field block's bytes seen so far.
+        name: scanBlock
+        type: int32
+      - doc: flags are the connection's booleans.
+        name: flags
+        type: connFlags
+    kind: struct
+    methods:
+      - doc: has reports whether the flags are all set.
+        name: has
+        params: f connFlags
+        recv: c *Conn
+        results: bool
+      - doc: set raises the flags.
+        name: set
+        params: f connFlags
+        recv: c *Conn
+    name: Conn
+  - doc: |-
+      streamState is one open stream, indexed by Conn.head and threaded by next:
+      a pointer-free arena per lane.
+    fields:
+      - doc: id is the stream's identifier.
+        name: id
+        type: uint32
+      - doc: next links the stream to an older one on the connection, or to the free list.
+        name: next
+        type: int32
+      - doc: peerWindow is what the peer may still send on the stream.
+        name: peerWindow
+        type: int32
+      - doc: sendWindow is what we may still send on the stream.
+        name: sendWindow
+        type: int32
+      - doc: peerCredit is consumed bytes not yet acknowledged on the stream.
+        name: peerCredit
+        type: int32
+      - doc: holdOff locates the stream's held bytes in the connection's buffer.
+        name: holdOff
+        type: int32
+      - doc: holdLen counts them.
+        name: holdLen
+        type: int32
+      - doc: bodyLen counts the body bytes received so far.
+        name: bodyLen
+        type: int32
+      - doc: flags are the stream's booleans.
+        name: flags
+        type: streamFlags
+    kind: struct
+    methods:
+      - doc: has reports whether the flags are all set.
+        name: has
+        params: f streamFlags
+        recv: s *streamState
+        results: bool
+      - doc: set raises the flags.
+        name: set
+        params: f streamFlags
+        recv: s *streamState
+    name: streamState
+  - kind: named
+    name: EventKind
+    underlying: uint8
+  - kind: named
+    name: EventFlags
+    underlying: uint8
+  - fields:
+      - doc: Kind says what the event is.
+        name: Kind
+        type: EventKind
+      - doc: Stream is the stream concerned; zero for an EventGoAway.
+        name: Stream
+        type: uint32
+      - doc: |-
+          Data is the field block of an EventHeaders, or the body bytes of an
+          EventData.
+        name: Data
+        type: "[]byte"
+      - doc: Flags carries what the frame said beside its bytes.
+        name: Flags
+        type: EventFlags
+      - doc: Code is the error code an EventReset or EventGoAway carried.
+        name: Code
+        type: corehttp2.ErrCode
+    kind: struct
+    name: Event
+  - doc: |-
+      holdBuffer is the bytes held unsent for one connection: DATA waiting for
+      flow-control credit, bounded by the lane's holdCap.
+    fields:
+      - doc: buf holds the bytes, compacted once more than half of it is dead.
+        name: buf
+        type: "[]byte"
+      - doc: dead counts the bytes in buf no stream refers to.
+        name: dead
+        type: int32
+    kind: struct
+    name: holdBuffer
+  - fields:
+      - doc: limits are the resolved bounds of the group.
+        name: limits
+        type: corehttp2.LimitsValue
+      - doc: |-
+          errs counts the errors Feed answered, by corehttp2.ErrorType, until
+          TakeErrors.
+        name: errs
+        type: "[corehttp2.ErrorTypes]uint64"
+      - doc: maxBody is the body bound a request is refused past (413).
+        name: maxBody
+        type: int32
+      - doc: holdCap is the most DATA one connection may hold unsent.
+        name: holdCap
+        type: int32
+      - doc: streams is the arena of stream states.
+        name: streams
+        type: "[]streamState"
+      - doc: freeStream is the free list's head in streams.
+        name: freeStream
+        type: int32
+      - doc: tables hands out the HPACK tables.
+        name: tables
+        type: tableArena
+      - doc: holds are the held-bytes buffers, by Conn.hold.
+        name: holds
+        type: "[]holdBuffer"
+      - doc: freeHolds are the holds no connection uses.
+        name: freeHolds
+        type: "[]int32"
+      - doc: events are the last Feed's events.
+        name: events
+        type: "[]Event"
+      - doc: join is the current batch's reassembled field blocks.
+        name: join
+        type: "[]byte"
+      - doc: epoch numbers the batches, from one.
+        name: epoch
+        type: uint32
+    kind: struct
+    methods:
+      - name: Open
+        params: c *Conn
+        recv: l *Lane
+      - name: Close
+        params: c *Conn
+        recv: l *Lane
+      - name: Events
+        recv: l *Lane
+        results: "[]Event"
+      - name: EndBatch
+        recv: l *Lane
+      - name: TakeErrors
+        params: dst []uint64
+        recv: l *Lane
+      - doc: countErr counts an error Feed answers with code.
+        name: countErr
+        params: code corehttp2.ErrCode
+        recv: l *Lane
+      - name: Decode
+        params: c *Conn, block, scratch []byte, req *corenet.HTTP1RequestValue
+        recv: l *Lane
+        results: "[]byte, error"
+      - name: Closing
+        params: c *Conn
+        recv: "*Lane"
+        results: bool
+      - name: Done
+        params: c *Conn
+        recv: "*Lane"
+        results: bool
+      - name: Feed
+        params: c *Conn, buf, dst []byte
+        recv: l *Lane
+        results: int, []byte
+      - doc: |-
+          find returns the arena index of stream id on c and its predecessor, or
+          noIndex: a walk of the list, newest first, stopped at the first older id
+          (ids only grow, so nothing older can match past it).
+        name: find
+        params: c *Conn, id uint32
+        recv: l *Lane
+        results: idx, prev int32
+      - doc: |-
+          newStream opens stream id at the head of the list, newest first, windows
+          taken from the peer's settings and the receive bound.
+        name: newStream
+        params: c *Conn, id uint32
+        recv: l *Lane
+        results: int32
+      - doc: closeStream unlinks stream idx from c and frees it.
+        name: closeStream
+        params: c *Conn, idx int32
+        recv: l *Lane
+      - doc: freeStreamSlot returns a stream slot to the free list.
+        name: freeStreamSlot
+        params: idx int32
+        recv: l *Lane
+      - doc: releaseHold gives a connection's hold buffer back to the lane.
+        name: releaseHold
+        params: c *Conn
+        recv: l *Lane
+      - name: Headers
+        params: c *Conn, stream uint32, res *corenet.HTTP1ResponseValue, endStream bool, dst []byte
+        recv: l *Lane
+        results: "[]byte, error"
+      - name: Send
+        params: c *Conn, stream uint32, body, dst []byte, endStream bool
+        recv: l *Lane
+        results: "[]byte"
+      - doc: holdOf returns c's hold buffer, taking one from the lane on first use.
+        name: holdOf
+        params: c *Conn
+        recv: l *Lane
+        results: "*holdBuffer"
+      - doc: takeHold returns a free buffer, growing the arena when none is free.
+        name: takeHold
+        recv: l *Lane
+        results: int32
+      - doc: |-
+          flushHolds sends whatever the windows now allow of every stream's held
+          bytes, in the order the streams opened (newest first); called from Feed
+          after a SETTINGS or WINDOW_UPDATE. Nothing is copied from the hold buffer
+          until a compaction asks for it.
+        name: flushHolds
+        params: f *feedRun
+        recv: l *Lane
+      - doc: flushStream sends what the windows allow of one stream's held bytes.
+        name: flushStream
+        params: f *feedRun, idx int32
+        recv: l *Lane
+      - doc: |-
+          compactHold reclaims the buffer's dead bytes: when nothing is held any
+          more it goes back to the lane, and otherwise once more than half of it is
+          dead the live ranges are moved down.
+        name: compactHold
+        params: c *Conn
+        recv: l *Lane
+      - doc: |-
+          moveHoldDown moves every stream's held range to the front of its buffer, in
+          offset order, so no byte is overwritten before it is copied.
+        name: moveHoldDown
+        params: c *Conn, h *holdBuffer
+        recv: l *Lane
+      - doc: |-
+          lowestHold returns the holding stream with the lowest offset at or past
+          from: the next range to compact, one scan of the list per range.
+        name: lowestHold
+        params: c *Conn, from int32
+        recv: l *Lane
+        results: int32
+      - name: Consume
+        params: c *Conn, stream uint32, n int
+        recv: l *Lane
+      - name: AppendCredits
+        params: c *Conn, dst []byte
+        recv: l *Lane
+        results: "[]byte"
+      - name: GoAway
+        params: c *Conn, code corehttp2.ErrCode, dst []byte
+        recv: l *Lane
+        results: "[]byte"
+      - name: Abort
+        params: c *Conn, code corehttp2.ErrCode, dst []byte
+        recv: "*Lane"
+        results: "[]byte"
+      - name: ResetStream
+        params: c *Conn, stream uint32, code corehttp2.ErrCode, dst []byte
+        recv: l *Lane
+        results: "[]byte"
+      - name: OpenStreams
+        params: c *Conn
+        recv: "*Lane"
+        results: int
+    name: Lane
+  - doc: tableArena hands out HPACK tables of one size from chunks, pointer-free.
+    fields:
+      - doc: size is one table's bytes.
+        name: size
+        type: int
+      - doc: chunks are the arena's chunks, tableChunk tables each.
+        name: chunks
+        type: "[][]byte"
+      - doc: free are the tables on the free list.
+        name: free
+        type: "[]int32"
+      - doc: next is the first table never handed out.
+        name: next
+        type: int32
+    kind: struct
+    methods:
+      - doc: get returns a free table's id, growing the arena when none is free.
+        name: get
+        recv: a *tableArena
+        results: int32
+      - doc: mem returns the memory of table id.
+        name: mem
+        params: id int32
+        recv: a *tableArena
+        results: "[]byte"
+      - doc: put returns table id to the free list.
+        name: put
+        params: id int32
+        recv: a *tableArena
+    name: tableArena
+  - doc: feedRun is one Feed's cursor, on its stack.
+    fields:
+      - doc: l is the lane.
+        name: l
+        type: "*Lane"
+      - doc: c is the connection.
+        name: c
+        type: "*Conn"
+      - doc: buf is the input.
+        name: buf
+        type: "[]byte"
+      - doc: dst receives the connection's own answers.
+        name: dst
+        type: "[]byte"
+      - doc: h is the current frame's header.
+        name: h
+        type: corehttp2.FrameValue
+      - doc: payload is the current frame's payload.
+        name: payload
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: |-
+          priorityFrame ignores the deprecated priority signal, §6.3, once it is well
+          formed: it opens no stream and takes no work.
+        name: priorityFrame
+        recv: f *feedRun
+        results: int
+      - doc: rstFrame handles RST_STREAM, §6.4.
+        name: rstFrame
+        recv: f *feedRun
+        results: int
+      - doc: rstOnAbsent answers a RST_STREAM for a stream not on the list.
+        name: rstOnAbsent
+        recv: f *feedRun
+      - doc: |-
+          spendReset charges one reset to the Rapid Reset budget, CVE-2023-44487: a
+          client that opens and cancels streams without letting any finish pays for
+          each, and ends the connection when the budget is gone.
+        name: spendReset
+        recv: f *feedRun
+      - doc: "pushFrame refuses a PUSH_PROMISE: a client cannot push, §8.4."
+        name: pushFrame
+        recv: f *feedRun
+        results: int
+      - doc: pingFrame answers a PING, §6.7.
+        name: pingFrame
+        recv: f *feedRun
+        results: int
+      - doc: "goAwayFrame reads the peer's GOAWAY, §6.8: it opens nothing new."
+        name: goAwayFrame
+        recv: f *feedRun
+        results: int
+      - doc: windowFrame handles WINDOW_UPDATE, §6.9.
+        name: windowFrame
+        recv: f *feedRun
+        results: int
+      - doc: connectionCredit applies a WINDOW_UPDATE on the connection, §6.9.1.
+        name: connectionCredit
+        params: inc uint32
+        recv: f *feedRun
+      - doc: streamCredit applies a WINDOW_UPDATE on a stream, §6.9.1.
+        name: streamCredit
+        params: inc uint32
+        recv: f *feedRun
+      - doc: creditOnAbsent answers a WINDOW_UPDATE for a stream not on the list.
+        name: creditOnAbsent
+        params: inc uint32
+        recv: f *feedRun
+      - doc: dataFrame handles a DATA frame, RFC 9113 §6.1.
+        name: dataFrame
+        recv: f *feedRun
+        results: int
+      - doc: |-
+          dataOnAbsent answers DATA for a stream not on the list: idle is a connection
+          error, §5.1; a closed stream is a stream error, and its bytes still count
+          against the connection, §5.2.
+        name: dataOnAbsent
+        recv: f *feedRun
+      - doc: |-
+          discardAgainstConn charges a frame to the connection window and credits it
+          back at once: no handler will read these bytes.
+        name: discardAgainstConn
+        recv: f *feedRun
+      - doc: dataOnStream receives DATA on an open or half-closed stream.
+        name: dataOnStream
+        params: idx int32
+        recv: f *feedRun
+      - doc: |-
+          deliverData strips the padding, accumulates the body and reports the
+          event; the padding is credited back at once since nothing reads it.
+        name: deliverData
+        params: idx int32
+        recv: f *feedRun
+      - doc: startBatch resets the connection's control budget for a new batch.
+        name: startBatch
+        recv: f *feedRun
+      - doc: |-
+          preface reads the client connection preface, RFC 9113 §3.4, and writes the
+          server's: its SETTINGS and the connection's window raised to the bound. It
+          reports the bytes it took and whether frames may be read: once the preface
+          was consumed earlier, zero bytes and true.
+        name: preface
+        recv: f *feedRun
+        results: int, bool
+      - doc: |-
+          frame consumes one frame, or one header sequence, from the input's front.
+          It returns the bytes taken, 0 while the frame is not whole.
+        name: frame
+        params: in []byte
+        recv: f *feedRun
+        results: int
+      - doc: dispatchLow handles the frame types DATA through SETTINGS.
+        name: dispatchLow
+        params: in []byte
+        recv: f *feedRun
+        results: int
+      - doc: dispatchHigh handles the frame types PUSH_PROMISE through CONTINUATION.
+        name: dispatchHigh
+        recv: f *feedRun
+        results: int
+      - doc: frameLen returns the whole frame's length on the wire.
+        name: frameLen
+        recv: f *feedRun
+        results: int
+      - doc: |-
+          spendControl charges one frame to the connection's batch budget; a frame
+          past it ends the connection, ENHANCE_YOUR_CALM, RFC 9113 §10.5: a flood of
+          frames that take no work is refused before it costs output.
+        name: spendControl
+        recv: f *feedRun
+      - doc: |-
+          connError ends the connection: GOAWAY with code, and nothing more is read.
+          A second error of the same input writes nothing.
+        name: connError
+        params: code corehttp2.ErrCode
+        recv: f *feedRun
+      - doc: "streamError ends one stream: RST_STREAM with code, and its event."
+        name: streamError
+        params: idx int32, code corehttp2.ErrCode
+        recv: f *feedRun
+      - doc: emit reports an event for the adapter.
+        name: emit
+        params: ev Event
+        recv: f *feedRun
+      - doc: |-
+          finishIfDone closes a stream once both halves are done: its answer fully
+          written (END_STREAM sent, nothing held) and the peer's half closed. A
+          response that ended first while the body is still arriving is ended with
+          RST_STREAM(NO_ERROR), RFC 9113 §8.1, so the rest is discarded.
+        name: finishIfDone
+        params: idx int32
+        recv: f *feedRun
+      - doc: |-
+          refundReset returns one unit of the Rapid Reset budget, a stream having
+          finished its life normally.
+        name: refundReset
+        recv: f *feedRun
+      - doc: |-
+          headersFrame handles a HEADERS frame, RFC 9113 §6.2, the whole sequence of
+          frames that carries one field block being read at once.
+        name: headersFrame
+        params: in []byte
+        recv: f *feedRun
+        results: int
+      - doc: |-
+          readSequence walks the frames carrying one field block, RFC 9113 §6.10:
+          HEADERS then CONTINUATIONs of its stream, none interleaved, the fragment
+          bytes and the frames bounded before anything is copied. Progress is kept in
+          the Conn so a block trickled a byte at a time is walked once, not re-read.
+        name: readSequence
+        params: in []byte
+        recv: f *feedRun
+        results: headerSequence, bool
+      - doc: |-
+          resumeScan returns where to resume walking the block's CONTINUATIONs: past
+          the frames an earlier call found good, or from the start when the input no
+          longer holds them.
+        name: resumeScan
+        params: in []byte, firstLen int32
+        recv: f *feedRun
+        results: off, blockLen int32
+      - doc: |-
+          withinBlockBound refuses a block past the bytes a Huffman-coded field list
+          could take, or spread over too many frames: a CONTINUATION flood. The
+          connection ends with ENHANCE_YOUR_CALM before anything is copied.
+        name: withinBlockBound
+        params: blockLen int32
+        recv: f *feedRun
+        results: bool
+      - doc: |-
+          nextContinuation reads the next frame of a field block: it must be a
+          CONTINUATION of the block's stream, §6.10, and whole.
+        name: nextContinuation
+        params: in []byte
+        recv: f *feedRun
+        results: corehttp2.FrameValue, int, bool
+      - doc: joinSequence builds the whole block of a sequence past one frame.
+        name: joinSequence
+        params: in, first []byte, end int, endStream bool
+        recv: f *feedRun
+        results: headerSequence
+      - doc: |-
+          fragmentOf returns a HEADERS payload's field-block fragment, without its pad
+          length, padding and priority fields, RFC 9113 §6.2.
+        name: fragmentOf
+        params: h corehttp2.FrameValue, payload []byte
+        recv: f *feedRun
+        results: "[]byte"
+      - doc: onHeaderBlock admits or refuses a complete field block.
+        name: onHeaderBlock
+        params: seq *headerSequence
+        recv: f *feedRun
+      - doc: |-
+          headersOnOpenStream refuses a HEADERS frame on an open stream: a trailer is
+          out of the profile, §8.1's trailers refused as http1 refuses them; a stream
+          that already closed its half is STREAM_CLOSED, §5.1. Either way the block is
+          decoded for the table's sake.
+        name: headersOnOpenStream
+        params: idx int32, seq *headerSequence
+        recv: f *feedRun
+      - doc: |-
+          continuationFrame refuses a CONTINUATION outside a field block, §6.10: a
+          sequence is read whole by headersFrame, so one seen here is out of place.
+        name: continuationFrame
+        recv: f *feedRun
+        results: int
+      - doc: sendNow writes what the windows allow of p on stream idx, and holds the rest.
+        name: sendNow
+        params: idx int32, p []byte, end bool
+        recv: f *feedRun
+      - doc: |-
+          appendData writes DATA frames for p, bounded by both windows and the frame
+          size; a stream with no window, or p empty, writes at most one empty DATA
+          that carries END_STREAM.
+        name: appendData
+        params: st *streamState, p []byte, end bool
+        recv: f *feedRun
+        results: int
+      - doc: |-
+          hold copies what the windows did not allow into the connection's buffer,
+          bounded by holdCap; END_STREAM stays with the held bytes.
+        name: hold
+        params: idx int32, p []byte, end bool
+        recv: f *feedRun
+      - doc: |-
+          settingsFrame handles SETTINGS, §6.5: an ACK moves the decoder's bound, a
+          new set is applied and acknowledged in the same batch.
+        name: settingsFrame
+        recv: f *feedRun
+        results: int
+      - doc: "settingsAck handles a SETTINGS ACK: the peer has our table bound."
+        name: settingsAck
+        recv: f *feedRun
+      - doc: applySettings walks the frame's parameters in order, §6.5.3.
+        name: applySettings
+        recv: f *feedRun
+      - doc: applySetting applies one parameter, §6.5.2.
+        name: applySetting
+        params: id corehttp2.SettingID, val uint32
+        recv: f *feedRun
+      - doc: applyEnablePush refuses a value the setting cannot take, §6.5.2.
+        name: applyEnablePush
+        params: val uint32
+        recv: f *feedRun
+      - doc: applyMaxFrame moves the frame size the server writes to, §6.5.2.
+        name: applyMaxFrame
+        params: val uint32
+        recv: f *feedRun
+      - doc: |-
+          applyInitialWindow adjusts every open stream's send window by the change in
+          the initial window, §6.9.2: it may push a window negative, and a window past
+          the protocol's maximum ends the connection.
+        name: applyInitialWindow
+        params: val uint32
+        recv: f *feedRun
+    name: feedRun
+  - doc: headerSequence is a HEADERS frame and its CONTINUATIONs read together.
+    fields:
+      - doc: total is the sequence's bytes on the wire.
+        name: total
+        type: int
+      - doc: block is the assembled field block.
+        name: block
+        type: "[]byte"
+      - doc: endStream reports END_STREAM on the HEADERS frame.
+        name: endStream
+        type: bool
+    kind: struct
+    name: headerSequence
+  - doc: |-
+      decodeRun is one Decode call's cursor: the block, what it fills, and the
+      running header list size. It lives on Decode's stack.
+    fields:
+      - doc: d is the connection's table.
+        name: d
+        type: "*Decoder"
+      - doc: mem is the table's memory.
+        name: mem
+        type: "[]byte"
+      - doc: block is what is left of the field block.
+        name: block
+        type: "[]byte"
+      - doc: scratch receives every byte a field is not aliased from.
+        name: scratch
+        type: "[]byte"
+      - doc: req receives the fields.
+        name: req
+        type: "*corenet.HTTP1RequestValue"
+      - doc: list is the header list so far, RFC 9113 §6.5.2's measure.
+        name: list
+        type: int
+      - doc: |-
+          invalid reports a field RFC 9113 §8.2.1 calls malformed: reported at
+          the block's end, so the table stays in step with the peer.
+        name: invalid
+        type: bool
+      - doc: |-
+          updatesDone is set once a field was decoded: a table size update comes
+          first or not at all, RFC 7541 §4.2.
+        name: updatesDone
+        type: bool
+    kind: struct
+    methods:
+      - doc: step decodes one representation, RFC 7541 §6.
+        name: step
+        recv: r *decodeRun
+        results: error
+      - doc: |-
+          readInt decodes an integer of the given prefix width off the block's front,
+          RFC 7541 §5.1, and advances past it.
+        name: readInt
+        params: prefix uint8
+        recv: r *decodeRun
+        results: int, error
+      - doc: readContinuation accumulates an integer's continuation bytes.
+        name: readContinuation
+        params: value int
+        recv: r *decodeRun
+        results: int, error
+      - doc: "indexed decodes an indexed field, §6.1: the whole field is an index."
+        name: indexed
+        recv: r *decodeRun
+        results: error
+      - doc: fieldByIndex looks an index up in the static then the dynamic table.
+        name: fieldByIndex
+        params: index int
+        recv: r *decodeRun
+        results: decodedField, error
+      - doc: |-
+          dynamicField looks an index up in the dynamic table and copies the entry
+          out, charged against the list before the copy: the entry could be evicted
+          by a later insert of the same block, so it is never aliased.
+        name: dynamicField
+        params: index int
+        recv: r *decodeRun
+        results: decodedField, error
+      - doc: emit charges a field to the list and appends it to the request.
+        name: emit
+        params: f *decodedField
+        recv: r *decodeRun
+        results: error
+      - doc: |-
+          sizeUpdate applies a dynamic table size update, §6.3: only before the
+          block's first field, and never past what the server advertised.
+        name: sizeUpdate
+        recv: r *decodeRun
+        results: error
+      - doc: |-
+          literal decodes a literal field, §6.2: the name by index or as a string, the
+          value as a string, added to the table when index is set.
+        name: literal
+        params: prefix uint8, index bool
+        recv: r *decodeRun
+        results: error
+      - doc: budget is how many decoded value bytes this field may still take.
+        name: budget
+        params: f *decodedField
+        recv: r *decodeRun
+        results: int
+      - doc: |-
+          literalName returns a literal field's name: by index, or as a string. A
+          name found by index is judged again with its value, since the table's
+          verdict covers a whole field and a literal reuses only its name.
+        name: literalName
+        params: nameIndex int
+        recv: r *decodeRun
+        results: decodedField, error
+      - doc: |-
+          dynamicName copies the name of a dynamic entry into the scratch, charging
+          its bytes first: a literal reuses only the entry's name.
+        name: dynamicName
+        params: index int
+        recv: r *decodeRun
+        results: decodedField, error
+      - doc: |-
+          readString decodes a string literal, §5.2: aliased from the block when plain,
+          decoded into scratch when Huffman-coded, its decoded size at most budget.
+        name: readString
+        params: budget int
+        recv: r *decodeRun
+        results: "[]byte, error"
+      - doc: |-
+          huffmanString decodes a Huffman-coded string into the scratch, RFC 7541
+          §5.2: a nibble automaton, one table look-up a nibble, bounded by budget and
+          by the input's own length, so a code cannot expand a string past what is
+          allowed.
+        name: huffmanString
+        params: raw []byte, budget int
+        recv: r *decodeRun
+        results: "[]byte, error"
+    name: decodeRun
+  - doc: decodedField is one field while it is being built.
+    fields:
+      - doc: name and value are its bytes.
+        name: name
+        type: "[]byte"
+      - doc: name and value are its bytes.
+        name: value
+        type: "[]byte"
+      - doc: |-
+          invalid is the verdict on them; a table or static field carries
+          its verdict with it.
+        name: invalid
+        type: bool
+    kind: struct
+    name: decodedField
+  - fields:
+      - doc: maxFrame is the largest frame the peer accepts.
+        name: maxFrame
+        type: int
+    kind: struct
+    methods:
+      - name: AppendHeaders
+        params: dst []byte, stream uint32, res *corenet.HTTP1ResponseValue, endStream bool
+        recv: e Encoder
+        results: "[]byte, error"
+      - doc: |-
+          frameBlock writes the header of the frame the block occupies and, when the
+          block is larger than maxFrame, splits it over CONTINUATION frames. Bytes are
+          moved within dst, so it allocates only when dst must grow.
+        name: frameBlock
+        params: dst []byte, start, blockStart int, stream uint32, endStream bool
+        recv: e Encoder
+        results: "[]byte"
+      - doc: |-
+          splitBlock frames a block over one HEADERS and as many CONTINUATION frames
+          as it takes, writing from the end so nothing is copied twice.
+        name: splitBlock
+        params: dst []byte, start, blockStart int, stream uint32, flags corehttp2.FrameFlags
+        recv: e Encoder
+        results: "[]byte"
+    name: Encoder
+  - fields:
+      - doc: maxList is the header list ceiling, RFC 9113 §6.5.2's measure.
+        name: maxList
+        type: int
+      - doc: capacity is mem's ring, the most the table can ever hold.
+        name: capacity
+        type: int32
+      - doc: |-
+          limit is the largest table the peer may announce now: the protocol's
+          default until our SETTINGS is acknowledged, then what we advertised.
+        name: limit
+        type: int32
+      - doc: advertised is what our SETTINGS says limit becomes.
+        name: advertised
+        type: int32
+      - doc: maxSize is the table's current size limit, the peer's last size update.
+        name: maxSize
+        type: int32
+      - doc: size is the entries' total as RFC 7541 §4.1 counts it.
+        name: size
+        type: int32
+      - doc: head is the ring offset the next entry is written at.
+        name: head
+        type: int32
+      - doc: tail is the ring offset of the oldest entry.
+        name: tail
+        type: int32
+      - doc: count is how many entries the table holds.
+        name: count
+        type: int32
+      - doc: top is the slot of the newest entry.
+        name: top
+        type: int32
+    kind: struct
+    methods:
+      - name: Decode
+        params: mem, block, scratch []byte, req *corenet.HTTP1RequestValue
+        recv: d *Decoder
+        results: "[]byte, error"
+      - doc: |-
+          acknowledge moves the peer's bound to what our SETTINGS advertised, the
+          moment it has acknowledged them (RFC 7541 §4.2).
+        name: acknowledge
+        recv: d *Decoder
+      - doc: slots returns the table's number of offset slots.
+        name: slots
+        recv: d *Decoder
+        results: int32
+      - doc: ringPut copies p into the ring at at and returns the offset past it.
+        name: ringPut
+        params: mem []byte, at int32, p []byte
+        recv: d *Decoder
+        results: int32
+      - doc: ringGet appends n ring bytes starting at at to dst.
+        name: ringGet
+        params: mem, dst []byte, at, n int32
+        recv: d *Decoder
+        results: "[]byte"
+      - doc: "slotAt returns the ring offset the slot of age age holds: zero is the newest."
+        name: slotAt
+        params: mem []byte, age int32
+        recv: d *Decoder
+        results: int32
+      - doc: storeSlot records an entry's ring offset as the newest slot.
+        name: storeSlot
+        params: mem []byte, offset int32
+        recv: d *Decoder
+      - doc: "entryAt reads the entry of age age: appended to scratch, and returned."
+        name: entryAt
+        params: mem, scratch []byte, age int32
+        recv: d *Decoder
+        results: decodedField, []byte
+      - doc: entrySize reads the stored name and value lengths of the entry of age age.
+        name: entrySize
+        params: mem []byte, age int32
+        recv: d *Decoder
+        results: nameLen, valueLen int32
+      - doc: nameAt appends the name of the entry of age age to scratch and returns it.
+        name: nameAt
+        params: mem, scratch []byte, age int32
+        recv: d *Decoder
+        results: name, grown []byte
+      - doc: u16 reads a stored little-endian length.
+        name: u16
+        params: b []byte
+        recv: d *Decoder
+        results: uint16
+      - doc: evictOldest drops the table's oldest entry, RFC 7541 §4.4.
+        name: evictOldest
+        params: mem []byte
+        recv: d *Decoder
+      - doc: shrinkTo evicts oldest entries until size is at most target.
+        name: shrinkTo
+        params: mem []byte, target int32
+        recv: d *Decoder
+      - doc: |-
+          insert adds a field to the table, evicting first, RFC 7541 §4.4. A field
+          bigger than the table empties it and is not added.
+        name: insert
+        params: mem, name, value []byte, invalid bool
+        recv: d *Decoder
+    name: Decoder
+  - doc: connKind is what a connection's first bytes made of it.
+    kind: named
+    name: connKind
+    underlying: uint8
+  - fields:
+      - doc: h serves every request of both versions.
+        name: h
+        type: corenet.HTTP1Handler
+      - doc: p frames HTTP/1.1 requests and bounds the head of a request of both.
+        name: p
+        type: http1.Parser
+      - doc: h1 serves the connections that do not open with the preface.
+        name: h1
+        type: "*http1.LoopHandler"
+      - doc: |-
+          worker, reader and aborter are h's optional capabilities, nil when it
+          lacks them; its HTTP1Batcher is the embedded adapter's to call, once a
+          batch for both versions.
+        name: worker
+        type: corenet.HTTP1Worker
+      - name: reader
+        type: corenet.HTTP1BodyReader
+      - name: aborter
+        type: corenet.HTTP1BodyAborter
+      - doc: limits are HTTP/2's bounds, as a group option gave them.
+        name: limits
+        type: corehttp2.LimitsValue
+      - doc: serveH1 and serveH2 say which versions the group serves.
+        name: serveH1
+        type: bool
+      - doc: serveH1 and serveH2 say which versions the group serves.
+        name: serveH2
+        type: bool
+      - doc: maxBody bounds a request's body.
+        name: maxBody
+        type: int64
+      - doc: holdCap bounds what one connection holds unsent.
+        name: holdCap
+        type: int
+      - doc: lanes holds each lane's state at its LoopIO.Loop index, replaced under mu.
+        name: lanes
+        type: atomic.Pointer[[]*laneState]
+      - doc: mu serialises the first sight of a lane.
+        name: mu
+        type: sync.Mutex
+      - doc: draining is set once the group's drain began.
+        name: draining
+        type: atomic.Bool
+      - doc: requests counts the HTTP/2 requests served, added once a batch.
+        name: requests
+        type: atomic.Uint64
+      - doc: errs counts the HTTP/2 errors by corehttp2.ErrorType, added once a batch.
+        name: errs
+        type: "[corehttp2.ErrorTypes]atomic.Uint64"
+    kind: struct
+    methods:
+      - name: OnStart
+        params: lanes int
+        recv: a *LoopHandler
+      - name: Honours
+        params: k corenet.OptionKind
+        recv: "*LoopHandler"
+        results: bool
+      - name: SetHTTP
+        params: v corenet.LoopHTTPValue
+        recv: a *LoopHandler
+      - name: CheckSpill
+        params: spillCap int
+        recv: a *LoopHandler
+        results: error
+      - doc: |-
+          checkH2Spill refuses a group whose spill cannot hold the largest frame or
+          field block HTTP/2's bounds admit: a frame incomplete in the spill stays
+          there whole.
+        name: checkH2Spill
+        params: spillCap int
+        recv: a *LoopHandler
+        results: error
+      - name: Unwrap
+        recv: a *LoopHandler
+        results: corenet.HTTP1Handler
+      - name: OnOpen
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: a *LoopHandler
+      - name: OnData
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, buf []byte
+        recv: a *LoopHandler
+        results: int
+      - doc: |-
+          sniff judges a connection's first bytes against the preface and reports
+          whether its version is decided: when it is not, the sniff consumed what the
+          second result says.
+        name: sniff
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry, buf []byte
+        recv: a *LoopHandler
+        results: bool, int
+      - doc: |-
+          writeClose writes p and closes ref when closing, or when the write is
+          refused.
+        name: writeClose
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, p []byte, closing bool
+        recv: "*LoopHandler"
+      - name: OnTimeout
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: "*LoopHandler"
+      - name: OnWritable
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: "*LoopHandler"
+      - name: OnClose
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, err error
+        recv: a *LoopHandler
+      - doc: state returns lane i's state, built on the lane's first call.
+        name: state
+        params: i int
+        recv: a *LoopHandler
+        results: "*laneState"
+      - doc: |-
+          grow builds lane i's state and publishes a table that holds it. A lane that
+          cannot be built holds no state and serves no HTTP/2: Honours and
+          CheckSpill have already judged the limits at Start, so this happens only
+          when a lane is first seen after a change the Start would have refused.
+        name: grow
+        params: i int
+        recv: a *LoopHandler
+        results: "*laneState"
+      - name: Worker
+        recv: a *LoopHandler
+        results: corenet.LoopWorker
+      - name: OnOutbound
+        params: v corenet.LoopOutboundValue
+        recv: a *LoopHandler
+      - name: OnDone
+        params: io corenet.LoopIO, job corenet.LoopJobValue
+        recv: a *LoopHandler
+      - doc: |-
+          answerSlot writes a worker's answer on its stream, ends the connection when
+          it was the last of a closing one, and frees the slot.
+        name: answerSlot
+        params: io corenet.LoopIO, st *laneState, e *connEntry, slot *workSlot, idx uint32
+        recv: a *LoopHandler
+      - name: Draining
+        recv: a *LoopHandler
+      - doc: |-
+          announce posts the drain's GOAWAY to st's thread; a lane with no connection
+          yet, or whose queue refuses, skips it, and the drain closes what it finds.
+        name: announce
+        params: st *laneState
+        recv: "*LoopHandler"
+      - name: InFlight
+        params: lane int, ref corenet.LoopConnRef
+        recv: a *LoopHandler
+        results: bool
+      - name: Pending
+        params: lane int, ref corenet.LoopConnRef
+        recv: a *LoopHandler
+        results: bool
+      - doc: |-
+          feed runs Feed over buf and serves what it reports, and returns the bytes
+          it took: a partial frame stays in the spill.
+        name: feed
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *laneState, e *connEntry, buf []byte
+        recv: a *LoopHandler
+        results: int
+      - name: OnBatchEnd
+        params: io corenet.LoopIO
+        recv: a *LoopHandler
+      - doc: |-
+          publish adds the batch's requests and errors to the adapter's counts: one
+          atomic add a batch for the requests, one a type counted for the errors.
+        name: publish
+        params: st *laneState
+        recv: a *LoopHandler
+      - name: HTTPCounts
+        recv: a *LoopHandler
+        results: corenet.HTTPCountsValue
+      - doc: |-
+          completeDeferred appends the batch's deferred answers now that EndBatch has
+          run; one still deferred is answered 500.
+        name: completeDeferred
+        params: io corenet.LoopIO, st *laneState
+        recv: a *LoopHandler
+      - doc: |-
+          flush credits the batch's connections and writes its output in order, then
+          closes the connections that ended.
+        name: flush
+        params: io corenet.LoopIO, st *laneState
+        recv: a *LoopHandler
+      - doc: |-
+          closeIfDone closes ref when its output was refused, a protocol error ended
+          it, or a GOAWAY went out and no stream is left open.
+        name: closeIfDone
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *laneState
+        recv: "*LoopHandler"
+    name: LoopHandler
+  - doc: |-
+      connEntry is one connection of a lane. An idle HTTP/2 connection holds this
+      and nothing else: no request record, no table, no buffer.
+    fields:
+      - doc: conn is the protocol state.
+        name: conn
+        type: Conn
+      - doc: |-
+          requests is the head of the connection's list of open requests in the
+          lane's request table, noIndex when none.
+        name: requests
+        type: int32
+      - doc: buffered counts the body bytes the connection's open requests hold.
+        name: buffered
+        type: int32
+      - doc: gen is the generation of the connection the entry describes.
+        name: gen
+        type: uint32
+      - doc: activeAt is the lane batch the connection was last active in.
+        name: activeAt
+        type: uint32
+      - doc: kind is what the connection's first bytes made of it.
+        name: kind
+        type: connKind
+      - doc: flags are the entry's booleans.
+        name: flags
+        type: entryFlags
+    kind: struct
+    methods:
+      - doc: live reports whether the entry holds an open connection.
+        name: live
+        recv: e *connEntry
+        results: bool
+    name: connEntry
+  - doc: entryFlags are a connEntry's booleans.
+    kind: named
+    name: entryFlags
+    underlying: uint8
+  - doc: |-
+      requestState is one HTTP/2 request that outlives the OnData that opened it:
+      a body still arriving, or an answer a worker owes. Pooled by the lane.
+    fields:
+      - doc: stream is the stream it answers.
+        name: stream
+        type: uint32
+      - doc: next links the connection's list, or the free list.
+        name: next
+        type: int32
+      - doc: req is the request as the handler sees it; its slices alias head.
+        name: req
+        type: corenet.HTTP1RequestValue
+      - doc: head holds the bytes req's slices alias.
+        name: head
+        type: "[]byte"
+      - doc: body accumulates a body the handler takes whole.
+        name: body
+        type: "[]byte"
+      - doc: uncredited counts body bytes not yet consumed for flow control.
+        name: uncredited
+        type: int32
+      - doc: slot is the worker slot answering it, noIndex when none.
+        name: slot
+        type: int32
+      - doc: wanted is the declared body length, from content-length.
+        name: wanted
+        type: int64
+      - doc: chunks counts the bytes given to OnBody.
+        name: chunks
+        type: int64
+      - doc: flags are the request's booleans.
+        name: flags
+        type: requestFlags
+    kind: struct
+    methods:
+      - doc: has reports whether the flags are all set.
+        name: has
+        params: f requestFlags
+        recv: r *requestState
+        results: bool
+      - doc: |-
+          resetKeepingBuffers clears r for a new request, keeping the backing of its
+          head and body so a churn of requests does not allocate them again.
+        name: resetKeepingBuffers
+        params: stream uint32, next int32
+        recv: r *requestState
+      - doc: received is the body bytes the record has seen so far.
+        name: received
+        recv: r *requestState
+        results: int64
+    name: requestState
+  - doc: requestFlags are a requestState's booleans.
+    kind: named
+    name: requestFlags
+    underlying: uint8
+  - doc: |-
+      workSlot is one pending answer: what the lane's worker fills. Slots are
+      never moved, so the worker holds one by pointer, and the worker reads
+      nothing else of the lane.
+    fields:
+      - doc: idx is the slot's index in the table.
+        name: idx
+        type: uint32
+      - doc: gen is the slot's generation, moved on at each take.
+        name: gen
+        type: uint32
+      - doc: ref is the connection it answers.
+        name: ref
+        type: corenet.LoopConnRef
+      - doc: stream is the stream it answers.
+        name: stream
+        type: uint32
+      - doc: isHead is whether the request's method was HEAD.
+        name: isHead
+        type: bool
+      - doc: res is the answer the worker fills.
+        name: res
+        type: corenet.HTTP1ResponseValue
+      - doc: |-
+          cancelled is set once the stream or connection ended: the worker skips
+          the work, and the answer is dropped.
+        name: cancelled
+        type: atomic.Bool
+    kind: struct
+    name: workSlot
+  - doc: deferredAnswer is one answer the batch's end completes.
+    fields:
+      - doc: res is the response the handler completes in EndBatch.
+        name: res
+        type: "*corenet.HTTP1ResponseValue"
+      - doc: ref is the connection it answers on.
+        name: ref
+        type: corenet.LoopConnRef
+      - doc: stream is the stream.
+        name: stream
+        type: uint32
+      - doc: isHead is whether the request was a HEAD.
+        name: isHead
+        type: bool
+    kind: struct
+    name: deferredAnswer
+  - doc: write is one range of the batch's output.
+    fields:
+      - doc: ref is the connection it goes out on.
+        name: ref
+        type: corenet.LoopConnRef
+      - doc: off and end bound it in out.
+        name: "off"
+        type: int
+      - doc: off and end bound it in out.
+        name: end
+        type: int
+    kind: struct
+    name: write
+  - doc: |-
+      laneState is one lane's state. Only that lane's thread touches it, except
+      where a field says.
+    fields:
+      - doc: lane is the protocol state of every HTTP/2 connection of the lane.
+        name: lane
+        type: "*Lane"
+      - doc: index is the lane's own number.
+        name: index
+        type: int
+      - doc: req is the request value every HTTP/2 request is decoded into.
+        name: req
+        type: corenet.HTTP1RequestValue
+      - doc: scratch holds decoded strings.
+        name: scratch
+        type: "[]byte"
+      - doc: count numbers the lane's HTTP/2 requests, for HTTP1RequestValue.ID.
+        name: count
+        type: uint64
+      - doc: out is the batch's output.
+        name: out
+        type: "[]byte"
+      - doc: jobOut is what a job's answer is written from.
+        name: jobOut
+        type: "[]byte"
+      - doc: writes are the ranges of out, in order.
+        name: writes
+        type: "[]write"
+      - doc: active are the connections the batch fed.
+        name: active
+        type: "[]corenet.LoopConnRef"
+      - doc: entries is the connection table, by ring and slot.
+        name: entries
+        type: "[][]connEntry"
+      - doc: requests are the open requests by index; freeRequests their free list.
+        name: requests
+        type: "[]*requestState"
+      - name: freeRequests
+        type: int32
+      - doc: completed are the requests answered this batch, returned at its end.
+        name: completed
+        type: "[]int32"
+      - doc: deferred are the batch's deferred answers.
+        name: deferred
+        type: "[]deferredAnswer"
+      - doc: free are the response values no request holds.
+        name: free
+        type: "[]*corenet.HTTP1ResponseValue"
+      - doc: served counts the requests the batch handed to the handler.
+        name: served
+        type: int
+      - doc: |-
+          errs counts the batch's HTTP/2 errors by corehttp2.ErrorType: the
+          codec's, taken at the batch's end, and the adapter's own answers.
+        name: errs
+        type: "[corehttp2.ErrorTypes]uint64"
+      - doc: outbound is the lane's queue to its worker, nil when nothing offloads.
+        name: outbound
+        type: corenet.LoopOutbound
+      - doc: |-
+          slots are the worker slots, replaced under no lock since only this lane
+          grows it; the worker reads through it.
+        name: slots
+        type: atomic.Pointer[[]*workSlot]
+      - doc: freeSlots are the indexes of the slots no answer holds.
+        name: freeSlots
+        type: "[]uint32"
+      - doc: post is the lane's LoopIO, published once for the drain's Post.
+        name: post
+        type: atomic.Pointer[postHolder]
+      - doc: goAwayDone is set when the drain's GOAWAY went out on this lane.
+        name: goAwayDone
+        type: atomic.Bool
+    kind: struct
+    methods:
+      - doc: remember publishes the lane's LoopIO once, for the drain's Post.
+        name: remember
+        params: io corenet.LoopIO
+        recv: st *laneState
+      - doc: |-
+          entry returns ref's entry, growing the table on first sight of its ring or
+          slot; a slot's next connection reuses the entry's Conn, whose arenas the
+          last OnClose released.
+        name: entry
+        params: ref corenet.LoopConnRef
+        recv: st *laneState
+        results: "*connEntry"
+      - doc: take returns a zeroed response value for one request.
+        name: take
+        recv: st *laneState
+        results: "*corenet.HTTP1ResponseValue"
+      - doc: |-
+          give returns res to the pool. Its slices are the handler's and are dropped
+          at the next take.
+        name: give
+        params: res *corenet.HTTP1ResponseValue
+        recv: st *laneState
+      - doc: |-
+          takeRequest returns a request record, cleared, linked at the head of e's
+          list, and its index.
+        name: takeRequest
+        params: e *connEntry, stream uint32
+        recv: st *laneState
+        results: int32, *requestState
+      - doc: findRequest returns the record of stream on e and its predecessor, or noIndex.
+        name: findRequest
+        params: e *connEntry, stream uint32
+        recv: st *laneState
+        results: idx, prev int32
+      - doc: unlinkRequest removes record idx from e's list, without freeing it.
+        name: unlinkRequest
+        params: e *connEntry, idx, prev int32
+        recv: st *laneState
+      - doc: |-
+          release returns record idx to the free list at the batch's end; a body or
+          head a large request grew is dropped rather than kept, so the pool's
+          memory follows the common request.
+        name: release
+        params: idx int32
+        recv: st *laneState
+      - doc: |-
+          finishRequest drops record idx from e, crediting what it never consumed and
+          the bytes it held, and queues it for the batch's end, its bytes still valid
+          for a handler that deferred its answer.
+        name: finishRequest
+        params: e *connEntry, idx, prev int32
+        recv: st *laneState
+      - doc: |-
+          closeRequests abandons every open request of e: an OnBody handler is told,
+          a worker's answer is cancelled.
+        name: closeRequests
+        params: a *LoopHandler, e *connEntry
+        recv: st *laneState
+      - doc: finishSlot drops stream's record, its answer having left.
+        name: finishSlot
+        params: e *connEntry, stream uint32
+        recv: st *laneState
+      - doc: releaseCompleted returns the answered requests to the pool.
+        name: releaseCompleted
+        recv: st *laneState
+      - doc: |-
+          takeSlot returns a free worker slot and its index, growing the table by
+          publication, never in place, so the worker can read it without a lock.
+        name: takeSlot
+        recv: st *laneState
+        results: "*workSlot, uint32"
+      - doc: freeSlot returns slot idx to the free list.
+        name: freeSlot
+        params: idx uint32
+        recv: st *laneState
+      - doc: announceDrain walks the lane's connections.
+        name: announceDrain
+        params: io corenet.LoopIO
+        recv: st *laneState
+      - doc: |-
+          announceConn writes GOAWAY(NO_ERROR) on one connection and closes it when
+          nothing is in flight.
+        name: announceConn
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry
+        recv: st *laneState
+      - doc: |-
+          peek returns ref's entry when it is ref's connection's, nil otherwise; it
+          resets nothing.
+        name: peek
+        params: ref corenet.LoopConnRef
+        recv: st *laneState
+        results: "*connEntry"
+      - doc: |-
+          pushWrite records what the batch has appended since off as ref's, and marks
+          the connection active once per batch.
+        name: pushWrite
+        params: ref corenet.LoopConnRef, off int, e *connEntry
+        recv: st *laneState
+      - doc: |-
+          countAbort counts a field block Decode refused: a header list past its
+          bound, or a block HPACK could not decode.
+        name: countAbort
+        params: err error
+        recv: st *laneState
+      - doc: credit appends the batch's window credits, one frame per stream at most.
+        name: credit
+        recv: st *laneState
+      - doc: |-
+          writeAll writes the batch's output in the order it was made; a refused
+          write ends its connection, as a refused http1 answer does.
+        name: writeAll
+        params: io corenet.LoopIO
+        recv: st *laneState
+      - doc: |-
+          endBatch ends the lane's batch: the output and scratches cleared, the
+          protocol state's batch ended, the requests answered returned to the pool.
+        name: endBatch
+        recv: st *laneState
+    name: laneState
+  - doc: postHolder boxes a LoopIO for an atomic pointer.
+    fields:
+      - doc: io is the lane's LoopIO.
+        name: io
+        type: corenet.LoopIO
+    kind: struct
+    name: postHolder
+  - doc: |-
+      h2Worker is the corenet.LoopWorker the adapter offloads to: it runs the
+      handler's HTTP1Worker on a slot of its own, or hands the job to the embedded
+      HTTP/1.1 adapter's.
+    fields:
+      - doc: a is the adapter.
+        name: a
+        type: "*LoopHandler"
+      - doc: h1 is the embedded HTTP/1.1 adapter's worker.
+        name: h1
+        type: corenet.LoopWorker
+    kind: struct
+    methods:
+      - doc: Work implements corenet.LoopWorker, on the lane's worker goroutine.
+        name: Work
+        params: lane int, job corenet.LoopJobValue
+        recv: w h2Worker
+    name: h2Worker
+  - doc: pseudoSet is which pseudo-fields a request carried.
+    kind: named
+    name: pseudoSet
+    underlying: uint8
+  - doc: mapVerdict is what mapping one request found.
+    fields:
+      - doc: refusal is what to answer on the stream, RefusalNone to serve it.
+        name: refusal
+        type: http1.Refusal
+      - doc: malformed ends the stream with RST_STREAM(PROTOCOL_ERROR), §8.1.1.
+        name: malformed
+        type: bool
+      - doc: wanted is the declared content length, if declared.
+        name: wanted
+        type: int64
+      - doc: declared says a content-length was given.
+        name: declared
+        type: bool
+    kind: struct
+    name: mapVerdict
+  - doc: mapState gathers the fields' verdicts across one request's walk.
+    fields:
+      - doc: method, target, scheme and authority are the pseudo-fields.
+        name: method
+        type: "[]byte"
+      - doc: method, target, scheme and authority are the pseudo-fields.
+        name: target
+        type: "[]byte"
+      - doc: method, target, scheme and authority are the pseudo-fields.
+        name: scheme
+        type: "[]byte"
+      - doc: method, target, scheme and authority are the pseudo-fields.
+        name: authority
+        type: "[]byte"
+      - doc: |-
+          seenRegular is set once a regular field went by: a pseudo-field after it
+          is malformed, §8.3.
+        name: seenRegular
+        type: bool
+      - doc: seen is which pseudo-fields the request gave.
+        name: seen
+        type: pseudoSet
+      - doc: hosts counts the Host fields.
+        name: hosts
+        type: int
+      - doc: crumbs counts the Cookie fields.
+        name: crumbs
+        type: int
+      - doc: v is the verdict so far.
+        name: v
+        type: mapVerdict
+    kind: struct
+    methods:
+      - doc: pseudo records one pseudo-field; a repeated, unknown or late one is malformed.
+        name: pseudo
+        params: name, value []byte
+        recv: m *mapState
+      - doc: setOnce keeps value in *slot, marking the request malformed on a repeat.
+        name: setOnce
+        params: bit pseudoSet, slot *[]byte, value []byte
+        recv: m *mapState
+      - doc: regular reads the fields of index i the mapping cares about.
+        name: regular
+        params: req *corenet.HTTP1RequestValue, i int
+        recv: m *mapState
+      - doc: te accepts the one value a TE field may hold, "trailers", §8.2.2.
+        name: te
+        params: value []byte
+        recv: m *mapState
+      - doc: host1 refuses a second Host field, as HTTP/1.1 does.
+        name: host1
+        recv: m *mapState
+      - doc: authorization keeps the one Authorization field a Bearer link reads.
+        name: authorization
+        params: req *corenet.HTTP1RequestValue, value []byte
+        recv: m *mapState
+      - doc: |-
+          contentLength reads the declared length, refused as HTTP/1.1 refuses a
+          malformed one; a second one is refused too.
+        name: contentLength
+        params: value []byte
+        recv: m *mapState
+      - doc: refuse keeps the first refusal of a request.
+        name: refuse
+        params: r http1.Refusal
+        recv: m *mapState
+      - doc: |-
+          complete reports whether the request has the pseudo-fields §8.3.1 demands:
+          :method, and on every method but CONNECT, :scheme and :path. A CONNECT is
+          refused by judge, whatever else it names.
+        name: complete
+        recv: m *mapState
+        results: bool
+      - doc: host returns the request's Host, :authority first and a Host field otherwise.
+        name: host
+        params: req *corenet.HTTP1RequestValue
+        recv: m *mapState
+        results: "[]byte, bool"
+      - doc: |-
+          hostConflict reports a request naming two different servers: an :authority
+          beside a Host field that differs.
+        name: hostConflict
+        params: req *corenet.HTTP1RequestValue
+        recv: m *mapState
+        results: bool
+      - doc: |-
+          judge computes the canonical target and refuses a form the profile does not
+          serve: a CONNECT, an absolute-form :path.
+        name: judge
+        params: req *corenet.HTTP1RequestValue
+        recv: m *mapState
+        results: http1.Refusal
+    name: mapState
+  - doc: h2Call is one callback's connection, what the stream handlers read of it.
+    fields:
+      - doc: a is the adapter.
+        name: a
+        type: "*LoopHandler"
+      - doc: io and ref are the callback's.
+        name: io
+        type: corenet.LoopIO
+      - name: ref
+        type: corenet.LoopConnRef
+      - doc: st is the lane's state, e the connection's entry.
+        name: st
+        type: "*laneState"
+      - name: e
+        type: "*connEntry"
+    kind: struct
+    methods:
+      - doc: |-
+          offload queues the pending answer res on its worker, or answers it at once
+          when no worker can take it. It returns the record that stays for the job.
+        name: offload
+        params: stream uint32, res *corenet.HTTP1ResponseValue, isHead bool, idx int32
+        recv: c *h2Call
+        results: int32
+      - doc: answerUnavailable writes a 503 with Retry-After on stream.
+        name: answerUnavailable
+        params: stream uint32
+        recv: c *h2Call
+      - doc: event serves one event of Feed.
+        name: event
+        params: ev Event
+        recv: c *h2Call
+      - doc: |-
+          onHeaders decodes a field block and opens, refuses or serves its request. A
+          block on a stream the machine refused is decoded and dropped.
+        name: onHeaders
+        params: ev Event
+        recv: c *h2Call
+      - doc: |-
+          open maps a decoded request and serves or defers it: at once when it carries
+          no body, otherwise a record keeps it until its last DATA.
+        name: open
+        params: stream uint32, end bool
+        recv: c *h2Call
+      - doc: |-
+          keep copies the decoded request into a record of its own, which outlives
+          this batch, for its body to arrive.
+        name: keep
+        params: stream uint32, v mapVerdict
+        recv: c *h2Call
+      - doc: |-
+          onData accumulates a stream's body, serves the request on its last byte,
+          and refuses a body past its bound or its declared length.
+        name: onData
+        params: ev Event
+        recv: c *h2Call
+      - doc: |-
+          take gives one DATA event to the handler that reads as it arrives, or
+          accumulates it, and serves the request on its end.
+        name: take
+        params: idx, prev int32, r *requestState, ev Event
+        recv: c *h2Call
+      - doc: |-
+          buffer appends a chunk to the record's body, crediting it at once while the
+          connection's buffered bodies stay under the receive bound: past it the
+          credit waits for the answer, so the peer's flow control stops what memory
+          would otherwise not.
+        name: buffer
+        params: r *requestState, ev Event
+        recv: c *h2Call
+      - doc: refuseBody answers status on the stream, its body dropped.
+        name: refuseBody
+        params: idx, prev int32, status int
+        recv: c *h2Call
+      - doc: |-
+          resetMalformed ends the stream with RST_STREAM(PROTOCOL_ERROR), its body
+          dropped.
+        name: resetMalformed
+        params: idx, prev int32
+        recv: c *h2Call
+      - doc: |-
+          onReset forgets a stream the peer or the state machine ended: its record is
+          dropped and a worker's answer cancelled, its slot freed when it comes back.
+        name: onReset
+        params: ev Event
+        recv: c *h2Call
+      - doc: |-
+          serve hands a whole request to h and answers, defers or offloads as it asks.
+          idx is the request's record, or noIndex when it never needed one.
+        name: serve
+        params: stream uint32, req *corenet.HTTP1RequestValue, idx, prev int32
+        recv: c *h2Call
+      - doc: |-
+          dispatch takes the handler's answer: at once, at the batch's end, or by the
+          worker. It returns the record that stays for a worker.
+        name: dispatch
+        params: stream uint32, res *corenet.HTTP1ResponseValue, isHead bool, idx int32
+        recv: c *h2Call
+        results: int32
+      - doc: |-
+          answer writes res on stream: HEADERS, then DATA unless it is a HEAD or empty.
+          A response the writer refuses is answered 500.
+        name: answer
+        params: stream uint32, res *corenet.HTTP1ResponseValue, isHead bool
+        recv: c *h2Call
+      - doc: |-
+          answerStatus writes a bodiless answer of status on stream, ending it; a
+          request whose body is still arriving is reset with NO_ERROR by the codec.
+        name: answerStatus
+        params: stream uint32, status int
+        recv: c *h2Call
+      - doc: |-
+          goAway writes GOAWAY(NO_ERROR) once: the connection serves its streams and
+          closes when they end.
+        name: goAway
+        recv: c *h2Call
+    name: h2Call
+vars:
+  - doc: clientPrefaceBytes is the client connection preface, RFC 9113 §3.4.
+    items:
+      - name: clientPrefaceBytes
+        value: "[]byte(clientPrefaceText)"
+    name: clientPrefaceBytes
+  - grouped: true
+    items:
+      - doc: |-
+          tokenBits is the RFC 9110 §5.6.2 token characters as a bit set, one
+          word per 64 bytes.
+        name: tokenBits
+        value: "[4]uint64{0x03ff6cfa00000000, 0x57ffffffc7fffffe, 0x0000000000000000, 0x0000000000000000}"
+      - doc: |-
+          staticStatusCodes are the seven statuses the static table holds, RFC 7541
+          Appendix A, in index order from firstStaticStatus.
+        name: staticStatusCodes
+        value: "[...]uint16{200, 204, 206, 304, 400, 404, 500}"
+      - doc: |-
+          connectionFields are RFC 9113 §8.2.2's connection-specific names, which
+          an HTTP/2 message never carries, and content-length, which the encoder
+          writes itself: a response's copies are dropped.
+        name: connectionFields
+        value: |-
+          [...]string{
+          		"connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "content-length",
+          	}
+    name: tokenBits
+  - grouped: true
+    items:
+      - doc: |-
+          huffTable is the automaton's transition table: one word per (state,
+          nibble), indexed state<<4|nibble. A word's low eight bits are the next
+          state, huffEmit says a symbol ended on this nibble, the byte above them
+          is that symbol, and huffFail marks a nibble no code can take: an EOS, or
+          more than the padding.
+        name: huffTable
+        value: |-
+          [huffStates * 16]uint32{
+          		0x000001, 0x000002, 0x000003, 0x000004, 0x000005, 0x000006, 0x000007, 0x000008, 0x000009, 0x00000a, 0x00000b, 0x00000c, 0x00000d, 0x00000e, 0x00000f, 0x000010,
+          		0x300111, 0x300112, 0x300113, 0x300114, 0x300115, 0x300116, 0x300117, 0x300118, 0x310111, 0x310112, 0x310113, 0x310114, 0x310115, 0x310116, 0x310117, 0x310118,
+          		0x320111, 0x320112, 0x320113, 0x320114, 0x320115, 0x320116, 0x320117, 0x320118, 0x610111, 0x610112, 0x610113, 0x610114, 0x610115, 0x610116, 0x610117, 0x610118,
+          		0x630111, 0x630112, 0x630113, 0x630114, 0x630115, 0x630116, 0x630117, 0x630118, 0x650111, 0x650112, 0x650113, 0x650114, 0x650115, 0x650116, 0x650117, 0x650118,
+          		0x690111, 0x690112, 0x690113, 0x690114, 0x690115, 0x690116, 0x690117, 0x690118, 0x6f0111, 0x6f0112, 0x6f0113, 0x6f0114, 0x6f0115, 0x6f0116, 0x6f0117, 0x6f0118,
+          		0x730111, 0x730112, 0x730113, 0x730114, 0x730115, 0x730116, 0x730117, 0x730118, 0x740111, 0x740112, 0x740113, 0x740114, 0x740115, 0x740116, 0x740117, 0x740118,
+          		0x200119, 0x20011a, 0x20011b, 0x20011c, 0x250119, 0x25011a, 0x25011b, 0x25011c, 0x2d0119, 0x2d011a, 0x2d011b, 0x2d011c, 0x2e0119, 0x2e011a, 0x2e011b, 0x2e011c,
+          		0x2f0119, 0x2f011a, 0x2f011b, 0x2f011c, 0x330119, 0x33011a, 0x33011b, 0x33011c, 0x340119, 0x34011a, 0x34011b, 0x34011c, 0x350119, 0x35011a, 0x35011b, 0x35011c,
+          		0x360119, 0x36011a, 0x36011b, 0x36011c, 0x370119, 0x37011a, 0x37011b, 0x37011c, 0x380119, 0x38011a, 0x38011b, 0x38011c, 0x390119, 0x39011a, 0x39011b, 0x39011c,
+          		0x3d0119, 0x3d011a, 0x3d011b, 0x3d011c, 0x410119, 0x41011a, 0x41011b, 0x41011c, 0x5f0119, 0x5f011a, 0x5f011b, 0x5f011c, 0x620119, 0x62011a, 0x62011b, 0x62011c,
+          		0x640119, 0x64011a, 0x64011b, 0x64011c, 0x660119, 0x66011a, 0x66011b, 0x66011c, 0x670119, 0x67011a, 0x67011b, 0x67011c, 0x680119, 0x68011a, 0x68011b, 0x68011c,
+          		0x6c0119, 0x6c011a, 0x6c011b, 0x6c011c, 0x6d0119, 0x6d011a, 0x6d011b, 0x6d011c, 0x6e0119, 0x6e011a, 0x6e011b, 0x6e011c, 0x700119, 0x70011a, 0x70011b, 0x70011c,
+          		0x720119, 0x72011a, 0x72011b, 0x72011c, 0x750119, 0x75011a, 0x75011b, 0x75011c, 0x3a011d, 0x3a011e, 0x42011d, 0x42011e, 0x43011d, 0x43011e, 0x44011d, 0x44011e,
+          		0x45011d, 0x45011e, 0x46011d, 0x46011e, 0x47011d, 0x47011e, 0x48011d, 0x48011e, 0x49011d, 0x49011e, 0x4a011d, 0x4a011e, 0x4b011d, 0x4b011e, 0x4c011d, 0x4c011e,
+          		0x4d011d, 0x4d011e, 0x4e011d, 0x4e011e, 0x4f011d, 0x4f011e, 0x50011d, 0x50011e, 0x51011d, 0x51011e, 0x52011d, 0x52011e, 0x53011d, 0x53011e, 0x54011d, 0x54011e,
+          		0x55011d, 0x55011e, 0x56011d, 0x56011e, 0x57011d, 0x57011e, 0x59011d, 0x59011e, 0x6a011d, 0x6a011e, 0x6b011d, 0x6b011e, 0x71011d, 0x71011e, 0x76011d, 0x76011e,
+          		0x77011d, 0x77011e, 0x78011d, 0x78011e, 0x79011d, 0x79011e, 0x7a011d, 0x7a011e, 0x260100, 0x2a0100, 0x2c0100, 0x3b0100, 0x580100, 0x5a0100, 0x00001f, 0x000020,
+          		0x300119, 0x30011a, 0x30011b, 0x30011c, 0x310119, 0x31011a, 0x31011b, 0x31011c, 0x320119, 0x32011a, 0x32011b, 0x32011c, 0x610119, 0x61011a, 0x61011b, 0x61011c,
+          		0x630119, 0x63011a, 0x63011b, 0x63011c, 0x650119, 0x65011a, 0x65011b, 0x65011c, 0x690119, 0x69011a, 0x69011b, 0x69011c, 0x6f0119, 0x6f011a, 0x6f011b, 0x6f011c,
+          		0x730119, 0x73011a, 0x73011b, 0x73011c, 0x740119, 0x74011a, 0x74011b, 0x74011c, 0x20011d, 0x20011e, 0x25011d, 0x25011e, 0x2d011d, 0x2d011e, 0x2e011d, 0x2e011e,
+          		0x2f011d, 0x2f011e, 0x33011d, 0x33011e, 0x34011d, 0x34011e, 0x35011d, 0x35011e, 0x36011d, 0x36011e, 0x37011d, 0x37011e, 0x38011d, 0x38011e, 0x39011d, 0x39011e,
+          		0x3d011d, 0x3d011e, 0x41011d, 0x41011e, 0x5f011d, 0x5f011e, 0x62011d, 0x62011e, 0x64011d, 0x64011e, 0x66011d, 0x66011e, 0x67011d, 0x67011e, 0x68011d, 0x68011e,
+          		0x6c011d, 0x6c011e, 0x6d011d, 0x6d011e, 0x6e011d, 0x6e011e, 0x70011d, 0x70011e, 0x72011d, 0x72011e, 0x75011d, 0x75011e, 0x3a0100, 0x420100, 0x430100, 0x440100,
+          		0x450100, 0x460100, 0x470100, 0x480100, 0x490100, 0x4a0100, 0x4b0100, 0x4c0100, 0x4d0100, 0x4e0100, 0x4f0100, 0x500100, 0x510100, 0x520100, 0x530100, 0x540100,
+          		0x550100, 0x560100, 0x570100, 0x590100, 0x6a0100, 0x6b0100, 0x710100, 0x760100, 0x770100, 0x780100, 0x790100, 0x7a0100, 0x000021, 0x000022, 0x000023, 0x000024,
+          		0x30011d, 0x30011e, 0x31011d, 0x31011e, 0x32011d, 0x32011e, 0x61011d, 0x61011e, 0x63011d, 0x63011e, 0x65011d, 0x65011e, 0x69011d, 0x69011e, 0x6f011d, 0x6f011e,
+          		0x73011d, 0x73011e, 0x74011d, 0x74011e, 0x200100, 0x250100, 0x2d0100, 0x2e0100, 0x2f0100, 0x330100, 0x340100, 0x350100, 0x360100, 0x370100, 0x380100, 0x390100,
+          		0x3d0100, 0x410100, 0x5f0100, 0x620100, 0x640100, 0x660100, 0x670100, 0x680100, 0x6c0100, 0x6d0100, 0x6e0100, 0x700100, 0x720100, 0x750100, 0x000025, 0x000026,
+          		0x000027, 0x000028, 0x000029, 0x00002a, 0x00002b, 0x00002c, 0x00002d, 0x00002e, 0x00002f, 0x000030, 0x000031, 0x000032, 0x000033, 0x000034, 0x000035, 0x000036,
+          		0x300100, 0x310100, 0x320100, 0x610100, 0x630100, 0x650100, 0x690100, 0x6f0100, 0x730100, 0x740100, 0x000037, 0x000038, 0x000039, 0x00003a, 0x00003b, 0x00003c,
+          		0x00003d, 0x00003e, 0x00003f, 0x000040, 0x000041, 0x000042, 0x000043, 0x000044, 0x000045, 0x000046, 0x000047, 0x000048, 0x000049, 0x00004a, 0x00004b, 0x00004c,
+          		0x210119, 0x21011a, 0x21011b, 0x21011c, 0x220119, 0x22011a, 0x22011b, 0x22011c, 0x280119, 0x28011a, 0x28011b, 0x28011c, 0x290119, 0x29011a, 0x29011b, 0x29011c,
+          		0x3f0119, 0x3f011a, 0x3f011b, 0x3f011c, 0x27011d, 0x27011e, 0x2b011d, 0x2b011e, 0x7c011d, 0x7c011e, 0x230100, 0x3e0100, 0x00004d, 0x00004e, 0x00004f, 0x000050,
+          		0x260111, 0x260112, 0x260113, 0x260114, 0x260115, 0x260116, 0x260117, 0x260118, 0x2a0111, 0x2a0112, 0x2a0113, 0x2a0114, 0x2a0115, 0x2a0116, 0x2a0117, 0x2a0118,
+          		0x2c0111, 0x2c0112, 0x2c0113, 0x2c0114, 0x2c0115, 0x2c0116, 0x2c0117, 0x2c0118, 0x3b0111, 0x3b0112, 0x3b0113, 0x3b0114, 0x3b0115, 0x3b0116, 0x3b0117, 0x3b0118,
+          		0x580111, 0x580112, 0x580113, 0x580114, 0x580115, 0x580116, 0x580117, 0x580118, 0x5a0111, 0x5a0112, 0x5a0113, 0x5a0114, 0x5a0115, 0x5a0116, 0x5a0117, 0x5a0118,
+          		0x21011d, 0x21011e, 0x22011d, 0x22011e, 0x28011d, 0x28011e, 0x29011d, 0x29011e, 0x3f011d, 0x3f011e, 0x270100, 0x2b0100, 0x7c0100, 0x000051, 0x000052, 0x000053,
+          		0x3a0111, 0x3a0112, 0x3a0113, 0x3a0114, 0x3a0115, 0x3a0116, 0x3a0117, 0x3a0118, 0x420111, 0x420112, 0x420113, 0x420114, 0x420115, 0x420116, 0x420117, 0x420118,
+          		0x430111, 0x430112, 0x430113, 0x430114, 0x430115, 0x430116, 0x430117, 0x430118, 0x440111, 0x440112, 0x440113, 0x440114, 0x440115, 0x440116, 0x440117, 0x440118,
+          		0x450111, 0x450112, 0x450113, 0x450114, 0x450115, 0x450116, 0x450117, 0x450118, 0x460111, 0x460112, 0x460113, 0x460114, 0x460115, 0x460116, 0x460117, 0x460118,
+          		0x470111, 0x470112, 0x470113, 0x470114, 0x470115, 0x470116, 0x470117, 0x470118, 0x480111, 0x480112, 0x480113, 0x480114, 0x480115, 0x480116, 0x480117, 0x480118,
+          		0x490111, 0x490112, 0x490113, 0x490114, 0x490115, 0x490116, 0x490117, 0x490118, 0x4a0111, 0x4a0112, 0x4a0113, 0x4a0114, 0x4a0115, 0x4a0116, 0x4a0117, 0x4a0118,
+          		0x4b0111, 0x4b0112, 0x4b0113, 0x4b0114, 0x4b0115, 0x4b0116, 0x4b0117, 0x4b0118, 0x4c0111, 0x4c0112, 0x4c0113, 0x4c0114, 0x4c0115, 0x4c0116, 0x4c0117, 0x4c0118,
+          		0x4d0111, 0x4d0112, 0x4d0113, 0x4d0114, 0x4d0115, 0x4d0116, 0x4d0117, 0x4d0118, 0x4e0111, 0x4e0112, 0x4e0113, 0x4e0114, 0x4e0115, 0x4e0116, 0x4e0117, 0x4e0118,
+          		0x4f0111, 0x4f0112, 0x4f0113, 0x4f0114, 0x4f0115, 0x4f0116, 0x4f0117, 0x4f0118, 0x500111, 0x500112, 0x500113, 0x500114, 0x500115, 0x500116, 0x500117, 0x500118,
+          		0x510111, 0x510112, 0x510113, 0x510114, 0x510115, 0x510116, 0x510117, 0x510118, 0x520111, 0x520112, 0x520113, 0x520114, 0x520115, 0x520116, 0x520117, 0x520118,
+          		0x530111, 0x530112, 0x530113, 0x530114, 0x530115, 0x530116, 0x530117, 0x530118, 0x540111, 0x540112, 0x540113, 0x540114, 0x540115, 0x540116, 0x540117, 0x540118,
+          		0x550111, 0x550112, 0x550113, 0x550114, 0x550115, 0x550116, 0x550117, 0x550118, 0x560111, 0x560112, 0x560113, 0x560114, 0x560115, 0x560116, 0x560117, 0x560118,
+          		0x570111, 0x570112, 0x570113, 0x570114, 0x570115, 0x570116, 0x570117, 0x570118, 0x590111, 0x590112, 0x590113, 0x590114, 0x590115, 0x590116, 0x590117, 0x590118,
+          		0x6a0111, 0x6a0112, 0x6a0113, 0x6a0114, 0x6a0115, 0x6a0116, 0x6a0117, 0x6a0118, 0x6b0111, 0x6b0112, 0x6b0113, 0x6b0114, 0x6b0115, 0x6b0116, 0x6b0117, 0x6b0118,
+          		0x710111, 0x710112, 0x710113, 0x710114, 0x710115, 0x710116, 0x710117, 0x710118, 0x760111, 0x760112, 0x760113, 0x760114, 0x760115, 0x760116, 0x760117, 0x760118,
+          		0x770111, 0x770112, 0x770113, 0x770114, 0x770115, 0x770116, 0x770117, 0x770118, 0x780111, 0x780112, 0x780113, 0x780114, 0x780115, 0x780116, 0x780117, 0x780118,
+          		0x790111, 0x790112, 0x790113, 0x790114, 0x790115, 0x790116, 0x790117, 0x790118, 0x7a0111, 0x7a0112, 0x7a0113, 0x7a0114, 0x7a0115, 0x7a0116, 0x7a0117, 0x7a0118,
+          		0x260119, 0x26011a, 0x26011b, 0x26011c, 0x2a0119, 0x2a011a, 0x2a011b, 0x2a011c, 0x2c0119, 0x2c011a, 0x2c011b, 0x2c011c, 0x3b0119, 0x3b011a, 0x3b011b, 0x3b011c,
+          		0x580119, 0x58011a, 0x58011b, 0x58011c, 0x5a0119, 0x5a011a, 0x5a011b, 0x5a011c, 0x210100, 0x220100, 0x280100, 0x290100, 0x3f0100, 0x000054, 0x000055, 0x000056,
+          		0x200111, 0x200112, 0x200113, 0x200114, 0x200115, 0x200116, 0x200117, 0x200118, 0x250111, 0x250112, 0x250113, 0x250114, 0x250115, 0x250116, 0x250117, 0x250118,
+          		0x2d0111, 0x2d0112, 0x2d0113, 0x2d0114, 0x2d0115, 0x2d0116, 0x2d0117, 0x2d0118, 0x2e0111, 0x2e0112, 0x2e0113, 0x2e0114, 0x2e0115, 0x2e0116, 0x2e0117, 0x2e0118,
+          		0x2f0111, 0x2f0112, 0x2f0113, 0x2f0114, 0x2f0115, 0x2f0116, 0x2f0117, 0x2f0118, 0x330111, 0x330112, 0x330113, 0x330114, 0x330115, 0x330116, 0x330117, 0x330118,
+          		0x340111, 0x340112, 0x340113, 0x340114, 0x340115, 0x340116, 0x340117, 0x340118, 0x350111, 0x350112, 0x350113, 0x350114, 0x350115, 0x350116, 0x350117, 0x350118,
+          		0x360111, 0x360112, 0x360113, 0x360114, 0x360115, 0x360116, 0x360117, 0x360118, 0x370111, 0x370112, 0x370113, 0x370114, 0x370115, 0x370116, 0x370117, 0x370118,
+          		0x380111, 0x380112, 0x380113, 0x380114, 0x380115, 0x380116, 0x380117, 0x380118, 0x390111, 0x390112, 0x390113, 0x390114, 0x390115, 0x390116, 0x390117, 0x390118,
+          		0x3d0111, 0x3d0112, 0x3d0113, 0x3d0114, 0x3d0115, 0x3d0116, 0x3d0117, 0x3d0118, 0x410111, 0x410112, 0x410113, 0x410114, 0x410115, 0x410116, 0x410117, 0x410118,
+          		0x5f0111, 0x5f0112, 0x5f0113, 0x5f0114, 0x5f0115, 0x5f0116, 0x5f0117, 0x5f0118, 0x620111, 0x620112, 0x620113, 0x620114, 0x620115, 0x620116, 0x620117, 0x620118,
+          		0x640111, 0x640112, 0x640113, 0x640114, 0x640115, 0x640116, 0x640117, 0x640118, 0x660111, 0x660112, 0x660113, 0x660114, 0x660115, 0x660116, 0x660117, 0x660118,
+          		0x670111, 0x670112, 0x670113, 0x670114, 0x670115, 0x670116, 0x670117, 0x670118, 0x680111, 0x680112, 0x680113, 0x680114, 0x680115, 0x680116, 0x680117, 0x680118,
+          		0x6c0111, 0x6c0112, 0x6c0113, 0x6c0114, 0x6c0115, 0x6c0116, 0x6c0117, 0x6c0118, 0x6d0111, 0x6d0112, 0x6d0113, 0x6d0114, 0x6d0115, 0x6d0116, 0x6d0117, 0x6d0118,
+          		0x6e0111, 0x6e0112, 0x6e0113, 0x6e0114, 0x6e0115, 0x6e0116, 0x6e0117, 0x6e0118, 0x700111, 0x700112, 0x700113, 0x700114, 0x700115, 0x700116, 0x700117, 0x700118,
+          		0x720111, 0x720112, 0x720113, 0x720114, 0x720115, 0x720116, 0x720117, 0x720118, 0x750111, 0x750112, 0x750113, 0x750114, 0x750115, 0x750116, 0x750117, 0x750118,
+          		0x3a0119, 0x3a011a, 0x3a011b, 0x3a011c, 0x420119, 0x42011a, 0x42011b, 0x42011c, 0x430119, 0x43011a, 0x43011b, 0x43011c, 0x440119, 0x44011a, 0x44011b, 0x44011c,
+          		0x450119, 0x45011a, 0x45011b, 0x45011c, 0x460119, 0x46011a, 0x46011b, 0x46011c, 0x470119, 0x47011a, 0x47011b, 0x47011c, 0x480119, 0x48011a, 0x48011b, 0x48011c,
+          		0x490119, 0x49011a, 0x49011b, 0x49011c, 0x4a0119, 0x4a011a, 0x4a011b, 0x4a011c, 0x4b0119, 0x4b011a, 0x4b011b, 0x4b011c, 0x4c0119, 0x4c011a, 0x4c011b, 0x4c011c,
+          		0x4d0119, 0x4d011a, 0x4d011b, 0x4d011c, 0x4e0119, 0x4e011a, 0x4e011b, 0x4e011c, 0x4f0119, 0x4f011a, 0x4f011b, 0x4f011c, 0x500119, 0x50011a, 0x50011b, 0x50011c,
+          		0x510119, 0x51011a, 0x51011b, 0x51011c, 0x520119, 0x52011a, 0x52011b, 0x52011c, 0x530119, 0x53011a, 0x53011b, 0x53011c, 0x540119, 0x54011a, 0x54011b, 0x54011c,
+          		0x550119, 0x55011a, 0x55011b, 0x55011c, 0x560119, 0x56011a, 0x56011b, 0x56011c, 0x570119, 0x57011a, 0x57011b, 0x57011c, 0x590119, 0x59011a, 0x59011b, 0x59011c,
+          		0x6a0119, 0x6a011a, 0x6a011b, 0x6a011c, 0x6b0119, 0x6b011a, 0x6b011b, 0x6b011c, 0x710119, 0x71011a, 0x71011b, 0x71011c, 0x760119, 0x76011a, 0x76011b, 0x76011c,
+          		0x770119, 0x77011a, 0x77011b, 0x77011c, 0x780119, 0x78011a, 0x78011b, 0x78011c, 0x790119, 0x79011a, 0x79011b, 0x79011c, 0x7a0119, 0x7a011a, 0x7a011b, 0x7a011c,
+          		0x26011d, 0x26011e, 0x2a011d, 0x2a011e, 0x2c011d, 0x2c011e, 0x3b011d, 0x3b011e, 0x58011d, 0x58011e, 0x5a011d, 0x5a011e, 0x000057, 0x000058, 0x000059, 0x00005a,
+          		0x000111, 0x000112, 0x000113, 0x000114, 0x000115, 0x000116, 0x000117, 0x000118, 0x240111, 0x240112, 0x240113, 0x240114, 0x240115, 0x240116, 0x240117, 0x240118,
+          		0x400111, 0x400112, 0x400113, 0x400114, 0x400115, 0x400116, 0x400117, 0x400118, 0x5b0111, 0x5b0112, 0x5b0113, 0x5b0114, 0x5b0115, 0x5b0116, 0x5b0117, 0x5b0118,
+          		0x5d0111, 0x5d0112, 0x5d0113, 0x5d0114, 0x5d0115, 0x5d0116, 0x5d0117, 0x5d0118, 0x7e0111, 0x7e0112, 0x7e0113, 0x7e0114, 0x7e0115, 0x7e0116, 0x7e0117, 0x7e0118,
+          		0x5e0119, 0x5e011a, 0x5e011b, 0x5e011c, 0x7d0119, 0x7d011a, 0x7d011b, 0x7d011c, 0x3c011d, 0x3c011e, 0x60011d, 0x60011e, 0x7b011d, 0x7b011e, 0x00005b, 0x00005c,
+          		0x230111, 0x230112, 0x230113, 0x230114, 0x230115, 0x230116, 0x230117, 0x230118, 0x3e0111, 0x3e0112, 0x3e0113, 0x3e0114, 0x3e0115, 0x3e0116, 0x3e0117, 0x3e0118,
+          		0x000119, 0x00011a, 0x00011b, 0x00011c, 0x240119, 0x24011a, 0x24011b, 0x24011c, 0x400119, 0x40011a, 0x40011b, 0x40011c, 0x5b0119, 0x5b011a, 0x5b011b, 0x5b011c,
+          		0x5d0119, 0x5d011a, 0x5d011b, 0x5d011c, 0x7e0119, 0x7e011a, 0x7e011b, 0x7e011c, 0x5e011d, 0x5e011e, 0x7d011d, 0x7d011e, 0x3c0100, 0x600100, 0x7b0100, 0x00005d,
+          		0x270111, 0x270112, 0x270113, 0x270114, 0x270115, 0x270116, 0x270117, 0x270118, 0x2b0111, 0x2b0112, 0x2b0113, 0x2b0114, 0x2b0115, 0x2b0116, 0x2b0117, 0x2b0118,
+          		0x7c0111, 0x7c0112, 0x7c0113, 0x7c0114, 0x7c0115, 0x7c0116, 0x7c0117, 0x7c0118, 0x230119, 0x23011a, 0x23011b, 0x23011c, 0x3e0119, 0x3e011a, 0x3e011b, 0x3e011c,
+          		0x00011d, 0x00011e, 0x24011d, 0x24011e, 0x40011d, 0x40011e, 0x5b011d, 0x5b011e, 0x5d011d, 0x5d011e, 0x7e011d, 0x7e011e, 0x5e0100, 0x7d0100, 0x00005e, 0x00005f,
+          		0x210111, 0x210112, 0x210113, 0x210114, 0x210115, 0x210116, 0x210117, 0x210118, 0x220111, 0x220112, 0x220113, 0x220114, 0x220115, 0x220116, 0x220117, 0x220118,
+          		0x280111, 0x280112, 0x280113, 0x280114, 0x280115, 0x280116, 0x280117, 0x280118, 0x290111, 0x290112, 0x290113, 0x290114, 0x290115, 0x290116, 0x290117, 0x290118,
+          		0x3f0111, 0x3f0112, 0x3f0113, 0x3f0114, 0x3f0115, 0x3f0116, 0x3f0117, 0x3f0118, 0x270119, 0x27011a, 0x27011b, 0x27011c, 0x2b0119, 0x2b011a, 0x2b011b, 0x2b011c,
+          		0x7c0119, 0x7c011a, 0x7c011b, 0x7c011c, 0x23011d, 0x23011e, 0x3e011d, 0x3e011e, 0x000100, 0x240100, 0x400100, 0x5b0100, 0x5d0100, 0x7e0100, 0x000060, 0x000061,
+          		0x5c011d, 0x5c011e, 0xc3011d, 0xc3011e, 0xd0011d, 0xd0011e, 0x800100, 0x820100, 0x830100, 0xa20100, 0xb80100, 0xc20100, 0xe00100, 0xe20100, 0x000062, 0x000063,
+          		0x000064, 0x000065, 0x000066, 0x000067, 0x000068, 0x000069, 0x00006a, 0x00006b, 0x00006c, 0x00006d, 0x00006e, 0x00006f, 0x000070, 0x000071, 0x000072, 0x000073,
+          		0x5c0100, 0xc30100, 0xd00100, 0x000074, 0x000075, 0x000076, 0x000077, 0x000078, 0x000079, 0x00007a, 0x00007b, 0x00007c, 0x00007d, 0x00007e, 0x00007f, 0x000080,
+          		0x3c0111, 0x3c0112, 0x3c0113, 0x3c0114, 0x3c0115, 0x3c0116, 0x3c0117, 0x3c0118, 0x600111, 0x600112, 0x600113, 0x600114, 0x600115, 0x600116, 0x600117, 0x600118,
+          		0x7b0111, 0x7b0112, 0x7b0113, 0x7b0114, 0x7b0115, 0x7b0116, 0x7b0117, 0x7b0118, 0x000081, 0x000082, 0x000083, 0x000084, 0x000085, 0x000086, 0x000087, 0x000088,
+          		0x5e0111, 0x5e0112, 0x5e0113, 0x5e0114, 0x5e0115, 0x5e0116, 0x5e0117, 0x5e0118, 0x7d0111, 0x7d0112, 0x7d0113, 0x7d0114, 0x7d0115, 0x7d0116, 0x7d0117, 0x7d0118,
+          		0x3c0119, 0x3c011a, 0x3c011b, 0x3c011c, 0x600119, 0x60011a, 0x60011b, 0x60011c, 0x7b0119, 0x7b011a, 0x7b011b, 0x7b011c, 0x000089, 0x00008a, 0x00008b, 0x00008c,
+          		0x990111, 0x990112, 0x990113, 0x990114, 0x990115, 0x990116, 0x990117, 0x990118, 0xa10111, 0xa10112, 0xa10113, 0xa10114, 0xa10115, 0xa10116, 0xa10117, 0xa10118,
+          		0xa70111, 0xa70112, 0xa70113, 0xa70114, 0xa70115, 0xa70116, 0xa70117, 0xa70118, 0xac0111, 0xac0112, 0xac0113, 0xac0114, 0xac0115, 0xac0116, 0xac0117, 0xac0118,
+          		0xb00111, 0xb00112, 0xb00113, 0xb00114, 0xb00115, 0xb00116, 0xb00117, 0xb00118, 0xb10111, 0xb10112, 0xb10113, 0xb10114, 0xb10115, 0xb10116, 0xb10117, 0xb10118,
+          		0xb30111, 0xb30112, 0xb30113, 0xb30114, 0xb30115, 0xb30116, 0xb30117, 0xb30118, 0xd10111, 0xd10112, 0xd10113, 0xd10114, 0xd10115, 0xd10116, 0xd10117, 0xd10118,
+          		0xd80111, 0xd80112, 0xd80113, 0xd80114, 0xd80115, 0xd80116, 0xd80117, 0xd80118, 0xd90111, 0xd90112, 0xd90113, 0xd90114, 0xd90115, 0xd90116, 0xd90117, 0xd90118,
+          		0xe30111, 0xe30112, 0xe30113, 0xe30114, 0xe30115, 0xe30116, 0xe30117, 0xe30118, 0xe50111, 0xe50112, 0xe50113, 0xe50114, 0xe50115, 0xe50116, 0xe50117, 0xe50118,
+          		0xe60111, 0xe60112, 0xe60113, 0xe60114, 0xe60115, 0xe60116, 0xe60117, 0xe60118, 0x810119, 0x81011a, 0x81011b, 0x81011c, 0x840119, 0x84011a, 0x84011b, 0x84011c,
+          		0x850119, 0x85011a, 0x85011b, 0x85011c, 0x860119, 0x86011a, 0x86011b, 0x86011c, 0x880119, 0x88011a, 0x88011b, 0x88011c, 0x920119, 0x92011a, 0x92011b, 0x92011c,
+          		0x9a0119, 0x9a011a, 0x9a011b, 0x9a011c, 0x9c0119, 0x9c011a, 0x9c011b, 0x9c011c, 0xa00119, 0xa0011a, 0xa0011b, 0xa0011c, 0xa30119, 0xa3011a, 0xa3011b, 0xa3011c,
+          		0xa40119, 0xa4011a, 0xa4011b, 0xa4011c, 0xa90119, 0xa9011a, 0xa9011b, 0xa9011c, 0xaa0119, 0xaa011a, 0xaa011b, 0xaa011c, 0xad0119, 0xad011a, 0xad011b, 0xad011c,
+          		0xb20119, 0xb2011a, 0xb2011b, 0xb2011c, 0xb50119, 0xb5011a, 0xb5011b, 0xb5011c, 0xb90119, 0xb9011a, 0xb9011b, 0xb9011c, 0xba0119, 0xba011a, 0xba011b, 0xba011c,
+          		0xbb0119, 0xbb011a, 0xbb011b, 0xbb011c, 0xbd0119, 0xbd011a, 0xbd011b, 0xbd011c, 0xbe0119, 0xbe011a, 0xbe011b, 0xbe011c, 0xc40119, 0xc4011a, 0xc4011b, 0xc4011c,
+          		0xc60119, 0xc6011a, 0xc6011b, 0xc6011c, 0xe40119, 0xe4011a, 0xe4011b, 0xe4011c, 0xe80119, 0xe8011a, 0xe8011b, 0xe8011c, 0xe90119, 0xe9011a, 0xe9011b, 0xe9011c,
+          		0x01011d, 0x01011e, 0x87011d, 0x87011e, 0x89011d, 0x89011e, 0x8a011d, 0x8a011e, 0x8b011d, 0x8b011e, 0x8c011d, 0x8c011e, 0x8d011d, 0x8d011e, 0x8f011d, 0x8f011e,
+          		0x93011d, 0x93011e, 0x95011d, 0x95011e, 0x96011d, 0x96011e, 0x97011d, 0x97011e, 0x98011d, 0x98011e, 0x9b011d, 0x9b011e, 0x9d011d, 0x9d011e, 0x9e011d, 0x9e011e,
+          		0xa5011d, 0xa5011e, 0xa6011d, 0xa6011e, 0xa8011d, 0xa8011e, 0xae011d, 0xae011e, 0xaf011d, 0xaf011e, 0xb4011d, 0xb4011e, 0xb6011d, 0xb6011e, 0xb7011d, 0xb7011e,
+          		0xbc011d, 0xbc011e, 0xbf011d, 0xbf011e, 0xc5011d, 0xc5011e, 0xe7011d, 0xe7011e, 0xef011d, 0xef011e, 0x090100, 0x8e0100, 0x900100, 0x910100, 0x940100, 0x9f0100,
+          		0xab0100, 0xce0100, 0xd70100, 0xe10100, 0xec0100, 0xed0100, 0x00008d, 0x00008e, 0x00008f, 0x000090, 0x000091, 0x000092, 0x000093, 0x000094, 0x000095, 0x000096,
+          		0x800111, 0x800112, 0x800113, 0x800114, 0x800115, 0x800116, 0x800117, 0x800118, 0x820111, 0x820112, 0x820113, 0x820114, 0x820115, 0x820116, 0x820117, 0x820118,
+          		0x830111, 0x830112, 0x830113, 0x830114, 0x830115, 0x830116, 0x830117, 0x830118, 0xa20111, 0xa20112, 0xa20113, 0xa20114, 0xa20115, 0xa20116, 0xa20117, 0xa20118,
+          		0xb80111, 0xb80112, 0xb80113, 0xb80114, 0xb80115, 0xb80116, 0xb80117, 0xb80118, 0xc20111, 0xc20112, 0xc20113, 0xc20114, 0xc20115, 0xc20116, 0xc20117, 0xc20118,
+          		0xe00111, 0xe00112, 0xe00113, 0xe00114, 0xe00115, 0xe00116, 0xe00117, 0xe00118, 0xe20111, 0xe20112, 0xe20113, 0xe20114, 0xe20115, 0xe20116, 0xe20117, 0xe20118,
+          		0x990119, 0x99011a, 0x99011b, 0x99011c, 0xa10119, 0xa1011a, 0xa1011b, 0xa1011c, 0xa70119, 0xa7011a, 0xa7011b, 0xa7011c, 0xac0119, 0xac011a, 0xac011b, 0xac011c,
+          		0xb00119, 0xb0011a, 0xb0011b, 0xb0011c, 0xb10119, 0xb1011a, 0xb1011b, 0xb1011c, 0xb30119, 0xb3011a, 0xb3011b, 0xb3011c, 0xd10119, 0xd1011a, 0xd1011b, 0xd1011c,
+          		0xd80119, 0xd8011a, 0xd8011b, 0xd8011c, 0xd90119, 0xd9011a, 0xd9011b, 0xd9011c, 0xe30119, 0xe3011a, 0xe3011b, 0xe3011c, 0xe50119, 0xe5011a, 0xe5011b, 0xe5011c,
+          		0xe60119, 0xe6011a, 0xe6011b, 0xe6011c, 0x81011d, 0x81011e, 0x84011d, 0x84011e, 0x85011d, 0x85011e, 0x86011d, 0x86011e, 0x88011d, 0x88011e, 0x92011d, 0x92011e,
+          		0x9a011d, 0x9a011e, 0x9c011d, 0x9c011e, 0xa0011d, 0xa0011e, 0xa3011d, 0xa3011e, 0xa4011d, 0xa4011e, 0xa9011d, 0xa9011e, 0xaa011d, 0xaa011e, 0xad011d, 0xad011e,
+          		0xb2011d, 0xb2011e, 0xb5011d, 0xb5011e, 0xb9011d, 0xb9011e, 0xba011d, 0xba011e, 0xbb011d, 0xbb011e, 0xbd011d, 0xbd011e, 0xbe011d, 0xbe011e, 0xc4011d, 0xc4011e,
+          		0xc6011d, 0xc6011e, 0xe4011d, 0xe4011e, 0xe8011d, 0xe8011e, 0xe9011d, 0xe9011e, 0x010100, 0x870100, 0x890100, 0x8a0100, 0x8b0100, 0x8c0100, 0x8d0100, 0x8f0100,
+          		0x930100, 0x950100, 0x960100, 0x970100, 0x980100, 0x9b0100, 0x9d0100, 0x9e0100, 0xa50100, 0xa60100, 0xa80100, 0xae0100, 0xaf0100, 0xb40100, 0xb60100, 0xb70100,
+          		0xbc0100, 0xbf0100, 0xc50100, 0xe70100, 0xef0100, 0x000097, 0x000098, 0x000099, 0x00009a, 0x00009b, 0x00009c, 0x00009d, 0x00009e, 0x00009f, 0x0000a0, 0x0000a1,
+          		0x5c0111, 0x5c0112, 0x5c0113, 0x5c0114, 0x5c0115, 0x5c0116, 0x5c0117, 0x5c0118, 0xc30111, 0xc30112, 0xc30113, 0xc30114, 0xc30115, 0xc30116, 0xc30117, 0xc30118,
+          		0xd00111, 0xd00112, 0xd00113, 0xd00114, 0xd00115, 0xd00116, 0xd00117, 0xd00118, 0x800119, 0x80011a, 0x80011b, 0x80011c, 0x820119, 0x82011a, 0x82011b, 0x82011c,
+          		0x830119, 0x83011a, 0x83011b, 0x83011c, 0xa20119, 0xa2011a, 0xa2011b, 0xa2011c, 0xb80119, 0xb8011a, 0xb8011b, 0xb8011c, 0xc20119, 0xc2011a, 0xc2011b, 0xc2011c,
+          		0xe00119, 0xe0011a, 0xe0011b, 0xe0011c, 0xe20119, 0xe2011a, 0xe2011b, 0xe2011c, 0x99011d, 0x99011e, 0xa1011d, 0xa1011e, 0xa7011d, 0xa7011e, 0xac011d, 0xac011e,
+          		0xb0011d, 0xb0011e, 0xb1011d, 0xb1011e, 0xb3011d, 0xb3011e, 0xd1011d, 0xd1011e, 0xd8011d, 0xd8011e, 0xd9011d, 0xd9011e, 0xe3011d, 0xe3011e, 0xe5011d, 0xe5011e,
+          		0xe6011d, 0xe6011e, 0x810100, 0x840100, 0x850100, 0x860100, 0x880100, 0x920100, 0x9a0100, 0x9c0100, 0xa00100, 0xa30100, 0xa40100, 0xa90100, 0xaa0100, 0xad0100,
+          		0xb20100, 0xb50100, 0xb90100, 0xba0100, 0xbb0100, 0xbd0100, 0xbe0100, 0xc40100, 0xc60100, 0xe40100, 0xe80100, 0xe90100, 0x0000a2, 0x0000a3, 0x0000a4, 0x0000a5,
+          		0x0000a6, 0x0000a7, 0x0000a8, 0x0000a9, 0x0000aa, 0x0000ab, 0x0000ac, 0x0000ad, 0x0000ae, 0x0000af, 0x0000b0, 0x0000b1, 0x0000b2, 0x0000b3, 0x0000b4, 0x0000b5,
+          		0x5c0119, 0x5c011a, 0x5c011b, 0x5c011c, 0xc30119, 0xc3011a, 0xc3011b, 0xc3011c, 0xd00119, 0xd0011a, 0xd0011b, 0xd0011c, 0x80011d, 0x80011e, 0x82011d, 0x82011e,
+          		0x83011d, 0x83011e, 0xa2011d, 0xa2011e, 0xb8011d, 0xb8011e, 0xc2011d, 0xc2011e, 0xe0011d, 0xe0011e, 0xe2011d, 0xe2011e, 0x990100, 0xa10100, 0xa70100, 0xac0100,
+          		0xb00100, 0xb10100, 0xb30100, 0xd10100, 0xd80100, 0xd90100, 0xe30100, 0xe50100, 0xe60100, 0x0000b6, 0x0000b7, 0x0000b8, 0x0000b9, 0x0000ba, 0x0000bb, 0x0000bc,
+          		0x0000bd, 0x0000be, 0x0000bf, 0x0000c0, 0x0000c1, 0x0000c2, 0x0000c3, 0x0000c4, 0x0000c5, 0x0000c6, 0x0000c7, 0x0000c8, 0x0000c9, 0x0000ca, 0x0000cb, 0x0000cc,
+          		0xc70111, 0xc70112, 0xc70113, 0xc70114, 0xc70115, 0xc70116, 0xc70117, 0xc70118, 0xcf0111, 0xcf0112, 0xcf0113, 0xcf0114, 0xcf0115, 0xcf0116, 0xcf0117, 0xcf0118,
+          		0xea0111, 0xea0112, 0xea0113, 0xea0114, 0xea0115, 0xea0116, 0xea0117, 0xea0118, 0xeb0111, 0xeb0112, 0xeb0113, 0xeb0114, 0xeb0115, 0xeb0116, 0xeb0117, 0xeb0118,
+          		0xc00119, 0xc0011a, 0xc0011b, 0xc0011c, 0xc10119, 0xc1011a, 0xc1011b, 0xc1011c, 0xc80119, 0xc8011a, 0xc8011b, 0xc8011c, 0xc90119, 0xc9011a, 0xc9011b, 0xc9011c,
+          		0xca0119, 0xca011a, 0xca011b, 0xca011c, 0xcd0119, 0xcd011a, 0xcd011b, 0xcd011c, 0xd20119, 0xd2011a, 0xd2011b, 0xd2011c, 0xd50119, 0xd5011a, 0xd5011b, 0xd5011c,
+          		0xda0119, 0xda011a, 0xda011b, 0xda011c, 0xdb0119, 0xdb011a, 0xdb011b, 0xdb011c, 0xee0119, 0xee011a, 0xee011b, 0xee011c, 0xf00119, 0xf0011a, 0xf0011b, 0xf0011c,
+          		0xf20119, 0xf2011a, 0xf2011b, 0xf2011c, 0xf30119, 0xf3011a, 0xf3011b, 0xf3011c, 0xff0119, 0xff011a, 0xff011b, 0xff011c, 0xcb011d, 0xcb011e, 0xcc011d, 0xcc011e,
+          		0xd3011d, 0xd3011e, 0xd4011d, 0xd4011e, 0xd6011d, 0xd6011e, 0xdd011d, 0xdd011e, 0xde011d, 0xde011e, 0xdf011d, 0xdf011e, 0xf1011d, 0xf1011e, 0xf4011d, 0xf4011e,
+          		0xf5011d, 0xf5011e, 0xf6011d, 0xf6011e, 0xf7011d, 0xf7011e, 0xf8011d, 0xf8011e, 0xfa011d, 0xfa011e, 0xfb011d, 0xfb011e, 0xfc011d, 0xfc011e, 0xfd011d, 0xfd011e,
+          		0xfe011d, 0xfe011e, 0x020100, 0x030100, 0x040100, 0x050100, 0x060100, 0x070100, 0x080100, 0x0b0100, 0x0c0100, 0x0e0100, 0x0f0100, 0x100100, 0x110100, 0x120100,
+          		0x130100, 0x140100, 0x150100, 0x170100, 0x180100, 0x190100, 0x1a0100, 0x1b0100, 0x1c0100, 0x1d0100, 0x1e0100, 0x1f0100, 0x7f0100, 0xdc0100, 0xf90100, 0x0000cd,
+          		0x090111, 0x090112, 0x090113, 0x090114, 0x090115, 0x090116, 0x090117, 0x090118, 0x8e0111, 0x8e0112, 0x8e0113, 0x8e0114, 0x8e0115, 0x8e0116, 0x8e0117, 0x8e0118,
+          		0x900111, 0x900112, 0x900113, 0x900114, 0x900115, 0x900116, 0x900117, 0x900118, 0x910111, 0x910112, 0x910113, 0x910114, 0x910115, 0x910116, 0x910117, 0x910118,
+          		0x940111, 0x940112, 0x940113, 0x940114, 0x940115, 0x940116, 0x940117, 0x940118, 0x9f0111, 0x9f0112, 0x9f0113, 0x9f0114, 0x9f0115, 0x9f0116, 0x9f0117, 0x9f0118,
+          		0xab0111, 0xab0112, 0xab0113, 0xab0114, 0xab0115, 0xab0116, 0xab0117, 0xab0118, 0xce0111, 0xce0112, 0xce0113, 0xce0114, 0xce0115, 0xce0116, 0xce0117, 0xce0118,
+          		0xd70111, 0xd70112, 0xd70113, 0xd70114, 0xd70115, 0xd70116, 0xd70117, 0xd70118, 0xe10111, 0xe10112, 0xe10113, 0xe10114, 0xe10115, 0xe10116, 0xe10117, 0xe10118,
+          		0xec0111, 0xec0112, 0xec0113, 0xec0114, 0xec0115, 0xec0116, 0xec0117, 0xec0118, 0xed0111, 0xed0112, 0xed0113, 0xed0114, 0xed0115, 0xed0116, 0xed0117, 0xed0118,
+          		0xc70119, 0xc7011a, 0xc7011b, 0xc7011c, 0xcf0119, 0xcf011a, 0xcf011b, 0xcf011c, 0xea0119, 0xea011a, 0xea011b, 0xea011c, 0xeb0119, 0xeb011a, 0xeb011b, 0xeb011c,
+          		0xc0011d, 0xc0011e, 0xc1011d, 0xc1011e, 0xc8011d, 0xc8011e, 0xc9011d, 0xc9011e, 0xca011d, 0xca011e, 0xcd011d, 0xcd011e, 0xd2011d, 0xd2011e, 0xd5011d, 0xd5011e,
+          		0xda011d, 0xda011e, 0xdb011d, 0xdb011e, 0xee011d, 0xee011e, 0xf0011d, 0xf0011e, 0xf2011d, 0xf2011e, 0xf3011d, 0xf3011e, 0xff011d, 0xff011e, 0xcb0100, 0xcc0100,
+          		0xd30100, 0xd40100, 0xd60100, 0xdd0100, 0xde0100, 0xdf0100, 0xf10100, 0xf40100, 0xf50100, 0xf60100, 0xf70100, 0xf80100, 0xfa0100, 0xfb0100, 0xfc0100, 0xfd0100,
+          		0xfe0100, 0x0000ce, 0x0000cf, 0x0000d0, 0x0000d1, 0x0000d2, 0x0000d3, 0x0000d4, 0x0000d5, 0x0000d6, 0x0000d7, 0x0000d8, 0x0000d9, 0x0000da, 0x0000db, 0x0000dc,
+          		0x010111, 0x010112, 0x010113, 0x010114, 0x010115, 0x010116, 0x010117, 0x010118, 0x870111, 0x870112, 0x870113, 0x870114, 0x870115, 0x870116, 0x870117, 0x870118,
+          		0x890111, 0x890112, 0x890113, 0x890114, 0x890115, 0x890116, 0x890117, 0x890118, 0x8a0111, 0x8a0112, 0x8a0113, 0x8a0114, 0x8a0115, 0x8a0116, 0x8a0117, 0x8a0118,
+          		0x8b0111, 0x8b0112, 0x8b0113, 0x8b0114, 0x8b0115, 0x8b0116, 0x8b0117, 0x8b0118, 0x8c0111, 0x8c0112, 0x8c0113, 0x8c0114, 0x8c0115, 0x8c0116, 0x8c0117, 0x8c0118,
+          		0x8d0111, 0x8d0112, 0x8d0113, 0x8d0114, 0x8d0115, 0x8d0116, 0x8d0117, 0x8d0118, 0x8f0111, 0x8f0112, 0x8f0113, 0x8f0114, 0x8f0115, 0x8f0116, 0x8f0117, 0x8f0118,
+          		0x930111, 0x930112, 0x930113, 0x930114, 0x930115, 0x930116, 0x930117, 0x930118, 0x950111, 0x950112, 0x950113, 0x950114, 0x950115, 0x950116, 0x950117, 0x950118,
+          		0x960111, 0x960112, 0x960113, 0x960114, 0x960115, 0x960116, 0x960117, 0x960118, 0x970111, 0x970112, 0x970113, 0x970114, 0x970115, 0x970116, 0x970117, 0x970118,
+          		0x980111, 0x980112, 0x980113, 0x980114, 0x980115, 0x980116, 0x980117, 0x980118, 0x9b0111, 0x9b0112, 0x9b0113, 0x9b0114, 0x9b0115, 0x9b0116, 0x9b0117, 0x9b0118,
+          		0x9d0111, 0x9d0112, 0x9d0113, 0x9d0114, 0x9d0115, 0x9d0116, 0x9d0117, 0x9d0118, 0x9e0111, 0x9e0112, 0x9e0113, 0x9e0114, 0x9e0115, 0x9e0116, 0x9e0117, 0x9e0118,
+          		0xa50111, 0xa50112, 0xa50113, 0xa50114, 0xa50115, 0xa50116, 0xa50117, 0xa50118, 0xa60111, 0xa60112, 0xa60113, 0xa60114, 0xa60115, 0xa60116, 0xa60117, 0xa60118,
+          		0xa80111, 0xa80112, 0xa80113, 0xa80114, 0xa80115, 0xa80116, 0xa80117, 0xa80118, 0xae0111, 0xae0112, 0xae0113, 0xae0114, 0xae0115, 0xae0116, 0xae0117, 0xae0118,
+          		0xaf0111, 0xaf0112, 0xaf0113, 0xaf0114, 0xaf0115, 0xaf0116, 0xaf0117, 0xaf0118, 0xb40111, 0xb40112, 0xb40113, 0xb40114, 0xb40115, 0xb40116, 0xb40117, 0xb40118,
+          		0xb60111, 0xb60112, 0xb60113, 0xb60114, 0xb60115, 0xb60116, 0xb60117, 0xb60118, 0xb70111, 0xb70112, 0xb70113, 0xb70114, 0xb70115, 0xb70116, 0xb70117, 0xb70118,
+          		0xbc0111, 0xbc0112, 0xbc0113, 0xbc0114, 0xbc0115, 0xbc0116, 0xbc0117, 0xbc0118, 0xbf0111, 0xbf0112, 0xbf0113, 0xbf0114, 0xbf0115, 0xbf0116, 0xbf0117, 0xbf0118,
+          		0xc50111, 0xc50112, 0xc50113, 0xc50114, 0xc50115, 0xc50116, 0xc50117, 0xc50118, 0xe70111, 0xe70112, 0xe70113, 0xe70114, 0xe70115, 0xe70116, 0xe70117, 0xe70118,
+          		0xef0111, 0xef0112, 0xef0113, 0xef0114, 0xef0115, 0xef0116, 0xef0117, 0xef0118, 0x090119, 0x09011a, 0x09011b, 0x09011c, 0x8e0119, 0x8e011a, 0x8e011b, 0x8e011c,
+          		0x900119, 0x90011a, 0x90011b, 0x90011c, 0x910119, 0x91011a, 0x91011b, 0x91011c, 0x940119, 0x94011a, 0x94011b, 0x94011c, 0x9f0119, 0x9f011a, 0x9f011b, 0x9f011c,
+          		0xab0119, 0xab011a, 0xab011b, 0xab011c, 0xce0119, 0xce011a, 0xce011b, 0xce011c, 0xd70119, 0xd7011a, 0xd7011b, 0xd7011c, 0xe10119, 0xe1011a, 0xe1011b, 0xe1011c,
+          		0xec0119, 0xec011a, 0xec011b, 0xec011c, 0xed0119, 0xed011a, 0xed011b, 0xed011c, 0xc7011d, 0xc7011e, 0xcf011d, 0xcf011e, 0xea011d, 0xea011e, 0xeb011d, 0xeb011e,
+          		0xc00100, 0xc10100, 0xc80100, 0xc90100, 0xca0100, 0xcd0100, 0xd20100, 0xd50100, 0xda0100, 0xdb0100, 0xee0100, 0xf00100, 0xf20100, 0xf30100, 0xff0100, 0x0000dd,
+          		0x0000de, 0x0000df, 0x0000e0, 0x0000e1, 0x0000e2, 0x0000e3, 0x0000e4, 0x0000e5, 0x0000e6, 0x0000e7, 0x0000e8, 0x0000e9, 0x0000ea, 0x0000eb, 0x0000ec, 0x0000ed,
+          		0x810111, 0x810112, 0x810113, 0x810114, 0x810115, 0x810116, 0x810117, 0x810118, 0x840111, 0x840112, 0x840113, 0x840114, 0x840115, 0x840116, 0x840117, 0x840118,
+          		0x850111, 0x850112, 0x850113, 0x850114, 0x850115, 0x850116, 0x850117, 0x850118, 0x860111, 0x860112, 0x860113, 0x860114, 0x860115, 0x860116, 0x860117, 0x860118,
+          		0x880111, 0x880112, 0x880113, 0x880114, 0x880115, 0x880116, 0x880117, 0x880118, 0x920111, 0x920112, 0x920113, 0x920114, 0x920115, 0x920116, 0x920117, 0x920118,
+          		0x9a0111, 0x9a0112, 0x9a0113, 0x9a0114, 0x9a0115, 0x9a0116, 0x9a0117, 0x9a0118, 0x9c0111, 0x9c0112, 0x9c0113, 0x9c0114, 0x9c0115, 0x9c0116, 0x9c0117, 0x9c0118,
+          		0xa00111, 0xa00112, 0xa00113, 0xa00114, 0xa00115, 0xa00116, 0xa00117, 0xa00118, 0xa30111, 0xa30112, 0xa30113, 0xa30114, 0xa30115, 0xa30116, 0xa30117, 0xa30118,
+          		0xa40111, 0xa40112, 0xa40113, 0xa40114, 0xa40115, 0xa40116, 0xa40117, 0xa40118, 0xa90111, 0xa90112, 0xa90113, 0xa90114, 0xa90115, 0xa90116, 0xa90117, 0xa90118,
+          		0xaa0111, 0xaa0112, 0xaa0113, 0xaa0114, 0xaa0115, 0xaa0116, 0xaa0117, 0xaa0118, 0xad0111, 0xad0112, 0xad0113, 0xad0114, 0xad0115, 0xad0116, 0xad0117, 0xad0118,
+          		0xb20111, 0xb20112, 0xb20113, 0xb20114, 0xb20115, 0xb20116, 0xb20117, 0xb20118, 0xb50111, 0xb50112, 0xb50113, 0xb50114, 0xb50115, 0xb50116, 0xb50117, 0xb50118,
+          		0xb90111, 0xb90112, 0xb90113, 0xb90114, 0xb90115, 0xb90116, 0xb90117, 0xb90118, 0xba0111, 0xba0112, 0xba0113, 0xba0114, 0xba0115, 0xba0116, 0xba0117, 0xba0118,
+          		0xbb0111, 0xbb0112, 0xbb0113, 0xbb0114, 0xbb0115, 0xbb0116, 0xbb0117, 0xbb0118, 0xbd0111, 0xbd0112, 0xbd0113, 0xbd0114, 0xbd0115, 0xbd0116, 0xbd0117, 0xbd0118,
+          		0xbe0111, 0xbe0112, 0xbe0113, 0xbe0114, 0xbe0115, 0xbe0116, 0xbe0117, 0xbe0118, 0xc40111, 0xc40112, 0xc40113, 0xc40114, 0xc40115, 0xc40116, 0xc40117, 0xc40118,
+          		0xc60111, 0xc60112, 0xc60113, 0xc60114, 0xc60115, 0xc60116, 0xc60117, 0xc60118, 0xe40111, 0xe40112, 0xe40113, 0xe40114, 0xe40115, 0xe40116, 0xe40117, 0xe40118,
+          		0xe80111, 0xe80112, 0xe80113, 0xe80114, 0xe80115, 0xe80116, 0xe80117, 0xe80118, 0xe90111, 0xe90112, 0xe90113, 0xe90114, 0xe90115, 0xe90116, 0xe90117, 0xe90118,
+          		0x010119, 0x01011a, 0x01011b, 0x01011c, 0x870119, 0x87011a, 0x87011b, 0x87011c, 0x890119, 0x89011a, 0x89011b, 0x89011c, 0x8a0119, 0x8a011a, 0x8a011b, 0x8a011c,
+          		0x8b0119, 0x8b011a, 0x8b011b, 0x8b011c, 0x8c0119, 0x8c011a, 0x8c011b, 0x8c011c, 0x8d0119, 0x8d011a, 0x8d011b, 0x8d011c, 0x8f0119, 0x8f011a, 0x8f011b, 0x8f011c,
+          		0x930119, 0x93011a, 0x93011b, 0x93011c, 0x950119, 0x95011a, 0x95011b, 0x95011c, 0x960119, 0x96011a, 0x96011b, 0x96011c, 0x970119, 0x97011a, 0x97011b, 0x97011c,
+          		0x980119, 0x98011a, 0x98011b, 0x98011c, 0x9b0119, 0x9b011a, 0x9b011b, 0x9b011c, 0x9d0119, 0x9d011a, 0x9d011b, 0x9d011c, 0x9e0119, 0x9e011a, 0x9e011b, 0x9e011c,
+          		0xa50119, 0xa5011a, 0xa5011b, 0xa5011c, 0xa60119, 0xa6011a, 0xa6011b, 0xa6011c, 0xa80119, 0xa8011a, 0xa8011b, 0xa8011c, 0xae0119, 0xae011a, 0xae011b, 0xae011c,
+          		0xaf0119, 0xaf011a, 0xaf011b, 0xaf011c, 0xb40119, 0xb4011a, 0xb4011b, 0xb4011c, 0xb60119, 0xb6011a, 0xb6011b, 0xb6011c, 0xb70119, 0xb7011a, 0xb7011b, 0xb7011c,
+          		0xbc0119, 0xbc011a, 0xbc011b, 0xbc011c, 0xbf0119, 0xbf011a, 0xbf011b, 0xbf011c, 0xc50119, 0xc5011a, 0xc5011b, 0xc5011c, 0xe70119, 0xe7011a, 0xe7011b, 0xe7011c,
+          		0xef0119, 0xef011a, 0xef011b, 0xef011c, 0x09011d, 0x09011e, 0x8e011d, 0x8e011e, 0x90011d, 0x90011e, 0x91011d, 0x91011e, 0x94011d, 0x94011e, 0x9f011d, 0x9f011e,
+          		0xab011d, 0xab011e, 0xce011d, 0xce011e, 0xd7011d, 0xd7011e, 0xe1011d, 0xe1011e, 0xec011d, 0xec011e, 0xed011d, 0xed011e, 0xc70100, 0xcf0100, 0xea0100, 0xeb0100,
+          		0x0000ee, 0x0000ef, 0x0000f0, 0x0000f1, 0x0000f2, 0x0000f3, 0x0000f4, 0x0000f5, 0x0000f6, 0x0000f7, 0x0000f8, 0x0000f9, 0x0000fa, 0x0000fb, 0x0000fc, 0x0000fd,
+          		0x0a0119, 0x0a011a, 0x0a011b, 0x0a011c, 0x0d0119, 0x0d011a, 0x0d011b, 0x0d011c, 0x160119, 0x16011a, 0x16011b, 0x16011c, 0x000200, 0x000200, 0x000200, 0x000200,
+          		0x020111, 0x020112, 0x020113, 0x020114, 0x020115, 0x020116, 0x020117, 0x020118, 0x030111, 0x030112, 0x030113, 0x030114, 0x030115, 0x030116, 0x030117, 0x030118,
+          		0x040111, 0x040112, 0x040113, 0x040114, 0x040115, 0x040116, 0x040117, 0x040118, 0x050111, 0x050112, 0x050113, 0x050114, 0x050115, 0x050116, 0x050117, 0x050118,
+          		0x060111, 0x060112, 0x060113, 0x060114, 0x060115, 0x060116, 0x060117, 0x060118, 0x070111, 0x070112, 0x070113, 0x070114, 0x070115, 0x070116, 0x070117, 0x070118,
+          		0x080111, 0x080112, 0x080113, 0x080114, 0x080115, 0x080116, 0x080117, 0x080118, 0x0b0111, 0x0b0112, 0x0b0113, 0x0b0114, 0x0b0115, 0x0b0116, 0x0b0117, 0x0b0118,
+          		0x0c0111, 0x0c0112, 0x0c0113, 0x0c0114, 0x0c0115, 0x0c0116, 0x0c0117, 0x0c0118, 0x0e0111, 0x0e0112, 0x0e0113, 0x0e0114, 0x0e0115, 0x0e0116, 0x0e0117, 0x0e0118,
+          		0x0f0111, 0x0f0112, 0x0f0113, 0x0f0114, 0x0f0115, 0x0f0116, 0x0f0117, 0x0f0118, 0x100111, 0x100112, 0x100113, 0x100114, 0x100115, 0x100116, 0x100117, 0x100118,
+          		0x110111, 0x110112, 0x110113, 0x110114, 0x110115, 0x110116, 0x110117, 0x110118, 0x120111, 0x120112, 0x120113, 0x120114, 0x120115, 0x120116, 0x120117, 0x120118,
+          		0x130111, 0x130112, 0x130113, 0x130114, 0x130115, 0x130116, 0x130117, 0x130118, 0x140111, 0x140112, 0x140113, 0x140114, 0x140115, 0x140116, 0x140117, 0x140118,
+          		0x150111, 0x150112, 0x150113, 0x150114, 0x150115, 0x150116, 0x150117, 0x150118, 0x170111, 0x170112, 0x170113, 0x170114, 0x170115, 0x170116, 0x170117, 0x170118,
+          		0x180111, 0x180112, 0x180113, 0x180114, 0x180115, 0x180116, 0x180117, 0x180118, 0x190111, 0x190112, 0x190113, 0x190114, 0x190115, 0x190116, 0x190117, 0x190118,
+          		0x1a0111, 0x1a0112, 0x1a0113, 0x1a0114, 0x1a0115, 0x1a0116, 0x1a0117, 0x1a0118, 0x1b0111, 0x1b0112, 0x1b0113, 0x1b0114, 0x1b0115, 0x1b0116, 0x1b0117, 0x1b0118,
+          		0x1c0111, 0x1c0112, 0x1c0113, 0x1c0114, 0x1c0115, 0x1c0116, 0x1c0117, 0x1c0118, 0x1d0111, 0x1d0112, 0x1d0113, 0x1d0114, 0x1d0115, 0x1d0116, 0x1d0117, 0x1d0118,
+          		0x1e0111, 0x1e0112, 0x1e0113, 0x1e0114, 0x1e0115, 0x1e0116, 0x1e0117, 0x1e0118, 0x1f0111, 0x1f0112, 0x1f0113, 0x1f0114, 0x1f0115, 0x1f0116, 0x1f0117, 0x1f0118,
+          		0x7f0111, 0x7f0112, 0x7f0113, 0x7f0114, 0x7f0115, 0x7f0116, 0x7f0117, 0x7f0118, 0xdc0111, 0xdc0112, 0xdc0113, 0xdc0114, 0xdc0115, 0xdc0116, 0xdc0117, 0xdc0118,
+          		0xf90111, 0xf90112, 0xf90113, 0xf90114, 0xf90115, 0xf90116, 0xf90117, 0xf90118, 0x0a011d, 0x0a011e, 0x0d011d, 0x0d011e, 0x16011d, 0x16011e, 0x000200, 0x000200,
+          		0xcb0111, 0xcb0112, 0xcb0113, 0xcb0114, 0xcb0115, 0xcb0116, 0xcb0117, 0xcb0118, 0xcc0111, 0xcc0112, 0xcc0113, 0xcc0114, 0xcc0115, 0xcc0116, 0xcc0117, 0xcc0118,
+          		0xd30111, 0xd30112, 0xd30113, 0xd30114, 0xd30115, 0xd30116, 0xd30117, 0xd30118, 0xd40111, 0xd40112, 0xd40113, 0xd40114, 0xd40115, 0xd40116, 0xd40117, 0xd40118,
+          		0xd60111, 0xd60112, 0xd60113, 0xd60114, 0xd60115, 0xd60116, 0xd60117, 0xd60118, 0xdd0111, 0xdd0112, 0xdd0113, 0xdd0114, 0xdd0115, 0xdd0116, 0xdd0117, 0xdd0118,
+          		0xde0111, 0xde0112, 0xde0113, 0xde0114, 0xde0115, 0xde0116, 0xde0117, 0xde0118, 0xdf0111, 0xdf0112, 0xdf0113, 0xdf0114, 0xdf0115, 0xdf0116, 0xdf0117, 0xdf0118,
+          		0xf10111, 0xf10112, 0xf10113, 0xf10114, 0xf10115, 0xf10116, 0xf10117, 0xf10118, 0xf40111, 0xf40112, 0xf40113, 0xf40114, 0xf40115, 0xf40116, 0xf40117, 0xf40118,
+          		0xf50111, 0xf50112, 0xf50113, 0xf50114, 0xf50115, 0xf50116, 0xf50117, 0xf50118, 0xf60111, 0xf60112, 0xf60113, 0xf60114, 0xf60115, 0xf60116, 0xf60117, 0xf60118,
+          		0xf70111, 0xf70112, 0xf70113, 0xf70114, 0xf70115, 0xf70116, 0xf70117, 0xf70118, 0xf80111, 0xf80112, 0xf80113, 0xf80114, 0xf80115, 0xf80116, 0xf80117, 0xf80118,
+          		0xfa0111, 0xfa0112, 0xfa0113, 0xfa0114, 0xfa0115, 0xfa0116, 0xfa0117, 0xfa0118, 0xfb0111, 0xfb0112, 0xfb0113, 0xfb0114, 0xfb0115, 0xfb0116, 0xfb0117, 0xfb0118,
+          		0xfc0111, 0xfc0112, 0xfc0113, 0xfc0114, 0xfc0115, 0xfc0116, 0xfc0117, 0xfc0118, 0xfd0111, 0xfd0112, 0xfd0113, 0xfd0114, 0xfd0115, 0xfd0116, 0xfd0117, 0xfd0118,
+          		0xfe0111, 0xfe0112, 0xfe0113, 0xfe0114, 0xfe0115, 0xfe0116, 0xfe0117, 0xfe0118, 0x020119, 0x02011a, 0x02011b, 0x02011c, 0x030119, 0x03011a, 0x03011b, 0x03011c,
+          		0x040119, 0x04011a, 0x04011b, 0x04011c, 0x050119, 0x05011a, 0x05011b, 0x05011c, 0x060119, 0x06011a, 0x06011b, 0x06011c, 0x070119, 0x07011a, 0x07011b, 0x07011c,
+          		0x080119, 0x08011a, 0x08011b, 0x08011c, 0x0b0119, 0x0b011a, 0x0b011b, 0x0b011c, 0x0c0119, 0x0c011a, 0x0c011b, 0x0c011c, 0x0e0119, 0x0e011a, 0x0e011b, 0x0e011c,
+          		0x0f0119, 0x0f011a, 0x0f011b, 0x0f011c, 0x100119, 0x10011a, 0x10011b, 0x10011c, 0x110119, 0x11011a, 0x11011b, 0x11011c, 0x120119, 0x12011a, 0x12011b, 0x12011c,
+          		0x130119, 0x13011a, 0x13011b, 0x13011c, 0x140119, 0x14011a, 0x14011b, 0x14011c, 0x150119, 0x15011a, 0x15011b, 0x15011c, 0x170119, 0x17011a, 0x17011b, 0x17011c,
+          		0x180119, 0x18011a, 0x18011b, 0x18011c, 0x190119, 0x19011a, 0x19011b, 0x19011c, 0x1a0119, 0x1a011a, 0x1a011b, 0x1a011c, 0x1b0119, 0x1b011a, 0x1b011b, 0x1b011c,
+          		0x1c0119, 0x1c011a, 0x1c011b, 0x1c011c, 0x1d0119, 0x1d011a, 0x1d011b, 0x1d011c, 0x1e0119, 0x1e011a, 0x1e011b, 0x1e011c, 0x1f0119, 0x1f011a, 0x1f011b, 0x1f011c,
+          		0x7f0119, 0x7f011a, 0x7f011b, 0x7f011c, 0xdc0119, 0xdc011a, 0xdc011b, 0xdc011c, 0xf90119, 0xf9011a, 0xf9011b, 0xf9011c, 0x0a0100, 0x0d0100, 0x160100, 0x000200,
+          		0xc00111, 0xc00112, 0xc00113, 0xc00114, 0xc00115, 0xc00116, 0xc00117, 0xc00118, 0xc10111, 0xc10112, 0xc10113, 0xc10114, 0xc10115, 0xc10116, 0xc10117, 0xc10118,
+          		0xc80111, 0xc80112, 0xc80113, 0xc80114, 0xc80115, 0xc80116, 0xc80117, 0xc80118, 0xc90111, 0xc90112, 0xc90113, 0xc90114, 0xc90115, 0xc90116, 0xc90117, 0xc90118,
+          		0xca0111, 0xca0112, 0xca0113, 0xca0114, 0xca0115, 0xca0116, 0xca0117, 0xca0118, 0xcd0111, 0xcd0112, 0xcd0113, 0xcd0114, 0xcd0115, 0xcd0116, 0xcd0117, 0xcd0118,
+          		0xd20111, 0xd20112, 0xd20113, 0xd20114, 0xd20115, 0xd20116, 0xd20117, 0xd20118, 0xd50111, 0xd50112, 0xd50113, 0xd50114, 0xd50115, 0xd50116, 0xd50117, 0xd50118,
+          		0xda0111, 0xda0112, 0xda0113, 0xda0114, 0xda0115, 0xda0116, 0xda0117, 0xda0118, 0xdb0111, 0xdb0112, 0xdb0113, 0xdb0114, 0xdb0115, 0xdb0116, 0xdb0117, 0xdb0118,
+          		0xee0111, 0xee0112, 0xee0113, 0xee0114, 0xee0115, 0xee0116, 0xee0117, 0xee0118, 0xf00111, 0xf00112, 0xf00113, 0xf00114, 0xf00115, 0xf00116, 0xf00117, 0xf00118,
+          		0xf20111, 0xf20112, 0xf20113, 0xf20114, 0xf20115, 0xf20116, 0xf20117, 0xf20118, 0xf30111, 0xf30112, 0xf30113, 0xf30114, 0xf30115, 0xf30116, 0xf30117, 0xf30118,
+          		0xff0111, 0xff0112, 0xff0113, 0xff0114, 0xff0115, 0xff0116, 0xff0117, 0xff0118, 0xcb0119, 0xcb011a, 0xcb011b, 0xcb011c, 0xcc0119, 0xcc011a, 0xcc011b, 0xcc011c,
+          		0xd30119, 0xd3011a, 0xd3011b, 0xd3011c, 0xd40119, 0xd4011a, 0xd4011b, 0xd4011c, 0xd60119, 0xd6011a, 0xd6011b, 0xd6011c, 0xdd0119, 0xdd011a, 0xdd011b, 0xdd011c,
+          		0xde0119, 0xde011a, 0xde011b, 0xde011c, 0xdf0119, 0xdf011a, 0xdf011b, 0xdf011c, 0xf10119, 0xf1011a, 0xf1011b, 0xf1011c, 0xf40119, 0xf4011a, 0xf4011b, 0xf4011c,
+          		0xf50119, 0xf5011a, 0xf5011b, 0xf5011c, 0xf60119, 0xf6011a, 0xf6011b, 0xf6011c, 0xf70119, 0xf7011a, 0xf7011b, 0xf7011c, 0xf80119, 0xf8011a, 0xf8011b, 0xf8011c,
+          		0xfa0119, 0xfa011a, 0xfa011b, 0xfa011c, 0xfb0119, 0xfb011a, 0xfb011b, 0xfb011c, 0xfc0119, 0xfc011a, 0xfc011b, 0xfc011c, 0xfd0119, 0xfd011a, 0xfd011b, 0xfd011c,
+          		0xfe0119, 0xfe011a, 0xfe011b, 0xfe011c, 0x02011d, 0x02011e, 0x03011d, 0x03011e, 0x04011d, 0x04011e, 0x05011d, 0x05011e, 0x06011d, 0x06011e, 0x07011d, 0x07011e,
+          		0x08011d, 0x08011e, 0x0b011d, 0x0b011e, 0x0c011d, 0x0c011e, 0x0e011d, 0x0e011e, 0x0f011d, 0x0f011e, 0x10011d, 0x10011e, 0x11011d, 0x11011e, 0x12011d, 0x12011e,
+          		0x13011d, 0x13011e, 0x14011d, 0x14011e, 0x15011d, 0x15011e, 0x17011d, 0x17011e, 0x18011d, 0x18011e, 0x19011d, 0x19011e, 0x1a011d, 0x1a011e, 0x1b011d, 0x1b011e,
+          		0x1c011d, 0x1c011e, 0x1d011d, 0x1d011e, 0x1e011d, 0x1e011e, 0x1f011d, 0x1f011e, 0x7f011d, 0x7f011e, 0xdc011d, 0xdc011e, 0xf9011d, 0xf9011e, 0x0000fe, 0x0000ff,
+          		0x0a0111, 0x0a0112, 0x0a0113, 0x0a0114, 0x0a0115, 0x0a0116, 0x0a0117, 0x0a0118, 0x0d0111, 0x0d0112, 0x0d0113, 0x0d0114, 0x0d0115, 0x0d0116, 0x0d0117, 0x0d0118,
+          		0x160111, 0x160112, 0x160113, 0x160114, 0x160115, 0x160116, 0x160117, 0x160118, 0x000200, 0x000200, 0x000200, 0x000200, 0x000200, 0x000200, 0x000200, 0x000200,
+          	}
+      - doc: |-
+          huffAccept reports, per state, whether a string may end there: at most
+          seven bits of padding, all ones, a prefix of EOS.
+        name: huffAccept
+        value: |-
+          [huffStates]bool{
+          		0:  true,
+          		16: true,
+          		24: true,
+          		28: true,
+          		30: true,
+          		36: true,
+          		54: true,
+          		76: true,
+          	}
+    name: huffTable
+  - grouped: true
+    items:
+      - doc: staticBytes holds every name and value of the static table, concatenated.
+        name: staticBytes
+        value: |-
+          [...]byte{
+          		0x3a, 0x61, 0x75, 0x74, 0x68, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x3a, 0x6d, 0x65, 0x74, 0x68, 0x6f,
+          		0x64, 0x47, 0x45, 0x54, 0x3a, 0x6d, 0x65, 0x74, 0x68, 0x6f, 0x64, 0x50, 0x4f, 0x53, 0x54, 0x3a,
+          		0x70, 0x61, 0x74, 0x68, 0x2f, 0x3a, 0x70, 0x61, 0x74, 0x68, 0x2f, 0x69, 0x6e, 0x64, 0x65, 0x78,
+          		0x2e, 0x68, 0x74, 0x6d, 0x6c, 0x3a, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x68, 0x74, 0x74, 0x70,
+          		0x3a, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x73, 0x74, 0x61,
+          		0x74, 0x75, 0x73, 0x32, 0x30, 0x30, 0x3a, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x32, 0x30, 0x34,
+          		0x3a, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x32, 0x30, 0x36, 0x3a, 0x73, 0x74, 0x61, 0x74, 0x75,
+          		0x73, 0x33, 0x30, 0x34, 0x3a, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x34, 0x30, 0x30, 0x3a, 0x73,
+          		0x74, 0x61, 0x74, 0x75, 0x73, 0x34, 0x30, 0x34, 0x3a, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x35,
+          		0x30, 0x30, 0x61, 0x63, 0x63, 0x65, 0x70, 0x74, 0x2d, 0x63, 0x68, 0x61, 0x72, 0x73, 0x65, 0x74,
+          		0x61, 0x63, 0x63, 0x65, 0x70, 0x74, 0x2d, 0x65, 0x6e, 0x63, 0x6f, 0x64, 0x69, 0x6e, 0x67, 0x67,
+          		0x7a, 0x69, 0x70, 0x2c, 0x20, 0x64, 0x65, 0x66, 0x6c, 0x61, 0x74, 0x65, 0x61, 0x63, 0x63, 0x65,
+          		0x70, 0x74, 0x2d, 0x6c, 0x61, 0x6e, 0x67, 0x75, 0x61, 0x67, 0x65, 0x61, 0x63, 0x63, 0x65, 0x70,
+          		0x74, 0x2d, 0x72, 0x61, 0x6e, 0x67, 0x65, 0x73, 0x61, 0x63, 0x63, 0x65, 0x70, 0x74, 0x61, 0x63,
+          		0x63, 0x65, 0x73, 0x73, 0x2d, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x6f, 0x6c, 0x2d, 0x61, 0x6c, 0x6c,
+          		0x6f, 0x77, 0x2d, 0x6f, 0x72, 0x69, 0x67, 0x69, 0x6e, 0x61, 0x67, 0x65, 0x61, 0x6c, 0x6c, 0x6f,
+          		0x77, 0x61, 0x75, 0x74, 0x68, 0x6f, 0x72, 0x69, 0x7a, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x63, 0x61,
+          		0x63, 0x68, 0x65, 0x2d, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x6f, 0x6c, 0x63, 0x6f, 0x6e, 0x74, 0x65,
+          		0x6e, 0x74, 0x2d, 0x64, 0x69, 0x73, 0x70, 0x6f, 0x73, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x63, 0x6f,
+          		0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x65, 0x6e, 0x63, 0x6f, 0x64, 0x69, 0x6e, 0x67, 0x63, 0x6f,
+          		0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x61, 0x6e, 0x67, 0x75, 0x61, 0x67, 0x65, 0x63, 0x6f,
+          		0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68, 0x63, 0x6f, 0x6e, 0x74,
+          		0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x63, 0x6f, 0x6e, 0x74,
+          		0x65, 0x6e, 0x74, 0x2d, 0x72, 0x61, 0x6e, 0x67, 0x65, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74,
+          		0x2d, 0x74, 0x79, 0x70, 0x65, 0x63, 0x6f, 0x6f, 0x6b, 0x69, 0x65, 0x64, 0x61, 0x74, 0x65, 0x65,
+          		0x74, 0x61, 0x67, 0x65, 0x78, 0x70, 0x65, 0x63, 0x74, 0x65, 0x78, 0x70, 0x69, 0x72, 0x65, 0x73,
+          		0x66, 0x72, 0x6f, 0x6d, 0x68, 0x6f, 0x73, 0x74, 0x69, 0x66, 0x2d, 0x6d, 0x61, 0x74, 0x63, 0x68,
+          		0x69, 0x66, 0x2d, 0x6d, 0x6f, 0x64, 0x69, 0x66, 0x69, 0x65, 0x64, 0x2d, 0x73, 0x69, 0x6e, 0x63,
+          		0x65, 0x69, 0x66, 0x2d, 0x6e, 0x6f, 0x6e, 0x65, 0x2d, 0x6d, 0x61, 0x74, 0x63, 0x68, 0x69, 0x66,
+          		0x2d, 0x72, 0x61, 0x6e, 0x67, 0x65, 0x69, 0x66, 0x2d, 0x75, 0x6e, 0x6d, 0x6f, 0x64, 0x69, 0x66,
+          		0x69, 0x65, 0x64, 0x2d, 0x73, 0x69, 0x6e, 0x63, 0x65, 0x6c, 0x61, 0x73, 0x74, 0x2d, 0x6d, 0x6f,
+          		0x64, 0x69, 0x66, 0x69, 0x65, 0x64, 0x6c, 0x69, 0x6e, 0x6b, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x69,
+          		0x6f, 0x6e, 0x6d, 0x61, 0x78, 0x2d, 0x66, 0x6f, 0x72, 0x77, 0x61, 0x72, 0x64, 0x73, 0x70, 0x72,
+          		0x6f, 0x78, 0x79, 0x2d, 0x61, 0x75, 0x74, 0x68, 0x65, 0x6e, 0x74, 0x69, 0x63, 0x61, 0x74, 0x65,
+          		0x70, 0x72, 0x6f, 0x78, 0x79, 0x2d, 0x61, 0x75, 0x74, 0x68, 0x6f, 0x72, 0x69, 0x7a, 0x61, 0x74,
+          		0x69, 0x6f, 0x6e, 0x72, 0x61, 0x6e, 0x67, 0x65, 0x72, 0x65, 0x66, 0x65, 0x72, 0x65, 0x72, 0x72,
+          		0x65, 0x66, 0x72, 0x65, 0x73, 0x68, 0x72, 0x65, 0x74, 0x72, 0x79, 0x2d, 0x61, 0x66, 0x74, 0x65,
+          		0x72, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x73, 0x65, 0x74, 0x2d, 0x63, 0x6f, 0x6f, 0x6b, 0x69,
+          		0x65, 0x73, 0x74, 0x72, 0x69, 0x63, 0x74, 0x2d, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72,
+          		0x74, 0x2d, 0x73, 0x65, 0x63, 0x75, 0x72, 0x69, 0x74, 0x79, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x66,
+          		0x65, 0x72, 0x2d, 0x65, 0x6e, 0x63, 0x6f, 0x64, 0x69, 0x6e, 0x67, 0x75, 0x73, 0x65, 0x72, 0x2d,
+          		0x61, 0x67, 0x65, 0x6e, 0x74, 0x76, 0x61, 0x72, 0x79, 0x76, 0x69, 0x61, 0x77, 0x77, 0x77, 0x2d,
+          		0x61, 0x75, 0x74, 0x68, 0x65, 0x6e, 0x74, 0x69, 0x63, 0x61, 0x74, 0x65,
+          	}
+      - doc: |-
+          staticOffsets locates each entry's name and value in staticBytes: four
+          numbers per entry — name offset, name length, value offset, value length
+          — the entry of index i at 4*(i-1).
+        name: staticOffsets
+        value: |-
+          [staticLen * 4]uint16{
+          		0, 10, 10, 0, 10, 7, 17, 3, 20, 7, 27, 4, 31, 5, 36, 1, 37, 5, 42, 11, 53, 7, 60, 4, 64, 7, 71, 5, 76, 7, 83, 3,
+          		86, 7, 93, 3, 96, 7, 103, 3, 106, 7, 113, 3, 116, 7, 123, 3, 126, 7, 133, 3, 136, 7, 143, 3, 146, 14, 160, 0, 160, 15, 175, 13,
+          		188, 15, 203, 0, 203, 13, 216, 0, 216, 6, 222, 0, 222, 27, 249, 0, 249, 3, 252, 0, 252, 5, 257, 0, 257, 13, 270, 0, 270, 13, 283, 0,
+          		283, 19, 302, 0, 302, 16, 318, 0, 318, 16, 334, 0, 334, 14, 348, 0, 348, 16, 364, 0, 364, 13, 377, 0, 377, 12, 389, 0, 389, 6, 395, 0,
+          		395, 4, 399, 0, 399, 4, 403, 0, 403, 6, 409, 0, 409, 7, 416, 0, 416, 4, 420, 0, 420, 4, 424, 0, 424, 8, 432, 0, 432, 17, 449, 0,
+          		449, 13, 462, 0, 462, 8, 470, 0, 470, 19, 489, 0, 489, 13, 502, 0, 502, 4, 506, 0, 506, 8, 514, 0, 514, 12, 526, 0, 526, 18, 544, 0,
+          		544, 19, 563, 0, 563, 5, 568, 0, 568, 7, 575, 0, 575, 7, 582, 0, 582, 11, 593, 0, 593, 6, 599, 0, 599, 10, 609, 0, 609, 25, 634, 0,
+          		634, 17, 651, 0, 651, 10, 661, 0, 661, 4, 665, 0, 665, 3, 668, 0, 668, 16, 684, 0,
+          	}
+      - doc: |-
+          staticSpans is, per name length, where the entries of that name length
+          are in staticSorted: a start and an end index, the length's pair at
+          2*length.
+        name: staticSpans
+        value: |-
+          [(staticNameMax + 1) * 2]uint8{
+          		0, 0, 0, 0, 0, 0, 0, 2, 2, 8, 8, 12, 12, 16, 16, 30, 30, 33, 33, 33, 33, 36, 36, 37, 37, 39, 39, 45, 45, 47, 47, 49,
+          		49, 53, 53, 55, 55, 56, 56, 59, 59, 59, 59, 59, 59, 59, 59, 59, 59, 59, 59, 60, 60, 60, 60, 61,
+          	}
+      - doc: |-
+          staticSorted is the static table's indices grouped by name length, the
+          lowest index of a name first.
+        name: staticSorted
+        value: |-
+          [61]uint8{
+          		21, 60, 33, 34, 37, 38, 45, 59, 4, 5, 22, 50, 19, 32, 35, 54, 2, 3, 6, 7,
+          		8, 9, 10, 11, 12, 13, 14, 36, 51, 52, 39, 42, 46, 1, 55, 58, 53, 31, 47, 18,
+          		23, 24, 30, 41, 44, 15, 28, 16, 17, 26, 27, 29, 61, 40, 57, 48, 25, 43, 49, 56,
+          		20,
+          	}
+    name: staticBytes
+  - doc: |-
+      valueStop is what a field value may not hold: NUL, LF and CR, RFC 9113
+      §8.2.1.
+    items:
+      - name: valueStop
+        value: swar.NewSet(asciiLF, asciiCR, 1, false)
+    name: valueStop
+  - doc: |-
+      refusalPreface is the whole answer to a connection speaking a version the
+      group does not serve: a 400, and the connection closed.
+    items:
+      - name: refusalPreface
+        value: "[]byte(\"HTTP/1.1 400 Bad Request\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n\")"
+    name: refusalPreface
+  - doc: |-
+      defaultLaneLimits are the bounds a lane falls back on, every field the
+      protocol's or the group's default, so resolving them cannot fail.
+    items:
+      - name: defaultLaneLimits
+        value: |-
+          corehttp2.LimitsValue{
+          	MaxStreams: corehttp2.DefaultMaxStreams, ReceivePerStream: corehttp2.DefaultReceivePerStream,
+          	ReceivePerConn: 4 * corehttp2.DefaultReceivePerStream, MaxFrame: corehttp2.DefaultMaxFrame,
+          	HeaderTable: corehttp2.DefaultHeaderTable, MaxHeaderList: corehttp2.DefaultMaxHeaderList,
+          }
+    name: defaultLaneLimits
+  - doc: "The package's vars: a 503's field and the drain's Post registry."
+    grouped: true
+    items:
+      - doc: retryAfter is the field a 503 for a full queue carries.
+        name: retryAfter
+        value: "[]byte(\"Retry-After: 1\\r\\n\")"
+      - doc: drainKeys numbers the drain's Post arguments.
+        name: drainKeys
+        type: atomic.Uintptr
+      - doc: |-
+          drainRegistry maps a drain's Post argument to its lane: an argument is
+          an integer and the registered op no closure, so the lane is found by a
+          key.
+        name: drainRegistry
+        type: sync.Map
+    name: retryAfter
+  - doc: |-
+      The pseudo-fields of a request, RFC 9113 §8.3.1, and the regular fields the
+      mapping reads.
+    grouped: true
+    items:
+      - doc: pseudoMethod is the method.
+        name: pseudoMethod
+        value: "[]byte(\":method\")"
+      - doc: pseudoPath is the target.
+        name: pseudoPath
+        value: "[]byte(\":path\")"
+      - doc: pseudoScheme is the scheme.
+        name: pseudoScheme
+        value: "[]byte(\":scheme\")"
+      - doc: pseudoAuthority is the authority.
+        name: pseudoAuthority
+        value: "[]byte(\":authority\")"
+      - doc: fieldAuthorization is the Authorization field.
+        name: fieldAuthorization
+        value: "[]byte(\"authorization\")"
+      - doc: fieldContentLength is the Content-Length field.
+        name: fieldContentLength
+        value: "[]byte(\"content-length\")"
+      - doc: fieldCookie is the Cookie field, split over several by §8.2.3.
+        name: fieldCookie
+        value: "[]byte(\"cookie\")"
+      - doc: fieldExpect is the Expect field, refused by the profile.
+        name: fieldExpect
+        value: "[]byte(\"expect\")"
+      - doc: fieldTE is the TE field, which may hold "trailers" alone.
+        name: fieldTE
+        value: "[]byte(\"te\")"
+      - doc: valueTrailers is what a TE field may hold.
+        name: valueTrailers
+        value: "[]byte(\"trailers\")"
+      - doc: |-
+          fieldConnection through fieldUpgrade are the connection-specific fields
+          RFC 9113 §8.2.2 calls malformed.
+        name: fieldConnection
+        value: "[]byte(\"connection\")"
+      - name: fieldKeepAlive
+        value: "[]byte(\"keep-alive\")"
+      - name: fieldProxyConnection
+        value: "[]byte(\"proxy-connection\")"
+      - name: fieldTransferEncoding
+        value: "[]byte(\"transfer-encoding\")"
+      - name: fieldUpgrade
+        value: "[]byte(\"upgrade\")"
+      - doc: methodConnect is the method the profile refuses.
+        name: methodConnect
+        value: "[]byte(\"CONNECT\")"
+      - doc: cookieSep joins a Cookie field's crumbs, §8.2.3.
+        name: cookieSep
+        value: "[]byte(\"; \")"
+    name: pseudoMethod
+  - doc: methodHEAD is the one method whose answer has no body.
+    items:
+      - name: methodHEAD
+        value: "[]byte(\"HEAD\")"
+    name: methodHEAD
