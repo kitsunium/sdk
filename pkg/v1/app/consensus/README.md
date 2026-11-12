@@ -60,6 +60,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func ParseMessage\(frame \[\]byte, m \*MessageValue\) error](<#ParseMessage>)
 - [func ParseSnapshotMeta\(b \[\]byte, m \*SnapshotMetaValue\) error](<#ParseSnapshotMeta>)
 - [func ParseToken\(b \[\]byte\) \(TokenValue, error\)](<#ParseToken>)
+- [func Preflight\(dir string, opts PreflightOptions\) \(PreflightValue, error\)](<#Preflight>)
 - [func ProposeAs\[R any\]\(ctx context.Context, r Replicated, data \[\]byte\) \(TokenValue, R, error\)](<#ProposeAs>)
 - [func ReceiptMessage\(old ClusterID, next ClusterID, voter NodeID\) \[\]byte](<#ReceiptMessage>)
 - [func Recover\(d DataDir, newCluster ClusterID, members \[\]MemberValue, opt \*RecoverOptions\) error](<#Recover>)
@@ -209,6 +210,9 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type PositionValue](<#PositionValue>)
 - [type Preallocate](<#Preallocate>)
 - [type PreconditionSpec](<#PreconditionSpec>)
+- [type PreflightOptions](<#PreflightOptions>)
+- [type PreflightValue](<#PreflightValue>)
+- [type PreflightVerdict](<#PreflightVerdict>)
 - [type QuarantineExit](<#QuarantineExit>)
 - [type QuarantineOptions](<#QuarantineOptions>)
 - [type ReadMode](<#ReadMode>)
@@ -1483,6 +1487,15 @@ func ParseToken(b []byte) (TokenValue, error)
 ```
 
 ParseToken decodes a token.
+
+<a name="Preflight"></a>
+## func [Preflight](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+```go
+func Preflight(dir string, opts PreflightOptions) (PreflightValue, error)
+```
+
+Preflight measures the fdatasync latency of the disk under dir on a stopped node, writing a scratch file it removes, and returns the verdicts of the rules the measurement or the platform breaks; it refuses DATA\_DIR\_LOCKED a directory a live node holds.
 
 <a name="ProposeAs"></a>
 ## func [ProposeAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -3558,6 +3571,85 @@ type PreconditionSpec struct {
 	// Generation is the contract or cluster-version generation an operation
 	// expects to replace.
 	Generation uint64
+}
+```
+
+<a name="PreflightOptions"></a>
+## type [PreflightOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type PreflightOptions = svcconsensus.PreflightOptions
+```
+
+PreflightOptions is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PreflightOptions`, declared as:
+
+```go
+type PreflightOptions struct {
+	// Syncs is the number of records written, each synced; 0 is 256. It is
+	// refused negative or above 65536.
+	Syncs           int
+	// RecordBytes is the size of one record; 0 is 4096. It is refused
+	// negative, and Syncs records of it above DefaultSegmentBytes.
+	RecordBytes     int
+	// Timing is the contract judged against the measurement; the zero value
+	// judges nothing (ADR 0031).
+	Timing          coreconsensus.TimingContractSpec
+	// LogReserveBytes is the reserve the free space is judged against; 0 is
+	// Config's default, 256 MiB.
+	LogReserveBytes int64
+	// Clock times each sync; nil is clock.System.
+	Clock           clock.Timed
+	// Logger receives each verdict at Warn; nil logs nothing.
+	Logger          corelogger.Logger
+}
+```
+
+<a name="PreflightValue"></a>
+## type [PreflightValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type PreflightValue = svcconsensus.PreflightValue
+```
+
+PreflightValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PreflightValue`, declared as:
+
+```go
+type PreflightValue struct {
+	FsyncP50    time.Duration
+	FsyncP99    time.Duration
+	FsyncMax    time.Duration
+	// FreeBytes is what an unprivileged writer may still use there, -1 when unknown.
+	FreeBytes   int64
+	// Flock is false where the platform has no flock(2), and NewDataDir refuses (ADR 0144).
+	Flock       bool
+	// UserTimeout is false where the transport sets no kernel bound on
+	// unacknowledged bytes (the BSDs, illumos, Solaris): a dead stream is
+	// closed by the read-silence bound alone (#1116).
+	UserTimeout bool
+	// Verdicts lists each rule broken, empty when none is.
+	Verdicts    []PreflightVerdict
+}
+```
+
+<a name="PreflightVerdict"></a>
+## type [PreflightVerdict](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type PreflightVerdict = svcconsensus.PreflightVerdict
+```
+
+PreflightVerdict is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PreflightVerdict`, declared as:
+
+```go
+type PreflightVerdict struct {
+	Field string
+	Rule  string
 }
 ```
 

@@ -1761,6 +1761,13 @@ rules:
       - "internal/service/app/resilience/breaker.go"
       - "**/internal/service/app/lifecycle/supervise.go"
       - "internal/service/app/lifecycle/supervise.go"
+      # service/app/consensus.Preflight(dir, opts PreflightOptions) is the
+      # same class (#1117): an offline check a product runs once before a node
+      # starts, its options a composite literal whose zero fields are the
+      # defaults, and its PreflightValue returned by value as Inspect's report
+      # is. The helpers behind it take both by pointer. Scoped to the one file.
+      - "**/internal/service/app/consensus/preflight.go"
+      - "internal/service/app/consensus/preflight.go"
       # service/app/forward.Config (168 bytes) is the published configuration
       # New takes BY VALUE, as NewCircuitBreaker takes its config: a composite
       # literal at the call site whose zero fields are the documented defaults

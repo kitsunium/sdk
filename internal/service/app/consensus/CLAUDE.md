@@ -9,7 +9,8 @@ in checksummed chunks, the segmented file log and its recovery procedure,
 the no-space guard over the log quota and the free space (`space.go`),
 the file snapshot store, the data directory with its lock, stamp and stop
 markers, the offline operations (`Init`, `Recover`, `RestoreSnapshot`,
-`Inspect`, `ClearQuarantine`, `ClearQuarantineWith`), what a non-member observer reads and
+`Inspect`, `ClearQuarantine`, `ClearQuarantineWith`, and `Preflight`, which measures the disk's
+fdatasync against the timing contract, `preflight.go`), what a non-member observer reads and
 rebuilds from (`Node.ReadCommitted`, COMPACTED below the log's first
 index; `OpenSnapshot`, SNAPSHOT_CORRUPT at the end of a stream that
 differs from its metadata; `ImportObserved`, a snapshot and the tail read
@@ -945,6 +946,14 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   terms; the default 1–2 s at most 4.8 s, and 11.4 s with syncs of
   500 ms–1 s (#598). Keep `ElectionTimeoutMin` above three times the p99
   of `consensus_fsync_latency_seconds`.
+  `Preflight` measures that p99 before a node runs, on a stopped node's
+  directory or an empty one, and names `InitialTiming.ElectionTimeoutMin`
+  when the rule fails; it refuses nothing (D17). Its scratch file is a
+  `.tmp` of the log directory, which recovery deletes, and it takes the
+  directory's LOCK only where one exists, so an empty directory is left
+  as it was (#1117, `TestPreflightMeasuresTheDiskAndLeavesNothingBehind`,
+  `TestPreflightNamesAnElectionTimeoutUnderThreeSyncs`,
+  `TestPreflightRefusesALockedDirectory`).
 - Forward a removal of the leader without moving leadership first: the
   leader refuses to remove itself, and the call failed MEMBERSHIP_INVALID
   on a follower only. `Remove` transfers to this node (or another voter),

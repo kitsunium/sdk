@@ -871,15 +871,7 @@
       "dir": "service/app/consensus",
       "layer": "service",
       "family": "app",
-      "doc": "Package consensus is the Raft engine of ADR 0152 and everything it ships\naround the step function of package raft: the event loop that drives it,\nthe storage actor that makes a write durable before any reply that depends\non it leaves, the apply goroutine, and snapshots cut, sent and installed in\nchecksummed chunks.\n\nA [Node] is built by [NewNode] over a [Config]: a state machine, a log, a\nsnapshot store and a transport. The shipped storage is a [DataDir] — a\nlock, a stamp, the segmented [fileLog], the [fileSnapshots] and the stop\nmarkers — and the shipped transport is the mutual-TLS [TCPTransport];\n[MemoryLog], [MemorySnapshots] and [MemoryNetwork] stand in for them in\ntests.\n\nA failed write or sync stops the node with STORAGE_FAILED and is never\nretried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],\n[Inspect] and [ClearQuarantine] work on a stopped node's directory only.\n"
-    },
-    {
-      "path": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "multi",
-      "dir": "service/app/consensus/multi",
-      "layer": "service",
-      "family": "app",
-      "doc": "Package multi packs many small commands into one consensus entry and splits\ntheir results, on top of the Replicated port and with no change to the\nengine (ADR 0152 D6, D19, #926). A [Packer] packs the commands its callers\npropose at one moment into one length-prefixed body and issues ONE\nPropose; a [MultiMachine] on every node splits that body and applies the\ncommands in order through its inner BatchingStateMachine, as one batch,\nand the Packer answers each caller with the entry's token, the command's\nindex in it and its own result.\n\nAn entry carries a header, a slot, a checksum and an apply result\nwhatever its size: for commands of a few dozen bytes, the entry count,\nnot the bytes, bounds a leader's turn and a follower's parse.\n"
+      "doc": "Package consensus is the Raft engine of ADR 0152 and everything it ships\naround the step function of package raft: the event loop that drives it,\nthe storage actor that makes a write durable before any reply that depends\non it leaves, the apply goroutine, and snapshots cut, sent and installed in\nchecksummed chunks.\n\nA [Node] is built by [NewNode] over a [Config]: a state machine, a log, a\nsnapshot store and a transport. The shipped storage is a [DataDir] — a\nlock, a stamp, the segmented [fileLog], the [fileSnapshots] and the stop\nmarkers — and the shipped transport is the mutual-TLS [TCPTransport];\n[MemoryLog], [MemorySnapshots] and [MemoryNetwork] stand in for them in\ntests.\n\nA failed write or sync stops the node with STORAGE_FAILED and is never\nretried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],\n[Inspect], [ClearQuarantine] and [Preflight] work on a stopped node's\ndirectory only.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -2790,31 +2782,6 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.BatchSender",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
-      "name": "BatchSender",
-      "spelled": "interface{SendShared(to NodeID, header []byte, body []byte)}",
-      "canonical": "interface{SendShared(to github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, header []byte, body []byte)}",
-      "doc": "BatchSender is the sibling of a transport that sends one frame as a\nheader and a body several peers share: the leader encodes the entries\nof an append once per Ready and hands the same body to every follower\nwhose append carries them (#912). A node that finds it sends every\nappend with entries through it, and every other frame through Send.\n",
-      "file": "core/app/consensus/gen_ports.go",
-      "layer": "core",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.BatchSender.SendShared",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
-      "name": "SendShared",
-      "recv": "BatchSender",
-      "spelled": "func(to NodeID, header []byte, body []byte)",
-      "canonical": "func(to github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, header []byte, body []byte)",
-      "doc": "SendShared hands over the frame header then body, the bytes Send\nwould have been handed. It never blocks and may drop, as Send; the\ntransport owns header after the call. body is shared: neither the\ntransport nor the caller mutates it, and several peers' queues may\nhold it at once.\n",
-      "file": "core/app/consensus/gen_ports.go",
-      "layer": "core",
-      "family": "app"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.BatchingStateMachine",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -4590,7 +4557,7 @@
       "recv": "LogReader",
       "spelled": "func(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)",
       "canonical": "func(lo uint64, hi uint64, maxBytes int, dst []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) ([]github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, error)",
-      "doc": "Entries returns entries in [lo, hi), at most maxBytes, and always at\nleast one entry when lo < hi, even above maxBytes. lo below first is\nCOMPACTED. The returned entries own their Data, valid after the call and\nnever written by the store, whatever it appends, truncates or compacts\nlater: the caller keeps it without a copy. Entry data may share one\nbuffer the store read for the whole call, each payload capped at its own\nlength, so a caller that keeps one entry's data keeps that buffer.\n",
+      "doc": "Entries returns entries in [lo, hi), at most maxBytes, and always at\nleast one entry when lo < hi, even above maxBytes. lo below first is\nCOMPACTED.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -5554,7 +5521,7 @@
       "recv": "Replicated",
       "spelled": "func(ctx context.Context) (TokenValue, error)",
       "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, error)",
-      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call, with the token of the applied index.\nReads queued in one turn share one round.\n",
+      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call, with the token of the applied index.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -63567,7 +63534,7 @@
       "recv": "Config",
       "spelled": "func(peers int) int64",
       "canonical": "func(peers int) int64",
-      "doc": "MemoryBudget is the node's memory budget with two peers, the sum of its\nbounds (D14) and of the file log's index: 4 bytes for each record\nMaxLogBytes holds at most, one of 56 bytes, an empty payload's.\n",
+      "doc": "MemoryBudget is the node's memory budget with two peers, the sum of its\nbounds (D14).\n",
       "file": "service/app/consensus/config.go",
       "layer": "service",
       "family": "app"
@@ -63641,8 +63608,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "DataDirOptions",
-      "spelled": "struct{SegmentBytes int64; Preallocate Preallocate; SyncPath SyncPath; RuntimeDir string}",
-      "canonical": "struct{SegmentBytes int64; Preallocate github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate; SyncPath github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath; RuntimeDir string}",
+      "spelled": "struct{SegmentBytes int64; RuntimeDir string}",
+      "canonical": "struct{SegmentBytes int64; RuntimeDir string}",
       "fields": [
         {
           "name": "SegmentBytes",
@@ -63650,22 +63617,12 @@
           "doc": "SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.\n"
         },
         {
-          "name": "Preallocate",
-          "type": "Preallocate",
-          "doc": "Preallocate is how a new segment is given its fixed size: zeros\nwritten (PreallocateZeroFill, the zero value) or fallocate(2)\n(PreallocateFallocate). Either way the segment occupies its whole\nsize, as the no-space guard counts it. Another value is refused\nCONSENSUS_MISCONFIGURED.\n"
-        },
-        {
-          "name": "SyncPath",
-          "type": "SyncPath",
-          "doc": "SyncPath is how a batch's records are made durable: pwrite(2) then\nfdatasync(2) (SyncFdatasync, the zero value) or one pwritev2(2)\nflagged RWF_DSYNC (SyncRWFDsync). Either way a batch has the same two\ndurability points, its end record written once the rest is durable.\nAnother value is refused CONSENSUS_MISCONFIGURED.\n"
-        },
-        {
           "name": "RuntimeDir",
           "type": "string",
           "doc": "RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED\nmarker (R9-05); empty is /run/kitsunium-consensus on Linux, and\nkitsunium-consensus in the temporary directory elsewhere. It must\noutlive the process within the boot and be gone at the next one: a\nhost tmpfs, or systemd's RuntimeDirectory= with\nRuntimeDirectoryPreserve=yes. The process must be able to create it\nand write in it: NewDataDirWith refuses CONSENSUS_MISCONFIGURED\notherwise, naming the path.\n"
         }
       ],
-      "doc": "DataDirOptions tunes NewDataDirWith: the size of a log segment, how a\nnew one is preallocated, how a batch is made durable, and the\nboot-scoped directory of the second STORAGE_FAILED marker.\n",
+      "doc": "DataDirOptions tunes NewDataDirWith: the size of a log segment and the\nboot-scoped directory of the second STORAGE_FAILED marker.\n",
       "file": "service/app/consensus/datadir.go",
       "layer": "service",
       "family": "app"
@@ -64580,7 +64537,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context) (coreconsensus.TokenValue, error)",
       "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, error)",
-      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call (D9).\nReads queued in one turn share one round.\n",
+      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call (D9).\n",
       "file": "service/app/consensus/ops.go",
       "layer": "service",
       "family": "app"
@@ -65070,40 +65027,126 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Preflight",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "Preflight",
+      "spelled": "func(dir string, opts PreflightOptions) (PreflightValue, error)",
+      "canonical": "func(dir string, opts github.com/kitsunium/sdk/internal/service/app/consensus.PreflightOptions) (github.com/kitsunium/sdk/internal/service/app/consensus.PreflightValue, error)",
+      "doc": "Preflight measures, on a stopped node, the disk the log of dir would trust\n(D16): it writes opts.Syncs records of opts.RecordBytes, each followed by\nthe log's own fdatasync, into a scratch file it creates, zero-filled at\ntheir total size like a segment, in dir's log directory (dir itself when\nthere is none yet, named preflight-*.tmp, which the log's recovery\ndeletes should a crash leave one), then removes it: the directory holds\nafter it what it held before. dir must exist. Where dir holds a LOCK,\nPreflight takes it as NewDataDir does, so a directory a live node holds\nis refused DATA_DIR_LOCKED; where the platform has no flock(2) (illumos,\nSolaris) it takes none and reports Flock false. It refuses nothing on\nwhat it measures: the verdicts are returned, and logged at Warn to\nopts.Logger, for the product to decide (D17). A failed write or sync is\nSTORAGE_FAILED, options out of their bounds CONSENSUS_MISCONFIGURED.\n",
+      "file": "service/app/consensus/preflight.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreflightOptions",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "Preallocate",
-      "spelled": "uint8",
-      "canonical": "uint8",
-      "doc": "Preallocate is how the file log gives a new segment its fixed size\nbefore it holds a record (D4, #922).\n",
-      "file": "service/app/consensus/datadir.go",
+      "name": "PreflightOptions",
+      "spelled": "struct{Syncs int; RecordBytes int; Timing coreconsensus.TimingContractSpec; LogReserveBytes int64; Clock clock.Timed; Logger corelogger.Logger}",
+      "canonical": "struct{Syncs int; RecordBytes int; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; LogReserveBytes int64; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Logger github.com/kitsunium/sdk/internal/core/observe/logger.Logger}",
+      "fields": [
+        {
+          "name": "Syncs",
+          "type": "int",
+          "doc": "Syncs is the number of records written, each synced; 0 is 256. It is\nrefused negative or above 65536.\n"
+        },
+        {
+          "name": "RecordBytes",
+          "type": "int",
+          "doc": "RecordBytes is the size of one record; 0 is 4096. It is refused\nnegative, and Syncs records of it above DefaultSegmentBytes.\n"
+        },
+        {
+          "name": "Timing",
+          "type": "coreconsensus.TimingContractSpec",
+          "doc": "Timing is the contract judged against the measurement; the zero value\njudges nothing (ADR 0031).\n"
+        },
+        {
+          "name": "LogReserveBytes",
+          "type": "int64",
+          "doc": "LogReserveBytes is the reserve the free space is judged against; 0 is\nConfig's default, 256 MiB.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock times each sync; nil is clock.System.\n"
+        },
+        {
+          "name": "Logger",
+          "type": "corelogger.Logger",
+          "doc": "Logger receives each verdict at Warn; nil logs nothing.\n"
+        }
+      ],
+      "doc": "PreflightOptions tunes Preflight: how much it writes, the timing contract\nit judges the measurement against, and where its time and its verdicts\ngo.\n",
+      "file": "service/app/consensus/preflight.go",
       "layer": "service",
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateFallocate",
-      "kind": "const",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreflightValue",
+      "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "PreallocateFallocate",
-      "spelled": "Preallocate",
-      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
-      "value": "1",
-      "doc": "PreallocateFallocate reserves a new segment's full size with\nfallocate(2) on Linux, its blocks unwritten extents that read as zeros,\nthen syncs it: no zero is written. A filesystem or a platform without\nit opens the log in PreallocateZeroFill, with one line logged (#922).\n",
-      "file": "service/app/consensus/datadir.go",
+      "name": "PreflightValue",
+      "spelled": "struct{FsyncP50 time.Duration; FsyncP99 time.Duration; FsyncMax time.Duration; FreeBytes int64; Flock bool; UserTimeout bool; Verdicts []PreflightVerdict}",
+      "canonical": "struct{FsyncP50 time.Duration; FsyncP99 time.Duration; FsyncMax time.Duration; FreeBytes int64; Flock bool; UserTimeout bool; Verdicts []github.com/kitsunium/sdk/internal/service/app/consensus.PreflightVerdict}",
+      "fields": [
+        {
+          "name": "FsyncP50",
+          "type": "time.Duration"
+        },
+        {
+          "name": "FsyncP99",
+          "type": "time.Duration"
+        },
+        {
+          "name": "FsyncMax",
+          "type": "time.Duration"
+        },
+        {
+          "name": "FreeBytes",
+          "type": "int64",
+          "doc": "FreeBytes is what an unprivileged writer may still use there, -1 when unknown.\n"
+        },
+        {
+          "name": "Flock",
+          "type": "bool",
+          "doc": "Flock is false where the platform has no flock(2), and NewDataDir refuses (ADR 0144).\n"
+        },
+        {
+          "name": "UserTimeout",
+          "type": "bool",
+          "doc": "UserTimeout is false where the transport sets no kernel bound on\nunacknowledged bytes (the BSDs, illumos, Solaris): a dead stream is\nclosed by the read-silence bound alone (#1116).\n"
+        },
+        {
+          "name": "Verdicts",
+          "type": "[]PreflightVerdict",
+          "doc": "Verdicts lists each rule broken, empty when none is.\n"
+        }
+      ],
+      "doc": "PreflightValue is what Preflight measured: the latency of one fdatasync of\na record, at the median, the 99th percentile (nearest rank) and its\nhighest, the free bytes of the filesystem, what the platform offers, and\na verdict per rule the measurement or the platform breaks.\n",
+      "file": "service/app/consensus/preflight.go",
       "layer": "service",
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreallocateZeroFill",
-      "kind": "const",
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreflightVerdict",
+      "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "PreallocateZeroFill",
-      "spelled": "Preallocate",
-      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.Preallocate",
-      "value": "0",
-      "doc": "PreallocateZeroFill writes zeros over a new segment's full size, then\nsyncs it. It is the zero value and the default (D4).\n",
-      "file": "service/app/consensus/datadir.go",
+      "name": "PreflightVerdict",
+      "spelled": "struct{Field string; Rule string}",
+      "canonical": "struct{Field string; Rule string}",
+      "fields": [
+        {
+          "name": "Field",
+          "type": "string"
+        },
+        {
+          "name": "Rule",
+          "type": "string"
+        }
+      ],
+      "doc": "PreflightVerdict is one rule Preflight found broken: the field it judges,\nspelled as Config spells it, and the rule.\n",
+      "file": "service/app/consensus/preflight.go",
       "layer": "service",
       "family": "app"
     },
@@ -65380,44 +65423,6 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.SyncFdatasync",
-      "kind": "const",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "SyncFdatasync",
-      "spelled": "SyncPath",
-      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath",
-      "value": "0",
-      "doc": "SyncFdatasync writes a batch's records with pwrite(2), then makes them\ndurable with fdatasync(2): two calls per durability point. It is the\nzero value and the default (D4, #417).\n",
-      "file": "service/app/consensus/datadir.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "SyncPath",
-      "spelled": "uint8",
-      "canonical": "uint8",
-      "doc": "SyncPath is how the file log makes a batch's records durable (D4,\n",
-      "file": "service/app/consensus/datadir.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.SyncRWFDsync",
-      "kind": "const",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "SyncRWFDsync",
-      "spelled": "SyncPath",
-      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.SyncPath",
-      "value": "1",
-      "doc": "SyncRWFDsync writes a batch's records with pwritev2(2) flagged\nRWF_DSYNC on Linux, which returns once they are durable: one call per\ndurability point, the same two points as SyncFdatasync. A kernel or a\nplatform without it opens the log in SyncFdatasync, with one line\nlogged (#923).\n",
-      "file": "service/app/consensus/datadir.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.TCPTransport",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -65573,19 +65578,6 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*TCPTransport).SendShared",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
-      "name": "SendShared",
-      "recv": "TCPTransport",
-      "spelled": "func(to coreconsensus.NodeID, header []byte, body []byte)",
-      "canonical": "func(to github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, header []byte, body []byte)",
-      "doc": "SendShared implements BatchSender: the frame is queued as Send queues\none, counted at the length of header and body, and written as header\nthen body under the batch's one deadline and flush. body is never\nwritten to, so the frames of several peers share it.\n",
-      "file": "service/app/consensus/tcp.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*TCPTransport).SetMembership",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -65666,8 +65658,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "TransportConfig",
-      "spelled": "struct{Certificate *tls.Certificate; GetCertificate func() (*tls.Certificate, error); Roots *x509.CertPool; ListenAddress string; Seeds map[coreconsensus.NodeID]string; MaxUnauthenticatedPerIP int; ReservedMemberSlots int; MaxFrameBytes int; MaxControlFrameBytes int; HandshakeTimeout time.Duration; PeerQueueBytes int64; MaxConnectionAge time.Duration; WriteTimeout time.Duration; JoinTimeout time.Duration; Clock clock.Timed}",
-      "canonical": "struct{Certificate *crypto/tls.Certificate; GetCertificate func() (*crypto/tls.Certificate, error); Roots *crypto/x509.CertPool; ListenAddress string; Seeds map[github.com/kitsunium/sdk/internal/core/app/consensus.NodeID]string; MaxUnauthenticatedPerIP int; ReservedMemberSlots int; MaxFrameBytes int; MaxControlFrameBytes int; HandshakeTimeout time.Duration; PeerQueueBytes int64; MaxConnectionAge time.Duration; WriteTimeout time.Duration; JoinTimeout time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed}",
+      "spelled": "struct{Certificate *tls.Certificate; GetCertificate func() (*tls.Certificate, error); Roots *x509.CertPool; ListenAddress string; Seeds map[coreconsensus.NodeID]string; MaxUnauthenticatedPerIP int; ReservedMemberSlots int; MaxFrameBytes int; MaxControlFrameBytes int; HandshakeTimeout time.Duration; PeerQueueBytes int64; MaxConnectionAge time.Duration; WriteTimeout time.Duration; JoinTimeout time.Duration}",
+      "canonical": "struct{Certificate *crypto/tls.Certificate; GetCertificate func() (*crypto/tls.Certificate, error); Roots *crypto/x509.CertPool; ListenAddress string; Seeds map[github.com/kitsunium/sdk/internal/core/app/consensus.NodeID]string; MaxUnauthenticatedPerIP int; ReservedMemberSlots int; MaxFrameBytes int; MaxControlFrameBytes int; HandshakeTimeout time.Duration; PeerQueueBytes int64; MaxConnectionAge time.Duration; WriteTimeout time.Duration; JoinTimeout time.Duration}",
       "fields": [
         {
           "name": "Certificate",
@@ -65729,11 +65721,6 @@
         {
           "name": "JoinTimeout",
           "type": "time.Duration"
-        },
-        {
-          "name": "Clock",
-          "type": "clock.Timed",
-          "doc": "Clock reads every age the transport keeps — a link's against\nMaxConnectionAge, the redial backoff, the peer certificate's end — and\ndrives the accept backoff; nil is clock.System. A connection deadline\nis a wall time the kernel needs, so it is the wall clock's reading plus\nthe duration this clock left.\n"
         }
       ],
       "doc": "TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound\nis clamped to its default; nil Roots, no certificate, a HandshakeTimeout\nabove one second, a control frame bound not below the data bound, or a\npeer queue below the data bound is refused.\n",
@@ -65764,224 +65751,6 @@
       "value": "1",
       "doc": "WipeAndRejoin wipes the directory; the operator then Removes the old\nNodeID and Inits under a NEW one (R4-03). A voter's incarnation is\nnever swapped in place. A wipe that does not finish leaves the stop\nmarker STOP-WIPE, which refuses a start, Init, Redraw, Recover,\nRestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs\nagain and completes it.\n",
       "file": "service/app/consensus/offline.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.Config",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "Config",
-      "spelled": "struct{MaxCommands int; MaxBytes int; MaxInFlight int}",
-      "canonical": "struct{MaxCommands int; MaxBytes int; MaxInFlight int}",
-      "fields": [
-        {
-          "name": "MaxCommands",
-          "type": "int",
-          "doc": "MaxCommands is the most commands one entry carries.\n"
-        },
-        {
-          "name": "MaxBytes",
-          "type": "int",
-          "doc": "MaxBytes is the largest packed body; it must not exceed the node's\nMaxEntryBytes, or a full entry is refused ENTRY_TOO_LARGE.\n"
-        },
-        {
-          "name": "MaxInFlight",
-          "type": "int",
-          "doc": "MaxInFlight is the most packed entries proposed and not yet answered;\nthe commands proposed while every one is in flight leave together in\nthe next.\n"
-        }
-      ],
-      "doc": "Config bounds what a Packer packs into one entry. A zero bound takes its\ndefault.\n",
-      "file": "service/app/consensus/multi/packer.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.DefaultMaxBytes",
-      "kind": "const",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "DefaultMaxBytes",
-      "spelled": "int",
-      "canonical": "int",
-      "value": "1048576",
-      "doc": "DefaultMaxBytes is the largest packed body when Config.MaxBytes is zero:\nthe engine's default MaxEntryBytes.\n",
-      "file": "service/app/consensus/multi/packer.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.DefaultMaxCommands",
-      "kind": "const",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "DefaultMaxCommands",
-      "spelled": "int",
-      "canonical": "int",
-      "value": "4096",
-      "doc": "DefaultMaxCommands is the commands one entry carries when\nConfig.MaxCommands is zero.\n",
-      "file": "service/app/consensus/multi/packer.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.DefaultMaxInFlight",
-      "kind": "const",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "DefaultMaxInFlight",
-      "spelled": "int",
-      "canonical": "int",
-      "value": "1",
-      "doc": "DefaultMaxInFlight is the packed entries in flight at once when\nConfig.MaxInFlight is zero: one, so every command proposed while an\nentry is in flight waits for it and leaves in the next.\n",
-      "file": "service/app/consensus/multi/packer.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.MultiMachine",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "MultiMachine",
-      "spelled": "struct{Inner coreconsensus.BatchingStateMachine}",
-      "canonical": "struct{Inner github.com/kitsunium/sdk/internal/core/app/consensus.BatchingStateMachine}",
-      "fields": [
-        {
-          "name": "Inner",
-          "type": "coreconsensus.BatchingStateMachine",
-          "doc": "Inner applies the commands.\n"
-        }
-      ],
-      "doc": "MultiMachine is the state machine of a node whose commands a Packer packs:\nit splits each entry's body into its commands and applies them in order, as\none batch, through Inner. The result of an entry is a []any holding one\nresult per command, in the order the Packer packed them, which the Packer\nhands back to each caller; a body that does not parse is answered\nFRAME_INVALID, the same on every node, and Inner sees none of it.\n\nEvery command proposed to a node running a MultiMachine must come through a\nPacker: a body proposed whole does not parse. A sub-entry is a copy of its\nentry whose Data is the command and whose BodySum is the command's own\nCRC-32C; ChainSum is zero. Inner may keep a sub-entry's Data: it is a slice\nof the entry's payload, capped at the command's end. Apply and ApplyBatch\nrun on the apply goroutine, one call at a time, as the engine calls them; a\nMultiMachine is not shared between nodes. It forwards no sibling port of\nInner's: a node running it keeps its state in memory.\n",
-      "file": "service/app/consensus/multi/machine.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*MultiMachine).Apply",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "Apply",
-      "recv": "MultiMachine",
-      "spelled": "func(e coreconsensus.EntryValue) any",
-      "canonical": "func(e github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) any",
-      "doc": "Apply splits e's body and applies its commands through Inner in one\nbatch; the result is their results, in order, or FRAME_INVALID.\n",
-      "file": "service/app/consensus/multi/machine.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*MultiMachine).ApplyBatch",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "ApplyBatch",
-      "recv": "MultiMachine",
-      "spelled": "func(es []coreconsensus.EntryValue, results []any)",
-      "canonical": "func(es []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, results []any)",
-      "doc": "ApplyBatch splits every entry of es and applies all their commands through\nONE call of Inner.ApplyBatch, then writes into results each entry's\nsub-results, a []any of one result per command, or FRAME_INVALID.\n",
-      "file": "service/app/consensus/multi/machine.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*MultiMachine).Restore",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "Restore",
-      "recv": "MultiMachine",
-      "spelled": "func(r io.Reader, meta coreconsensus.SnapshotMetaValue) error",
-      "canonical": "func(r io.Reader, meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
-      "doc": "Restore replaces Inner's state with a snapshot's.\n",
-      "file": "service/app/consensus/multi/machine.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*MultiMachine).Snapshot",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "Snapshot",
-      "recv": "MultiMachine",
-      "spelled": "func() (coreconsensus.Snapshot, error)",
-      "canonical": "func() (github.com/kitsunium/sdk/internal/core/app/consensus.Snapshot, error)",
-      "doc": "Snapshot captures Inner's state.\n",
-      "file": "service/app/consensus/multi/machine.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.NewPacker",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "NewPacker",
-      "spelled": "func(r coreconsensus.Replicated, cfg Config) *Packer",
-      "canonical": "func(r github.com/kitsunium/sdk/internal/core/app/consensus.Replicated, cfg github.com/kitsunium/sdk/internal/service/app/consensus/multi.Config) *github.com/kitsunium/sdk/internal/service/app/consensus/multi.Packer",
-      "doc": "NewPacker starts a Packer proposing through r, bounded by cfg.\n",
-      "file": "service/app/consensus/multi/packer.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.Packer",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "Packer",
-      "spelled": "struct{}",
-      "canonical": "struct{}",
-      "doc": "Packer packs the commands its callers propose at one moment into one entry\nand proposes it with ONE Propose, then answers each caller with its own\nresult. There is no linger timer (ADR 0152 D6): a command proposed while\nfewer than MaxInFlight entries are in flight leaves at once, and those\nproposed while every one is in flight leave together in the next. The\nnode's state machine must be a MultiMachine. A Packer is safe for\nconcurrent use; Close stops it.\n",
-      "file": "service/app/consensus/multi/packer.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*Packer).Close",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "Close",
-      "recv": "Packer",
-      "spelled": "func(ctx context.Context) error",
-      "canonical": "func(ctx context.Context) error",
-      "doc": "Close stops the Packer: a command still queued is answered NODE_STOPPED,\nthe entries in flight are waited for within ctx. When ctx ends first, their\nProposes are cancelled, their callers answered OUTCOME_UNKNOWN, and\nClose returns OUTCOME_UNKNOWN. A second Close waits for the first.\n",
-      "file": "service/app/consensus/multi/packer.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.(*Packer).Propose",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "Propose",
-      "recv": "Packer",
-      "spelled": "func(ctx context.Context, cmd []byte) (ResultValue, error)",
-      "canonical": "func(ctx context.Context, cmd []byte) (github.com/kitsunium/sdk/internal/service/app/consensus/multi.ResultValue, error)",
-      "doc": "Propose packs cmd with the commands proposed beside it and returns once\ntheir entry is applied locally, with the entry's token, the command's index\nin it and its own result. A command whose packed body would exceed MaxBytes\nalone is ENTRY_TOO_LARGE. A ctx that ends before the command is packed\nanswers ctx.Err(), the command never proposed; once it is packed, the\nanswer is OUTCOME_UNKNOWN, as Propose's. The errors of the entry's Propose\nreach every caller packed in it; a result that is not one per command is\nRESULT_TYPE_MISMATCH, the entry committed and its token returned. A Packer\nclosed answers NODE_STOPPED. The caller may reuse cmd once Propose returns.\n",
-      "file": "service/app/consensus/multi/packer.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/multi.ResultValue",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
-      "name": "ResultValue",
-      "spelled": "struct{Token coreconsensus.TokenValue; Sub int; Value any}",
-      "canonical": "struct{Token github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue; Sub int; Value any}",
-      "fields": [
-        {
-          "name": "Token",
-          "type": "coreconsensus.TokenValue",
-          "doc": "Token is the packed entry's token, shared by every command in it.\n"
-        },
-        {
-          "name": "Sub",
-          "type": "int",
-          "doc": "Sub is the command's index in the entry, in packing order.\n"
-        },
-        {
-          "name": "Value",
-          "type": "any",
-          "doc": "Value is the result Inner's ApplyBatch wrote for the command.\n"
-        }
-      ],
-      "doc": "ResultValue is what a Packer answers one caller: the token of the entry its\ncommand was packed into, the command's index in that entry, and the result\nInner returned for it.\n",
-      "file": "service/app/consensus/multi/packer.go",
       "layer": "service",
       "family": "app"
     },
@@ -66705,19 +66474,6 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).ReadRounds",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
-      "name": "ReadRounds",
-      "recv": "Raft",
-      "spelled": "func() uint64",
-      "canonical": "func() uint64",
-      "doc": "ReadRounds counts the heartbeat rounds opened to confirm reads since the\nnode started: every read pending when a round opens shares it (D9).\n",
-      "file": "service/app/consensus/raft/raft.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Ready",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -66842,7 +66598,7 @@
       "recv": "Raft",
       "spelled": "func(now time.Time, m core.MessageValue)",
       "canonical": "func(now time.Time, m github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue)",
-      "doc": "Step handles one message. The driver has already checked that m.From is\nthe peer the transport authenticated (R7-05). The entries' Data are the\ncaller's gift: Step keeps them without a copy, so the caller hands bytes\nit never writes again, a frame it parsed into a buffer of its own.\n",
+      "doc": "Step handles one message. The driver has already checked that m.From is\nthe peer the transport authenticated (R7-05).\n",
       "file": "service/app/consensus/raft/step.go",
       "layer": "service",
       "family": "app"
@@ -67438,30 +67194,6 @@
       "family": "app"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AppendEntries",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
-      "name": "AppendEntries",
-      "spelled": "func(dst []byte, ents []coreconsensus.EntryValue) []byte",
-      "canonical": "func(dst []byte, ents []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) []byte",
-      "doc": "AppendEntries appends to dst the entries body of an append message: each\nentry's fixed header, then its payload, EntryLen bytes each.\n",
-      "file": "service/app/consensus/wire/codec.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AppendHeader",
-      "kind": "func",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
-      "name": "AppendHeader",
-      "spelled": "func(dst []byte, m *coreconsensus.MessageValue, bodyLen int) []byte",
-      "canonical": "func(dst []byte, m *github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue, bodyLen int) []byte",
-      "doc": "AppendHeader appends to dst the part of m's frame before its entries:\nthe frame header, whose length counts bodyLen bytes of entries after it,\nand m's fixed fields with the count of m.Entries, whose contents it does\nnot read. Followed by AppendEntries of m.Entries, whose length is\nbodyLen, it writes AppendMessage's bytes: the body of an append is the\nsame for every peer, only this header differs (#912).\n",
-      "file": "service/app/consensus/wire/codec.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AppendMembership",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
@@ -67669,19 +67401,6 @@
       "spelled": "func(frame []byte) (coreconsensus.FrameLane, error)",
       "canonical": "func(frame []byte) (github.com/kitsunium/sdk/internal/core/app/consensus.FrameLane, error)",
       "doc": "Lane reads the lane of an encoded frame from its frozen header alone, so a\ntransport routes a frame of a type or a version it does not parse.\n",
-      "file": "service/app/consensus/wire/codec.go",
-      "layer": "service",
-      "family": "app"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.MessageHeaderLen",
-      "kind": "const",
-      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
-      "name": "MessageHeaderLen",
-      "spelled": "int",
-      "canonical": "int",
-      "value": "112",
-      "doc": "MessageHeaderLen is the length AppendHeader writes: the frame header and\na message's fixed fields, up to and including its entry count.\n",
       "file": "service/app/consensus/wire/codec.go",
       "layer": "service",
       "family": "app"

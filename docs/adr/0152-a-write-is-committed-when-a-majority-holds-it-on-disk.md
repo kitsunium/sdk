@@ -3121,6 +3121,12 @@ measurements exist:
   disk nobody will use.
 
 The first draft assumed 1–3 ms. That assumption is withdrawn until measured.
+`Preflight` (#1117) takes the second on a stopped node, over the data
+directory the log will trust: fdatasync p50, p99 and highest of records
+written the log's own way into a scratch file it removes, judged against
+the timing rule (`ElectionTimeoutMin` above three times the p99), the
+reserve, and what the platform offers; it refuses nothing, the product
+decides (D17).
 
 **What the targets rest on (R7-22).**
 - The RTTs of Context are MEANS. The p99 RTT of each pair is to be measured,

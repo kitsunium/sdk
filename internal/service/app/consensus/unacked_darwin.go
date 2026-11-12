@@ -16,6 +16,10 @@ const tcpRxtConnDropTime int = 0x80
 // dropped returns.
 const errTimedOut = syscall.ETIMEDOUT
 
+// unackedBound reports that boundUnacknowledged sets a kernel bound here
+// (TCP_RXT_CONNDROPTIME), which Preflight reports as UserTimeout.
+const unackedBound = true
+
 // boundUnacknowledged makes the kernel drop c once its retransmissions of
 // bytes written on it have gone unacknowledged for d, rounded up to the
 // second it counts in (TCP_RXT_CONNDROPTIME, the contract Linux's

@@ -16,6 +16,10 @@ const tcpMaxRT int = 5
 // a connection the stack dropped returns; package syscall does not name it.
 const errTimedOut syscall.Errno = 10060
 
+// unackedBound reports that boundUnacknowledged sets a kernel bound here
+// (TCP_MAXRT), which Preflight reports as UserTimeout.
+const unackedBound = true
+
 // boundUnacknowledged makes the stack abort c once its retransmissions of
 // bytes written on it have gone unacknowledged for d, rounded up to the
 // second it counts in (TCP_MAXRT, the contract Linux's TCP_USER_TIMEOUT

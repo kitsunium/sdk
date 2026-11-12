@@ -2362,7 +2362,8 @@ packages:
 
       A failed write or sync stops the node with STORAGE_FAILED and is never
       retried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],
-      [Inspect] and [ClearQuarantine] work on a stopped node's directory only.
+      [Inspect], [ClearQuarantine] and [Preflight] work on a stopped node's
+      directory only.
     functions:
       - doc: |-
           Bootstrap founds a cluster on one founding node's log, in phases that are
@@ -2553,6 +2554,29 @@ packages:
         name: Inspect
         out:
           - type: ReportValue
+          - type: error
+      - doc: |-
+          Preflight measures, on a stopped node, the disk the log of dir would trust
+          (D16): it writes opts.Syncs records of opts.RecordBytes, each followed by
+          the log's own fdatasync, into a scratch file it creates, zero-filled at
+          their total size like a segment, in dir's log directory (dir itself when
+          there is none yet, named preflight-*.tmp, which the log's recovery
+          deletes should a crash leave one), then removes it: the directory holds
+          after it what it held before. dir must exist. Where dir holds a LOCK,
+          Preflight takes it as NewDataDir does, so a directory a live node holds
+          is refused DATA_DIR_LOCKED; where the platform has no flock(2) (illumos,
+          Solaris) it takes none and reports Flock false. It refuses nothing on
+          what it measures: the verdicts are returned, and logged at Warn to
+          opts.Logger, for the product to decide (D17). A failed write or sync is
+          STORAGE_FAILED, options out of their bounds CONSENSUS_MISCONFIGURED.
+        in:
+          - name: dir
+            type: string
+          - name: opts
+            type: PreflightOptions
+        name: Preflight
+        out:
+          - type: PreflightValue
           - type: error
       - doc: |-
           ClearQuarantine clears a quarantined, or stopped, directory through one of
@@ -3692,6 +3716,75 @@ packages:
               type: string
             - name: Markers
               type: "[]string"
+      - doc: |-
+          PreflightOptions tunes Preflight: how much it writes, the timing contract
+          it judges the measurement against, and where its time and its verdicts
+          go.
+        name: PreflightOptions
+        struct:
+          fields:
+            - doc: |-
+                Syncs is the number of records written, each synced; 0 is 256. It is
+                refused negative or above 65536.
+              name: Syncs
+              type: int
+            - doc: |-
+                RecordBytes is the size of one record; 0 is 4096. It is refused
+                negative, and Syncs records of it above DefaultSegmentBytes.
+              name: RecordBytes
+              type: int
+            - doc: |-
+                Timing is the contract judged against the measurement; the zero value
+                judges nothing (ADR 0031).
+              name: Timing
+              type: coreconsensus.TimingContractSpec
+            - doc: |-
+                LogReserveBytes is the reserve the free space is judged against; 0 is
+                Config's default, 256 MiB.
+              name: LogReserveBytes
+              type: int64
+            - doc: Clock times each sync; nil is clock.System.
+              name: Clock
+              type: clock.Timed
+            - doc: Logger receives each verdict at Warn; nil logs nothing.
+              name: Logger
+              type: corelogger.Logger
+      - doc: |-
+          PreflightValue is what Preflight measured: the latency of one fdatasync of
+          a record, at the median, the 99th percentile (nearest rank) and its
+          highest, the free bytes of the filesystem, what the platform offers, and
+          a verdict per rule the measurement or the platform breaks.
+        name: PreflightValue
+        struct:
+          fields:
+            - name: FsyncP50
+            - name: FsyncP99
+            - name: FsyncMax
+              type: time.Duration
+            - doc: FreeBytes is what an unprivileged writer may still use there, -1 when unknown.
+              name: FreeBytes
+              type: int64
+            - doc: Flock is false where the platform has no flock(2), and NewDataDir refuses (ADR 0144).
+              name: Flock
+              type: bool
+            - doc: |-
+                UserTimeout is false where the transport sets no kernel bound on
+                unacknowledged bytes (the BSDs, illumos, Solaris): a dead stream is
+                closed by the read-silence bound alone (#1116).
+              name: UserTimeout
+              type: bool
+            - doc: Verdicts lists each rule broken, empty when none is.
+              name: Verdicts
+              type: "[]PreflightVerdict"
+      - doc: |-
+          PreflightVerdict is one rule Preflight found broken: the field it judges,
+          spelled as Config spells it, and the rule.
+        name: PreflightVerdict
+        struct:
+          fields:
+            - name: Field
+            - name: Rule
+              type: string
       - doc: QuarantineExit is one of the two exits ClearQuarantine allows (R3-09).
         name: QuarantineExit
         underlying: uint8
@@ -5729,6 +5822,12 @@ packages:
             target: svcconsensus.SyncPath
           - name: ReportValue
             target: svcconsensus.ReportValue
+          - name: PreflightOptions
+            target: svcconsensus.PreflightOptions
+          - name: PreflightValue
+            target: svcconsensus.PreflightValue
+          - name: PreflightVerdict
+            target: svcconsensus.PreflightVerdict
           - name: QuarantineExit
             target: svcconsensus.QuarantineExit
           - name: QuarantineOptions
@@ -5832,6 +5931,22 @@ packages:
           name: Inspect
           out:
             - type: ReportValue
+            - type: error
+      - func:
+          doc: |-
+            Preflight measures the fdatasync latency of the disk under dir on a
+            stopped node, writing a scratch file it removes, and returns the
+            verdicts of the rules the measurement or the platform breaks; it
+            refuses DATA_DIR_LOCKED a directory a live node holds.
+          forward: svcconsensus.Preflight
+          in:
+            - name: dir
+              type: string
+            - name: opts
+              type: PreflightOptions
+          name: Preflight
+          out:
+            - type: PreflightValue
             - type: error
       - func:
           doc: |-

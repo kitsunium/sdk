@@ -13,5 +13,6 @@
 //
 // A failed write or sync stops the node with STORAGE_FAILED and is never
 // retried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],
-// [Inspect] and [ClearQuarantine] work on a stopped node's directory only.
+// [Inspect], [ClearQuarantine] and [Preflight] work on a stopped node's
+// directory only.
 package consensus

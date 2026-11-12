@@ -12,6 +12,10 @@ import (
 // dropped at its own retransmission limit returns.
 const errTimedOut = syscall.ETIMEDOUT
 
+// unackedBound reports that boundUnacknowledged sets no kernel bound here,
+// which Preflight reports as UserTimeout false and a verdict.
+const unackedBound = false
+
 // boundUnacknowledged sets nothing on the BSDs and illumos, which have no
 // per-connection bound on unacknowledged bytes (TCP_USER_TIMEOUT,
 // TCP_RXT_CONNDROPTIME, TCP_MAXRT): a write that blocks still misses its

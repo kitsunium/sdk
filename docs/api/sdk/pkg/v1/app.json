@@ -2951,6 +2951,57 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.Preflight",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "Preflight",
+      "spelled": "func(dir string, opts PreflightOptions) (PreflightValue, error)",
+      "canonical": "func(dir string, opts github.com/kitsunium/sdk/pkg/v1/app/consensus.PreflightOptions) (github.com/kitsunium/sdk/pkg/v1/app/consensus.PreflightValue, error)",
+      "doc": "Preflight measures the fdatasync latency of the disk under dir on a\nstopped node, writing a scratch file it removes, and returns the\nverdicts of the rules the measurement or the platform breaks; it\nrefuses DATA_DIR_LOCKED a directory a live node holds.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PreflightOptions",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "PreflightOptions",
+      "spelled": "svcconsensus.PreflightOptions",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PreflightOptions",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreflightOptions",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PreflightValue",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "PreflightValue",
+      "spelled": "svcconsensus.PreflightValue",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PreflightValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreflightValue",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PreflightVerdict",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "PreflightVerdict",
+      "spelled": "svcconsensus.PreflightVerdict",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PreflightVerdict",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PreflightVerdict",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.ProposeAs[...]",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
