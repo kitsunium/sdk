@@ -72,6 +72,10 @@ var (
 	_ starter = (*Secret)(nil)
 	_ starter = (*Watch)(nil)
 	_ starter = (*SubscriptionWorker[struct{}])(nil)
+	_ starter = (*TopicService[struct{}])(nil)
+
+	_ streameder = (*SubscriptionWorker[struct{}])(nil)
+	_ streameder = (*TopicService[struct{}])(nil)
 
 	_ mailbox       = (*Mailer)(nil)
 	_ starter       = (*Mailer)(nil)

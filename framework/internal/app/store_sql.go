@@ -122,6 +122,10 @@ type frameworkTable struct {
 	// release made (issue #500) —, recorded in kit's registry under the
 	// table's name and trailSuffix, which no table name can hold.
 	trailOf string
+	// stream marks a streamed topic's stream: the SDK's SQL stream's three
+	// tables, named from this one, which the stream subsystem migrates
+	// (issue #826).
+	stream bool
 }
 
 // frameworkTables are the tables kit keeps on d: each store it keeps, the former
@@ -146,20 +150,43 @@ func (a *App) frameworkTables(d *database) []frameworkTable {
 // nodeTables are the tables kit keeps on d for a node that is no store: a
 // workflow's journal, a consumer's queue.
 func (a *App) nodeTables(n node, d *database) []frameworkTable {
-	var out []frameworkTable
-	if w, ok := n.(journaled); ok {
-		if st := w.journalStore(); st != nil && a.keptOn(st, d) {
-			out = append(out, frameworkTable{name: w.journalTable(), node: n.base().id}.withFormer(n.base(), workflowSuffix, ""))
-		}
-	}
-	if q, ok := n.(queueOwner); ok {
-		if under := q.queueUnder(); under != "" && a.queueKeptOn(q.base(), d) {
-			table := queueTable(q.base(), under)
-			out = append(out, frameworkTable{name: table, node: q.base().id, former: formerQueueTable(q.base(), under), queue: true},
-				frameworkTable{name: table + trailSuffix, node: q.base().id, queue: true, trailOf: table})
-		}
+	out := a.journalTables(n, d)
+	out = append(out, a.queueTables(n, d)...)
+	if s, ok := n.(streameder); ok && s.streamed() && n.base().kind == model.KindTopic && a.queueKeptOn(n.base(), d) {
+		out = append(out, frameworkTable{name: streamTable(n.base()), node: n.base().id, stream: true})
 	}
 	return out
+}
+
+// journalTables are the tables of a workflow's journal, when it lives on d.
+func (a *App) journalTables(n node, d *database) []frameworkTable {
+	w, ok := n.(journaled)
+	if !ok {
+		return nil
+	}
+	st := w.journalStore()
+	if st == nil || !a.keptOn(st, d) {
+		return nil
+	}
+	return []frameworkTable{frameworkTable{name: w.journalTable(), node: n.base().id}.withFormer(n.base(), workflowSuffix, "")}
+}
+
+// queueTables are the tables of a consumer's queue and of its trail, when the
+// queue lives on d.
+func (a *App) queueTables(n node, d *database) []frameworkTable {
+	q, ok := n.(queueOwner)
+	if !ok {
+		return nil
+	}
+	under := q.queueUnder()
+	if under == "" || !a.queueKeptOn(q.base(), d) {
+		return nil
+	}
+	table := queueTable(q.base(), under)
+	return []frameworkTable{
+		{name: table, node: q.base().id, former: formerQueueTable(q.base(), under), queue: true},
+		{name: table + trailSuffix, node: q.base().id, queue: true, trailOf: table},
+	}
 }
 
 // keptOn reports whether st lives on d, not in memory.

@@ -250,23 +250,38 @@ func freeVersion(used map[uint64]bool, v uint64) uint64 {
 // the SQL broker's one table (ADR 0178 C1), and for its trail column the
 // column's addition to a table an earlier release made, which does nothing
 // on a table that has it or is not there yet — so it may run before the
-// table's own, whose version it does not follow (issue #500).
+// table's own, whose version it does not follow (issue #500); as the stream
+// subsystem writes it, for a streamed topic, the SQL stream's three tables
+// (issue #826).
 func tableMigration(dialect Dialect, t frameworkTable, version uint64) (plug.MigrationValue, error) {
+	if t.stream {
+		streams := plug.Streams.Load()
+		if streams == nil || streams.TableMigration == nil {
+			return plug.MigrationValue{}, streamsMissing()
+		}
+		return streams.TableMigration(string(dialect), t.name, version)
+	}
 	if t.queue {
-		queues := plug.Queues.Load()
-		if queues == nil || queues.TableMigration == nil || (t.trailOf != "" && queues.TrailMigration == nil) {
-			return plug.MigrationValue{}, queuesMissing()
-		}
-		if t.trailOf != "" {
-			return queues.TrailMigration(string(dialect), t.trailOf, version)
-		}
-		return queues.TableMigration(string(dialect), t.name, version)
+		return queueTableMigration(dialect, t, version)
 	}
 	stores := plug.Stores.Load()
 	if stores == nil || stores.TableMigration == nil {
 		return plug.MigrationValue{}, storesMissing()
 	}
 	return stores.TableMigration(string(dialect), plug.TableSpec{Name: t.name, VersionsOf: t.versionsOf}, version)
+}
+
+// queueTableMigration is the migration of a consumer's queue table, or of its
+// trail column when t is a trail.
+func queueTableMigration(dialect Dialect, t frameworkTable, version uint64) (plug.MigrationValue, error) {
+	queues := plug.Queues.Load()
+	if queues == nil || queues.TableMigration == nil || (t.trailOf != "" && queues.TrailMigration == nil) {
+		return plug.MigrationValue{}, queuesMissing()
+	}
+	if t.trailOf != "" {
+		return queues.TrailMigration(string(dialect), t.trailOf, version)
+	}
+	return queues.TableMigration(string(dialect), t.name, version)
 }
 
 // nameDigest is the low half of a new table's version.

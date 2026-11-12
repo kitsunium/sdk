@@ -1,0 +1,231 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls:
+      - sdkClock
+      - clockOf
+      - sdkClock.NewTimer
+      - sdkClock.NewTicker
+    name: clock.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - stream
+      - (*stream).Append
+      - (*stream).Subscribe
+      - running
+      - (*running).handle
+      - (*running).quiet
+      - (*stream).drainAfter
+      - (*stream).Join
+      - (*stream).startOf
+      - (*stream).Close
+      - pluggedRecord
+      - lacks
+    name: stream.go
+  - decls:
+      - Enable
+      - open
+      - openStream
+      - openSQL
+      - tableMigration
+      - dialectOf
+      - pluggedStep
+    name: streamengine.go
+  - decls:
+      - _
+    name: streamengine_compliance.go
+functions:
+  - doc: |-
+      clockOf is c as the SDK's stream takes it, nil — the stream's own, the
+      system's — for none.
+    name: clockOf
+    params: c plug.Clock
+    results: clock.Timed
+  - doc: pluggedRecord is the SDK's entry as kit's core reads it.
+    name: pluggedRecord
+    params: e *sdkstream.Entry
+    results: plug.StreamRecordValue
+  - doc: |-
+      lacks is the refusal of a stream that does not answer a sibling every
+      engine of the SDK's answers: one a test's wrapper hid.
+    name: lacks
+    params: name, sibling string
+    results: error
+  - name: Enable
+  - doc: |-
+      open opens the stream cfg places: the SDK's SQL stream on its database,
+      else a file stream in its directory, else a memory stream; behind a test's
+      wrapper when it set one.
+
+      IFACE-PLUGIN: kit reaches a stream through plug.Stream; this is its
+      implementation.
+    name: open
+    params: cfg plug.StreamConfig
+    results: plug.Stream, error
+  - doc: openStream is the SDK's stream cfg places.
+    name: openStream
+    params: cfg *plug.StreamConfig, clk clock.Timed
+    results: sdkstream.Stream, error
+  - doc: |-
+      openSQL is the SDK's SQL stream over cfg's tables: on the transaction
+      manager and in the dialect of the database the store subsystem opened, so
+      that an append joins the transaction its context carries.
+    name: openSQL
+    params: cfg *plug.StreamConfig, policy sdkstream.Policy, clk clock.Timed
+    results: sdkstream.Stream, error
+  - doc: |-
+      tableMigration is the migration of a streamed topic's tables on a database
+      of the dialect named: the SDK's SQL stream's three tables, named from
+      table.
+    name: tableMigration
+    params: dialect, table string, version uint64
+    results: plug.MigrationValue, error
+  - doc: dialectOf is the SDK's dialect the engine's name says.
+    name: dialectOf
+    params: name string
+    results: sql.Dialect, error
+  - doc: |-
+      pluggedStep is the SDK's migration step s on the standard library's
+      executor, nil for none.
+    name: pluggedStep
+    params: s sql.Step
+    results: plug.Step
+imports:
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  io: io
+  model: github.com/kitsunium/sdk/framework/model
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  sdkstream: github.com/kitsunium/sdk/pkg/v1/data/stream
+  sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+  storeengine: github.com/kitsunium/sdk/framework/internal/app/storeengine
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/streamengine
+  name: streamengine
+  purpose: "Package streamengine is what framework/app/stream plugs into kit: the log a streamed topic appends to — the SDK's stream in memory, in the data directory and over SQL —, the consumer groups its subscriptions read it as, and the migration of a stream's tables (issue #826, ADR 0179 step 4's shape)."
+types:
+  - doc: |-
+      sdkClock is the app's clock, as kit's core hands it (plug.Clock), as the
+      SDK's stream stamps and waits on it: the same instants and the same
+      timers, a test's manual clock included.
+    fields:
+      - name: ""
+        role: embedded
+        type: plug.Clock
+    kind: struct
+    methods:
+      - doc: NewTimer is the clock's timer, as the SDK's.
+        name: NewTimer
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Timer
+      - doc: NewTicker is the clock's ticker, as the SDK's.
+        name: NewTicker
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Ticker
+    name: sdkClock
+  - doc: stream is one of the SDK's streams as kit's core uses it.
+    fields:
+      - name: s
+        type: sdkstream.Stream
+      - name: clock
+        type: clock.Timed
+      - name: name
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          Append puts payload in the stream under key, one record of one batch: one
+          sync on a file stream, one statement in the transaction ctx carries on a
+          SQL one.
+        name: Append
+        params: ctx context.Context, key string, payload []byte
+        recv: s *stream
+        results: error
+      - doc: |-
+          Subscribe runs the consumer group cfg names until ctx ends or the stream's
+          storage fails: a group the stream does not know yet is first placed where
+          cfg starts it (Join), then the SDK's subscriber hands cfg's handler each record
+          of each partition in offset order, at most cfg.Parallelism at once, and
+          commits past it once the handler accepted it. Once ctx ended no record
+          starts; the one running may run cfg.DrainTimeout more.
+
+          Goroutine lifecycle: the goroutine started here ends the subscriber's
+          context once the drain after ctx's end is over, or once Subscribe
+          returned, whichever comes first.
+        name: Subscribe
+        params: ctx context.Context, cfg plug.StreamSubscribeConfig
+        recv: s *stream
+        results: error
+      - doc: |-
+          drainAfter cancels the subscriber once ctx ended and no record is being
+          handled — at the latest drain after ctx ended —, or once done is closed.
+        name: drainAfter
+        params: ctx context.Context, done <-chan struct{}, drain time.Duration, run *running, cancel context.CancelFunc
+        recv: s *stream
+      - doc: |-
+          Join places a group the stream does not know yet where cfg starts it,
+          on every partition: after the last record appended (the default), at the
+          first appended at or after cfg.From, or — FromBeginning — nowhere, the
+          SDK's subscriber starting it at the first record kept. A group the stream
+          knows keeps its offsets.
+        name: Join
+        params: ctx context.Context, cfg plug.StreamSubscribeConfig
+        recv: s *stream
+        results: error
+      - doc: |-
+          startOf is the offset a new group starts at on partition: the first
+          appended at or after from, or — from zero — the next to be appended.
+        name: startOf
+        params: ctx context.Context, partition int, from time.Time
+        recv: s *stream
+        results: sdkstream.Offset, error
+      - doc: "Close releases the stream: a file stream's directory."
+        name: Close
+        recv: s *stream
+        results: error
+    name: stream
+  - doc: |-
+      running counts the records being handled, so that a stop waits for them
+      alone: idle is signalled each time one ends.
+    fields:
+      - name: idle
+        type: chan struct{}
+      - name: mu
+        type: sync.Mutex
+      - name: busy
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          handle runs fn as one record's handling, unless stop ended: a record does
+          not start once the app began to stop — refused, it is read again at the
+          next start.
+        name: handle
+        params: stop context.Context, fn func() error
+        recv: r *running
+        results: error
+      - doc: quiet reports whether no record is being handled.
+        name: quiet
+        recv: r *running
+        results: bool
+    name: running
+vars:
+  - doc: |-
+      : Asserts at compile time that a stream is what plug describes, and that
+      the app's clock is the SDK's.
+    grouped: true
+    items:
+      - name: _
+        type: plug.Stream
+        value: (*stream)(nil)
+      - name: _
+        type: clock.Timed
+        value: sdkClock{}
+    name: _

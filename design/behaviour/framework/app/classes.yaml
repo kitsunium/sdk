@@ -972,6 +972,9 @@ files:
       - Lease
       - AutoExtend
       - OwnStores
+      - FromBeginning
+      - FromNow
+      - FromTime
     name: topic.go
   - decls:
       - Transact
@@ -1423,6 +1426,13 @@ functions:
     params: on bool
     results: DeliveryOption
   - name: OwnStores
+    results: SubscriptionOption
+  - name: FromBeginning
+    results: SubscriptionOption
+  - name: FromNow
+    results: SubscriptionOption
+  - name: FromTime
+    params: at time.Time
     results: SubscriptionOption
   - name: Transact
     params: ctx context.Context, fn func(context.Context) error, opts ...TransactOption

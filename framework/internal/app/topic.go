@@ -30,6 +30,9 @@ type TopicService[T any] struct {
 	once       func(T) string
 	onceWindow time.Duration
 	onceFor    *SettingService[time.Duration]
+	// log is the topic's stream when it is streamed (Streamed), nil
+	// otherwise (topic_stream.go).
+	log *topicStream[T]
 }
 
 // Topic declares a topic carrying messages of type T.
@@ -63,6 +66,8 @@ func (t *TopicService[T]) Once(key func(T) string, window time.Duration) *TopicS
 		t.svc.problem(t.decl, t.id, "topic.once-nil", "topic", t.id)
 	case t.once != nil:
 		t.svc.problem(t.decl, t.id, "topic.once-twice", "topic", t.id)
+	case t.log != nil:
+		t.svc.problem(t.decl, t.id, "topic.once-streamed", "topic", t.id)
 	default:
 		t.once, t.onceWindow = key, window
 		t.onceFor = declarePolicySetting(t.svc, &t.nodeBase, knobOnceWindow, window, checkPositive())
@@ -112,6 +117,11 @@ func (t *TopicService[T]) publishAs(ctx context.Context, msg T, at time.Time, na
 		return notRunning(&t.nodeBase)
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: t.id, from: currentNode(ctx), edge: model.EdgePublishes, op: model.OpPublish, name: name})
+	if t.log != nil {
+		err := t.appendStreamed(ctx, a, sp, msg, at)
+		sp.end(err)
+		return err
+	}
 	pub, err := t.publication(msg, at)
 	var payload []byte
 	if err == nil {
@@ -236,13 +246,7 @@ func (t *TopicService[T]) publishInto(ctx context.Context, sub *SubscriptionWork
 // describe fills the graph node out with what the Topic declares, and returns
 // its edges.
 func (t *TopicService[T]) describe(a *App, out *model.Node) []model.Edge {
-	// Where a subscription of the topic's own service waits: every one, in a
-	// product whose one default database keeps them all.
-	broker := "memory"
-	if a != nil && a.data != nil {
-		broker = queueWhere(a, &t.nodeBase)
-	}
-	out.Topic = &model.TopicInfo{Message: keptSchemaOf(reflect.TypeFor[T](), a != nil && t.sealsAtRest(a)), Delivery: "at-least-once", Broker: broker}
+	out.Topic = &model.TopicInfo{Message: keptSchemaOf(reflect.TypeFor[T](), a != nil && t.sealsAtRest(a)), Delivery: "at-least-once", Broker: t.brokerWhere(a)}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	edges := make([]model.Edge, 0, len(t.subs))
@@ -253,6 +257,19 @@ func (t *TopicService[T]) describe(a *App, out *model.Node) []model.Edge {
 		edges = append(edges, model.Edge{From: t.id, To: sub.id, Kind: model.EdgeDelivers, Declared: true})
 	}
 	return edges
+}
+
+// brokerWhere is where a subscription of the topic's own service waits:
+// every one, in a product whose one default database keeps them all.
+func (t *TopicService[T]) brokerWhere(a *App) string {
+	broker := "memory"
+	if a != nil && a.data != nil {
+		broker = queueWhere(a, &t.nodeBase)
+	}
+	if t.log != nil {
+		broker = "stream:" + broker
+	}
+	return broker
 }
 
 // SubscriptionWorker consumes a topic: its handler runs once per message, at least
@@ -275,10 +292,18 @@ type SubscriptionWorker[T any] struct {
 	// sup runs the subscription's consumer while the app runs: the SDK's
 	// supervisor, which restarts it after its queue fails.
 	sup *lifecycle.Supervisor
+	// from is where it starts when its topic is streamed (topic_stream.go).
+	from streamStart
 }
 
-// queueUnder is what the subscription's queue is kept under.
-func (sb *SubscriptionWorker[T]) queueUnder() string { return underQueues }
+// queueUnder is what the subscription's queue is kept under: none for a
+// streamed topic's, which reads the topic's stream.
+func (sb *SubscriptionWorker[T]) queueUnder() string {
+	if sb.streamed() {
+		return ""
+	}
+	return underQueues
+}
 
 // SubscriptionConfigurer configures a subscription.
 type SubscriptionConfigurer interface {
@@ -287,6 +312,9 @@ type SubscriptionConfigurer interface {
 
 type subscriptionOptions struct {
 	deliveryOptions
+	// start is where a streamed topic's subscription starts (FromBeginning,
+	// FromNow, FromTime), zero when no option said.
+	start streamStart
 	// ownStores lets a watch hear its own module's stores (OwnStores).
 	ownStores bool
 }
@@ -316,6 +344,9 @@ type deliveryOptions struct {
 	parallelism   int
 	// knobs are the consumer's stop and lease (consumer_policy.go).
 	knobs consumerKnobs
+	// given names the options given that a streamed topic's subscription
+	// refuses: a queue's, which a stream has no use for (topic_stream.go).
+	given []string
 }
 
 // DeliveryOption configures a queue's deliveries: a subscription's, or a
@@ -344,7 +375,10 @@ func (f deliveryOption) commandConfigure(o *commandOptions) {
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
 func MaxDeliveries(n int) DeliveryOption {
-	return deliveryOption(func(o *deliveryOptions) { o.maxDeliveries = n })
+	return deliveryOption(func(o *deliveryOptions) {
+		o.maxDeliveries = n
+		o.given = append(o.given, "MaxDeliveries")
+	})
 }
 
 // Parallelism is how many messages are handled at once — a subscription's,
@@ -400,7 +434,10 @@ func Settle(d time.Duration) DeliveryOption {
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
 func Lease(d time.Duration) DeliveryOption {
-	return deliveryOption(func(o *deliveryOptions) { o.knobs.lease = d })
+	return deliveryOption(func(o *deliveryOptions) {
+		o.knobs.lease = d
+		o.given = append(o.given, "Lease")
+	})
 }
 
 // AutoExtend says whether the lease of the message a handler is running is
@@ -419,7 +456,10 @@ func Lease(d time.Duration) DeliveryOption {
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
 func AutoExtend(on bool) DeliveryOption {
-	return deliveryOption(func(o *deliveryOptions) { o.knobs.autoExtend = on })
+	return deliveryOption(func(o *deliveryOptions) {
+		o.knobs.autoExtend = on
+		o.given = append(o.given, "AutoExtend")
+	})
 }
 
 // Subscribe declares a subscription of the service to topic. Delivery is at
@@ -446,7 +486,9 @@ func (s *Service) Subscribe[T any](name string, topic *TopicService[T], handler 
 		s.problem(sub.decl, sub.id, "subscription.limits", "name", name)
 	case o.ownStores:
 		s.problem(sub.decl, sub.id, "subscription.own-stores", "name", name)
+	case !sub.acceptsStart(s, o, name):
 	default:
+		sub.from = o.start
 		topic.mu.Lock()
 		topic.subs = append(topic.subs, sub)
 		topic.mu.Unlock()
@@ -463,6 +505,9 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 	if sb.topic.svc.app.Load() != a {
 		return failure(CodeNotMounted, "TOPIC_NOT_MOUNTED", "a subscription consumes a topic whose service is not mounted in this app", nil,
 			errs.String("subscription", sb.id), errs.String("topic", sb.topic.id))
+	}
+	if sb.streamed() {
+		return sb.startStreamed(a)
 	}
 	var err error
 	run := sb.knobs.values()

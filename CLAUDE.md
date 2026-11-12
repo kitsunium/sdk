@@ -369,11 +369,12 @@ framework/         the layer above pkg/v1, packages of the root module — ADR 0
                      — the workflows, step 5 —, mail — the mailers,
                      step 6 —, jobs — the jobs, step 7 — and otlp —
                      the product's OTLP export over app/forward, issue
-                     #483 —, storetest, the stores' conformance suite, and
+                     #483 —, stream — a streamed topic's log over
+                     data/stream, issue #826 —, storetest, the stores' conformance suite, and
                      apptest, a product's tests on disk — ADR 0175;
                      its engine internal/app, + plug, serverengine,
                      studioengine, storeengine, queueengine, workflowengine,
-                     mailengine, jobengine, otlpengine), telemetry (the
+                     mailengine, jobengine, otlpengine, streamengine), telemetry (the
                      telemetry port + exporter — ADR 0149, the tool's
                      channel, apart from the OTLP export),
                    entitlement, selfupdate, gate, git (the distribution

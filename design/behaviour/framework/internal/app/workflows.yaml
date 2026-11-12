@@ -1456,6 +1456,26 @@ workflows:
           range: missing
           value: s
       - return: out
+  - of: (*TopicService).describe
+    steps:
+      - set: out.Topic
+        value: "&model.TopicInfo{Message: keptSchemaOf(reflect.TypeFor[T](), a != nil && t.sealsAtRest(a)), Delivery: \"at-least-once\", Broker: t.brokerWhere(a)}"
+      - lock:
+          mutex: t.mu
+      - bind: edges
+        eval: make([]model.Edge, 0, len(t.subs))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: a != nil && sub.svc.app.Load() != nil && sub.svc.app.Load() != a
+            - set: edges
+              value: "append(edges, model.Edge{From: t.id, To: sub.id, Kind: model.EdgeDelivers, Declared: true})"
+          key: _
+          range: t.subs
+          value: sub
+      - return: edges
   - of: txOptionsOf
     steps:
       - var:
