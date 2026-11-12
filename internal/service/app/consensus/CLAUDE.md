@@ -1320,6 +1320,22 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   it for a follower that stopped or fell further behind: slower than the
   writes, it would hold the log growing until the log is tight
   (`TestARenewedStreamedPinEndsOnceItsFollowerNoLongerCatchesUp`).
+- Stream a snapshot to every peer in need at once, or as fast as the link
+  allows: two learners joining together streamed two snapshots over the
+  NIC and the TLS CPU of the data lane, one goroutine each, unbounded.
+  `sendSnapshot` starts at most `MaxSnapshotStreams` (default 1); a peer
+  beyond it waits in raft's snapshot state, holding no pin, and
+  `serveWaiting` starts it, first asked first served, when a stream ends
+  (`streamWait`, cleared by `leadershipChanged`).
+  `SnapshotStreamBytesPerSecond` paces every stream together with one token
+  bucket on the node's clock (`pacer`, `node_pace.go`), never the wall
+  clock: a read is cut to a tenth of the rate and paid after it, its
+  `moved` mark renewed after the wait, so a paced stream never looks
+  stalled to `streamDue`. `PeerHealthValue.SnapshotSent`/`SnapshotSize` say
+  how far a stream is, `consensus_snapshot_stream_bytes_per_second` how fast
+  each one went (#920, `TestTwoLearnersAreStreamedOneAfterTheOther`,
+  `TestAPacedStreamEndsInItsSizeOverItsRate`,
+  `TestThePacingWaitsOnTheInjectedClockOnly`).
 - Accept an offer of the snapshot this node is restoring: it was streamed
   again and committed over the file the restore reads (#610,
   `answerRestoring`, `TestAnOfferOfTheSnapshotBeingRestoredIsRefused`).

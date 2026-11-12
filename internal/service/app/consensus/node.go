@@ -168,6 +168,13 @@ type Node struct {
 	// sendStop cancels the snapshot stream in flight to each peer: a
 	// leader that lost its leadership or its term stops streaming (#547).
 	sendStop map[coreconsensus.NodeID]context.CancelFunc
+	// streamWait are the peers in need of a snapshot beyond
+	// MaxSnapshotStreams, in the order they asked: each waits in raft's
+	// snapshot state and is served when a stream ends (#920).
+	streamWait []coreconsensus.NodeID
+	// pace paces every snapshot stream together; nil when
+	// SnapshotStreamBytesPerSecond is unlimited (#920).
+	pace *pacer
 	// pinScale is, per peer, how many times its pin bound doubled: a
 	// receiver still answering when its stream's pin fell due was slow to
 	// install, not stuck (#610).
@@ -501,6 +508,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		waiters: map[uint64]*proposal{}, forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, confWatchers: map[chan coreconsensus.MembershipValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
+	n.pace = newPacer(cfg.Clock, cfg.SnapshotStreamBytesPerSecond)
 	ident := stamp.Log
 	n.ident.Store(&ident)
 	return n
@@ -1892,6 +1900,9 @@ func (n *Node) leadershipChanged() {
 		// same snapshot writes to on the receiver (#547).
 		stop()
 	}
+	// A peer waiting for a stream waited for this term's leader: the next
+	// one asks again.
+	n.streamWait = n.streamWait[:0]
 	// A new leader is probed at the next tick: until it answers, this
 	// node does not know it hears it (#541).
 	n.contact.probeCtx, n.contact.probeAt = 0, time.Time{}

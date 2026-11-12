@@ -2501,6 +2501,7 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_loop_turn_seconds` | histogram (R7-20) |
 | `consensus_chain_refusals_total`, `consensus_snapshot_pins`, `consensus_snapshot_pin_age_seconds` | counter by leader, gauge, gauge by peer: how long each pin has held since its offer (R7-19, R7-38, #914) |
 | `consensus_stopped` | gauge by `StopReason`, set before the process exits (R7-37) |
+| `consensus_snapshot_stream_bytes_per_second` | histogram: the pace of each snapshot stream that ended (#920) |
 
 **The product pushes stop reasons (R7-37).** A stopped node exits, so a
 scrape may never see `consensus_stopped`. The product sends the
@@ -2838,6 +2839,8 @@ transport. The cross-field rules are checked after defaults are applied
 | `JoinAuthorizer` | engine | none | without it, every JOIN is refused (R8-09) |
 | `HardCloseTimeout` | engine | 5 s | clamp (R7-11) |
 | `PromoteLag` | engine | 1 024 | clamp |
+| `MaxSnapshotStreams` | engine | 1 | clamp; a peer in need beyond it waits in raft's snapshot state, served when a stream ends (#920) |
+| `SnapshotStreamBytesPerSecond` | engine | 0, unlimited | refuse if negative; one token bucket on `Clock` paces every stream together (#920) |
 | `MaxFrameBytes` | transport | 16 MiB | clamp; refuse if < `MaxBatchBytes` + header |
 | `HandshakeTimeout` | transport | 1 s | clamp; refuse > 1 s |
 | `MaxUnauthenticatedPerIP`, `ReservedMemberSlots` | transport | 4, 8 | clamp |

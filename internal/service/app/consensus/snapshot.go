@@ -888,6 +888,12 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	if _, busy := n.sendStop[to]; busy {
 		return
 	}
+	if len(n.sendStop) >= n.cfg.MaxSnapshotStreams {
+		// Every stream allowed is in flight: the peer waits, paused in
+		// raft's snapshot state, and is served when one ends (#920).
+		n.queueStream(to)
+		return
+	}
 	meta, ok := n.snapshotToSend()
 	if !ok {
 		// None to send: cut one now, and the next probe sends it.
@@ -904,9 +910,9 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.r.SnapshotDone(to, 0, false)
 		return
 	}
-	sent, moved := new(atomic.Int64), new(atomic.Int64)
+	sent, moved, progress := new(atomic.Int64), new(atomic.Int64), new(atomic.Int64)
 	moved.Store(n.clk.Now().UnixNano())
-	n.sending[to] = sendPin{index: meta.Position.Index, since: moved.Load(), sent: sent, moved: moved}
+	n.sending[to] = sendPin{index: meta.Position.Index, since: moved.Load(), sent: sent, moved: moved, progress: progress, size: meta.EncodedSize}
 	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
 	ctx, cancel := context.WithCancel(context.Background())
 	n.sendStop[to] = cancel
@@ -920,15 +926,23 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		}()
 		// The handle pins the snapshot until the transfer completes, so
 		// compaction cannot delete it mid-transfer (R3-16).
+		var accepted time.Time
+		var from int64
 		err := n.cfg.Transport.Stream(ctx, to, offer, func(off int64) (io.ReadCloser, error) {
 			if off < 0 || off > meta.EncodedSize {
 				return nil, origin(coreconsensus.FrameInvalid, errs.Int64("offset", off))
 			}
 			// The offer was accepted: the stream moved.
-			moved.Store(n.clk.Now().UnixNano())
-			return io.NopCloser(&sentReader{r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent, moved: moved}), nil
+			accepted = n.clk.Now()
+			moved.Store(accepted.UnixNano())
+			progress.Store(off)
+			from = off
+			return io.NopCloser(&sentReader{ctx: ctx, r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent, moved: moved, progress: progress}), nil
 		})
 		cancel()
+		if err == nil && !accepted.IsZero() {
+			n.streamRate(progress.Load()-from, n.clk.Since(accepted))
+		}
 		if cerr := h.Close(); cerr != nil {
 			// The transfer is over whatever the read handle says; the pin
 			// it held is released either way.
@@ -949,6 +963,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			}
 			delete(n.sendStop, to)
 			n.r.SnapshotDone(to, meta.Position.Index, err == nil)
+			n.serveWaiting()
 			n.handleReady()
 		})
 	})

@@ -1745,62 +1745,69 @@ Config is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.C
 ```go
 type Config struct {
 	// Cluster is the cluster the node belongs to; it must match the stamp.
-	Cluster             coreconsensus.ClusterID
+	Cluster                      coreconsensus.ClusterID
 	// Group is the consensus group, 1 in v1; 0 is clamped to 1.
-	Group               coreconsensus.GroupID
+	Group                        coreconsensus.GroupID
 	// ID is the node; 0 takes the stamp's, any other value must match it.
-	ID                  coreconsensus.NodeID
+	ID                           coreconsensus.NodeID
 	// Machine is the replicated program.
-	Machine             coreconsensus.StateMachine
+	Machine                      coreconsensus.StateMachine
 	// Durability must agree with Machine's siblings.
-	Durability          Durability
+	Durability                   Durability
 	// Log, Snapshots and Transport are the node's ports; the caller owns
 	// them and closes them after the node.
-	Log                 coreconsensus.LogStore
-	Snapshots           coreconsensus.SnapshotStore
-	Transport           coreconsensus.Transport
+	Log                          coreconsensus.LogStore
+	Snapshots                    coreconsensus.SnapshotStore
+	Transport                    coreconsensus.Transport
 	// Clock drives every timer; nil is clock.System.
-	Clock               clock.Timed
+	Clock                        clock.Timed
 	// InitialTiming is proposed at Bootstrap only; the committed contract
 	// rules.
-	InitialTiming       coreconsensus.TimingContractSpec
-	MaxBatchBytes       int
-	MaxInflight         int
-	MaxInflightBytes    int
-	MaxEntryBytes       int
-	MaxPendingBytes     int64
-	MaxApplyLagBytes    int64
-	RecentEntriesBytes  int64
-	SnapshotEvery       uint64
-	SnapshotTrailing    uint64
-	PromoteLag          uint64
-	SnapshotEveryBytes  int64
-	MaxSnapshotBytes    int64
-	MaxLogBytes         int64
-	LogReserveBytes     int64
+	InitialTiming                coreconsensus.TimingContractSpec
+	MaxBatchBytes                int
+	MaxInflight                  int
+	MaxInflightBytes             int
+	MaxEntryBytes                int
+	MaxPendingBytes              int64
+	MaxApplyLagBytes             int64
+	RecentEntriesBytes           int64
+	SnapshotEvery                uint64
+	SnapshotTrailing             uint64
+	PromoteLag                   uint64
+	SnapshotEveryBytes           int64
+	MaxSnapshotBytes             int64
+	MaxLogBytes                  int64
+	LogReserveBytes              int64
+	// MaxSnapshotStreams bounds the snapshot streams this node sends at
+	// once; 0 is 1. A peer in need beyond it waits, its transfer pending,
+	// and is served when a stream ends.
+	MaxSnapshotStreams           int
+	// SnapshotStreamBytesPerSecond paces the snapshot streams this node
+	// sends, all of them together, on Clock; 0 is unlimited.
+	SnapshotStreamBytesPerSecond int64
 	// SnapshotCodec compresses snapshot chunks; nil is flate.
-	SnapshotCodec       coretransform.BoundedDecompressor
+	SnapshotCodec                coretransform.BoundedDecompressor
 	// SnapshotPausesApply says the state machine cannot cut cheaply.
-	SnapshotPausesApply bool
+	SnapshotPausesApply          bool
 	// MinVoters is the floor a Remove may not cross.
-	MinVoters           int
+	MinVoters                    int
 	// JoinAuthorizer decides a JOIN; without it every JOIN is refused.
-	JoinAuthorizer      coreconsensus.JoinAuthorizer
+	JoinAuthorizer               coreconsensus.JoinAuthorizer
 	// HardCloseTimeout bounds HardClose.
-	HardCloseTimeout    time.Duration
+	HardCloseTimeout             time.Duration
 	// Reads selects the read mode.
-	Reads               ReadMode
+	Reads                        ReadMode
 	// PreferredLeaders are the nodes a leader transfers to after an
 	// election when it is not one of them.
-	PreferredLeaders    []coreconsensus.NodeID
+	PreferredLeaders             []coreconsensus.NodeID
 	// Seed draws the election timeouts; 0 draws one.
-	Seed                uint64
+	Seed                         uint64
 	// Meter, Tracer and Logger receive D13's metrics, one span per Propose
 	// and the role, membership, snapshot and truncation events; nil turns
 	// each off. None of them changes a decision.
-	Meter               coremetrics.Meter
-	Tracer              coretrace.Tracer
-	Logger              corelogger.Logger
+	Meter                        coremetrics.Meter
+	Tracer                       coretrace.Tracer
+	Logger                       corelogger.Logger
 }
 ```
 
@@ -3553,20 +3560,25 @@ PeerHealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/co
 ```go
 type PeerHealthValue struct {
 	// ID is the peer.
-	ID          coreconsensus.NodeID
+	ID           coreconsensus.NodeID
 	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
 	// PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
 	// PeerLeaderUnconfirmed.
-	Flags       PeerFlags
+	Flags        PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
-	Match       uint64
+	Match        uint64
 	// Lag is how far Match is behind the leader's last index.
-	Lag         uint64
+	Lag          uint64
 	// Inflight counts the appends in flight to it.
-	Inflight    int
+	Inflight     int
 	// LastContact is how long ago it last answered; negative when it never
 	// answered in this term.
-	LastContact time.Duration
+	LastContact  time.Duration
+	// SnapshotSent is how many bytes of the snapshot streamed to it the
+	// transport has read, resumed offset included; 0 with no stream.
+	SnapshotSent int64
+	// SnapshotSize is the EncodedSize of that snapshot; 0 with no stream.
+	SnapshotSize int64
 }
 ```
 

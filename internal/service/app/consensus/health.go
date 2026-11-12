@@ -89,6 +89,11 @@ type PeerHealthValue struct {
 	// LastContact is how long ago it last answered; negative when it never
 	// answered in this term.
 	LastContact time.Duration
+	// SnapshotSent is how many bytes of the snapshot streamed to it the
+	// transport has read, resumed offset included; 0 with no stream.
+	SnapshotSent int64
+	// SnapshotSize is the EncodedSize of that snapshot; 0 with no stream.
+	SnapshotSize int64
 }
 
 // PeerFlags are a peer's yes/no facts in a health verdict, one bit each,
@@ -379,13 +384,7 @@ func (n *Node) warnHandOver(to coreconsensus.NodeID) {
 // never answered this term, when its last answer is older than the minimum
 // election timeout, or when the transport reported it unreachable since.
 func (n *Node) peerHealth(p *raft.PeerStatValue, now time.Time, last uint64, window time.Duration) PeerHealthValue {
-	ph := PeerHealthValue{ID: p.ID, Match: p.Match, Inflight: p.Inflight, LastContact: -1}
-	if p.Flags.Has(raft.StatVoter) {
-		ph.Flags |= PeerVoter
-	}
-	if p.Flags.Has(raft.StatSnapshot) {
-		ph.Flags |= PeerSnapshot
-	}
+	ph := PeerHealthValue{ID: p.ID, Match: p.Match, Inflight: p.Inflight, LastContact: -1, Flags: peerRoleFlags(p.Flags)}
 	if last > p.Match {
 		ph.Lag = last - p.Match
 	}
@@ -396,7 +395,25 @@ func (n *Node) peerHealth(p *raft.PeerStatValue, now time.Time, last uint64, win
 	if n.peerUnreachable(p, heard, ph.LastContact, window) {
 		ph.Flags |= PeerUnreachable
 	}
+	if pin, ok := n.sending[p.ID]; ok && pin.until.IsZero() && pin.progress != nil {
+		// A stream in flight: how far the transport has read it (#920).
+		ph.SnapshotSent, ph.SnapshotSize = pin.progress.Load(), pin.size
+	}
 	return ph
+}
+
+// peerRoleFlags carries the facts of the leader's view a verdict repeats
+// as they are: whether the peer votes and whether a snapshot is under way
+// to it.
+func peerRoleFlags(f raft.PeerStatFlags) PeerFlags {
+	var out PeerFlags
+	if f.Has(raft.StatVoter) {
+		out |= PeerVoter
+	}
+	if f.Has(raft.StatSnapshot) {
+		out |= PeerSnapshot
+	}
+	return out
 }
 
 // peerUnreachable reports whether a peer counts as unreachable: it never

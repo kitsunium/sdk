@@ -63432,8 +63432,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "Config",
-      "spelled": "struct{Cluster coreconsensus.ClusterID; Group coreconsensus.GroupID; ID coreconsensus.NodeID; Machine coreconsensus.StateMachine; Durability Durability; Log coreconsensus.LogStore; Snapshots coreconsensus.SnapshotStore; Transport coreconsensus.Transport; Clock clock.Timed; InitialTiming coreconsensus.TimingContractSpec; MaxBatchBytes int; MaxInflight int; MaxInflightBytes int; MaxEntryBytes int; MaxPendingBytes int64; MaxApplyLagBytes int64; RecentEntriesBytes int64; SnapshotEvery uint64; SnapshotTrailing uint64; PromoteLag uint64; SnapshotEveryBytes int64; MaxSnapshotBytes int64; MaxLogBytes int64; LogReserveBytes int64; SnapshotCodec coretransform.BoundedDecompressor; SnapshotPausesApply bool; MinVoters int; JoinAuthorizer coreconsensus.JoinAuthorizer; HardCloseTimeout time.Duration; Reads ReadMode; PreferredLeaders []coreconsensus.NodeID; Seed uint64; Meter coremetrics.Meter; Tracer coretrace.Tracer; Logger corelogger.Logger}",
-      "canonical": "struct{Cluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Machine github.com/kitsunium/sdk/internal/core/app/consensus.StateMachine; Durability github.com/kitsunium/sdk/internal/service/app/consensus.Durability; Log github.com/kitsunium/sdk/internal/core/app/consensus.LogStore; Snapshots github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotStore; Transport github.com/kitsunium/sdk/internal/core/app/consensus.Transport; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; InitialTiming github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; MaxBatchBytes int; MaxInflight int; MaxInflightBytes int; MaxEntryBytes int; MaxPendingBytes int64; MaxApplyLagBytes int64; RecentEntriesBytes int64; SnapshotEvery uint64; SnapshotTrailing uint64; PromoteLag uint64; SnapshotEveryBytes int64; MaxSnapshotBytes int64; MaxLogBytes int64; LogReserveBytes int64; SnapshotCodec github.com/kitsunium/sdk/internal/core/data/transform.BoundedDecompressor; SnapshotPausesApply bool; MinVoters int; JoinAuthorizer github.com/kitsunium/sdk/internal/core/app/consensus.JoinAuthorizer; HardCloseTimeout time.Duration; Reads github.com/kitsunium/sdk/internal/service/app/consensus.ReadMode; PreferredLeaders []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Seed uint64; Meter github.com/kitsunium/sdk/internal/core/observe/metrics.Meter; Tracer github.com/kitsunium/sdk/internal/core/observe/trace.Tracer; Logger github.com/kitsunium/sdk/internal/core/observe/logger.Logger}",
+      "spelled": "struct{Cluster coreconsensus.ClusterID; Group coreconsensus.GroupID; ID coreconsensus.NodeID; Machine coreconsensus.StateMachine; Durability Durability; Log coreconsensus.LogStore; Snapshots coreconsensus.SnapshotStore; Transport coreconsensus.Transport; Clock clock.Timed; InitialTiming coreconsensus.TimingContractSpec; MaxBatchBytes int; MaxInflight int; MaxInflightBytes int; MaxEntryBytes int; MaxPendingBytes int64; MaxApplyLagBytes int64; RecentEntriesBytes int64; SnapshotEvery uint64; SnapshotTrailing uint64; PromoteLag uint64; SnapshotEveryBytes int64; MaxSnapshotBytes int64; MaxLogBytes int64; LogReserveBytes int64; MaxSnapshotStreams int; SnapshotStreamBytesPerSecond int64; SnapshotCodec coretransform.BoundedDecompressor; SnapshotPausesApply bool; MinVoters int; JoinAuthorizer coreconsensus.JoinAuthorizer; HardCloseTimeout time.Duration; Reads ReadMode; PreferredLeaders []coreconsensus.NodeID; Seed uint64; Meter coremetrics.Meter; Tracer coretrace.Tracer; Logger corelogger.Logger}",
+      "canonical": "struct{Cluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Machine github.com/kitsunium/sdk/internal/core/app/consensus.StateMachine; Durability github.com/kitsunium/sdk/internal/service/app/consensus.Durability; Log github.com/kitsunium/sdk/internal/core/app/consensus.LogStore; Snapshots github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotStore; Transport github.com/kitsunium/sdk/internal/core/app/consensus.Transport; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; InitialTiming github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; MaxBatchBytes int; MaxInflight int; MaxInflightBytes int; MaxEntryBytes int; MaxPendingBytes int64; MaxApplyLagBytes int64; RecentEntriesBytes int64; SnapshotEvery uint64; SnapshotTrailing uint64; PromoteLag uint64; SnapshotEveryBytes int64; MaxSnapshotBytes int64; MaxLogBytes int64; LogReserveBytes int64; MaxSnapshotStreams int; SnapshotStreamBytesPerSecond int64; SnapshotCodec github.com/kitsunium/sdk/internal/core/data/transform.BoundedDecompressor; SnapshotPausesApply bool; MinVoters int; JoinAuthorizer github.com/kitsunium/sdk/internal/core/app/consensus.JoinAuthorizer; HardCloseTimeout time.Duration; Reads github.com/kitsunium/sdk/internal/service/app/consensus.ReadMode; PreferredLeaders []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Seed uint64; Meter github.com/kitsunium/sdk/internal/core/observe/metrics.Meter; Tracer github.com/kitsunium/sdk/internal/core/observe/trace.Tracer; Logger github.com/kitsunium/sdk/internal/core/observe/logger.Logger}",
       "fields": [
         {
           "name": "Cluster",
@@ -63538,6 +63538,16 @@
         {
           "name": "LogReserveBytes",
           "type": "int64"
+        },
+        {
+          "name": "MaxSnapshotStreams",
+          "type": "int",
+          "doc": "MaxSnapshotStreams bounds the snapshot streams this node sends at\nonce; 0 is 1. A peer in need beyond it waits, its transfer pending,\nand is served when a stream ends.\n"
+        },
+        {
+          "name": "SnapshotStreamBytesPerSecond",
+          "type": "int64",
+          "doc": "SnapshotStreamBytesPerSecond paces the snapshot streams this node\nsends, all of them together, on Clock; 0 is unlimited.\n"
         },
         {
           "name": "SnapshotCodec",
@@ -64981,8 +64991,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "PeerHealthValue",
-      "spelled": "struct{ID coreconsensus.NodeID; Flags PeerFlags; Match uint64; Lag uint64; Inflight int; LastContact time.Duration}",
-      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Flags github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags; Match uint64; Lag uint64; Inflight int; LastContact time.Duration}",
+      "spelled": "struct{ID coreconsensus.NodeID; Flags PeerFlags; Match uint64; Lag uint64; Inflight int; LastContact time.Duration; SnapshotSent int64; SnapshotSize int64}",
+      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Flags github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags; Match uint64; Lag uint64; Inflight int; LastContact time.Duration; SnapshotSent int64; SnapshotSize int64}",
       "fields": [
         {
           "name": "ID",
@@ -65013,6 +65023,16 @@
           "name": "LastContact",
           "type": "time.Duration",
           "doc": "LastContact is how long ago it last answered; negative when it never\nanswered in this term.\n"
+        },
+        {
+          "name": "SnapshotSent",
+          "type": "int64",
+          "doc": "SnapshotSent is how many bytes of the snapshot streamed to it the\ntransport has read, resumed offset included; 0 with no stream.\n"
+        },
+        {
+          "name": "SnapshotSize",
+          "type": "int64",
+          "doc": "SnapshotSize is the EncodedSize of that snapshot; 0 with no stream.\n"
         }
       ],
       "doc": "PeerHealthValue is the leader's view of one peer (D13), one line of\nHealthValue.Peers. It is taken on the event loop and stale at the next\nturn.\n",

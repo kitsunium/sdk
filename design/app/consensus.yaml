@@ -2950,6 +2950,17 @@ packages:
               type: int64
             - name: LogReserveBytes
               type: int64
+            - doc: |-
+                MaxSnapshotStreams bounds the snapshot streams this node sends at
+                once; 0 is 1. A peer in need beyond it waits, its transfer pending,
+                and is served when a stream ends.
+              name: MaxSnapshotStreams
+              type: int
+            - doc: |-
+                SnapshotStreamBytesPerSecond paces the snapshot streams this node
+                sends, all of them together, on Clock; 0 is unlimited.
+              name: SnapshotStreamBytesPerSecond
+              type: int64
             - doc: SnapshotCodec compresses snapshot chunks; nil is flate.
               name: SnapshotCodec
               type: coretransform.BoundedDecompressor
@@ -3083,6 +3094,14 @@ packages:
                 answered in this term.
               name: LastContact
               type: time.Duration
+            - doc: |-
+                SnapshotSent is how many bytes of the snapshot streamed to it the
+                transport has read, resumed offset included; 0 with no stream.
+              name: SnapshotSent
+              type: int64
+            - doc: SnapshotSize is the EncodedSize of that snapshot; 0 with no stream.
+              name: SnapshotSize
+              type: int64
       - doc: |-
           PeerFlags are a peer's yes/no facts in a health verdict, one bit each,
           read with Has.

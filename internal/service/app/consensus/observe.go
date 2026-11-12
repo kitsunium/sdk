@@ -65,6 +65,10 @@ const (
 	mPeerCertExpiry   = "consensus_tls_peer_cert_expiry_seconds"
 	mReloadFailures   = "consensus_tls_reload_failures_total"
 	mLinksAborted     = "consensus_links_aborted_total"
+
+	// mSnapshotStreamRate is the pace of each snapshot stream that ended,
+	// in bytes a second (#920).
+	mSnapshotStreamRate = "consensus_snapshot_stream_bytes_per_second"
 )
 
 // departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads
@@ -212,8 +216,12 @@ func (o *obs) record(name string, v float64, attrs ...coreotel.AttrValue) {
 	h, ok := o.hist[k]
 	if !ok {
 		buckets := latencyBuckets
-		if name == mBatchEntries || name == mBatchBytes || name == mSnapshotBytes {
+		switch name {
+		case mBatchEntries, mBatchBytes, mSnapshotBytes:
 			buckets = []float64{1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 1 << 20, 16 << 20, 256 << 20}
+		case mSnapshotStreamRate:
+			// From 64 KiB/s, a paced stream on a thin link, to 1 GiB/s.
+			buckets = []float64{64 << 10, 256 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20, 256 << 20, 1 << 30}
 		}
 		h = o.meter.Histogram(name, buckets, append([]coreotel.AttrValue{o.group}, attrs...)...)
 		o.hist[k] = h
@@ -434,46 +442,69 @@ func (n *Node) observeResources() {
 	}
 	o.lastRes = now
 	o.setGauge(mLogQuota, float64(n.cfg.MaxLogBytes))
-	if ls, ok := n.cfg.Log.(interface {
+	n.observeLogStats(o)
+	n.observeCerts(o, now)
+	n.observeLinkAborts(o)
+}
+
+// observeLogStats publishes the log's size, the free space of its
+// filesystem and the tails it truncated, for a log that keeps them.
+func (n *Node) observeLogStats(o *obs) {
+	ls, ok := n.cfg.Log.(interface {
 		logStats() (bytes, free, tails int64)
-	}); ok {
-		b, free, tails := ls.logStats()
-		o.setGauge(mLogBytes, float64(b))
-		if free >= 0 {
-			o.setGauge(mFsFree, float64(free), coreotel.String("fs", "data"))
-		}
-		o.addTo(mTailTruncated, &o.seenTails, tails)
+	})
+	if !ok {
+		return
 	}
-	if ct, ok := n.cfg.Transport.(interface {
+	b, free, tails := ls.logStats()
+	o.setGauge(mLogBytes, float64(b))
+	if free >= 0 {
+		o.setGauge(mFsFree, float64(free), coreotel.String("fs", "data"))
+	}
+	o.addTo(mTailTruncated, &o.seenTails, tails)
+}
+
+// observeCerts publishes how long this node's certificate and each peer's
+// remain valid at now, and the reloads that failed, for a transport that
+// holds certificates. A peer no longer seen has its gauge set to
+// departedCertExpiry.
+func (n *Node) observeCerts(o *obs, now time.Time) {
+	ct, ok := n.cfg.Transport.(interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time
 		ReloadFailures() int
-	}); ok {
-		if e := ct.CertExpiry(); !e.IsZero() {
-			o.setGauge(mCertExpiry, e.Sub(now).Seconds())
-		}
-		seen := map[coreconsensus.NodeID]bool{}
-		for id, e := range ct.PeerCertExpiry() {
-			seen[id] = true
-			o.setGauge(mPeerCertExpiry, e.Sub(now).Seconds(), coreotel.String("peer", id.String()))
-		}
-		for id := range o.certsPub {
-			if !seen[id] {
-				o.setGauge(mPeerCertExpiry, departedCertExpiry, coreotel.String("peer", id.String()))
-			}
-		}
-		o.certsPub = seen
-		o.addTo(mReloadFailures, &o.seenReloads, int64(ct.ReloadFailures()))
+	})
+	if !ok {
+		return
 	}
-	if la, ok := n.cfg.Transport.(linkAborter); ok {
-		timedOut, silenced := la.linksAborted()
-		o.addTo(mLinksAborted, &o.seenTimedOut, timedOut, coreotel.String("reason", "user_timeout"))
-		o.addTo(mLinksAborted, &o.seenSilenced, silenced, coreotel.String("reason", "read_silence"))
+	if e := ct.CertExpiry(); !e.IsZero() {
+		o.setGauge(mCertExpiry, e.Sub(now).Seconds())
 	}
+	seen := map[coreconsensus.NodeID]bool{}
+	for id, e := range ct.PeerCertExpiry() {
+		seen[id] = true
+		o.setGauge(mPeerCertExpiry, e.Sub(now).Seconds(), coreotel.String("peer", id.String()))
+	}
+	for id := range o.certsPub {
+		if !seen[id] {
+			o.setGauge(mPeerCertExpiry, departedCertExpiry, coreotel.String("peer", id.String()))
+		}
+	}
+	o.certsPub = seen
+	o.addTo(mReloadFailures, &o.seenReloads, int64(ct.ReloadFailures()))
 }
 
-// linkAborter is a transport that counts the sender links it aborted for
-// bytes left unacknowledged and for read silence (#1116).
-type linkAborter interface {
-	linksAborted() (userTimeout, readSilence int64)
+// observeLinkAborts publishes the sender links the transport aborted for
+// bytes left unacknowledged and for read silence, for a transport that
+// counts them (#1116).
+func (n *Node) observeLinkAborts(o *obs) {
+	la, ok := n.cfg.Transport.(interface {
+		linksAborted() (userTimeout, readSilence int64)
+	})
+	if !ok {
+		return
+	}
+	timedOut, silenced := la.linksAborted()
+	o.addTo(mLinksAborted, &o.seenTimedOut, timedOut, coreotel.String("reason", "user_timeout"))
+	o.addTo(mLinksAborted, &o.seenSilenced, silenced, coreotel.String("reason", "read_silence"))
 }
