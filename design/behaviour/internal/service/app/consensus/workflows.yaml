@@ -438,6 +438,30 @@ workflows:
           key: i
           range: stats
       - return: "false"
+  - of: (*TCPTransport).forgetDeparted
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: delete(t.heard, spki)
+                init:
+                  bind: _, ok
+                  eval: bySPKI[spki]
+                when: "!ok"
+          key: spki
+          range: t.heard
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: delete(t.peerExpiry, id)
+                init:
+                  bind: _, ok
+                  eval: byID[id]
+                when: "!ok"
+          key: id
+          range: t.peerExpiry
   - of: indexMembers
     steps:
       - var:
@@ -476,3 +500,24 @@ workflows:
           key: k
           range: shared
       - return: byID, bySPKI
+  - of: (*TCPTransport).unreachableHooks
+    steps:
+      - var:
+          name: fs
+          type: "[]func(coreconsensus.NodeID)"
+      - opt:
+          do:
+            - set: fs
+              value: append(fs, t.unreachable)
+          when: t.unreachable != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: fs
+                    value: append(fs, b.unreachable)
+                when: b.unreachable != nil
+          key: _
+          range: t.groups
+          value: b
+      - return: fs

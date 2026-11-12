@@ -8,7 +8,10 @@ Public facade of the consensus domain (ADR 0152 D14), written by kit into
 published port speaks, `NewNode`, `Bootstrap`, the data directory and its
 offline operations — `ImportObserved` and `OpenSnapshot` among them, what a
 non-member observer rebuilds from beside `Node.ReadCommitted`, and
-`Preflight`, the disk's fdatasync measured against the timing contract —,
+`Preflight`, the disk's fdatasync measured against the timing contract —, the
+incremental backup (`Node.ExportBackup`, `Node.AppendBackup`,
+`VerifyBackup`, `RestoreBackup`, its recovery point in the package doc's
+Backup section, #927),
 `NewTCPTransport` and `NewTCPTransportFromPEM`, the
 memory doubles, the wire codecs and the sentinels of both ranges. The
 `LeadershipWatcher` and `MembershipWatcher` siblings are aliased too: a

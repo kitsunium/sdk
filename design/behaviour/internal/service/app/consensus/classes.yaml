@@ -1,6 +1,43 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - grouped: true
+    items:
+      - name: backupMagic
+        value: "\"KSBK\""
+      - name: backupVersion1
+        value: "1"
+      - name: backupExport
+        value: "'F'"
+      - name: backupTail
+        value: "'T'"
+      - name: backupHeadLen
+        value: len(backupMagic) + 2
+      - name: recSnapshot
+        value: "1"
+      - name: recMeta
+        value: "2"
+      - name: recEntries
+        value: "3"
+      - name: recTrailer
+        value: "4"
+      - doc: recHeadLen is a record's type and length; recSumLen its CRC-32C.
+        name: recHeadLen
+        value: "5"
+      - name: recSumLen
+        value: "4"
+      - doc: |-
+          backupChunk bounds a snapshot record, backupBatchBytes the payloads
+          of one entry record, backupMaxRecord any record a reader accepts.
+        name: backupChunk
+        value: 64 << 10
+      - name: backupBatchBytes
+        value: 1 << 20
+      - name: backupMaxRecord
+        value: 64 << 20
+      - name: trailerLen
+        value: 2*(8+8+4) + 8
+    name: backupMagic
   - doc: |-
       batchFrameOverhead bounds what an append frame adds to the batch bytes
       the leader counts: the message header and the first entry's fields.
@@ -468,6 +505,16 @@ constants:
         value: "4096"
     name: resultRing
   - doc: |-
+      paceSlices is how many reads a second of a paced stream is cut into: a
+      read is at most a tenth of the rate, so a stream that waits for its
+      budget waits at most a tenth of a second between two reads, its moved
+      mark renewed after each, far inside any pin bound (pinAfterStream).
+    items:
+      - name: paceSlices
+        type: int64
+        value: "10"
+    name: paceSlices
+  - doc: |-
       cutAllowance is how many maximum election timeouts a cut on the apply
       goroutine may hold it before watchProgress counts it as a stuck apply: a
       capture or a write that never returns is the failure the watch exists
@@ -613,6 +660,11 @@ constants:
         value: "\"consensus_tls_reload_failures_total\""
       - name: mLinksAborted
         value: "\"consensus_links_aborted_total\""
+      - doc: |-
+          mSnapshotStreamRate is the pace of each snapshot stream that ended,
+          in bytes a second (#920).
+        name: mSnapshotStreamRate
+        value: "\"consensus_snapshot_stream_bytes_per_second\""
     name: mRole
   - doc: |-
       departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads
@@ -927,9 +979,11 @@ constants:
           that predates it serves no unknown lane and ends the connection
           without an answer, which the asker counts as a member that did not
           answer: no raft message changes, and the protocol version stays.
+          Byte 8: 5 and 6 are left to ADR 0220's proposed laneControlV2 and
+          laneDataV2, and 7 to the group snapshot lane of ADR 0244.
         name: laneMembership
         type: byte
-        value: "5"
+        value: "8"
       - doc: sanScheme is the URI scheme of a node certificate's one URI SAN.
         name: sanScheme
         value: "\"kitsunium-consensus\""
@@ -1032,6 +1086,37 @@ constants:
         type: coreconsensus.GroupID
         value: "0"
     name: defaultUnauthenticatedPerIP
+  - grouped: true
+    items:
+      - doc: |-
+          laneSnapshotGroup carries one snapshot offer and its stream for the
+          group its offer names: the group as a little-endian u64, then
+          laneSnapshot's offer, in one chunk. Group 1 keeps laneSnapshot, so a
+          cluster of one group 1 sends what it always did. 5 and 6 are left to
+          ADR 0220's laneControlV2 and laneDataV2.
+        name: laneSnapshotGroup
+        type: byte
+        value: "7"
+      - doc: |-
+          groupPrefix is the group's bytes before laneSnapshot's offer on
+          laneSnapshotGroup.
+        name: groupPrefix
+        type: int
+        value: "8"
+      - doc: |-
+          frameGroupAt is the offset of the group in a frame as readFrames
+          reads it, its length included: length (u32), version (u8), type
+          (u8), then the group (u64), little-endian (ADR 0152 D18).
+        name: frameGroupAt
+        type: int
+        value: 4 + 1 + 1
+      - doc: |-
+          defaultGroup is the group a lane that names none is served to when
+          several are bound: the one every v1 node runs (Config clamps 0 to it).
+        name: defaultGroup
+        type: coreconsensus.GroupID
+        value: "1"
+    name: laneSnapshotGroup
   - doc: |-
       tcpUserTimeout is TCP_USER_TIMEOUT of linux/tcp.h, which package syscall
       does not name.
@@ -1080,6 +1165,36 @@ files:
       - (*Node).waitApplied
       - unsupportedKind
     name: apply.go
+  - decls:
+      - backupMagic
+      - backupTable
+      - BackupPoint
+      - BackupParams
+      - (*Node).ExportBackup
+      - (*Node).AppendBackup
+      - (*Node).writeBackupTail
+      - VerifyBackup
+      - RestoreBackup
+      - scanBackup
+      - backupScan
+      - (*backupScan).file
+      - (*backupScan).entries
+      - (*backupScan).trailer
+      - checkBackupBatch
+      - backupSnapshot
+      - appendTrailer
+      - parseTrailer
+      - backupWriter
+      - (*backupWriter).header
+      - (*backupWriter).record
+      - snapshotRecords
+      - snapshotRecords.Write
+      - backupReader
+      - (*backupReader).header
+      - (*backupReader).next
+      - backupSnapReader
+      - (*backupSnapReader).Read
+    name: backup.go
   - decls:
       - foundingDigest
       - byID
@@ -1134,7 +1249,9 @@ files:
       - DataDir
       - NewDataDir
       - NewDataDirWith
+      - newDataDirOn
       - (*dataDir).open
+      - (*dataDir).fs
       - DataDir.Dir
       - DataDir.Log
       - DataDir.Snapshots
@@ -1157,6 +1274,18 @@ files:
       - readStamp
       - writeStamp
     name: datadir_stamp.go
+  - decls:
+      - segFile
+      - diskFS
+      - osDisk
+      - openOSFile
+      - datasyncFile
+      - (*diskFS).writeSynced
+      - (*diskFS).writeFileSync
+      - (*diskFS).mkdirDurable
+      - (*diskFS).zeroFrom
+      - (*diskFS).abandonTmp
+    name: disk.go
   - decls: []
     name: doc.go
   - decls:
@@ -1198,6 +1327,7 @@ files:
       - segment
       - fileLog
       - segName
+      - (*fileLog).fs
       - (*fileLog).logDir
       - quarantined
       - openFileLog
@@ -1242,26 +1372,21 @@ files:
       - (*fileLog).syncAtOpen
       - (*fileLog).syncFailedAtOpen
       - syncRan
-      - syncFileAtOpen
       - (*fileLog).positionTail
       - classifyTail
       - recordsAfter
       - judgeAfterHole
       - tornBatchStart
       - allZero
-      - zeroFrom
       - zeroRange
       - (*fileLog).quarantine
       - (*fileLog).createSegment
       - (*fileLog).segmentFile
+      - (*fileLog).dsyncWrite
       - (*fileLog).zeroFill
-      - abandonTmp
       - prepared
       - (*fileLog).prepare
       - (*fileLog).takePrepared
-      - writeFileSync
-      - mkdirDurable
-      - writeSynced
       - (*fileLog).rotate
       - (*fileLog).publishNext
       - (*fileLog).termLocked
@@ -1330,6 +1455,8 @@ files:
       - supersededWhy
       - fileSnapshots
       - newFileSnapshots
+      - newFileSnapshotsOn
+      - (*fileSnapshots).fs
       - snapshotEntries
       - newerMetas
       - newerMeta
@@ -1657,6 +1784,18 @@ files:
       - (*Node).leaderConfirmed
     name: node_leadercontact.go
   - decls:
+      - paceSlices
+      - pacer
+      - newPacer
+      - (*pacer).limit
+      - (*pacer).charge
+      - (*pacer).pay
+      - (*Node).queueStream
+      - (*Node).serveWaiting
+      - (*Node).awaitsSnapshot
+      - (*Node).streamRate
+    name: node_pace.go
+  - decls:
       - cutAllowance
       - progressWatch
       - (*Node).watchProgress
@@ -1849,11 +1988,11 @@ files:
       - (*truncationConfs).peers
       - peerSet
       - (*peerSet).add
-      - truncateAtDamage
+      - (*diskFS).truncateAtDamage
       - maxRecordTerm
       - recordTerm
-      - truncateSegment
-      - zeroSegmentFrom
+      - (*diskFS).truncateSegment
+      - (*diskFS).zeroSegmentFrom
       - silenceRecord
       - DataDir.reopenSilenced
       - (*fileLog).silence
@@ -1914,7 +2053,7 @@ files:
       - probePreallocate
       - (*fileLog).resolvePreallocate
       - (*fileLog).bindWarn
-      - fallocateFill
+      - (*diskFS).fallocateFill
     name: prealloc.go
   - decls:
       - fallocZeroRange
@@ -2160,6 +2299,7 @@ files:
       - encodeOffer
       - decodeOffer
       - (*TCPTransport).Stream
+      - (*TCPTransport).streamGroup
       - readAccept
       - streamFrom
       - closeWriter
@@ -2202,6 +2342,36 @@ files:
       - (*TCPTransport).maxFrameBytes
     name: tcp.go
   - decls:
+      - laneSnapshotGroup
+      - binding
+      - groupBinder
+      - groupStreamer
+      - streamOffer
+      - (*TCPTransport).bindingOf
+      - (*TCPTransport).legacyBinding
+      - frameGroup
+      - (*TCPTransport).unroutedGroup
+      - (*TCPTransport).unroutedFrames
+      - (*TCPTransport).unreachableFor
+      - (*TCPTransport).undecodableFor
+      - (*TCPTransport).membershipFor
+      - (*TCPTransport).unreachableHooks
+      - groupOffer
+      - (*TCPTransport).offerBinding
+    name: tcp_groups.go
+  - decls:
+      - traceState
+      - fwdTraceKey
+      - fwdSpan
+      - (*Node).traceAppended
+      - traceForwardFlags
+      - (*Node).traceForward
+      - (*Node).traceReady
+      - (*Node).traceAnswers
+      - (*Node).traceCommitted
+      - (*Node).traceEnd
+    name: tracefwd.go
+  - decls:
       - kernelTimedOut
     name: unacked.go
   - decls:
@@ -2220,6 +2390,39 @@ functions:
     name: unsupportedKind
     params: k coreconsensus.EntryKind, index uint64
     results: error
+  - name: VerifyBackup
+    params: p *BackupParams, opt *RestoreOptions
+    results: BackupPoint, error
+  - name: RestoreBackup
+    params: d DataDir, p *BackupParams, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions
+    results: coreconsensus.SnapshotMetaValue, error
+  - doc: |-
+      scanBackup reads the export then each tail, checks every record and the
+      chain across them, and returns the export's metadata, the point the last
+      file ends at and, when keep, the entries in order.
+    name: scanBackup
+    params: p *BackupParams, keep bool
+    results: coreconsensus.SnapshotMetaValue, BackupPoint, []coreconsensus.EntryValue, error
+  - doc: |-
+      checkBackupBatch checks that es continues at, as ImportObserved checks a
+      tail against a snapshot.
+    name: checkBackupBatch
+    params: at BackupPoint, es []coreconsensus.EntryValue
+    results: error
+  - doc: |-
+      backupSnapshot rewinds an export and returns the reader of its snapshot
+      records' bytes.
+    name: backupSnapshot
+    params: export io.ReadSeeker
+    results: io.Reader, error
+  - doc: appendTrailer appends a trailer's payload.
+    name: appendTrailer
+    params: dst []byte, from, to BackupPoint, count uint64
+    results: "[]byte"
+  - doc: parseTrailer reads a trailer's payload.
+    name: parseTrailer
+    params: b []byte
+    results: from, to BackupPoint, count uint64, ok bool
   - doc: |-
       foundingDigest is the digest of the founding member list, so that a rerun
       with another list is refused.
@@ -2406,6 +2609,12 @@ functions:
   - name: NewDataDirWith
     params: dir string, opts DataDirOptions
     results: DataDir, error
+  - doc: |-
+      newDataDirOn is NewDataDirWith over the fault seam disk: osDisk in
+      production, a test's faultFS under the shim lane (D15).
+    name: newDataDirOn
+    params: dir string, opts DataDirOptions, disk *diskFS
+    results: DataDir, error
   - doc: reasonOf is the reason a stop marker's name carries for code.
     name: reasonOf
     params: code errs.Code
@@ -2452,9 +2661,23 @@ functions:
     name: readStamp
     params: dir string
     results: coreconsensus.StampValue, error
-  - doc: writeStamp replaces the stamp of dir atomically and durably.
+  - doc: |-
+      writeStamp replaces the stamp of dir atomically and durably, through the
+      fault seam disk.
     name: writeStamp
-    params: dir string, s coreconsensus.StampValue
+    params: disk *diskFS, dir string, s coreconsensus.StampValue
+    results: error
+  - doc: |-
+      openOSFile is os.OpenFile as a segFile; a failed open is a nil interface,
+      never a typed nil.
+    name: openOSFile
+    params: name string, flag int, perm os.FileMode
+    results: segFile, error
+  - doc: |-
+      datasyncFile is datasync on the *os.File under f, and f's own Sync on any
+      other segFile.
+    name: datasyncFile
+    params: f segFile
     results: error
   - doc: |-
       u64s renders v in decimal: the spelling every index field of an error
@@ -2728,51 +2951,11 @@ functions:
     params: b []byte
     results: bool
   - doc: |-
-      zeroFrom zeroes f from off to size, 1 MiB at a time, and syncs it; the
-      sync runs even when there is nothing to zero, so the caller may rely on
-      the range being durable zeros on return.
-    name: zeroFrom
-    params: f *os.File, off, size int64
-    results: error
-  - doc: |-
       zeroRange writes zeros over f from off to size, 1 MiB at a time, and
       syncs nothing.
     name: zeroRange
     params: f io.WriterAt, off, size int64
     results: error
-  - doc: |-
-      abandonTmp closes f, the segment .tmp at path a failure leaves
-      unpublished, removes it, and returns cause, the failure that stops the
-      log. The .tmp is never renamed, so what its Close says changes nothing. It
-      is removed now, not at the next start: a zero-fill that failed on a full
-      disk wrote until the disk had no byte left, and the disk is shared with
-      what the product stores beside the log (#520). A removal that fails
-      leaves it to recovery, which deletes every .tmp.
-    name: abandonTmp
-    params: f io.Closer, path string, cause error
-    results: error
-  - doc: |-
-      writeFileSync publishes data at path atomically and durably: written and
-      synced to path.tmp, renamed over path, and the directory synced.
-    name: writeFileSync
-    params: path string, data []byte
-    results: error
-  - doc: |-
-      mkdirDurable creates dir, private to the owner, and when it did not exist
-      syncs its parent: the new entry is otherwise published only by whatever
-      syncs that directory next, which ext4 and XFS do through their journal and
-      other filesystems may not (#422). A directory already there is left as it
-      is, so a parent this process may not open is never asked for.
-    name: mkdirDurable
-    params: dir string
-    results: error
-  - doc: |-
-      writeSynced writes data to a fresh file at path and syncs it. The file is
-      closed before it returns, so before writeFileSync renames it, and a Close
-      failure is reported like the sync's: it is part of the write.
-    name: writeSynced
-    params: path string, data []byte
-    results: err error
   - doc: lowPayload is the least payload a record of this aligned length holds.
     name: lowPayload
     params: length int64
@@ -2807,6 +2990,12 @@ functions:
       markers first (#637), and a store opened alone passes storageFailed.
     name: newFileSnapshots
     params: dir string, syncFailed func(op string, cause error) error
+    results: "*fileSnapshots, error"
+  - doc: |-
+      newFileSnapshotsOn is newFileSnapshots over the fault seam disk: its data
+      directory's (D15).
+    name: newFileSnapshotsOn
+    params: dir string, syncFailed func(op string, cause error) error, disk *diskFS
     results: "*fileSnapshots, error"
   - doc: |-
       snapshotEntries lists the snapshot directory dir for its open: a
@@ -3152,6 +3341,12 @@ functions:
     name: writesAny
     params: reqs []storeReq
     results: bool
+  - doc: |-
+      newPacer is the bucket of rate bytes a second on clk, nil when rate is 0:
+      unlimited.
+    name: newPacer
+    params: clk clock.Timed, rate int64
+    results: "*pacer"
   - doc: |-
       newObs binds a node's instruments to its configured Meter, Tracer and
       Logger; every series carries the group, so two groups never share one.
@@ -3535,12 +3730,6 @@ functions:
     params: m *coreconsensus.MembershipValue, p *coreconsensus.MemberValue
     results: bool
   - doc: |-
-      truncateAtDamage deletes every segment after segment segN, and segN too
-      when the damage is at its start, and zeroes segN from off otherwise.
-    name: truncateAtDamage
-    params: logDir string, segN uint64, off int64
-    results: error
-  - doc: |-
       maxRecordTerm is the highest term any readable record of segment b names,
       before and after any damage, scanning every record boundary.
     name: maxRecordTerm
@@ -3552,20 +3741,6 @@ functions:
     name: recordTerm
     params: r *record
     results: uint64
-  - doc: |-
-      truncateSegment applies the truncation at (segN, off) to segment n of
-      size bytes at path: deleted when it lies wholly past the damage, zeroed
-      from off when the damage is inside it, untouched before it.
-    name: truncateSegment
-    params: path string, n, segN uint64, off, size int64
-    results: error
-  - doc: |-
-      zeroSegmentFrom zeroes and syncs the segment at path from off to size.
-      Its Close is part of the write: a failure there is reported like the
-      zeroing's.
-    name: zeroSegmentFrom
-    params: path string, off, size int64
-    results: err error
   - doc: |-
       silenceRecord is the silence condition's on-disk form: the term, then
       the index the silence lasts until, 0 for "the end of the log".
@@ -3604,14 +3779,6 @@ functions:
   - name: NewTCPTransportFromPEM
     params: certFile, keyFile, caFile string, cfgIn *TransportConfig
     results: "*TCPTransport, error"
-  - doc: |-
-      fallocateFill is zeroFrom's counterpart in PreallocateFallocate: f's
-      range from off to size is reserved and reads as zeros, then synced. A
-      filesystem that stops answering to fallocate after the open's probe gets
-      the zeros written instead.
-    name: fallocateFill
-    params: f *os.File, off, size int64
-    results: error
   - doc: |-
       fallocateProbe reserves 4 KiB of a fresh file in dir with fallocate(2)
       and removes it: the reason the filesystem cannot, empty when it can.
@@ -4189,6 +4356,34 @@ functions:
     params: b []byte
     results: reason string, ok bool
   - doc: |-
+      streamOffer streams offer to to for group: group 1's, and any group's on
+      a transport that is no groupStreamer, through Stream, so that a transport
+      wrapping a TCPTransport and its Stream still carries a v1 cluster's
+      snapshots; another group's on a groupStreamer under that group.
+    name: streamOffer
+    params: ctx context.Context, tr coreconsensus.Transport, group coreconsensus.GroupID, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)
+    results: error
+  - doc: |-
+      frameGroup is the group a frame read by readFrames names; readFrame
+      refuses one shorter than its header.
+    name: frameGroup
+    params: frame []byte
+    results: coreconsensus.GroupID
+  - doc: |-
+      groupOffer is the wire form of an offer on laneSnapshotGroup: the group,
+      then body, encodeOffer's.
+    name: groupOffer
+    params: group coreconsensus.GroupID, body []byte
+    results: "[]byte"
+  - doc: |-
+      traceForwardFlags returns the flag and the trace context a forward of p
+      carries: its span's context once the committed cluster version is 4,
+      which every member announced, and nothing otherwise, so a node of
+      protocol 3 never meets the trailing bytes.
+    name: traceForwardFlags
+    params: p *proposal, cluster uint32
+    results: coreconsensus.MessageFlags, coreconsensus.TraceContextValue
+  - doc: |-
       kernelTimedOut reports whether err is the kernel aborting a connection
       whose bytes stayed unacknowledged: the bound boundUnacknowledged sets,
       or the platform's own retransmission limit where it sets none (#1116).
@@ -4331,6 +4526,132 @@ types:
         type: error
     kind: struct
     name: saveRes
+  - fields:
+      - doc: Position is the last entry the backup holds.
+        name: Position
+        type: coreconsensus.PositionValue
+      - doc: ChainTip is the ChainSum at Position, which the next entry continues.
+        name: ChainTip
+        type: uint32
+    kind: struct
+    name: BackupPoint
+  - fields:
+      - doc: Export is the file ExportBackup wrote.
+        name: Export
+        type: io.ReadSeeker
+      - doc: Tails are the files AppendBackup wrote after it, in order.
+        name: Tails
+        type: "[]io.Reader"
+      - doc: Machine is a fresh state machine; RestoreBackup restores into it.
+        name: Machine
+        type: coreconsensus.StateMachine
+    kind: struct
+    name: BackupParams
+  - doc: backupScan is scanBackup's state across files.
+    fields:
+      - name: keep
+        type: bool
+      - name: meta
+        type: coreconsensus.SnapshotMetaValue
+      - name: at
+        type: BackupPoint
+      - name: tail
+        type: "[]coreconsensus.EntryValue"
+      - name: msg
+        type: coreconsensus.MessageValue
+    kind: struct
+    methods:
+      - doc: file reads one backup file of the kind given to its trailer.
+        name: file
+        params: r io.Reader, kind byte
+        recv: s *backupScan
+        results: error
+      - doc: entries checks one entry record against the chain and keeps its entries.
+        name: entries
+        params: payload []byte
+        recv: s *backupScan
+        results: error
+      - doc: |-
+          trailer checks a file's trailer against what the file held, and that
+          nothing follows it.
+        name: trailer
+        params: br *backupReader, payload []byte, base BackupPoint, count uint64
+        recv: s *backupScan
+        results: error
+    name: backupScan
+  - doc: backupWriter writes a backup file's header and records.
+    fields:
+      - name: w
+        type: io.Writer
+      - name: buf
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: header writes the file's header.
+        name: header
+        params: kind byte
+        recv: b *backupWriter
+        results: error
+      - doc: record writes one record, its sum after it.
+        name: record
+        params: typ byte, payload []byte
+        recv: b *backupWriter
+        results: error
+    name: backupWriter
+  - doc: |-
+      snapshotRecords is the writer SaveSnapshot copies the encoded stream to:
+      each write becomes snapshot records of at most backupChunk bytes.
+    fields:
+      - name: bw
+        type: "*backupWriter"
+    kind: struct
+    methods:
+      - doc: Write implements io.Writer.
+        name: Write
+        params: p []byte
+        recv: s snapshotRecords
+        results: int, error
+    name: snapshotRecords
+  - doc: backupReader reads a backup file's header and records.
+    fields:
+      - name: r
+        type: io.Reader
+      - name: buf
+        type: "[]byte"
+    kind: struct
+    methods:
+      - doc: header reads the file's header and checks it names kind.
+        name: header
+        params: kind byte
+        recv: b *backupReader
+        results: error
+      - doc: |-
+          next reads one record and checks its sum. The payload aliases the
+          reader's buffer, valid until the next call, unless fresh asks for a
+          buffer of its own.
+        name: next
+        params: fresh bool
+        recv: b *backupReader
+        results: byte, []byte, error
+    name: backupReader
+  - doc: |-
+      backupSnapReader reads the bytes of an export's snapshot records, and
+      io.EOF at the first record that is not one.
+    fields:
+      - name: br
+        type: "*backupReader"
+      - name: cur
+        type: "[]byte"
+      - name: done
+        type: bool
+    kind: struct
+    methods:
+      - doc: Read implements io.Reader.
+        name: Read
+        params: p []byte
+        recv: s *backupSnapReader
+        results: int, error
+    name: backupSnapReader
   - kind: named
     name: ReadMode
     underlying: uint8
@@ -4397,6 +4718,17 @@ types:
       - name: MaxLogBytes
         type: int64
       - name: LogReserveBytes
+        type: int64
+      - doc: |-
+          MaxSnapshotStreams bounds the snapshot streams this node sends at
+          once; 0 is 1. A peer in need beyond it waits, its transfer pending,
+          and is served when a stream ends.
+        name: MaxSnapshotStreams
+        type: int
+      - doc: |-
+          SnapshotStreamBytesPerSecond paces the snapshot streams this node
+          sends, all of them together, on Clock; 0 is unlimited.
+        name: SnapshotStreamBytesPerSecond
         type: int64
       - doc: SnapshotCodec compresses snapshot chunks; nil is flate.
         name: SnapshotCodec
@@ -4489,6 +4821,11 @@ types:
         type: sync.Mutex
       - name: lockf
         type: "*os.File"
+      - doc: |-
+          disk is the fault seam the log, the snapshot store and the offline
+          operations write through: osDisk, a test's faultFS (fs).
+        name: disk
+        type: "*diskFS"
       - name: log
         type: "*fileLog"
       - name: snaps
@@ -4521,6 +4858,12 @@ types:
         name: open
         recv: d *dataDir
         results: error
+      - doc: |-
+          fs is the directory's fault seam, osDisk for a dataDir built without
+          one.
+        name: fs
+        recv: d *dataDir
+        results: "*diskFS"
     name: dataDir
   - fields:
       - name: d
@@ -4961,6 +5304,144 @@ types:
         results: error
     name: DataDir
   - doc: |-
+      segFile is what the log and the snapshot store write a file through: an
+      *os.File in production, the fault-injecting wrapper of D15's shim lane
+      under a test. Reads that only judge what is on disk (recovery's scan, a
+      snapshot's Open) open their file with os.Open and are not part of it.
+    kind: named
+    name: segFile
+    underlying: |-
+      interface {
+      	io.ReaderAt
+      	io.WriterAt
+      	io.Writer
+      	io.Seeker
+      	Stat() (os.FileInfo, error)
+      	Truncate(size int64) error
+      	Sync() error
+      	Close() error
+      	Name() string
+      }
+  - doc: |-
+      diskFS is the one fault seam of the data directory (ADR 0152 D15): every
+      write, sync, rename and removal the log, the snapshot store, the stamp,
+      the markers and the offline operations make goes through the function
+      fields of the diskFS their dataDir holds, and through the segFile its
+      openFile returns. Production is osDisk, the os functions; the shim lane's
+      faultFS counts each operation, fails the one it is told to, or stops the
+      process model there and reopens what was written but not synced
+      (TestEveryFaultPoint). The tests that need a moment of a write — between
+      a batch's write and its fdatasync, after a seal is durable — read it off
+      the operations this seam sees, never off a hook of the log's own.
+    fields:
+      - doc: openFile opens name to be written, as os.OpenFile does.
+        name: openFile
+        type: func(name string, flag int, perm os.FileMode) (segFile, error)
+      - doc: |-
+          datasync makes f's written bytes durable: fdatasync(2) on Linux,
+          os.File.Sync elsewhere (datasync).
+        name: datasync
+        type: func(f segFile) error
+      - doc: syncDir makes a directory's entries durable (syncDir).
+        name: syncDir
+        type: func(dir string) error
+      - doc: |-
+          rename and remove are os.Rename and os.Remove; removeAll is
+          os.RemoveAll.
+        name: rename
+        type: func(from, to string) error
+      - name: remove
+        type: func(name string) error
+      - name: removeAll
+        type: func(path string) error
+      - doc: |-
+          background runs the zero-fill of the next segment off the writer's
+          path: a goroutine in production, at once under the shim, so that an
+          operation's index names the same operation at every run.
+        name: background
+        type: func(run func())
+    kind: struct
+    methods:
+      - doc: |-
+          writeSynced writes data to a fresh file at path and syncs it. The file is
+          closed before it returns, so before writeFileSync renames it, and a Close
+          failure is reported like the sync's: it is part of the write.
+        name: writeSynced
+        params: path string, data []byte
+        recv: d *diskFS
+        results: err error
+      - doc: |-
+          writeFileSync publishes data at path atomically and durably: written and
+          synced to path.tmp, renamed over path, and the directory synced.
+        name: writeFileSync
+        params: path string, data []byte
+        recv: d *diskFS
+        results: error
+      - doc: |-
+          mkdirDurable creates dir, private to the owner, and when it did not exist
+          syncs its parent: the new entry is otherwise published only by whatever
+          syncs that directory next, which ext4 and XFS do through their journal and
+          other filesystems may not (#422). A directory already there is left as it
+          is, so a parent this process may not open is never asked for.
+        name: mkdirDurable
+        params: dir string
+        recv: d *diskFS
+        results: error
+      - doc: |-
+          zeroFrom zeroes f from off to size, 1 MiB at a time, and syncs it; the
+          sync runs even when there is nothing to zero, so the caller may rely on
+          the range being durable zeros on return.
+        name: zeroFrom
+        params: f segFile, off, size int64
+        recv: d *diskFS
+        results: error
+      - doc: |-
+          abandonTmp closes f, the segment .tmp at path a failure leaves
+          unpublished, removes it, and returns cause, the failure that stops the
+          log. The .tmp is never renamed, so what its Close says changes nothing. It
+          is removed now, not at the next start: a zero-fill that failed on a full
+          disk wrote until the disk had no byte left, and the disk is shared with
+          what the product stores beside the log (#520). A removal that fails
+          leaves it to recovery, which deletes every .tmp.
+        name: abandonTmp
+        params: f io.Closer, path string, cause error
+        recv: d *diskFS
+        results: error
+      - doc: |-
+          truncateAtDamage deletes every segment after segment segN, and segN too
+          when the damage is at its start, and zeroes segN from off otherwise.
+        name: truncateAtDamage
+        params: logDir string, segN uint64, off int64
+        recv: disk *diskFS
+        results: error
+      - doc: |-
+          truncateSegment applies the truncation at (segN, off) to segment n of
+          size bytes at path: deleted when it lies wholly past the damage, zeroed
+          from off when the damage is inside it, untouched before it.
+        name: truncateSegment
+        params: path string, n, segN uint64, off, size int64
+        recv: disk *diskFS
+        results: error
+      - doc: |-
+          zeroSegmentFrom zeroes and syncs the segment at path from off to size.
+          Its Close is part of the write: a failure there is reported like the
+          zeroing's.
+        name: zeroSegmentFrom
+        params: path string, off, size int64
+        recv: disk *diskFS
+        results: err error
+      - doc: |-
+          fallocateFill is zeroFrom's counterpart in PreallocateFallocate: f's
+          range from off to size is reserved and reads as zeros, then synced
+          through the seam. A filesystem that stops answering to fallocate after
+          the open's probe, or a file that is not an *os.File (the fault shim's,
+          #1113), gets the zeros written instead.
+        name: fallocateFill
+        params: f segFile, off, size int64
+        recv: d *diskFS
+        results: error
+    name: diskFS
+  - doc: |-
       cause is the text of a storage failure's cause. It never travels as an
       error of its own: storageFailed records it in a field of a
       STORAGE_FAILED, the only error a caller matches on.
@@ -5030,7 +5511,7 @@ types:
       - name: "n"
         type: uint64
       - name: f
-        type: "*os.File"
+        type: segFile
       - name: size
         type: int64
     kind: struct
@@ -5112,22 +5593,17 @@ types:
         name: runDir
         type: string
       - doc: |-
-          afterSeal runs once a rotation's seal is durable and before the next
-          segment is published. Only the dm-crypt lane sets it, to cut power in
-          that window; it is nil otherwise.
-        name: afterSeal
-        type: func()
+          disk is the fault seam every write, sync, rename and removal of the
+          log goes through: its dataDir's, osDisk when nil (fs).
+        name: disk
+        type: "*diskFS"
       - doc: |-
-          duringSync runs between each write of a batch and its fdatasync, or
-          after each write flagged RWF_DSYNC (#923), the lock released: twice
-          for a batch of several records. Only a test sets it.
-        name: duringSync
-        type: func()
-      - doc: |-
-          fill replaces zeroFrom when a test sets it, to fail as a full disk
-          does; nil otherwise.
-        name: fill
-        type: func(f *os.File, off, size int64) error
+          timedSync, when set, is handed how long each fdatasync of a batch
+          took, end true for the end record's (the last of the batch): the
+          bench lane's fdatasync distribution and syncs per batch (#911). Only
+          a benchmark sets it, before the node starts; nil otherwise.
+        name: timedSync
+        type: func(took time.Duration, end bool)
       - doc: |-
           prealloc is how the segments are preallocated, set at open by
           resolvePreallocate: PreallocateFallocate only where the filesystem
@@ -5160,7 +5636,7 @@ types:
           readAt replaces a segment's ReadAt on the entry reads when a test
           sets it, to count the preads Entries issues (#913); nil otherwise.
         name: readAt
-        type: func(f *os.File, b []byte, off int64) (int, error)
+        type: func(f segFile, b []byte, off int64) (int, error)
       - doc: |-
           occupied is the bytes the segments occupy, kept beside segs wherever
           a segment is added or dropped, so the event loop reads it without mu:
@@ -5224,6 +5700,12 @@ types:
         params: ents []os.DirEntry
         recv: l *fileLog
         results: "[]string"
+      - doc: |-
+          fs is the log's fault seam: its dataDir's, osDisk for a log built
+          without one.
+        name: fs
+        recv: l *fileLog
+        results: "*diskFS"
       - doc: logDir is the directory holding the segments.
         name: logDir
         recv: l *fileLog
@@ -5421,15 +5903,23 @@ types:
         name: segmentFile
         params: n uint64, size int64, tmp string
         recv: l *fileLog
-        results: "*os.File, error"
+        results: segFile, error
       - doc: |-
-          zeroFill is the function that zero-fills a segment: zeroFrom, or
-          fallocateFill when the log preallocates with fallocate (#922), unless a
-          test set fill to fail as a full disk does. It is read on the writer's
-          path, before any goroutine it hands it to starts.
+          dsyncWrite is writeDsync on the segment's *os.File. A segment the fault
+          seam wraps (#1113) is not one: false, and it is written and fdatasynced
+          through the seam instead, as in SyncFdatasync.
+        name: dsyncWrite
+        params: cur *segment, b []byte, off int64
+        recv: l *fileLog
+        results: bool, error
+      - doc: |-
+          zeroFill is the function that zero-fills a segment through the log's
+          seam: zeroFrom, or fallocateFill when the log preallocates with
+          fallocate (#922). It is read on the writer's path, before any goroutine
+          it hands it to starts.
         name: zeroFill
         recv: l *fileLog
-        results: func(f *os.File, off, size int64) error
+        results: func(f segFile, off, size int64) error
       - doc: |-
           prepare launches the background goroutine that zero-fills segment n off
           the writer's path. The goroutine ends on its own once the .tmp is zeroed
@@ -5445,7 +5935,7 @@ types:
         name: takePrepared
         params: n uint64, size int64
         recv: l *fileLog
-        results: "*os.File"
+        results: segFile
       - doc: |-
           rotate seals the current segment in its own synced batch, then publishes
           the next one with the CURRENT hard state. It runs between batches only
@@ -5564,9 +6054,9 @@ types:
           writeAndSync writes b at off in segment cur and makes it durable: one
           pwritev2 flagged RWF_DSYNC in SyncRWFDsync, pwrite then fdatasync
           otherwise, or when the kernel stops answering to the flag after the
-          open's probe (#923).
+          open's probe (#923); end says the write is the batch's end record.
         name: writeAndSync
-        params: cur *segment, b []byte, off int64
+        params: cur *segment, b []byte, off int64, end bool
         recv: l *fileLog
         results: error
       - doc: |-
@@ -6081,7 +6571,7 @@ types:
       - name: done
         type: chan struct{}
       - name: f
-        type: "*os.File"
+        type: segFile
       - name: err
         type: error
     kind: struct
@@ -6157,6 +6647,11 @@ types:
     fields:
       - name: dir
         type: string
+      - doc: |-
+          disk is the fault seam every write, sync, rename and removal of the
+          store goes through: its dataDir's, osDisk when nil (fs).
+        name: disk
+        type: "*diskFS"
       - name: mu
         type: sync.Mutex
       - name: pins
@@ -6183,6 +6678,10 @@ types:
         type: func(id string)
     kind: struct
     methods:
+      - doc: fs is the store's fault seam, osDisk for a store built without one.
+        name: fs
+        recv: s *fileSnapshots
+        results: "*diskFS"
       - doc: |-
           sweepSpools removes every receive spool but keep's and those a sink still
           writes to. A transfer cut mid-stream keeps its spool so that the same
@@ -6327,7 +6826,7 @@ types:
       - name: id
         type: string
       - name: f
-        type: "*os.File"
+        type: segFile
       - name: meta
         type: coreconsensus.SnapshotMetaValue
       - name: done
@@ -6473,6 +6972,14 @@ types:
           answered in this term.
         name: LastContact
         type: time.Duration
+      - doc: |-
+          SnapshotSent is how many bytes of the snapshot streamed to it the
+          transport has read, resumed offset included; 0 with no stream.
+        name: SnapshotSent
+        type: int64
+      - doc: SnapshotSize is the EncodedSize of that snapshot; 0 with no stream.
+        name: SnapshotSize
+        type: int64
     kind: struct
     name: PeerHealthValue
   - kind: named
@@ -7198,6 +7705,17 @@ types:
         name: sendStop
         type: map[coreconsensus.NodeID]context.CancelFunc
       - doc: |-
+          streamWait are the peers in need of a snapshot beyond
+          MaxSnapshotStreams, in the order they asked: each waits in raft's
+          snapshot state and is served when a stream ends (#920).
+        name: streamWait
+        type: "[]coreconsensus.NodeID"
+      - doc: |-
+          pace paces every snapshot stream together; nil when
+          SnapshotStreamBytesPerSecond is unlimited (#920).
+        name: pace
+        type: "*pacer"
+      - doc: |-
           pinScale is, per peer, how many times its pin bound doubled: a
           receiver still answering when its stream's pin fell due was slow to
           install, not stuck (#610).
@@ -7240,6 +7758,9 @@ types:
         type: coreconsensus.NodeID
       - name: lastRole
         type: coreconsensus.Role
+      - doc: traced is what the loop holds of D13's spans until a commit (#1115).
+        name: traced
+        type: traceState
       - name: canVote
         type: bool
       - name: noTable
@@ -7439,6 +7960,21 @@ types:
         params: done <-chan struct{}, index uint64
         recv: n *Node
         results: bool
+      - name: ExportBackup
+        params: ctx context.Context, op coreconsensus.Operator, w io.Writer
+        recv: n *Node
+        results: BackupPoint, error
+      - name: AppendBackup
+        params: ctx context.Context, since BackupPoint, w io.Writer
+        recv: n *Node
+        results: BackupPoint, error
+      - doc: |-
+          writeBackupTail writes the entries after base up to the commit a barrier
+          reads now, checked against base's chain, then the trailer.
+        name: writeBackupTail
+        params: ctx context.Context, bw *backupWriter, base BackupPoint
+        recv: n *Node
+        results: BackupPoint, error
       - name: Health
         recv: n *Node
         results: HealthValue
@@ -8520,6 +9056,33 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
+          queueStream records peer to as waiting for a snapshot stream: the
+          streams in flight are at MaxSnapshotStreams. It stays in raft's snapshot
+          state, so nothing is appended to it, and holds no pin: the newest
+          snapshot at its turn is the one it is sent. Asked twice, it waits once.
+          It runs on the loop.
+        name: queueStream
+        params: to coreconsensus.NodeID
+        recv: n *Node
+      - doc: |-
+          serveWaiting starts the streams of the waiting peers, first asked first
+          served, while fewer than MaxSnapshotStreams are in flight. A peer that no
+          longer waits in raft's snapshot state — it left, or this node no longer
+          leads it — is dropped. It runs on the loop, once a stream ended.
+        name: serveWaiting
+        recv: n *Node
+      - doc: awaitsSnapshot reports whether raft holds peer to in its snapshot state.
+        name: awaitsSnapshot
+        params: to coreconsensus.NodeID
+        recv: n *Node
+        results: bool
+      - doc: |-
+          streamRate records the pace of a stream that ended: the bytes the
+          transport read in it over the time from its accept to its end.
+        name: streamRate
+        params: bytes int64, d time.Duration
+        recv: n *Node
+      - doc: |-
           watchProgress hands the leadership to the most up-to-date voter once
           this leader's durable index has trailed its log, or its applied index
           its commit, without moving for the maximum election timeout. A
@@ -9407,6 +9970,46 @@ types:
         params: ctx context.Context, data []byte
         recv: n *Node
         results: tok coreconsensus.TokenValue, known bool, err error
+      - doc: |-
+          traceAppended records the "appended" event of a traced proposal at its
+          position, then "committed" at once when the commit already covers it, or
+          keeps it for the commit that will.
+        name: traceAppended
+        params: p *proposal, pos coreconsensus.PositionValue
+        recv: n *Node
+      - doc: |-
+          traceForward opens, on the node that handles a traced forward, the
+          "consensus.Forward" span whose parent is the proposer's span, so the two
+          are one trace. A forward sent again under the same id while its first
+          copy waits for its answer opens nothing.
+        name: traceForward
+        params: m *coreconsensus.MessageValue
+        recv: n *Node
+      - doc: |-
+          traceReady carries a Ready's part of the traces, before its entries are
+          handed to apply: the answers to traced forwards it sends, then the
+          commit it moves.
+        name: traceReady
+        params: rd *raft.ReadyValue
+        recv: n *Node
+      - doc: |-
+          traceAnswers takes the position, or the refusal, each traced forward was
+          answered with.
+        name: traceAnswers
+        params: ms []coreconsensus.MessageValue
+        recv: n *Node
+      - doc: |-
+          traceCommitted records "committed" on every waiting proposal the commit
+          covers, and ends every forward span it covers.
+        name: traceCommitted
+        recv: n *Node
+      - doc: |-
+          traceEnd ends every forward span still open with err, the leadership
+          lost or the node stopped: the position it answered may never commit.
+          The proposals' own spans end with their callers' answers.
+        name: traceEnd
+        params: err error
+        recv: n *Node
     name: Node
   - doc: "snapState tracks the cuts: at most one in flight, coalesced (D7)."
     fields:
@@ -9502,6 +10105,11 @@ types:
       - doc: gone is set by a caller that stopped waiting for a forward's answer.
         name: gone
         type: atomic.Bool
+      - doc: |-
+          span is its caller's consensus.Propose span, nil with no Tracer;
+          written before the loop has the proposal, read-only after (D13).
+        name: span
+        type: coretrace.Span
     kind: struct
     name: proposal
   - fields:
@@ -9702,6 +10310,50 @@ types:
     kind: struct
     name: leaderContact
   - doc: |-
+      pacer is a token bucket over the node's clock, shared by every snapshot
+      stream it sends: SnapshotStreamBytesPerSecond bounds them all together,
+      so two learners joining at once do not take twice the bandwidth the data
+      lane was left (#920). It waits on the injected clock, never on the wall
+      clock, so the pacing is asserted under a ManualClock. A read takes its
+      bytes first and pays after: the budget may go into debt by one read,
+      which the wait that follows pays back, and the bucket never holds more
+      than one read's worth, so a stream idle for a while does not burst.
+    fields:
+      - name: clk
+        type: clock.Timed
+      - name: rate
+        type: float64
+      - name: burst
+        type: int64
+      - name: mu
+        type: sync.Mutex
+      - name: tokens
+        type: float64
+      - name: at
+        type: time.Time
+    kind: struct
+    methods:
+      - doc: limit is the size a read of n bytes is cut to.
+        name: limit
+        params: n int
+        recv: p *pacer
+        results: int
+      - doc: |-
+          charge takes k bytes from the bucket and returns how long the reader
+          waits before the next read: 0 while the bucket holds them.
+        name: charge
+        params: k int
+        recv: p *pacer
+        results: time.Duration
+      - doc: |-
+          pay charges k bytes, then waits on the clock until the bucket is out of
+          debt, or until ctx ends, whose error it returns.
+        name: pay
+        params: ctx context.Context, k int
+        recv: p *pacer
+        results: error
+    name: pacer
+  - doc: |-
       progressWatch is the leader's watch over its own storage and machine,
       loop-owned: the durable index and the applied index last seen moving,
       and when. A leader whose fdatasync never returns, or whose Apply blocks,
@@ -9764,6 +10416,14 @@ types:
         type: "*pinFollow"
       - name: lifted
         type: bool
+      - doc: |-
+          progress is, while it streams, how many bytes of the snapshot the
+          transport has read, from the offset it resumed at; size is the
+          snapshot's EncodedSize (#920).
+        name: progress
+        type: "*atomic.Int64"
+      - name: size
+        type: int64
     kind: struct
     name: sendPin
   - doc: |-
@@ -9793,7 +10453,11 @@ types:
   - doc: |-
       sentReader marks moved with n.clk's time at each read of r, and sent
       once r reads to its end: the transport read the snapshot's last byte.
+      It counts the bytes read in progress, and, under a pacer, cuts each read
+      to the pacer's slice and pays it on ctx before the next (#920).
     fields:
+      - name: ctx
+        type: context.Context
       - name: r
         type: io.Reader
       - name: "n"
@@ -9802,9 +10466,14 @@ types:
         type: "*atomic.Int64"
       - name: moved
         type: "*atomic.Int64"
+      - name: progress
+        type: "*atomic.Int64"
     kind: struct
     methods:
-      - doc: Read reads r, and marks the stream moving and its end.
+      - doc: |-
+          Read reads r, and marks the stream moving and its end; a paced stream
+          waits for its budget after the read, and marks it moving again once the
+          wait is over, so the pacing never makes a stream look stalled.
         name: Read
         params: p []byte
         recv: s *sentReader
@@ -10833,17 +11502,15 @@ types:
         type: "[]string"
       - name: peerExpiry
         type: map[coreconsensus.NodeID]time.Time
-      - name: deliver
-        type: func(coreconsensus.AuthenticatedPeerValue, []byte)
-      - name: offer
-        type: func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
-      - name: install
-        type: func(coreconsensus.InstallParams) error
-      - name: join
-        type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
-      - name: joinR
-        type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
-      - name: unreachable
+      - doc: |-
+          groups is, per group, the callbacks its node bound (ADR 0244, #925):
+          a frame and an offer are routed by the group they name.
+        name: groups
+        type: map[coreconsensus.GroupID]*binding
+      - doc: |-
+          unreachable is the callback Unreachable registers, reported to beside
+          every group's.
+        name: unreachable
         type: func(coreconsensus.NodeID)
       - name: closed
         type: bool
@@ -10881,9 +11548,15 @@ types:
         type: func(msg string, attrs ...corelogger.AttrValue)
       - doc: |-
           undecodable judges, on the node, an offer whose metadata is of a
-          version this build does not know (#665); nil refuses it unjudged.
+          version this build does not know (#665), for a group whose binding
+          names none; nil refuses it unjudged.
         name: undecodable
         type: func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
+      - doc: |-
+          unrouted counts the frames and offers of a group nothing bound on
+          this transport, each dropped (#925).
+        name: unrouted
+        type: atomic.Int64
       - doc: |-
           oversized counts the frames Send dropped for being larger than the
           whole peer queue (#669).
@@ -11020,12 +11693,13 @@ types:
         params: from coreconsensus.NodeID, ln uint32, limit int
         recv: t *TCPTransport
       - doc: |-
-          deliverTo is the bound deliver callback and whether the key is still a
-          member's: a reader whose peer left stops at its next frame.
+          deliverTo is the deliver callback group bound, whether group is bound at
+          all, and whether the key is still a member's: a reader whose peer left
+          stops at its next frame.
         name: deliverTo
-        params: spki [32]byte
+        params: spki [32]byte, group coreconsensus.GroupID
         recv: t *TCPTransport
-        results: func(coreconsensus.AuthenticatedPeerValue, []byte), bool
+        results: d func(coreconsensus.AuthenticatedPeerValue, []byte), bound, still bool
       - doc: |-
           laneBound is the bound a member's frames on lane are read under, on the
           connection it dialled as on the one this node dialled to it.
@@ -11245,7 +11919,7 @@ types:
         recv: t *TCPTransport
       - name: Bind
         params: |
-          _ coreconsensus.GroupID,
+          group coreconsensus.GroupID,
           	deliver func(coreconsensus.AuthenticatedPeerValue, []byte),
           	offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
           	install func(coreconsensus.InstallParams) error,
@@ -11279,6 +11953,14 @@ types:
         recv: t *TCPTransport
         results: error
       - doc: |-
+          streamGroup implements groupStreamer: group 1's offer on laneSnapshot,
+          as every release sent it, any other group's on laneSnapshotGroup, which
+          names it (ADR 0244).
+        name: streamGroup
+        params: ctx context.Context, group coreconsensus.GroupID, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)
+        recv: t *TCPTransport
+        results: error
+      - doc: |-
           serveSnapshot is the receiving end of a snapshot stream: it reads the
           offer, answers with the engine's acceptance, and when accepted hands the
           stream to install, then writes back the install's verdict.
@@ -11296,8 +11978,12 @@ types:
           An offer whose metadata is of a version this build does not know is still
           judged by the node, from its term alone, and its refusal answered
           (refuseOffer, #665).
+
+          The offer goes to the group its lane names (offerBinding): on
+          laneSnapshotGroup one nothing bound is refused PEER_REJECTED and counted,
+          never handed to another group's node (#925).
         name: serveSnapshot
-        params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue
+        params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, lane byte
         recv: t *TCPTransport
       - doc: |-
           refuseOffer ends an offer from peer at term that was not read, or did
@@ -11309,7 +11995,7 @@ types:
           stopped, and its leader offered it again at every probe (#665). Every
           other refusal is logged.
         name: refuseOffer
-        params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, term uint64, err error
+        params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, term uint64, bd *binding, err error
         recv: t *TCPTransport
       - doc: bindWarn implements bindWarner.
         name: bindWarn
@@ -11396,7 +12082,7 @@ types:
         recv: t *TCPTransport
         results: coreconsensus.MembershipValue, error
       - name: BindJoinReason
-        params: _ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
+        params: group coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
         recv: t *TCPTransport
       - name: RefusedBeforeHandshake
         recv: t *TCPTransport
@@ -11416,6 +12102,62 @@ types:
         name: maxFrameBytes
         recv: t *TCPTransport
         results: int
+      - doc: bindingOf is group's binding, created on its first callback; under mu.
+        name: bindingOf
+        params: group coreconsensus.GroupID
+        recv: t *TCPTransport
+        results: "*binding"
+      - doc: |-
+          legacyBinding is the binding a lane that names no group is served to —
+          laneSnapshot, laneJoin, laneJoinV2 and laneMembership: the only group
+          bound, or with several the default group, and none when it is not bound;
+          under mu. A node of one group, whatever its number, is served as it
+          always was.
+        name: legacyBinding
+        recv: t *TCPTransport
+        results: "*binding"
+      - doc: |-
+          unroutedGroup counts a frame or a snapshot offer from a member naming a
+          group nothing bound on this transport, which is dropped, and logs it at
+          the first and at each power of two after it: a peer's group this node
+          does not run retransmits at every heartbeat.
+        name: unroutedGroup
+        params: from coreconsensus.NodeID, group coreconsensus.GroupID, lane byte
+        recv: t *TCPTransport
+      - doc: unroutedFrames is the count of unroutedGroup.
+        name: unroutedFrames
+        recv: t *TCPTransport
+        results: int64
+      - doc: unreachableFor implements groupBinder.
+        name: unreachableFor
+        params: group coreconsensus.GroupID, f func(coreconsensus.NodeID)
+        recv: t *TCPTransport
+      - doc: undecodableFor implements groupBinder.
+        name: undecodableFor
+        params: group coreconsensus.GroupID, judge func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
+        recv: t *TCPTransport
+      - doc: |-
+          membershipFor implements groupBinder: read answers laneMembership for
+          group, bound beside bindMembership's, which names none (#763, #925).
+        name: membershipFor
+        params: group coreconsensus.GroupID, read func() (coreconsensus.MembershipValue, bool)
+        recv: t *TCPTransport
+      - doc: |-
+          unreachableHooks is every callback an unreachable peer is reported to:
+          the transport's own (Unreachable), then each group's; under mu.
+        name: unreachableHooks
+        recv: t *TCPTransport
+        results: "[]func(coreconsensus.NodeID)"
+      - doc: |-
+          offerBinding reads the offer chunk of a snapshot connection on lane and
+          the binding it is served to: laneSnapshot's to legacyBinding, and
+          laneSnapshotGroup's to the group it names, whose prefix is cut off the
+          chunk returned. group is the one named, 0 on laneSnapshot; b is nil when
+          that group is not bound.
+        name: offerBinding
+        params: r io.Reader, lane byte
+        recv: t *TCPTransport
+        results: chunk []byte, group coreconsensus.GroupID, b *binding, err error
     name: TCPTransport
   - doc: |-
       backLink is a member's lane as this node reads it, on the connection the
@@ -11558,7 +12300,103 @@ types:
         type: uint64
     kind: struct
     name: joinTry
+  - doc: |-
+      binding is one group's callbacks: those Bind registers, the JOIN with
+      its reasons, and the two hooks a node binds beside them under its group
+      (groupBinder).
+    fields:
+      - name: deliver
+        type: func(coreconsensus.AuthenticatedPeerValue, []byte)
+      - name: offer
+        type: func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
+      - name: install
+        type: func(coreconsensus.InstallParams) error
+      - name: join
+        type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
+      - name: joinR
+        type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
+      - name: unreachable
+        type: func(coreconsensus.NodeID)
+      - name: undecodable
+        type: func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
+      - doc: |-
+          membership answers laneMembership's read of the configuration the
+          group runs with (#763), when the group is the one that lane is
+          served to (legacyBinding).
+        name: membership
+        type: func() (coreconsensus.MembershipValue, bool)
+    kind: struct
+    name: binding
+  - doc: |-
+      groupBinder is the sibling of a transport that serves several groups: the
+      hooks a node binds beside Bind, which name no group of their own, bound
+      under the node's. Bound through UnreachableReporter and undecodableBinder
+      instead, the second node on a transport replaced the first's (#925).
+    kind: named
+    name: groupBinder
+    underlying: |-
+      interface {
+      	unreachableFor(group coreconsensus.GroupID, f func(coreconsensus.NodeID))
+      	undecodableFor(group coreconsensus.GroupID, judge func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code)
+      	membershipFor(group coreconsensus.GroupID, read func() (coreconsensus.MembershipValue, bool))
+      }
+  - doc: |-
+      groupStreamer is the sibling of a transport whose snapshot offer names the
+      group it installs in; Transport.Stream names none.
+    kind: named
+    name: groupStreamer
+    underlying: |-
+      interface {
+      	streamGroup(ctx context.Context, group coreconsensus.GroupID, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error
+      }
+  - doc: |-
+      traceState is what the loop holds of D13's spans between the turn that
+      learns a position and the commit that covers it: the proposals of this
+      node whose span waits for its "committed" event, and on a leader the
+      spans of the forwards it handles, opened at the forward and ended at the
+      commit of the position it answered (#1115). It is touched only when a
+      span exists, so a node with no Tracer pays nothing for it.
+    fields:
+      - doc: |-
+          commit is the highest commit index a Ready handed; every waiter at
+          or below it was committed before the apply goroutine was handed it.
+        name: commit
+        type: uint64
+      - doc: waits are this node's proposals appended and not yet committed.
+        name: waits
+        type: "[]*proposal"
+      - doc: |-
+          answers are the forwards stepped and not yet answered, by sender
+          and submission id; made at the first traced forward.
+        name: answers
+        type: map[fwdTraceKey]coretrace.Span
+      - doc: open are the answered forwards waiting for their commit.
+        name: open
+        type: "[]fwdSpan"
+    kind: struct
+    name: traceState
+  - doc: "fwdTraceKey names a forward as its answer does: its sender, its id."
+    fields:
+      - name: from
+        type: coreconsensus.NodeID
+      - name: ctx
+        type: uint64
+    kind: struct
+    name: fwdTraceKey
+  - doc: fwdSpan is a leader's span of a forward whose position is known.
+    fields:
+      - name: index
+        type: uint64
+      - name: span
+        type: coretrace.Span
+    kind: struct
+    name: fwdSpan
 vars:
+  - doc: backupTable is the CRC-32C table of the records' sums.
+    items:
+      - name: backupTable
+        value: crc32.MakeTable(crc32.Castagnoli)
+    name: backupTable
   - doc: |-
       The engine reaches every interface below by TYPE ASSERTION, on the ports it
       was handed: the data directory's hold, the stop markers, the silence
@@ -11703,6 +12541,13 @@ vars:
           		bindMembership(read func() (coreconsensus.MembershipValue, bool))
           	}
         value: (*MemoryTransport)(nil)
+      - doc: The TCP transport serves several groups on one listener (#925).
+        name: _
+        type: groupBinder
+        value: (*TCPTransport)(nil)
+      - name: _
+        type: groupStreamer
+        value: (*TCPTransport)(nil)
       - name: _
         type: |-
           interface {
@@ -11712,6 +12557,20 @@ vars:
           	}
         value: (*TCPTransport)(nil)
     name: _
+  - doc: "osDisk is the production seam: the os functions."
+    items:
+      - name: osDisk
+        value: |-
+          diskFS{
+          	openFile:   openOSFile,
+          	datasync:   datasyncFile,
+          	syncDir:    syncDir,
+          	rename:     os.Rename,
+          	remove:     os.Remove,
+          	removeAll:  os.RemoveAll,
+          	background: func(run func()) { go run() },
+          }
+    name: osDisk
   - doc: |-
       sentinelByCode maps every code the step function may answer to the
       sentinel a caller matches on. A code it does not hold is answered by
@@ -11737,20 +12596,11 @@ vars:
           	coreconsensus.CodeJoinRefused:             coreconsensus.JoinRefused,
           	coreconsensus.CodeNoSpace:                 coreconsensus.NoSpace,
           	coreconsensus.CodeLeadershipUnconfirmed:   coreconsensus.LeadershipUnconfirmed,
+          	// A receiver's answer to a snapshot offer for a group it does not
+          	// serve (#925).
+          	coreconsensus.CodePeerRejected: coreconsensus.PeerRejected,
           }
     name: sentinelByCode
-  - doc: |-
-      syncFileAtOpen and syncDirAtOpen are the syncs an open makes of what it
-      read before it trusts it: datasync and syncDir, unless a test replaces one
-      to fail as a write-back error reported at open does (#637). Only the
-      open's own goroutine reads them.
-    grouped: true
-    items:
-      - name: syncFileAtOpen
-        value: datasync
-      - name: syncDirAtOpen
-        value: syncDir
-    name: syncFileAtOpen
   - doc: |-
       isolationCauses names each isolation cause, in the order isolatedText
       writes them.

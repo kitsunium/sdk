@@ -257,6 +257,15 @@ sequences:
       - set: dst
         to: AppendEntries
         value: AppendEntries(dst, m.Entries)
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, m.Trace.TraceID[:]...)
+            - set: dst
+              value: append(dst, m.Trace.SpanID[:]...)
+            - set: dst
+              value: append(dst, boolByte(m.Trace.Sampled))
+          when: m.Flags&coreconsensus.FlagTrace != 0
       - eval: binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
         to: binary.LittleEndian.PutUint32
       - return: dst
@@ -410,6 +419,8 @@ sequences:
         kind: stdlib
       - id: parseEntry
         kind: internal
+      - id: parseTrace
+        kind: internal
     steps:
       - opt:
           do:
@@ -508,12 +519,42 @@ sequences:
           range: "n"
       - opt:
           do:
+            - var:
+                name: err
+                type: error
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: body, err
+                  eval: parseTrace(body, m)
+                  op: =
+                  to: parseTrace
+                when: err != nil
+          when: m.Flags&coreconsensus.FlagTrace != 0
+      - opt:
+          do:
             - return: frameInvalid("trailing bytes", len(frame))
               to: frameInvalid
           when: len(body) != 0
       - set: m.Entries
         value: entries
       - return: nil
+  - of: parseTrace
+    steps:
+      - opt:
+          do:
+            - return: nil, frameInvalid("trace flag", len(b))
+          when: m.Kind != coreconsensus.MsgForward && m.Kind != coreconsensus.MsgForwardAdmin
+      - opt:
+          do:
+            - return: nil, frameInvalid("trace context", len(b))
+          when: len(b) < traceLen || b[traceLen-1] > 1
+      - eval: copy(m.Trace.TraceID[:], b)
+      - eval: copy(m.Trace.SpanID[:], b[16:])
+      - set: m.Trace.Sampled
+        value: b[24] != 0
+      - return: b[traceLen:], nil
   - of: parseEntry
     participants:
       - id: caller

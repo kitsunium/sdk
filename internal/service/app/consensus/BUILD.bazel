@@ -6,6 +6,7 @@ go_library(
     name = "consensus",
     srcs = [
         "apply.go",
+        "backup.go",
         "boot_darwin.go",
         "boot_other.go",
         "bootstrap.go",
@@ -32,6 +33,7 @@ go_library(
         "memtransport.go",
         "node.go",
         "node_leadercontact.go",
+        "node_pace.go",
         "node_progresswatch.go",
         "node_sendpin.go",
         "node_sendshared.go",
@@ -115,6 +117,7 @@ go_test(
         "applied_alloc_internal_test.go",
         "applied_bench_test.go",
         "appliedwait_internal_test.go",
+        "backup_internal_test.go",
         "cancel_internal_test.go",
         "catchuppin_internal_test.go",
         "cluster_internal_test.go",
@@ -168,6 +171,7 @@ go_test(
         "observe_internal_test.go",
         "observed_internal_test.go",
         "offline_internal_test.go",
+        "pace_internal_test.go",
         "pausedcut_internal_test.go",
         "peerqueue_internal_test.go",
         "peerseries_internal_test.go",
@@ -253,6 +257,10 @@ go_test(
         exclude = ["*_test.go"],
     ),
     embed = [":consensus"],
+    embedsrcs = [
+        "node_pace.go",
+        "node_sendpin.go",
+    ],
     shard_count = 24,
     deps = [
         "//internal/core/app/consensus",

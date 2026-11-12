@@ -2775,6 +2775,45 @@ packages:
           - type: coreconsensus.SnapshotMetaValue
           - type: error
       - doc: |-
+          VerifyBackup checks a backup offline, writing nothing: each record's sum,
+          the export's snapshot against its metadata (sizes and SHA-256, decoded as
+          OpenSnapshot does, bounded by opt.MaxDecoded), and every entry of the
+          export and of the tails, in order, against the chain from the snapshot's
+          ChainTip. It returns the point the backup restores to. opt.Expected is
+          ignored: the export carries the metadata.
+        in:
+          - name: p
+            type: "*BackupParams"
+          - name: opt
+            type: "*RestoreOptions"
+        name: VerifyBackup
+        out:
+          - type: BackupPoint
+          - type: error
+      - doc: |-
+          RestoreBackup starts a new history on an empty, joining directory from a
+          backup: the files are checked as VerifyBackup checks them, the chain
+          before anything is written, then the export's snapshot and every entry
+          after it are handed to ImportObserved, which replays them through
+          p.Machine and restores the state they reach, its last entry the point
+          VerifyBackup returns. opt.Expected is ignored: the export carries the
+          metadata.
+        in:
+          - name: d
+            type: DataDir
+          - name: p
+            type: "*BackupParams"
+          - name: newCluster
+            type: coreconsensus.ClusterID
+          - name: members
+            type: "[]coreconsensus.MemberValue"
+          - name: opt
+            type: "*RestoreOptions"
+        name: RestoreBackup
+        out:
+          - type: coreconsensus.SnapshotMetaValue
+          - type: error
+      - doc: |-
           ProposeAs types the Apply result. A result of another dynamic type is
           RESULT_TYPE_MISMATCH carrying the committed token: the entry IS committed.
           A nil result is the zero R.
@@ -3756,6 +3795,43 @@ packages:
               - type: "[]coreconsensus.EntryValue"
               - type: error
             recv: pointer
+          - doc: |-
+              ExportBackup writes a full backup to w: the snapshot SaveSnapshot cuts
+              now, then the committed entries after it up to the commit at the call,
+              once applied here, then a trailer. It returns the point the file ends at,
+              for AppendBackup. A tail entry that changes the engine's own state (a
+              cluster version, a timing contract, the no-space alarm) is refused, as
+              ImportObserved would refuse it: export again once it is in a snapshot.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: op
+                type: coreconsensus.Operator
+              - name: w
+                type: io.Writer
+            name: ExportBackup
+            out:
+              - type: BackupPoint
+              - type: error
+            recv: pointer
+          - doc: |-
+              AppendBackup writes to w the committed entries after since, the point a
+              previous ExportBackup or AppendBackup returned, up to the commit at the
+              call, once applied here, then a trailer, and returns the point it ends
+              at. since below the first entry the log keeps is COMPACTED: export again.
+              An entry that does not continue since's chain is RESTORE_REFUSED.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: since
+                type: BackupPoint
+              - name: w
+                type: io.Writer
+            name: AppendBackup
+            out:
+              - type: BackupPoint
+              - type: error
+            recv: pointer
         name: Node
         struct:
           unexported: true
@@ -3972,6 +4048,38 @@ packages:
               name: Tail
               type: "[]coreconsensus.EntryValue"
             - doc: Machine is a fresh state machine; the snapshot is restored into it and the tail applied.
+              name: Machine
+              type: coreconsensus.StateMachine
+      - doc: |-
+          BackupPoint is where a backup file ends, and where the next one starts:
+          the position of the last entry it holds, or of the snapshot when it holds
+          none, and the chain value at that position. AppendBackup takes it to
+          write the tail after it.
+        name: BackupPoint
+        struct:
+          fields:
+            - doc: Position is the last entry the backup holds.
+              name: Position
+              type: coreconsensus.PositionValue
+            - doc: ChainTip is the ChainSum at Position, which the next entry continues.
+              name: ChainTip
+              type: uint32
+      - doc: |-
+          BackupParams are the files RestoreBackup restores and VerifyBackup
+          checks: the export, read twice (its metadata follows its snapshot), the
+          tail files appended after it, in the order they were written, and the
+          state machine the restore replays through. Export is required; Machine is
+          required by RestoreBackup alone.
+        name: BackupParams
+        struct:
+          fields:
+            - doc: Export is the file ExportBackup wrote.
+              name: Export
+              type: io.ReadSeeker
+            - doc: Tails are the files AppendBackup wrote after it, in order.
+              name: Tails
+              type: "[]io.Reader"
+            - doc: "Machine is a fresh state machine; RestoreBackup restores into it."
               name: Machine
               type: coreconsensus.StateMachine
       - doc: |-
@@ -5759,6 +5867,27 @@ packages:
       under the four conditions of D9; a leader paused after its lease check
       serves a stale read, which ReadIndex never does.
 
+      # Backup
+
+      A backup is three calls. Node.ExportBackup writes a full file: the
+      snapshot SaveSnapshot cuts, then the committed entries after it up to
+      the commit at the call, then a trailer naming the point it ends at.
+      Node.AppendBackup writes, from that point, only the entries committed
+      since, and returns the next point; keep the last point beside the
+      files. VerifyBackup checks the files offline (every record's sum, the
+      snapshot's SHA-256, the chain from its ChainTip), and RestoreBackup
+      restores the export and its tails, in order, through ImportObserved on
+      every node of the new cluster, refusing a tail that does not continue
+      the chain before anything is written.
+
+      The recovery point is the last committed entry the backup node had
+      applied when the last append ran: a restore loses only what committed
+      after it. Store the tail files in the repository beside the export
+      (restic keeps them as it keeps the snapshot), export again when an
+      append is refused COMPACTED or names an entry that changes the
+      engine's state, and restore from the newest export and every tail
+      written after it.
+
       # Apply is a pure transition
 
       StateMachine.Apply is called for every committed command, in log order, on
@@ -5922,6 +6051,10 @@ packages:
             target: svcconsensus.RestoreOptions
           - name: ImportParams
             target: svcconsensus.ImportParams
+          - name: BackupPoint
+            target: svcconsensus.BackupPoint
+          - name: BackupParams
+            target: svcconsensus.BackupParams
           - name: TransportConfig
             target: svcconsensus.TransportConfig
           - name: TCPTransport
@@ -6150,6 +6283,36 @@ packages:
             - name: opt
               type: "*RestoreOptions"
           name: ImportObserved
+          out:
+            - type: SnapshotMetaValue
+            - type: error
+      - func:
+          doc: VerifyBackup checks a backup's files offline, its snapshot's digest and its chain, writing nothing.
+          forward: svcconsensus.VerifyBackup
+          in:
+            - name: p
+              type: "*BackupParams"
+            - name: opt
+              type: "*RestoreOptions"
+          name: VerifyBackup
+          out:
+            - type: BackupPoint
+            - type: error
+      - func:
+          doc: RestoreBackup starts a new history from a backup's export and tails, checked before anything is written, offline.
+          forward: svcconsensus.RestoreBackup
+          in:
+            - name: d
+              type: DataDir
+            - name: p
+              type: "*BackupParams"
+            - name: newCluster
+              type: ClusterID
+            - name: members
+              type: "[]MemberValue"
+            - name: opt
+              type: "*RestoreOptions"
+          name: RestoreBackup
           out:
             - type: SnapshotMetaValue
             - type: error

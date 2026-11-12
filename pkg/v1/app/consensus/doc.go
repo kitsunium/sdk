@@ -23,6 +23,27 @@
 // under the four conditions of D9; a leader paused after its lease check
 // serves a stale read, which ReadIndex never does.
 //
+// # Backup
+//
+// A backup is three calls. Node.ExportBackup writes a full file: the
+// snapshot SaveSnapshot cuts, then the committed entries after it up to
+// the commit at the call, then a trailer naming the point it ends at.
+// Node.AppendBackup writes, from that point, only the entries committed
+// since, and returns the next point; keep the last point beside the
+// files. VerifyBackup checks the files offline (every record's sum, the
+// snapshot's SHA-256, the chain from its ChainTip), and RestoreBackup
+// restores the export and its tails, in order, through ImportObserved on
+// every node of the new cluster, refusing a tail that does not continue
+// the chain before anything is written.
+//
+// The recovery point is the last committed entry the backup node had
+// applied when the last append ran: a restore loses only what committed
+// after it. Store the tail files in the repository beside the export
+// (restic keeps them as it keeps the snapshot), export again when an
+// append is refused COMPACTED or names an entry that changes the
+// engine's state, and restore from the newest export and every tail
+// written after it.
+//
 // # Apply is a pure transition
 //
 // StateMachine.Apply is called for every committed command, in log order, on

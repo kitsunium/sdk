@@ -22,7 +22,13 @@ import (
 // threeOnDisk founds three nodes on data directories, writes n keys, and
 // stops them all.
 func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
-	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}
+	return threeOnDiskTuned(t, n, nil)
+}
+
+// threeOnDiskTuned is threeOnDisk with every node's configuration adjusted
+// by tune, when set.
+func threeOnDiskTuned(t *testing.T, n int, tune func(cfg *Config)) (*cluster, []*diskNode) {
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}, diskTune: tune}
 	var nodes []*diskNode
 	var members []coreconsensus.MemberValue
 	// The directories setup holds open without a node over them.

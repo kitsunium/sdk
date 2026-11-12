@@ -125,6 +125,12 @@ constants:
         name: messageFixedLen
         type: int
         value: 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 4 + 4
+      - doc: |-
+          traceLen is a forward's trace context after its entry, beside
+          FlagTrace: trace id, parent span id, sampled (#1115).
+        name: traceLen
+        type: int
+        value: 16 + 8 + 1
     name: frameHeaderLen
   - doc: |-
       MessageHeaderLen is the length AppendHeader writes: the frame header and
@@ -160,6 +166,7 @@ files:
       - appendEntry
       - EntryLen
       - ParseMessage
+      - parseTrace
       - parseEntry
       - AppendToken
       - ParseToken
@@ -246,6 +253,14 @@ functions:
   - name: ParseMessage
     params: frame []byte, m *coreconsensus.MessageValue
     results: error
+  - doc: |-
+      parseTrace reads the trace context a forward carries beside FlagTrace
+      from the head of b, after its entry, and returns the rest. The flag on
+      any other kind, a short context or a non-canonical sampled byte is
+      FRAME_INVALID: an accepted frame encodes back to its own bytes.
+    name: parseTrace
+    params: b []byte, m *coreconsensus.MessageValue
+    results: "[]byte, error"
   - doc: parseEntry decodes one entry from the head of b and returns the rest.
     name: parseEntry
     params: b []byte, e *coreconsensus.EntryValue

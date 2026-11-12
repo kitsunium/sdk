@@ -723,6 +723,748 @@ sequences:
     steps:
       - return: origin(coreconsensus.VersionUnsupported, errs.Int("kind", int(k)), errs.String("index", u64s(index)))
         to: origin
+  - of: (*Node).ExportBackup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).ExportBackup
+        kind: self
+      - id: bw.header
+        kind: internal
+      - id: n.SaveSnapshot
+        kind: internal
+      - id: bw.record
+        kind: internal
+      - id: n.writeBackupTail
+        kind: internal
+    steps:
+      - bind: bw
+        eval: "&backupWriter{w: w}"
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          init:
+            bind: err
+            eval: bw.header(backupExport)
+            to: bw.header
+          when: err != nil
+      - bind: meta, err
+        eval: n.SaveSnapshot(ctx, op, snapshotRecords{bw})
+        to: n.SaveSnapshot
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          when: err != nil
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          init:
+            bind: err
+            eval: bw.record(recMeta, wire.AppendSnapshotMeta(nil, &meta))
+            to: bw.record
+          when: err != nil
+      - return: "n.writeBackupTail(ctx, bw, BackupPoint{Position: meta.Position, ChainTip: meta.ChainTip})"
+        to: n.writeBackupTail
+  - of: (*Node).AppendBackup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).AppendBackup
+        kind: self
+      - id: bw.header
+        kind: internal
+      - id: n.writeBackupTail
+        kind: internal
+    steps:
+      - bind: bw
+        eval: "&backupWriter{w: w}"
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          init:
+            bind: err
+            eval: bw.header(backupTail)
+            to: bw.header
+          when: err != nil
+      - return: n.writeBackupTail(ctx, bw, since)
+        to: n.writeBackupTail
+  - of: (*Node).writeBackupTail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).writeBackupTail
+        kind: self
+      - id: n.Barrier
+        kind: internal
+      - id: n.ReadCommitted
+        kind: internal
+      - id: checkBackupBatch
+        kind: internal
+      - id: wire
+        kind: package
+      - id: bw.record
+        kind: internal
+    steps:
+      - bind: tok, err
+        eval: n.Barrier(ctx)
+        to: n.Barrier
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          when: err != nil
+      - bind: last, count
+        eval: base, uint64(0)
+      - var:
+          name: frame
+          type: "[]byte"
+      - loop:
+          cond: last.Position.Index < tok.Index
+          do:
+            - bind: es, err
+              eval: n.ReadCommitted(ctx, last.Position.Index+1, tok.Index, backupBatchBytes)
+              to: n.ReadCommitted
+            - opt:
+                do:
+                  - return: BackupPoint{}, err
+                when: err != nil
+            - opt:
+                do:
+                  - break: true
+                when: len(es) == 0
+            - opt:
+                do:
+                  - return: BackupPoint{}, err
+                init:
+                  bind: err
+                  eval: checkBackupBatch(last, es)
+                  to: checkBackupBatch
+                when: err != nil
+            - set: frame
+              to: wire
+              value: "wire.AppendMessage(frame[:0], &coreconsensus.MessageValue{Kind: coreconsensus.MsgApp, Entries: es})"
+            - opt:
+                do:
+                  - return: BackupPoint{}, err
+                init:
+                  bind: err
+                  eval: bw.record(recEntries, frame)
+                  to: bw.record
+                when: err != nil
+            - bind: e
+              eval: "&es[len(es)-1]"
+            - set: last, count
+              value: "BackupPoint{Position: e.Position, ChainTip: e.ChainSum}, count+uint64(len(es))"
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          init:
+            bind: err
+            eval: bw.record(recTrailer, appendTrailer(nil, base, last, count))
+            to: bw.record
+          when: err != nil
+      - return: last, nil
+  - of: VerifyBackup
+    participants:
+      - id: caller
+        kind: actor
+      - id: VerifyBackup
+        kind: self
+      - id: scanBackup
+        kind: internal
+      - id: backupSnapshot
+        kind: internal
+      - id: OpenSnapshot
+        kind: internal
+      - id: io
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: BackupPoint{}, restoreRefused("no options or no export")
+          when: opt == nil || p == nil || p.Export == nil
+      - bind: meta, at, _, err
+        eval: scanBackup(p, false)
+        to: scanBackup
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          when: err != nil
+      - bind: sr, err
+        eval: backupSnapshot(p.Export)
+        to: backupSnapshot
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          when: err != nil
+      - bind: o
+        eval: "*opt"
+      - set: o.Expected
+        value: meta
+      - bind: r, err
+        eval: OpenSnapshot(sr, &o)
+        to: OpenSnapshot
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          when: err != nil
+      - opt:
+          do:
+            - return: BackupPoint{}, err
+          init:
+            bind: _, err
+            eval: io.Copy(io.Discard, r)
+            to: io
+          when: err != nil
+      - return: at, nil
+  - of: RestoreBackup
+    participants:
+      - id: caller
+        kind: actor
+      - id: RestoreBackup
+        kind: self
+      - id: scanBackup
+        kind: internal
+      - id: backupSnapshot
+        kind: internal
+      - id: ImportObserved
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, restoreRefused("no options, no export or no state machine")
+          when: opt == nil || p == nil || p.Export == nil || p.Machine == nil
+      - bind: meta, _, tail, err
+        eval: scanBackup(p, true)
+        to: scanBackup
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, err
+          when: err != nil
+      - bind: sr, err
+        eval: backupSnapshot(p.Export)
+        to: backupSnapshot
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, err
+          when: err != nil
+      - bind: o
+        eval: "*opt"
+      - set: o.Expected
+        value: meta
+      - return: "ImportObserved(d, &ImportParams{Snapshot: sr, Tail: tail, Machine: p.Machine}, newCluster, members, &o)"
+        to: ImportObserved
+  - of: scanBackup
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanBackup
+        kind: self
+      - id: p.Export.Seek
+        kind: value
+      - id: s.file
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, BackupPoint{}, nil, err
+          init:
+            bind: _, err
+            eval: p.Export.Seek(0, io.SeekStart)
+            to: p.Export.Seek
+          when: err != nil
+      - bind: s
+        eval: "&backupScan{keep: keep}"
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, BackupPoint{}, nil, err
+          init:
+            bind: err
+            eval: s.file(p.Export, backupExport)
+            to: s.file
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: coreconsensus.SnapshotMetaValue{}, BackupPoint{}, nil, restoreRefused(fmt.Sprintf("tail %d is nil", i))
+                when: t == nil
+            - opt:
+                do:
+                  - return: coreconsensus.SnapshotMetaValue{}, BackupPoint{}, nil, err
+                init:
+                  bind: err
+                  eval: s.file(t, backupTail)
+                  to: s.file
+                when: err != nil
+          key: i
+          range: p.Tails
+          value: t
+      - return: s.meta, s.at, s.tail, nil
+  - of: (*backupScan).file
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backupScan).file
+        kind: self
+      - id: br.header
+        kind: internal
+      - id: br.next
+        kind: internal
+      - id: wire
+        kind: package
+      - id: s.entries
+        kind: internal
+      - id: s.trailer
+        kind: internal
+      - id: snapshotCorrupt
+        kind: internal
+    steps:
+      - bind: br
+        eval: "&backupReader{r: r}"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: br.header(kind)
+            to: br.header
+          when: err != nil
+      - bind: base, count, metaSeen
+        eval: s.at, uint64(0), kind != backupExport
+      - loop:
+          do:
+            - bind: typ, payload, err
+              eval: br.next(s.keep)
+              to: br.next
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - switch:
+                cases:
+                  - case: typ == recSnapshot && kind == backupExport && !metaSeen
+                  - case: typ == recMeta && !metaSeen
+                    do:
+                      - opt:
+                          do:
+                            - return: err
+                          init:
+                            bind: err
+                            eval: wire.ParseSnapshotMeta(payload, &s.meta)
+                            to: wire
+                          when: err != nil
+                      - set: metaSeen
+                        value: "true"
+                      - set: s.at
+                        value: "BackupPoint{Position: s.meta.Position, ChainTip: s.meta.ChainTip}"
+                      - set: base
+                        value: s.at
+                  - case: typ == recEntries && metaSeen
+                    do:
+                      - opt:
+                          do:
+                            - return: err
+                          init:
+                            bind: err
+                            eval: s.entries(payload)
+                            to: s.entries
+                          when: err != nil
+                      - op: +=
+                        set: count
+                        value: uint64(len(s.msg.Entries))
+                  - case: typ == recTrailer && metaSeen
+                    do:
+                      - return: s.trailer(br, payload, base, count)
+                        to: s.trailer
+                  - default: true
+                    do:
+                      - return: snapshotCorrupt(fmt.Sprintf("backup record %d out of place", typ))
+                        to: snapshotCorrupt
+          forever: true
+  - of: (*backupScan).entries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backupScan).entries
+        kind: self
+      - id: wire
+        kind: package
+      - id: snapshotCorrupt
+        kind: internal
+      - id: checkBackupBatch
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: wire.ParseMessage(payload, &s.msg)
+            to: wire
+          when: err != nil
+      - opt:
+          do:
+            - return: snapshotCorrupt("backup entry record")
+              to: snapshotCorrupt
+          when: s.msg.Kind != coreconsensus.MsgApp || len(s.msg.Entries) == 0
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkBackupBatch(s.at, s.msg.Entries)
+            to: checkBackupBatch
+          when: err != nil
+      - opt:
+          do:
+            - set: s.tail
+              value: append(s.tail, s.msg.Entries...)
+          when: s.keep
+      - bind: e
+        eval: "&s.msg.Entries[len(s.msg.Entries)-1]"
+      - set: s.at
+        value: "BackupPoint{Position: e.Position, ChainTip: e.ChainSum}"
+      - return: nil
+  - of: (*backupScan).trailer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backupScan).trailer
+        kind: self
+      - id: parseTrailer
+        kind: internal
+      - id: snapshotCorrupt
+        kind: internal
+      - id: restoreRefused
+        kind: internal
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: from, to, n, ok
+        eval: parseTrailer(payload)
+        to: parseTrailer
+      - switch:
+          cases:
+            - case: "!ok"
+              do:
+                - return: snapshotCorrupt("backup trailer")
+                  to: snapshotCorrupt
+            - case: from != base
+              do:
+                - return: restoreRefused(fmt.Sprintf("the backup file starts at %d, not at %d where the one before ends", from.Position.Index, base.Position.Index))
+                  to: restoreRefused
+            - case: to != s.at || n != count
+              do:
+                - return: snapshotCorrupt("backup trailer differs from the entries")
+                  to: snapshotCorrupt
+      - var:
+          name: one
+          type: "[1]byte"
+      - opt:
+          do:
+            - return: snapshotCorrupt("bytes after the backup trailer")
+              to: snapshotCorrupt
+          init:
+            bind: _, err
+            eval: io.ReadFull(br.r, one[:])
+            to: io
+          when: "!errors.Is(err, io.EOF)"
+      - return: nil
+  - of: checkBackupBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkBackupBatch
+        kind: self
+      - id: checkObservedTail
+        kind: internal
+    steps:
+      - return: "checkObservedTail(&coreconsensus.SnapshotMetaValue{Position: at.Position, ChainTip: at.ChainTip}, es)"
+        to: checkObservedTail
+  - of: backupSnapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: backupSnapshot
+        kind: self
+      - id: export.Seek
+        kind: value
+      - id: br.header
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: _, err
+            eval: export.Seek(0, io.SeekStart)
+            to: export.Seek
+          when: err != nil
+      - bind: br
+        eval: "&backupReader{r: export}"
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: br.header(backupExport)
+            to: br.header
+          when: err != nil
+      - return: "&backupSnapReader{br: br}, nil"
+  - of: appendTrailer
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendTrailer
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - loop:
+          do:
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, p.Position.Term)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, p.Position.Index)
+            - set: dst
+              to: binary.LittleEndian.AppendUint32
+              value: binary.LittleEndian.AppendUint32(dst, p.ChainTip)
+          key: _
+          range: "[2]BackupPoint{from, to}"
+          value: p
+      - return: binary.LittleEndian.AppendUint64(dst, count)
+        to: binary.LittleEndian.AppendUint64
+  - of: parseTrailer
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseTrailer
+        kind: self
+      - id: binary.LittleEndian.Uint64
+        kind: value
+      - id: binary.LittleEndian.Uint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: BackupPoint{}, BackupPoint{}, 0, false
+          when: len(b) != trailerLen
+      - var:
+          name: ps
+          type: "[2]BackupPoint"
+      - loop:
+          do:
+            - set: ps[i].Position.Term
+              to: binary.LittleEndian.Uint64
+              value: binary.LittleEndian.Uint64(b)
+            - set: ps[i].Position.Index
+              to: binary.LittleEndian.Uint64
+              value: binary.LittleEndian.Uint64(b[8:])
+            - set: ps[i].ChainTip
+              to: binary.LittleEndian.Uint32
+              value: binary.LittleEndian.Uint32(b[16:])
+            - set: b
+              value: b[20:]
+          key: i
+          range: ps
+      - return: ps[0], ps[1], binary.LittleEndian.Uint64(b), true
+  - of: (*backupWriter).header
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backupWriter).header
+        kind: self
+      - id: b.w.Write
+        kind: value
+    steps:
+      - bind: _, err
+        eval: b.w.Write(append([]byte(backupMagic), backupVersion1, kind))
+        to: b.w.Write
+      - return: err
+  - of: (*backupWriter).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backupWriter).record
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: b.w.Write
+        kind: value
+    steps:
+      - set: b.buf
+        value: append(b.buf[:0], typ)
+      - set: b.buf
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(b.buf, uint32(len(payload)))
+      - set: b.buf
+        value: append(b.buf, payload...)
+      - set: b.buf
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(b.buf, crc32.Checksum(b.buf, backupTable))
+      - bind: _, err
+        eval: b.w.Write(b.buf)
+        to: b.w.Write
+      - return: err
+  - of: snapshotRecords.Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: snapshotRecords.Write
+        kind: self
+      - id: s.bw.record
+        kind: internal
+    steps:
+      - loop:
+          cond: off < len(p)
+          do:
+            - opt:
+                do:
+                  - return: off, err
+                init:
+                  bind: err
+                  eval: s.bw.record(recSnapshot, p[off:min(off+backupChunk, len(p))])
+                  to: s.bw.record
+                when: err != nil
+          init: off := 0
+          post: off += backupChunk
+      - return: len(p), nil
+  - of: (*backupReader).header
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backupReader).header
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: snapshotCorrupt
+        kind: internal
+      - id: restoreRefused
+        kind: internal
+    steps:
+      - var:
+          name: h
+          type: "[backupHeadLen]byte"
+      - opt:
+          do:
+            - return: snapshotCorrupt("short backup header")
+              to: snapshotCorrupt
+          init:
+            bind: _, err
+            eval: io.ReadFull(b.r, h[:])
+            to: io
+          when: err != nil
+      - switch:
+          cases:
+            - case: "!bytes.Equal(h[:len(backupMagic)], []byte(backupMagic))"
+              do:
+                - return: snapshotCorrupt("not a backup file")
+                  to: snapshotCorrupt
+            - case: h[len(backupMagic)] != backupVersion1
+              do:
+                - return: snapshotCorrupt("backup version")
+                  to: snapshotCorrupt
+            - case: h[len(backupMagic)+1] != kind
+              do:
+                - return: restoreRefused(fmt.Sprintf("a backup file of kind %q where %q is due", h[len(backupMagic)+1], kind))
+                  to: restoreRefused
+      - return: nil
+  - of: (*backupReader).next
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backupReader).next
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: binary.LittleEndian.Uint32
+        kind: value
+      - id: crc32
+        kind: stdlib
+    steps:
+      - var:
+          name: h
+          type: "[recHeadLen]byte"
+      - opt:
+          do:
+            - return: 0, nil, snapshotCorrupt("backup cut before its trailer")
+          init:
+            bind: _, err
+            eval: io.ReadFull(b.r, h[:])
+            to: io
+          when: err != nil
+      - bind: "n"
+        eval: binary.LittleEndian.Uint32(h[1:])
+        to: binary.LittleEndian.Uint32
+      - opt:
+          do:
+            - return: 0, nil, snapshotCorrupt("backup record length")
+          when: n > backupMaxRecord
+      - bind: size
+        eval: int(n) + recSumLen
+      - opt:
+          do:
+            - set: b.buf
+              value: make([]byte, size)
+          when: fresh || cap(b.buf) < size
+      - bind: buf
+        eval: b.buf[:size]
+      - opt:
+          do:
+            - return: 0, nil, snapshotCorrupt("backup cut in a record")
+          init:
+            bind: _, err
+            eval: io.ReadFull(b.r, buf)
+            to: io
+          when: err != nil
+      - bind: sum
+        eval: crc32.Update(crc32.Checksum(h[:], backupTable), backupTable, buf[:n])
+        to: crc32
+      - opt:
+          do:
+            - return: 0, nil, snapshotCorrupt("backup record sum")
+          when: sum != binary.LittleEndian.Uint32(buf[n:])
+      - return: h[0], buf[:n:n], nil
+  - of: (*backupSnapReader).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*backupSnapReader).Read
+        kind: self
+      - id: s.br.next
+        kind: internal
+    steps:
+      - loop:
+          cond: len(s.cur) == 0
+          do:
+            - opt:
+                do:
+                  - return: 0, io.EOF
+                when: s.done
+            - bind: typ, payload, err
+              eval: s.br.next(false)
+              to: s.br.next
+            - opt:
+                do:
+                  - return: 0, err
+                when: err != nil
+            - opt:
+                do:
+                  - set: s.done
+                    value: "true"
+                  - return: 0, io.EOF
+                when: typ != recSnapshot
+            - set: s.cur
+              value: payload
+      - bind: "n"
+        eval: copy(p, s.cur)
+      - set: s.cur
+        value: s.cur[n:]
+      - return: n, nil
   - of: foundingDigest
     participants:
       - id: caller
@@ -1220,6 +1962,8 @@ sequences:
         to: clampInt
       - eval: clampU64(&c.PromoteLag, 1024)
         to: clampU64
+      - eval: clampInt(&c.MaxSnapshotStreams, 1)
+        to: clampInt
       - opt:
           do:
             - set: c.HardCloseTimeout
@@ -1391,6 +2135,10 @@ sequences:
               do:
                 - return: misconfigured("MaxPendingBytes", "below MaxEntryBytes")
                   to: misconfigured
+            - case: c.SnapshotStreamBytesPerSecond < 0
+              do:
+                - return: misconfigured("SnapshotStreamBytesPerSecond", "negative")
+                  to: misconfigured
             - case: framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead)
               do:
                 - return: misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
@@ -1498,9 +2246,20 @@ sequences:
         kind: actor
       - id: NewDataDirWith
         kind: self
+      - id: newDataDirOn
+        kind: internal
+    steps:
+      - return: newDataDirOn(dir, opts, &osDisk)
+        to: newDataDirOn
+  - of: newDataDirOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: newDataDirOn
+        kind: self
       - id: refuseUnmarked
         kind: internal
-      - id: mkdirDurable
+      - id: disk.mkdirDurable
         kind: internal
       - id: os
         kind: stdlib
@@ -1536,11 +2295,11 @@ sequences:
             - return: DataDir{}, err
           init:
             bind: err
-            eval: mkdirDurable(dir)
-            to: mkdirDurable
+            eval: disk.mkdirDurable(dir)
+            to: disk.mkdirDurable
           when: err != nil
       - bind: d
-        eval: "&dataDir{dir: dir, opts: opts}"
+        eval: "&dataDir{dir: dir, opts: opts, disk: disk}"
       - bind: lf, err
         eval: os.OpenFile(filepath.Join(dir, fileLock), os.O_RDWR|os.O_CREATE, 0o600)
         to: os
@@ -1581,7 +2340,7 @@ sequences:
         kind: self
       - id: openFileLog
         kind: internal
-      - id: newFileSnapshots
+      - id: newFileSnapshotsOn
         kind: internal
       - id: alsoFailed
         kind: internal
@@ -1594,8 +2353,8 @@ sequences:
             - return: err
           when: err != nil
       - bind: s, err
-        eval: newFileSnapshots(filepath.Join(d.dir, "snap"), l.syncFailedAtOpen)
-        to: newFileSnapshots
+        eval: newFileSnapshotsOn(filepath.Join(d.dir, "snap"), l.syncFailedAtOpen, d.fs())
+        to: newFileSnapshotsOn
       - opt:
           do:
             - return: alsoFailed(err, "close log", l.Close())
@@ -1604,6 +2363,13 @@ sequences:
       - set: d.log, d.snaps
         value: l, s
       - return: nil
+  - of: (*dataDir).fs
+    steps:
+      - opt:
+          do:
+            - return: d.disk
+          when: d.disk != nil
+      - return: "&osDisk"
   - of: DataDir.Dir
     steps:
       - return: d.d.dir
@@ -1743,7 +2509,7 @@ sequences:
         kind: stdlib
       - id: os
         kind: stdlib
-      - id: writeFileSync
+      - id: l.fs().writeFileSync
         kind: internal
     steps:
       - bind: reason
@@ -1757,8 +2523,8 @@ sequences:
             - opt:
                 do:
                   - set: runErr
-                    to: writeFileSync
-                    value: writeFileSync(l.runtimeMarker(reason), body)
+                    to: l.fs().writeFileSync
+                    value: l.fs().writeFileSync(l.runtimeMarker(reason), body)
                 init:
                   bind: runErr
                   eval: os.MkdirAll(l.runDir, 0o700)
@@ -1767,8 +2533,8 @@ sequences:
                 when: runErr == nil
           when: code == coreconsensus.CodeStorageFailed
       - set: dirErr
-        to: writeFileSync
-        value: writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body)
+        to: l.fs().writeFileSync
+        value: l.fs().writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body)
       - return: dirErr, runErr
   - of: reasonOf
     steps:
@@ -2044,11 +2810,179 @@ sequences:
         kind: actor
       - id: writeStamp
         kind: self
-      - id: writeFileSync
+      - id: disk.writeFileSync
         kind: internal
     steps:
-      - return: writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
-        to: writeFileSync
+      - return: disk.writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
+        to: disk.writeFileSync
+  - of: openOSFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: openOSFile
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: f, err
+        eval: os.OpenFile(name, flag, perm)
+        to: os
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: f, nil
+  - of: datasyncFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: datasyncFile
+        kind: self
+      - id: datasync
+        kind: internal
+      - id: f.Sync
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: datasync(of)
+              to: datasync
+          init:
+            bind: of, ok
+            eval: f.(*os.File)
+          when: ok
+      - return: f.Sync()
+        to: f.Sync
+  - of: (*diskFS).writeSynced
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*diskFS).writeSynced
+        kind: self
+      - id: f.Write
+        kind: value
+      - id: f.Sync
+        kind: internal
+    steps:
+      - bind: f, err
+        eval: d.openFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: |-
+          func() {
+          		if cerr := f.Close(); cerr != nil && err == nil {
+          			err = cerr
+          		}
+          	}()
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: _, err
+            eval: f.Write(data)
+            to: f.Write
+          when: err != nil
+      - return: f.Sync()
+        to: f.Sync
+  - of: (*diskFS).writeFileSync
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*diskFS).writeFileSync
+        kind: self
+      - id: d.writeSynced
+        kind: internal
+    steps:
+      - bind: tmp
+        eval: path + ".tmp"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.writeSynced(tmp, data)
+            to: d.writeSynced
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.rename(tmp, path)
+          when: err != nil
+      - return: d.syncDir(filepath.Dir(path))
+  - of: (*diskFS).mkdirDurable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*diskFS).mkdirDurable
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: storageFailed
+        kind: internal
+    steps:
+      - bind: _, err
+        eval: os.Stat(dir)
+        to: os
+      - bind: existed
+        eval: err == nil
+      - opt:
+          do:
+            - return: storageFailed("mkdir", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: os.MkdirAll(dir, 0o700)
+            to: os
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: existed
+      - opt:
+          do:
+            - return: storageFailed("mkdir", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: d.syncDir(filepath.Dir(dir))
+          when: err != nil
+      - return: nil
+  - of: (*diskFS).zeroFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*diskFS).zeroFrom
+        kind: self
+      - id: zeroRange
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: zeroRange(f, off, size)
+            to: zeroRange
+          when: err != nil
+      - return: d.datasync(f)
+  - of: (*diskFS).abandonTmp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*diskFS).abandonTmp
+        kind: self
+      - id: abandon
+        kind: internal
+    steps:
+      - eval: abandon(f.Close())
+        to: abandon
+      - eval: abandon(d.remove(path))
+        to: abandon
+      - return: cause
   - of: cause.Error
     steps:
       - return: string(c)
@@ -2587,6 +3521,13 @@ sequences:
     steps:
       - return: fmt.Sprintf("seg-%016x", n)
         to: fmt
+  - of: (*fileLog).fs
+    steps:
+      - opt:
+          do:
+            - return: l.disk
+          when: l.disk != nil
+      - return: "&osDisk"
   - of: (*fileLog).logDir
     participants:
       - id: caller
@@ -2640,7 +3581,7 @@ sequences:
               value: DefaultSegmentBytes
           when: segBytes <= 0
       - bind: l
-        eval: "&fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: dd.opts.RuntimeDir}"
+        eval: "&fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, disk: dd.fs(), first: 1, pendingLast: -1, runDir: dd.opts.RuntimeDir}"
       - opt:
           do:
             - return: nil, err
@@ -2709,7 +3650,7 @@ sequences:
         kind: internal
       - id: l.probeRuntimeDir
         kind: internal
-      - id: mkdirDurable
+      - id: l.fs().mkdirDurable
         kind: internal
       - id: readStamp
         kind: internal
@@ -2733,8 +3674,8 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: mkdirDurable(l.logDir())
-            to: mkdirDurable
+            eval: l.fs().mkdirDurable(l.logDir())
+            to: l.fs().mkdirDurable
           when: err != nil
       - bind: st, err
         eval: readStamp(l.dir)
@@ -2959,8 +3900,7 @@ sequences:
                         - return: nil, storageFailed("remove tmp", err)
                       init:
                         bind: err
-                        eval: os.Remove(filepath.Join(l.logDir(), name))
-                        to: os
+                        eval: l.fs().remove(filepath.Join(l.logDir(), name))
                       when: err != nil
                   - continue: true
                 when: strings.HasSuffix(name, ".tmp")
@@ -3607,8 +4547,6 @@ sequences:
         kind: actor
       - id: (*fileLog).openSegments
         kind: self
-      - id: os
-        kind: stdlib
       - id: storageFailed
         kind: internal
       - id: l.occupied.Add
@@ -3617,8 +4555,7 @@ sequences:
       - loop:
           do:
             - bind: f, err
-              eval: os.OpenFile(filepath.Join(l.logDir(), segName(s.n)), os.O_RDWR, 0)
-              to: os
+              eval: l.fs().openFile(filepath.Join(l.logDir(), segName(s.n)), os.O_RDWR, 0)
             - opt:
                 do:
                   - return: storageFailed("open segment", err)
@@ -3638,9 +4575,14 @@ sequences:
         kind: actor
       - id: (*fileLog).syncAtOpen
         kind: self
+      - id: l.fs
+        kind: internal
       - id: l.syncFailedAtOpen
         kind: internal
     steps:
+      - bind: disk
+        eval: l.fs()
+        to: l.fs
       - loop:
           do:
             - opt:
@@ -3649,7 +4591,7 @@ sequences:
                     to: l.syncFailedAtOpen
                 init:
                   bind: err
-                  eval: syncFileAtOpen(s.f)
+                  eval: disk.datasync(s.f)
                 when: err != nil
             - op: ++
               set: l.syncedAtOpen
@@ -3664,7 +4606,7 @@ sequences:
                     to: l.syncFailedAtOpen
                 init:
                   bind: err
-                  eval: syncDirAtOpen(dir)
+                  eval: disk.syncDir(dir)
                 when: err != nil
           key: _
           range: "[]string{l.logDir(), l.dir}"
@@ -3746,7 +4688,7 @@ sequences:
                               to: l.syncFailedAtOpen
                           init:
                             bind: err
-                            eval: syncFileAtOpen(tail.f)
+                            eval: l.fs().datasync(tail.f)
                           when: err != nil
                     when: "!allZero(last.data[l.off:])"
             - case: len(last.recs) > 0
@@ -3843,27 +4785,6 @@ sequences:
             - return: "-1, \"torn checkpoint\""
           when: recs[0].batch == torn && start == recs[0].off
       - return: start, ""
-  - of: zeroFrom
-    participants:
-      - id: caller
-        kind: actor
-      - id: zeroFrom
-        kind: self
-      - id: zeroRange
-        kind: internal
-      - id: datasync
-        kind: internal
-    steps:
-      - opt:
-          do:
-            - return: err
-          init:
-            bind: err
-            eval: zeroRange(f, off, size)
-            to: zeroRange
-          when: err != nil
-      - return: datasync(f)
-        to: datasync
   - of: zeroRange
     participants:
       - id: caller
@@ -3907,7 +4828,7 @@ sequences:
         kind: internal
       - id: fmt
         kind: stdlib
-      - id: writeFileSync
+      - id: l.fs().writeFileSync
         kind: internal
       - id: storageFailed
         kind: internal
@@ -3924,8 +4845,8 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: writeFileSync(filepath.Join(l.dir, markerQuarantine), []byte(line))
-            to: writeFileSync
+            eval: l.fs().writeFileSync(filepath.Join(l.dir, markerQuarantine), []byte(line))
+            to: l.fs().writeFileSync
           when: err != nil
       - return: qerr
   - of: (*fileLog).createSegment
@@ -3934,6 +4855,8 @@ sequences:
         kind: actor
       - id: (*fileLog).createSegment
         kind: self
+      - id: l.fs
+        kind: internal
       - id: appendRecord
         kind: internal
       - id: filepath
@@ -3942,17 +4865,13 @@ sequences:
         kind: internal
       - id: f.WriteAt
         kind: value
-      - id: abandonTmp
+      - id: disk.abandonTmp
         kind: internal
       - id: f.Sync
-        kind: value
-      - id: f.Close
-        kind: value
-      - id: storageFailed
         kind: internal
-      - id: os
-        kind: stdlib
-      - id: syncDir
+      - id: f.Close
+        kind: internal
+      - id: storageFailed
         kind: internal
       - id: l.occupied.Add
         kind: value
@@ -3961,6 +4880,9 @@ sequences:
     steps:
       - bind: size
         eval: l.segBytes
+      - bind: disk
+        eval: l.fs()
+        to: l.fs
       - bind: cpRec
         eval: "appendRecord(nil, &record{kind: recCheckpt, end: true, batch: cp.nextBatchSeq, data: cp.encode()})"
         to: appendRecord
@@ -3976,8 +4898,8 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: abandonTmp(f, tmp, storageFailed("checkpoint", err))
-              to: abandonTmp
+            - return: disk.abandonTmp(f, tmp, storageFailed("checkpoint", err))
+              to: disk.abandonTmp
           init:
             bind: _, err
             eval: f.WriteAt(cpRec, 0)
@@ -3985,8 +4907,8 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: abandonTmp(f, tmp, storageFailed("sync segment", err))
-              to: abandonTmp
+            - return: disk.abandonTmp(f, tmp, storageFailed("sync segment", err))
+              to: disk.abandonTmp
           init:
             bind: err
             eval: f.Sync()
@@ -4010,8 +4932,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: os.Rename(tmp, final)
-            to: os
+            eval: disk.rename(tmp, final)
           when: err != nil
       - opt:
           do:
@@ -4019,12 +4940,10 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(l.logDir())
-            to: syncDir
+            eval: disk.syncDir(l.logDir())
           when: err != nil
       - set: f, err
-        to: os
-        value: os.OpenFile(final, os.O_RDWR, 0)
+        value: disk.openFile(final, os.O_RDWR, 0)
       - opt:
           do:
             - return: storageFailed("open segment", err)
@@ -4049,8 +4968,8 @@ sequences:
         kind: self
       - id: l.takePrepared
         kind: internal
-      - id: os
-        kind: stdlib
+      - id: l.fs
+        kind: internal
     steps:
       - opt:
           do:
@@ -4060,54 +4979,69 @@ sequences:
             eval: l.takePrepared(n, size)
             to: l.takePrepared
           when: f != nil
+      - bind: disk
+        eval: l.fs()
+        to: l.fs
       - bind: f, err
-        eval: os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
-        to: os
+        eval: disk.openFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
       - opt:
           do:
             - return: nil, storageFailed("create segment", err)
           when: err != nil
       - opt:
           do:
-            - return: nil, abandonTmp(f, tmp, storageFailed("zero-fill", err))
+            - return: nil, disk.abandonTmp(f, tmp, storageFailed("zero-fill", err))
           init:
             bind: err
             eval: l.zeroFill()(f, 0, size)
           when: err != nil
       - return: f, nil
-  - of: (*fileLog).zeroFill
-    steps:
-      - opt:
-          do:
-            - return: l.fill
-          when: l.fill != nil
-      - opt:
-          do:
-            - return: fallocateFill
-          when: l.prealloc == PreallocateFallocate
-      - return: zeroFrom
-  - of: abandonTmp
+  - of: (*fileLog).dsyncWrite
     participants:
       - id: caller
         kind: actor
-      - id: abandonTmp
+      - id: (*fileLog).dsyncWrite
         kind: self
-      - id: abandon
+      - id: writeDsync
         kind: internal
     steps:
-      - eval: abandon(f.Close())
-        to: abandon
-      - eval: abandon(os.Remove(path))
-        to: abandon
-      - return: cause
+      - bind: f, ok
+        eval: cur.f.(*os.File)
+      - opt:
+          do:
+            - return: false, nil
+          when: "!ok"
+      - return: writeDsync(f, b, off)
+        to: writeDsync
+  - of: (*fileLog).zeroFill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).zeroFill
+        kind: self
+      - id: l.fs
+        kind: internal
+    steps:
+      - bind: disk
+        eval: l.fs()
+        to: l.fs
+      - opt:
+          do:
+            - return: disk.fallocateFill
+          when: l.prealloc == PreallocateFallocate
+      - return: disk.zeroFrom
   - of: (*fileLog).prepare
     participants:
       - id: caller
         kind: actor
       - id: (*fileLog).prepare
         kind: self
+      - id: l.fs
+        kind: internal
       - id: l.zeroFill
         kind: internal
+      - id: filepath
+        kind: stdlib
     steps:
       - bind: done
         eval: make(chan struct{})
@@ -4115,14 +5049,19 @@ sequences:
         eval: "&prepared{n: n, size: size, done: done}"
       - set: l.prep
         value: p
+      - bind: disk
+        eval: l.fs()
+        to: l.fs
       - bind: fill
         eval: l.zeroFill()
         to: l.zeroFill
-      - go: |-
-          func() {
+      - bind: tmp
+        eval: filepath.Join(l.logDir(), segName(n)+".tmp")
+        to: filepath
+      - eval: |-
+          disk.background(func() {
           		defer close(done)
-          		tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
-          		f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+          		f, err := disk.openFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
           		if err != nil {
           			p.err = err
           			return
@@ -4132,11 +5071,11 @@ sequences:
           			// builds the segment on the writer's path, where a failure
           			// stops the node. It goes now: on a full disk it holds every
           			// byte the fill could write (#520).
-          			p.err = abandonTmp(f, tmp, err)
+          			p.err = disk.abandonTmp(f, tmp, err)
           			return
           		}
           		p.f = f
-          	}()
+          	})
   - of: (*fileLog).takePrepared
     participants:
       - id: caller
@@ -4159,122 +5098,12 @@ sequences:
           do:
             - opt:
                 do:
-                  - eval: abandon(abandonTmp(p.f, filepath.Join(l.logDir(), segName(p.n)+".tmp"), nil))
+                  - eval: abandon(l.fs().abandonTmp(p.f, filepath.Join(l.logDir(), segName(p.n)+".tmp"), nil))
                     to: abandon
                 when: p.f != nil
             - return: nil
           when: p.err != nil || p.n != n || p.size != size
       - return: p.f
-  - of: writeFileSync
-    participants:
-      - id: caller
-        kind: actor
-      - id: writeFileSync
-        kind: self
-      - id: writeSynced
-        kind: internal
-      - id: os
-        kind: stdlib
-      - id: syncDir
-        kind: internal
-    steps:
-      - bind: tmp
-        eval: path + ".tmp"
-      - opt:
-          do:
-            - return: err
-          init:
-            bind: err
-            eval: writeSynced(tmp, data)
-            to: writeSynced
-          when: err != nil
-      - opt:
-          do:
-            - return: err
-          init:
-            bind: err
-            eval: os.Rename(tmp, path)
-            to: os
-          when: err != nil
-      - return: syncDir(filepath.Dir(path))
-        to: syncDir
-  - of: mkdirDurable
-    participants:
-      - id: caller
-        kind: actor
-      - id: mkdirDurable
-        kind: self
-      - id: os
-        kind: stdlib
-      - id: storageFailed
-        kind: internal
-      - id: syncDir
-        kind: internal
-    steps:
-      - bind: _, err
-        eval: os.Stat(dir)
-        to: os
-      - bind: existed
-        eval: err == nil
-      - opt:
-          do:
-            - return: storageFailed("mkdir", err)
-              to: storageFailed
-          init:
-            bind: err
-            eval: os.MkdirAll(dir, 0o700)
-            to: os
-          when: err != nil
-      - opt:
-          do:
-            - return: nil
-          when: existed
-      - opt:
-          do:
-            - return: storageFailed("mkdir", err)
-              to: storageFailed
-          init:
-            bind: err
-            eval: syncDir(filepath.Dir(dir))
-            to: syncDir
-          when: err != nil
-      - return: nil
-  - of: writeSynced
-    participants:
-      - id: caller
-        kind: actor
-      - id: writeSynced
-        kind: self
-      - id: os
-        kind: stdlib
-      - id: f.Write
-        kind: value
-      - id: f.Sync
-        kind: value
-    steps:
-      - bind: f, err
-        eval: os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
-        to: os
-      - opt:
-          do:
-            - return: err
-          when: err != nil
-      - defer: |-
-          func() {
-          		if cerr := f.Close(); cerr != nil && err == nil {
-          			err = cerr
-          		}
-          	}()
-      - opt:
-          do:
-            - return: err
-          init:
-            bind: _, err
-            eval: f.Write(data)
-            to: f.Write
-          when: err != nil
-      - return: f.Sync()
-        to: f.Sync
   - of: (*fileLog).rotate
     participants:
       - id: caller
@@ -4286,8 +5115,6 @@ sequences:
       - id: cur.f.WriteAt
         kind: value
       - id: storageFailed
-        kind: internal
-      - id: datasync
         kind: internal
       - id: l.publishNext
         kind: internal
@@ -4314,15 +5141,10 @@ sequences:
                     to: storageFailed
                 init:
                   bind: err
-                  eval: datasync(cur.f)
-                  to: datasync
+                  eval: l.fs().datasync(cur.f)
                 when: err != nil
             - op: ++
               set: l.batch
-            - opt:
-                do:
-                  - eval: l.afterSeal()
-                when: l.afterSeal != nil
           when: l.off+int64(len(seal)) <= cur.size
       - return: l.publishNext(need)
         to: l.publishNext
@@ -4871,11 +5693,11 @@ sequences:
                   - return: err
                 init:
                   bind: err
-                  eval: l.writeAndSync(cur, body, l.off)
+                  eval: l.writeAndSync(cur, body, l.off, false)
                   to: l.writeAndSync
                 when: err != nil
           when: len(body) > 0
-      - return: l.writeAndSync(cur, l.pending[l.pendingLast:], l.off+int64(len(body)))
+      - return: l.writeAndSync(cur, l.pending[l.pendingLast:], l.off+int64(len(body)), true)
         to: l.writeAndSync
   - of: (*fileLog).writeAndSync
     participants:
@@ -4883,20 +5705,29 @@ sequences:
         kind: actor
       - id: (*fileLog).writeAndSync
         kind: self
-      - id: writeDsync
+      - id: time
+        kind: stdlib
+      - id: l.dsyncWrite
         kind: internal
       - id: storageFailed
         kind: internal
       - id: cur.f.WriteAt
         kind: value
-      - id: datasync
-        kind: internal
     steps:
       - opt:
           do:
+            - var:
+                name: start
+                type: time.Time
+            - opt:
+                do:
+                  - set: start
+                    to: time
+                    value: time.Now()
+                when: l.timedSync != nil
             - bind: ok, err
-              eval: writeDsync(cur.f, b, off)
-              to: writeDsync
+              eval: l.dsyncWrite(cur, b, off)
+              to: l.dsyncWrite
             - opt:
                 do:
                   - return: storageFailed("pwritev2", err)
@@ -4906,8 +5737,8 @@ sequences:
                 do:
                   - opt:
                       do:
-                        - eval: l.duringSync()
-                      when: l.duringSync != nil
+                        - eval: l.timedSync(time.Since(start), end)
+                      when: l.timedSync != nil
                   - return: nil
                 when: ok
           when: l.syncPath == SyncRWFDsync
@@ -4920,19 +5751,27 @@ sequences:
             eval: cur.f.WriteAt(b, off)
             to: cur.f.WriteAt
           when: err != nil
+      - var:
+          name: start
+          type: time.Time
       - opt:
           do:
-            - eval: l.duringSync()
-          when: l.duringSync != nil
+            - set: start
+              to: time
+              value: time.Now()
+          when: l.timedSync != nil
       - opt:
           do:
             - return: storageFailed("fdatasync", err)
               to: storageFailed
           init:
             bind: err
-            eval: datasync(cur.f)
-            to: datasync
+            eval: l.fs().datasync(cur.f)
           when: err != nil
+      - opt:
+          do:
+            - eval: l.timedSync(time.Since(start), end)
+          when: l.timedSync != nil
       - return: nil
   - of: (*fileLog).settleBatch
     participants:
@@ -5115,8 +5954,6 @@ sequences:
         kind: internal
       - id: l.removeFirstSegment
         kind: internal
-      - id: syncDir
-        kind: internal
     steps:
       - bind: removed
         eval: "false"
@@ -5150,8 +5987,7 @@ sequences:
               value: "true"
       - opt:
           do:
-            - return: syncDir(l.logDir())
-              to: syncDir
+            - return: l.fs().syncDir(l.logDir())
           when: removed
       - return: nil
   - of: (*fileLog).supersedes
@@ -5195,11 +6031,9 @@ sequences:
       - id: (*fileLog).removeFirstSegment
         kind: self
       - id: l.segs[0].f.Close
-        kind: value
+        kind: internal
       - id: storageFailed
         kind: internal
-      - id: os
-        kind: stdlib
       - id: l.occupied.Add
         kind: value
     steps:
@@ -5218,8 +6052,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: os.Remove(filepath.Join(l.logDir(), segName(l.segs[0].n)))
-            to: os
+            eval: l.fs().remove(filepath.Join(l.logDir(), segName(l.segs[0].n)))
           when: err != nil
       - eval: l.occupied.Add(-l.segs[0].size)
         to: l.occupied.Add
@@ -5263,7 +6096,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: writeStamp(l.dir, s)
+            eval: writeStamp(l.fs(), l.dir, s)
             to: writeStamp
           when: err != nil
       - set: l.stamp
@@ -5276,7 +6109,7 @@ sequences:
       - id: (*fileLog).Close
         kind: self
       - id: s.f.Close
-        kind: value
+        kind: internal
       - id: storageFailed
         kind: internal
       - id: l.occupied.Store
@@ -5704,7 +6537,18 @@ sequences:
         kind: actor
       - id: newFileSnapshots
         kind: self
-      - id: mkdirDurable
+      - id: newFileSnapshotsOn
+        kind: internal
+    steps:
+      - return: newFileSnapshotsOn(dir, syncFailed, &osDisk)
+        to: newFileSnapshotsOn
+  - of: newFileSnapshotsOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: newFileSnapshotsOn
+        kind: self
+      - id: disk.mkdirDurable
         kind: internal
       - id: snapshotEntries
         kind: internal
@@ -5720,8 +6564,8 @@ sequences:
             - return: nil, err
           init:
             bind: err
-            eval: mkdirDurable(dir)
-            to: mkdirDurable
+            eval: disk.mkdirDurable(dir)
+            to: disk.mkdirDurable
           when: err != nil
       - bind: ents, err
         eval: snapshotEntries(dir)
@@ -5746,8 +6590,7 @@ sequences:
                         - return: nil, storageFailed("remove orphan snapshot", err)
                       init:
                         bind: err
-                        eval: os.Remove(filepath.Join(dir, e.Name()))
-                        to: os
+                        eval: disk.remove(filepath.Join(dir, e.Name()))
                       when: err != nil
                 init:
                   bind: _, err
@@ -5758,7 +6601,7 @@ sequences:
           range: ents
           value: e
       - bind: s
-        eval: "&fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}, resume: map[string]resumePoint{}}"
+        eval: "&fileSnapshots{dir: dir, disk: disk, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}, resume: map[string]resumePoint{}}"
       - opt:
           do:
             - return: nil, err
@@ -5772,9 +6615,16 @@ sequences:
             - return: nil, syncFailed("sync snapshots at open", err)
           init:
             bind: err
-            eval: syncDirAtOpen(dir)
+            eval: disk.syncDir(dir)
           when: err != nil
       - return: s, nil
+  - of: (*fileSnapshots).fs
+    steps:
+      - opt:
+          do:
+            - return: s.disk
+          when: s.disk != nil
+      - return: "&osDisk"
   - of: snapshotEntries
     participants:
       - id: caller
@@ -5882,8 +6732,6 @@ sequences:
         kind: internal
       - id: s.removeSpools
         kind: internal
-      - id: syncDir
-        kind: internal
     steps:
       - bind: ents, err
         eval: os.ReadDir(s.dir)
@@ -5906,8 +6754,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(s.dir)
-            to: syncDir
+            eval: s.fs().syncDir(s.dir)
           when: err != nil
       - return: nil
   - of: (*fileSnapshots).removeSpools
@@ -5918,8 +6765,6 @@ sequences:
         kind: self
       - id: s.orphanSpools
         kind: internal
-      - id: os
-        kind: stdlib
     steps:
       - lock:
           mutex: s.mu
@@ -5933,8 +6778,7 @@ sequences:
                   - return: true, storageFailed("remove orphan spool", err)
                 init:
                   bind: err
-                  eval: os.Remove(filepath.Join(s.dir, name))
-                  to: os
+                  eval: s.fs().remove(filepath.Join(s.dir, name))
                 when: err != nil && !errors.Is(err, os.ErrNotExist)
             - eval: delete(s.resume, strings.TrimSuffix(name, ".spool"))
           key: _
@@ -5991,8 +6835,6 @@ sequences:
         kind: internal
       - id: old.supersede
         kind: internal
-      - id: os
-        kind: stdlib
       - id: sink.mu.Unlock
         kind: value
       - id: positionSpool
@@ -6037,8 +6879,7 @@ sequences:
               to: old.supersede
           when: old != nil
       - bind: f, err
-        eval: os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
-        to: os
+        eval: s.fs().openFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
       - opt:
           do:
             - eval: sink.mu.Unlock()
@@ -6294,9 +7135,9 @@ sequences:
       - id: alsoFailed
         kind: internal
       - id: k.f.Sync
-        kind: value
+        kind: internal
       - id: k.f.Close
-        kind: value
+        kind: internal
       - id: storageFailed
         kind: internal
       - id: k.s.forget
@@ -6375,29 +7216,19 @@ sequences:
           when: err != nil
       - return: nil
   - of: (*fileSnapshots).rename
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*fileSnapshots).rename
-        kind: self
-      - id: os
-        kind: stdlib
     steps:
       - lock:
           mutex: s.mu
-      - return: os.Rename(filepath.Join(s.dir, from), filepath.Join(s.dir, to))
-        to: os
+      - return: s.fs().rename(filepath.Join(s.dir, from), filepath.Join(s.dir, to))
   - of: (*fileSnapshots).writeMeta
     participants:
       - id: caller
         kind: actor
       - id: (*fileSnapshots).writeMeta
         kind: self
-      - id: writeSynced
+      - id: s.fs().writeSynced
         kind: internal
       - id: s.rename
-        kind: internal
-      - id: syncDir
         kind: internal
     steps:
       - opt:
@@ -6405,8 +7236,8 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: writeSynced(filepath.Join(s.dir, id+".meta.tmp"), data)
-            to: writeSynced
+            eval: s.fs().writeSynced(filepath.Join(s.dir, id+".meta.tmp"), data)
+            to: s.fs().writeSynced
           when: err != nil
       - opt:
           do:
@@ -6416,8 +7247,7 @@ sequences:
             eval: s.rename(id+".meta.tmp", id+".meta")
             to: s.rename
           when: err != nil
-      - return: syncDir(s.dir)
-        to: syncDir
+      - return: s.fs().syncDir(s.dir)
   - of: (*fileSnapshots).published
     participants:
       - id: caller
@@ -6531,8 +7361,6 @@ sequences:
         kind: internal
       - id: k.s.forget
         kind: internal
-      - id: os
-        kind: stdlib
       - id: storageFailed
         kind: internal
     steps:
@@ -6554,8 +7382,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: os.Remove(filepath.Join(k.s.dir, k.id+".spool"))
-            to: os
+            eval: k.s.fs().remove(filepath.Join(k.s.dir, k.id+".spool"))
           when: err != nil && !errors.Is(err, os.ErrNotExist)
       - return: nil
   - of: (*fileSnapshots).List
@@ -6718,8 +7545,6 @@ sequences:
         kind: internal
       - id: s.removeFiles
         kind: internal
-      - id: syncDir
-        kind: internal
       - id: storageFailed
         kind: internal
     steps:
@@ -6742,8 +7567,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(s.dir)
-            to: syncDir
+            eval: s.fs().syncDir(s.dir)
           when: err != nil
       - return: nil
   - of: (*fileSnapshots).removeFiles
@@ -6754,8 +7578,6 @@ sequences:
         kind: self
       - id: pinnedSnapshot
         kind: internal
-      - id: os
-        kind: stdlib
       - id: storageFailed
         kind: internal
     steps:
@@ -6774,8 +7596,7 @@ sequences:
                     to: storageFailed
                 init:
                   bind: err
-                  eval: os.Remove(filepath.Join(s.dir, id+ext))
-                  to: os
+                  eval: s.fs().remove(filepath.Join(s.dir, id+ext))
                 when: err != nil && !errors.Is(err, os.ErrNotExist)
           key: _
           range: "[]string{\".meta\", \".snap\"}"
@@ -7182,6 +8003,14 @@ sequences:
               set: ph.Flags
               value: PeerUnreachable
           when: n.peerUnreachable(p, heard, ph.LastContact, window)
+      - opt:
+          do:
+            - set: ph.SnapshotSent, ph.SnapshotSize
+              value: pin.progress.Load(), pin.size
+          init:
+            bind: pin, ok
+            eval: n.sending[p.ID]
+          when: ok && pin.until.IsZero() && pin.progress != nil
       - return: ph
   - of: (*Node).peerUnreachable
     steps:
@@ -9771,6 +10600,8 @@ sequences:
         kind: actor
       - id: newNode
         kind: self
+      - id: newPacer
+        kind: internal
       - id: n.ident.Store
         kind: value
     steps:
@@ -9784,6 +10615,9 @@ sequences:
           		waiters: map[uint64]*proposal{}, forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
           		watchers: map[chan coreconsensus.StatusValue]struct{}{}, confWatchers: map[chan coreconsensus.MembershipValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
           	}
+      - set: n.pace
+        to: newPacer
+        value: newPacer(cfg.Clock, cfg.SnapshotStreamBytesPerSecond)
       - bind: ident
         eval: stamp.Log
       - eval: n.ident.Store(&ident)
@@ -9887,11 +10721,17 @@ sequences:
         kind: self
       - id: ur.Unreachable
         kind: value
+      - id: gb.unreachableFor
+        kind: internal
       - id: cfg.Transport.Bind
         kind: value
       - id: jb.BindJoinReason
         kind: value
+      - id: gb.membershipFor
+        kind: internal
       - id: ms.bindMembership
+        kind: internal
+      - id: gb.undecodableFor
         kind: internal
       - id: ub.bindUndecodable
         kind: internal
@@ -9908,23 +10748,33 @@ sequences:
             bind: bs, ok
             eval: cfg.Transport.(coreconsensus.BatchSender)
           when: ok
-      - opt:
-          do:
-            - eval: |-
-                ur.Unreachable(func(id coreconsensus.NodeID) {
-                			select {
-                			case n.execc <- func() {
-                				n.unreachableAt[id] = n.clk.Now()
-                				n.r.ReportUnreachable(id)
-                			}:
-                			default:
-                			}
-                		})
-              to: ur.Unreachable
-          init:
-            bind: ur, ok
-            eval: cfg.Transport.(coreconsensus.UnreachableReporter)
-          when: ok
+      - bind: unreachable
+        eval:
+          closure:
+            params: id coreconsensus.NodeID
+            steps:
+              - select:
+                  cases:
+                    - comm: |-
+                        n.execc <- func() {
+                        			n.unreachableAt[id] = n.clk.Now()
+                        			n.r.ReportUnreachable(id)
+                        		}
+                    - default: true
+      - bind: gb, grouped
+        eval: cfg.Transport.(groupBinder)
+      - alt:
+          - do:
+              - eval: ur.Unreachable(unreachable)
+                to: ur.Unreachable
+            init:
+              bind: ur, ok
+              eval: cfg.Transport.(coreconsensus.UnreachableReporter)
+            when: ok && !grouped
+          - do:
+              - eval: gb.unreachableFor(cfg.Group, unreachable)
+                to: gb.unreachableFor
+            when: grouped
       - opt:
           do:
             - return: err
@@ -9941,25 +10791,33 @@ sequences:
             bind: jb, ok
             eval: cfg.Transport.(coreconsensus.JoinReasonBinder)
           when: ok
-      - opt:
-          do:
-            - eval: ms.bindMembership(n.servedMembership)
-              to: ms.bindMembership
-          init:
-            bind: ms, ok
-            eval: |-
-              cfg.Transport.(interface {
-              		bindMembership(read func() (coreconsensus.MembershipValue, bool))
-              	})
-          when: ok
-      - opt:
-          do:
-            - eval: ub.bindUndecodable(n.undecodableOffer)
-              to: ub.bindUndecodable
-          init:
-            bind: ub, ok
-            eval: cfg.Transport.(undecodableBinder)
-          when: ok
+      - alt:
+          - do:
+              - eval: gb.membershipFor(cfg.Group, n.servedMembership)
+                to: gb.membershipFor
+            when: grouped
+          - do:
+              - eval: ms.bindMembership(n.servedMembership)
+                to: ms.bindMembership
+            init:
+              bind: ms, ok
+              eval: |-
+                cfg.Transport.(interface {
+                		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+                	})
+            when: ok
+      - alt:
+          - do:
+              - eval: gb.undecodableFor(cfg.Group, n.undecodableOffer)
+                to: gb.undecodableFor
+            when: grouped
+          - do:
+              - eval: ub.bindUndecodable(n.undecodableOffer)
+                to: ub.bindUndecodable
+            init:
+              bind: ub, ok
+              eval: cfg.Transport.(undecodableBinder)
+            when: ok
       - opt:
           do:
             - eval: wb.bindWarn(n.obs.warn)
@@ -10868,6 +11726,8 @@ sequences:
         kind: value
       - id: n.declineNoted
         kind: internal
+      - id: n.traceForward
+        kind: internal
       - id: n.r.Step
         kind: value
     steps:
@@ -10882,6 +11742,8 @@ sequences:
         to: n.r.SetOverloaded
       - eval: n.declineNoted(m)
         to: n.declineNoted
+      - eval: n.traceForward(m)
+        to: n.traceForward
       - eval: n.r.Step(n.clk.Now(), *m)
         to: n.r.Step
       - return: turn, true
@@ -11093,6 +11955,8 @@ sequences:
         kind: internal
       - id: n.declineNoted
         kind: internal
+      - id: n.traceForward
+        kind: internal
       - id: n.r.Step
         kind: value
     steps:
@@ -11107,6 +11971,8 @@ sequences:
                 when: "!ok"
             - eval: n.declineNoted(&m)
               to: n.declineNoted
+            - eval: n.traceForward(&m)
+              to: n.traceForward
             - eval: n.r.Step(n.clk.Now(), m)
               to: n.r.Step
           range: maxCtrlPerTurn
@@ -11617,6 +12483,8 @@ sequences:
         kind: value
       - id: n.sq.push
         kind: internal
+      - id: n.traceReady
+        kind: internal
       - id: n.queueApply
         kind: internal
       - id: n.fetchq.push
@@ -11658,6 +12526,8 @@ sequences:
             - eval: n.sq.push(q)
               to: n.sq.push
           when: rd.NeedsWrite()
+      - eval: n.traceReady(rd)
+        to: n.traceReady
       - eval: n.queueApply(rd)
         to: n.queueApply
       - loop:
@@ -11986,6 +12856,8 @@ sequences:
         kind: self
       - id: n.r.Status
         kind: value
+      - id: n.traceEnd
+        kind: internal
       - id: n.startGrace
         kind: internal
       - id: n.clk.Now().Add
@@ -12000,12 +12872,19 @@ sequences:
           when: st.Term == n.lastTerm && st.Lead == n.lastLead && st.Role == n.lastRole
       - set: n.lastTerm, n.lastLead, n.lastRole
         value: st.Term, st.Lead, st.Role
+      - opt:
+          do:
+            - eval: n.traceEnd(notLeader(st.Lead))
+              to: n.traceEnd
+          when: st.Role != coreconsensus.RoleLeader && (len(n.traced.answers) > 0 || len(n.traced.open) > 0)
       - loop:
           do:
             - eval: stop()
           key: _
           range: n.sendStop
           value: stop
+      - set: n.streamWait
+        value: n.streamWait[:0]
       - set: n.contact.probeCtx, n.contact.probeAt
         value: 0, time.Time{}
       - eval: n.startGrace(st.Commit)
@@ -12823,6 +13702,8 @@ sequences:
         kind: self
       - id: n.stoppedErr
         kind: internal
+      - id: n.traceEnd
+        kind: internal
       - id: n.dropForward
         kind: internal
       - id: n.queuedProposal
@@ -12835,6 +13716,8 @@ sequences:
       - bind: err
         eval: n.stoppedErr()
         to: n.stoppedErr
+      - eval: n.traceEnd(err)
+        to: n.traceEnd
       - loop:
           do:
             - eval: n.dropForward(ctx)
@@ -13257,6 +14140,145 @@ sequences:
               do:
                 - return: "true"
       - return: n.contact.from == n.lastLead && now.Sub(n.contact.heard) <= n.r.Status().Timing.ElectionTimeoutMax
+  - of: newPacer
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: rate <= 0 || clk == nil
+      - return: "&pacer{clk: clk, rate: float64(rate), burst: max(rate/paceSlices, 1), at: clk.Now()}"
+  - of: (*pacer).limit
+    steps:
+      - return: int(min(int64(n), p.burst))
+  - of: (*pacer).charge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pacer).charge
+        kind: self
+      - id: p.clk.Now
+        kind: value
+      - id: now.Sub
+        kind: value
+      - id: time
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: p.mu
+      - bind: now
+        eval: p.clk.Now()
+        to: p.clk.Now
+      - opt:
+          do:
+            - set: p.tokens
+              value: min(p.tokens+d.Seconds()*p.rate, float64(p.burst))
+          init:
+            bind: d
+            eval: now.Sub(p.at)
+            to: now.Sub
+          when: d > 0
+      - set: p.at
+        value: now
+      - op: "-="
+        set: p.tokens
+        value: float64(k)
+      - opt:
+          do:
+            - return: "0"
+          when: p.tokens >= 0
+      - return: time.Duration(math.Ceil(-p.tokens / p.rate * float64(time.Second)))
+        to: time
+  - of: (*pacer).pay
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pacer).pay
+        kind: self
+      - id: p.charge
+        kind: internal
+      - id: p.clk.NewTimer
+        kind: value
+      - id: t.Stop
+        kind: value
+      - id: ctx.Err
+        kind: value
+    steps:
+      - bind: d
+        eval: p.charge(k)
+        to: p.charge
+      - opt:
+          do:
+            - return: nil
+          when: d <= 0
+      - bind: t
+        eval: p.clk.NewTimer(d)
+        to: p.clk.NewTimer
+      - defer: t.Stop()
+        to: t.Stop
+      - select:
+          cases:
+            - comm: <-t.C()
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: ctx.Err()
+                  to: ctx.Err
+  - of: (*Node).serveWaiting
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).serveWaiting
+        kind: self
+      - id: n.sendSnapshot
+        kind: internal
+    steps:
+      - loop:
+          cond: len(n.streamWait) > 0 && len(n.sendStop) < n.cfg.MaxSnapshotStreams
+          do:
+            - bind: to
+              eval: n.streamWait[0]
+            - set: n.streamWait
+              value: n.streamWait[1:]
+            - opt:
+                do:
+                  - eval: n.sendSnapshot(to)
+                    to: n.sendSnapshot
+                when: n.awaitsSnapshot(to)
+  - of: (*Node).awaitsSnapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).awaitsSnapshot
+        kind: self
+      - id: p.Flags.Has
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: p.Flags.Has(raft.StatSnapshot)
+                    to: p.Flags.Has
+                when: p.ID == to
+          key: _
+          range: n.r.PeerStats()
+          value: p
+      - return: "false"
+  - of: (*Node).streamRate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).streamRate
+        kind: self
+      - id: n.obs.record
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: n.obs.record(mSnapshotStreamRate, float64(bytes)/d.Seconds())
+              to: n.obs.record
+          when: bytes > 0 && d > 0
   - of: (*Node).watchProgress
     participants:
       - id: caller
@@ -13736,16 +14758,29 @@ sequences:
         kind: self
       - id: s.r.Read
         kind: value
+      - id: s.progress.Add
+        kind: value
       - id: s.n.clk.Now().UnixNano
         kind: value
       - id: s.moved.Store
         kind: value
       - id: s.sent.CompareAndSwap
         kind: value
+      - id: pace.pay
+        kind: internal
     steps:
+      - bind: pace
+        eval: s.n.pace
+      - opt:
+          do:
+            - set: p
+              value: p[:pace.limit(len(p))]
+          when: pace != nil
       - bind: k, err
         eval: s.r.Read(p)
         to: s.r.Read
+      - eval: s.progress.Add(int64(k))
+        to: s.progress.Add
       - bind: now
         eval: s.n.clk.Now().UnixNano()
         to: s.n.clk.Now().UnixNano
@@ -13756,6 +14791,19 @@ sequences:
             - eval: s.sent.CompareAndSwap(0, now)
               to: s.sent.CompareAndSwap
           when: err == io.EOF
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: k, werr
+                init:
+                  bind: werr
+                  eval: pace.pay(s.ctx, k)
+                  to: pace.pay
+                when: werr != nil
+            - eval: s.moved.Store(s.n.clk.Now().UnixNano())
+              to: s.moved.Store
+          when: pace != nil && k > 0 && err == nil
       - return: k, err
   - of: (*appendBodies).body
     participants:
@@ -14259,11 +15307,17 @@ sequences:
           do:
             - bind: buckets
               eval: latencyBuckets
-            - opt:
-                do:
-                  - set: buckets
-                    value: "[]float64{1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 1 << 20, 16 << 20, 256 << 20}"
-                when: name == mBatchEntries || name == mBatchBytes || name == mSnapshotBytes
+            - switch:
+                cases:
+                  - case: mBatchEntries, mBatchBytes, mSnapshotBytes
+                    do:
+                      - set: buckets
+                        value: "[]float64{1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 1 << 20, 16 << 20, 256 << 20}"
+                  - case: mSnapshotStreamRate
+                    do:
+                      - set: buckets
+                        value: "[]float64{64 << 10, 256 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20, 256 << 20, 1 << 30}"
+                "on": name
             - set: h
               to: o.meter.Histogram
               value: o.meter.Histogram(name, buckets, append([]coreotel.AttrValue{o.group}, attrs...)...)
@@ -15192,20 +16246,15 @@ sequences:
         kind: actor
       - id: DataDir.audit
         kind: self
-      - id: os
-        kind: stdlib
       - id: storageFailed
         kind: internal
       - id: fmt
         kind: stdlib
       - id: f.Sync
-        kind: value
-      - id: syncDir
         kind: internal
     steps:
       - bind: f, err
-        eval: os.OpenFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-        to: os
+        eval: d.d.fs().openFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
       - opt:
           do:
             - return: storageFailed("audit", err)
@@ -15241,8 +16290,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(d.d.dir)
-            to: syncDir
+            eval: d.d.fs().syncDir(d.d.dir)
           when: err != nil
       - return: nil
   - of: Init
@@ -15633,7 +16681,7 @@ sequences:
         kind: actor
       - id: DataDir.markWipe
         kind: self
-      - id: writeFileSync
+      - id: d.d.fs().writeFileSync
         kind: internal
       - id: storageFailed
         kind: internal
@@ -15646,8 +16694,8 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail))
-            to: writeFileSync
+            eval: d.d.fs().writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail))
+            to: d.d.fs().writeFileSync
           when: err != nil
       - return: d.wipeStep("marker")
         to: d.wipeStep
@@ -15657,11 +16705,7 @@ sequences:
         kind: actor
       - id: DataDir.clearWipeMarker
         kind: self
-      - id: os
-        kind: stdlib
       - id: storageFailed
-        kind: internal
-      - id: syncDir
         kind: internal
       - id: d.wipeStep
         kind: internal
@@ -15672,8 +16716,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: os.Remove(filepath.Join(d.d.dir, markerWipe))
-            to: os
+            eval: d.d.fs().remove(filepath.Join(d.d.dir, markerWipe))
           when: err != nil
       - opt:
           do:
@@ -15681,8 +16724,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(d.d.dir)
-            to: syncDir
+            eval: d.d.fs().syncDir(d.d.dir)
           when: err != nil
       - return: d.wipeStep("done")
         to: d.wipeStep
@@ -15699,13 +16741,9 @@ sequences:
         kind: actor
       - id: DataDir.removeStores
         kind: self
-      - id: os
-        kind: stdlib
       - id: storageFailed
         kind: internal
       - id: d.wipeStep
-        kind: internal
-      - id: syncDir
         kind: internal
     steps:
       - loop:
@@ -15716,8 +16754,7 @@ sequences:
                     to: storageFailed
                 init:
                   bind: err
-                  eval: os.RemoveAll(filepath.Join(d.d.dir, name))
-                  to: os
+                  eval: d.d.fs().removeAll(filepath.Join(d.d.dir, name))
                 when: err != nil
             - opt:
                 do:
@@ -15736,8 +16773,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(d.d.dir)
-            to: syncDir
+            eval: d.d.fs().syncDir(d.d.dir)
           when: err != nil
       - return: nil
   - of: DataDir.removeStampAndMarkers
@@ -15751,8 +16787,6 @@ sequences:
       - id: storageFailed
         kind: internal
       - id: d.removeBootMarker
-        kind: internal
-      - id: syncDir
         kind: internal
       - id: d.wipeStep
         kind: internal
@@ -15775,8 +16809,7 @@ sequences:
                           to: storageFailed
                       init:
                         bind: err
-                        eval: os.Remove(filepath.Join(d.d.dir, e.Name()))
-                        to: os
+                        eval: d.d.fs().remove(filepath.Join(d.d.dir, e.Name()))
                       when: err != nil
                 when: wipedWithStamp(e.Name())
           key: _
@@ -15796,8 +16829,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(d.d.dir)
-            to: syncDir
+            eval: d.d.fs().syncDir(d.d.dir)
           when: err != nil
       - return: d.wipeStep("stamp")
         to: d.wipeStep
@@ -15827,8 +16859,6 @@ sequences:
         kind: actor
       - id: DataDir.removeBootMarker
         kind: self
-      - id: os
-        kind: stdlib
       - id: storageFailed
         kind: internal
     steps:
@@ -15838,8 +16868,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED"))
-            to: os
+            eval: d.d.fs().remove(d.d.log.runtimeMarker("STORAGE_FAILED"))
           when: err != nil && !errors.Is(err, os.ErrNotExist)
       - return: nil
   - of: receiptMessage
@@ -16471,7 +17500,7 @@ sequences:
         kind: self
       - id: fmt
         kind: stdlib
-      - id: writeFileSync
+      - id: d.d.fs().writeFileSync
         kind: internal
       - id: storageFailed
         kind: internal
@@ -16487,8 +17516,8 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: writeFileSync(filepath.Join(d.d.dir, markerRecover), []byte(body))
-            to: writeFileSync
+            eval: d.d.fs().writeFileSync(filepath.Join(d.d.dir, markerRecover), []byte(body))
+            to: d.d.fs().writeFileSync
           when: err != nil
       - return: nil
   - of: DataDir.readRecoverIntent
@@ -16543,11 +17572,7 @@ sequences:
         kind: actor
       - id: DataDir.clearRecoverIntent
         kind: self
-      - id: os
-        kind: stdlib
       - id: storageFailed
-        kind: internal
-      - id: syncDir
         kind: internal
     steps:
       - opt:
@@ -16556,8 +17581,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: os.Remove(filepath.Join(d.d.dir, markerRecover))
-            to: os
+            eval: d.d.fs().remove(filepath.Join(d.d.dir, markerRecover))
           when: err != nil
       - opt:
           do:
@@ -16565,8 +17589,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(d.d.dir)
-            to: syncDir
+            eval: d.d.fs().syncDir(d.d.dir)
           when: err != nil
       - return: nil
   - of: recoverRefused
@@ -17595,16 +18618,12 @@ sequences:
         kind: internal
       - id: persistedSilenceTerm
         kind: internal
-      - id: writeFileSync
+      - id: d.d.fs().writeFileSync
         kind: internal
       - id: storageFailed
         kind: internal
-      - id: truncateAtDamage
+      - id: d.d.fs().truncateAtDamage
         kind: internal
-      - id: syncDir
-        kind: internal
-      - id: os
-        kind: stdlib
       - id: d.reopenSilenced
         kind: internal
     steps:
@@ -17672,16 +18691,16 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0))
-            to: writeFileSync
+            eval: d.d.fs().writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0))
+            to: d.d.fs().writeFileSync
           when: err != nil
       - opt:
           do:
             - return: err
           init:
             bind: err
-            eval: truncateAtDamage(logDir, segN, off)
-            to: truncateAtDamage
+            eval: d.d.fs().truncateAtDamage(logDir, segN, off)
+            to: d.d.fs().truncateAtDamage
           when: err != nil
       - opt:
           do:
@@ -17689,8 +18708,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: syncDir(logDir)
-            to: syncDir
+            eval: d.d.fs().syncDir(logDir)
           when: err != nil
       - opt:
           do:
@@ -17708,8 +18726,7 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: os.Remove(filepath.Join(d.d.dir, markerQuarantine))
-            to: os
+            eval: d.d.fs().remove(filepath.Join(d.d.dir, markerQuarantine))
           when: err != nil
       - return: d.reopenSilenced(maxTerm)
         to: d.reopenSilenced
@@ -18370,11 +19387,11 @@ sequences:
       - eval: p.add(&c.kept)
         to: p.add
       - return: p.out
-  - of: truncateAtDamage
+  - of: (*diskFS).truncateAtDamage
     participants:
       - id: caller
         kind: actor
-      - id: truncateAtDamage
+      - id: (*diskFS).truncateAtDamage
         kind: self
       - id: logSegments
         kind: internal
@@ -18382,7 +19399,7 @@ sequences:
         kind: stdlib
       - id: storageFailed
         kind: internal
-      - id: truncateSegment
+      - id: disk.truncateSegment
         kind: internal
     steps:
       - bind: segs, err
@@ -18407,8 +19424,8 @@ sequences:
                   - return: err
                 init:
                   bind: err
-                  eval: truncateSegment(path, n, segN, off, st.Size())
-                  to: truncateSegment
+                  eval: disk.truncateSegment(path, n, segN, off, st.Size())
+                  to: disk.truncateSegment
                 when: err != nil
           key: "n"
           range: segs
@@ -18473,17 +19490,15 @@ sequences:
                 when: ok
           when: r.kind == recCheckpt
       - return: term
-  - of: truncateSegment
+  - of: (*diskFS).truncateSegment
     participants:
       - id: caller
         kind: actor
-      - id: truncateSegment
+      - id: (*diskFS).truncateSegment
         kind: self
-      - id: os
-        kind: stdlib
       - id: storageFailed
         kind: internal
-      - id: zeroSegmentFrom
+      - id: disk.zeroSegmentFrom
         kind: internal
     steps:
       - switch:
@@ -18496,30 +19511,26 @@ sequences:
                         to: storageFailed
                     init:
                       bind: err
-                      eval: os.Remove(path)
-                      to: os
+                      eval: disk.remove(path)
                     when: err != nil
             - case: n == segN
               do:
-                - return: zeroSegmentFrom(path, off, size)
-                  to: zeroSegmentFrom
+                - return: disk.zeroSegmentFrom(path, off, size)
+                  to: disk.zeroSegmentFrom
       - return: nil
-  - of: zeroSegmentFrom
+  - of: (*diskFS).zeroSegmentFrom
     participants:
       - id: caller
         kind: actor
-      - id: zeroSegmentFrom
+      - id: (*diskFS).zeroSegmentFrom
         kind: self
-      - id: os
-        kind: stdlib
       - id: storageFailed
         kind: internal
-      - id: zeroFrom
+      - id: disk.zeroFrom
         kind: internal
     steps:
       - bind: f, err
-        eval: os.OpenFile(path, os.O_RDWR, 0)
-        to: os
+        eval: disk.openFile(path, os.O_RDWR, 0)
       - opt:
           do:
             - return: storageFailed("truncate", err)
@@ -18537,8 +19548,8 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: zeroFrom(f, off, size)
-            to: zeroFrom
+            eval: disk.zeroFrom(f, off, size)
+            to: disk.zeroFrom
           when: err != nil
       - return: nil
   - of: silenceRecord
@@ -18564,11 +19575,9 @@ sequences:
         kind: internal
       - id: d.d.log.Bounds
         kind: internal
-      - id: writeFileSync
+      - id: d.d.fs().writeFileSync
         kind: internal
       - id: storageFailed
-        kind: internal
-      - id: syncDir
         kind: internal
     steps:
       - opt:
@@ -18596,11 +19605,10 @@ sequences:
               to: storageFailed
           init:
             bind: err
-            eval: writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, last+1))
-            to: writeFileSync
+            eval: d.d.fs().writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, last+1))
+            to: d.d.fs().writeFileSync
           when: err != nil
-      - return: syncDir(d.d.dir)
-        to: syncDir
+      - return: d.d.fs().syncDir(d.d.dir)
   - of: (*fileLog).silence
     participants:
       - id: caller
@@ -18611,7 +19619,7 @@ sequences:
         kind: stdlib
       - id: l.Bounds
         kind: internal
-      - id: writeFileSync
+      - id: l.fs().writeFileSync
         kind: internal
     steps:
       - bind: b, err
@@ -18644,8 +19652,8 @@ sequences:
                   - return: 0, 0, nil, err
                 init:
                   bind: err
-                  eval: writeFileSync(filepath.Join(l.dir, fileSilent), silenceRecord(term, index))
-                  to: writeFileSync
+                  eval: l.fs().writeFileSync(filepath.Join(l.dir, fileSilent), silenceRecord(term, index))
+                  to: l.fs().writeFileSync
                 when: err != nil
           when: index == 0
       - return: term, index, nil, nil
@@ -18659,7 +19667,7 @@ sequences:
         kind: stdlib
       - id: os
         kind: stdlib
-      - id: writeFileSync
+      - id: l.fs().writeFileSync
         kind: internal
     steps:
       - bind: path
@@ -18682,29 +19690,18 @@ sequences:
           do:
             - return: nil
           when: cur == 0 || index == 0 || index >= cur
-      - return: writeFileSync(path, silenceRecord(term, index))
-        to: writeFileSync
+      - return: l.fs().writeFileSync(path, silenceRecord(term, index))
+        to: l.fs().writeFileSync
   - of: (*fileLog).endSilence
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*fileLog).endSilence
-        kind: self
-      - id: os
-        kind: stdlib
-      - id: syncDir
-        kind: internal
     steps:
       - opt:
           do:
             - return: err
           init:
             bind: err
-            eval: os.Remove(filepath.Join(l.dir, fileSilent))
-            to: os
+            eval: l.fs().remove(filepath.Join(l.dir, fileSilent))
           when: err != nil && !os.IsNotExist(err)
-      - return: syncDir(l.dir)
-        to: syncDir
+      - return: l.fs().syncDir(l.dir)
   - of: (*Node).Propose
     participants:
       - id: caller
@@ -18781,6 +19778,8 @@ sequences:
       - bind: span
         eval: n.obs.span(ctx, "consensus.Propose")
         to: n.obs.span
+      - set: p.span
+        value: span
       - eval: n.pendingProp.Add(1)
         to: n.pendingProp.Add
       - eval: n.obs.setGauge(mProposalsPending, float64(n.pendingProp.Load()))
@@ -19030,6 +20029,8 @@ sequences:
         kind: self
       - id: p.stage.Store
         kind: value
+      - id: n.traceAppended
+        kind: internal
       - id: n.pendingBytes.Add
         kind: value
       - id: n.am.Lock
@@ -19047,6 +20048,11 @@ sequences:
         value: pos, local
       - eval: p.stage.Store(stageAppended)
         to: p.stage.Store
+      - opt:
+          do:
+            - eval: n.traceAppended(p, pos)
+              to: n.traceAppended
+          when: p.span != nil
       - opt:
           do:
             - eval: n.pendingBytes.Add(int64(len(p.entry.Data)))
@@ -19138,6 +20144,8 @@ sequences:
         kind: self
       - id: n.nextID
         kind: internal
+      - id: traceForwardFlags
+        kind: internal
       - id: n.clk.Now
         kind: value
       - id: n.am.Lock
@@ -19166,11 +20174,14 @@ sequences:
             - set: kind
               value: coreconsensus.MsgForwardAdmin
           when: p.admin
+      - bind: flags, trace
+        eval: traceForwardFlags(p, st.Cluster)
+        to: traceForwardFlags
       - bind: m
         eval: |-
           coreconsensus.MessageValue{
-          		Version: 1, Group: n.cfg.Group, Kind: kind, From: n.stamp.ID, To: st.Lead,
-          		Term: st.Term, Context: ctx, Entries: []coreconsensus.EntryValue{p.entry},
+          		Version: 1, Group: n.cfg.Group, Kind: kind, Flags: flags, From: n.stamp.ID, To: st.Lead,
+          		Term: st.Term, Context: ctx, Entries: []coreconsensus.EntryValue{p.entry}, Trace: trace,
           	}
       - set: p.sentAt
         to: n.clk.Now
@@ -20113,21 +21124,26 @@ sequences:
                 warn("consensus: the file log syncs with fdatasync, RWF_DSYNC is not available",
                 			lstr("dir", l.dir), lstr("why", syncWhy))
           when: syncWhy != ""
-  - of: fallocateFill
+  - of: (*diskFS).fallocateFill
     participants:
       - id: caller
         kind: actor
-      - id: fallocateFill
+      - id: (*diskFS).fallocateFill
         kind: self
+      - id: d.zeroFrom
+        kind: internal
       - id: fallocateRange
         kind: internal
-      - id: zeroFrom
-        kind: internal
-      - id: datasync
-        kind: internal
     steps:
+      - bind: of, isFile
+        eval: f.(*os.File)
+      - opt:
+          do:
+            - return: d.zeroFrom(f, off, size)
+              to: d.zeroFrom
+          when: "!isFile"
       - bind: ok, err
-        eval: fallocateRange(f, off, size)
+        eval: fallocateRange(of, off, size)
         to: fallocateRange
       - opt:
           do:
@@ -20135,11 +21151,10 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: zeroFrom(f, off, size)
-              to: zeroFrom
+            - return: d.zeroFrom(f, off, size)
+              to: d.zeroFrom
           when: "!ok"
-      - return: datasync(f)
-        to: datasync
+      - return: d.datasync(f)
   - of: fallocateProbe
     participants:
       - id: caller
@@ -22439,6 +23454,8 @@ sequences:
         kind: actor
       - id: (*Node).sendSnapshot
         kind: self
+      - id: n.queueStream
+        kind: internal
       - id: n.snapshotToSend
         kind: internal
       - id: n.requestCut
@@ -22461,6 +23478,12 @@ sequences:
             bind: _, busy
             eval: n.sendStop[to]
           when: busy
+      - opt:
+          do:
+            - eval: n.queueStream(to)
+              to: n.queueStream
+            - return: ""
+          when: len(n.sendStop) >= n.cfg.MaxSnapshotStreams
       - bind: meta, ok
         eval: n.snapshotToSend()
         to: n.snapshotToSend
@@ -22487,12 +23510,12 @@ sequences:
               to: n.r.SnapshotDone
             - return: ""
           when: err != nil
-      - bind: sent, moved
-        eval: new(atomic.Int64), new(atomic.Int64)
+      - bind: sent, moved, progress
+        eval: new(atomic.Int64), new(atomic.Int64), new(atomic.Int64)
       - eval: moved.Store(n.clk.Now().UnixNano())
         to: moved.Store
       - set: n.sending[to]
-        value: "sendPin{index: meta.Position.Index, since: moved.Load(), sent: sent, moved: moved}"
+        value: "sendPin{index: meta.Position.Index, since: moved.Load(), sent: sent, moved: moved, progress: progress, size: meta.EncodedSize}"
       - bind: offer
         eval: "coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}"
       - bind: ctx, cancel
@@ -22511,15 +23534,23 @@ sequences:
           		}()
           		// The handle pins the snapshot until the transfer completes, so
           		// compaction cannot delete it mid-transfer (R3-16).
-          		err := n.cfg.Transport.Stream(ctx, to, offer, func(off int64) (io.ReadCloser, error) {
+          		var accepted time.Time
+          		var from int64
+          		err := streamOffer(ctx, n.cfg.Transport, n.cfg.Group, to, offer, func(off int64) (io.ReadCloser, error) {
           			if off < 0 || off > meta.EncodedSize {
           				return nil, origin(coreconsensus.FrameInvalid, errs.Int64("offset", off))
           			}
           			// The offer was accepted: the stream moved.
-          			moved.Store(n.clk.Now().UnixNano())
-          			return io.NopCloser(&sentReader{r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent, moved: moved}), nil
+          			accepted = n.clk.Now()
+          			moved.Store(accepted.UnixNano())
+          			progress.Store(off)
+          			from = off
+          			return io.NopCloser(&sentReader{ctx: ctx, r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent, moved: moved, progress: progress}), nil
           		})
           		cancel()
+          		if err == nil && !accepted.IsZero() {
+          			n.streamRate(progress.Load()-from, n.clk.Since(accepted))
+          		}
           		if cerr := h.Close(); cerr != nil {
           			// The transfer is over whatever the read handle says; the pin
           			// it held is released either way.
@@ -22540,6 +23571,7 @@ sequences:
           			}
           			delete(n.sendStop, to)
           			n.r.SnapshotDone(to, meta.Position.Index, err == nil)
+          			n.serveWaiting()
           			n.handleReady()
           		})
           	})
@@ -22867,7 +23899,7 @@ sequences:
         kind: internal
       - id: os
         kind: stdlib
-      - id: writeFileSync
+      - id: l.fs().writeFileSync
         kind: internal
       - id: misconfigured
         kind: internal
@@ -22881,14 +23913,13 @@ sequences:
       - opt:
           do:
             - set: err
-              to: writeFileSync
-              value: writeFileSync(probe, nil)
+              to: l.fs().writeFileSync
+              value: l.fs().writeFileSync(probe, nil)
           when: err == nil
       - opt:
           do:
             - set: err
-              to: os
-              value: os.Remove(probe)
+              value: l.fs().remove(probe)
           when: err == nil
       - opt:
           do:
@@ -23960,7 +24991,7 @@ sequences:
           		cfg: *cfg, id: id, cluster: cid, slot: slot,
           		members: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}, byID: map[coreconsensus.NodeID]coreconsensus.MemberValue{},
           		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, back: map[outKey]*backLink{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
-          		done: make(chan struct{}),
+          		groups: map[coreconsensus.GroupID]*binding{}, done: make(chan struct{}),
           	}
       - bind: ln, err
         eval: listenTCP("tcp", cfg.ListenAddress)
@@ -24362,9 +25393,9 @@ sequences:
                   to: t.readFrames
                 - eval: t.dropBack(k, bl)
                   to: t.dropBack
-            - case: laneSnapshot
+            - case: laneSnapshot, laneSnapshotGroup
               do:
-                - eval: t.serveSnapshot(conn, peer)
+                - eval: t.serveSnapshot(conn, peer, lane)
                   to: t.serveSnapshot
             - case: laneMembership
               do:
@@ -24382,7 +25413,11 @@ sequences:
         kind: internal
       - id: t.refusedOversized
         kind: internal
+      - id: frameGroup
+        kind: internal
       - id: t.deliverTo
+        kind: internal
+      - id: t.unroutedGroup
         kind: internal
     steps:
       - var:
@@ -24404,17 +25439,24 @@ sequences:
                 when: "!ok"
             - set: buf
               value: frame
-            - bind: d, still
-              eval: t.deliverTo(peer.SPKI)
+            - bind: group
+              eval: frameGroup(frame)
+              to: frameGroup
+            - bind: d, bound, still
+              eval: t.deliverTo(peer.SPKI, group)
               to: t.deliverTo
-            - opt:
-                do:
-                  - return: ""
-                when: "!still"
-            - opt:
-                do:
-                  - eval: d(peer, frame)
-                when: d != nil
+            - switch:
+                cases:
+                  - case: "!still"
+                    do:
+                      - return: ""
+                  - case: "!bound"
+                    do:
+                      - eval: t.unroutedGroup(peer.ID, group, frame[5]>>6)
+                        to: t.unroutedGroup
+                  - case: d != nil
+                    do:
+                      - eval: d(peer, frame)
           forever: true
   - of: readFrame
     participants:
@@ -24506,13 +25548,13 @@ sequences:
         kind: actor
       - id: (*TCPTransport).deliverTo
         kind: self
-      - id: time
-        kind: stdlib
+      - id: t.cfg.Clock.Now
+        kind: value
     steps:
       - lock:
           mutex: t.mu
-      - bind: _, still
-        eval: t.bySPKI[spki]
+      - set: _, still
+        value: t.bySPKI[spki]
       - opt:
           do:
             - opt:
@@ -24521,10 +25563,17 @@ sequences:
                     value: map[[32]byte]time.Time{}
                 when: t.heard == nil
             - set: t.heard[spki]
-              to: time
-              value: time.Now()
+              to: t.cfg.Clock.Now
+              value: t.cfg.Clock.Now()
           when: still
-      - return: t.deliver, still
+      - bind: b, bound
+        eval: t.groups[group]
+      - opt:
+          do:
+            - set: d
+              value: b.deliver
+          when: bound
+      - return: d, bound, still
   - of: (*TCPTransport).laneBound
     steps:
       - opt:
@@ -25171,8 +26220,8 @@ sequences:
         kind: internal
       - id: t.reportUnreachable
         kind: internal
-      - id: time
-        kind: stdlib
+      - id: t.cfg.Clock.Now
+        kind: value
     steps:
       - eval: t.retire(k, link)
         to: t.retire
@@ -25214,8 +26263,8 @@ sequences:
       - opt:
           do:
             - set: link.unanswered
-              to: time
-              value: time.Now()
+              to: t.cfg.Clock.Now
+              value: t.cfg.Clock.Now()
           when: link.unanswered.IsZero()
   - of: (*TCPTransport).retire
     participants:
@@ -25277,7 +26326,7 @@ sequences:
               value: time.Time{}
             - return: "false"
           when: heard.After(link.unanswered)
-      - return: time.Since(link.unanswered) >= bound
+      - return: t.cfg.Clock.Since(link.unanswered) >= bound
   - of: (*TCPTransport).boundSilence
     participants:
       - id: caller
@@ -25486,19 +26535,24 @@ sequences:
         kind: self
       - id: t.mu.Lock
         kind: value
+      - id: t.unreachableHooks
+        kind: internal
       - id: t.mu.Unlock
         kind: value
     steps:
       - eval: t.mu.Lock()
         to: t.mu.Lock
-      - bind: f
-        eval: t.unreachable
+      - bind: fs
+        eval: t.unreachableHooks()
+        to: t.unreachableHooks
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
-      - opt:
+      - loop:
           do:
             - eval: f(id)
-          when: f != nil
+          key: _
+          range: fs
+          value: f
   - of: (*TCPTransport).Unreachable
     participants:
       - id: caller
@@ -25517,10 +26571,20 @@ sequences:
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
   - of: (*TCPTransport).Bind
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).Bind
+        kind: self
+      - id: t.bindingOf
+        kind: internal
     steps:
       - lock:
           mutex: t.mu
-      - set: t.deliver, t.offer, t.install, t.join
+      - bind: b
+        eval: t.bindingOf(group)
+        to: t.bindingOf
+      - set: b.deliver, b.offer, b.install, b.join
         value: deliver, offer, install, join
       - return: nil
   - of: (*TCPTransport).SetMembership
@@ -25898,6 +26962,17 @@ sequences:
         kind: actor
       - id: (*TCPTransport).Stream
         kind: self
+      - id: t.streamGroup
+        kind: internal
+    steps:
+      - return: t.streamGroup(ctx, defaultGroup, to, offer, open)
+        to: t.streamGroup
+  - of: (*TCPTransport).streamGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).streamGroup
+        kind: self
       - id: encodeOffer
         kind: internal
       - id: origin
@@ -25931,6 +27006,13 @@ sequences:
             - return: origin(coreconsensus.FrameInvalid, errs.String("what", "snapshot offer"), errs.Int("length", len(body)))
               to: origin
           when: len(body) > t.cfg.MaxFrameBytes
+      - bind: lane
+        eval: laneSnapshot
+      - opt:
+          do:
+            - set: lane, body
+              value: laneSnapshotGroup, groupOffer(group, body)
+          when: group != defaultGroup
       - bind: addr, pin, ok
         eval: t.address(to)
         to: t.address
@@ -25940,7 +27022,7 @@ sequences:
               to: peerRejected
           when: "!ok"
       - bind: c, err
-        eval: t.dial(ctx, addr, laneSnapshot, &pin)
+        eval: t.dial(ctx, addr, lane, &pin)
         to: t.dial
       - opt:
           do:
@@ -26157,7 +27239,11 @@ sequences:
         kind: actor
       - id: (*TCPTransport).serveSnapshot
         kind: self
-      - id: readChunk
+      - id: t.offerBinding
+        kind: internal
+      - id: t.unroutedGroup
+        kind: internal
+      - id: abandon
         kind: internal
       - id: decodeOffer
         kind: internal
@@ -26173,14 +27259,22 @@ sequences:
         kind: stdlib
       - id: errs
         kind: package
-      - id: abandon
-        kind: internal
       - id: drainHalfClose
         kind: internal
     steps:
-      - bind: b, err
-        eval: readChunk(c, t.cfg.MaxFrameBytes)
-        to: readChunk
+      - bind: b, group, bd, err
+        eval: t.offerBinding(c, lane)
+        to: t.offerBinding
+      - opt:
+          do:
+            - eval: t.unroutedGroup(peer.ID, group, laneSnapshot)
+              to: t.unroutedGroup
+            - bind: acc
+              eval: "coreconsensus.InstallAcceptValue{Refused: coreconsensus.CodePeerRejected}"
+            - eval: abandon(writeChunk(c, encodeAccept(&acc)))
+              to: abandon
+            - return: ""
+          when: err == nil && bd == nil && lane == laneSnapshotGroup
       - var:
           name: o
           type: coreconsensus.InstallOfferValue
@@ -26192,16 +27286,25 @@ sequences:
           when: err == nil
       - opt:
           do:
-            - eval: t.refuseOffer(c, peer, o.Term, err)
+            - eval: t.refuseOffer(c, peer, o.Term, bd, err)
               to: t.refuseOffer
             - return: ""
           when: err != nil
-      - eval: t.mu.Lock()
-        to: t.mu.Lock
-      - bind: of, in
-        eval: t.offer, t.install
-      - eval: t.mu.Unlock()
-        to: t.mu.Unlock
+      - var:
+          name: of
+          type: func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
+      - var:
+          name: in
+          type: func(coreconsensus.InstallParams) error
+      - opt:
+          do:
+            - eval: t.mu.Lock()
+              to: t.mu.Lock
+            - set: of, in
+              value: bd.offer, bd.install
+            - eval: t.mu.Unlock()
+              to: t.mu.Unlock
+          when: bd != nil
       - opt:
           do:
             - return: ""
@@ -26301,6 +27404,11 @@ sequences:
         to: t.mu.Lock
       - bind: warn, judge
         eval: t.warn, t.undecodable
+      - opt:
+          do:
+            - set: judge
+              value: bd.undecodable
+          when: bd != nil && bd.undecodable != nil
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
       - opt:
@@ -26510,6 +27618,8 @@ sequences:
         kind: package
       - id: abandon
         kind: internal
+      - id: t.legacyBinding
+        kind: internal
       - id: context
         kind: stdlib
     steps:
@@ -26582,10 +27692,23 @@ sequences:
           when: req.Slot != peer.Slot
       - set: req.SPKI
         value: peer.SPKI
+      - var:
+          name: j
+          type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)
+      - var:
+          name: jr
+          type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
       - eval: t.mu.Lock()
         to: t.mu.Lock
-      - bind: j, jr
-        eval: t.join, t.joinR
+      - opt:
+          do:
+            - set: j, jr
+              value: b.join, b.joinR
+          init:
+            bind: b
+            eval: t.legacyBinding()
+            to: t.legacyBinding
+          when: b != nil
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
       - bind: ctx, cancel
@@ -26970,6 +28093,8 @@ sequences:
         kind: self
       - id: t.mu.Lock
         kind: value
+      - id: t.legacyBinding
+        kind: internal
       - id: t.mu.Unlock
         kind: value
       - id: wire
@@ -26983,6 +28108,15 @@ sequences:
         to: t.mu.Lock
       - bind: read
         eval: t.membership
+      - opt:
+          do:
+            - set: read
+              value: b.membership
+          init:
+            bind: b
+            eval: t.legacyBinding()
+            to: t.legacyBinding
+          when: read == nil && b != nil
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
       - opt:
@@ -27116,7 +28250,7 @@ sequences:
     steps:
       - eval: t.mu.Lock()
         to: t.mu.Lock
-      - set: t.joinR
+      - set: t.bindingOf(group).joinR
         value: join
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
@@ -27167,6 +28301,433 @@ sequences:
   - of: (*TCPTransport).maxFrameBytes
     steps:
       - return: t.cfg.MaxFrameBytes
+  - of: streamOffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamOffer
+        kind: self
+      - id: gs.streamGroup
+        kind: internal
+      - id: tr.Stream
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: gs.streamGroup(ctx, group, to, offer, open)
+              to: gs.streamGroup
+          init:
+            bind: gs, ok
+            eval: tr.(groupStreamer)
+          when: ok && group != defaultGroup
+      - return: tr.Stream(ctx, to, offer, open)
+        to: tr.Stream
+  - of: (*TCPTransport).bindingOf
+    steps:
+      - bind: b, ok
+        eval: t.groups[group]
+      - opt:
+          do:
+            - set: b
+              value: "&binding{}"
+            - set: t.groups[group]
+              value: b
+          when: "!ok"
+      - return: b
+  - of: (*TCPTransport).legacyBinding
+    steps:
+      - opt:
+          do:
+            - loop:
+                do:
+                  - return: b
+                key: _
+                range: t.groups
+                value: b
+          when: len(t.groups) == 1
+      - return: t.groups[defaultGroup]
+  - of: frameGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: frameGroup
+        kind: self
+      - id: coreconsensus
+        kind: package
+    steps:
+      - return: coreconsensus.GroupID(binary.LittleEndian.Uint64(frame[frameGroupAt:]))
+        to: coreconsensus
+  - of: (*TCPTransport).unroutedGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).unroutedGroup
+        kind: self
+      - id: t.unrouted.Add
+        kind: value
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - bind: "n"
+        eval: t.unrouted.Add(1)
+        to: t.unrouted.Add
+      - opt:
+          do:
+            - return: ""
+          when: n&(n-1) != 0
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: warn
+        eval: t.warn
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: |-
+                warn("consensus: a frame of a group this transport does not serve was dropped", lattr("from", uint64(from)),
+                			lattr("group", uint64(group)), lattr("lane", uint64(lane)), lattr("dropped", uint64(n)))
+          when: warn != nil
+  - of: (*TCPTransport).unroutedFrames
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).unroutedFrames
+        kind: self
+      - id: t.unrouted.Load
+        kind: value
+    steps:
+      - return: t.unrouted.Load()
+        to: t.unrouted.Load
+  - of: (*TCPTransport).unreachableFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).unreachableFor
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.bindingOf(group).unreachable
+        value: f
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+  - of: (*TCPTransport).undecodableFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).undecodableFor
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.bindingOf(group).undecodable
+        value: judge
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+  - of: (*TCPTransport).membershipFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).membershipFor
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.bindingOf(group).membership
+        value: read
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+  - of: groupOffer
+    steps:
+      - return: append(binary.LittleEndian.AppendUint64(make([]byte, 0, groupPrefix+len(body)), uint64(group)), body...)
+  - of: (*TCPTransport).offerBinding
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).offerBinding
+        kind: self
+      - id: readChunk
+        kind: internal
+      - id: coreconsensus
+        kind: package
+    steps:
+      - bind: limit
+        eval: t.cfg.MaxFrameBytes
+      - opt:
+          do:
+            - op: +=
+              set: limit
+              value: groupPrefix
+          when: lane == laneSnapshotGroup
+      - set: chunk, err
+        to: readChunk
+        value: readChunk(r, limit)
+      - opt:
+          do:
+            - return: nil, 0, nil, err
+          when: err != nil
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, 0, nil, origin(coreconsensus.FrameInvalid, errs.String("what", "snapshot offer group"))
+                when: len(chunk) < groupPrefix
+            - set: group
+              to: coreconsensus
+              value: coreconsensus.GroupID(binary.LittleEndian.Uint64(chunk))
+            - set: chunk
+              value: chunk[groupPrefix:]
+          when: lane == laneSnapshotGroup
+      - lock:
+          mutex: t.mu
+      - opt:
+          do:
+            - return: chunk, group, t.groups[group], nil
+          when: lane == laneSnapshotGroup
+      - return: chunk, 0, t.legacyBinding(), nil
+  - of: (*Node).traceAppended
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).traceAppended
+        kind: self
+      - id: spanEvent
+        kind: internal
+    steps:
+      - eval: spanEvent(p.span, "appended", coreotel.Int64("index", int64(pos.Index)), coreotel.Int64("term", int64(pos.Term)))
+        to: spanEvent
+      - opt:
+          do:
+            - eval: spanEvent(p.span, "committed", coreotel.Int64("index", int64(pos.Index)))
+              to: spanEvent
+            - return: ""
+          when: pos.Index <= n.traced.commit
+      - set: n.traced.waits
+        value: append(n.traced.waits, p)
+  - of: traceForwardFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: traceForwardFlags
+        kind: self
+      - id: p.span.SpanContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, coreconsensus.TraceContextValue{}
+          when: p.span == nil || cluster < raft.Protocol4
+      - bind: sc
+        eval: p.span.SpanContext()
+        to: p.span.SpanContext
+      - opt:
+          do:
+            - return: 0, coreconsensus.TraceContextValue{}
+          when: "!sc.IsValid()"
+      - return: "coreconsensus.FlagTrace, coreconsensus.TraceContextValue{TraceID: sc.TraceID, SpanID: sc.SpanID, Sampled: sc.IsSampled()}"
+  - of: (*Node).traceForward
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).traceForward
+        kind: self
+      - id: n.obs.span
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: m.Flags&coreconsensus.FlagTrace == 0 || n.obs.tracer == nil
+      - bind: key
+        eval: "fwdTraceKey{from: m.From, ctx: m.Context}"
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, ok
+            eval: n.traced.answers[key]
+          when: ok
+      - bind: parent
+        eval: |-
+          coretrace.SpanContextValue{
+          		TraceID: coretrace.TraceID(m.Trace.TraceID), SpanID: coretrace.SpanID(m.Trace.SpanID),
+          		Flags: coretrace.TraceFlags(0).WithSampled(m.Trace.Sampled), Remote: true,
+          	}
+      - bind: span
+        eval: n.obs.span(coretrace.ContextWithSpanContext(context.Background(), parent), "consensus.Forward")
+        to: n.obs.span
+      - opt:
+          do:
+            - set: n.traced.answers
+              value: map[fwdTraceKey]coretrace.Span{}
+          when: n.traced.answers == nil
+      - set: n.traced.answers[key]
+        value: span
+  - of: (*Node).traceReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).traceReady
+        kind: self
+      - id: n.traceAnswers
+        kind: internal
+      - id: n.traceCommitted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: n.traceAnswers(rd.Messages)
+              to: n.traceAnswers
+            - eval: n.traceAnswers(rd.AfterSync)
+              to: n.traceAnswers
+          when: len(n.traced.answers) > 0
+      - opt:
+          do:
+            - return: ""
+          when: rd.Commit <= n.traced.commit
+      - set: n.traced.commit
+        value: rd.Commit
+      - opt:
+          do:
+            - eval: n.traceCommitted()
+              to: n.traceCommitted
+          when: len(n.traced.waits) > 0 || len(n.traced.open) > 0
+  - of: (*Node).traceAnswers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).traceAnswers
+        kind: self
+      - id: spanEnd
+        kind: internal
+      - id: spanEvent
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: m
+              eval: "&ms[i]"
+            - opt:
+                do:
+                  - continue: true
+                when: m.Kind != coreconsensus.MsgForwardResp && m.Kind != coreconsensus.MsgForwardAdminResp
+            - bind: key
+              eval: "fwdTraceKey{from: m.To, ctx: m.Context}"
+            - bind: span, ok
+              eval: n.traced.answers[key]
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok"
+            - eval: delete(n.traced.answers, key)
+            - opt:
+                do:
+                  - eval: spanEnd(span, sentinelOf(m.Code))
+                    to: spanEnd
+                  - continue: true
+                when: m.Reject
+            - eval: spanEvent(span, "appended", coreotel.Int64("index", int64(m.Index)), coreotel.Int64("term", int64(m.LogTerm)))
+              to: spanEvent
+            - set: n.traced.open
+              value: "append(n.traced.open, fwdSpan{index: m.Index, span: span})"
+          key: i
+          range: ms
+  - of: (*Node).traceCommitted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).traceCommitted
+        kind: self
+      - id: spanEvent
+        kind: internal
+      - id: spanEnd
+        kind: internal
+    steps:
+      - bind: c
+        eval: n.traced.commit
+      - bind: k
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: spanEvent(p.span, "committed", coreotel.Int64("index", int64(p.pos.Index)))
+                    to: spanEvent
+                  - continue: true
+                when: p.pos.Index <= c
+            - set: n.traced.waits[k]
+              value: p
+            - op: ++
+              set: k
+          key: _
+          range: n.traced.waits
+          value: p
+      - eval: clear(n.traced.waits[k:])
+      - set: n.traced.waits
+        value: n.traced.waits[:k]
+      - set: k
+        value: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: spanEvent(f.span, "committed", coreotel.Int64("index", int64(f.index)))
+                    to: spanEvent
+                  - eval: spanEnd(f.span, nil)
+                    to: spanEnd
+                  - continue: true
+                when: f.index <= c
+            - set: n.traced.open[k]
+              value: f
+            - op: ++
+              set: k
+          key: _
+          range: n.traced.open
+          value: f
+      - eval: clear(n.traced.open[k:])
+      - set: n.traced.open
+        value: n.traced.open[:k]
+  - of: (*Node).traceEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).traceEnd
+        kind: self
+      - id: spanEnd
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: delete(n.traced.answers, key)
+            - eval: spanEnd(span, err)
+              to: spanEnd
+          key: key
+          range: n.traced.answers
+          value: span
+      - loop:
+          do:
+            - eval: spanEnd(f.span, err)
+              to: spanEnd
+          key: _
+          range: n.traced.open
+          value: f
+      - eval: clear(n.traced.open)
+      - set: n.traced.open
+        value: n.traced.open[:0]
   - of: kernelTimedOut
     steps:
       - return: err != nil && errors.Is(err, errTimedOut)

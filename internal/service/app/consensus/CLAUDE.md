@@ -22,7 +22,11 @@ the instant of the append carried in the entry, every other entry skipped
 by a read, `OFFSET_TRIMMED` below the log's first index, a `Waker` on the
 node's status, an `OUTCOME_UNKNOWN` answered `STREAM_BACKEND_FAILED` with
 the token `TokenOf` reads when this node appended it, no cursor — a
-consumer's `Committer` is its own store), the mTLS TCP transport over `net/tlsid` and
+consumer's `Committer` is its own store), the incremental backup that
+pairs the snapshot's export with the log's (`Node.ExportBackup`, a snapshot and the committed tail
+after it in one framed file; `Node.AppendBackup`, the tail since a
+`BackupPoint`; `VerifyBackup` and `RestoreBackup` over a `BackupParams`,
+`backup.go`, #927), the mTLS TCP transport over `net/tlsid` and
 `net/server.Admission` (ADR 0174), and the in-memory doubles. It declares no
 code: it raises the core's.
 
@@ -1107,6 +1111,17 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   the bound from the rounds the winner's term counts, each one election
   timeout and a tick, and cap the rounds by the odds of that many splits
   (`electionBound`, `maxRounds`).
+- Restore a backup whose tail has not been checked against the chain, or
+  read its metadata from anywhere but the export: `RestoreBackup` scans
+  every file first — each record's CRC-32C, the export's metadata, every
+  entry batch against the chain from the snapshot's `ChainTip` and the
+  point the file before ends at, each trailer — and only then rewinds the
+  export and hands its snapshot records and the entries to
+  `ImportObserved`, which checks the snapshot's digest before it writes. A
+  file is header, records, trailer (`backup.go`); an append starts where
+  the last file ended, and one the log compacted past is COMPACTED: export
+  again (#927, `TestABackupOfAnExportAndTwoAppendsRestoresTheState`,
+  `TestABackupWhoseTailBreaksTheChainIsRefusedBeforeAnythingIsWritten`).
 - Decode an offline restore with flate when the expected metadata names
   another codec: `OpenSnapshot`, `RestoreSnapshot` and `ImportObserved`
   read the codec `RestoreOptions.Expected` names when the caller gives

@@ -187,6 +187,13 @@ constants:
           cluster version to 4 while a member's last frame of the term lacks it
           (#919).
         name: FlagProtocol4
+      - doc: |-
+          FlagTrace marks a forward that carries its proposer's trace context
+          after its entry (Trace). A follower sets it only once the committed
+          cluster version is 4, which every member announced, so a node of
+          protocol 3 or below never meets the trailing bytes; on any other
+          kind it is refused as a frame that does not parse (#1115).
+        name: FlagTrace
     name: FlagTransfer
   - doc: The states of a stamp.
     grouped: true
@@ -282,6 +289,7 @@ files:
       - MessageKind.Known
       - GroupID
       - MessageValue
+      - TraceContextValue
     name: message.go
   - decls:
       - PositionValue
@@ -648,8 +656,25 @@ types:
           carries with a zero position.
         name: Entries
         type: "[]EntryValue"
+      - doc: |-
+          Trace is the proposer's span context a forward carries beside
+          FlagTrace, the zero value without it.
+        name: Trace
+        type: TraceContextValue
     kind: struct
     name: MessageValue
+  - fields:
+      - doc: TraceID identifies the whole trace.
+        name: TraceID
+        type: "[16]byte"
+      - doc: SpanID is the proposer's span, the parent of the leader's.
+        name: SpanID
+        type: "[8]byte"
+      - doc: Sampled is the proposer's sampling decision.
+        name: Sampled
+        type: bool
+    kind: struct
+    name: TraceContextValue
   - fields:
       - doc: Term is the leader term the entry was appended in.
         name: Term

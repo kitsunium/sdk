@@ -63404,6 +63404,59 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.BackupParams",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "BackupParams",
+      "spelled": "struct{Export io.ReadSeeker; Tails []io.Reader; Machine coreconsensus.StateMachine}",
+      "canonical": "struct{Export io.ReadSeeker; Tails []io.Reader; Machine github.com/kitsunium/sdk/internal/core/app/consensus.StateMachine}",
+      "fields": [
+        {
+          "name": "Export",
+          "type": "io.ReadSeeker",
+          "doc": "Export is the file ExportBackup wrote.\n"
+        },
+        {
+          "name": "Tails",
+          "type": "[]io.Reader",
+          "doc": "Tails are the files AppendBackup wrote after it, in order.\n"
+        },
+        {
+          "name": "Machine",
+          "type": "coreconsensus.StateMachine",
+          "doc": "Machine is a fresh state machine; RestoreBackup restores into it.\n"
+        }
+      ],
+      "doc": "BackupParams are the files RestoreBackup restores and VerifyBackup\nchecks: the export, read twice (its metadata follows its snapshot), the\ntail files appended after it, in the order they were written, and the\nstate machine the restore replays through. Export is required; Machine is\nrequired by RestoreBackup alone.\n",
+      "file": "service/app/consensus/backup.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.BackupPoint",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "BackupPoint",
+      "spelled": "struct{Position coreconsensus.PositionValue; ChainTip uint32}",
+      "canonical": "struct{Position github.com/kitsunium/sdk/internal/core/app/consensus.PositionValue; ChainTip uint32}",
+      "fields": [
+        {
+          "name": "Position",
+          "type": "coreconsensus.PositionValue",
+          "doc": "Position is the last entry the backup holds.\n"
+        },
+        {
+          "name": "ChainTip",
+          "type": "uint32",
+          "doc": "ChainTip is the ChainSum at Position, which the next entry continues.\n"
+        }
+      ],
+      "doc": "BackupPoint is where a backup file ends, and where the next one starts:\nthe position of the last entry it holds, or of the snapshot when it holds\nnone, and the chain value at that position. AppendBackup takes it to\nwrite the tail after it.\n",
+      "file": "service/app/consensus/backup.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Bootstrap",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -64612,6 +64665,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*Node).AppendBackup",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "AppendBackup",
+      "recv": "Node",
+      "spelled": "func(ctx context.Context, since BackupPoint, w io.Writer) (BackupPoint, error)",
+      "canonical": "func(ctx context.Context, since github.com/kitsunium/sdk/internal/service/app/consensus.BackupPoint, w io.Writer) (github.com/kitsunium/sdk/internal/service/app/consensus.BackupPoint, error)",
+      "doc": "AppendBackup writes to w the committed entries after since, the point a\nprevious ExportBackup or AppendBackup returned, up to the commit at the\ncall, once applied here, then a trailer, and returns the point it ends\nat. since below the first entry the log keeps is COMPACTED: export again.\nAn entry that does not continue since's chain is RESTORE_REFUSED.\n",
+      "file": "service/app/consensus/backup.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*Node).Barrier",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -64660,6 +64726,19 @@
       "canonical": "func(ctx context.Context, op github.com/kitsunium/sdk/internal/core/app/consensus.Operator, id github.com/kitsunium/sdk/internal/core/app/consensus.NodeID) error",
       "doc": "DenyPin withdraws a member's SPKI pin (R9-18). The transport refuses the\nmember once the change commits. It is refused MEMBERSHIP_INVALID for the\nleader itself, and while the voters that answer the leader, the target\nleft out, are not a majority (R2-27).\n",
       "file": "service/app/consensus/ops.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*Node).ExportBackup",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "ExportBackup",
+      "recv": "Node",
+      "spelled": "func(ctx context.Context, op coreconsensus.Operator, w io.Writer) (BackupPoint, error)",
+      "canonical": "func(ctx context.Context, op github.com/kitsunium/sdk/internal/core/app/consensus.Operator, w io.Writer) (github.com/kitsunium/sdk/internal/service/app/consensus.BackupPoint, error)",
+      "doc": "ExportBackup writes a full backup to w: the snapshot SaveSnapshot cuts\nnow, then the committed entries after it up to the commit at the call,\nonce applied here, then a trailer. It returns the point the file ends at,\nfor AppendBackup. A tail entry that changes the engine's own state (a\ncluster version, a timing contract, the no-space alarm) is refused, as\nImportObserved would refuse it: export again once it is in a snapshot.\n",
+      "file": "service/app/consensus/backup.go",
       "layer": "service",
       "family": "app"
     },
@@ -65448,6 +65527,18 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.RestoreBackup",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "RestoreBackup",
+      "spelled": "func(d DataDir, p *BackupParams, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error)",
+      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, p *github.com/kitsunium/sdk/internal/service/app/consensus.BackupParams, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue, error)",
+      "doc": "RestoreBackup starts a new history on an empty, joining directory from a\nbackup: the files are checked as VerifyBackup checks them, the chain\nbefore anything is written, then the export's snapshot and every entry\nafter it are handed to ImportObserved, which replays them through\np.Machine and restores the state they reach, its last entry the point\nVerifyBackup returns. opt.Expected is ignored: the export carries the\nmetadata.\n",
+      "file": "service/app/consensus/backup.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -65843,6 +65934,18 @@
       "value": "2",
       "doc": "TruncateAndStaySilent truncates at the damage and persists a silence\ncondition (R4-03).\n",
       "file": "service/app/consensus/offline.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.VerifyBackup",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "VerifyBackup",
+      "spelled": "func(p *BackupParams, opt *RestoreOptions) (BackupPoint, error)",
+      "canonical": "func(p *github.com/kitsunium/sdk/internal/service/app/consensus.BackupParams, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (github.com/kitsunium/sdk/internal/service/app/consensus.BackupPoint, error)",
+      "doc": "VerifyBackup checks a backup offline, writing nothing: each record's sum,\nthe export's snapshot against its metadata (sizes and SHA-256, decoded as\nOpenSnapshot does, bounded by opt.MaxDecoded), and every entry of the\nexport and of the tails, in order, against the chain from the snapshot's\nChainTip. It returns the point the backup restores to. opt.Expected is\nignored: the export carries the metadata.\n",
+      "file": "service/app/consensus/backup.go",
       "layer": "service",
       "family": "app"
     },
