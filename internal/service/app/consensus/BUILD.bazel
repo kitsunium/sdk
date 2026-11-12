@@ -129,6 +129,7 @@ go_test(
         "cluster_internal_test.go",
         "codec_offline_internal_test.go",
         "codec_rolling_internal_test.go",
+        "conformance_internal_test.go",
         "cut_internal_test.go",
         "defects_internal_test.go",
         "deniedvoucher_internal_test.go",
@@ -257,11 +258,13 @@ go_test(
         "zwhiledown_internal_test.go",
     ],
     # The transport's sources, read by TestTransportNeverWaitsOnTheWallClock
-    # (#948) from the package directory, the test's working directory.
+    # (#948) from the package directory, the test's working directory, and
+    # the conformance tables (#1114), which read the ports they quote from
+    # //internal/core/app/consensus's sources.
     data = glob(["testdata/**"]) + glob(
         ["tcp*.go"],
         exclude = ["*_test.go"],
-    ),
+    ) + ["//internal/core/app/consensus:audit_srcs"],
     embed = [":consensus"],
     embedsrcs = [
         "node_pace.go",

@@ -36,11 +36,15 @@ alias(
     ],
 )
 
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit, and gen_ports.go to the service's conformance tables (#1114).
 filegroup(
     name = "audit_srcs",
     srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
+    visibility = [
+        "//:__pkg__",
+        "//internal/service/app/consensus:__pkg__",
+    ],
 )
 
 go_test(
