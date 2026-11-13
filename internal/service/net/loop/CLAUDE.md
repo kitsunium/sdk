@@ -663,7 +663,9 @@ which a `_linux_bench_test.go` name would lose): a benchmark put in an
   refused `Write` with a caller-owned `p` (`TestCore_allocs`).
 - An idle connection costs at most **256 B of Go heap** and no mapped byte
   (`TestMemory_idleConnection`, 10 000 connections from a re-executed child,
-  race off, its own Bazel target in `tools/alloc-lane-targets.txt`). Measured
+  dialed `SOMAXCONN` at a time, each wave accepted before the next — FreeBSD
+  clamps the 4096 backlog to 128 and resets a handshake past its queue
+  (#1407) —, race off, its own Bazel target in `tools/alloc-lane-targets.txt`). Measured
   under Docker on Linux 7.0 arm64: 136.4 B per connection with epoll, the test
   handler's own map entry included, and 137.9 B with io_uring (145.8 B each
   before the table grew by fixed steps, ADR 0201 §D2). The kernel's socket memory is not counted
