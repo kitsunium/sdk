@@ -75,7 +75,7 @@ func (s *Server) bindLoopAddress(ctx context.Context, group *StreamGroup, addr c
 		ln, rep, err := listen(ctx, target, nil, socketSpec{
 			reuse: reuseOf(count, share), attempts: s.rebindAttempts(target), backlog: group.limits.Backlog,
 			receiveBuffer: group.limits.ReceiveBuffer, sendBuffer: group.limits.SendBuffer,
-			keepAlive: s.keepAliveOf(group), userTimeout: s.userTimeoutOf(group),
+			keepAlive: s.keepAliveOf(group), userTimeout: s.userTimeoutOf(group), plainTCP: plainTCPListens(group, plan),
 		})
 		//: a shard that will not bind aborts the start, never a smaller group.
 		if err != nil {

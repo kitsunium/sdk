@@ -145,6 +145,16 @@ constants:
         name: CapabilityTCPUserTimeout
         type: Capability
         value: "\"tcp-user-timeout\""
+      - doc: |-
+          CapabilityURingSockGetsockopt is io_uring's socket getsockopt command
+          (IORING_OP_URING_CMD with SOCKET_URING_OP_GETSOCKOPT, Linux 6.7), with which
+          the loop reads a Unix connection's SO_PEERCRED on its direct descriptor at
+          accept, so a group with a Unix listener keeps direct descriptors and LoopPeer
+          still answers. Switched off, or absent, a group with a Unix listener runs on
+          process descriptors, where LoopPeer asks the socket.
+        name: CapabilityURingSockGetsockopt
+        type: Capability
+        value: "\"uring-sock-getsockopt\""
     name: CapabilityURingMultishotRecv
   - doc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
     grouped: true
@@ -250,7 +260,13 @@ constants:
           through LoopValue.Capabilities, every flight of at least LoopValue.SendZCMin
           bytes then leaves zero-copy, released at the kernel's notification. The
           probe asks REGISTER_PROBE for the opcode, then sends one datagram zero-copy
-          on loopback and waits for its notification.
+          on loopback and waits for its notification. Such a group's listeners are
+          bound with plain TCP, Go's default MPTCP switched off for that group alone
+          (ListenerStateValue.MultipathTCP reads false): a socket accepted from an
+          MPTCP listener answers EOPNOTSUPP, after which the loop sends plainly. A
+          socket that refuses anyway — a Unix one, an adopted MPTCP listener's —
+          turns the loop's later flights plain, and one past RLIMIT_MEMLOCK that
+          flight alone.
         name: CapabilityURingSendZC
         type: Capability
         value: "\"uring-send-zc\""
@@ -657,9 +673,11 @@ constants:
     items:
       - doc: |-
           LoopBackendAuto takes the best backend the platform's probe reaches:
-          io_uring, then epoll on Linux, the portable backend elsewhere. On darwin
-          and the BSDs it stays portable until kqueue's paired gate holds: kqueue
-          runs there when named, LoopBackendKqueue (ADR 0222).
+          io_uring, then epoll on Linux, kqueue on darwin, the portable backend
+          elsewhere — a native backend the probe refuses falls back to it. On
+          FreeBSD, OpenBSD, NetBSD and DragonFly it stays portable while no
+          paired row was measured there: kqueue runs there when named,
+          LoopBackendKqueue (ADR 0222).
         name: LoopBackendAuto
         type: LoopBackend
         value: iota
@@ -675,8 +693,9 @@ constants:
         name: LoopBackendPortable
       - doc: |-
           LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and
-          DragonFly, after a staged probe (ADR 0222). It runs only when named:
-          LoopBackendAuto does not choose it until its paired gate holds.
+          DragonFly, after a staged probe (ADR 0222). LoopBackendAuto takes it on
+          darwin, where its paired gate held on macos-15; on the BSDs it runs
+          only when named.
         name: LoopBackendKqueue
     name: LoopBackendAuto
   - doc: |-
@@ -2988,10 +3007,10 @@ types:
         name: AcceptBackoffs
         type: uint64
       - doc: |-
-          SuppressedLogs counts the lines of net/http's own log the server did not
-          write: over the cap of ten records a second, or with no logger to write
-          them to (WithLogger). A count that rises is a port being probed, or a
-          handler that panics.
+          SuppressedLogs counts the lines of net/http's own log, and the failed TLS
+          handshakes, the server did not write: over the cap of ten records a second,
+          or with no logger to write them to (WithLogger). A count that rises is a
+          port being probed, or a handler that panics.
         name: SuppressedLogs
         type: uint64
       - doc: Datagrams counts what the batched datagram paths drop (ADR 0192).
@@ -3112,6 +3131,19 @@ types:
           as ReceiveBuffer is (SO_SNDBUF, wmem_max).
         name: SendBuffer
         type: int
+      - doc: |-
+          MultipathTCP reports a stream listener whose socket is Multipath TCP,
+          read back from the socket (SO_PROTOCOL is IPPROTO_MPTCP) after bind or
+          adoption: on Linux, what Go's net.Listen opens by default since Go 1.24
+          where the kernel has MPTCP (net.mptcp.enabled), unless GODEBUG's
+          multipathtcp says otherwise. A loop group that opts into uring-send-zc
+          on io_uring binds plain TCP instead, and its rows read false, because a
+          socket accepted from an MPTCP listener refuses IORING_OP_SEND_ZC; the
+          operator switching uring-send-zc off, or capping the group at epoll or
+          the portable backend, gives it Go's default back (#969, ADR 0189).
+          False on every other platform, for a Unix socket and for a datagram one.
+        name: MultipathTCP
+        type: bool
       - doc: |-
           ProxyRefused counts the connections a ProxyProtocol group refused — peers
           outside Trusted, and headers malformed or not finished within Timeout. It

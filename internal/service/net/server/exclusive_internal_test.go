@@ -60,7 +60,34 @@ func Test_bindRetrying(t *testing.T) {
 	if _, _, err := bindRetrying(ctx, 8, inUse, bind); !errors.Is(err, errTaken) || *calls != 1 {
 		t.Fatalf("cancelled: %v, %d calls", err, *calls)
 	}
+	//: the caller gave up as the wait ended, both ready at the select — a
+	//: guest that ran the goroutine late (#1352): never bound again. A zero
+	//: wait makes the race every time; the select took the timer half of
+	//: them before the fix.
+	done, stop := context.WithCancel(t.Context())
+	stop()
+	for range 64 {
+		bind, calls = binder(9, errTaken)
+		if _, _, err := bindRetryingAfter(done, 8, func(int) time.Duration { return 0 }, inUse, bind); !errors.Is(err, errTaken) || *calls != 1 {
+			t.Fatalf("cancelled as the wait ended: %v, %d calls", err, *calls)
+		}
+	}
+	//: the deadline passed and its cancel has not run yet — it runs on a
+	//: goroutine of its own, which illumos had not scheduled 15 ms past
+	//: the deadline (#1352): never bound again either.
+	bind, calls = binder(9, errTaken)
+	if _, _, err := bindRetryingAfter(pastDeadline{t.Context()}, 8, func(int) time.Duration { return 0 }, inUse, bind); !errors.Is(err, errTaken) || *calls != 1 {
+		t.Fatalf("past its deadline, not yet cancelled: %v, %d calls", err, *calls)
+	}
 }
+
+// pastDeadline is a context whose deadline has passed and whose cancel has
+// not run: Done open, Err nil, as context.WithDeadline's is until the
+// goroutine its timer starts gets to run.
+type pastDeadline struct{ context.Context }
+
+// Deadline is an instant already gone.
+func (pastDeadline) Deadline() (time.Time, bool) { return time.Now().Add(-time.Second), true }
 
 // Test_exclusiveApplies pins which sockets take SO_EXCLUSIVEADDRUSE: a
 // unicast TCP or UDP one on Windows, never a multicast or AF_UNIX one, and

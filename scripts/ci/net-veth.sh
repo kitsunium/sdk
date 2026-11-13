@@ -12,9 +12,15 @@
 # It prints, on `up`, the environment the bench reads: the receiver's and the
 # sender's addresses and the prefix that runs the receiver in the namespace.
 #
-# Usage: net-veth.sh up|down
-# Environment: IP names the ip command (the suite stubs it).
-# Exit 0, 1 when ip fails on `up`, 64 on bad usage.
+# `gro` switches GRO on on the far end, which gives the veth's receive side a
+# NAPI instance: the sockets bound there carry its id, and busy polling
+# (#979, the Sparse load) has something to poll. L3 runs before it, on the
+# pair as `up` leaves it.
+#
+# Usage: net-veth.sh up|gro|down
+# Environment: IP names the ip command, ETHTOOL the ethtool command (the
+# suite stubs both).
+# Exit 0, 1 when ip or ethtool fails on `up` or `gro`, 64 on bad usage.
 
 set -euo pipefail
 
@@ -24,6 +30,7 @@ far=ng-b
 near_addr=198.18.0.1
 far_addr=198.18.0.2
 ip_cmd="${IP:-ip}"
+ethtool_cmd="${ETHTOOL:-ethtool}"
 
 case "${1:-}" in
   up)
@@ -39,11 +46,14 @@ case "${1:-}" in
     echo "KITSUNIUM_NETGATE_L3_LOCAL=$near_addr"
     echo "KITSUNIUM_NETGATE_L3_EXEC=sudo $ip_cmd netns exec $ns"
     ;;
+  gro)
+    "$ip_cmd" netns exec "$ns" "$ethtool_cmd" -K "$far" gro on
+    ;;
   down)
     "$ip_cmd" netns del "$ns" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 up|down" >&2
+    echo "usage: $0 up|gro|down" >&2
     exit 64
     ;;
 esac

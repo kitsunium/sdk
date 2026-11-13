@@ -59,7 +59,12 @@ func TestAPipeCarriesALineBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeOrFail(t, c)
-	a := <-got
+	var a accepted
+	select {
+	case a = <-got:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Accept did not return the client; refused %d", ln.Refused())
+	}
 	if a.err != nil {
 		t.Fatal(a.err)
 	}
@@ -81,6 +86,59 @@ func TestAPipeCarriesALineBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 	if line, err := bufio.NewReader(c).ReadString('\n'); err != nil || line != "pong\n" {
+		t.Fatalf("read %q, %v", line, err)
+	}
+	if ln.Refused() != 0 {
+		t.Errorf("refused %d", ln.Refused())
+	}
+}
+
+// A listener whose pipe is opened to a list (#1349) still admits this
+// account — read from the client's token again, by its user — and a client
+// with the same configuration, its own account's pipe existing, reaches it as
+// before; both ends name this account.
+//
+// Goroutine lifecycle: one goroutine accepts once and reports on a buffered
+// channel, which the test reads within ten seconds.
+func TestAPipeOpenedToAListAdmitsThisAccount(t *testing.T) {
+	cfg := pipeConfig(t)
+	cfg.AllowSIDs = []string{"S-1-5-32-545", "S-1-5-32-546"}
+	ln, err := ipc.NewListener(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOrFail(t, ln)
+	type accepted struct {
+		c   *coreipc.Conn
+		err error
+	}
+	got := make(chan accepted, 1)
+	go func() {
+		c, err := ln.Accept()
+		got <- accepted{c, err}
+	}()
+	c, err := ipc.Dial(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOrFail(t, c)
+	var a accepted
+	select {
+	case a = <-got:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Accept did not return this account's client; refused %d", ln.Refused())
+	}
+	if a.err != nil {
+		t.Fatal(a.err)
+	}
+	closeOrFail(t, a.c)
+	if !a.c.Peer.Verified || a.c.Peer.SID != c.Peer.SID || !c.Peer.Verified {
+		t.Errorf("the listener sees %+v, the client %+v", a.c.Peer, c.Peer)
+	}
+	if _, err := c.Write([]byte("ping\n")); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := bufio.NewReader(a.c).ReadString('\n'); err != nil || line != "ping\n" {
 		t.Fatalf("read %q, %v", line, err)
 	}
 	if ln.Refused() != 0 {

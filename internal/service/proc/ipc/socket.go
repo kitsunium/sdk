@@ -31,6 +31,21 @@ const (
 	anybodySearches os.FileMode = 0o001
 )
 
+// credentials are what the Unix admission reads beside a peer's PeerValue:
+// its supplementary groups, as the kernel recorded them, where they are read.
+type credentials = []int
+
+// checkSIDs refuses a SID list: Unix has no SID, and a list it cannot honour
+// would admit nobody it names while seeming to (#1349). An empty list is the
+// only one there is here.
+func checkSIDs(sids []string) error {
+	if len(sids) == 0 {
+		return nil
+	}
+	return errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "AllowSIDs is Windows's: a SID names no account here"),
+		errs.Int("sids", len(sids)))
+}
+
 // socketAcceptor accepts on a Unix socket; its peers are named by peerOf, and
 // their supplementary groups read (peerGroups) when an allowed group may
 // need them.

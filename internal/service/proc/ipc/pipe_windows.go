@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -152,14 +153,6 @@ func pipeName(path, sid string) pipeAddr {
 	return pipeAddr(pipePrefix + sid + "-" + hex.EncodeToString(sum[:pipeHashBytes]) + "-" + filepath.Base(path))
 }
 
-// pipeSDDL is the descriptor the pipe is created under: owned by the account
-// sid — never the token's default owner, Administrators for an elevated
-// process, so a later listen reads the account itself — and a DACL granting
-// it alone, protected from inheritance.
-func pipeSDDL(sid string) string {
-	return "O:" + sid + "D:P(A;;GA;;;" + sid + ")"
-}
-
 // accountOf is the account a process runs as, from its token; pid 0 is this
 // process.
 func accountOf(pid uint32) (string, error) {
@@ -213,13 +206,19 @@ func listen(cfg *Config) (*Listener, error) {
 		return nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path),
 			errs.String("cause", "this process's account cannot be read: "+err.Error()))
 	}
-	return listenAs(cfg, self)
+	allowed, err := canonicalSIDs(cfg.AllowSIDs)
+	if err != nil {
+		return nil, err
+	}
+	return listenAs(cfg, self, allowed)
 }
 
 // listenAs is listen for the account self, which names the pipe, owns it and
-// is the one its DACL grants.
-func listenAs(cfg *Config, self string) (*Listener, error) {
-	a := &pipeAcceptor{name: pipeName(cfg.Path, self), sddl: pipeSDDL(self)}
+// is granted everything by its DACL, and for allowed, the canonical SIDs its
+// DACL grants clientAccess and its admission names. The listener keeps its
+// own copy of allowed: the caller's slice changes nothing afterwards.
+func listenAs(cfg *Config, self string, allowed []string) (*Listener, error) {
+	a := &pipeAcceptor{name: pipeName(cfg.Path, self), sddl: pipeSDDL(self, allowed)}
 	h, err := a.create(true)
 	switch {
 	case errors.Is(err, syscall.ERROR_ACCESS_DENIED), errors.Is(err, errorPipeBusy):
@@ -228,7 +227,9 @@ func listenAs(cfg *Config, self string) (*Listener, error) {
 		return nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
 	}
 	a.pending = h
-	return &Listener{cfg: *cfg, ln: a, self: -1, selfSID: self}, nil
+	own := *cfg
+	own.AllowSIDs = slices.Clone(allowed)
+	return &Listener{cfg: own, ln: a, self: -1, selfSID: self}, nil
 }
 
 // taken is the verdict on a name that exists: IN_USE when the pipe is this
@@ -318,9 +319,10 @@ func (a *pipeAcceptor) create(first bool) (syscall.Handle, error) {
 }
 
 // accept waits for a client on the pending instance, puts the next instance
-// in its place, and returns the connection with the client's account. A
-// client that came and went before the wait saw it is skipped.
-func (a *pipeAcceptor) accept() (conn net.Conn, peer coreipc.PeerValue, groups []int, err error) {
+// in its place, and returns the connection with the client's account and the
+// identity its token speaks for. A client that came and went before the wait
+// saw it is skipped.
+func (a *pipeAcceptor) accept() (conn net.Conn, peer coreipc.PeerValue, creds credentials, err error) {
 	a.acceptMu.Lock()
 	defer a.acceptMu.Unlock()
 	for {
@@ -332,8 +334,8 @@ func (a *pipeAcceptor) accept() (conn net.Conn, peer coreipc.PeerValue, groups [
 			return nil, coreipc.PeerValue{}, nil, connectErr
 		}
 		connected := connectedNow()
-		peer = clientPeer(h)
-		return newPipeConn(h, a.name, peer, connected), peer, nil, nil
+		peer, creds = clientPeer(h)
+		return newPipeConn(h, a.name, peer, connected), peer, creds, nil
 	}
 }
 
@@ -401,19 +403,21 @@ func connectPipe(h syscall.Handle) error {
 	return nil
 }
 
-// clientPeer is the client of h: its process, and its account when its token
-// can be read; unverified otherwise — the DACL admitted it.
-func clientPeer(h syscall.Handle) coreipc.PeerValue {
+// clientPeer is the client of h: its process where the pipe names it, and
+// its account and groups from the token the pipe captured (clientIdentity);
+// unverified, with no identity — and refused by admits — when that token
+// cannot be read.
+func clientPeer(h syscall.Handle) (coreipc.PeerValue, *tokenIdentity) {
 	p := coreipc.PeerValue{UID: -1, GID: -1}
-	pid, err := pipeProcess(procPipeClientProcess.Call, h)
+	if pid, err := pipeProcess(procPipeClientProcess.Call, h); err == nil {
+		p.PID = int(pid)
+	}
+	id, err := clientIdentity(h)
 	if err != nil {
-		return p
+		return p, nil
 	}
-	p.PID = int(pid)
-	if sid, err := accountOf(pid); err == nil {
-		p.SID, p.Verified = sid, true
-	}
-	return p
+	p.SID, p.Verified = id.user, true
+	return p, &id
 }
 
 // closeHandles closes handles this package no longer needs. A close that
@@ -450,53 +454,132 @@ func (a *pipeAcceptor) Close() error {
 // Addr is the pipe's name.
 func (a *pipeAcceptor) Addr() net.Addr { return a.name }
 
-// admits is the Windows admission: this account, or a client whose account
-// could not be read — the DACL, which grants this account only, admitted it.
-// No group is read here: the lists admit nobody more on Windows.
-func (l *Listener) admits(p coreipc.PeerValue, _ []int) error {
-	if !p.Verified || p.SID == l.selfSID {
-		return nil
+// admits is the Windows admission, after the pipe's DACL: the client's token,
+// read again, must speak for this account or a SID AllowSIDs lists as the
+// kernel's check of the DACL did (tokenIdentity.admittedBy). A client whose
+// token could not be read is refused — what cannot be read is never admitted
+// (#1349) —, and AllowUIDs and AllowGIDs name nobody here.
+func (l *Listener) admits(p coreipc.PeerValue, id credentials) error {
+	switch {
+	case !p.Verified, id == nil:
+		return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.String("reason", "the client's token cannot be read"), errs.Int("pid", p.PID))
+	case !id.admittedBy(l.selfSID, l.cfg.AllowSIDs):
+		return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.String("sid", p.SID), errs.Int("pid", p.PID))
 	}
-	return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.String("sid", p.SID), errs.Int("pid", p.PID))
+	return nil
 }
 
-// dial opens the pipe that stands for cfg.Path at SECURITY_IDENTIFICATION,
-// waiting while every instance is busy, and refuses a server that does not
-// run as this account — or whose account cannot be read.
+// dial opens, at SECURITY_IDENTIFICATION and waiting while every instance is
+// busy, this account's pipe that stands for cfg.Path or — when it does not
+// exist — the pipe of each SID cfg.AllowSIDs lists, in turn, and judges the
+// listener there (serverPeer) before a byte is sent.
 func dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
 	self, err := accountOf(0)
 	if err != nil {
 		return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path),
 			errs.String("cause", "this process's account cannot be read: "+err.Error()))
 	}
+	allowed, err := canonicalSIDs(cfg.AllowSIDs)
+	if err != nil {
+		return nil, err
+	}
+	return dialAs(ctx, cfg, self, allowed)
+}
+
+// dialAs is dial for the account self and the canonical SIDs allowed. Only a
+// pipe that does not exist passes the turn to the next account: one that
+// exists and is refused — or cannot be opened — ends the dial, so a name
+// another account took is never stepped over to reach a later one.
+func dialAs(ctx context.Context, cfg *Config, self string, allowed []string) (*coreipc.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	name := pipeName(cfg.Path, self)
-	h, err := openPipe(ctx, name)
-	if err != nil {
-		return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
+	var cause error
+	for _, account := range dialOrder(self, allowed) {
+		name := pipeName(cfg.Path, account)
+		h, err := openPipe(ctx, name)
+		switch {
+		case errors.Is(err, syscall.ERROR_FILE_NOT_FOUND):
+			cause = err
+			continue
+		case err != nil:
+			return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("pipe", string(name)),
+				errs.String("cause", err.Error()))
+		}
+		connected := connectedNow()
+		peer, err := serverPeer(cfg, h, account, account == self)
+		if err != nil {
+			closeHandles(h)
+			return nil, err
+		}
+		return &coreipc.Conn{Conn: newPipeConn(h, name, peer, connected), Peer: peer}, nil
 	}
-	connected := connectedNow()
+	return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", cause.Error()))
+}
+
+// dialOrder is the accounts whose pipes a dial tries: this account first,
+// then each listed SID other than it, in the list's order.
+func dialOrder(self string, allowed []string) []string {
+	order := []string{self}
+	for _, sid := range allowed {
+		if sid != self {
+			order = append(order, sid)
+		}
+	}
+	return order
+}
+
+// serverPeer judges the listener at the end of h, a pipe named after
+// account: it must run as that account, read from its process token. This
+// account's pipe (own) keeps the rule it had: a listener whose account cannot
+// be read is DIAL_FAILED. A listed account's pipe must also be owned by that
+// account, and when its process may not be read — another account's,
+// unless this one is privileged — the owner alone names it, Verified false:
+// only the owner can serve an instance of a pipe this package made, its
+// DACL granting the listed SIDs clientAccess and nothing more.
+func serverPeer(cfg *Config, h syscall.Handle, account string, own bool) (coreipc.PeerValue, error) {
+	peer := coreipc.PeerValue{UID: -1, GID: -1}
 	pid, err := pipeProcess(procPipeServerProcess.Call, h)
 	var sid string
 	if err == nil {
+		peer.PID = int(pid)
 		sid, err = accountOf(pid)
 	}
-	switch {
-	case err != nil:
-		closeHandles(h)
-		return nil, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path),
-			errs.String("cause", "the listener's account cannot be read: "+err.Error()))
-	case sid != self:
-		closeHandles(h)
-		return nil, errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("sid", sid))
+	if !own {
+		if ownerErr := ownedBy(cfg, h, account); ownerErr != nil {
+			return peer, ownerErr
+		}
 	}
-	peer := coreipc.PeerValue{UID: -1, GID: -1, PID: int(pid), SID: sid, Verified: true}
-	return &coreipc.Conn{Conn: newPipeConn(h, name, peer, connected), Peer: peer}, nil
+	switch {
+	case err == nil && sid != account:
+		return peer, errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("sid", sid))
+	case err == nil:
+		peer.SID, peer.Verified = sid, true
+	case own:
+		return peer, errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path),
+			errs.String("cause", "the listener's account cannot be read: "+err.Error()))
+	default:
+		peer.SID = account
+	}
+	return peer, nil
 }
 
-// openPipe opens the pipe overlapped, retrying while every instance is
-// busy, until ctx ends.
+// ownedBy refuses the pipe h is an instance of unless account owns it: its
+// owner, read with GetSecurityInfo — READ_CONTROL is part of clientAccess.
+func ownedBy(cfg *Config, h syscall.Handle, account string) error {
+	owner, err := ownerOf(h)
+	switch {
+	case err != nil:
+		return errs.Wrap(coreipc.DialFailed, errs.WrapParams{}, errs.String("path", cfg.Path),
+			errs.String("cause", "the pipe's owner cannot be read: "+err.Error()))
+	case owner != account:
+		return errs.Wrap(coreipc.EndpointForeign, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("owner", owner))
+	}
+	return nil
+}
+
+// openPipe opens the pipe overlapped with clientAccess — what a listed SID is
+// granted, so this account and a listed one open it alike —, retrying while
+// every instance is busy, until ctx ends.
 func openPipe(ctx context.Context, name pipeAddr) (syscall.Handle, error) {
 	p, err := syscall.UTF16PtrFromString(string(name))
 	if err != nil {
@@ -505,7 +588,7 @@ func openPipe(ctx context.Context, name pipeAddr) (syscall.Handle, error) {
 	retry := time.NewTimer(pipeBusyRetry)
 	defer retry.Stop()
 	for {
-		h, err := syscall.CreateFile(p, syscall.GENERIC_READ|syscall.GENERIC_WRITE, 0, nil, syscall.OPEN_EXISTING,
+		h, err := syscall.CreateFile(p, clientAccess, 0, nil, syscall.OPEN_EXISTING,
 			syscall.FILE_FLAG_OVERLAPPED|securitySQOSPresent|securityIdentification, 0)
 		if err == nil || !errors.Is(err, errorPipeBusy) {
 			return h, err

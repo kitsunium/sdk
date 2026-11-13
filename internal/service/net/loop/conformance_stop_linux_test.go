@@ -56,6 +56,54 @@ func TestConformance_closeBounded(t *testing.T) {
 	stopBounded(t, false)
 }
 
+// TestConformance_closeWhileArriving closes the group while connections keep
+// arriving: every connection OnOpen named hears OnClose before Close returns,
+// and none opens after. io_uring's close waits a bounded time for what it
+// issued; an accept completing in that wait used to open, armed the next one,
+// and the connections it opened were never closed (Fedora 6.14, #974's
+// TestUnix_peerUnderLoad on process descriptors).
+func TestConformance_closeWhileArriving(t *testing.T) {
+	const dialers = 16
+	eachBackend(t, func(t *testing.T, b backendCase) {
+		h := &lineH{}
+		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops = 2 })
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		for range dialers {
+			wg.Go(func() {
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+					}
+					c, err := stdnet.DialTimeout("tcp", addr, time.Second)
+					if err != nil {
+						continue
+					}
+					_, _ = c.Write([]byte("x\n"))
+					_ = c.Close()
+				}
+			})
+		}
+		defer func() {
+			close(stop)
+			wg.Wait()
+		}()
+		waitFor(t, "an arrival", func() bool { opens, _ := h.counts(); return opens > 0 })
+		time.Sleep(50 * time.Millisecond)
+		_ = g.Close()
+		opens, closes := h.counts()
+		if opens != closes {
+			t.Fatalf("after Close: %d OnOpen, %d OnClose", opens, closes)
+		}
+		time.Sleep(50 * time.Millisecond)
+		if again, _ := h.counts(); again != opens {
+			t.Fatalf("%d OnOpen after Close returned", again-opens)
+		}
+	})
+}
+
 // stopBounded holds stopConns heard connections, then drains (drain) or
 // closes the group, judges what the backend issued, and calls a stop past
 // stopBound hung.

@@ -62,8 +62,8 @@ func listenPacket(ctx context.Context, addr corenet.AddressValue, spec socketSpe
 		//: surface the address that could not be bound, AddressInUse when held.
 		return nil, rep, bindRefusal(addr, lerr)
 	}
-	rep.shared = spec.reuse == reuseShared
-	rep.exclusive = exclusiveOf(packetSocket(bound))
+	rep.traits = traitIf(spec.reuse == reuseShared, traitShared) |
+		traitIf(exclusiveOf(packetSocket(bound)), traitExclusive)
 	rep.receiveBuffer, rep.sendBuffer = socketBuffers(packetSocket(bound))
 	//: the socket is bound and ready to read.
 	return bound, rep, nil

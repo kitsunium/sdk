@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/service/net/server"
@@ -40,10 +41,10 @@ func benchFile(b *testing.B) string {
 }
 
 // startCopyServer runs a raw TCP group over handle and dials it once.
-func startCopyServer(b *testing.B, handle func(c corenet.Conn) error) stdnet.Conn {
+func startCopyServer(b *testing.B, handle func(c corenet.Conn) error, opts ...server.GroupOption) stdnet.Conn {
 	b.Helper()
 	srv := server.New()
-	srv.Group("bench", server.Listen("tcp", "127.0.0.1:0")).
+	srv.Group("bench", append([]server.GroupOption{server.Listen("tcp", "127.0.0.1:0")}, opts...)...).
 		HandleFunc(func(_ context.Context, c corenet.Conn) error {
 			//: the copy under measure.
 			return handle(c)
@@ -62,28 +63,39 @@ func startCopyServer(b *testing.B, handle func(c corenet.Conn) error) stdnet.Con
 }
 
 // benchCopyFile serves one file a round on a connection the handler holds.
-func benchCopyFile(b *testing.B, path string, wrap func(corenet.Conn) io.Writer) {
+func benchCopyFile(b *testing.B, path string, wrap func(corenet.Conn) io.Writer, opts ...server.GroupOption) {
 	b.Helper()
 	rounds := make(chan struct{})
 	client := startCopyServer(b, func(c corenet.Conn) error {
-		dst := wrap(c)
-		for range rounds {
-			f, err := os.Open(path)
-			if err != nil {
-				//: reported by the client's short read.
-				return err
-			}
-			_, cerr := io.Copy(dst, f)
-			discard(f.Close())
-			if cerr != nil {
-				//: reported by the client's short read.
-				return cerr
-			}
-		}
-		//: the benchmark ended.
-		return nil
-	})
+		return copyRounds(wrap(c), path, rounds)
+	}, opts...)
 	b.Cleanup(func() { close(rounds) })
+	readRounds(b, client, rounds)
+}
+
+// copyRounds copies the file at path to dst once a round, opening it each
+// time, until rounds closes.
+func copyRounds(dst io.Writer, path string, rounds <-chan struct{}) error {
+	for range rounds {
+		f, err := os.Open(path)
+		if err != nil {
+			//: reported by the client's short read.
+			return err
+		}
+		_, cerr := io.Copy(dst, f)
+		discard(f.Close())
+		if cerr != nil {
+			//: reported by the client's short read.
+			return cerr
+		}
+	}
+	//: the benchmark ended.
+	return nil
+}
+
+// readRounds asks for a file a round and reads it whole.
+func readRounds(b *testing.B, client stdnet.Conn, rounds chan<- struct{}) {
+	b.Helper()
 	buf := make([]byte, 1<<20)
 	b.SetBytes(benchFileBytes)
 	b.ReportAllocs()
@@ -117,6 +129,42 @@ func BenchmarkCopyFile(b *testing.B) {
 			return plainConn{Conn: c}
 		})
 	})
+	b.Run("bounded_ReadFrom", func(b *testing.B) {
+		benchCopyFile(b, path, func(c corenet.Conn) io.Writer {
+			//: the connection as handed out, its group bounding each write.
+			return c
+		}, server.WriteTimeout(time.Minute))
+	})
+	b.Run("bare_TCPConn", func(b *testing.B) {
+		benchBareCopyFile(b, path)
+	})
+}
+
+// benchBareCopyFile is benchCopyFile on a bare *net.TCPConn the standard
+// library accepted, no engine around it: the floor of what io.Copy(c, f)
+// allocates in this Go, whoever calls it.
+func benchBareCopyFile(b *testing.B, path string) {
+	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("listen: %v", err)
+	}
+	b.Cleanup(func() { discard(ln.Close()) })
+	rounds := make(chan struct{})
+	go func() {
+		c, aerr := ln.Accept()
+		if aerr != nil {
+			return
+		}
+		defer func() { discard(c.Close()) }()
+		discard(copyRounds(c, path, rounds))
+	}()
+	client, err := stdnet.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		b.Fatalf("dial: %v", err)
+	}
+	b.Cleanup(func() { discard(client.Close()) })
+	b.Cleanup(func() { close(rounds) })
+	readRounds(b, client, rounds)
 }
 
 // benchEcho runs n bytes through the connection's echo, per round.

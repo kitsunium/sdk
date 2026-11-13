@@ -287,3 +287,81 @@ taken as before (`TestAFirstLayoutFrameIsStillRead`). Any other magic, and an
 entry of a kind the reader does not know, is `FD_PASS_REFUSED`. `SDKF` may
 stop being read in a release after the first one that writes only `SDK2`.
 Unix sends no frame (`SCM_RIGHTS`), so the rule has nothing to read there.
+
+## Amendment — 2026-11-13: the pipe opened to listed SIDs (kitsunium/sdk#1349)
+
+Point 6 and the 2026-11-11 amendment's point 5 left Windows with one account:
+the pipe's DACL granted the listening account alone, `AllowUIDs`/`AllowGIDs`
+are POSIX ids, and a client dialled its own account's pipe only. The owner
+decided on 2026-11-13 (option 2 of the issue): lists of SIDs, written into the
+DACL — the kernel's barrier, as the socket's mode is on Unix — and checked
+again on the client's token by the listener, as `SO_PEERCRED` is.
+
+1. **`Config.AllowSIDs []string`**, SIDs as text. `NewListener`, `NewDialer`
+   and `Dial` check each with `ConvertStringSidToSid` and keep the form
+   `ConvertSidToStringSid` writes back, once each: the DACL and the admission
+   compare one spelling, and nothing an entry spells beyond a SID reaches the
+   descriptor's text. An entry that is not a SID is `MISCONFIGURED` with
+   `rule` and `sid`; so are Everyone (`S-1-1-0`), Anonymous Logon (`S-1-5-7`)
+   and the Null SID (`S-1-0-0`), which stand for every caller — the DACL never
+   names them. A group that names every account (Users, Authenticated Users)
+   is the operator's to list. Off Windows a list that is not empty is
+   `MISCONFIGURED`: a SID names no account there. `AllowUIDs`/`AllowGIDs` keep
+   their Windows behaviour — checked for a negative id, then ignored, as point
+   6 said —, not refused, so one configuration still serves every platform.
+   No code is added: `MISCONFIGURED`, `PEER_REFUSED` and `ENDPOINT_FOREIGN`
+   carry every refusal.
+2. **The DACL grants each listed SID the rights a client needs, and no
+   more**: `(A;;0x12008b;;;<SID>)`, `FILE_GENERIC_READ` and `FILE_WRITE_DATA`,
+   beside `(A;;GA;;;<account>)`, protected (`D:P`), owner `O:<account>`, the
+   first instance still `FILE_FLAG_FIRST_PIPE_INSTANCE`. The issue said
+   `GENERIC_READ|GENERIC_WRITE`; that was not taken. `FILE_GENERIC_WRITE`
+   carries `FILE_APPEND_DATA`, which on a pipe has the value of
+   `FILE_CREATE_PIPE_INSTANCE` — Microsoft's "Named Pipe Security and Access
+   Rights": "FILE_GENERIC_WRITE enables permission to create the pipe … use the
+   individual rights instead" —, so a listed account could have created an
+   instance of the pipe and served this listener's clients as the listener.
+   `Dial` opens the pipe with the same mask for every account.
+3. **The listener reads the client's token again**, at every `Accept`,
+   through the pipe: `ImpersonateNamedPipeClient`, `OpenThreadToken
+   (TOKEN_QUERY, OpenAsSelf)` — the only way to open a token held at
+   `SECURITY_IDENTIFICATION`, the level `Dial` opens at —, `RevertToSelf`, on
+   a goroutine locked to its OS thread; a thread that cannot revert is never
+   handed back to the runtime, which ends it with the goroutine. The token is
+   the connection's own, captured by the pipe when the client opened it — not
+   the token of the process a pid names, which may since be another process.
+   The client is admitted when the token's user (unless a restricted token
+   made it deny-only) or one of its enabled groups is the listener's account
+   or listed, and, for a restricted token, one of its restricting SIDs too:
+   the kernel's two passes over the same DACL. Otherwise `PEER_REFUSED`,
+   closed and counted by `Refused`. **A token that cannot be read is refused,
+   never admitted** — a change for a listener without a list, which used to
+   admit such a client as the DACL's when the DACL named its account alone;
+   `Peer.SID` now comes from that token.
+4. **`Dial` reaches a listed account's pipe.** A pipe is named after the
+   account that listens, so a client of another account could not have found
+   it. `Dial` tries this account's pipe, then each listed SID's in the list's
+   order; only a pipe that does not exist passes the turn, so a name another
+   account took is never stepped over. This account's pipe keeps its rule —
+   the server's process token, or `DIAL_FAILED`. A listed account's pipe must
+   be owned by that account and, where the server's process token can be
+   read, run by it (`ENDPOINT_FOREIGN`, `owner` or `sid`). Where it cannot —
+   another account's process, unless this one is privileged — the pipe's
+   owner alone names the listener, and `Peer.Verified` is false: the owner is
+   sound there because, under the DACL point 2 writes, only the owner can
+   serve an instance, and a squatter cannot make another account the owner
+   without a privilege. A group a dialer lists names no pipe.
+5. **What it does not do, stated.** The name stays computable (a SID is no
+   secret): a squatter still denies the service, named `ENDPOINT_SQUATTED` at
+   the listener and `ENDPOINT_FOREIGN` at the dialer, never mistaken for the
+   account it imitates. Whether a listener that is neither privileged nor the
+   client's account may open the client's identification token depends on
+   that token's own DACL; where it may not, the client is refused. No lane
+   has a second Windows account, so the cross-account path has not run: the
+   Windows tests (`sids_windows_internal_test.go`,
+   `TestAPipeOpenedToAListAdmitsThisAccount`, e2e-cross's `windows (internal)`
+   lane) read the DACL back from the kernel, refuse bad entries at every entry
+   point, re-check the client with the listener standing as LocalSystem,
+   refuse an anonymous client, judge tokens made with
+   `CreateRestrictedToken`, and walk the dial order over squatted names; the
+   framework's listeners and telemetry exporter do not expose the list yet.

@@ -61,7 +61,7 @@ func TestThePipeNameCarriesTheAccount(t *testing.T) {
 	if other := string(pipeName(path, otherAccount)); other == name {
 		t.Errorf("two accounts share the pipe %q", name)
 	}
-	if got := pipeSDDL(self); !strings.HasPrefix(got, "O:"+self+"D:P(") {
+	if got := pipeSDDL(self, nil); !strings.HasPrefix(got, "O:"+self+"D:P(") {
 		t.Errorf("descriptor %q does not name %q as its owner", got, self)
 	}
 }
@@ -94,7 +94,7 @@ func TestAPipeAnotherAccountOwnsIsSquatted(t *testing.T) {
 	self := selfAccount(t)
 	cfg := &Config{Path: filepath.Join(t.TempDir(), "p.sock")}
 	squatPipe(t, pipeName(cfg.Path, otherAccount), "O:"+self+"D:P(A;;GA;;;WD)")
-	ln, err := listenAs(cfg, otherAccount)
+	ln, err := listenAs(cfg, otherAccount, nil)
 	if err == nil {
 		closeBestEffort(ln, "a listener the test should not have got")
 		t.Fatal("listened on a name another account holds")
@@ -111,7 +111,7 @@ func TestAPipeAnotherAccountOwnsIsSquatted(t *testing.T) {
 // what makes a second listener of ours IN_USE rather than squatted.
 func TestThePipeOwnerIsTheAccount(t *testing.T) {
 	self := selfAccount(t)
-	h, err := (&pipeAcceptor{name: pipeName(filepath.Join(t.TempDir(), "p.sock"), self), sddl: pipeSDDL(self)}).create(true)
+	h, err := (&pipeAcceptor{name: pipeName(filepath.Join(t.TempDir(), "p.sock"), self), sddl: pipeSDDL(self, nil)}).create(true)
 	if err != nil {
 		t.Fatal(err)
 	}

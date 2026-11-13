@@ -624,3 +624,18 @@ the second `Start` fails with `AddressInUse` naming the address; with
 serve. `share_linux_internal_test.go` holds a port with a `SO_REUSEPORT` socket
 and checks each engine refused, then joining with `ShareAddress`, and that a
 free named port still gets its N shards.
+
+## Amendment 2026-11-13 (#970): a bounded copy from a file still goes by sendfile
+
+A copy into a connection whose group bounds writes went by the generic copy, a
+bounded write per 32 KiB, so a file left through user space whenever
+`WriteTimeout` was set. It now goes by the socket's own copy when its source
+is one the kernel sends itself — a `syscall.Conn`, a file or a socket, alone or
+under an `io.LimitedReader` —, one mebibyte under each write deadline: the
+bound stays one per step, as it is one per write, never one for the whole copy.
+Any other source, and a copy out of a connection whose group bounds reads, keeps
+the generic copy. The Conn port's doc says so. The copy allocates a constant of
+the call, not of its bytes, and that constant is not zero in Go 1.27: the
+standard library's own `io.Copy` to a bare `*net.TCPConn` allocates 192 B in 4
+allocations with the file's open, the engine's connection 80 to 170 B more
+(`internal/service/net/server/BENCH.md`, edition 2026-11-13).

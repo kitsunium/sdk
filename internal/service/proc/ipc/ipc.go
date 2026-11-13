@@ -41,9 +41,28 @@ type Config struct {
 	// or one of its supplementary groups. The directory must still let
 	// those accounts reach the socket, which is the deployment's to
 	// arrange — this package never widens a directory. Windows has no UID:
-	// there the pipe's DACL admits this account only, and the lists admit
-	// nobody more.
+	// there these two lists admit nobody, and AllowSIDs is the list.
 	AllowUIDs, AllowGIDs []int
+	// AllowSIDs admits, on Windows, accounts and groups besides this
+	// process's own account, written as SIDs ("S-1-5-32-545"). Each is
+	// checked by NewListener, NewDialer and Dial — an entry that is not a
+	// SID, or Everyone, Anonymous Logon or the Null SID, which stand for
+	// every caller, is MISCONFIGURED. The listener writes each into the
+	// pipe's DACL with the rights a client needs to read and write the pipe
+	// and no more — never FILE_GENERIC_WRITE, whose FILE_APPEND_DATA is
+	// FILE_CREATE_PIPE_INSTANCE on a pipe, so a listed account can open the
+	// pipe but never serve an instance of it —, then reads each client's
+	// token again, through the pipe, and admits the client when the token's
+	// user or one of its enabled groups is this account or listed (for a
+	// restricted token, one of its restricting SIDs too); a token it cannot
+	// read is refused, PEER_REFUSED and counted by Refused. A dialer whose
+	// own account's pipe does not exist tries the pipe of each listed SID in
+	// turn, and trusts it only when that account owns it and, where the
+	// serving process's token can be read, runs it (ENDPOINT_FOREIGN
+	// otherwise); a group it lists names no pipe, since a pipe is named
+	// after the account that listens. Unix has no SID: a list that is not
+	// empty is MISCONFIGURED there.
+	AllowSIDs []string
 }
 
 // Listener accepts the connections of admitted peers only; a peer the
@@ -63,10 +82,12 @@ type Listener struct {
 
 // acceptor is the endpoint a Listener accepts on: a Unix socket
 // (socket.go), a named pipe on Windows (pipe_windows.go). accept returns the
-// next connection, what the kernel says of its peer and, where it reads
-// them, the peer's supplementary groups; admission is the Listener's.
+// next connection, what the kernel says of its peer and the credentials the
+// admission reads beside it — the peer's supplementary groups on Unix, where
+// they are read; its token's user and groups on Windows. Admission is the
+// Listener's.
 type acceptor interface {
-	accept() (conn net.Conn, peer coreipc.PeerValue, groups []int, err error)
+	accept() (conn net.Conn, peer coreipc.PeerValue, creds credentials, err error)
 	Close() error
 	Addr() net.Addr
 }
@@ -82,7 +103,7 @@ func (c *Config) validate() error {
 	case slices.ContainsFunc(c.AllowUIDs, negative), slices.ContainsFunc(c.AllowGIDs, negative):
 		return errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "a UID or GID is negative"))
 	}
-	return nil
+	return checkSIDs(c.AllowSIDs)
 }
 
 // negative reports whether n cannot be a UID or a GID.
@@ -104,6 +125,9 @@ func negative(n int) bool { return n < 0 }
 // named pipe is created with FILE_FLAG_FIRST_PIPE_INSTANCE: a name that
 // exists is IN_USE when this account owns it, ENDPOINT_SQUATTED when
 // another account does or its DACL admits no instance of this account.
+// Its DACL grants this account and the SIDs cfg.AllowSIDs lists, each
+// checked here (MISCONFIGURED for an entry that is not a SID or stands
+// for every caller, and for a list that is not empty off Windows).
 func NewListener(cfg *Config) (*Listener, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -116,7 +140,7 @@ func NewListener(cfg *Config) (*Listener, error) {
 // (Refused), and never returned.
 func (l *Listener) Accept() (*coreipc.Conn, error) {
 	for {
-		c, p, groups, err := l.ln.accept()
+		c, p, creds, err := l.ln.accept()
 		if err != nil {
 			l.mu.Lock()
 			closed := l.closed
@@ -126,7 +150,7 @@ func (l *Listener) Accept() (*coreipc.Conn, error) {
 			}
 			return nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", l.cfg.Path), errs.String("cause", err.Error()))
 		}
-		if err := l.admits(p, groups); err != nil {
+		if err := l.admits(p, creds); err != nil {
 			closeBestEffort(c, l.cfg.Path)
 			l.mu.Lock()
 			l.refused++
@@ -202,7 +226,10 @@ func NewDialer(cfg *Config) (*Dialer, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	own := Config{Path: cfg.Path, AllowUIDs: slices.Clone(cfg.AllowUIDs), AllowGIDs: slices.Clone(cfg.AllowGIDs)}
+	own := Config{
+		Path: cfg.Path, AllowUIDs: slices.Clone(cfg.AllowUIDs), AllowGIDs: slices.Clone(cfg.AllowGIDs),
+		AllowSIDs: slices.Clone(cfg.AllowSIDs),
+	}
 	return &Dialer{cfg: own}, nil
 }
 
@@ -217,7 +244,9 @@ func (d *Dialer) Dial(ctx context.Context) (*coreipc.Conn, error) {
 // another account could write to and a socket file another account owns, so
 // a client never hands a request to an impostor; and where the kernel names
 // the listener, it refuses one that is neither this account nor allowed. On
-// Windows it refuses a pipe whose server runs as another account.
+// Windows it opens this account's pipe or, when that does not exist, the
+// pipe of each SID cfg.AllowSIDs lists in turn, and refuses one served by,
+// or owned by, another account than the one it stands for.
 func Dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err

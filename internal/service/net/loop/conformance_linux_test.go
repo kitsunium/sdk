@@ -16,6 +16,7 @@ import (
 	stdnet "net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -54,6 +55,10 @@ var capProbes = map[string]func() error{
 	// uring-direct: io_uring's release check chose direct descriptors (a
 	// kernel from 6.13, ADR 0186).
 	"uring-direct": probeURingDirect,
+	// uring-sock-getsockopt: the socket command read a peer's credentials on
+	// the self-test's direct descriptor (6.7, #974); on or available, the
+	// release check deciding whether the group uses it.
+	"uring-sock-getsockopt": probeURingSockGetsockopt,
 }
 
 // errCapAbsent reports a capability whose probe ran and did not find it.
@@ -71,6 +76,45 @@ func probeURingDirect() error {
 	}
 	if !strings.HasSuffix(stage, "+direct") {
 		return fmt.Errorf("%w: probe stage %q, want +direct", errCapAbsent, stage)
+	}
+	return nil
+}
+
+// probeURingSockGetsockopt starts an io_uring group on a Unix listener and
+// reads its uring-sock-getsockopt row.
+func probeURingSockGetsockopt() error {
+	dir, err := os.MkdirTemp("", "p")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: filepath.Join(dir, "s")}); err != nil {
+		_ = syscall.Close(fd)
+		return err
+	}
+	if err := syscall.Listen(fd, 8); err != nil {
+		_ = syscall.Close(fd)
+		return err
+	}
+	g, err := Start(Config{Group: "probe", Value: corenet.LoopValue{Backend: corenet.LoopBackendIOURing}, Handler: &lineH{}, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
+	if err != nil {
+		return err
+	}
+	var row corenet.CapabilityValue
+	for _, r := range g.State().Capabilities {
+		if r.Name == corenet.CapabilityURingSockGetsockopt {
+			row = r
+		}
+	}
+	if err := g.Close(); err != nil {
+		return err
+	}
+	if row.Status != statusOn && row.Status != statusAvailable {
+		return fmt.Errorf("%w: uring-sock-getsockopt %s: %s", errCapAbsent, row.Status, row.Reason)
 	}
 	return nil
 }

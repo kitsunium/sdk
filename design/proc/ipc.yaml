@@ -6,7 +6,8 @@ packages:
           - doc: |-
               CodeMisconfigured identifies a configuration no endpoint can be built from:
               an empty or relative path, one longer than the kernel's sun_path, a UID or
-              GID list holding a negative value.
+              GID list holding a negative value, a SID list off Windows, or an entry of it
+              that is not a SID or stands for every caller.
             name: CodeMisconfigured
             note: "range: 0.3.91.0 - 0.3.91.255"
             value: "0x00_03_5B_01"
@@ -230,7 +231,7 @@ packages:
             doc: Misconfigured refuses a configuration no endpoint can be built from.
             exit: CONFIG
             name: Misconfigured
-            private: "service/proc/ipc: empty or relative path, path beyond sun_path, or a negative UID/GID; the rule field says which"
+            private: "service/proc/ipc: empty or relative path, path beyond sun_path, a negative UID/GID, a SID list off Windows, or a SID entry that is not one or names every caller; the rule field says which, the sid field the entry"
             public: The private socket is misconfigured
             reason: MISCONFIGURED
           - code: CodeDirectoryUnsafe
@@ -258,7 +259,7 @@ packages:
               admit. It is returned to no one but the listener's observer: the
               connection is closed without a word.
             name: PeerRefused
-            private: "service/proc/ipc: the kernel-reported UID/GID is neither ours nor in the allow-lists; uid and gid fields"
+            private: "service/proc/ipc: the kernel-reported UID/GID is neither ours nor in the allow-lists, uid and gid fields; on Windows the client's token names neither our account nor a listed SID, or cannot be read, sid and reason fields"
             public: The peer is not allowed on this private socket
             reason: PEER_REFUSED
           - code: CodeDialFailed
@@ -271,10 +272,13 @@ packages:
             doc: |-
               EndpointForeign refuses a socket file another account owns, unless that
               account is in AllowUIDs or the file's group in AllowGIDs; the uid and
-              gid fields name the owner.
+              gid fields name the owner. On Windows it refuses a pipe served by
+              another account than the one it stands for — this account's, or the
+              listed account whose pipe it is —, or owned by another; the sid or
+              owner field names it.
             exit: CONFIG
             name: EndpointForeign
-            private: "service/proc/ipc: the socket file's owner is not this process's user nor an allowed one; the uid field names it"
+            private: "service/proc/ipc: the socket file's owner is not this process's user nor an allowed one, the uid field names it; on Windows the pipe's server or owner is not the account it stands for, the sid or owner field names it"
             public: The private socket belongs to another account
             reason: ENDPOINT_FOREIGN
           - code: CodeFDPassRefused
@@ -332,17 +336,19 @@ packages:
               name: PID
               type: int
             - doc: |-
-                SID is the peer's account on Windows, read from its process token;
-                empty elsewhere.
+                SID is the peer's account on Windows — a client's read from the token
+                its pipe captured, a listener's from its process token, or from the
+                pipe's owner when that token cannot be read —; empty elsewhere.
               name: SID
               type: string
             - doc: |-
                 Verified is true when the kernel named the peer — UID and GID by
                 SO_PEERCRED on Linux, LOCAL_PEERCRED on FreeBSD and DragonFly,
-                LOCAL_PEEREID on NetBSD, SID from the process token on Windows —, false
+                LOCAL_PEEREID on NetBSD, SID from a token on Windows —, false
                 when only the directory's permissions admitted it (darwin, OpenBSD,
-                illumos, Solaris). On Linux and the three BSDs an unnamed peer is
-                refused, never admitted.
+                illumos, Solaris), or on Windows when a dialer named another
+                account's listener by its pipe's owner alone. On Linux, the three BSDs
+                and at a Windows listener an unnamed peer is refused, never admitted.
               name: Verified
               type: bool
       - doc: |-
@@ -466,11 +472,13 @@ packages:
 
       Windows has no search permission to gate a socket by its directory: there
       the endpoint is a named pipe (pipe_windows.go) named after Config.Path,
-      whose own DACL grants this process's account only, which refuses remote
-      clients (PIPE_REJECT_REMOTE_CLIENTS) and which nobody can join once it
-      exists (FILE_FLAG_FIRST_PIPE_INSTANCE); each end reads the other's account
-      from its process token (Peer.SID), and a client refuses a listener of
-      another account before it sends a byte.
+      whose own DACL grants this process's account and the SIDs Config.AllowSIDs
+      lists (sids_windows.go), which refuses remote clients
+      (PIPE_REJECT_REMOTE_CLIENTS) and which nobody can join once it exists
+      (FILE_FLAG_FIRST_PIPE_INSTANCE); the listener reads each client's token
+      again and refuses one the list does not name, or whose token it cannot
+      read (Peer.SID), and a client refuses a listener of another account than
+      the one whose pipe it opened before it sends a byte.
 
       The contract is internal/core/proc/ipc (ADR 0160): the peer and the
       connection that carries it, the Listener and Dialer ports this package's
@@ -498,9 +506,22 @@ packages:
       permission to make a directory the gate, so the endpoint is a named pipe,
       the object Windows secures by itself:
 
-        - its DACL grants this process's account only, protected from
-          inheritance (SDDL "D:P(A;;GA;;;<SID>)"), so no other account can open
-          it — Everyone, Authenticated Users and Administrators included;
+        - its DACL grants this process's account, protected from inheritance
+          (SDDL "D:P(A;;GA;;;<SID>)"), and each SID Config.AllowSIDs lists the
+          rights a client needs and no more ("(A;;0x12008b;;;<SID>)":
+          FILE_GENERIC_READ and FILE_WRITE_DATA, never FILE_GENERIC_WRITE,
+          whose FILE_APPEND_DATA is, on a pipe, FILE_CREATE_PIPE_INSTANCE), so
+          no other account can open it — Everyone, Authenticated Users and
+          Administrators included unless listed — and no listed one can serve
+          an instance of it. Everyone, Anonymous Logon and the Null SID are
+          never listed;
+        - the listener reads each client's token again, through the pipe
+          (ImpersonateNamedPipeClient, OpenThreadToken, RevertToSelf on a
+          thread of its own), and admits it when the token's user or an
+          enabled group is this account or listed — and, for a restricted
+          token, one of its restricting SIDs too, as the kernel's second check
+          asks —; a token it cannot read is refused (PEER_REFUSED), never
+          admitted;
         - PIPE_REJECT_REMOTE_CLIENTS refuses a client of another machine;
         - the first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, so a
           name that exists is never joined as the listener's; the next instance
@@ -513,12 +534,15 @@ packages:
           that made the name first (ENDPOINT_SQUATTED). The name is derived from
           the account, which is no secret, so a squatter can still take it:
           what changed is that it is named, never mistaken for our own daemon;
-        - each end reads the other's account from its process token
-          (GetNamedPipeClientProcessId / GetNamedPipeServerProcessId, then
-          OpenProcessToken): a client refuses a server of another account before
-          it sends a byte (ENDPOINT_FOREIGN), and opens the pipe at
-          SECURITY_IDENTIFICATION, so the server can learn who it is but never
-          act as it.
+        - a client reads the server's account from its process token
+          (GetNamedPipeServerProcessId, then OpenProcessToken) and refuses a
+          server of another account before it sends a byte (ENDPOINT_FOREIGN);
+          it opens the pipe at SECURITY_IDENTIFICATION, so the server can learn
+          who it is but never act as it. When its own account's pipe does not
+          exist, it tries the pipe of each listed SID in turn and trusts one
+          only when that account owns it and — where the serving process's
+          token can be read — runs it; a pipe whose owner alone names it is
+          admitted unverified.
 
       The pipe is named after this process's account and Config.Path, so one
       configuration serves every platform and two accounts with the same path
@@ -557,6 +581,9 @@ packages:
           named pipe is created with FILE_FLAG_FIRST_PIPE_INSTANCE: a name that
           exists is IN_USE when this account owns it, ENDPOINT_SQUATTED when
           another account does or its DACL admits no instance of this account.
+          Its DACL grants this account and the SIDs cfg.AllowSIDs lists, each
+          checked here (MISCONFIGURED for an entry that is not a SID or stands
+          for every caller, and for a list that is not empty off Windows).
         in:
           - name: cfg
             type: "*Config"
@@ -581,7 +608,9 @@ packages:
           another account could write to and a socket file another account owns, so
           a client never hands a request to an impostor; and where the kernel names
           the listener, it refuses one that is neither this account nor allowed. On
-          Windows it refuses a pipe whose server runs as another account.
+          Windows it opens this account's pipe or, when that does not exist, the
+          pipe of each SID cfg.AllowSIDs lists in turn, and refuses one served by,
+          or owned by, another account than the one it stands for.
         in:
           - name: ctx
             type: context.Context
@@ -643,8 +672,7 @@ packages:
                 or one of its supplementary groups. The directory must still let
                 those accounts reach the socket, which is the deployment's to
                 arrange — this package never widens a directory. Windows has no UID:
-                there the pipe's DACL admits this account only, and the lists admit
-                nobody more.
+                there these two lists admit nobody, and AllowSIDs is the list.
               name: AllowUIDs
             - doc: |-
                 AllowUIDs and AllowGIDs admit peers besides this process's own user:
@@ -655,10 +683,31 @@ packages:
                 or one of its supplementary groups. The directory must still let
                 those accounts reach the socket, which is the deployment's to
                 arrange — this package never widens a directory. Windows has no UID:
-                there the pipe's DACL admits this account only, and the lists admit
-                nobody more.
+                there these two lists admit nobody, and AllowSIDs is the list.
               name: AllowGIDs
               type: "[]int"
+            - doc: |-
+                AllowSIDs admits, on Windows, accounts and groups besides this
+                process's own account, written as SIDs ("S-1-5-32-545"). Each is
+                checked by NewListener, NewDialer and Dial — an entry that is not a
+                SID, or Everyone, Anonymous Logon or the Null SID, which stand for
+                every caller, is MISCONFIGURED. The listener writes each into the
+                pipe's DACL with the rights a client needs to read and write the pipe
+                and no more — never FILE_GENERIC_WRITE, whose FILE_APPEND_DATA is
+                FILE_CREATE_PIPE_INSTANCE on a pipe, so a listed account can open the
+                pipe but never serve an instance of it —, then reads each client's
+                token again, through the pipe, and admits the client when the token's
+                user or one of its enabled groups is this account or listed (for a
+                restricted token, one of its restricting SIDs too); a token it cannot
+                read is refused, PEER_REFUSED and counted by Refused. A dialer whose
+                own account's pipe does not exist tries the pipe of each listed SID in
+                turn, and trusts it only when that account owns it and, where the
+                serving process's token can be read, runs it (ENDPOINT_FOREIGN
+                otherwise); a group it lists names no pipe, since a pipe is named
+                after the account that listens. Unix has no SID: a list that is not
+                empty is MISCONFIGURED there.
+              name: AllowSIDs
+              type: "[]string"
       - doc: |-
           Listener accepts the connections of admitted peers only; a peer the
           kernel names and the configuration does not admit is closed and counted.
@@ -741,18 +790,23 @@ packages:
           0666 for another user or several groups —, the directory, which the
           deployment opens to them, staying the first gate. On Windows the endpoint is a named pipe named
           after this account and the path, whose own DACL grants this account
-          only, which refuses remote clients and which nobody can join once it
-          exists; a name another account took first is refused as squatted
-          ([CodeEndpointSquatted]), never mistaken for a daemon of ours.
+          and the SIDs Config.AllowSIDs lists — the right to read and write it,
+          never to serve an instance of it —, which refuses remote clients and
+          which nobody can join once it exists; a name another account took
+          first is refused as squatted ([CodeEndpointSquatted]), never mistaken
+          for a daemon of ours.
         - The PEER'S CREDENTIALS, where the kernel gives them: on Linux,
           SO_PEERCRED names the peer's user, group and process, and a peer that is
           neither this account nor in Config.AllowUIDs / AllowGIDs — by its
           user, its effective group or a supplementary group the kernel
           recorded — is closed before Accept returns it — and so, since #1093,
           do FreeBSD, DragonFly and NetBSD (the effective group alone there),
-          where an unnamed peer is refused too. On Windows each end
-          reads the other's account from its process token ([Peer].SID) and
-          refuses another one. On darwin, OpenBSD, illumos and Solaris
+          where an unnamed peer is refused too. On Windows the listener reads
+          each client's token again ([Peer].SID) and refuses one whose user and
+          enabled groups name neither this account nor a listed SID, or whose
+          token it cannot read; a client refuses a listener of another account
+          than the one whose pipe it opened — its own, or a listed one's when
+          its own does not exist. On darwin, OpenBSD, illumos and Solaris
           [Peer].Verified is false and the directory is the only gate.
 
       # The path to the directory is part of the gate

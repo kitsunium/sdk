@@ -61,11 +61,21 @@ constants:
         type: int
         value: gzip.BestCompression
     name: contentSniffBytes
+  - doc: |-
+      zeroCopyStep is how much of a bounded copy one write deadline covers when
+      the socket sends it by sendfile or splice: the bound stays one per step, as
+      it is one per write, and a step's set-up — the standard library's few
+      allocations of a sendfile — is paid once a mebibyte, not once 32 KiB.
+    items:
+      - name: zeroCopyStep
+        type: int64
+        value: 1 << 20
+    name: zeroCopyStep
   - grouped: true
     items:
       - doc: |-
-          errorLogCap is how many records of net/http's own log a server writes in
-          one second. The rest are counted, never written: a scanner probing a port
+          errorLogCap is how many records of net/http's own log, and of the TLS
+          handshakes the engine saw fail, a server writes in one second. The rest are counted, never written: a scanner probing a port
           must not turn into one line per attempt.
         name: errorLogCap
         type: int
@@ -80,11 +90,32 @@ constants:
         name: errorLogDetailMax
         type: int
         value: "2048"
-      - doc: errorLogSource is the value of the source attribute every record carries.
+      - doc: |-
+          errorLogSource is the value of the source attribute every record of an
+          HTTP group carries: net/http's own lines, and the TLS handshake failures
+          the engine negotiates in net/http's place.
         name: errorLogSource
         type: string
         value: "\"net/http\""
+      - doc: |-
+          handshakeLogSource is the source of a TLS handshake failure on a group
+          net/http does not serve: a connection handler's, or a loop codec's.
+        name: handshakeLogSource
+        type: string
+        value: "\"net/server\""
     name: errorLogCap
+  - doc: The traits a bind reports.
+    grouped: true
+    items:
+      - doc: traitExclusive is ListenerStateValue.Exclusive.
+        name: traitExclusive
+        type: socketTraits
+        value: 1 << iota
+      - doc: traitShared is ListenerStateValue.Shared.
+        name: traitShared
+      - doc: traitMultipath is ListenerStateValue.MultipathTCP.
+        name: traitMultipath
+    name: traitExclusive
   - doc: |-
       rebindAttempts is one: an address in use elsewhere is a real conflict, and
       a TIME_WAIT connection does not hold a listener's address (Go binds with
@@ -364,8 +395,8 @@ constants:
         type: string
         value: "\"net_server_datagram_reply_failures_total\""
       - doc: |-
-          MetricSuppressedLogs names the lines of net/http's own log the server did not write:
-          State's SuppressedLogs.
+          MetricSuppressedLogs names the lines of net/http's own log, and the failed TLS
+          handshakes, the server did not write: State's SuppressedLogs.
         name: MetricSuppressedLogs
         type: string
         value: "\"net_server_suppressed_logs_total\""
@@ -477,6 +508,15 @@ constants:
       - doc: metricFloatGauge is a sampled reading in a float.
         name: metricFloatGauge
     name: metricCounter
+  - doc: |-
+      ipprotoMPTCP is IPPROTO_MPTCP (Linux 5.6, include/uapi/linux/in.h): absent
+      from the standard library's syscall package, and the protocol Go's
+      net.Listen asks for by default since Go 1.24.
+    items:
+      - name: ipprotoMPTCP
+        type: int
+        value: "262"
+    name: ipprotoMPTCP
   - grouped: true
     items:
       - doc: |-
@@ -1077,10 +1117,13 @@ files:
       - (*compressWriter).decidedIdentity
     name: compress.go
   - decls:
+      - zeroCopyStep
       - conn
       - (*conn).Read
       - (*conn).Write
       - (*conn).ReadFrom
+      - (*conn).boundedReadFrom
+      - kernelSource
       - (*conn).WriteTo
       - (*conn).Unwrap
       - connWriter
@@ -1136,11 +1179,19 @@ files:
       - (*errorLogBudget).admit
       - errorLogWriter
       - (*errorLogWriter).Write
+      - (*errorLogWriter).record
       - clip
       - (*Server).errorLog
+      - (*Server).logWriter
+      - (*Server).handshakeLog
+      - (*errorLogWriter).handshakeFailed
     name: error_log.go
   - decls:
       - bindReport
+      - socketTraits
+      - traitExclusive
+      - socketTraits.has
+      - traitIf
       - exclusiveApplies
       - (*Server).rebindAttempts
       - (*Server).holdsPort
@@ -1149,6 +1200,8 @@ files:
       - exclusiveOf
       - rebindDelay
       - bindRetrying
+      - bindRetryingAfter
+      - rebindWait
       - listenerSocket
       - packetSocket
     name: exclusive.go
@@ -1167,7 +1220,7 @@ files:
   - decls:
       - defaultHandshakeTimeout
       - handshakeHandler
-      - handshakeHandler.ServeConn
+      - (*handshakeHandler).ServeConn
       - boundHandshake
       - handshakeBudget
     name: handshake.go
@@ -1447,6 +1500,7 @@ files:
       - (*portableLoop).open
       - (*portableLoop).reader
       - (*portableLoop).writer
+      - (*portableLoop).sendFlight
       - lingerClose
       - (*portableLoop).dropOutput
       - (*portableLoop).lookupSlot
@@ -1457,6 +1511,7 @@ files:
       - (*portableLoop).pending
       - (*portableLoop).markDirty
       - (*portableLoop).finish
+      - writeFailure
       - (*portableLoop).timers
       - (*portableLoop).timer
       - (*portableLoop).control
@@ -1552,6 +1607,13 @@ files:
       - (*Server).claimMeter
     name: metrics.go
   - decls:
+      - plainTCPListens
+    name: multipath.go
+  - decls:
+      - ipprotoMPTCP
+      - multipathOf
+    name: multipath_linux.go
+  - decls:
       - udpGRO
       - multiReader
       - newMultiReader
@@ -1635,6 +1697,8 @@ files:
       - (*operatorEnv).backendPlan
       - (*operatorEnv).linuxPlan
       - (*operatorEnv).kqueuePlan
+      - kqueueTaken
+      - kqueueAuto
     name: operator.go
   - decls:
       - optionSet
@@ -2137,6 +2201,13 @@ functions:
     name: newCompressSettings
     params: v corenet.CompressValue
     results: "*compressSettings"
+  - doc: |-
+      kernelSource reports whether the socket's ReadFrom can send r without user
+      space: the standard library's sendfile and splice take a syscall.Conn — a
+      file, a socket — alone or under an io.LimitedReader.
+    name: kernelSource
+    params: r io.Reader
+    results: bool
   - doc: tighterBudget returns the smaller of two budgets, treating zero as unbounded.
     name: tighterBudget
     params: a, b time.Duration
@@ -2192,6 +2263,10 @@ functions:
     name: clip
     params: s string, n int
     results: string
+  - doc: traitIf is trait when cond holds, none otherwise.
+    name: traitIf
+    params: cond bool, trait socketTraits
+    results: socketTraits
   - doc: |-
       exclusiveApplies reports whether a socket of network bound to address takes
       SO_EXCLUSIVEADDRUSE: a unicast TCP or UDP one, on a platform that has the
@@ -2238,6 +2313,25 @@ functions:
     params: ctx context.Context, attempts int, inUse func(error) bool, bind func() (T, error)
     results: T, time.Duration, error
     typeParams: T any
+  - doc: |-
+      bindRetryingAfter is bindRetrying waiting delay(attempt) after the
+      attempt-th refusal. A caller that gave up is never bound again: when its
+      ctx ended as the wait did, both ready at once on a guest that ran the
+      goroutine late, the select may take either (#1352), and the refusal stands
+      all the same.
+    name: bindRetryingAfter
+    params: ctx context.Context, attempts int, delay func(int) time.Duration, inUse func(error) bool, bind func() (T, error)
+    results: T, time.Duration, error
+    typeParams: T any
+  - doc: |-
+      rebindWait waits d or until ctx ends, and reports whether the caller still
+      wants the bind: false once ctx ended, even when d ran out with it, and
+      false once its deadline passed — a deadline's cancel runs on a goroutine
+      of its own, which a loaded guest may not have run yet when the wait's
+      timer fires after it (#1352: illumos read ctx.Err() nil 15 ms past it).
+    name: rebindWait
+    params: ctx context.Context, d time.Duration
+    results: bool
   - doc: listenerSocket is ln's descriptor, nil when it has none.
     name: listenerSocket
     params: ln stdnet.Listener
@@ -2325,8 +2419,10 @@ functions:
       limitBody bounds the request body next reads to n bytes: a Content-Length
       past n is answered 413 on the head, with Connection: close, before next
       runs and before a body byte is read; a body of unknown length is wrapped in
-      http.MaxBytesReader, whose error next sees as *http.MaxBytesError. A bound
-      below zero leaves the handler as it is.
+      http.MaxBytesReader, whose error next sees as *http.MaxBytesError; a request
+      with no body is left as it is, at no allocation, and so is a CONNECT, whose
+      body is a tunnel's stream rather than a request body. A bound below zero
+      leaves the handler as it is.
     name: limitBody
     params: next http.Handler, n int64
     results: http.Handler
@@ -2782,6 +2878,10 @@ functions:
     name: clampUsed
     params: v, n int
     results: int
+  - doc: writeFailure is pc's send failure, nil when its writer never failed.
+    name: writeFailure
+    params: pc *portableConn
+    results: error
   - doc: |-
       markClosing records, under the writer's lock, whether pc closes and
       whether its writer lingers (lingerClose), and reports whether it finishes
@@ -2879,9 +2979,9 @@ functions:
     results: "*tls.Config"
   - doc: |-
       handshake negotiates c, a TLS connection, within d, and reports whether it
-      completed: a failed or stalled negotiation closes c.
+      completed: a failed or stalled negotiation closes c, recorded by log.
     name: handshake
-    params: c stdnet.Conn, d time.Duration
+    params: c stdnet.Conn, d time.Duration, log *errorLogWriter
     results: bool
   - doc: |-
       metricInstruments are the instruments RegisterMetrics creates, in the order
@@ -2914,6 +3014,24 @@ functions:
   - doc: registerInstrument registers inst on m as the observable its kind names.
     name: registerInstrument
     params: m coremetrics.AsyncMeter, reader *metricsReader, inst metricInstrument
+  - doc: |-
+      plainTCPListens reports whether a loop group binds its listeners with plain
+      TCP rather than Go's default, Multipath TCP on Linux since Go 1.24 (#969):
+      it opted into uring-send-zc, the operator did not switch the row off, and
+      its plan may run io_uring. An accepted MPTCP socket lacks SOCK_SUPPORT_ZC
+      and answers IORING_OP_SEND_ZC with EOPNOTSUPP, after which the loop sends
+      every flight plainly: the opt-in would do nothing. Every other group keeps
+      the standard library's default, MPTCP included.
+    name: plainTCPListens
+    params: group *StreamGroup, plan loopPlan
+    results: bool
+  - doc: |-
+      multipathOf reports whether sc's socket is Multipath TCP, read back
+      (SO_PROTOCOL): what State says, whoever bound it. A socket that cannot be
+      read counts as plain.
+    name: multipathOf
+    params: sc syscall.Conn
+    results: bool
   - doc: newMultiReader builds a batched reader over pc.
     name: newMultiReader
     params: pc stdnet.PacketConn, sc rawConnProvider
@@ -2981,6 +3099,21 @@ functions:
     name: lookupCapability
     params: token string
     results: capabilityEntry, bool
+  - doc: |-
+      kqueueTaken reports whether code's choice is kqueue on goos: named, or auto
+      where auto takes it (kqueueAuto).
+    name: kqueueTaken
+    params: code corenet.LoopBackend, goos string
+    results: bool
+  - doc: |-
+      kqueueAuto reports whether auto takes kqueue on goos: on darwin alone,
+      where the paired gate of ADR 0190 held it against the goroutine engine on
+      macos-15 (P6, the bench-darwin rows). FreeBSD, OpenBSD, NetBSD and
+      DragonFly have no measured row, so auto stays portable there (ADR 0222
+      §D6, amended 2026-11-13).
+    name: kqueueAuto
+    params: goos string
+    results: bool
   - name: WithDrainTimeout
     params: d time.Duration
     results: Option
@@ -4037,12 +4170,23 @@ types:
       - doc: |-
           ReadFrom implements io.ReaderFrom: a copy into the connection reaches the
           socket's own, so a plaintext TCP socket chooses sendfile or splice (#970). A
-          group with a write bound keeps it per write, as its contract says, so the copy
-          then goes one bounded write at a time: one deadline for the whole of it would
-          be the lifetime budget this type exists to refuse, and would end a long copy
-          to a healthy peer.
+          group with a write bound keeps it per step: one deadline for the whole copy
+          would be the lifetime budget this type exists to refuse, and would end a long
+          copy to a healthy peer. A source the socket copies from without user space —
+          a file or a socket, alone or under an io.LimitedReader, anything that is a
+          syscall.Conn — goes zeroCopyStep at a time through the socket's own copy,
+          the bound installed before each step; any other source one bounded write at
+          a time.
         name: ReadFrom
         params: r io.Reader
+        recv: c *conn
+        results: n int64, err error
+      - doc: |-
+          boundedReadFrom copies r through the socket's own copy, zeroCopyStep at a
+          time, the write bound installed before each step. A step that comes back
+          short with no error reached the source's end.
+        name: boundedReadFrom
+        params: socket io.ReaderFrom, r io.Reader
         recv: c *conn
         results: n int64, err error
       - doc: |-
@@ -4298,6 +4442,11 @@ types:
       - doc: clk is the server's clock, the budget's window.
         name: clk
         type: clock.Clock
+      - doc: |-
+          source is the source attribute of the records: empty for net/http, on
+          an HTTP group, net/server for the handshake failures of any other.
+        name: source
+        type: string
     kind: struct
     methods:
       - doc: |-
@@ -4307,19 +4456,33 @@ types:
         params: p []byte
         recv: w *errorLogWriter
         results: int, error
+      - doc: |-
+          record writes line as one warn record under the budget, or counts it: with
+          no logger, or over the cap.
+        name: record
+        params: line string
+        recv: w *errorLogWriter
+      - doc: |-
+          handshakeFailed records one TLS negotiation that failed with err from
+          remote, as net/http words it on an HTTP group — "http: TLS handshake error
+          from <addr>: <reason>" — and without its "http: " on any other, the reason crypto/tls's error, which names no key, certificate
+          content or byte the peer sent. A handshake the engine itself gave up — its
+          context cancelled by the drain or the stop — is not a failure of the peer,
+          and is not recorded. A nil writer records nothing.
+        name: handshakeFailed
+        params: ctx context.Context, remote stdnet.Addr, err error
+        recv: w *errorLogWriter
     name: errorLogWriter
   - doc: |-
       bindReport is what binding one address tells State: whether the socket
       holds its address exclusively, and how long the bind waited for it.
     fields:
-      - doc: exclusive is ListenerStateValue.Exclusive.
-        name: exclusive
-        type: bool
       - doc: |-
-          shared is ListenerStateValue.Shared: the socket was bound for another
-          process to join (ShareAddress, #1330).
-        name: shared
-        type: bool
+          traits are what the bind read of its socket: ListenerStateValue's
+          Exclusive, Shared — bound for another process to join (ShareAddress,
+          #1330) — and MultipathTCP (#969).
+        name: traits
+        type: socketTraits
       - doc: wait is ListenerStateValue.BindWait.
         name: wait
         type: time.Duration
@@ -4342,6 +4505,16 @@ types:
         type: int
     kind: struct
     name: bindReport
+  - doc: socketTraits are a bound socket's yes-or-no properties, one bit each.
+    kind: named
+    methods:
+      - doc: has reports whether every bit of want is set.
+        name: has
+        params: want socketTraits
+        recv: t socketTraits
+        results: bool
+    name: socketTraits
+    underlying: uint8
   - doc: |-
       handshakeHandler completes the TLS negotiation under its own bound before
       handing the connection to the group's handler.
@@ -4358,12 +4531,17 @@ types:
       - doc: timeouts carries the group's handshake bound.
         name: timeouts
         type: corenet.TimeoutsValue
+      - doc: |-
+          log records a failed negotiation under the server's budget (#846); nil
+          records nothing.
+        name: log
+        type: "*errorLogWriter"
     kind: struct
     methods:
       - doc: ServeConn implements corenet.ConnHandler.
         name: ServeConn
         params: ctx context.Context, c corenet.Conn
-        recv: h handshakeHandler
+        recv: h *handshakeHandler
         results: error
     name: handshakeHandler
   - doc: |-
@@ -4713,6 +4891,11 @@ types:
         type: reuseMode
       - doc: trackCloses hands out sockets that report their own Close.
         name: trackCloses
+        type: bool
+      - doc: |-
+          plainTCP binds TCP without Go's default Multipath TCP: a loop group
+          that sends zero-copy (plainTCPListens, #969).
+        name: plainTCP
         type: bool
       - doc: attempts bounds the binds of one address.
         name: attempts
@@ -5161,7 +5344,9 @@ types:
       - doc: kick wakes the writer.
         name: kick
         type: chan struct{}
-      - doc: mu guards out, flight, closing and linger, shared with the writer.
+      - doc: |-
+          mu guards out, flight, closing, linger and failed, shared with the
+          writer.
         name: mu
         type: sync.Mutex
       - name: out
@@ -5170,6 +5355,13 @@ types:
         type: int
       - name: closing
         type: bool
+      - doc: |-
+          failed is the writer's send failure, recorded with the flight it ended
+          and before the writer closes the socket: the reader then ends on a
+          clean EOF (the kernel hands a socket error to one call only) or on the
+          close, and either end, taken first, would read as a clean close.
+        name: failed
+        type: error
       - doc: |-
           linger says the close is the handler's own, the peer still sending:
           the writer shuts its side and lets the reader end it (lingerClose).
@@ -5284,6 +5476,9 @@ types:
           lane sees it; zero for a plaintext group (ADR 0198).
         name: handshake
         type: time.Duration
+      - doc: hsLog records a failed negotiation under the server's budget (#846).
+        name: hsLog
+        type: "*errorLogWriter"
       - doc: turn is the lane the next accepted connection goes to, modulo the count.
         name: turn
         type: atomic.Uint64
@@ -5548,6 +5743,18 @@ types:
         name: writer
         params: slot int32, pc *portableConn
         recv: pl *portableLoop
+      - doc: |-
+          sendFlight writes out, pc's flight, and tells the lane; it reports false
+          when the socket failed. The failure is recorded (failed) before the close
+          that wakes the reader. The reader reports the end while it still reads;
+          one that ended on a clean EOF is gone, and the connection would stay open
+          with nothing to send it and nobody to read it, so the writer posts the end
+          itself. The lane takes the first end only, and finish reads failed
+          whichever it is.
+        name: sendFlight
+        params: slot int32, pc *portableConn, out []byte
+        recv: pl *portableLoop
+        results: bool
       - doc: dropOutput takes what the writer left behind off the pending gauge.
         name: dropOutput
         params: pc *portableConn
@@ -6490,14 +6697,16 @@ types:
         recv: e *operatorEnv
         results: loopPlan
       - doc: |-
-          kqueuePlan is backendPlan on darwin and the BSDs: kqueue only when the code
-          named it and the environment allows it; the portable backend otherwise,
-          auto included. A backend that has never run on these platforms is not their
-          default: auto stays portable until the paired gate of ADR 0190 holds kqueue
-          (ADR 0222 §D6). io_uring and epoll, refused by startLoopEngine there, plan
-          the floor.
+          kqueuePlan is backendPlan on darwin and the BSDs: kqueue when the code's
+          choice takes it (kqueueTaken) and the environment allows it, the portable
+          backend otherwise. An explicit kqueue never falls back — the probe's
+          refusal is the code's LoopBackendUnavailable —; auto's does, to portable,
+          reported. A backend whose paired gate has never held on a platform is not
+          its default, so auto stays portable on the BSDs (ADR 0222 §D6, amended
+          2026-11-13). io_uring and epoll, refused by startLoopEngine there, plan the
+          floor.
         name: kqueuePlan
-        params: code corenet.LoopBackend
+        params: code corenet.LoopBackend, take bool
         recv: e *operatorEnv
         results: loopPlan
     name: operatorEnv
@@ -7361,6 +7570,24 @@ types:
         recv: s *Server
         results: "*log.Logger"
       - doc: |-
+          logWriter is the server's logger and budget for group's records, with
+          source as their source attribute.
+        name: logWriter
+        params: group, source string
+        recv: s *Server
+        results: "*errorLogWriter"
+      - doc: |-
+          handshakeLog is the writer a TLS group's handshake failures go to (#846):
+          the engine negotiates TLS itself, before net/http or a codec sees the
+          connection, so net/http's own "TLS handshake error" line is never written
+          and the engine writes it in its place — under the same budget, with the
+          same fields. An HTTP group's records say source=net/http, any other
+          group's source=net/server.
+        name: handshakeLog
+        params: group *StreamGroup
+        recv: s *Server
+        results: "*errorLogWriter"
+      - doc: |-
           rebindAttempts is how many binds addr gets: rebindAttempts on a platform
           that holds an address after its socket closed, but one when this server
           already holds a socket on the same port, of the same transport — another
@@ -8051,6 +8278,11 @@ types:
           can shut the embedded http.Server down with the rest of the group.
         name: httpAdapter
         type: "*httpAdapter"
+      - doc: |-
+          hsLog records the group's failed TLS negotiations, set at Start by the
+          server (#846); nil for a plaintext group.
+        name: hsLog
+        type: "*errorLogWriter"
       - doc: |-
           http holds the bounds only an HTTP group has: the header phase's own
           deadline and the header size cap. They live here rather than in
@@ -8765,6 +8997,7 @@ vars:
           	{token: corenet.CapabilityURingRecvmsg, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityTCPKeepAlive, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityTCPUserTimeout, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingSockGetsockopt, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingDeferTaskrun, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingNoSQArray, rank: rankKernel, switchable: true, kernel: true},
           	{token: corenet.CapabilityURingRingFDs, rank: rankKernel, switchable: true, kernel: true},

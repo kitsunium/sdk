@@ -157,6 +157,53 @@ func TestConnCopyKeepsPerOperationBound(t *testing.T) {
 	}
 }
 
+// TestConnBoundedCopyFromAFile pins the bounded copy of a source the kernel
+// sends itself (#970): a file goes through the socket's own ReadFrom — where
+// a *net.TCPConn chooses sendfile —, one step of zeroCopyStep a write
+// deadline, byte-exact; the same file under an io.LimitedReader stops at the
+// limit; a source in user space still goes one bounded write at a time
+// (TestConnCopyKeepsPerOperationBound).
+func TestConnBoundedCopyFromAFile(t *testing.T) {
+	size := int(2*zeroCopyStep + zeroCopyStep/2)
+	payload := make([]byte, size)
+	if _, err := rand.Read(payload); err != nil {
+		t.Fatalf("random: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		limit int64
+		steps int
+	}{{"whole", -1, 3}, {"limited", zeroCopyStep + 7, 2}} {
+		t.Run(tc.name, func(t *testing.T) {
+			sock := &copyingSocket{}
+			c := acquiredOver(t, sock, corenet.TimeoutsValue{Write: corenet.DurationValue(time.Minute)})
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			defer func() { swallowErr(f.Close()) }()
+			var src io.Reader = f
+			want := payload
+			if tc.limit >= 0 {
+				src, want = io.LimitReader(f, tc.limit), payload[:tc.limit]
+			}
+			if n, err := c.ReadFrom(src); err != nil || n != int64(len(want)) {
+				t.Fatalf("ReadFrom = %d, %v", n, err)
+			}
+			if !bytes.Equal(sock.taken.Bytes(), want) {
+				t.Fatalf("the socket took %d bytes, not the source's %d", sock.taken.Len(), len(want))
+			}
+			if sock.readFroms != tc.steps || sock.writes() != tc.steps {
+				t.Fatalf("%d socket copies under %d write deadlines, want %d of each", sock.readFroms, sock.writes(), tc.steps)
+			}
+		})
+	}
+}
+
 // serveOneConn runs a one-handler TCP group and returns its address.
 func serveOneConn(t *testing.T, handle func(c corenet.Conn) error, opts ...GroupOption) string {
 	t.Helper()
@@ -302,6 +349,47 @@ func TestConnCopyToAStalledPeer(t *testing.T) {
 			t.Fatalf("the peer's read ended with %v", err)
 		}
 	}
+}
+
+// TestConnBoundedFileCopyToAStalledPeer is TestConnCopyToAStalledPeer with a
+// file, which a bounded group now sends by sendfile a step at a time: a peer
+// that stopped reading still ends the copy on the write bound.
+func TestConnBoundedFileCopyToAStalledPeer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	//: sparse, read as zeros: far more than every buffer between the peers.
+	if err := f.Truncate(256 << 20); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	swallowErr(f.Close())
+	outcome := make(chan error, 1)
+	addr := serveOneConn(t, func(c corenet.Conn) error {
+		file, oerr := os.Open(path)
+		if oerr != nil {
+			outcome <- oerr
+			//: reported below.
+			return oerr
+		}
+		defer func() { swallowErr(file.Close()) }()
+		_, cerr := io.Copy(c, file)
+		outcome <- cerr
+		//: the bounded write's failure.
+		return cerr
+	}, WriteTimeout(200*time.Millisecond))
+	client := dialTimed(t, addr)
+	select {
+	case err := <-outcome:
+		var timeout stdnet.Error
+		if !errors.As(err, &timeout) || !timeout.Timeout() {
+			t.Fatalf("the file copy ended with %v, want a timeout", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the file copy to a stalled peer never ended")
+	}
+	swallowErr(client.Close())
 }
 
 // endless is a source that never ends.

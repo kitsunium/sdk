@@ -14,11 +14,10 @@ import (
 // bindReport is what binding one address tells State: whether the socket
 // holds its address exclusively, and how long the bind waited for it.
 type bindReport struct {
-	// exclusive is ListenerStateValue.Exclusive.
-	exclusive bool
-	// shared is ListenerStateValue.Shared: the socket was bound for another
-	// process to join (ShareAddress, #1330).
-	shared bool
+	// traits are what the bind read of its socket: ListenerStateValue's
+	// Exclusive, Shared — bound for another process to join (ShareAddress,
+	// #1330) — and MultipathTCP (#969).
+	traits socketTraits
 	// wait is ListenerStateValue.BindWait.
 	wait time.Duration
 	// backlog is ListenerStateValue.Backlog, the accept queue's depth as
@@ -28,6 +27,35 @@ type bindReport struct {
 	// receiveBuffer and sendBuffer are ListenerStateValue's, read back after
 	// bind.
 	receiveBuffer, sendBuffer int
+}
+
+// socketTraits are a bound socket's yes-or-no properties, one bit each.
+type socketTraits uint8
+
+// The traits a bind reports.
+const (
+	// traitExclusive is ListenerStateValue.Exclusive.
+	traitExclusive socketTraits = 1 << iota
+	// traitShared is ListenerStateValue.Shared.
+	traitShared
+	// traitMultipath is ListenerStateValue.MultipathTCP.
+	traitMultipath
+)
+
+// has reports whether every bit of want is set.
+func (t socketTraits) has(want socketTraits) bool {
+	//: all of them.
+	return t&want == want
+}
+
+// traitIf is trait when cond holds, none otherwise.
+func traitIf(cond bool, trait socketTraits) socketTraits {
+	//: held.
+	if cond {
+		return trait
+	}
+	//: none.
+	return 0
 }
 
 // exclusiveApplies reports whether a socket of network bound to address takes
@@ -193,6 +221,16 @@ func rebindDelay(attempt int) time.Duration {
 // server's predecessor still holds. ctx ends the wait early with the last
 // refusal.
 func bindRetrying[T any](ctx context.Context, attempts int, inUse func(error) bool, bind func() (T, error)) (T, time.Duration, error) {
+	//: on the published curve.
+	return bindRetryingAfter(ctx, attempts, rebindDelay, inUse, bind)
+}
+
+// bindRetryingAfter is bindRetrying waiting delay(attempt) after the
+// attempt-th refusal. A caller that gave up is never bound again: when its
+// ctx ended as the wait did, both ready at once on a guest that ran the
+// goroutine late, the select may take either (#1352), and the refusal stands
+// all the same.
+func bindRetryingAfter[T any](ctx context.Context, attempts int, delay func(int) time.Duration, inUse func(error) bool, bind func() (T, error)) (T, time.Duration, error) {
 	start := time.Now()
 	//: one call, then one per wait, bounded.
 	for attempt := 1; ; attempt++ {
@@ -207,15 +245,32 @@ func bindRetrying[T any](ctx context.Context, attempts int, inUse func(error) bo
 			//: the last outcome.
 			return v, wait, err
 		}
-		timer := time.NewTimer(rebindDelay(attempt))
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			timer.Stop()
-			//: the caller gave up: the refusal stands.
+		//: the caller gave up, whichever the select took: the refusal stands.
+		if !rebindWait(ctx, delay(attempt)) {
+			//: not bound again.
 			return v, time.Since(start), err
 		}
 	}
+}
+
+// rebindWait waits d or until ctx ends, and reports whether the caller still
+// wants the bind: false once ctx ended, even when d ran out with it, and
+// false once its deadline passed — a deadline's cancel runs on a goroutine
+// of its own, which a loaded guest may not have run yet when the wait's
+// timer fires after it (#1352: illumos read ctx.Err() nil 15 ms past it).
+func rebindWait(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	//: the deadline is the caller's word even before its cancel ran.
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return false
+	}
+	//: the caller's word, read after the wait.
+	return ctx.Err() == nil
 }
 
 // listenerSocket is ln's descriptor, nil when it has none.
