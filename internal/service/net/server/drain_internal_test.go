@@ -171,8 +171,8 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 	}
 	addr := srv.State().Listeners[0].Address
 	type cut struct {
-		at  time.Time
-		msg string
+		at, failed time.Time
+		msg        string
 	}
 	var draining atomic.Bool
 	var during atomic.Int64
@@ -188,22 +188,26 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 				//: an h2c exchange on a slow guest (NetBSD) began 20.036 ms
 				//: before the close and was completed inside the window.
 				dialled, at, msg := p.exchange(addr)
+				failed := time.Now()
 				mu.Lock()
 				switch {
 				case !dialled && !began && !draining.Load():
-					cuts = append(cuts, cut{at, "refused before the drain: " + msg})
+					cuts = append(cuts, cut{at, failed, "refused before the drain: " + msg})
 				case !dialled:
 					refusedAt = append(refusedAt, at)
 				case msg != "":
-					cuts = append(cuts, cut{at, msg})
+					cuts = append(cuts, cut{at, failed, msg})
 				case began:
 					during.Add(1)
 				}
 				mu.Unlock()
+				//: back to back: the first refusal dates the close. A pause
+				//: between two exchanges dated it late by the pause, which
+				//: NetBSD's 10 ms clock makes 20 ms — #1385's four cuts at
+				//: 20.1 to 20.5 ms, none inside the window.
 				if !dialled {
 					return
 				}
-				time.Sleep(time.Millisecond)
 			}
 		})
 	}
@@ -225,7 +229,7 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 			window++
 			continue
 		}
-		t.Errorf("cut short %v before the listener closed: %s", closed.Sub(c.at), c.msg)
+		t.Errorf("cut short %v before the listener closed, failed %v before it: %s", closed.Sub(c.at), closed.Sub(c.failed), c.msg)
 	}
 	t.Logf("%d served during the drain; %d reset within %v of the close", during.Load(), window, drainCloseWindow)
 	if o, cl := counts(); o != cl {

@@ -137,8 +137,21 @@ jobs:
         run: |
           set -euo pipefail
           echo "kernel: $(uname -r)"
+          # The suites run side by side on one network namespace: what they
+          # leave in the connection-tracking table is shared (#1377).
+          echo "conntrack: max $(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo absent)"
           # shellcheck disable=SC2086 # NET_PKGS is a list.
           CGO_ENABLED=1 go test -race -count=1 $NET_PKGS
+
+      - name: the host's connection tracking, when the suites failed
+        if: failure() && matrix.kind == 'host'
+        run: |
+          # A loopback send refused with EPERM is netfilter's verdict, the
+          # conntrack table full (#1377), which no suite's output names.
+          for f in nf_conntrack_count nf_conntrack_max; do
+            echo "$f: $(cat "/proc/sys/net/netfilter/$f" 2>/dev/null || echo absent)"
+          done
+          sudo dmesg 2>/dev/null | grep -i conntrack | tail -20 || true
 
       - name: compile the net suites for the guest
         if: matrix.kind == 'vm'

@@ -8,7 +8,6 @@ package server
 import (
 	"context"
 	stdnet "net"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -135,10 +134,9 @@ func TestShards_probeRefusesAHeldPort(t *testing.T) {
 			if len(st.Listeners) != 1 || !st.Listeners[0].Shared || st.Listeners[0].Shards != p.want {
 				t.Fatalf("Listeners = %+v, want one Shared row of Shards %d", st.Listeners, p.want)
 			}
-			port := portOf(t, held)
-			//: the holder's socket and the group's three.
-			if n := kernelSocketsOn(t, p.proto, port, p.state); n != p.want+1 {
-				t.Fatalf("the kernel lists %d sockets on port %d, want %d", n, port, p.want+1)
+			//: the holder's socket and the group's three, this process's on the held address.
+			if n := kernelSocketsOn(t, p.proto, held, p.state); n != p.want+1 {
+				t.Fatalf("the kernel lists %d sockets of this process on %s, want %d", n, held, p.want+1)
 			}
 		})
 	}
@@ -176,9 +174,8 @@ func TestShards_namedPortStillShards(t *testing.T) {
 			if st.Listeners[0].Address != addr {
 				t.Fatalf("bound %s, asked %s", st.Listeners[0].Address, addr)
 			}
-			port, _ := strconv.Atoi(addr[len("127.0.0.1:"):])
-			if n := kernelSocketsOn(t, p.proto, port, p.state); n != p.want {
-				t.Fatalf("the kernel lists %d sockets on port %d, want %d", n, port, p.want)
+			if n := kernelSocketsOn(t, p.proto, addr, p.state); n != p.want {
+				t.Fatalf("the kernel lists %d sockets of this process on %s, want %d", n, addr, p.want)
 			}
 		})
 	}

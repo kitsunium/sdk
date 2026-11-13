@@ -125,11 +125,7 @@ func stopBounded(t *testing.T, drain bool) {
 			}
 		})
 		conns := heardConns(t, addr, stopConns)
-		defer func() {
-			for _, c := range conns {
-				_ = c.Close()
-			}
-		}()
+		defer resetClose(conns)
 		waitFor(t, "every open", func() bool { return g.Live() == int64(stopConns) })
 		from := time.Now()
 		if drain {
