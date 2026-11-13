@@ -106,11 +106,13 @@
 //
 // Windows has no search permission to gate a socket by its directory: there
 // the endpoint is a named pipe (pipe_windows.go) named after Config.Path,
-// whose own DACL grants this process's account only, which refuses remote
-// clients (PIPE_REJECT_REMOTE_CLIENTS) and which nobody can join once it
-// exists (FILE_FLAG_FIRST_PIPE_INSTANCE); each end reads the other's account
-// from its process token (Peer.SID), and a client refuses a listener of
-// another account before it sends a byte.
+// whose own DACL grants this process's account and the SIDs Config.AllowSIDs
+// lists (sids_windows.go), which refuses remote clients
+// (PIPE_REJECT_REMOTE_CLIENTS) and which nobody can join once it exists
+// (FILE_FLAG_FIRST_PIPE_INSTANCE); the listener reads each client's token
+// again and refuses one the list does not name, or whose token it cannot
+// read (Peer.SID), and a client refuses a listener of another account than
+// the one whose pipe it opened before it sends a byte.
 //
 // The contract is internal/core/proc/ipc (ADR 0160): the peer and the
 // connection that carries it, the Listener and Dialer ports this package's
@@ -138,9 +140,22 @@
 // permission to make a directory the gate, so the endpoint is a named pipe,
 // the object Windows secures by itself:
 //
-//   - its DACL grants this process's account only, protected from
-//     inheritance (SDDL "D:P(A;;GA;;;<SID>)"), so no other account can open
-//     it — Everyone, Authenticated Users and Administrators included;
+//   - its DACL grants this process's account, protected from inheritance
+//     (SDDL "D:P(A;;GA;;;<SID>)"), and each SID Config.AllowSIDs lists the
+//     rights a client needs and no more ("(A;;0x12008b;;;<SID>)":
+//     FILE_GENERIC_READ and FILE_WRITE_DATA, never FILE_GENERIC_WRITE,
+//     whose FILE_APPEND_DATA is, on a pipe, FILE_CREATE_PIPE_INSTANCE), so
+//     no other account can open it — Everyone, Authenticated Users and
+//     Administrators included unless listed — and no listed one can serve
+//     an instance of it. Everyone, Anonymous Logon and the Null SID are
+//     never listed;
+//   - the listener reads each client's token again, through the pipe
+//     (ImpersonateNamedPipeClient, OpenThreadToken, RevertToSelf on a
+//     thread of its own), and admits it when the token's user or an
+//     enabled group is this account or listed — and, for a restricted
+//     token, one of its restricting SIDs too, as the kernel's second check
+//     asks —; a token it cannot read is refused (PEER_REFUSED), never
+//     admitted;
 //   - PIPE_REJECT_REMOTE_CLIENTS refuses a client of another machine;
 //   - the first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, so a
 //     name that exists is never joined as the listener's; the next instance
@@ -153,12 +168,15 @@
 //     that made the name first (ENDPOINT_SQUATTED). The name is derived from
 //     the account, which is no secret, so a squatter can still take it:
 //     what changed is that it is named, never mistaken for our own daemon;
-//   - each end reads the other's account from its process token
-//     (GetNamedPipeClientProcessId / GetNamedPipeServerProcessId, then
-//     OpenProcessToken): a client refuses a server of another account before
-//     it sends a byte (ENDPOINT_FOREIGN), and opens the pipe at
-//     SECURITY_IDENTIFICATION, so the server can learn who it is but never
-//     act as it.
+//   - a client reads the server's account from its process token
+//     (GetNamedPipeServerProcessId, then OpenProcessToken) and refuses a
+//     server of another account before it sends a byte (ENDPOINT_FOREIGN);
+//     it opens the pipe at SECURITY_IDENTIFICATION, so the server can learn
+//     who it is but never act as it. When its own account's pipe does not
+//     exist, it tries the pipe of each listed SID in turn and trusts one
+//     only when that account owns it and — where the serving process's
+//     token can be read — runs it; a pipe whose owner alone names it is
+//     admitted unverified.
 //
 // The pipe is named after this process's account and Config.Path, so one
 // configuration serves every platform and two accounts with the same path

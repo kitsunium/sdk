@@ -232,6 +232,8 @@ files:
     name: peergroups_linux.go
   - decls:
       - ownerOnly
+      - credentials
+      - checkSIDs
       - socketAcceptor
       - posture
       - socketAcceptor.accept
@@ -468,6 +470,13 @@ functions:
     params: raw syscall.RawConn, room int
     results: groups []int, need int
   - doc: |-
+      checkSIDs refuses a SID list: Unix has no SID, and a list it cannot honour
+      would admit nobody it names while seeming to (#1349). An empty list is the
+      only one there is here.
+    name: checkSIDs
+    params: sids []string
+    results: error
+  - doc: |-
       socketPosture is the narrowest posture that lets the accounts cfg names
       connect (#1092, the owner's decision of 2026-11-10): 0600 when it names
       none but this account and root; 0660 and the group when it names a single
@@ -593,8 +602,7 @@ types:
           or one of its supplementary groups. The directory must still let
           those accounts reach the socket, which is the deployment's to
           arrange — this package never widens a directory. Windows has no UID:
-          there the pipe's DACL admits this account only, and the lists admit
-          nobody more.
+          there these two lists admit nobody, and AllowSIDs is the list.
         name: AllowUIDs
         type: "[]int"
       - doc: |-
@@ -606,10 +614,31 @@ types:
           or one of its supplementary groups. The directory must still let
           those accounts reach the socket, which is the deployment's to
           arrange — this package never widens a directory. Windows has no UID:
-          there the pipe's DACL admits this account only, and the lists admit
-          nobody more.
+          there these two lists admit nobody, and AllowSIDs is the list.
         name: AllowGIDs
         type: "[]int"
+      - doc: |-
+          AllowSIDs admits, on Windows, accounts and groups besides this
+          process's own account, written as SIDs ("S-1-5-32-545"). Each is
+          checked by NewListener, NewDialer and Dial — an entry that is not a
+          SID, or Everyone, Anonymous Logon or the Null SID, which stand for
+          every caller, is MISCONFIGURED. The listener writes each into the
+          pipe's DACL with the rights a client needs to read and write the pipe
+          and no more — never FILE_GENERIC_WRITE, whose FILE_APPEND_DATA is
+          FILE_CREATE_PIPE_INSTANCE on a pipe, so a listed account can open the
+          pipe but never serve an instance of it —, then reads each client's
+          token again, through the pipe, and admits the client when the token's
+          user or one of its enabled groups is this account or listed (for a
+          restricted token, one of its restricting SIDs too); a token it cannot
+          read is refused, PEER_REFUSED and counted by Refused. A dialer whose
+          own account's pipe does not exist tries the pipe of each listed SID in
+          turn, and trusts it only when that account owns it and, where the
+          serving process's token can be read, runs it (ENDPOINT_FOREIGN
+          otherwise); a group it lists names no pipe, since a pipe is named
+          after the account that listens. Unix has no SID: a list that is not
+          empty is MISCONFIGURED there.
+        name: AllowSIDs
+        type: "[]string"
     kind: struct
     methods:
       - doc: validate refuses a configuration no endpoint can be built from.
@@ -662,13 +691,15 @@ types:
   - doc: |-
       acceptor is the endpoint a Listener accepts on: a Unix socket
       (socket.go), a named pipe on Windows (pipe_windows.go). accept returns the
-      next connection, what the kernel says of its peer and, where it reads
-      them, the peer's supplementary groups; admission is the Listener's.
+      next connection, what the kernel says of its peer and the credentials the
+      admission reads beside it — the peer's supplementary groups on Unix, where
+      they are read; its token's user and groups on Windows. Admission is the
+      Listener's.
     kind: named
     name: acceptor
     underlying: |-
       interface {
-      	accept() (conn net.Conn, peer coreipc.PeerValue, groups []int, err error)
+      	accept() (conn net.Conn, peer coreipc.PeerValue, creds credentials, err error)
       	Close() error
       	Addr() net.Addr
       }
@@ -682,6 +713,13 @@ types:
         recv: d *Dialer
         results: "*coreipc.Conn, error"
     name: Dialer
+  - alias: true
+    doc: |-
+      credentials are what the Unix admission reads beside a peer's PeerValue:
+      its supplementary groups, as the kernel recorded them, where they are read.
+    kind: alias
+    name: credentials
+    underlying: "[]int"
   - doc: |-
       socketAcceptor accepts on a Unix socket; its peers are named by peerOf, and
       their supplementary groups read (peerGroups) when an allowed group may

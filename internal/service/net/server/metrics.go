@@ -36,8 +36,8 @@ const (
 	// MetricReplyFailures names the replies that did not leave: State's
 	// Datagrams.ReplyFailures.
 	MetricReplyFailures string = "net_server_datagram_reply_failures_total"
-	// MetricSuppressedLogs names the lines of net/http's own log the server did not write:
-	// State's SuppressedLogs.
+	// MetricSuppressedLogs names the lines of net/http's own log, and the failed TLS
+	// handshakes, the server did not write: State's SuppressedLogs.
 	MetricSuppressedLogs string = "net_server_suppressed_logs_total"
 	// MetricDegraded names 1 while State reports the server degraded - a fallback, a
 	// fault, a listener below what it asked for -, 0 otherwise.

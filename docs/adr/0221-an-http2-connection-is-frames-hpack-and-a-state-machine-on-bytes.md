@@ -304,3 +304,34 @@ END_STREAM so its cost stays flat. Engines `goroutine-h2` (net/http's h2c, #861)
 inactive: they are measured on the GitHub runner alone, and turn on once cal-L1h2 has
 held on three consecutive runs. The workflow's `^BenchmarkLoad` already runs the
 pairs; whether ten rounds still fit its 30 minutes is the runner's to say.
+
+## Amendment 2026-11-13 — the drain suite on h2c, an idle reading, the adapter's allocation, a tunnel's body (#961, #1354, #966, #967)
+
+- **The drain suite on h2c (#961).** ADR 0196's suite (`TestDrain_graceUnderArrivals`,
+  `TestDrain_arrivalsAcrossTheDrain`) runs each case on two protocols, the lane's
+  line echo and h2c on `http2.HandleLoop` (`drainProtos`): every arrival a GET on
+  stream 1 answered `ok` with no reset and no GOAWAY that refuses it, every kept
+  connection ending with GOAWAY(NO_ERROR) then the end of the stream, the rings'
+  accepted and closed counts equal, on auto, epoll and portable — the suite
+  replayed, not a test of its own beside it (`TestLoopHTTP2_drain` stays, for the
+  in-flight stream answered by the worker).
+- **An idle reading is a median (#1354).** `TestLoopHTTP2_idleMemory` compares the
+  median of three alternating readings of each version, each taken once the process
+  stopped ending goroutines: memory an earlier test released inside the HTTP/1.1
+  window had lowered that reading to 97 B on linux/386 and failed the comparison
+  with nothing wrong in the codec (`TestIdleHeapPerConn_release` makes it: 2 MiB
+  released read 280 B as 70 B). #961's idle bound is this comparison — h2c within
+  HTTP/1.1 plus 200 B —, the loop's 256 B being its own before any adapter.
+- **The adapter allocates as net/http does (#966).** The request-body bound wrapped
+  a bodiless request in `http.MaxBytesReader`, the one allocation
+  `BenchmarkHTTP_Adapter` had over `BenchmarkHTTP_Native` (65 against 64 on
+  go1.27.4, the sentence above read it as the counters' absence of cost); a request
+  with `http.NoBody` keeps it, 64 each.
+- **A CONNECT's body is a tunnel (#967).** The same bound wrapped an extended
+  CONNECT's body — an RFC 8441 WebSocket's frames — and cut every WebSocket over
+  HTTP/2 after 1 MiB of input; a CONNECT is not bounded by that layer
+  (`TestXConnectBeyondTheBodyBound`). `BenchmarkXConnectLoopback` measures a 64 B
+  and a 4 KiB message over the stream beside the HTTP/1.1 rows (websocket
+  BENCH.md). The tests frame HTTP/2 by hand because Go 1.27's `http.Transport`
+  refuses a `:protocol` field before it chooses HTTP/2 (`validateHeaders`);
+  `TestXConnectTransportRefusesProtocolField` fails once a release lets it through.

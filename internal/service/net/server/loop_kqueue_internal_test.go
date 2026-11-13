@@ -4,6 +4,7 @@
 package server
 
 import (
+	"runtime"
 	"testing"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -43,17 +44,24 @@ func TestLoopKqueue_refusedOffItsPlatforms(t *testing.T) {
 }
 
 // TestLoopKqueue_autoAndTheOperator starts auto and an explicit kqueue on
-// darwin and the BSDs: auto runs portable, not degraded — kqueue is opt-in
-// until its paired gate holds (ADR 0222 §D6) —; the explicit kqueue runs on
-// it, its probe's last stage named, not degraded; KITSUNIUM_NET_ENGINE=portable
-// lowers it, the override naming the cap, and an explicit kqueue the operator
-// switched off runs portable, as an explicit epoll does on Linux. The suite runs on the darwin lane and
-// the BSD guests (ADR 0222); elsewhere the refusal above is the platform's
-// contract.
+// darwin and the BSDs: auto runs kqueue on darwin, where its paired gate held,
+// and portable on the BSDs, which have no measured row (ADR 0222 §D6, amended
+// 2026-11-13), not degraded either way; KITSUNIUM_NET_ENGINE=portable takes
+// darwin's auto back to portable; the explicit kqueue runs on it, its probe's
+// last stage named, not degraded; KITSUNIUM_NET_ENGINE=portable lowers it,
+// the override naming the cap, and an explicit kqueue the operator switched
+// off runs portable, as an explicit epoll does on Linux. The suite runs on
+// the darwin lane and the BSD guests (ADR 0222); elsewhere the refusal above
+// is the platform's contract.
 func TestLoopKqueue_autoAndTheOperator(t *testing.T) {
 	t.Parallel()
 	if nativePoller != corenet.CapabilityKqueue {
 		t.Skip("kqueue is darwin's and the BSDs': TestLoopKqueue_refusedOffItsPlatforms holds the refusal here")
+	}
+	// darwin's auto is kqueue; a BSD's stays portable.
+	autoBackend := corenet.LoopBackendPortable
+	if kqueueAuto(runtime.GOOS) {
+		autoBackend = corenet.LoopBackendKqueue
 	}
 	cases := []struct {
 		name    string
@@ -62,7 +70,8 @@ func TestLoopKqueue_autoAndTheOperator(t *testing.T) {
 		want    corenet.LoopBackend
 		applied corenet.Capability
 	}{
-		{"auto stays portable", nil, corenet.LoopBackendAuto, corenet.LoopBackendPortable, ""},
+		{"auto", nil, corenet.LoopBackendAuto, autoBackend, ""},
+		{"auto capped at portable", map[string]string{corenet.EnvEngine: "portable"}, corenet.LoopBackendAuto, corenet.LoopBackendPortable, corenet.CapabilityPortable},
 		{"explicit", nil, corenet.LoopBackendKqueue, corenet.LoopBackendKqueue, ""},
 		{"capped at portable", map[string]string{corenet.EnvEngine: "portable"}, corenet.LoopBackendKqueue, corenet.LoopBackendPortable, corenet.CapabilityPortable},
 		{"switched off", map[string]string{corenet.EnvDisable: "kqueue"}, corenet.LoopBackendKqueue, corenet.LoopBackendPortable, corenet.CapabilityIOURing},

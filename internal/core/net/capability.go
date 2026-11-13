@@ -95,6 +95,13 @@ const (
 	// unacknowledged before the kernel closes the connection with an error. Switched
 	// off, or with no timeout asked for, it is not set.
 	CapabilityTCPUserTimeout Capability = "tcp-user-timeout"
+	// CapabilityURingSockGetsockopt is io_uring's socket getsockopt command
+	// (IORING_OP_URING_CMD with SOCKET_URING_OP_GETSOCKOPT, Linux 6.7), with which
+	// the loop reads a Unix connection's SO_PEERCRED on its direct descriptor at
+	// accept, so a group with a Unix listener keeps direct descriptors and LoopPeer
+	// still answers. Switched off, or absent, a group with a Unix listener runs on
+	// process descriptors, where LoopPeer asks the socket.
+	CapabilityURingSockGetsockopt Capability = "uring-sock-getsockopt"
 )
 
 // The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).

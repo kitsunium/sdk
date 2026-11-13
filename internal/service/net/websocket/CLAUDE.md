@@ -44,7 +44,8 @@ read is handed out in place, with no copy.
 | `loop_engine_linux_test.go`, `loop_memory_linux_test.go`, `loop_bench_test.go`, `perf_fixtures_test.go` | echo, ping, a fragmented message and the closing handshake on epoll, io_uring and the portable backend; `TestAdversarial_onTheLoop`; the drain's 1001; the handshake refusals; (race off) 10 000 idle connections under 512 B each with no goroutine; `BenchmarkWSLoopReceive4KiB` |
 | `handshake.go` | `Upgrade` — RFC 6455 §4.2 validation, the origin policy, the hijack probe, the 101 response |
 | `h2stream.go` | #967: RFC 8441's extended CONNECT — `isExtendedConnect` (HTTP/2, CONNECT, `:protocol` exactly `websocket`), the version and origin checks, the 200 (never 101), `EnableFullDuplex`; `h2Stream`, the stream as the Conn's `transport` (Write flushed into DATA, deadlines through the ResponseController, Close ends the body) |
-| `h2_external_test.go` | #967: `TestExtendedConnect` re-runs the `TestXConnect*` tests in a child with `GODEBUG=http2xconnect=1` (net/http reads it at init; the role variable removed before it is set, the child bounded at 120 s and never starting another): 1 000 masked frames echoed, the adversarial table over h2 streams, the drain's 1001 then END_STREAM, a `connect-udp` CONNECT refused; and in the default binary the CONNECT refused by net/http with RST_STREAM and an HTTP/2 GET answered 426. A raw HTTP/2 client: net/http's refuses a `:protocol` field |
+| `h2_external_test.go` | #967: `TestExtendedConnect` re-runs the `TestXConnect*` tests in a child with `GODEBUG=http2xconnect=1` (net/http reads it at init; the role variable removed before it is set, the child bounded at 120 s and never starting another): 1 000 masked frames echoed, the adversarial table over h2 streams, the drain's 1001 then END_STREAM, a `connect-udp` CONNECT refused; and in the default binary the CONNECT refused by net/http with RST_STREAM and an HTTP/2 GET answered 426. A raw HTTP/2 client: net/http's refuses a `:protocol` field, which `TestXConnectTransportRefusesProtocolField` holds (it fails once a Go release lets `http.Transport` send it); `TestXConnectBeyondTheBodyBound` crosses 1.2 MiB on one stream, past the default request-body bound a CONNECT is exempt from |
+| `h2_bench_test.go` | #967: `BenchmarkXConnectLoopback`, `BenchmarkLoopback` over an RFC 8441 stream (64 B and 4 KiB), run only in a binary started with `GODEBUG=http2xconnect=1` and the child's role variable (BENCH.md §Over HTTP/2), on a hand-framed HTTP/2 client (`h2BenchPeer`) |
 | `options.go` | `Option` — `Subprotocols`, `MaxMessageSize`, `MaxFrameSize`, `PingInterval`, `WithoutPing`, `WriteTimeout`, `AllowOrigins`, `AllowAnyOrigin`; `resolve` and the ADR 0031 clamp/refuse split |
 | `frame.go` | the frame codec — `MaskLen` / `MinHeaderLen` / `MaxHeaderLen`, `FrameHeaderValue` (+ `ValidateFromClient`), `FrameHeaderLen`, `ParseFrameHeader`, `ApplyMask` (word at a time), `AppendFrame` |
 | `close.go` | the close payload — `CloseCodeLen`, `AppendClosePayload`, `ParseClosePayload` |
@@ -426,6 +427,10 @@ was entertained.
 - **Opt-in in the process, not here.** net/http announces
   SETTINGS_ENABLE_CONNECT_PROTOCOL only with `GODEBUG=http2xconnect=1`, read
   at its init; a consumer's main package writes `//go:debug http2xconnect=1`.
+- **The tunnel is not a request body.** `net/server`'s request-body bound
+  (#845, 1 MiB by default) leaves a CONNECT alone: the stream's body is the
+  WebSocket's frames, and a bound on its total cut every WebSocket over HTTP/2
+  after 1 MiB of input until #967's bench found it.
 - **No other tunnel.** Only `:protocol` = `websocket` takes this path; any
   other CONNECT is a non-GET (405). The loop's HTTP/2 adapter refuses CONNECT
   and announces no extended CONNECT.

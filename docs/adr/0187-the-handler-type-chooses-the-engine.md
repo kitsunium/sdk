@@ -330,3 +330,15 @@ on io_uring and epoll. The portable backend is not held to that drain: past
 eight `SYN_RECV` requests the kernel answers with SYN cookies, and a final ACK
 that finds the queue full is dropped while the peer believes itself connected —
 the kernel's trade with a queue this short, not the option's defect.
+
+Amended 2026-11-13 (kitsunium/sdk#1353): the same loss reaches the native
+backends when the loop is slow — 38 of 385 peers reset on epoll under Bazel's
+parallel shards, each one a peer whose final ACK the full queue dropped and
+whose retransmission came after the grace, to the closed listener. The drain
+promises what the kernel queued, not what it dropped, so the test now holds
+that and tells the rest apart: every peer whose line the handler read is served,
+echo then end; the group opens and closes exactly the peers it served; a peer
+counted lost is one refused or reset once `Shutdown` began, nothing echoed, its
+line never read. `TestBacklog_drainLossIsTheKernels` makes the loss with a 300 ms
+grace and one cohort (about 375 of 384 lost, the drain still serving all it
+opened).

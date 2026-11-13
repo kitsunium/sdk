@@ -19,18 +19,23 @@
 //     0666 for another user or several groups —, the directory, which the
 //     deployment opens to them, staying the first gate. On Windows the endpoint is a named pipe named
 //     after this account and the path, whose own DACL grants this account
-//     only, which refuses remote clients and which nobody can join once it
-//     exists; a name another account took first is refused as squatted
-//     ([CodeEndpointSquatted]), never mistaken for a daemon of ours.
+//     and the SIDs Config.AllowSIDs lists — the right to read and write it,
+//     never to serve an instance of it —, which refuses remote clients and
+//     which nobody can join once it exists; a name another account took
+//     first is refused as squatted ([CodeEndpointSquatted]), never mistaken
+//     for a daemon of ours.
 //   - The PEER'S CREDENTIALS, where the kernel gives them: on Linux,
 //     SO_PEERCRED names the peer's user, group and process, and a peer that is
 //     neither this account nor in Config.AllowUIDs / AllowGIDs — by its
 //     user, its effective group or a supplementary group the kernel
 //     recorded — is closed before Accept returns it — and so, since #1093,
 //     do FreeBSD, DragonFly and NetBSD (the effective group alone there),
-//     where an unnamed peer is refused too. On Windows each end
-//     reads the other's account from its process token ([Peer].SID) and
-//     refuses another one. On darwin, OpenBSD, illumos and Solaris
+//     where an unnamed peer is refused too. On Windows the listener reads
+//     each client's token again ([Peer].SID) and refuses one whose user and
+//     enabled groups name neither this account nor a listed SID, or whose
+//     token it cannot read; a client refuses a listener of another account
+//     than the one whose pipe it opened — its own, or a listed one's when
+//     its own does not exist. On darwin, OpenBSD, illumos and Solaris
 //     [Peer].Verified is false and the directory is the only gate.
 //
 // # The path to the directory is part of the gate

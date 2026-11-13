@@ -80,11 +80,17 @@ type portableConn struct {
 	ack chan struct{}
 	// kick wakes the writer.
 	kick chan struct{}
-	// mu guards out, flight, closing and linger, shared with the writer.
+	// mu guards out, flight, closing, linger and failed, shared with the
+	// writer.
 	mu      sync.Mutex
 	out     []byte
 	flight  int
 	closing bool
+	// failed is the writer's send failure, recorded with the flight it ended
+	// and before the writer closes the socket: the reader then ends on a
+	// clean EOF (the kernel hands a socket error to one call only) or on the
+	// close, and either end, taken first, would read as a clean close.
+	failed error
 	// linger says the close is the handler's own, the peer still sending:
 	// the writer shuts its side and lets the reader end it (lingerClose).
 	linger bool
@@ -151,6 +157,8 @@ type portableGroup struct {
 	// handshake bounds a TLS connection's negotiation, which runs before the
 	// lane sees it; zero for a plaintext group (ADR 0198).
 	handshake time.Duration
+	// hsLog records a failed negotiation under the server's budget (#846).
+	hsLog *errorLogWriter
 	// turn is the lane the next accepted connection goes to, modulo the count.
 	turn     atomic.Uint64
 	drainReq atomic.Bool
@@ -247,6 +255,7 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 	//: a TLS codec group negotiates each connection first.
 	if group.tlsCodec() {
 		g.handshake = group.handshakeBound()
+		g.hsLog = group.hsLog
 	}
 	//: the lanes, built before any acceptor can hand one a connection.
 	for i := range loopLanes(v) {
@@ -452,7 +461,7 @@ func (g *portableGroup) dispatch(c stdnet.Conn) {
 func (pl *portableLoop) negotiate(c stdnet.Conn, d time.Duration) {
 	defer pl.negotiating.Add(-1)
 	//: given up: the lane never counted it.
-	if !handshake(c, d) {
+	if !handshake(c, d, pl.g.hsLog) {
 		pl.live.Add(-1)
 		//: closed.
 		return
@@ -703,25 +712,43 @@ func (pl *portableLoop) writer(slot int32, pc *portableConn) {
 				}
 				break
 			}
-			n, err := pc.conn.Write(out)
-			pc.mu.Lock()
-			pc.flight = 0
-			pc.mu.Unlock()
-			pl.bytesOut.Add(uint64(n))
-			pl.pendingOutput.Add(-int64(len(out)))
-			//: the socket failed. The reader reports the end while it still
-			//: reads; one that ended on a clean EOF is gone, and the connection
-			//: would stay open with nothing to send it and nobody to read it, so
-			//: the writer posts the end itself. The lane takes the first end only.
-			if err != nil {
-				swallowErr(pc.conn.Close())
-				pl.events <- portableEvent{kind: pevEnd, slot: slot, gen: pc.gen, err: err}
+			//: the socket failed: done.
+			if !pl.sendFlight(slot, pc, out) {
 				//: done.
 				return
 			}
-			pl.events <- portableEvent{kind: pevSent, slot: slot, gen: pc.gen}
 		}
 	}
+}
+
+// sendFlight writes out, pc's flight, and tells the lane; it reports false
+// when the socket failed. The failure is recorded (failed) before the close
+// that wakes the reader. The reader reports the end while it still reads;
+// one that ended on a clean EOF is gone, and the connection would stay open
+// with nothing to send it and nobody to read it, so the writer posts the end
+// itself. The lane takes the first end only, and finish reads failed
+// whichever it is.
+func (pl *portableLoop) sendFlight(slot int32, pc *portableConn, out []byte) bool {
+	n, err := pc.conn.Write(out)
+	pc.mu.Lock()
+	pc.flight = 0
+	//: recorded with the flight it ended.
+	if err != nil {
+		pc.failed = err
+	}
+	pc.mu.Unlock()
+	pl.bytesOut.Add(uint64(n))
+	pl.pendingOutput.Add(-int64(len(out)))
+	//: the socket failed.
+	if err != nil {
+		swallowErr(pc.conn.Close())
+		pl.events <- portableEvent{kind: pevEnd, slot: slot, gen: pc.gen, err: err}
+		//: done.
+		return false
+	}
+	pl.events <- portableEvent{kind: pevSent, slot: slot, gen: pc.gen}
+	//: sent.
+	return true
 }
 
 // lingerClose shuts pc's writing side once its output left, and bounds the
@@ -863,9 +890,9 @@ func (pl *portableLoop) finish(slot int32, pc *portableConn, err error) {
 		return
 	}
 	pc.open = false
-	//: a reader's clean end is a clean close.
-	if errors.Is(err, io.EOF) || errors.Is(err, stdnet.ErrClosed) {
-		err = nil
+	//: a reader's clean end is a clean close, unless the writer's send failed.
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, stdnet.ErrClosed) {
+		err = writeFailure(pc)
 	}
 	//: a reason chosen earlier — the drain, a spill — wins.
 	if pc.reasonSet {
@@ -877,6 +904,14 @@ func (pl *portableLoop) finish(slot int32, pc *portableConn, err error) {
 	swallowErr(pc.conn.Close())
 	close(pc.kick)
 	pl.free = append(pl.free, slot)
+}
+
+// writeFailure is pc's send failure, nil when its writer never failed.
+func writeFailure(pc *portableConn) error {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	//: the writer's, or none.
+	return pc.failed
 }
 
 // timers fires deadlines and closes idle connections, and sets the next scan

@@ -665,7 +665,7 @@ Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricRep
 const MetricSuppressedLogs string = "net_server_suppressed_logs_total"
 ```
 
-MetricSuppressedLogs names the lines of net/http's own log the server did not write: State's SuppressedLogs.
+MetricSuppressedLogs names the lines of net/http's own log, and the failed TLS handshakes, the server did not write: State's SuppressedLogs.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricSuppressedLogs`.
 
@@ -1837,7 +1837,7 @@ WithDrainTimeout bounds how long Shutdown waits for in-flight connections before
 func WithLogger(l corelogger.Logger) Option
 ```
 
-WithLogger gives the server the logger that carries what net/http reports through http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream error, a superfluous WriteHeader, a failed accept — as warn records with source=net/http, at most ten a second; State counts the rest in SuppressedLogs. Without a logger, or with a nil one, nothing is written to stderr or anywhere else, and every line is counted there.
+WithLogger gives the server the logger that carries what net/http reports through http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream error, a superfluous WriteHeader, a failed accept — and every failed TLS handshake as warn records with source=net/http (net/server on a group net/http does not serve), at most ten a second; State counts the rest in SuppressedLogs. Without a logger, or with a nil one, nothing is written to stderr or anywhere else, and every line is counted there.
 
 <a name="WriteTimeout"></a>
 ## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -4234,10 +4234,10 @@ type State struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs   uint64               `json:"accept_backoffs"`
-	// SuppressedLogs counts the lines of net/http's own log the server did not
-	// write: over the cap of ten records a second, or with no logger to write
-	// them to (WithLogger). A count that rises is a port being probed, or a
-	// handler that panics.
+	// SuppressedLogs counts the lines of net/http's own log, and the failed TLS
+	// handshakes, the server did not write: over the cap of ten records a second,
+	// or with no logger to write them to (WithLogger). A count that rises is a
+	// port being probed, or a handler that panics.
 	SuppressedLogs   uint64               `json:"suppressed_logs"`
 	// Datagrams counts what the batched datagram paths drop (ADR 0192).
 	Datagrams        DatagramStateValue   `json:"datagrams"`

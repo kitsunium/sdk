@@ -10,8 +10,12 @@
 //
 // Usage:
 //
-//	netgate -in bench.txt -sha <commit> [-out report.json]
+//	netgate -in bench.txt -sha <commit> [-out report.json] [-only step,step]
 //	netgate -list
+//
+// -only judges the named steps alone: a lane that measures some loads only —
+// the macOS runner's L1 on kqueue — is judged on its own rows, the others'
+// being absent there by design, not missing.
 //
 // Exit 0 when every active gate passes, 1 when one does not, 2 on bad usage
 // or an unreadable input.
@@ -43,6 +47,8 @@ var (
 	errNoSHA = errors.New("-sha is required: a report names the commit it measured")
 	// errNoInput reports a run given no bench output.
 	errNoInput = errors.New("-in is required")
+	// errUnknownStep reports an -only naming no step of the table.
+	errUnknownStep = errors.New("-only names a step the table does not have")
 )
 
 func main() {
@@ -57,6 +63,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	sha := fs.String("sha", "", "the commit the samples were measured on")
 	out := fs.String("out", "", "where to write the JSON report (optional)")
 	list := fs.Bool("list", false, "print the gate table and exit")
+	only := fs.String("only", "", "comma-separated steps to judge alone; empty judges the whole table")
 	//: a flag error is printed by the set.
 	if err := fs.Parse(args); err != nil {
 		//: bad usage.
@@ -67,7 +74,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		//: nothing judged.
 		return printJSON(stdout, stderr, gates)
 	}
-	rep, err := judgeFile(*in, *sha)
+	table, err := selectGates(gates, *only)
+	//: a step the table does not have.
+	if err != nil {
+		fmt.Fprintln(stderr, "netgate:", err)
+		return exitUsage
+	}
+	rep, err := judgeFile(table, *in, *sha)
 	//: no input, no commit, or an unreadable file.
 	if err != nil {
 		fmt.Fprintln(stderr, "netgate:", err)
@@ -91,8 +104,39 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// judgeFile reads the bench output at path and judges the table on it.
-func judgeFile(path, sha string) (*reportEntity, error) {
+// selectGates returns the rows of table that only names, comma-separated,
+// in the table's order; all of them when only is empty.
+func selectGates(table []gateEntity, only string) ([]gateEntity, error) {
+	//: the whole table.
+	if only == "" {
+		//: unchanged.
+		return table, nil
+	}
+	want := map[string]bool{}
+	//: each name given.
+	for name := range strings.SplitSeq(only, ",") {
+		want[strings.TrimSpace(name)] = true
+	}
+	var out []gateEntity
+	//: the table's order kept.
+	for _, g := range table {
+		//: named.
+		if want[g.Step] {
+			out = append(out, g)
+			delete(want, g.Step)
+		}
+	}
+	//: a name matched no row.
+	if len(want) > 0 {
+		//: refused, never judged on fewer rows than asked.
+		return nil, errUnknownStep
+	}
+	//: the rows named.
+	return out, nil
+}
+
+// judgeFile reads the bench output at path and judges table on it.
+func judgeFile(table []gateEntity, path, sha string) (*reportEntity, error) {
 	//: the report is tied to a commit or not written.
 	if sha == "" {
 		//: refused.
@@ -116,7 +160,7 @@ func judgeFile(path, sha string) (*reportEntity, error) {
 		return nil, err
 	}
 	//: judged.
-	return evaluate(gates, s, sha), nil
+	return evaluate(table, s, sha), nil
 }
 
 // printSummary writes one line per gate and per criterion.

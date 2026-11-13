@@ -175,6 +175,7 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 	var owners []int
 	plan := s.operator.plan(group.loopBackend(), nativePoller)
 	resolveLanes(group)
+	group.hsLog = s.handshakeLog(group)
 	//: inherited sockets first, as for every group.
 	for _, name := range group.adopt {
 		adopted, err := s.adoptStream(name)

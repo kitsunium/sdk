@@ -145,6 +145,16 @@ constants:
         name: CapabilityTCPUserTimeout
         type: Capability
         value: "\"tcp-user-timeout\""
+      - doc: |-
+          CapabilityURingSockGetsockopt is io_uring's socket getsockopt command
+          (IORING_OP_URING_CMD with SOCKET_URING_OP_GETSOCKOPT, Linux 6.7), with which
+          the loop reads a Unix connection's SO_PEERCRED on its direct descriptor at
+          accept, so a group with a Unix listener keeps direct descriptors and LoopPeer
+          still answers. Switched off, or absent, a group with a Unix listener runs on
+          process descriptors, where LoopPeer asks the socket.
+        name: CapabilityURingSockGetsockopt
+        type: Capability
+        value: "\"uring-sock-getsockopt\""
     name: CapabilityURingMultishotRecv
   - doc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
     grouped: true
@@ -657,9 +667,11 @@ constants:
     items:
       - doc: |-
           LoopBackendAuto takes the best backend the platform's probe reaches:
-          io_uring, then epoll on Linux, the portable backend elsewhere. On darwin
-          and the BSDs it stays portable until kqueue's paired gate holds: kqueue
-          runs there when named, LoopBackendKqueue (ADR 0222).
+          io_uring, then epoll on Linux, kqueue on darwin, the portable backend
+          elsewhere — a native backend the probe refuses falls back to it. On
+          FreeBSD, OpenBSD, NetBSD and DragonFly it stays portable while no
+          paired row was measured there: kqueue runs there when named,
+          LoopBackendKqueue (ADR 0222).
         name: LoopBackendAuto
         type: LoopBackend
         value: iota
@@ -675,8 +687,9 @@ constants:
         name: LoopBackendPortable
       - doc: |-
           LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and
-          DragonFly, after a staged probe (ADR 0222). It runs only when named:
-          LoopBackendAuto does not choose it until its paired gate holds.
+          DragonFly, after a staged probe (ADR 0222). LoopBackendAuto takes it on
+          darwin, where its paired gate held on macos-15; on the BSDs it runs
+          only when named.
         name: LoopBackendKqueue
     name: LoopBackendAuto
   - doc: |-
@@ -2988,10 +3001,10 @@ types:
         name: AcceptBackoffs
         type: uint64
       - doc: |-
-          SuppressedLogs counts the lines of net/http's own log the server did not
-          write: over the cap of ten records a second, or with no logger to write
-          them to (WithLogger). A count that rises is a port being probed, or a
-          handler that panics.
+          SuppressedLogs counts the lines of net/http's own log, and the failed TLS
+          handshakes, the server did not write: over the cap of ten records a second,
+          or with no logger to write them to (WithLogger). A count that rises is a
+          port being probed, or a handler that panics.
         name: SuppressedLogs
         type: uint64
       - doc: Datagrams counts what the batched datagram paths drop (ADR 0192).

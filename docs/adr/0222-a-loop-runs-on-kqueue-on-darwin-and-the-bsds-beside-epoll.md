@@ -137,3 +137,49 @@ kqueue in the change that lands the gate's numbers.
   and the FreeBSD, OpenBSD and NetBSD guests are its first run; DragonFly only
   compiles.
 - IOCP and illumos event ports stay rejected (ADR 0186 §D5).
+
+## Amendment 2026-11-13 — the conformance ran, the gate's lane is built (kitsunium/sdk#976)
+
+The suites of `internal/service/net/loop` ran on kqueue: e2e-cross on `main` at
+`a7eb89f0d` (run 43326746134) passed the package on macos-15 (arm64), FreeBSD,
+OpenBSD and NetBSD — the guests' logs show its groups starting on
+`backend=kqueue`, probe `kqueue-socket` —, race off everywhere, so
+`TestMemory_idleConnection` ran too. D6's
+gate now has its lane: net-kernel-gate's `bench-darwin` job runs `BenchmarkLoadL1`
+on macos-15, where its pairs are `goroutine:loop-kqueue` and
+`loop-kqueue:loop-kqueue` (`load_gate_hooks_darwin_test.go`), ten rounds, and
+`tools/netgate -only kqueue,cal-L1-kqueue` judges them, reported. `auto` stays on
+the portable backend until those rows hold, in the change that cites them.
+
+## Amendment 2026-11-13 (second) — `auto` takes kqueue on darwin, not on the BSDs (kitsunium/sdk#976)
+
+D6's gate held on macos-15. The `bench-darwin` job of net-kernel-gate run
+43358351908 (#1368, commit `e8b003d3f`; Darwin 24.6.0, Apple M1 (Virtual),
+3 CPUs) ran `BenchmarkLoadL1` ten paired rounds, and its
+`netgate-darwin-report.json` reads `goroutine:loop-kqueue` at a `cpu-ns/req`
+ratio interval of 0.3313–0.3995 (median 0.3767), against P6's 0.7: pass. The
+calibration row, `loop-kqueue:loop-kqueue`, read 0.8946–1.068 (median
+0.9867) and does not hold its ±5 %: the virtual runner is noisier than
+Linux's. Its widest deviation from 1 would move the kqueue row's upper bound
+to 0.4466, still under 0.7, so the verdict does not depend on it. The rows
+are in `internal/service/net/server/BENCH.md` (edition 2026-11-13).
+
+So, as criterion 1 of #976 amended reads — `auto` prefers kqueue in the change
+that cites criterion 3's rows —, `server`'s plan for `auto` on **darwin** is
+kqueue, with its fallback: a probe that refuses kqueue runs the group on the
+portable backend, reported, as `auto` falls back on Linux (`kqueuePlan`,
+`kqueueAuto`). On **FreeBSD, OpenBSD, NetBSD and DragonFly** no row has been
+measured — the bench lane is macOS's alone —, so `auto` stays on the portable
+backend there and kqueue runs when the code names it, as the amendment of
+2026-11-11 decided for every platform of the family. A BSD's `auto` moves in
+the change that cites a row measured on that BSD.
+
+This changes a default: a darwin group whose code leaves `LoopValue.Backend`
+at `auto` ran portable and now runs kqueue. The pull request carries the
+`net:default-change` label and its `Override:` block names the way back,
+`KITSUNIUM_NET_ENGINE=portable` (`KITSUNIUM_NET_DISABLE=kqueue` does the same
+for kqueue alone); the operator's tokens keep their ADR 0188 meaning and only
+lower. `TestKqueueAuto` and `TestOperatorPlan_kqueueAuto` pin the plan on any
+platform, darwin's and FreeBSD's side by side; `TestLoopKqueue_autoAndTheOperator`
+and `TestLoopGroup_serves` start `auto` on the darwin lane (kqueue) and the BSD
+guests (portable).
