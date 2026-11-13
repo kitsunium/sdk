@@ -1,0 +1,240 @@
+name: Bench A/B
+# The performance lot's measurements (kitsunium/sdk#1038, #1059, #808, #834,
+# #811, #1016): a base commit against a head commit, on the suites of
+# scripts/ci/bench-ab.conf — the kernel cache, the cache domain, the queue's
+# file broker and the logger —, every row an issue names judged against the
+# threshold its issue wrote.
+#
+#   - `plan`: the suites this run measures — on a pull request, those whose
+#     paths it changed (every normal suite when it changed the lane itself);
+#     on a dispatch, those named — as a matrix (scripts/ci/bench-ab-conf.sh).
+#   - `ab`, one leg a suite: two `go test -c` binaries, the base's — built
+#     with the head's benchmark files where they compile there, so both carry
+#     the same rows (bench-ab-build.sh) — and the head's; ROUNDS rounds
+#     alternating A B, B A, … on one runner (bench-ab-run.sh); benchstat over
+#     the two sides; the attribution of step 0 at both commits, `-gcflags=-m=2`
+#     and `perf stat` where the runner allows (bench-ab-step0.sh); then the
+#     verdict, one line a rule: the bound of the 95 % interval of the rule's
+#     per-round values against its threshold (bench-ab-verdict.sh). A `report`
+#     rule never fails the leg, a `gate` rule does — and every rule does on a
+#     dispatch with `enforce`. The samples, benchstat's output, step 0, the
+#     runner's description and the verdict are uploaded as
+#     `bench-ab-<suite>-<run>-<attempt>`.
+#
+# Never a merge gate, and never a self-hosted runner a fork's pull request
+# could reach: `pull_request`, never `pull_request_target`, no secret, a
+# read-only token. A run by hand (.github/workflows/CLAUDE.md §bench-ab.yml):
+#   gh workflow run bench-ab.yml -R kitsunium/sdk -f suites=kcache -f rounds=20
+
+on:
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Suites or package directories, comma-separated, or all (scripts/ci/bench-ab.conf)"
+        required: false
+        default: all
+        type: string
+      mode:
+        description: "normal: the threshold rows; scale: the large rows (a million keys, a moving backlog)"
+        required: false
+        default: normal
+        type: choice
+        options: [normal, scale]
+      base:
+        description: "Base commit or ref; empty: each suite's base, the commit its issues cite"
+        required: false
+        default: ""
+        type: string
+      head:
+        description: "Head commit or ref; empty: the dispatched ref"
+        required: false
+        default: ""
+        type: string
+      pattern:
+        description: "-test.bench expression replacing each suite's; empty: the suite's"
+        required: false
+        default: ""
+        type: string
+      benchtime:
+        description: "-test.benchtime replacing each suite's (Nx, Ns or Nms); empty: the suite's"
+        required: false
+        default: ""
+        type: string
+      rounds:
+        description: "Interleaved rounds, 10..200; empty: 20, 10 in scale mode"
+        required: false
+        default: ""
+        type: string
+      runner:
+        description: "runs-on label replacing each suite's (#808's rows need 8 CPUs or more)"
+        required: false
+        default: ""
+        type: string
+      enforce:
+        description: "Every rule gates this run, report rows included"
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # The normal suites' PATHS and the lane's own files; bench-ab.bats holds
+    # this list to `bench-ab-conf.sh paths`.
+    paths:
+      - "internal/kernel/collections/cache/**"
+      - "internal/service/data/cache/**"
+      - "internal/service/data/queue/**"
+      - "internal/service/observe/logger/**"
+      - ".github/workflows/bench-ab.yml"
+      - "scripts/ci/bench-ab*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: the suites this run measures
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVAL_SHA: ${{ github.sha }}
+          SELECT: ${{ inputs.suites }}
+          MODE: ${{ inputs.mode }}
+          BENCH_AB_RUNNER: ${{ inputs.runner }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci/bench-ab-conf.sh check
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-only "$BASE_SHA" "$EVAL_SHA" >"$RUNNER_TEMP/changed.txt"
+            BENCH_AB_RUNNER="" bash scripts/ci/bench-ab-conf.sh plan normal changed "$RUNNER_TEMP/changed.txt" | tee -a "$GITHUB_OUTPUT"
+          else
+            bash scripts/ci/bench-ab-conf.sh plan "${MODE:-normal}" "${SELECT:-all}" | tee -a "$GITHUB_OUTPUT"
+          fi
+
+  ab:
+    name: ab ${{ matrix.suite }}
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ${{ matrix.runner }}
+    # A scale suite fills a million files and reads them back every round.
+    timeout-minutes: ${{ inputs.mode == 'scale' && 330 || 150 }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      GOWORK: "off"
+      # Both binaries are compiled by the one toolchain setup-go installs.
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+      SUITE: ${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: install benchstat, pinned
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e
+
+      - name: the suite, its commits and its rounds
+        env:
+          BENCH_AB_BASE: ${{ inputs.base }}
+          BENCH_AB_PATTERN: ${{ inputs.pattern }}
+          BENCH_AB_BENCHTIME: ${{ inputs.benchtime }}
+          BENCH_AB_ROUNDS: ${{ inputs.rounds }}
+          INPUT_HEAD: ${{ inputs.head }}
+          EVAL_SHA: ${{ github.sha }}
+          ENFORCE: ${{ inputs.enforce }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci/bench-ab-conf.sh suite "$SUITE" | tee -a "$GITHUB_ENV"
+          {
+            echo "HEAD_REF=${INPUT_HEAD:-$EVAL_SHA}"
+            echo "OUT=$RUNNER_TEMP/bench-ab"
+            echo "TREES=$RUNNER_TEMP/trees"
+            echo "BENCH_AB_ENFORCE=$([ "$ENFORCE" = true ] && echo 1 || echo 0)"
+          } | tee -a "$GITHUB_ENV"
+
+      - name: the two trees
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT" "$TREES"
+          base_sha="$(bash scripts/ci/bench-ab-tree.sh "$SUITE_BASE" "$TREES/base")"
+          head_sha="$(bash scripts/ci/bench-ab-tree.sh "$HEAD_REF" "$TREES/head")"
+          echo "BASE_SHA=$base_sha" | tee -a "$GITHUB_ENV"
+          echo "HEAD_SHA=$head_sha" | tee -a "$GITHUB_ENV"
+
+      - name: the two test binaries, the base carrying the head's benchmarks where they compile
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT/bin"
+          bash scripts/ci/bench-ab-build.sh "$TREES/base" "$SUITE_DIR" "$OUT/bin/base.test" "$TREES/head" | tee "$OUT/overlay.txt"
+          bash scripts/ci/bench-ab-build.sh "$TREES/head" "$SUITE_DIR" "$OUT/bin/head.test"
+          echo "OVERLAY=$(sed -n 's/^overlay=//p' "$OUT/overlay.txt")" | tee -a "$GITHUB_ENV"
+
+      - name: the runner
+        run: bash scripts/ci/bench-ab-env.sh | tee "$OUT/env.txt"
+
+      - name: the rounds, A B then B A
+        run: bash scripts/ci/bench-ab-run.sh "$OUT/bin/base.test" "$TREES/base/$SUITE_DIR" "$OUT/bin/head.test" "$TREES/head/$SUITE_DIR" "$OUT"
+
+      - name: benchstat, base against head
+        run: |
+          set -euo pipefail
+          if ! "$(go env GOPATH)/bin/benchstat" base="$OUT/base.txt" head="$OUT/head.txt" >"$OUT/benchstat.txt" 2>&1; then
+            echo "::warning::benchstat compared nothing: $(head -c 300 "$OUT/benchstat.txt")"
+          fi
+          cat "$OUT/benchstat.txt"
+
+      - name: step 0, what the compiler decided and what the processor counted, at both commits
+        if: ${{ !cancelled() && env.HEAD_SHA != '' }}
+        run: |
+          set -uo pipefail
+          # perf is the runner kernel's linux-tools; a hosted runner may not
+          # ship it or expose the counters, which the record then says.
+          if ! command -v perf >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq linux-tools-common "linux-tools-$(uname -r)" >/dev/null 2>&1 ||
+              echo "::notice::perf is not installable on this runner; step 0 records the compiler alone"
+          fi
+          sudo sysctl -w kernel.perf_event_paranoid=1 >/dev/null 2>&1 || true
+          bash scripts/ci/bench-ab-step0.sh "$TREES/base" "$SUITE_DIR" "$OUT/bin/base.test" "$OUT/step0/base"
+          bash scripts/ci/bench-ab-step0.sh "$TREES/head" "$SUITE_DIR" "$OUT/bin/head.test" "$OUT/step0/head"
+          tail -n 12 "$OUT"/step0/*-perf-stat.txt
+
+      - name: the verdict, one line a rule
+        run: |
+          set -euo pipefail
+          status=0
+          bash scripts/ci/bench-ab-verdict.sh "$SUITE" "$OUT/raw" "$OUT" || status=$?
+          cat "$OUT/verdict.md" >>"$GITHUB_STEP_SUMMARY" || echo "::error::no verdict was written (exit $status)"
+          exit "$status"
+
+      - name: publish the samples, benchstat, step 0 and the verdict
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bench-ab-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/bench-ab/
+            !${{ runner.temp }}/bench-ab/bin/
+          if-no-files-found: warn
+          retention-days: 90
