@@ -698,11 +698,7 @@ func TestConformance_idleNoWatchdog(t *testing.T) {
 			}
 			conns = append(conns, c)
 		}
-		defer func() {
-			for _, c := range conns {
-				_ = c.Close()
-			}
-		}()
+		defer resetClose(conns)
 		waitFor(t, "every open", func() bool { return g.Live() == 10000 })
 		time.Sleep(time.Duration(watchdogFires+1) * time.Duration(watchdogTicks) * tickEvery)
 		st := g.State()
