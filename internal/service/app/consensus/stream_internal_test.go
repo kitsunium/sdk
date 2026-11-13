@@ -175,9 +175,23 @@ func TestAStreamReadBelowTheSnapshotIsOffsetTrimmed(t *testing.T) {
 	if _, err := s.Read(t.Context(), 0, 1, 10); !errs.HasCode(err, corestream.CodeOffsetTrimmed) {
 		t.Fatalf("Read(1) below the snapshot = %v, want OFFSET_TRIMMED", err)
 	}
-	page, err := s.Read(t.Context(), 0, b.First, 100)
-	if err != nil || len(page) == 0 || page[len(page)-1].Offset != last {
-		t.Fatalf("Read(First) = %d entries, %v; want the retained records up to %d", len(page), err, last)
+	// compactedPast returns at the first snapshot past 5, and the follower
+	// may still take the later ones: a First read before them is then below
+	// the next, and OFFSET_TRIMMED is the answer the contract gives. The read
+	// starts again at the First the stream reports then, until it holds.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		page, err := s.Read(t.Context(), 0, b.First, 100)
+		if errs.HasCode(err, corestream.CodeOffsetTrimmed) && time.Now().Before(deadline) {
+			if b, err = s.Bounds(t.Context(), 0); err != nil {
+				t.Fatalf("Bounds after a compaction: %v", err)
+			}
+			continue
+		}
+		if err != nil || len(page) == 0 || page[len(page)-1].Offset != last {
+			t.Fatalf("Read(First) = %d entries, %v; want the retained records up to %d", len(page), err, last)
+		}
+		return
 	}
 }
 

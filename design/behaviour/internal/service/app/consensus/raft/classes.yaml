@@ -2844,9 +2844,16 @@ types:
         recv: r *Raft
         results: int, time.Duration
       - doc: |-
-          extendLease moves the lease start to a confirmed round sent later than
-          the current one, shortened by the drift budget; a dropped lease stays
-          dropped for the term.
+          extendLease rests the lease on the newest confirmed round: it starts at
+          that round's send instant and lasts that round's window, shortened by the
+          drift budget; a dropped lease stays dropped for the term. confirmRounds
+          forgets every round through the one it confirms, so the round given here
+          is newer than the one the lease rests on, and one sent at the same
+          instant sets the lease too, with its own window, never the longer of the
+          two. Moved only by a round sent strictly later, the lease kept the older
+          round's window: 0 when a follower holding nothing durably committed
+          confirmed it (#698), and a read a majority of generation 1 confirmed at
+          that instant left the leader with no lease (#1390).
         name: extendLease
         params: sentAt time.Time, leaseLen time.Duration
         recv: r *Raft
@@ -3757,7 +3764,10 @@ types:
       - doc: |-
           becomeFollower moves to term, following lead (0 when unknown). The vote
           is forgotten only with a new term, and a deposed leader refuses what it
-          still held for its clients.
+          still held for its clients. A term below this node's never lowers it: a
+          message that carries no term is handled at this node's own (stepTerm),
+          and a candidate that followed an append of term 0 wrote a HardState of
+          term 0 over its durable term (#1362).
         name: becomeFollower
         params: term uint64, lead core.NodeID
         recv: r *Raft

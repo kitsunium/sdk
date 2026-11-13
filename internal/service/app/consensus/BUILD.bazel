@@ -216,6 +216,8 @@ go_test(
         "runtimedir_unix_internal_test.go",
         "savesnapshotstall_internal_test.go",
         "sendshared_alloc_internal_test.go",
+        "sendshared_bench_test.go",
+        "sendshared_benchnode_test.go",
         "sendshared_internal_test.go",
         "silencedurable_internal_test.go",
         "silencelowered_internal_test.go",
@@ -270,6 +272,7 @@ go_test(
         "zstranded_internal_test.go",
         "zstrandedbet_internal_test.go",
         "zwhiledown_internal_test.go",
+        "zzbenchmdkeep_internal_test.go",
     ],
     # The transport's sources, read by TestTransportNeverWaitsOnTheWallClock
     # (#948) from the package directory, the test's working directory, and
@@ -349,7 +352,10 @@ go_test(
     name = "consensus_bench_test",
     size = "enormous",
     timeout = "eternal",
-    srcs = ["consensus_bench_test.go"],
+    srcs = [
+        "consensus_bench_test.go",
+        "zzbenchmdkeep_internal_test.go",
+    ],
     args = ["-test.run=^$$"],
     embed = [":consensus"],
     race = "off",

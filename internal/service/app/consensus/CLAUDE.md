@@ -69,10 +69,10 @@ silence closed (`read_silence`).
 | simulator soak | `CONSENSUS_SIM_SOAK=1 go test -run TestSimSoak ./raft/`; a seed replays with `CONSENSUS_SIM_SEED` |
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package, and on `raft/`'s `FuzzStep`, the step function under the simulator's invariants (#924); nightly in CI (`scripts/ci/consensus-fuzz.sh`, `FuzzStep` 10 minutes) |
 | alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt` (`bazel test --config=alloc` it, or `go test -run 'TestALeaderTurnEncodes|TestApplied1Keeps' .` race off): `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go`, the leader turn's budget of #912 and applied1's of #1109 (`applied_alloc_internal_test.go`, with `appliedwait_internal_test.go`; `sendshared_alloc_internal_test.go`, with `sendshared_internal_test.go` for its helpers, the target's `-test.run` naming the gates) and the package's copy of `allocwindow_test.go`, nothing else of the suite |
-| alloc (D15) | `make test-alloc` (race off): `gen_perf_test.go` in `raft/` and in `wire/`, written by kit gen from `design/sdk.yaml`'s budgets over each package's `perf_fixtures_test.go` — the leader's `Step` on an append response (1) and the follower's on 64 entries (65), `AppendMessage`, `ParseMessage` and `ChainSum` (0) — and `TestTheRecordCodecAllocatesNothing` (`recordcodec_alloc_internal_test.go`, counted with `allocwindow_test.go`), the log record codec's 0; the bounds D15 revised are ADR 0152's amendment of 2026-11-12 (#921); `Propose` on three memory nodes is no budget — kit's 60 000 calls with the collector off hold some 2 GB — and is `BENCH.md`'s `MEM/propose` row |
+| alloc (D15) | `make test-alloc` (race off): `gen_perf_test.go` in `raft/` and in `wire/`, written by kit gen from `design/sdk.yaml`'s budgets over each package's `perf_fixtures_test.go` — the leader's `Step` on an append response (1) and the follower's on 64 entries (1, the entry slice: 65 before #1110 and left there until L1's audit), `AppendMessage`, `ParseMessage` and `ChainSum` (0) — and `TestTheRecordCodecAllocatesNothing` (`recordcodec_alloc_internal_test.go`, counted with `allocwindow_test.go`), the log record codec's 0; the bounds D15 revised are ADR 0152's amendment of 2026-11-12 (#921); `Propose` on three memory nodes is no budget — kit's 60 000 calls with the collector off hold some 2 GB — and is `BENCH.md`'s `MEM/propose` row |
 | bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`), `-bench BenchmarkApplied1` (`applied_bench_test.go`); numbers in `BENCH.md` |
 | dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate] [fdatasync\|rwfdsync]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922), G1's paired sync path row (`TestDMCryptSyncPathBench`, ADR 0190's shape, #923) and power cuts through LUKS, on ext4 or xfs; with `fallocate` or `rwfdsync` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`) or writing `RWF_DSYNC` (`CONSENSUS_SYNC_PATH=rwfdsync`), and with `rwfdsync` the power cuts too; results in `testdata/dmcrypt/RESULTS.md` |
-| bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911) |
+| bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`), keeping the hand-run part from `## Hand-run micro-benchmarks` on, which only its own commands refresh (`keepHandRun`, `zzbenchmdkeep_internal_test.go`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911) |
 
 Under Bazel `consensus_test` has 48 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
@@ -1403,7 +1403,14 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `TestAStreamedPinOutlastsItsBoundWhileItsFollowerCatchesUp`). Nor renew
   it for a follower that stopped or fell further behind: slower than the
   writes, it would hold the log growing until the log is tight
-  (`TestARenewedStreamedPinEndsOnceItsFollowerNoLongerCatchesUp`).
+  (`TestARenewedStreamedPinEndsOnceItsFollowerNoLongerCatchesUp`). Their
+  `valveRun` shuts the leader's frames to the follower once the stream's
+  body is read (`holdTransport.drained`), before the follower commits its
+  install and answers it: shut once `Stream` returned, the answer reached
+  the leader first, which replicated through the open valve, and a
+  follower caught up meanwhile ended its pin before the setup saw it
+  (linux/386, "timed out waiting for the streamed snapshot's pin"; every
+  run with 300 ms between the answer and `Stream`'s return).
 - Stream a snapshot to every peer in need at once, or as fast as the link
   allows: two learners joining together streamed two snapshots over the
   NIC and the TLS CPU of the data lane, one goroutine each, unbounded.
@@ -1610,7 +1617,13 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   (`Raft.ReadRounds`) counts the rounds
   (`TestBarriersQueuedInOneTurnShareOneRound`,
   `TestLeasedBarriersOpenNoRound`,
-  `TestABarrierQueuedAfterTheLoopEndedIsAnswered`).
+  `TestABarrierQueuedAfterTheLoopEndedIsAnswered`). Their manual cluster's
+  `elect` asks its read only once every follower holds the leader's commit:
+  a follower that has not heard it answers a heartbeat with generation 0,
+  which sizes no lease (#698), and a round it confirmed, the read's or one
+  still in flight, left the lease test's leader with a lease of 0 on the
+  stopped clock (#1390, one run in 12 under `-race` and `GOMAXPROCS=1`;
+  the raft side is `extendLease`'s same-instant round).
 - Read the wall clock in the transport for an age, a backoff or an expiry:
   a link's age against `MaxConnectionAge`, the redial backoff, the peer
   certificate's end and the accept backoff ran on `time.Now`, so no test

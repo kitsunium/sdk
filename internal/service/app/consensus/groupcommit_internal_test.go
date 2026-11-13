@@ -45,6 +45,11 @@ func hangLogs(c *cluster) func(*testNode) *hangLog {
 	return get
 }
 
+// groupCommitWait bounds each wait of TestABacklogOfWritesIsSyncedAsOneGroup:
+// both take some 0.1 s alone, and a loaded Bazel shard has taken 5 s for
+// the first (#1358).
+const groupCommitWait = 30 * time.Second
+
 // #558: the storage actor paid one Sync per queued Ready. A follower whose
 // fdatasync was held built a backlog of one request per append and one per
 // commit advance, then drained it one Sync at a time (84 Syncs for 41
@@ -63,8 +68,15 @@ func TestABacklogOfWritesIsSyncedAsOneGroup(t *testing.T) {
 	for i := range 40 {
 		last = propose(t, l.node, fmt.Sprintf("k%d=v", i)).Index
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for slow.node.Status().Commit < last && time.Now().Before(deadline) {
+	// Each wait has a budget of its own: one deadline taken before the
+	// setup's wait left the wait after release() none when a loaded
+	// shard spent it on the setup, and the first check after the release
+	// failed before the grouped Sync could run (#1358).
+	learnt := time.Now().Add(groupCommitWait)
+	for slow.node.Status().Commit < last {
+		if time.Now().After(learnt) {
+			t.Fatalf("setup: the held follower learnt commit %d < %d within %v", slow.node.Status().Commit, last, groupCommitWait)
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	held := stableOf(slow)
@@ -73,9 +85,10 @@ func TestABacklogOfWritesIsSyncedAsOneGroup(t *testing.T) {
 	}
 	before := logOf(slow).syncs()
 	release()
+	durable := time.Now().Add(groupCommitWait)
 	for stableOf(slow) < last {
-		if time.Now().After(deadline) {
-			t.Fatalf("the follower is durable through %d < %d after its Sync was released", stableOf(slow), last)
+		if time.Now().After(durable) {
+			t.Fatalf("the follower is durable through %d < %d %v after its Sync was released", stableOf(slow), last, groupCommitWait)
 		}
 		time.Sleep(time.Millisecond)
 	}

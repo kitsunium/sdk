@@ -95,8 +95,14 @@ func valveRun(t *testing.T, id byte) (c *cluster, l, lag *testNode, v *valveTran
 	mu.Lock()
 	v = valves[l.id]
 	mu.Unlock()
+	// Shut once the stream's body is read, before the follower commits
+	// its install and answers it: shut once Stream returned, its answer
+	// reached the leader first, which replicated through the open valve,
+	// and a follower that caught up meanwhile ended its pin before the
+	// setup saw it (linux/386: "timed out waiting for the streamed
+	// snapshot's pin").
 	shut := func() { v.close(lag.id) }
-	v.streamed.Store(&shut)
+	v.drained.Store(&shut)
 	v.holding.Store(true)
 	t.Cleanup(func() {
 		v.holding.Store(false)

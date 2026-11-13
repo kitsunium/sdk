@@ -188,11 +188,15 @@ func TestTwoLearnersAreStreamedOneAfterTheOther(t *testing.T) {
 		}
 		trs[tn.id] = ht
 		cfg.Transport = ht
+		// Elections four times as slow as steadyTiming's: a change of
+		// term cancels the held stream, and the pin bound, ten maximum
+		// election timeouts, is the hold's budget (40 s).
 		cfg.InitialTiming = steadyTiming()
+		cfg.InitialTiming.ElectionTimeoutMin, cfg.InitialTiming.ElectionTimeoutMax = 2*time.Second, 4*time.Second
 		cfg.MaxSnapshotStreams = 1
 	}
 	newClusterWith(t, c)
-	l := c.settledLeader(5 * time.Second)
+	l := c.settledLeader(20 * time.Second)
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
@@ -215,7 +219,16 @@ func TestTwoLearnersAreStreamedOneAfterTheOther(t *testing.T) {
 	waiting := streamWaiter(t, l)
 	select {
 	case <-lt.started:
-		t.Fatal("a second stream started while the first was in flight")
+		// An offer is not a stream in flight: one that started once the
+		// first had ended — a change of term cancels it, and so does its
+		// pin falling due — bounds nothing. On a FreeBSD runner the
+		// first was cancelled within the window and the test failed
+		// while one stream at most was ever in flight (#920's
+		// follow-up).
+		if p := lt.peak.Load(); p > 1 {
+			t.Fatalf("%d streams in flight at once under MaxSnapshotStreams 1", p)
+		}
+		t.Fatalf("setup: the held stream ended before the second was offered (%d cancelled, leader %+v): its term changed or its pin fell due", lt.cancelled.Load(), l.node.Status())
 	case <-time.After(500 * time.Millisecond):
 	}
 	for i := range 45 {
@@ -252,6 +265,9 @@ func TestTwoLearnersAreStreamedOneAfterTheOther(t *testing.T) {
 	}
 	if got := lt.streams.Load(); got != 2 {
 		t.Fatalf("%d snapshot streams, want 2: a learner needed another one to catch up", got)
+	}
+	if p := lt.peak.Load(); p > 1 {
+		t.Fatalf("%d streams in flight at once under MaxSnapshotStreams 1", p)
 	}
 }
 

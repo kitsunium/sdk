@@ -884,12 +884,13 @@ budgets:
     allocs: 1
     fixture: StepAppResp
   # A follower taking an append of 64 entries of 256 B into the memory log:
-  # 65, the entry slice and one copy of each payload (appendNew's ownCopy,
-  # which #1110 removes, D15's "0 per entry" then holding); D15's 1 revised
-  # until then. ChainSum allocated twice an entry more until this budget
-  # found it.
+  # 1, the entry slice, D15's value. It was 65 until #1110, one copy of each
+  # payload more (appendNew's ownCopy), and #1110 left it at 65 while the
+  # fixture measured 1: a payload copied again would have passed it (L1's
+  # audit). ChainSum allocated twice an entry more until this budget found
+  # it.
   - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Step
-    allocs: 65
+    allocs: 1
     fixture: StepApp64
   # The frame codec and the chain sum allocate nothing (D15's 0): an append
   # of 64 entries encoded into a warm buffer and decoded into a warm

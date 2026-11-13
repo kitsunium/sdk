@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -25,9 +26,24 @@ type holdTransport struct {
 	// streamed, when set, runs after a stream that succeeded, before
 	// Stream returns.
 	streamed atomic.Pointer[func()]
+	// drained, when set, runs once a stream's body was read to its end:
+	// before the receiver commits the install and answers it, which
+	// streamed comes after.
+	drained atomic.Pointer[func()]
+	// inFlight counts the Stream calls not returned yet, and peak the
+	// most at once: what MaxSnapshotStreams bounds (#920).
+	inFlight atomic.Int32
+	peak     atomic.Int32
 }
 
 func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
+	for n := t.inFlight.Add(1); ; {
+		p := t.peak.Load()
+		if n <= p || t.peak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	defer t.inFlight.Add(-1)
 	if t.holding.Load() {
 		select {
 		case t.started <- offer:
@@ -41,6 +57,9 @@ func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, off
 			return ctx.Err()
 		}
 	}
+	if f := t.drained.Load(); f != nil {
+		open = onEOF(open, *f)
+	}
 	err := t.MemoryTransport.Stream(ctx, to, offer, open)
 	if err == nil {
 		t.streams.Add(1)
@@ -49,6 +68,33 @@ func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, off
 		}
 	}
 	return err
+}
+
+// onEOF is open whose body runs hook once a read of it returns io.EOF.
+func onEOF(open func(int64) (io.ReadCloser, error), hook func()) func(int64) (io.ReadCloser, error) {
+	return func(off int64) (io.ReadCloser, error) {
+		rc, err := open(off)
+		if err != nil {
+			return rc, err
+		}
+		return &eofReader{ReadCloser: rc, hook: hook}, nil
+	}
+}
+
+// eofReader runs hook, once, when its body returns io.EOF.
+type eofReader struct {
+	io.ReadCloser
+	hook func()
+	once sync.Once
+}
+
+// Read implements io.Reader.
+func (r *eofReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if errors.Is(err, io.EOF) {
+		r.once.Do(r.hook)
+	}
+	return n, err
 }
 
 // compactedPastItsEnd waits until the leader's log starts past the end of
