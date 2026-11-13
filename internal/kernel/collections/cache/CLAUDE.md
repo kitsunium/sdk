@@ -61,7 +61,11 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
   counter saturates at 3). A hit moves nothing. An unknown `Policy` value runs
   as LRU and `Stats().Policy` says which policy runs — the kernel has no error
   surface (rule 1). The entry a `Set` just wrote is never its own victim, under
-  either policy. Every behavioural table of `cache_external_test.go` runs under
+  either policy, and it never shields another (#1380): the probation walk steps
+  over it rather than stopping there (an overwrite leaves it where it sits,
+  newer entries ahead of it), main is asked again after the walk promoted its
+  hit entries, and an entry alone in main with hits left spends them and goes.
+  Every behavioural table of `cache_external_test.go` runs under
   both policies (`forEachPolicy`); `BENCH.md` measures the hit ratio of each on
   Zipf traces and through scans.
 - **Striping is a sibling** (#808). `Striped[K,V]` holds N Caches, picks one by

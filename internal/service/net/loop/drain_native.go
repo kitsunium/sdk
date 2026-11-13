@@ -178,12 +178,20 @@ func (r *ring) drainable(c *connCtl) bool {
 // closeSettled starts the drain's close of every connection of r the drain
 // may close (drainable) that has no answer out with a worker (R3): each
 // closes once its output has left; mid-request ones, and ones waiting on a
-// worker, finish first.
+// worker, finish first. A connection the batch handed bytes to is judged at
+// the next batch: the handler may answer them at OnBatchEnd, which runs after
+// the drain, and a close marked before it would refuse that answer (#1385).
 func (lp *loop) closeSettled(r *ring) {
 	//: every open connection is looked at.
 	for s := r.lruHead; s != noLink; {
 		c := &r.conns[s]
 		nxt := c.lruNext
+		//: heard in this batch: its answer may still be on its way.
+		if c.heardNow {
+			c.heardNow = false
+			s = nxt
+			continue
+		}
 		//: settled, heard or quiet, and waiting on nobody.
 		if r.drainable(c) && !lp.waits(r, s) {
 			//: the handler's last word, once; the connection closes next batch.

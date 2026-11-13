@@ -7801,6 +7801,8 @@ sequences:
         to: pl.bytesIn.Add
       - eval: pc.heard(time.Now())
         to: pc.heard
+      - set: pc.heardNow
+        value: "true"
       - bind: ref
         eval: "corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}"
       - bind: buf
@@ -8020,6 +8022,12 @@ sequences:
         to: time
       - loop:
           do:
+            - opt:
+                do:
+                  - set: pc.heardNow
+                    value: "false"
+                  - continue: true
+                when: pc.heardNow
             - opt:
                 do:
                   - opt:

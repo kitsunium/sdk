@@ -687,7 +687,12 @@ passed.
 - **`Stats` reads no payload (issue #833).** File: the three directories'
   names, no file opened, and no directory read on a quiet queue (issue #811); SQL: one `GROUP BY dead, CASE WHEN lease IS NULL …`;
   memory: lengths and one walk. A lapsed lease nobody reclaimed counts as
-  leased.
+  leased. The file broker's count is two readings, the queued directory then
+  the in-flight one, so a message a reclaim, a nack or a release renames from
+  flight back into the queue between them is in neither (issue #1369): the
+  snapshot races the queue, as `Counter` says, and a test waits on an
+  acknowledgement the broker accepted, never on an empty `Stats` taken while
+  a consumer runs (`TestTheAckedWindowAcknowledgesARedeliveryWithoutRunningTheHandler`).
 - **`MaxAge` dead-letters, it never drops (issue #835).** A message whose age
   reached it is buried `MESSAGE_EXPIRED` with the count it had, by the
   Receive that reaches it visible: the memory broker at its head; the file

@@ -101,3 +101,76 @@ func TestACacheThatWeighsNothingReportsNoWeight(t *testing.T) {
 		t.Errorf("Weight = %d, want 0 for a cache configured without weights", got)
 	}
 }
+
+// TestTheS3FIFOWalkMakesRoomWhileAVictimIsLeft is #1380: under S3-FIFO the
+// eviction gave up with a victim left, and the weight stayed over the bound,
+// in three places. The probation walk stopped at the entry the Set wrote,
+// taken for the newest, though an overwrite leaves it where it sits, newer
+// entries ahead of it. A walk that promoted its hit entries into main and
+// evicted nothing did not ask main again. An entry alone in main with a hit
+// left was taken for the entry just written and never evicted. Each case
+// ends with a Set over the bound of 100, and is run under both policies.
+func TestTheS3FIFOWalkMakesRoomWhileAVictimIsLeft(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		writes func(c *cache.Cache[string, []byte])
+		// kept is the key the last Set wrote, never its own victim.
+		kept string
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		forEachPolicy(t, func(t *testing.T, policy cache.Policy) {
+			store := cache.NewCache[string, []byte](cache.Config[string, []byte]{MaxWeight: 100, WeightOf: byLength, Policy: policy})
+			c.writes(store)
+			if got := store.Stats().Weight; got > 100 {
+				t.Fatalf("Weight = %d after %q was written, over 100", got, c.kept)
+			}
+			if _, ok := store.Fetch(c.kept); !ok {
+				t.Errorf("the entry just written, %q, was evicted", c.kept)
+			}
+		})
+	}
+	// overwrite writes keys of 10 bytes in order, then key again with 95.
+	overwrite := func(key string, keys ...string) func(c *cache.Cache[string, []byte]) {
+		return func(c *cache.Cache[string, []byte]) {
+			for _, k := range keys {
+				c.Set(k, make([]byte, 10))
+			}
+			c.Set(key, make([]byte, 95))
+		}
+	}
+	// ghostX makes the ghost remember x: x leaves probation without a hit.
+	ghostX := func(c *cache.Cache[string, []byte]) {
+		c.Set("x", make([]byte, 10))
+		c.Set("y", make([]byte, 95))
+		c.Delete("y")
+	}
+	cases := []tc{
+		{name: "an overwrite of the oldest of two", writes: overwrite("a", "a", "b"), kept: "a"},
+		{name: "an overwrite of the oldest of three", writes: overwrite("a", "a", "b", "c"), kept: "a"},
+		{name: "an overwrite of the middle of three", writes: overwrite("b", "a", "b", "c"), kept: "b"},
+		{name: "a promotion out of probation", kept: "x", writes: func(c *cache.Cache[string, []byte]) {
+			ghostX(c)
+			//: s sits in probation, under its tenth, with a hit.
+			c.Set("s", make([]byte, 5))
+			c.Fetch("s")
+			//: x comes back into main, alone there, over the bound with s.
+			c.Set("x", make([]byte, 99))
+		}},
+		{name: "an entry alone in main with a hit", kept: "n", writes: func(c *cache.Cache[string, []byte]) {
+			ghostX(c)
+			//: x comes back into main, alone there, and is hit.
+			c.Set("x", make([]byte, 40))
+			c.Fetch("x")
+			//: n enters probation, over the bound with x.
+			c.Set("n", make([]byte, 70))
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

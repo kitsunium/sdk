@@ -82,9 +82,39 @@ func Test_mustProbe(t *testing.T) {
 	}
 }
 
-// Test_probeAddress pins the probe on every OS: a free address passes and is
-// left free, a held one is AddressInUse naming it, a stream's and a
-// datagram's alike.
+// Test_probeAddressLeavesAFreeAddressFree pins the probe's other half on every
+// OS: a free stream address passes and is left free.
+//
+// It is deliberately NOT parallel. Between the close of the listener that
+// found the port and the probe, and between the probe and the bind that checks
+// the port is free again, the port is free, and the OS hands a free port to
+// any socket bound to port 0 or connecting out: run beside the package's
+// parallel tests, which dial and listen on ephemeral ports by the thousands,
+// another socket of this process took it in that window (#1404, on Solaris),
+// and the assertion measured the allocator, not the probe. A serial test runs
+// while every parallel test of the binary is held at its t.Parallel, and the
+// CI guests run one test binary at a time.
+func Test_probeAddressLeavesAFreeAddressFree(t *testing.T) {
+	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := corenet.AddressValue{Network: "tcp", Addr: ln.Addr().String()}
+	swallowErr(ln.Close())
+	if err := probeAddress(t.Context(), addr, true); err != nil {
+		t.Fatalf("probe of a free address = %v", err)
+	}
+	again, err := stdnet.Listen("tcp", addr.Addr)
+	if err != nil {
+		t.Fatalf("the probe left %s held: %v", addr.Addr, err)
+	}
+	swallowErr(again.Close())
+}
+
+// Test_probeAddress pins the probe on every OS: a held address is
+// AddressInUse naming it, a stream's and a datagram's alike, and an address
+// that does not resolve is ListenFailed. A free one is
+// Test_probeAddressLeavesAFreeAddressFree's.
 func Test_probeAddress(t *testing.T) {
 	t.Parallel()
 	t.Run("stream", func(t *testing.T) {
@@ -93,19 +123,11 @@ func Test_probeAddress(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer func() { swallowErr(ln.Close()) }()
 		addr := corenet.AddressValue{Network: "tcp", Addr: ln.Addr().String()}
 		if err := probeAddress(t.Context(), addr, true); !errs.HasCode(err, corenet.CodeAddressInUse) {
 			t.Fatalf("probe of a held address = %v, want ADDRESS_IN_USE", err)
 		}
-		swallowErr(ln.Close())
-		if err := probeAddress(t.Context(), addr, true); err != nil {
-			t.Fatalf("probe of a free address = %v", err)
-		}
-		again, err := stdnet.Listen("tcp", addr.Addr)
-		if err != nil {
-			t.Fatalf("the probe left %s held: %v", addr.Addr, err)
-		}
-		swallowErr(again.Close())
 	})
 	t.Run("datagram", func(t *testing.T) {
 		t.Parallel()

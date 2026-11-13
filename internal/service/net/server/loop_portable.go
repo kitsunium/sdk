@@ -107,7 +107,12 @@ type portableConn struct {
 	// leaves a connection that has sent nothing open for portableQuiet.
 	heardAt time.Time
 	// drained says the drain has told the handler about this connection.
-	drained   bool
+	drained bool
+	// heardNow says the handler was handed bytes since the drain last looked
+	// at the connection: what they asked for may be written only at
+	// OnBatchEnd, so the drain closes it no earlier than the next batch
+	// (#1385).
+	heardNow  bool
 	pressure  bool
 	wantWrite bool
 	peerDone  bool
@@ -814,6 +819,7 @@ func (pc *portableConn) heard(now time.Time) {
 func (pl *portableLoop) deliver(slot int32, pc *portableConn, data []byte) {
 	pl.bytesIn.Add(uint64(len(data)))
 	pc.heard(time.Now())
+	pc.heardNow = true
 	ref := corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}
 	buf := data
 	//: behind a spill the bytes join it; appending never touches the bytes
@@ -964,11 +970,19 @@ func (pl *portableLoop) control() {
 }
 
 // closeSettled marks for closing, as the drain does, every open connection
-// the drain may close now (drainable).
+// the drain may close now (drainable). A connection the batch handed bytes to
+// is judged at the next batch: the handler may answer them at OnBatchEnd,
+// which runs after the drain, and a close marked before it would refuse that
+// answer (#1385).
 func (pl *portableLoop) closeSettled() {
 	now := time.Now()
 	//: each open one the drain may close.
 	for slot, pc := range pl.conns {
+		//: heard in this batch: its answer may still be on its way.
+		if pc.heardNow {
+			pc.heardNow = false
+			continue
+		}
 		//: mid-request ones, ones waiting on a worker, fresh ones not yet
 		//: heard nor quiet: they finish first.
 		if pl.drainable(int32(slot), pc, now) {
