@@ -231,6 +231,197 @@ func TestSendZC_notificationHoldsTheFlight(t *testing.T) {
 	}
 }
 
+// zcStep is one CQE a zero-copy send's flight receives: its own (res, with
+// F_MORE or not), or a notification.
+type zcStep struct {
+	notif bool
+	res   int32
+	more  bool
+}
+
+// zcAnswer is one way the kernel may answer a zero-copy send: the CQEs it
+// posts, in order, from a flight whose sent bytes (sent of 4096) are pinned
+// by pinned earlier sends; whether the peer must read the rest; the
+// notifications still owed the slot when everything settled; and whether the
+// flight must be held past the scripted CQEs until a last notification.
+type zcAnswer struct {
+	name   string
+	sent   int32
+	pinned uint8
+	steps  []zcStep
+	reads  bool
+	owed   int32
+	held   bool
+}
+
+// zcAnswers is every answer TestSendZC_everyAnswerDelivers plays (#1396).
+func zcAnswers() []zcAnswer {
+	const n = 4096
+	refused := func(errno syscall.Errno, more bool) zcStep { return zcStep{res: -int32(errno), more: more} }
+	notif := zcStep{notif: true}
+	var out []zcAnswer
+	for _, e := range []struct {
+		name  string
+		errno syscall.Errno
+	}{{"eopnotsupp", syscall.EOPNOTSUPP}, {"enomem", syscall.ENOMEM}} {
+		out = append(out,
+			zcAnswer{name: e.name + "/more-then-notif", steps: []zcStep{refused(e.errno, true), notif}, reads: true},
+			zcAnswer{name: e.name + "/more-no-notif", steps: []zcStep{refused(e.errno, true)}, reads: true, owed: 1},
+			zcAnswer{name: e.name + "/no-more", steps: []zcStep{refused(e.errno, false)}, reads: true},
+			zcAnswer{name: e.name + "/no-more-then-notif", steps: []zcStep{refused(e.errno, false), notif}, reads: true},
+			zcAnswer{name: e.name + "/notif-then-more", steps: []zcStep{notif, refused(e.errno, true)}, reads: true},
+			zcAnswer{name: e.name + "/notif-then-no-more", steps: []zcStep{notif, refused(e.errno, false)}, reads: true},
+		)
+	}
+	return append(out,
+		// A send of the flight the kernel took still pins its first 1024
+		// bytes: the rest leaves plainly at once, and the chunk is held until
+		// that send's notification, the refused send's coming first.
+		zcAnswer{name: "enomem/after-a-pinned-send", sent: 1024, pinned: 1, steps: []zcStep{refused(syscall.ENOMEM, true), notif}, reads: true, held: true},
+		zcAnswer{name: "accepted/more-then-notif", steps: []zcStep{{res: n, more: true}, notif}},
+		zcAnswer{name: "accepted/no-more", steps: []zcStep{{res: n}}},
+		zcAnswer{name: "accepted/no-more-then-notif", steps: []zcStep{{res: n}, notif}},
+		zcAnswer{name: "accepted/notif-then-more", steps: []zcStep{notif, {res: n, more: true}}},
+		zcAnswer{name: "accepted/notif-then-no-more", steps: []zcStep{notif, {res: n}}},
+	)
+}
+
+// TestSendZC_everyAnswerDelivers plays, on a live ring and on the loop's
+// thread, every answer the kernel may give a zero-copy send of a 4096-byte
+// flight (#1396): refused — EOPNOTSUPP, ENOMEM — or taken, its own CQE with
+// F_MORE or without, a notification after it, before it, or none. A refused
+// flight's bytes reach the peer, by IORING_OP_SEND, without waiting for any
+// notification; the slot keeps one operation for each notification promised
+// and not come, and the chunk is held only while a send the kernel took
+// still pins it; a notification nothing counts is dropped, never taken for a
+// failed send; the connection answers an echo after it all.
+func TestSendZC_everyAnswerDelivers(t *testing.T) {
+	b := backendCase{"iouring", corenet.LoopBackendIOURing}
+	if err := probeBackend(b.backend); err != nil {
+		t.Skipf("io_uring not present: %v", err)
+	}
+	for _, a := range zcAnswers() {
+		t.Run(a.name, func(t *testing.T) { zcAnswerCase(t, b, a) })
+	}
+}
+
+// zcSlot is the open slot of g's first ring, read on the loop's thread.
+type zcSlot struct {
+	slot int32
+	ops  int32
+	err  string
+}
+
+// zcAnswerCase serves one connection, plays a's CQEs on its slot and checks
+// what reaches the peer and what the slot holds once settled.
+func zcAnswerCase(t *testing.T, b backendCase, a zcAnswer) {
+	const n = 4096
+	g, addr := serve(t, b, &lineH{}, func(c *Config) { c.Value.Rings = 1 })
+	c := dial(t, addr)
+	r := bufio.NewReader(c)
+	if _, err := c.Write([]byte("hi\n")); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := r.ReadString('\n'); err != nil || line != "hi\n" {
+		t.Fatalf("echo = %q, %v", line, err)
+	}
+	ul, lp := uringOf(g), g.loops[0]
+	rr := ul.rings[0]
+	done := make(chan zcSlot, 1)
+	if err := lp.Post(func(corenet.LoopIO, uintptr) {
+		var out zcSlot
+		defer func() { done <- out }()
+		out.slot = -1
+		for i := range rr.r.conns {
+			if rr.r.conns[i].state == stOpen {
+				out.slot = int32(i)
+				break
+			}
+		}
+		if out.slot < 0 {
+			out.err = "no open slot"
+			return
+		}
+		cc := &rr.r.conns[out.slot]
+		ref, ok := lp.slab.alloc(n)
+		if !ok || cc.flags&fSending != 0 {
+			out.err = "no chunk, or a send in flight"
+			return
+		}
+		ref.len = n
+		copy(lp.slab.data(ref), pattern(n))
+		out.ops = cc.ops
+		// A zero-copy flight as sendFlight leaves it, a.sent bytes of it sent
+		// by sends whose a.pinned notifications are still to come: the send
+		// in flight and its notification counted, and each pending one.
+		ref.off = a.sent
+		cc.flight, cc.zc, cc.zcPend = ref, zcOn, 1+a.pinned
+		cc.ops += 2 + int32(a.pinned)
+		cc.flags |= fSending
+		ud := udPack(udSend, cc.gen, uint32(out.slot))
+		for _, st := range a.steps {
+			q := &cqe{userData: ud, res: st.res}
+			switch {
+			case st.notif:
+				q.res, q.flags = 0, cqeFNotif
+			case st.more:
+				q.flags = cqeFMore
+			}
+			rr.onSend(out.slot, cc.gen, q)
+		}
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	if got.err != "" {
+		t.Fatal(got.err)
+	}
+	if a.reads {
+		want := pattern(n)[a.sent:]
+		buf := make([]byte, len(want))
+		_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if _, err := io.ReadFull(r, buf); err != nil || !bytes.Equal(buf, want) {
+			t.Fatalf("the refused flight's %d bytes: %v", len(want), err)
+		}
+	}
+	type settled struct {
+		held, sending bool
+		ops           int32
+		pend, void    uint8
+	}
+	read := func() settled {
+		var s settled
+		onLoop(t, g, func() {
+			cc := &rr.r.conns[got.slot]
+			s = settled{!cc.flight.empty(), cc.flags&fSending != 0, cc.ops, cc.zcPend, cc.zcVoid}
+		})
+		return s
+	}
+	if a.held {
+		waitFor(t, "the rest sent plainly", func() bool { s := read(); return s.held && s.ops == got.ops+1 })
+		if s := read(); !s.held || !s.sending || s.pend != 1 {
+			t.Fatalf("before the pinning send's notification: %+v, want the chunk held, pending 1", s)
+		}
+		done := make(chan struct{})
+		if err := lp.Post(func(corenet.LoopIO, uintptr) {
+			defer close(done)
+			cc := &rr.r.conns[got.slot]
+			rr.onSend(got.slot, cc.gen, &cqe{userData: udPack(udSend, cc.gen, uint32(got.slot)), flags: cqeFNotif})
+		}, 0); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+	}
+	want := settled{ops: got.ops + a.owed, void: uint8(a.owed)}
+	waitFor(t, "the flight settled", func() bool { return read() == want })
+	if _, err := c.Write([]byte("after\n")); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := r.ReadString('\n'); err != nil || line != "after\n" {
+		t.Fatalf("the echo after it: %q, %v", line, err)
+	}
+}
+
 // TestSendZC_switchedOffAndRefused pins the two ways out: the operator's
 // switch reads disabled and issues no opcode 47; a refused probe
 // (failStage=send_zc) reads missing — opted into, a fault — and every byte
@@ -274,9 +465,9 @@ const ipprotoMPTCP = 262
 // accepted from an MPTCP listener, which lacks SOCK_SUPPORT_ZC as every
 // connection Go's default listener accepts does — answers EOPNOTSUPP to
 // IORING_OP_SEND_ZC. The connection is not failed: the refused flight is
-// sent again by IORING_OP_SEND once its notification came, byte-exact at
-// 8 MiB read slowly, one opcode 47 issued in all, every later flight of the
-// ring plain.
+// sent again by IORING_OP_SEND at once, its notification waited for by the
+// slot alone (#1396), byte-exact at 8 MiB read slowly, one opcode 47 issued
+// in all, every later flight of the ring plain.
 func TestSendZC_refusedBySocket(t *testing.T) {
 	b := backendCase{"iouring", corenet.LoopBackendIOURing}
 	if err := probeBackend(b.backend); err != nil {
@@ -319,6 +510,7 @@ func TestSendZC_goListener(t *testing.T) {
 	t.Run("multipath-off", func(t *testing.T) {
 		fd, addr, mptcp := goListenFD(t, false)
 		if mptcp {
+			_ = syscall.Close(fd)
 			t.Fatal("SetMultipathTCP(false) bound an MPTCP socket")
 		}
 		if z, p := zcTransfer(t, b, fd, "tcp", addr); z == 0 || p != 0 {
@@ -328,6 +520,7 @@ func TestSendZC_goListener(t *testing.T) {
 	t.Run("go-default", func(t *testing.T) {
 		fd, addr, mptcp := goListenFD(t, true)
 		if !mptcp {
+			_ = syscall.Close(fd)
 			t.Skipf("Go's default listener is plain TCP here (%s, GODEBUG=%q): nothing to refuse", kernelRelease(), os.Getenv("GODEBUG"))
 		}
 		if z, p := zcTransfer(t, b, fd, "tcp", addr); z != 1 || p == 0 {
@@ -339,7 +532,9 @@ func TestSendZC_goListener(t *testing.T) {
 // goListenFD binds a loopback listener with Go's net.ListenConfig, Multipath
 // TCP as multipath says (true keeps Go's default), and hands back a
 // duplicated, non-blocking descriptor of it, as server does, its address, and
-// whether the kernel made it an MPTCP socket (SO_PROTOCOL).
+// whether the kernel made it an MPTCP socket (SO_PROTOCOL). The descriptor is
+// the caller's to hand to a group, which closes it (Listener), or to close: a
+// second close here would close whatever reused its number.
 func goListenFD(t *testing.T, multipath bool) (int, string, bool) {
 	t.Helper()
 	var lc stdnet.ListenConfig
@@ -368,8 +563,8 @@ func goListenFD(t *testing.T, multipath bool) (int, string, bool) {
 	}); cerr != nil || derr != nil || perr != nil {
 		t.Fatalf("the listener's descriptor: %v %v %v", cerr, derr, perr)
 	}
-	t.Cleanup(func() { _ = syscall.Close(fd) })
 	if err := syscall.SetNonblock(fd, true); err != nil {
+		_ = syscall.Close(fd)
 		t.Fatal(err)
 	}
 	return fd, ln.Addr().String(), proto == ipprotoMPTCP
@@ -407,7 +602,7 @@ func zcTransfer(t *testing.T, b backendCase, fd int, network, addr string) (zc, 
 	for off := 0; off < n; {
 		k, err := r.Read(got[off:min(n, off+1+off%7919)])
 		if err != nil {
-			t.Fatalf("after %d bytes: %v", off, err)
+			t.Fatalf("after %d bytes: %v; zc=%d plain=%d; %s", off, err, ops.zc.Load(), ops.plain.Load(), zcWhere(g))
 		}
 		off += k
 	}
@@ -421,6 +616,44 @@ func zcTransfer(t *testing.T, b backendCase, fd int, network, addr string) (zc, 
 		t.Fatalf("the next flight: %v", err)
 	}
 	return ops.zc.Load(), ops.plain.Load()
+}
+
+// zcWhere says where a zero-copy exchange stands when its peer read
+// nothing (#1396): each ring's accepted connections and bytes in and out, and
+// its watchdog fires and accept pauses, and every slot in use's flight — how
+// it leaves, its notifications pending and owed, its operations — read on the
+// loop's thread, bounded.
+func zcWhere(g *Group) string {
+	var b strings.Builder
+	for _, rs := range g.State().RingStates {
+		b.WriteString("ring " + strconv.Itoa(rs.Ring) + ": accepted " + strconv.FormatUint(rs.Accepted, 10) +
+			", in " + strconv.FormatUint(rs.BytesIn, 10) + ", out " + strconv.FormatUint(rs.BytesOut, 10) +
+			", watchdog " + strconv.FormatUint(rs.WatchdogFires, 10) + ", pauses " + strconv.FormatUint(rs.AcceptPauses, 10) + "; ")
+	}
+	slots := make(chan string, 1)
+	if err := g.loops[0].Post(func(corenet.LoopIO, uintptr) {
+		var sb strings.Builder
+		for _, rr := range uringOf(g).rings {
+			for i := range rr.r.conns {
+				cc := &rr.r.conns[i]
+				if cc.state == stFree {
+					continue
+				}
+				sb.WriteString("slot " + strconv.Itoa(i) + ": state " + strconv.Itoa(int(cc.state)) + " zc " + strconv.Itoa(int(cc.zc)) +
+					" pend " + strconv.Itoa(int(cc.zcPend)) + " void " + strconv.Itoa(int(cc.zcVoid)) + " ops " + strconv.Itoa(int(cc.ops)) +
+					" sending " + strconv.FormatBool(cc.flags&fSending != 0) + " flight " + strconv.Itoa(int(cc.flight.off)) + "/" + strconv.Itoa(int(cc.flight.len)) + "; ")
+			}
+		}
+		slots <- sb.String()
+	}, 0); err != nil {
+		return b.String() + "the loop refused the post: " + err.Error()
+	}
+	select {
+	case s := <-slots:
+		return b.String() + s
+	case <-time.After(2 * time.Second):
+		return b.String() + "the loop did not answer within 2 s"
+	}
 }
 
 // TestSendZC_refusedForMemory pins the other refusal at send time: the
@@ -515,22 +748,22 @@ const rlimitMemlock = 8
 
 // mptcpListenFD binds a non-blocking MPTCP listener on loopback, as Go's
 // net.Listen does by default, and skips where the kernel has no MPTCP or it
-// is switched off (net.mptcp.enabled = 0).
+// is switched off (net.mptcp.enabled = 0). The descriptor is handed to the
+// group, which closes it; it is closed here only when the listen failed.
 func mptcpListenFD(t *testing.T) (int, string, string) {
 	t.Helper()
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, ipprotoMPTCP)
 	if err != nil {
 		t.Skipf("no MPTCP socket here: %v", err)
 	}
-	t.Cleanup(func() { _ = syscall.Close(fd) })
-	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
-		t.Fatal(err)
+	var sa syscall.Sockaddr
+	if err = syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err == nil {
+		if err = syscall.Listen(fd, 128); err == nil {
+			sa, err = syscall.Getsockname(fd)
+		}
 	}
-	if err := syscall.Listen(fd, 128); err != nil {
-		t.Fatal(err)
-	}
-	sa, err := syscall.Getsockname(fd)
 	if err != nil {
+		_ = syscall.Close(fd)
 		t.Fatal(err)
 	}
 	return fd, "tcp", "127.0.0.1:" + strconv.Itoa(sa.(*syscall.SockaddrInet4).Port)

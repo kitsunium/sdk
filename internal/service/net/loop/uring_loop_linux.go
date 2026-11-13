@@ -1687,8 +1687,9 @@ func (rr *uRing) onSend(slot int32, gen uint32, c *cqe) {
 		return
 	}
 	cc := &rr.r.conns[slot]
-	//: a zero-copy send's notification, or its refusal (#969).
-	if cc.zc != zcOff && rr.zeroCopyHandled(slot, c) {
+	//: a zero-copy send's notification, whatever the flight now is, or its
+	//: refusal (#969, #1396).
+	if (cc.zc != zcOff || c.flags&cqeFNotif != 0) && rr.zeroCopyHandled(slot, c) {
 		//: settled, held or sent again.
 		return
 	}
@@ -2057,6 +2058,14 @@ func (rr *uRing) flush(r *ring, slot int32) {
 // sendFlight submits the unsent rest of slot's flight.
 func (rr *uRing) sendFlight(slot int32) {
 	c := &rr.r.conns[slot]
+	//: as many notifications pending as zcPend counts: none sent until they
+	//: came, the rest then plain; no SQE taken for it.
+	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
+		c.zc = zcHold
+		c.flags |= fSending
+		//: held.
+		return
+	}
 	s := rr.u.get()
 	//: no room: the connection fails rather than stalls silently.
 	if s == nil {
@@ -2066,14 +2075,6 @@ func (rr *uRing) sendFlight(slot int32) {
 		return
 	}
 	ud := udPack(udSend, c.gen, uint32(slot))
-	//: as many notifications pending as zcPend counts: none sent until they
-	//: came, the rest then plain.
-	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
-		c.zc = zcHold
-		c.flags |= fSending
-		//: held.
-		return
-	}
 	//: plain, or zero-copy: its notification is one more operation (#969).
 	if c.zc == zcOn {
 		prepSendZC(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)

@@ -142,8 +142,8 @@ const drainCloseWindow = 20 * time.Millisecond
 // drain, on every backend the platform has: clients dial back to back and
 // stop only once a dial is refused — the listener closed. Every connection
 // whose dial succeeded must read its echo, never a reset nor an end before
-// it, unless it was dialled within drainCloseWindow of the first refusal:
-// the close's own window, which no sequence of calls on one listener closes.
+// it, unless it was dialled within drainCloseWindow of the first refused
+// dial's start: the close's own window, which no sequence of calls on one listener closes.
 // Each backend takes its listen queue before it closes the listener, so
 // what waited there is served.
 func TestDrain_arrivalsAcrossTheDrain(t *testing.T) {
@@ -171,8 +171,8 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 	}
 	addr := srv.State().Listeners[0].Address
 	type cut struct {
-		at  time.Time
-		msg string
+		at, failed time.Time
+		msg        string
 	}
 	var draining atomic.Bool
 	var during atomic.Int64
@@ -187,23 +187,34 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 				//: a connection is placed by when the kernel completed it:
 				//: an h2c exchange on a slow guest (NetBSD) began 20.036 ms
 				//: before the close and was completed inside the window.
+				//: a refusal dates the close by when its dial began: the kernel
+				//: may answer a SYN that met the closing listener only on its
+				//: retransmission — FreeBSD's first comes a second later, and
+				//: #1385's cut connections, reset 49 µs after their dial
+				//: returned, were dated 1.009 s before a refusal that returned
+				//: on it.
+				start := time.Now()
 				dialled, at, msg := p.exchange(addr)
+				failed := time.Now()
 				mu.Lock()
 				switch {
 				case !dialled && !began && !draining.Load():
-					cuts = append(cuts, cut{at, "refused before the drain: " + msg})
+					cuts = append(cuts, cut{at, failed, "refused before the drain: " + msg})
 				case !dialled:
-					refusedAt = append(refusedAt, at)
+					refusedAt = append(refusedAt, start)
 				case msg != "":
-					cuts = append(cuts, cut{at, msg})
+					cuts = append(cuts, cut{at, failed, msg})
 				case began:
 					during.Add(1)
 				}
 				mu.Unlock()
+				//: back to back: the first refusal dates the close. A pause
+				//: between two exchanges dated it late by the pause, which
+				//: NetBSD's 10 ms clock makes 20 ms — #1385's four cuts at
+				//: 20.1 to 20.5 ms, none inside the window.
 				if !dialled {
 					return
 				}
-				time.Sleep(time.Millisecond)
 			}
 		})
 	}
@@ -225,7 +236,7 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 			window++
 			continue
 		}
-		t.Errorf("cut short %v before the listener closed: %s", closed.Sub(c.at), c.msg)
+		t.Errorf("cut short %v before the listener closed, failed %v before it: %s", closed.Sub(c.at), closed.Sub(c.failed), c.msg)
 	}
 	t.Logf("%d served during the drain; %d reset within %v of the close", during.Load(), window, drainCloseWindow)
 	if o, cl := counts(); o != cl {
