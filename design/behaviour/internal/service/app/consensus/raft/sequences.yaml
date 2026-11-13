@@ -2277,7 +2277,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: r.facts&raftLeaseDropped != 0 || !sentAt.After(r.leaseStart)
+          when: r.facts&raftLeaseDropped != 0 || sentAt.Before(r.leaseStart)
       - set: r.leaseStart
         value: sentAt
       - opt:
@@ -5538,7 +5538,7 @@ sequences:
                 value: term
               - set: r.vote
                 value: "0"
-            when: term != r.term
+            when: term > r.term
           - do:
               - set: r.vote
                 value: "0"

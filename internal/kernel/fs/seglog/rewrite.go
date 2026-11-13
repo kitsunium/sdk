@@ -90,7 +90,11 @@ func (l *Log) rewriteSegment(
 	out, moved := res.data, res.moved
 	size := int64(len(out))
 	if last {
-		size = s.size
+		// The segment being written keeps its size, and grows when an edit
+		// lengthened its records: the seal a later rotation writes must still
+		// fit after them, or that rotation seals nothing and recovery refuses
+		// the segment as a sealed one with a hole.
+		size = max(s.size, size+sealReserve)
 	}
 	if err := l.writeTmp(s.n, out, size); err != nil {
 		return false, err

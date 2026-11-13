@@ -79,8 +79,23 @@ message, then steps ops that replay a recorded message or forge one
 replays keep every check and end on convergence, a forgery switches off
 the checks that compare nodes (`sim.forged`) and keeps each node's own;
 `sim.budget` and `maxReadyTurns` fail a run that never settles. Its seed
-corpus runs with the suite; `scripts/ci/consensus-fuzz.sh` fuzzes it 10
-minutes a night. Both files are named to sort after every seed suite.
+corpus runs with the suite, with the crashers kept under
+`testdata/fuzz/FuzzStep/` (the walkthrough reads `testdata/*.txt` only):
+`term-zero-append-at-a-candidate-1362` is a forged TimeoutNow then an
+append of term 0 at the candidate it made, which followed the sender at
+term 0 and wrote a HardState of term 0 over a durable term of 3 (#1362);
+`becomeFollower` never lowers the term, and
+`TestATermlessMessageNeverLowersTheTerm` (`ztermless_internal_test.go`)
+holds it at a candidate and a pre-candidate. A residual risk is left on
+purpose: `stepTerm` still hands a peer's message of term 0 on at this
+node's own term, so a follower takes a termless append from a peer as one
+of the current term. No correct sender emits one (`send` stamps the term,
+the PreVote and its answer carry theirs), but a node at term 0 — a joiner
+before its first append — stamps 0, and refusing term 0 in `Step` was not
+proved free of a legitimate sender (a joiner, a restart, the observer's
+import, a transfer's frames), so it is not refused; the wire does not
+refuse it either. `scripts/ci/consensus-fuzz.sh` fuzzes it 10 minutes a
+night. Both files are named to sort after every seed suite.
 
 Bazel deals top-level tests to shards by their index, so a new test file
 whose name sorts before a seed suite's (`checks_*`, `lincheck_*`, `sim_*`,
@@ -348,6 +363,15 @@ under coverage before touching `shard_count`.
 - Hold a lease under a contract with no drift budget in (0, 1), or run a
   founding contract without its maximum (#523, `mutLeaseWithoutDrift`,
   `mutFoundingAsWritten`).
+- Move the lease only to a round sent strictly after the one it rests on.
+  Two rounds leave at one instant, a read flushed in the turn of a round
+  already confirmed, and the newer was ignored: a first round confirmed by
+  a follower holding nothing durably committed, which reports generation 0
+  (#698), left a lease of 0 at that instant, and a read a majority of
+  generation 1 confirmed at the same instant left the leader with no lease
+  (#1390, `extendLease`, `TestTheNewestRoundSetsTheLeaseAtItsOwnInstant`).
+  The newest confirmed round sets the lease with its own window, never the
+  longer of the two: a newer round of a shorter window shortens it.
 - Take a read's answer from any peer but the leader this node asked (#510,
   `mutReadRespAnyPeer`).
 - Hand the driver the admission set at a commit that did not change it:

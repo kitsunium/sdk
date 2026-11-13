@@ -4,9 +4,10 @@
 # Runs every fuzz target of the consensus domain for a bounded time each:
 # the frame, snapshot-metadata, admin and token decoders of wire/, and the
 # log record decoder, segment scan and tail classification of the engine,
-# and raft's step function under the simulator's invariants (FuzzStep, #924),
+# raft's step function under the simulator's invariants (FuzzStep, #924),
 # which runs for its own time, FUZZ_STEP_TIME (10m), whatever the others
-# run for. A crash, a hang or a broken property fails the run; go writes the failing input under the
+# run for, and the same three targets of kernel/fs/seglog, the segmented log
+# extracted from the engine's (#820). A crash, a hang or a broken property fails the run; go writes the failing input under the
 # package's testdata/fuzz/<Target>/, which the workflow uploads, and which a
 # fix commits as a regression case. Local: scripts/ci/consensus-fuzz.sh 30s
 # (FUZZ_STEP_TIME=30s for FuzzStep as well).
@@ -24,6 +25,9 @@ targets=(
 	"./internal/service/app/consensus FuzzClassifyTail"
 	"./internal/service/app/consensus FuzzScanSegment"
 	"./internal/service/app/consensus/raft FuzzStep"
+	"./internal/kernel/fs/seglog FuzzParseRecord"
+	"./internal/kernel/fs/seglog FuzzOpenTail"
+	"./internal/kernel/fs/seglog FuzzScanSegment"
 )
 failed=0
 for t in "${targets[@]}"; do

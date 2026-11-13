@@ -143,6 +143,11 @@ func TestPreflightRefusesALockedDirectory(t *testing.T) {
 	}
 	dir := t.TempDir()
 	d := openDir(t, dir, 1<<16)
+	// The held log zero-fills its next segment in the background: the
+	// listing is taken once that .tmp exists, or it lands between the two
+	// listings and reads as the refused call's write (#1363, 17 times in 20
+	// on tmpfs).
+	settlePrepared(d)
 	before := listing(t, dir)
 	_, err := Preflight(dir, PreflightOptions{Syncs: 4})
 	if !errors.Is(err, coreconsensus.DataDirLocked) {

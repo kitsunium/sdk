@@ -66,9 +66,13 @@ func newManualCluster(t *testing.T, reads ReadMode) *manualCluster {
 	return mc
 }
 
-// elect advances the clock a tick at a time until a leader has confirmed a
-// read of its own term, then stops it: from there on no tick fires, and
-// every heartbeat is one a read opened.
+// elect advances the clock a tick at a time until a leader whose commit
+// every follower holds has confirmed a read of its own term, then stops it:
+// from there on no tick fires, and every heartbeat is one a read opened.
+// The read is asked only once the followers hold the commit: a follower
+// that has not heard it yet answers a heartbeat with generation 0, which
+// sizes no lease (#698), and a round it confirms, this read's or one still
+// in flight, leaves the leader a lease of 0 (#1390).
 func (mc *manualCluster) elect(t *testing.T) *testNode {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
@@ -78,7 +82,7 @@ func (mc *manualCluster) elect(t *testing.T) *testNode {
 			time.Sleep(200 * time.Microsecond)
 		}
 		for _, tn := range mc.nodes {
-			if tn.node.Status().Role != coreconsensus.RoleLeader {
+			if tn.node.Status().Role != coreconsensus.RoleLeader || !mc.followersHoldCommit(tn) {
 				continue
 			}
 			done := make(chan error, 1)
@@ -95,6 +99,30 @@ func (mc *manualCluster) elect(t *testing.T) *testNode {
 	}
 	t.Fatal("setup: no leader confirmed a read on the manual clock")
 	return nil
+}
+
+// followersHoldCommit reports whether every other node holds l's commit,
+// committed and durable, each read on its own loop: its heartbeat answers
+// then report the contract that commit put in force.
+func (mc *manualCluster) followersHoldCommit(l *testNode) bool {
+	var commit uint64
+	if !l.node.exec(func() { commit = l.node.r.Status().Commit }) || commit == 0 {
+		return false
+	}
+	for _, tn := range mc.nodes {
+		if tn == l {
+			continue
+		}
+		held := false
+		tn.node.exec(func() {
+			st := tn.node.r.Status()
+			held = min(st.Commit, st.Stable) >= commit
+		})
+		if !held {
+			return false
+		}
+	}
+	return true
 }
 
 // settle keeps the clock moving until the read that answers on done ends,
