@@ -7,38 +7,13 @@ sequences:
         kind: actor
       - id: NewCache
         kind: self
-      - id: newGhostSet
+      - id: built.core.init
         kind: internal
     steps:
-      - bind: clk
-        eval: cfg.Clock
-      - opt:
-          do:
-            - set: clk
-              value: clock.System
-          when: clk == nil
-      - bind: maxEntries
-        eval: max(cfg.MaxEntries, 0)
       - bind: built
-        eval: |-
-          &Cache[K, V]{
-          		clk:        clk,
-          		maxEntries: maxEntries,
-          		maxWeight:  max(cfg.MaxWeight, 0),
-          		weightOf:   cfg.WeightOf,
-          		defaultTTL: cfg.DefaultTTL,
-          		onEvict:    cfg.OnEvict,
-          		policy:     PolicyLRU,
-          		items:      make(map[K]*entry[K, V], maxEntries),
-          	}
-      - opt:
-          do:
-            - set: built.policy
-              value: PolicyS3FIFO
-            - set: built.ghost
-              to: newGhostSet
-              value: newGhostSet[K]()
-          when: cfg.Policy == PolicyS3FIFO
+        eval: "&Cache[K, V]{}"
+      - eval: built.core.init(cfg)
+        to: built.core.init
       - return: built
   - of: (*Cache).Fetch
     participants:
@@ -46,44 +21,17 @@ sequences:
         kind: actor
       - id: (*Cache).Fetch
         kind: self
-      - id: c.removeEvict
-        kind: internal
-      - id: c.touch
+      - id: c.core.fetch
         kind: internal
     steps:
       - var:
           name: pending
           type: "[]evictionValue[K, V]"
-      - defer: func() { c.notifyEvicted(pending) }()
+      - defer: func() { c.core.notifyEvicted(pending) }()
       - lock:
           mutex: c.mu
-      - bind: ent, found
-        eval: c.items[key]
-      - opt:
-          do:
-            - op: ++
-              set: c.misses
-            - var:
-                name: zero
-                type: V
-            - return: zero, false
-          when: "!found"
-      - opt:
-          do:
-            - eval: c.removeEvict(ent, &pending)
-              to: c.removeEvict
-            - op: ++
-              set: c.misses
-            - var:
-                name: zero
-                type: V
-            - return: zero, false
-          when: c.expired(ent)
-      - eval: c.touch(ent)
-        to: c.touch
-      - op: ++
-        set: c.hits
-      - return: ent.val, true
+      - return: c.core.fetch(key, &pending)
+        to: c.core.fetch
   - of: (*Cache).Set
     participants:
       - id: caller
@@ -93,7 +41,7 @@ sequences:
       - id: c.setTTL
         kind: internal
     steps:
-      - eval: c.setTTL(key, val, c.defaultTTL)
+      - eval: c.setTTL(key, val, c.core.defaultTTL)
         to: c.setTTL
   - of: (*Cache).SetTTL
     participants:
@@ -112,143 +60,47 @@ sequences:
         kind: actor
       - id: (*Cache).setTTL
         kind: self
-      - id: c.clk.Now().Add
-        kind: value
-      - id: c.overwrite
-        kind: internal
-      - id: c.admit
-        kind: internal
-      - id: c.setDeadline
-        kind: internal
-      - id: c.evictIfNeeded
+      - id: c.core.set
         kind: internal
     steps:
       - var:
           name: pending
           type: "[]evictionValue[K, V]"
-      - defer: func() { c.notifyEvicted(pending) }()
+      - defer: func() { c.core.notifyEvicted(pending) }()
       - lock:
           mutex: c.mu
-      - var:
-          name: exp
-          type: time.Time
-      - opt:
-          do:
-            - set: exp
-              to: c.clk.Now().Add
-              value: c.clk.Now().Add(ttl)
-          when: ttl > 0
-      - opt:
-          do:
-            - eval: c.overwrite(ent, val, exp, &pending)
-              to: c.overwrite
-            - return: ""
-          init:
-            bind: ent, found
-            eval: c.items[key]
-          when: found
-      - bind: ent
-        eval: "&entry[K, V]{key: key, val: val, weight: c.weigh(key, val)}"
-      - set: c.items[key]
-        value: ent
-      - eval: c.admit(ent)
-        to: c.admit
-      - eval: c.setDeadline(ent, exp)
-        to: c.setDeadline
-      - eval: c.evictIfNeeded(ent, &pending)
-        to: c.evictIfNeeded
-  - of: (*Cache).overwrite
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Cache).overwrite
-        kind: self
-      - id: c.reweigh
-        kind: internal
-      - id: c.setDeadline
-        kind: internal
-      - id: c.touch
-        kind: internal
-      - id: c.evictIfNeeded
-        kind: internal
-    steps:
-      - opt:
-          do:
-            - eval: c.reweigh(ent, c.weigh(ent.key, val))
-              to: c.reweigh
-          when: c.weightOf != nil
-      - set: ent.val
-        value: val
-      - eval: c.setDeadline(ent, exp)
-        to: c.setDeadline
-      - eval: c.touch(ent)
-        to: c.touch
-      - opt:
-          do:
-            - eval: c.evictIfNeeded(ent, pending)
-              to: c.evictIfNeeded
-          when: c.maxWeight > 0
+      - eval: c.core.set(key, val, ttl, &pending)
+        to: c.core.set
   - of: (*Cache).Delete
     participants:
       - id: caller
         kind: actor
       - id: (*Cache).Delete
         kind: self
-      - id: c.detach
+      - id: c.core.remove
         kind: internal
     steps:
       - lock:
           mutex: c.mu
-      - opt:
-          do:
-            - eval: c.detach(ent)
-              to: c.detach
-          init:
-            bind: ent, found
-            eval: c.items[key]
-          when: found
+      - eval: c.core.remove(key)
+        to: c.core.remove
   - of: (*Cache).Expire
     participants:
       - id: caller
         kind: actor
       - id: (*Cache).Expire
         kind: self
-      - id: c.clk.Now
-        kind: value
-      - id: c.expiry.Peek
-        kind: value
-      - id: c.removeEvict
+      - id: c.core.expire
         kind: internal
     steps:
       - var:
           name: pending
           type: "[]evictionValue[K, V]"
-      - defer: func() { c.notifyEvicted(pending) }()
+      - defer: func() { c.core.notifyEvicted(pending) }()
       - lock:
           mutex: c.mu
-      - opt:
-          do:
-            - return: "0"
-          when: c.expiry == nil || c.expiry.Len() == 0
-      - bind: now
-        eval: c.clk.Now()
-        to: c.clk.Now
-      - bind: reaped
-        eval: "0"
-      - loop:
-          do:
-            - bind: top, _, ok
-              eval: c.expiry.Peek()
-              to: c.expiry.Peek
-            - opt:
-                do:
-                  - return: reaped
-                when: "!ok || now.Before(top.expireAt)"
-            - eval: c.removeEvict(top, &pending)
-              to: c.removeEvict
-            - op: ++
-              set: reaped
-          forever: true
+      - return: c.core.expire(&pending)
+        to: c.core.expire
   - of: (*Cache).Keys
     steps:
       - return:
@@ -270,298 +122,201 @@ sequences:
         kind: actor
       - id: (*Cache).keySnapshot
         kind: self
-      - id: c.clk.Now
-        kind: value
+      - id: c.core.keySnapshot
+        kind: internal
     steps:
       - lock:
           mutex: c.mu
-          read: true
-      - bind: keys
-        eval: make([]K, 0, len(c.items))
-      - var:
-          name: now
-          type: time.Time
-      - loop:
-          do:
-            - opt:
-                do:
-                  - opt:
-                      do:
-                        - set: now
-                          to: c.clk.Now
-                          value: c.clk.Now()
-                      when: now.IsZero()
-                  - opt:
-                      do:
-                        - continue: true
-                      when: "!now.Before(ent.expireAt)"
-                when: "!ent.expireAt.IsZero()"
-            - set: keys
-              value: append(keys, key)
-          key: key
-          range: c.items
-          value: ent
-      - return: keys
+      - return: c.core.keySnapshot()
+        to: c.core.keySnapshot
   - of: (*Cache).Len
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).Len
+        kind: self
+      - id: c.core.Len
+        kind: internal
     steps:
       - lock:
           mutex: c.mu
-          read: true
-      - return: len(c.items)
+      - return: c.core.Len()
+        to: c.core.Len
   - of: (*Cache).Purge
     participants:
       - id: caller
         kind: actor
       - id: (*Cache).Purge
         kind: self
-      - id: c.ghost.reset
+      - id: c.core.Purge
         kind: internal
     steps:
       - lock:
           mutex: c.mu
-      - set: c.items
-        value: make(map[K]*entry[K, V], c.maxEntries)
-      - set: c.main
-        value: entryList[K, V]{}
-      - set: c.small
-        value: entryList[K, V]{}
-      - set: c.expiry
-        value: nil
-      - opt:
-          do:
-            - eval: c.ghost.reset()
-              to: c.ghost.reset
-          when: c.policy == PolicyS3FIFO
+      - eval: c.core.Purge()
+        to: c.core.Purge
   - of: (*Cache).Stats
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Cache).Stats
+        kind: self
+      - id: c.core.Stats
+        kind: internal
     steps:
       - lock:
           mutex: c.mu
-          read: true
-      - var:
-          name: weight
-          type: int64
-      - opt:
-          do:
-            - set: weight
-              value: c.main.weight + c.small.weight
-          when: c.maxWeight > 0 || c.weightOf != nil
-      - return: "StatsValue{Hits: c.hits, Misses: c.misses, Evictions: c.evictions, Weight: weight, Policy: c.policy}"
-  - of: (*Cache).weigh
+      - return: c.core.Stats()
+        to: c.core.Stats
+  - of: (*deadlineHeap).size
+    steps:
+      - return: len(h.slots)
+  - of: (*deadlineHeap).top
     steps:
       - opt:
           do:
-            - return: "1"
-          when: c.weightOf == nil
-      - return: int32(min(max(c.weightOf(key, val), 0), math.MaxInt32))
-  - of: (*Cache).reweigh
+            - return: nil, 0
+          when: len(h.slots) == 0
+      - return: h.slots[0].ent, h.slots[0].at
+  - of: (*deadlineHeap).push
     participants:
       - id: caller
         kind: actor
-      - id: (*Cache).reweigh
+      - id: (*deadlineHeap).push
         kind: self
-      - id: c.listOf
+      - id: h.up
         kind: internal
     steps:
-      - bind: list
-        eval: c.listOf(ent)
-        to: c.listOf
-      - op: +=
-        set: list.weight
-        value: int64(weight) - int64(ent.weight)
-      - set: ent.weight
-        value: weight
-  - of: (*Cache).setDeadline
+      - set: h.slots
+        value: "append(h.slots, deadlineSlot[K, V]{at: at, ent: ent})"
+      - eval: h.up(len(h.slots) - 1)
+        to: h.up
+  - of: (*deadlineHeap).fix
     participants:
       - id: caller
         kind: actor
-      - id: (*Cache).setDeadline
+      - id: (*deadlineHeap).fix
         kind: self
-      - id: c.expiry.Remove
-        kind: value
-      - id: heap
-        kind: package
-      - id: c.expiry.Update
-        kind: value
-      - id: c.expiry.Push
-        kind: value
+      - id: h.down
+        kind: internal
     steps:
-      - set: ent.expireAt
-        value: exp
+      - bind: cell
+        eval: int(ent.slot) - 1
+      - set: h.slots[cell].at
+        value: at
       - opt:
           do:
+            - eval: h.down(cell)
+              to: h.down
+          when: "!h.up(cell)"
+  - of: (*deadlineHeap).remove
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deadlineHeap).remove
+        kind: self
+      - id: h.down
+        kind: internal
+    steps:
+      - bind: cell
+        eval: int(ent.slot) - 1
+      - bind: last
+        eval: len(h.slots) - 1
+      - set: ent.slot
+        value: "0"
+      - opt:
+          do:
+            - set: h.slots[cell]
+              value: h.slots[last]
+          when: cell != last
+      - set: h.slots[last]
+        value: deadlineSlot[K, V]{}
+      - set: h.slots
+        value: h.slots[:last]
+      - opt:
+          do:
+            - eval: h.down(cell)
+              to: h.down
+          when: cell != last && !h.up(cell)
+  - of: (*deadlineHeap).up
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deadlineHeap).up
+        kind: self
+      - id: h.place
+        kind: internal
+    steps:
+      - bind: moving
+        eval: h.slots[index]
+      - bind: start
+        eval: index
+      - loop:
+          cond: index > 0
+          do:
+            - bind: parent
+              eval: (index - 1) / heapArity
             - opt:
                 do:
-                  - eval: c.expiry.Remove(ent.expiry)
-                    to: c.expiry.Remove
-                  - set: ent.expiry
-                    value: heap.Handle{}
-                when: ent.expiry != (heap.Handle{})
-            - return: ""
-          when: exp.IsZero()
-      - opt:
-          do:
-            - set: c.expiry
-              to: heap
-              value: heap.NewIndexed(byDeadline[K, V])
-          when: c.expiry == nil
-      - opt:
-          do:
-            - eval: c.expiry.Update(ent.expiry, ent)
-              to: c.expiry.Update
-            - return: ""
-          when: ent.expiry != (heap.Handle{})
-      - set: ent.expiry
-        to: c.expiry.Push
-        value: c.expiry.Push(ent)
-  - of: byDeadline
+                  - break: true
+                when: h.slots[parent].at <= moving.at
+            - eval: h.place(index, h.slots[parent])
+              to: h.place
+            - set: index
+              value: parent
+      - eval: h.place(index, moving)
+        to: h.place
+      - return: index != start
+  - of: (*deadlineHeap).down
     participants:
       - id: caller
         kind: actor
-      - id: byDeadline
+      - id: (*deadlineHeap).down
         kind: self
-      - id: a.expireAt.Compare
-        kind: value
+      - id: h.place
+        kind: internal
     steps:
-      - return: a.expireAt.Compare(b.expireAt)
-        to: a.expireAt.Compare
-  - of: (*Cache).expired
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Cache).expired
-        kind: self
-      - id: c.clk.Now().Before
-        kind: value
-    steps:
-      - opt:
-          do:
-            - return: "false"
-          when: ent.expireAt.IsZero()
-      - return: "!c.clk.Now().Before(ent.expireAt)"
-        to: c.clk.Now().Before
-  - of: (*Cache).overCapacity
-    steps:
+      - bind: moving
+        eval: h.slots[index]
       - bind: count
-        eval: len(c.items)
-      - opt:
-          do:
-            - return: "true"
-          when: c.maxEntries > 0 && count > c.maxEntries
-      - return: c.maxWeight > 0 && count > 1 && c.main.weight+c.small.weight > c.maxWeight
-  - of: (*Cache).evictIfNeeded
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Cache).evictIfNeeded
-        kind: self
-      - id: c.expiry.Peek
-        kind: value
-      - id: c.removeEvict
-        kind: internal
-    steps:
-      - opt:
-          do:
-            - return: ""
-          when: "!c.overCapacity()"
-      - var:
-          name: now
-          type: time.Time
-      - bind: read
-        eval: "false"
+        eval: len(h.slots)
       - loop:
-          cond: c.overCapacity()
           do:
+            - bind: first
+              eval: index*heapArity + 1
             - opt:
+                do:
+                  - break: true
+                when: first >= count
+            - bind: least
+              eval: first
+            - loop:
+                cond: child < min(first+heapArity, count)
                 do:
                   - opt:
                       do:
-                        - set: now, read
-                          value: c.clk.Now(), true
-                      when: "!read"
-                  - opt:
-                      do:
-                        - eval: c.removeEvict(top, pending)
-                          to: c.removeEvict
-                        - continue: true
-                      init:
-                        bind: top, _, _
-                        eval: c.expiry.Peek()
-                        to: c.expiry.Peek
-                      when: top != fresh && !now.Before(top.expireAt)
-                when: c.expiry != nil && c.expiry.Len() > 0
+                        - set: least
+                          value: child
+                      when: h.slots[child].at < h.slots[least].at
+                init: child := first + 1
+                post: child++
             - opt:
                 do:
-                  - return: ""
-                when: "!c.evictOne(fresh, pending)"
-  - of: (*Cache).removeEvict
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Cache).removeEvict
-        kind: self
-      - id: c.detach
-        kind: internal
+                  - break: true
+                when: h.slots[least].at >= moving.at
+            - eval: h.place(index, h.slots[least])
+              to: h.place
+            - set: index
+              value: least
+          forever: true
+      - eval: h.place(index, moving)
+        to: h.place
+  - of: (*deadlineHeap).place
     steps:
-      - eval: c.detach(ent)
-        to: c.detach
-      - op: ++
-        set: c.evictions
-      - opt:
-          do:
-            - set: "*pending"
-              value: "append(*pending, evictionValue[K, V]{key: ent.key, val: ent.val})"
-          when: c.onEvict != nil
-  - of: (*Cache).detach
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Cache).detach
-        kind: self
-      - id: c.unlink
-        kind: internal
-      - id: c.expiry.Remove
-        kind: value
-    steps:
-      - eval: c.unlink(ent)
-        to: c.unlink
-      - opt:
-          do:
-            - eval: c.expiry.Remove(ent.expiry)
-              to: c.expiry.Remove
-            - set: ent.expiry
-              value: heap.Handle{}
-          when: ent.expiry != (heap.Handle{})
-      - eval: delete(c.items, ent.key)
-  - of: (*Cache).notifyEvicted
-    steps:
-      - opt:
-          do:
-            - return: ""
-          when: len(pending) == 0
-      - loop:
-          do:
-            - eval: c.onEvict(ev.key, ev.val)
-          key: _
-          range: pending
-          value: ev
-  - of: (*Cache).listOf
-    steps:
-      - opt:
-          do:
-            - return: "&c.small"
-          when: ent.queue == queueSmall
-      - return: "&c.main"
-  - of: (*Cache).unlink
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Cache).unlink
-        kind: self
-      - id: c.listOf(ent).unlink
-        kind: internal
-    steps:
-      - eval: c.listOf(ent).unlink(ent)
-        to: c.listOf(ent).unlink
+      - set: h.slots[index]
+        value: cell
+      - set: cell.ent.slot
+        value: uint32(index) + 1
   - of: newGhostSet
     steps:
       - return: "ghostSet[K]{seed: maphash.MakeSeed(), members: make(map[uint64]uint32)}"
@@ -695,29 +450,37 @@ sequences:
         set: l.weight
         value: int64(ent.weight)
   - of: (*entryList).moveFront
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*entryList).moveFront
-        kind: self
-      - id: l.unlink
-        kind: internal
-      - id: l.pushFront
-        kind: internal
     steps:
       - opt:
           do:
             - return: ""
           when: l.head == ent
-      - eval: l.unlink(ent)
-        to: l.unlink
-      - eval: l.pushFront(ent)
-        to: l.pushFront
-  - of: (*Cache).admit
+      - bind: prev, next
+        eval: ent.prev, ent.next
+      - set: prev.next
+        value: next
+      - alt:
+          - do:
+              - set: next.prev
+                value: prev
+            when: next != nil
+          - do:
+              - set: l.tail
+                value: prev
+            else: true
+      - set: ent.prev
+        value: nil
+      - set: ent.next
+        value: l.head
+      - set: l.head.prev
+        value: ent
+      - set: l.head
+        value: ent
+  - of: (*UnlockedMap).admit
     participants:
       - id: caller
         kind: actor
-      - id: (*Cache).admit
+      - id: (*UnlockedMap).admit
         kind: self
       - id: c.main.pushFront
         kind: internal
@@ -744,11 +507,11 @@ sequences:
         value: queueSmall
       - eval: c.small.pushFront(ent)
         to: c.small.pushFront
-  - of: (*Cache).touch
+  - of: (*UnlockedMap).touch
     participants:
       - id: caller
         kind: actor
-      - id: (*Cache).touch
+      - id: (*UnlockedMap).touch
         kind: self
       - id: c.main.moveFront
         kind: internal
@@ -764,11 +527,11 @@ sequences:
           when: c.policy == PolicyS3FIFO
       - eval: c.main.moveFront(ent)
         to: c.main.moveFront
-  - of: (*Cache).evictOne
+  - of: (*UnlockedMap).evictOne
     participants:
       - id: caller
         kind: actor
-      - id: (*Cache).evictOne
+      - id: (*UnlockedMap).evictOne
         kind: self
       - id: c.evictS3FIFO
         kind: internal
@@ -789,25 +552,25 @@ sequences:
       - eval: c.removeEvict(victim, pending)
         to: c.removeEvict
       - return: "true"
-  - of: (*Cache).evictS3FIFO
+  - of: (*UnlockedMap).evictS3FIFO
     steps:
       - opt:
           do:
             - return: c.evictSmall(fresh, pending) || c.evictMain(fresh, pending)
           when: c.small.count > 0 && (c.main.count == 0 || c.smallIsLarge())
       - return: c.evictMain(fresh, pending) || c.evictSmall(fresh, pending)
-  - of: (*Cache).smallIsLarge
+  - of: (*UnlockedMap).smallIsLarge
     steps:
       - opt:
           do:
             - return: "true"
           when: c.maxEntries > 0 && c.small.count*smallShare >= c.maxEntries
       - return: c.maxWeight > 0 && c.small.weight*int64(smallShare) >= c.maxWeight
-  - of: (*Cache).evictSmall
+  - of: (*UnlockedMap).evictSmall
     participants:
       - id: caller
         kind: actor
-      - id: (*Cache).evictSmall
+      - id: (*UnlockedMap).evictSmall
         kind: self
       - id: c.small.unlink
         kind: internal
@@ -841,11 +604,11 @@ sequences:
           init: victim := c.small.tail
           post: victim = c.small.tail
       - return: "false"
-  - of: (*Cache).evictMain
+  - of: (*UnlockedMap).evictMain
     participants:
       - id: caller
         kind: actor
-      - id: (*Cache).evictMain
+      - id: (*UnlockedMap).evictMain
         kind: self
       - id: c.main.moveFront
         kind: internal
@@ -882,7 +645,7 @@ sequences:
           init: budget := c.main.count*int(maxFreq+1) + 1
           post: budget--
       - return: "false"
-  - of: (*Cache).ghostBound
+  - of: (*UnlockedMap).ghostBound
     steps:
       - opt:
           do:
@@ -1131,3 +894,607 @@ sequences:
   - of: (*Striped).Stripes
     steps:
       - return: len(s.stripes)
+  - of: NewUnlockedMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewUnlockedMap
+        kind: self
+      - id: built.init
+        kind: internal
+    steps:
+      - bind: built
+        eval: "&UnlockedMap[K, V]{}"
+      - eval: built.init(cfg)
+        to: built.init
+      - return: built
+  - of: (*UnlockedMap).init
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).init
+        kind: self
+      - id: newGhostSet
+        kind: internal
+    steps:
+      - set: c.clk
+        value: cfg.Clock
+      - opt:
+          do:
+            - set: c.clk
+              value: clock.System
+          when: c.clk == nil
+      - set: c.maxEntries
+        value: max(cfg.MaxEntries, 0)
+      - set: c.maxWeight
+        value: max(cfg.MaxWeight, 0)
+      - set: c.weightOf
+        value: cfg.WeightOf
+      - set: c.defaultTTL
+        value: cfg.DefaultTTL
+      - set: c.onEvict
+        value: cfg.OnEvict
+      - set: c.policy
+        value: PolicyLRU
+      - set: c.items
+        value: make(map[K]*entry[K, V], c.maxEntries)
+      - opt:
+          do:
+            - set: c.policy
+              value: PolicyS3FIFO
+            - set: c.ghost
+              to: newGhostSet
+              value: newGhostSet[K]()
+          when: cfg.Policy == PolicyS3FIFO
+  - of: (*UnlockedMap).Fetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).Fetch
+        kind: self
+      - id: c.fetch
+        kind: internal
+      - id: c.notifyEvicted
+        kind: internal
+    steps:
+      - var:
+          name: pending
+          type: "[]evictionValue[K, V]"
+      - set: value, ok
+        to: c.fetch
+        value: c.fetch(key, &pending)
+      - eval: c.notifyEvicted(pending)
+        to: c.notifyEvicted
+      - return: value, ok
+  - of: (*UnlockedMap).Set
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).Set
+        kind: self
+      - id: c.set
+        kind: internal
+      - id: c.notifyEvicted
+        kind: internal
+    steps:
+      - var:
+          name: pending
+          type: "[]evictionValue[K, V]"
+      - eval: c.set(key, val, c.defaultTTL, &pending)
+        to: c.set
+      - eval: c.notifyEvicted(pending)
+        to: c.notifyEvicted
+  - of: (*UnlockedMap).SetTTL
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).SetTTL
+        kind: self
+      - id: c.set
+        kind: internal
+      - id: c.notifyEvicted
+        kind: internal
+    steps:
+      - var:
+          name: pending
+          type: "[]evictionValue[K, V]"
+      - eval: c.set(key, val, ttl, &pending)
+        to: c.set
+      - eval: c.notifyEvicted(pending)
+        to: c.notifyEvicted
+  - of: (*UnlockedMap).Delete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).Delete
+        kind: self
+      - id: c.remove
+        kind: internal
+    steps:
+      - eval: c.remove(key)
+        to: c.remove
+  - of: (*UnlockedMap).Expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).Expire
+        kind: self
+      - id: c.expire
+        kind: internal
+      - id: c.notifyEvicted
+        kind: internal
+    steps:
+      - var:
+          name: pending
+          type: "[]evictionValue[K, V]"
+      - bind: reaped
+        eval: c.expire(&pending)
+        to: c.expire
+      - eval: c.notifyEvicted(pending)
+        to: c.notifyEvicted
+      - return: reaped
+  - of: (*UnlockedMap).Keys
+    steps:
+      - return:
+          closure:
+            params: yield func(K) bool
+            steps:
+              - loop:
+                  do:
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yield(key)"
+                  key: _
+                  range: c.keySnapshot()
+                  value: key
+  - of: (*UnlockedMap).Len
+    steps:
+      - return: len(c.items)
+  - of: (*UnlockedMap).Purge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).Purge
+        kind: self
+      - id: c.ghost.reset
+        kind: internal
+    steps:
+      - set: c.items
+        value: make(map[K]*entry[K, V], c.maxEntries)
+      - set: c.main
+        value: entryList[K, V]{}
+      - set: c.small
+        value: entryList[K, V]{}
+      - set: c.expiry
+        value: deadlineHeap[K, V]{}
+      - opt:
+          do:
+            - eval: c.ghost.reset()
+              to: c.ghost.reset
+          when: c.policy == PolicyS3FIFO
+  - of: (*UnlockedMap).Stats
+    steps:
+      - var:
+          name: weight
+          type: int64
+      - opt:
+          do:
+            - set: weight
+              value: c.main.weight + c.small.weight
+          when: c.maxWeight > 0 || c.weightOf != nil
+      - return: "StatsValue{Hits: c.hits, Misses: c.misses, Evictions: c.evictions, Weight: weight, Policy: c.policy}"
+  - of: (*UnlockedMap).fetch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).fetch
+        kind: self
+      - id: c.removeEvict
+        kind: internal
+      - id: c.touch
+        kind: internal
+      - id: c.main.moveFront
+        kind: internal
+    steps:
+      - bind: ent
+        eval: c.items[key]
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: c.removeEvict(ent, pending)
+                    to: c.removeEvict
+                when: ent != nil
+            - op: ++
+              set: c.misses
+            - var:
+                name: zero
+                type: V
+            - return: zero, false
+          when: ent == nil || (ent.slot != 0 && c.sinceEpoch() >= ent.deadline)
+      - alt:
+          - do:
+              - eval: c.touch(ent)
+                to: c.touch
+            when: c.policy == PolicyS3FIFO
+          - do:
+              - eval: c.main.moveFront(ent)
+                to: c.main.moveFront
+            else: true
+      - op: ++
+        set: c.hits
+      - return: ent.val, true
+  - of: (*UnlockedMap).set
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).set
+        kind: self
+      - id: c.deadlineAfter
+        kind: internal
+      - id: c.overwrite
+        kind: internal
+      - id: c.weigh
+        kind: internal
+      - id: c.admit
+        kind: internal
+      - id: c.main.pushFront
+        kind: internal
+      - id: c.setDeadline
+        kind: internal
+      - id: c.evictIfNeeded
+        kind: internal
+    steps:
+      - var:
+          name: at
+          type: int64
+      - opt:
+          do:
+            - set: at
+              to: c.deadlineAfter
+              value: c.deadlineAfter(ttl)
+          when: ttl > 0
+      - opt:
+          do:
+            - eval: c.overwrite(ent, val, ttl > 0, at, pending)
+              to: c.overwrite
+            - return: ""
+          init:
+            bind: ent
+            eval: c.items[key]
+          when: ent != nil
+      - bind: ent
+        eval: "&entry[K, V]{key: key, val: val, weight: 1}"
+      - opt:
+          do:
+            - set: ent.weight
+              to: c.weigh
+              value: c.weigh(key, val)
+          when: c.weightOf != nil
+      - set: c.items[key]
+        value: ent
+      - alt:
+          - do:
+              - eval: c.admit(ent)
+                to: c.admit
+            when: c.policy == PolicyS3FIFO
+          - do:
+              - eval: c.main.pushFront(ent)
+                to: c.main.pushFront
+            else: true
+      - opt:
+          do:
+            - eval: c.setDeadline(ent, at)
+              to: c.setDeadline
+          when: ttl > 0
+      - opt:
+          do:
+            - eval: c.evictIfNeeded(ent, pending)
+              to: c.evictIfNeeded
+          when: c.maxEntries > 0 || c.maxWeight > 0
+  - of: (*UnlockedMap).overwrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).overwrite
+        kind: self
+      - id: c.reweigh
+        kind: internal
+      - id: c.setDeadline
+        kind: internal
+      - id: c.clearDeadline
+        kind: internal
+      - id: c.touch
+        kind: internal
+      - id: c.evictIfNeeded
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.reweigh(ent, c.weigh(ent.key, val))
+              to: c.reweigh
+          when: c.weightOf != nil
+      - set: ent.val
+        value: val
+      - alt:
+          - do:
+              - eval: c.setDeadline(ent, at)
+                to: c.setDeadline
+            when: timed
+          - do:
+              - eval: c.clearDeadline(ent)
+                to: c.clearDeadline
+            else: true
+      - eval: c.touch(ent)
+        to: c.touch
+      - opt:
+          do:
+            - eval: c.evictIfNeeded(ent, pending)
+              to: c.evictIfNeeded
+          when: c.maxWeight > 0
+  - of: (*UnlockedMap).remove
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).remove
+        kind: self
+      - id: c.detach
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.detach(ent)
+              to: c.detach
+          init:
+            bind: ent
+            eval: c.items[key]
+          when: ent != nil
+  - of: (*UnlockedMap).expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).expire
+        kind: self
+      - id: c.sinceEpoch
+        kind: internal
+      - id: c.expiry.top
+        kind: internal
+      - id: c.removeEvict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: c.expiry.size() == 0
+      - bind: now
+        eval: c.sinceEpoch()
+        to: c.sinceEpoch
+      - bind: reaped
+        eval: "0"
+      - loop:
+          do:
+            - bind: top, at
+              eval: c.expiry.top()
+              to: c.expiry.top
+            - opt:
+                do:
+                  - return: reaped
+                when: top == nil || now < at
+            - eval: c.removeEvict(top, pending)
+              to: c.removeEvict
+            - op: ++
+              set: reaped
+          forever: true
+  - of: (*UnlockedMap).deadlineAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).deadlineAfter
+        kind: self
+      - id: c.clk.Now
+        kind: value
+      - id: now.Sub
+        kind: value
+    steps:
+      - bind: now
+        eval: c.clk.Now()
+        to: c.clk.Now
+      - opt:
+          do:
+            - set: c.epoch, c.epochSet
+              value: now, true
+          when: "!c.epochSet"
+      - bind: since
+        eval: now.Sub(c.epoch)
+        to: now.Sub
+      - opt:
+          do:
+            - return: math.MaxInt64
+          when: since > math.MaxInt64-ttl
+      - return: int64(since + ttl)
+  - of: (*UnlockedMap).sinceEpoch
+    steps:
+      - return: int64(c.clk.Now().Sub(c.epoch))
+  - of: (*UnlockedMap).setDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).setDeadline
+        kind: self
+      - id: c.expiry.fix
+        kind: internal
+      - id: c.expiry.push
+        kind: internal
+    steps:
+      - set: ent.deadline
+        value: at
+      - opt:
+          do:
+            - eval: c.expiry.fix(ent, at)
+              to: c.expiry.fix
+            - return: ""
+          when: ent.slot != 0
+      - eval: c.expiry.push(ent, at)
+        to: c.expiry.push
+  - of: (*UnlockedMap).clearDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).clearDeadline
+        kind: self
+      - id: c.expiry.remove
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.expiry.remove(ent)
+              to: c.expiry.remove
+          when: ent.slot != 0
+      - set: ent.deadline
+        value: "0"
+  - of: (*UnlockedMap).weigh
+    steps:
+      - opt:
+          do:
+            - return: "1"
+          when: c.weightOf == nil
+      - return: int32(min(max(c.weightOf(key, val), 0), math.MaxInt32))
+  - of: (*UnlockedMap).reweigh
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).reweigh
+        kind: self
+      - id: c.listOf
+        kind: internal
+    steps:
+      - bind: list
+        eval: c.listOf(ent)
+        to: c.listOf
+      - op: +=
+        set: list.weight
+        value: int64(weight) - int64(ent.weight)
+      - set: ent.weight
+        value: weight
+  - of: (*UnlockedMap).overCapacity
+    steps:
+      - bind: count
+        eval: len(c.items)
+      - opt:
+          do:
+            - return: "true"
+          when: c.maxEntries > 0 && count > c.maxEntries
+      - return: c.maxWeight > 0 && count > 1 && c.main.weight+c.small.weight > c.maxWeight
+  - of: (*UnlockedMap).evictIfNeeded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).evictIfNeeded
+        kind: self
+      - id: c.expiry.top
+        kind: internal
+      - id: c.removeEvict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!c.overCapacity()"
+      - var:
+          name: now
+          type: int64
+      - bind: read
+        eval: "false"
+      - loop:
+          cond: c.overCapacity()
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: now, read
+                          value: c.sinceEpoch(), true
+                      when: "!read"
+                  - opt:
+                      do:
+                        - eval: c.removeEvict(top, pending)
+                          to: c.removeEvict
+                        - continue: true
+                      init:
+                        bind: top, at
+                        eval: c.expiry.top()
+                        to: c.expiry.top
+                      when: top != fresh && now >= at
+                when: c.expiry.size() > 0
+            - opt:
+                do:
+                  - return: ""
+                when: "!c.evictOne(fresh, pending)"
+  - of: (*UnlockedMap).removeEvict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).removeEvict
+        kind: self
+      - id: c.detach
+        kind: internal
+    steps:
+      - eval: c.detach(ent)
+        to: c.detach
+      - op: ++
+        set: c.evictions
+      - opt:
+          do:
+            - set: "*pending"
+              value: "append(*pending, evictionValue[K, V]{key: ent.key, val: ent.val})"
+          when: c.onEvict != nil
+  - of: (*UnlockedMap).detach
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).detach
+        kind: self
+      - id: c.unlink
+        kind: internal
+      - id: c.expiry.remove
+        kind: internal
+    steps:
+      - eval: c.unlink(ent)
+        to: c.unlink
+      - opt:
+          do:
+            - eval: c.expiry.remove(ent)
+              to: c.expiry.remove
+          when: ent.slot != 0
+      - eval: delete(c.items, ent.key)
+  - of: (*UnlockedMap).notifyEvicted
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(pending) == 0
+      - loop:
+          do:
+            - eval: c.onEvict(ev.key, ev.val)
+          key: _
+          range: pending
+          value: ev
+  - of: (*UnlockedMap).listOf
+    steps:
+      - opt:
+          do:
+            - return: "&c.small"
+          when: ent.queue == queueSmall
+      - return: "&c.main"
+  - of: (*UnlockedMap).unlink
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).unlink
+        kind: self
+      - id: c.listOf(ent).unlink
+        kind: internal
+    steps:
+      - eval: c.listOf(ent).unlink(ent)
+        to: c.listOf(ent).unlink

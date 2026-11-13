@@ -30,6 +30,11 @@ packages:
 
       Package cache — Striped: independent Caches behind one hash, each with
       its own lock.
+
+      Package cache — UnlockedMap: the cache without its lock, for a caller that
+      already serialises every call.
+
+      Package cache — the expiry heap: a 4-ary heap of int64 deadlines.
     constants:
       - blockDoc: ""
         doc: |-
@@ -77,6 +82,20 @@ packages:
         name: NewStriped
         out:
           - type: "*Striped[K, V]"
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - doc: |-
+          NewUnlockedMap builds an UnlockedMap from cfg, as NewCache builds a Cache. A nil
+          cfg.Clock defaults to clock.System.
+        in:
+          - name: cfg
+            type: Config[K, V]
+        name: NewUnlockedMap
+        out:
+          - type: "*UnlockedMap[K, V]"
         typeParams:
           - constraint: comparable
             name: K
@@ -144,8 +163,8 @@ packages:
             recv: pointer
           - doc: |-
               Keys yields the keys present and unexpired when the loop starts, in no
-              particular order. They are copied under the read lock and yielded after it
-              is released, so the loop's body may call the cache — Set, Delete, Fetch —
+              particular order. They are copied under the lock and yielded after it is
+              released, so the loop's body may call the cache — Set, Delete, Fetch —
               without deadlocking; what the body changes is not seen by the loop. A walk
               is not a read: no entry is promoted and no counter moves. Each loop
               allocates one slice of the keys.
@@ -338,6 +357,96 @@ packages:
               - type: int
             recv: pointer
         name: Striped
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - doc: |-
+          UnlockedMap is the cache without its lock: the same LRU or S3-FIFO policy, TTL,
+          bounds, sweep and counters as Cache, for a caller that already serialises
+          every call under a lock of its own — a store that keeps more state beside
+          the entries, which a second lock inside would only slow down. It is NOT
+          safe for concurrent use: two goroutines calling it at once race, which the
+          race detector reports. OnEvict runs at the end of the call that evicted,
+          once the cache is consistent again, so it may call back into the cache;
+          under the caller's lock it runs under that lock. The zero value is NOT
+          usable — construct with NewUnlockedMap.
+        methods:
+          - doc: |-
+              Fetch returns the value for key and whether it was present and unexpired. A
+              hit is recorded by the policy, as Cache.Fetch records it.
+            in:
+              - name: key
+                type: K
+            name: Fetch
+            out:
+              - name: value
+                type: V
+              - name: ok
+                type: bool
+            recv: pointer
+          - doc: Set stores key=val with the cache's default TTL.
+            in:
+              - name: key
+                type: K
+              - name: val
+                type: V
+            name: Set
+            recv: pointer
+          - doc: |-
+              SetTTL stores key=val with an explicit ttl (0 = no expiry), overriding the
+              default for this entry only.
+            in:
+              - name: key
+                type: K
+              - name: val
+                type: V
+              - name: ttl
+                type: time.Duration
+            name: SetTTL
+            recv: pointer
+          - doc: Delete removes key if present, without firing OnEvict.
+            in:
+              - name: key
+                type: K
+            name: Delete
+            recv: pointer
+          - doc: |-
+              Expire removes every entry whose deadline has passed and reports how many
+              it removed, each counted as an eviction and passed to OnEvict, as
+              Cache.Expire does.
+            name: Expire
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              Keys yields the keys present and unexpired when the loop starts, in no
+              particular order, from a copy: the loop's body may call the cache, and
+              what it changes is not seen by the loop. A walk is not a read: no entry is
+              promoted and no counter moves. Each loop allocates one slice of the keys.
+            name: Keys
+            out:
+              - type: iter.Seq[K]
+            recv: pointer
+          - doc: |-
+              Len returns the current entry count, including expired entries not yet
+              reaped.
+            name: Len
+            out:
+              - type: int
+            recv: pointer
+          - doc: Purge drops every entry without firing OnEvict.
+            name: Purge
+            recv: pointer
+          - doc: Stats returns a copy of the hit/miss/eviction counters.
+            name: Stats
+            out:
+              - type: StatsValue
+            recv: pointer
+        name: UnlockedMap
         struct:
           unexported: true
         typeParams:

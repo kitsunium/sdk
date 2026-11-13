@@ -7,6 +7,14 @@ constants:
         type: int
         value: "64"
     name: cacheLine
+  - doc: |-
+      heapArity is the expiry heap's fan-out: the four cells of a parent's children share
+      one cache line, and the tree is half as deep as a binary one.
+    items:
+      - name: heapArity
+        type: int
+        value: "4"
+    name: heapArity
   - grouped: true
     items:
       - doc: queueMain is the LRU list, and S3-FIFO's main queue.
@@ -67,7 +75,6 @@ files:
       - (*Cache).Set
       - (*Cache).SetTTL
       - (*Cache).setTTL
-      - (*Cache).overwrite
       - (*Cache).Delete
       - (*Cache).Expire
       - (*Cache).Keys
@@ -75,22 +82,23 @@ files:
       - (*Cache).Len
       - (*Cache).Purge
       - (*Cache).Stats
-      - (*Cache).weigh
-      - (*Cache).reweigh
-      - (*Cache).setDeadline
-      - byDeadline
-      - (*Cache).expired
-      - (*Cache).overCapacity
-      - (*Cache).evictIfNeeded
-      - (*Cache).removeEvict
-      - (*Cache).detach
-      - (*Cache).notifyEvicted
-      - (*Cache).listOf
-      - (*Cache).unlink
     name: cache.go
   - decls:
       - Config
     name: config.go
+  - decls:
+      - heapArity
+      - deadlineSlot
+      - deadlineHeap
+      - (*deadlineHeap).size
+      - (*deadlineHeap).top
+      - (*deadlineHeap).push
+      - (*deadlineHeap).fix
+      - (*deadlineHeap).remove
+      - (*deadlineHeap).up
+      - (*deadlineHeap).down
+      - (*deadlineHeap).place
+    name: deadline.go
   - decls: []
     name: doc.go
   - decls:
@@ -124,14 +132,14 @@ files:
   - decls:
       - maxFreq
       - smallShare
-      - (*Cache).admit
-      - (*Cache).touch
-      - (*Cache).evictOne
-      - (*Cache).evictS3FIFO
-      - (*Cache).smallIsLarge
-      - (*Cache).evictSmall
-      - (*Cache).evictMain
-      - (*Cache).ghostBound
+      - (*UnlockedMap).admit
+      - (*UnlockedMap).touch
+      - (*UnlockedMap).evictOne
+      - (*UnlockedMap).evictS3FIFO
+      - (*UnlockedMap).smallIsLarge
+      - (*UnlockedMap).evictSmall
+      - (*UnlockedMap).evictMain
+      - (*UnlockedMap).ghostBound
     name: s3fifo.go
   - decls:
       - StatsValue
@@ -152,15 +160,43 @@ files:
       - (*Striped).Stats
       - (*Striped).Stripes
     name: striped.go
+  - decls:
+      - UnlockedMap
+      - NewUnlockedMap
+      - (*UnlockedMap).init
+      - (*UnlockedMap).Fetch
+      - (*UnlockedMap).Set
+      - (*UnlockedMap).SetTTL
+      - (*UnlockedMap).Delete
+      - (*UnlockedMap).Expire
+      - (*UnlockedMap).Keys
+      - (*UnlockedMap).Len
+      - (*UnlockedMap).Purge
+      - (*UnlockedMap).Stats
+      - (*UnlockedMap).fetch
+      - (*UnlockedMap).set
+      - (*UnlockedMap).overwrite
+      - (*UnlockedMap).remove
+      - (*UnlockedMap).expire
+      - (*UnlockedMap).keySnapshot
+      - (*UnlockedMap).deadlineAfter
+      - (*UnlockedMap).sinceEpoch
+      - (*UnlockedMap).setDeadline
+      - (*UnlockedMap).clearDeadline
+      - (*UnlockedMap).weigh
+      - (*UnlockedMap).reweigh
+      - (*UnlockedMap).overCapacity
+      - (*UnlockedMap).evictIfNeeded
+      - (*UnlockedMap).removeEvict
+      - (*UnlockedMap).detach
+      - (*UnlockedMap).notifyEvicted
+      - (*UnlockedMap).listOf
+      - (*UnlockedMap).unlink
+    name: unlocked.go
 functions:
   - name: NewCache
     params: cfg Config[K, V]
     results: "*Cache[K, V]"
-    typeParams: K comparable, V any
-  - doc: byDeadline orders entries earliest deadline first.
-    name: byDeadline
-    params: a, b *entry[K, V]
-    results: int
     typeParams: K comparable, V any
   - doc: newGhostSet returns an empty ghost set with its own seed.
     name: newGhostSet
@@ -177,9 +213,12 @@ functions:
     name: shareOf
     params: bound, count, at int
     results: int
+  - name: NewUnlockedMap
+    params: cfg Config[K, V]
+    results: "*UnlockedMap[K, V]"
+    typeParams: K comparable, V any
 imports:
   clock: github.com/kitsunium/sdk/internal/kernel/clock
-  heap: github.com/kitsunium/sdk/internal/kernel/collections/heap
   iter: iter
   maphash: hash/maphash
   math: math
@@ -192,44 +231,15 @@ package:
   purpose: Package cache provides a generic, concurrency-safe LRU + TTL cache (Cache[K,V]) — a kernel primitive (stdlib-only, no domain vocabulary).
 types:
   - fields:
-      - name: mu
-        type: sync.RWMutex
-      - name: clk
-        type: clock.Clock
-      - name: maxEntries
-        type: int
-      - name: maxWeight
-        type: int64
-      - name: weightOf
-        type: func(key K, val V) int64
-      - name: defaultTTL
-        type: time.Duration
-      - name: onEvict
-        type: func(key K, val V)
-      - name: policy
-        type: Policy
-      - name: items
-        type: map[K]*entry[K, V]
-      - doc: main is the LRU list, and S3-FIFO's main queue.
-        name: main
-        type: entryList[K, V]
-      - doc: small is S3-FIFO's probationary queue; empty under LRU.
-        name: small
-        type: entryList[K, V]
-      - doc: ghost remembers the keys probation evicted (S3-FIFO only).
-        name: ghost
-        type: ghostSet[K]
       - doc: |-
-          expiry orders the entries that carry a deadline, earliest first; nil
-          until the first one is stored.
-        name: expiry
-        type: "*heap.IndexedHeap[*entry[K, V]]"
-      - name: hits
-        type: uint64
-      - name: misses
-        type: uint64
-      - name: evictions
-        type: uint64
+          mu serialises every call: a sync.Mutex, whose uncontended lock and
+          unlock are one atomic each and inlined — a RWMutex's write lock costs
+          four, and only Len and Stats ever read shared (#1038).
+        name: mu
+        type: sync.Mutex
+      - doc: core is the cache itself; every access holds mu.
+        name: core
+        type: UnlockedMap[K, V]
       - doc: |-
           The padding keeps the counters every operation writes off the cache line of the
           mutex of whatever is allocated next — in a Striped, the next stripe.
@@ -248,16 +258,10 @@ types:
         params: key K, val V, ttl time.Duration
         recv: c *Cache[K, V]
       - doc: |-
-          setTTL inserts or updates key=val, computing the absolute expiry and applying
-          eviction when a bound is exceeded.
+          setTTL inserts or updates key=val under the lock, computing the deadline
+          and applying eviction when a bound is exceeded.
         name: setTTL
         params: key K, val V, ttl time.Duration
-        recv: c *Cache[K, V]
-      - doc: |-
-          overwrite refreshes a live entry's value, weight and expiry, and records the
-          write as a hit would be recorded. Caller holds mu.
-        name: overwrite
-        params: ent *entry[K, V], val V, exp time.Time, pending *[]evictionValue[K, V]
         recv: c *Cache[K, V]
       - name: Delete
         params: key K
@@ -268,7 +272,7 @@ types:
       - name: Keys
         recv: c *Cache[K, V]
         results: iter.Seq[K]
-      - doc: keySnapshot copies the keys present and unexpired, under the read lock.
+      - doc: keySnapshot copies the keys present and unexpired, under the lock.
         name: keySnapshot
         recv: c *Cache[K, V]
         results: "[]K"
@@ -280,131 +284,6 @@ types:
       - name: Stats
         recv: c *Cache[K, V]
         results: StatsValue
-      - doc: weigh returns what key=val counts against MaxWeight.
-        name: weigh
-        params: key K, val V
-        recv: c *Cache[K, V]
-        results: int32
-      - doc: |-
-          reweigh changes ent's weight in place, keeping its list's sum. Caller holds
-          mu.
-        name: reweigh
-        params: ent *entry[K, V], weight int32
-        recv: c *Cache[K, V]
-      - doc: |-
-          setDeadline gives ent the deadline exp (zero = none) and keeps the expiry
-          heap in step. Caller holds mu.
-        name: setDeadline
-        params: ent *entry[K, V], exp time.Time
-        recv: c *Cache[K, V]
-      - doc: expired reports whether ent carries a deadline that has passed. Caller holds mu.
-        name: expired
-        params: ent *entry[K, V]
-        recv: c *Cache[K, V]
-        results: bool
-      - doc: |-
-          overCapacity reports whether a bound is exceeded. The weight bound never
-          asks a lone entry to leave: an entry heavier than MaxWeight is stored and
-          evicts everything else. Caller holds mu.
-        name: overCapacity
-        recv: c *Cache[K, V]
-        results: bool
-      - doc: |-
-          evictIfNeeded removes entries while a bound is exceeded, never fresh — the
-          entry the current Set wrote. An entry whose deadline has passed goes before
-          any live one: the heap's top is tried first, so a dead entry never costs a
-          live one its slot. Caller holds mu.
-        name: evictIfNeeded
-        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
-        recv: c *Cache[K, V]
-      - doc: |-
-          removeEvict detaches ent, counts an eviction, and QUEUES the evicted pair
-          onto pending. Caller holds mu.
-
-          OnEvict is deliberately NOT invoked here. Every caller holds c.mu and
-          sync.Mutex is not reentrant, so a callback that touches the cache would
-          deadlock outright, and a merely slow one would hold every other operation
-          off for its whole duration — turning eviction into an unbounded critical
-          section. Callers drain pending through notifyEvicted after unlocking.
-        name: removeEvict
-        params: ent *entry[K, V], pending *[]evictionValue[K, V]
-        recv: c *Cache[K, V]
-      - doc: |-
-          detach takes ent out of its list, the expiry heap and the map. Caller holds
-          mu.
-        name: detach
-        params: ent *entry[K, V]
-        recv: c *Cache[K, V]
-      - doc: |-
-          notifyEvicted fires OnEvict for every queued pair. It MUST be called with
-          c.mu released — the callback is user code and may re-enter the cache.
-        name: notifyEvicted
-        params: pending []evictionValue[K, V]
-        recv: c *Cache[K, V]
-      - doc: listOf returns the list ent sits in. Caller holds mu.
-        name: listOf
-        params: ent *entry[K, V]
-        recv: c *Cache[K, V]
-        results: "*entryList[K, V]"
-      - doc: unlink detaches ent from its list, fixing head/tail. Caller holds mu.
-        name: unlink
-        params: ent *entry[K, V]
-        recv: c *Cache[K, V]
-      - doc: |-
-          admit places a new entry: at the front of the LRU list, or for S3-FIFO in
-          the small queue — main when the ghost remembers its key. Caller holds mu.
-        name: admit
-        params: ent *entry[K, V]
-        recv: c *Cache[K, V]
-      - doc: |-
-          touch records a hit: LRU promotes the entry, S3-FIFO counts it. Caller
-          holds mu.
-        name: touch
-        params: ent *entry[K, V]
-        recv: c *Cache[K, V]
-      - doc: |-
-          evictOne removes one entry by the policy, never fresh — the entry the
-          current Set wrote — and reports whether it found a victim. Caller holds mu.
-        name: evictOne
-        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
-        recv: c *Cache[K, V]
-        results: bool
-      - doc: |-
-          evictS3FIFO evicts from the small queue while it holds its share or main is
-          empty, from main otherwise, and falls back to the other queue when the
-          first has nothing it may evict. Caller holds mu.
-        name: evictS3FIFO
-        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
-        recv: c *Cache[K, V]
-        results: bool
-      - doc: |-
-          smallIsLarge reports whether the small queue holds its tenth of the bound
-          that applies. Caller holds mu.
-        name: smallIsLarge
-        recv: c *Cache[K, V]
-        results: bool
-      - doc: |-
-          evictSmall walks the small queue from its tail: an entry hit since its
-          admission moves to main with its counter cleared, the first one never hit
-          is evicted and its key remembered by the ghost. Caller holds mu.
-        name: evictSmall
-        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
-        recv: c *Cache[K, V]
-        results: bool
-      - doc: |-
-          evictMain is main's clock hand: the tail with hits left is re-inserted at
-          the head with one hit fewer, the first without any is evicted. Caller holds
-          mu.
-        name: evictMain
-        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
-        recv: c *Cache[K, V]
-        results: bool
-      - doc: |-
-          ghostBound is how many hashes the ghost keeps: the entry bound when there is
-          one, else the live count. Caller holds mu.
-        name: ghostBound
-        recv: c *Cache[K, V]
-        results: int
     name: Cache
     typeParams: K comparable, V any
   - fields:
@@ -443,36 +322,111 @@ types:
     kind: struct
     name: Config
     typeParams: K comparable, V any
+  - doc: |-
+      deadlineSlot is one cell of the expiry heap: the deadline, held inline so a
+      comparison reads no entry, and the entry it belongs to.
+    fields:
+      - name: at
+        type: int64
+      - name: ent
+        type: "*entry[K, V]"
+    kind: struct
+    name: deadlineSlot
+    typeParams: K comparable, V any
+  - doc: |-
+      deadlineHeap orders the entries that carry a deadline, earliest first: a
+      4-ary min-heap over int64 deadlines (#1038). Each entry knows its cell — its
+      slot is the index plus one — so a re-stamp or a removal from anywhere costs
+      O(log n) without a search, and no comparison goes through a function value.
+      It replaced kernel/collections/heap's IndexedHeap here, whose comparison is
+      an indirect call that dereferences two entries; that heap stays for its
+      other users. A slot is 32 bits: four billion deadlines is past what the
+      memory of the entries holding them allows. Caller holds the cache's lock.
+    fields:
+      - doc: slots is the heap array; nil until the first deadline.
+        name: slots
+        type: "[]deadlineSlot[K, V]"
+    kind: struct
+    methods:
+      - doc: size reports how many entries carry a deadline.
+        name: size
+        recv: h *deadlineHeap[K, V]
+        results: int
+      - doc: |-
+          top returns the entry with the earliest deadline and that deadline, or nil
+          when no entry carries one.
+        name: top
+        recv: h *deadlineHeap[K, V]
+        results: "*entry[K, V], int64"
+      - doc: push adds ent, which carries no deadline yet, at deadline at.
+        name: push
+        params: ent *entry[K, V], at int64
+        recv: h *deadlineHeap[K, V]
+      - doc: fix moves ent, already in the heap, to its new deadline at.
+        name: fix
+        params: ent *entry[K, V], at int64
+        recv: h *deadlineHeap[K, V]
+      - doc: remove takes ent, which is in the heap, out of it.
+        name: remove
+        params: ent *entry[K, V]
+        recv: h *deadlineHeap[K, V]
+      - doc: |-
+          up moves the cell at index toward the root while its deadline is earlier
+          than its parent's, keeping every entry's slot in step, and reports whether
+          it moved.
+        name: up
+        params: index int
+        recv: h *deadlineHeap[K, V]
+        results: bool
+      - doc: |-
+          down moves the cell at index toward the leaves while a child's deadline is
+          earlier, keeping every entry's slot in step.
+        name: down
+        params: index int
+        recv: h *deadlineHeap[K, V]
+      - doc: place writes cell at index and tells its entry where it is.
+        name: place
+        params: index int, cell deadlineSlot[K, V]
+        recv: h *deadlineHeap[K, V]
+    name: deadlineHeap
+    typeParams: K comparable, V any
   - doc: queueID names the list an entry sits in.
     kind: named
     name: queueID
     underlying: uint8
   - doc: |-
       entry is one cache slot: it holds the key (so eviction can delete it from the
-      map), the value, an optional absolute expiry, and the prev/next links of the
-      intrusive list it sits in (head = most recently inserted or promoted, tail =
-      the next victim).
+      map), the value, the prev/next links of the intrusive list it sits in (head =
+      most recently inserted or promoted, tail = the next victim), and an optional
+      deadline.
+
+      The layout is a budget (#1038): for a string key and a word-sized value the
+      node is 58 bytes, so it lands in the 64-byte size class — one class, and one
+      cache line, since the runtime places an object of that class on a 64-byte
+      boundary. A time.Time deadline (24 bytes) and a heap handle (8) had taken it
+      to 80 bytes, two lines, and every insertion paid the larger class.
     fields:
       - name: key
         type: K
       - name: val
         type: V
-      - name: expireAt
-        type: time.Time
       - name: prev
         type: "*entry[K, V]"
       - name: next
         type: "*entry[K, V]"
       - doc: |-
-          expiry names the entry's node in the expiry heap; the zero Handle when
+          deadline is when the entry expires, in nanoseconds since the cache's
+          epoch (see UnlockedMap.deadlineAfter); meaningful only while slot is set.
+        name: deadline
+        type: int64
+      - doc: |-
+          slot is the entry's position in the expiry heap plus one, and 0 while
           it carries no deadline.
-        name: expiry
-        type: heap.Handle
+        name: slot
+        type: uint32
       - doc: |-
           weight is what the entry counts against MaxWeight: WeightOf's answer,
-          or 1 without one. 32 bits, so that with freq and queue it fills one word
-          and the node stays in the 80-byte size class for a string key and a
-          word-sized value.
+          or 1 without one.
         name: weight
         type: int32
       - doc: |-
@@ -547,7 +501,7 @@ types:
   - doc: |-
       entryList is an intrusive doubly-linked list of entries with its count and
       summed weight: head = most recently inserted or promoted, tail = the next
-      victim. Caller holds the cache's mu for every method.
+      victim. Caller holds the cache's lock for every method.
     fields:
       - name: head
         type: "*entry[K, V]"
@@ -567,7 +521,10 @@ types:
         name: unlink
         params: ent *entry[K, V]
         recv: l *entryList[K, V]
-      - doc: moveFront promotes ent to the head.
+      - doc: |-
+          moveFront promotes ent, which sits in the list, to the head. It relinks
+          pointers only: the entry never leaves the list, so its count and summed
+          weight stay as they are, and a hit writes neither (#1038).
         name: moveFront
         params: ent *entry[K, V]
         recv: l *entryList[K, V]
@@ -641,4 +598,262 @@ types:
         recv: s *Striped[K, V]
         results: int
     name: Striped
+    typeParams: K comparable, V any
+  - fields:
+      - name: clk
+        type: clock.Clock
+      - name: maxEntries
+        type: int
+      - name: maxWeight
+        type: int64
+      - name: weightOf
+        type: func(key K, val V) int64
+      - name: defaultTTL
+        type: time.Duration
+      - name: onEvict
+        type: func(key K, val V)
+      - name: policy
+        type: Policy
+      - name: items
+        type: map[K]*entry[K, V]
+      - doc: main is the LRU list, and S3-FIFO's main queue.
+        name: main
+        type: entryList[K, V]
+      - doc: small is S3-FIFO's probationary queue; empty under LRU.
+        name: small
+        type: entryList[K, V]
+      - doc: ghost remembers the keys probation evicted (S3-FIFO only).
+        name: ghost
+        type: ghostSet[K]
+      - doc: expiry orders the entries that carry a deadline, earliest first.
+        name: expiry
+        type: deadlineHeap[K, V]
+      - doc: |-
+          epoch is the instant every deadline counts from: the clock's reading at
+          the first deadline, set once epochSet says it was read.
+        name: epoch
+        type: time.Time
+      - name: epochSet
+        type: bool
+      - name: hits
+        type: uint64
+      - name: misses
+        type: uint64
+      - name: evictions
+        type: uint64
+    kind: struct
+    methods:
+      - doc: |-
+          admit places a new entry: at the front of the LRU list, or for S3-FIFO in
+          the small queue — main when the ghost remembers its key. Caller holds the lock.
+        name: admit
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          touch records a hit: LRU promotes the entry, S3-FIFO counts it. Caller
+          holds the lock.
+        name: touch
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          evictOne removes one entry by the policy, never fresh — the entry the
+          current Set wrote — and reports whether it found a victim. Caller holds the lock.
+        name: evictOne
+        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          evictS3FIFO evicts from the small queue while it holds its share or main is
+          empty, from main otherwise, and falls back to the other queue when the
+          first has nothing it may evict. Caller holds the lock.
+        name: evictS3FIFO
+        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          smallIsLarge reports whether the small queue holds its tenth of the bound
+          that applies. Caller holds the lock.
+        name: smallIsLarge
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          evictSmall walks the small queue from its tail: an entry hit since its
+          admission moves to main with its counter cleared, the first one never hit
+          is evicted and its key remembered by the ghost. Caller holds the lock.
+        name: evictSmall
+        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          evictMain is main's clock hand: the tail with hits left is re-inserted at
+          the head with one hit fewer, the first without any is evicted. Caller holds
+          the lock.
+        name: evictMain
+        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          ghostBound is how many hashes the ghost keeps: the entry bound when there is
+          one, else the live count. Caller holds the lock.
+        name: ghostBound
+        recv: c *UnlockedMap[K, V]
+        results: int
+      - doc: init configures c from cfg; NewUnlockedMap and NewCache share it.
+        name: init
+        params: cfg Config[K, V]
+        recv: c *UnlockedMap[K, V]
+      - name: Fetch
+        params: key K
+        recv: c *UnlockedMap[K, V]
+        results: value V, ok bool
+      - name: Set
+        params: key K, val V
+        recv: c *UnlockedMap[K, V]
+      - name: SetTTL
+        params: key K, val V, ttl time.Duration
+        recv: c *UnlockedMap[K, V]
+      - name: Delete
+        params: key K
+        recv: c *UnlockedMap[K, V]
+      - name: Expire
+        recv: c *UnlockedMap[K, V]
+        results: int
+      - name: Keys
+        recv: c *UnlockedMap[K, V]
+        results: iter.Seq[K]
+      - name: Len
+        recv: c *UnlockedMap[K, V]
+        results: int
+      - name: Purge
+        recv: c *UnlockedMap[K, V]
+      - name: Stats
+        recv: c *UnlockedMap[K, V]
+        results: StatsValue
+      - doc: |-
+          fetch looks key up, reaping it when its deadline has passed, and records a
+          hit by the policy. Caller holds the lock.
+        name: fetch
+        params: key K, pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: value V, ok bool
+      - doc: |-
+          set inserts or updates key=val with ttl (0 or less = no deadline), and
+          applies the bounds. Caller holds the lock.
+        name: set
+        params: key K, val V, ttl time.Duration, pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          overwrite refreshes a live entry's value, weight and deadline, and records
+          the write as a hit would be recorded. Caller holds the lock.
+        name: overwrite
+        params: ent *entry[K, V], val V, timed bool, at int64, pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          remove takes key out, if present, without an eviction. Caller holds the
+          lock.
+        name: remove
+        params: key K
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          expire evicts every entry whose deadline has passed, the clock read once,
+          and reports how many. Caller holds the lock.
+        name: expire
+        params: pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: int
+      - doc: keySnapshot copies the keys present and unexpired. Caller holds the lock.
+        name: keySnapshot
+        recv: c *UnlockedMap[K, V]
+        results: "[]K"
+      - doc: |-
+          deadlineAfter returns the deadline ttl (positive) from now, in nanoseconds
+          since the epoch, the first call fixing the epoch. The difference of two
+          clock readings is taken on their monotonic readings when both carry one,
+          as time.Time.Before compares them, so a deadline means what a time.Time
+          deadline meant; a sum past the int64 range — a TTL of centuries — is held
+          at its maximum. Caller holds the lock.
+        name: deadlineAfter
+        params: ttl time.Duration
+        recv: c *UnlockedMap[K, V]
+        results: int64
+      - doc: |-
+          sinceEpoch reads the clock as nanoseconds since the epoch. Called only once
+          some entry carries a deadline, so the epoch is set. Caller holds the lock.
+        name: sinceEpoch
+        recv: c *UnlockedMap[K, V]
+        results: int64
+      - doc: |-
+          setDeadline gives ent the deadline at, keeping the expiry heap in step.
+          Caller holds the lock.
+        name: setDeadline
+        params: ent *entry[K, V], at int64
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          clearDeadline takes ent's deadline away, if it had one. Caller holds the
+          lock.
+        name: clearDeadline
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: weigh returns what key=val counts against MaxWeight.
+        name: weigh
+        params: key K, val V
+        recv: c *UnlockedMap[K, V]
+        results: int32
+      - doc: |-
+          reweigh changes ent's weight in place, keeping its list's sum. Caller holds
+          the lock.
+        name: reweigh
+        params: ent *entry[K, V], weight int32
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          overCapacity reports whether a bound is exceeded. The weight bound never
+          asks a lone entry to leave: an entry heavier than MaxWeight is stored and
+          evicts everything else. Caller holds the lock.
+        name: overCapacity
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          evictIfNeeded removes entries while a bound is exceeded, never fresh — the
+          entry the current Set wrote. An entry whose deadline has passed goes before
+          any live one: the heap's top is tried first, so a dead entry never costs a
+          live one its slot. Caller holds the lock.
+        name: evictIfNeeded
+        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          removeEvict detaches ent, counts an eviction, and QUEUES the evicted pair
+          onto pending. Caller holds the lock.
+
+          OnEvict is deliberately NOT invoked here. Under a Cache every caller holds
+          its mutex and sync.Mutex is not reentrant, so a callback that touches the
+          cache would deadlock outright, and a merely slow one would hold every other
+          operation off for its whole duration — turning eviction into an unbounded
+          critical section; and an UnlockedMap must be consistent before user code runs.
+          Callers drain pending through notifyEvicted once the operation is done.
+        name: removeEvict
+        params: ent *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          detach takes ent out of its list, the expiry heap and the map. Caller holds
+          the lock.
+        name: detach
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          notifyEvicted fires OnEvict for every queued pair. Under a Cache it MUST be
+          called with the mutex released — the callback is user code and may re-enter
+          the cache.
+        name: notifyEvicted
+        params: pending []evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: listOf returns the list ent sits in. Caller holds the lock.
+        name: listOf
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: "*entryList[K, V]"
+      - doc: unlink detaches ent from its list, fixing head/tail. Caller holds the lock.
+        name: unlink
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+    name: UnlockedMap
     typeParams: K comparable, V any
