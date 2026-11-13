@@ -34,6 +34,15 @@ const victimBatch = 3
 // Append more often than not.
 const victimAcks = 40
 
+// victimMaxBatches and victimLifetime bound the child on its own: a parent
+// that dies before its kill — a test binary's timeout, an interrupted run —
+// leaves an orphan that stops appending by itself, rather than one that
+// fills the disk until somebody notices it.
+const (
+	victimMaxBatches = 20_000
+	victimLifetime   = 2 * time.Minute
+)
+
 // TestAKilledAppenderLosesNoAcknowledgedRecord is Append's durability claim,
 // proved by killing a real producer in a real other process with a signal it
 // cannot catch: every batch whose Append returned nil before the kill is read
@@ -42,6 +51,10 @@ const victimAcks = 40
 // it at all.
 func TestAKilledAppenderLosesNoAcknowledgedRecord(t *testing.T) {
 	requireFileEngine(t)
+	//: a victim never spawns a victim of its own.
+	if os.Getenv(victimDirEnv) != "" {
+		t.Skip("a victim does not kill appenders: " + victimDirEnv + " is set")
+	}
 	//: not parallel: it spawns a process and waits on it.
 	dir := t.TempDir()
 	victim, lines := startVictim(t, dir)
@@ -83,8 +96,9 @@ func TestAKilledAppenderLosesNoAcknowledgedRecord(t *testing.T) {
 	}
 }
 
-// TestTheVictimAppender is the child: it appends numbered batches forever,
-// printing each one Append acknowledged, until it is killed.
+// TestTheVictimAppender is the child: it appends numbered batches, printing
+// each one Append acknowledged, until it is killed — or, a parent gone,
+// until victimMaxBatches or victimLifetime ends it.
 func TestTheVictimAppender(t *testing.T) {
 	dir := os.Getenv(victimDirEnv)
 	if dir == "" {
@@ -94,7 +108,8 @@ func TestTheVictimAppender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFile() = %v, want nil", err)
 	}
-	for n := 0; ; n++ {
+	deadline := time.Now().Add(victimLifetime)
+	for n := 0; n < victimMaxBatches && time.Now().Before(deadline); n++ {
 		batch := make([]corestream.RecordValue, victimBatch)
 		for i := range batch {
 			batch[i] = record(strconv.Itoa(n) + "/" + strconv.Itoa(i))
@@ -117,7 +132,9 @@ func victimPolicy() corestream.PolicyValue {
 func startVictim(t *testing.T, dir string) (*exec.Cmd, *bufio.Scanner) {
 	t.Helper()
 	child := exec.Command(os.Args[0], "-test.run=^TestTheVictimAppender$", "-test.v") //nolint:gosec
-	child.Env = append(os.Environ(), victimDirEnv+"="+dir)
+	//: the role inherited from a run that already was a victim is dropped
+	//: before this child's is set: a child reads its role from one variable.
+	child.Env = append(withoutVar(os.Environ(), victimDirEnv), victimDirEnv+"="+dir)
 	child.Stderr = io.Discard
 	pipe, err := child.StdoutPipe()
 	if err != nil {
@@ -135,4 +152,15 @@ func startVictim(t *testing.T, dir string) (*exec.Cmd, *bufio.Scanner) {
 	timer := time.AfterFunc(2*time.Minute, func() { _ = child.Process.Kill() })
 	t.Cleanup(func() { timer.Stop() })
 	return child, bufio.NewScanner(pipe)
+}
+
+// withoutVar returns env without any entry for name.
+func withoutVar(env []string, name string) []string {
+	kept := make([]string, 0, len(env))
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, name+"=") {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
 }

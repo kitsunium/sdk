@@ -1999,7 +1999,7 @@ sequences:
       - opt:
           do:
             - set: size
-              value: s.size
+              value: max(s.size, size+sealReserve)
           when: last
       - opt:
           do:

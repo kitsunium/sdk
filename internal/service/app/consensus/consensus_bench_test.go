@@ -937,7 +937,8 @@ func TestGenerateBenchMD(t *testing.T) {
 	rep.propose = testing.Benchmark(BenchmarkThreeNodePropose)
 	rep.sim = benchSimulate(t, rep.simSync())
 	out := resolveConsensusBenchOutputPath()
-	if err := os.WriteFile(out, []byte(rep.render(collectBenchEnvelope())), 0o644); err != nil {
+	before, _ := os.ReadFile(out) // none yet: nothing hand-run to keep
+	if err := os.WriteFile(out, []byte(keepHandRun(rep.render(collectBenchEnvelope()), before)), 0o644); err != nil {
 		panic(fmt.Sprintf("consensus bench: write %s: %v", out, err))
 	}
 	t.Logf("wrote %s", out)
