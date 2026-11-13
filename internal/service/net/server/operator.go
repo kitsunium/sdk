@@ -2,6 +2,7 @@ package server
 
 import (
 	"cmp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -72,6 +73,7 @@ var capabilityRegistry = [...]capabilityEntry{
 	{token: corenet.CapabilityURingRecvmsg, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityTCPKeepAlive, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityTCPUserTimeout, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingSockGetsockopt, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingDeferTaskrun, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingNoSQArray, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingRingFDs, rank: rankKernel, switchable: true, kernel: true},
@@ -306,7 +308,7 @@ func (e *operatorEnv) backendPlan(code corenet.LoopBackend, poller corenet.Capab
 	//: darwin and the BSDs.
 	case corenet.CapabilityKqueue:
 		//: kqueue, or the floor.
-		return e.kqueuePlan(code)
+		return e.kqueuePlan(code, kqueueTaken(code, runtime.GOOS))
 	//: Linux.
 	case corenet.CapabilityEpoll:
 		//: io_uring, epoll, or the floor.
@@ -351,18 +353,37 @@ func (e *operatorEnv) linuxPlan(code corenet.LoopBackend) loopPlan {
 	}
 }
 
-// kqueuePlan is backendPlan on darwin and the BSDs: kqueue only when the code
-// named it and the environment allows it; the portable backend otherwise,
-// auto included. A backend that has never run on these platforms is not their
-// default: auto stays portable until the paired gate of ADR 0190 holds kqueue
-// (ADR 0222 §D6). io_uring and epoll, refused by startLoopEngine there, plan
-// the floor.
-func (e *operatorEnv) kqueuePlan(code corenet.LoopBackend) loopPlan {
-	//: kqueue, as the code named it: an explicit backend never falls back.
-	if code == corenet.LoopBackendKqueue && e.allows(corenet.CapabilityKqueue) {
-		//: the probe's refusal is the code's error, LoopBackendUnavailable.
-		return loopPlan{backend: corenet.LoopBackendKqueue}
+// kqueuePlan is backendPlan on darwin and the BSDs: kqueue when the code's
+// choice takes it (kqueueTaken) and the environment allows it, the portable
+// backend otherwise. An explicit kqueue never falls back — the probe's
+// refusal is the code's LoopBackendUnavailable —; auto's does, to portable,
+// reported. A backend whose paired gate has never held on a platform is not
+// its default, so auto stays portable on the BSDs (ADR 0222 §D6, amended
+// 2026-11-13). io_uring and epoll, refused by startLoopEngine there, plan the
+// floor.
+func (e *operatorEnv) kqueuePlan(code corenet.LoopBackend, take bool) loopPlan {
+	//: taken, and allowed.
+	if take && e.allows(corenet.CapabilityKqueue) {
+		//: kqueue; auto keeps its fallback.
+		return loopPlan{backend: corenet.LoopBackendKqueue, fallback: code == corenet.LoopBackendAuto}
 	}
 	//: the floor of the loop family.
 	return loopPlan{backend: corenet.LoopBackendPortable}
+}
+
+// kqueueTaken reports whether code's choice is kqueue on goos: named, or auto
+// where auto takes it (kqueueAuto).
+func kqueueTaken(code corenet.LoopBackend, goos string) bool {
+	//: either.
+	return code == corenet.LoopBackendKqueue || code == corenet.LoopBackendAuto && kqueueAuto(goos)
+}
+
+// kqueueAuto reports whether auto takes kqueue on goos: on darwin alone,
+// where the paired gate of ADR 0190 held it against the goroutine engine on
+// macos-15 (P6, the bench-darwin rows). FreeBSD, OpenBSD, NetBSD and
+// DragonFly have no measured row, so auto stays portable there (ADR 0222
+// §D6, amended 2026-11-13).
+func kqueueAuto(goos string) bool {
+	//: darwin's rows held; no BSD has one.
+	return goos == "darwin"
 }

@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-11T00:00:00Z -->
+<!-- updated: 2026-11-13T00:00:00Z -->
 # internal/service/proc/ipc/
 
 ## Purpose
@@ -23,11 +23,12 @@ sentinels — this package returns them and declares none.
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `ipc.go` | `Config` (the engine's, ADR 0074), `Listener` over an `acceptor` — the engine behind `coreipc.Listener` —, `NewListener`, `Accept` (refused peers closed and counted), `Dialer` + `NewDialer` — the engine behind `coreipc.Dialer`, its allow-lists copied —, `Dial`, `RuntimeDir` and `RuntimeDirOr` (the same chain ending on the caller's directory instead of `<tmp>/<app>-<uid>`, ADR 0182), `admit`, `closeBestEffort` |
+| `ipc.go` | `Config` (the engine's, ADR 0074; `AllowSIDs` checked by `validate` through the platform's `checkSIDs`, #1349), `Listener` over an `acceptor` — the engine behind `coreipc.Listener`, whose `accept` returns the platform's `credentials` beside the peer —, `NewListener`, `Accept` (refused peers closed and counted), `Dialer` + `NewDialer` — the engine behind `coreipc.Dialer`, its allow-lists copied —, `Dial`, `RuntimeDir` and `RuntimeDirOr` (the same chain ending on the caller's directory instead of `<tmp>/<app>-<uid>`, ADR 0182), `admit`, `closeBestEffort` |
 | `ipc_compliance.go` | the compile-time proof that `*Listener` satisfies `coreipc.Listener` and `*Dialer` satisfies `coreipc.Dialer` — a method renamed or retyped on either engine fails the build here, not in a caller holding the port |
-| `socket.go` (`!windows`) | the Unix socket: `socketPosture` (the mode and group the lists need, #1092), `checkReach` (a `0666` socket under a directory anybody searches refused where the kernel names no peer), `listen` (dial-then-remove of a leftover socket — `nobodyListens`: refused or gone, nothing else —, then `bindSocket` and `listenBound`), `socketAcceptor` (reads the peer's groups when `AllowGIDs` is set), `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
+| `socket.go` (`!windows`) | the Unix socket: `credentials` (the peer's supplementary groups), `checkSIDs` (a non-empty `AllowSIDs` is `MISCONFIGURED`, #1349), `socketPosture` (the mode and group the lists need, #1092), `checkReach` (a `0666` socket under a directory anybody searches refused where the kernel names no peer), `listen` (dial-then-remove of a leftover socket — `nobodyListens`: refused or gone, nothing else —, then `bindSocket` and `listenBound`), `socketAcceptor` (reads the peer's groups when `AllowGIDs` is set), `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
 | `bind_unix.go` | `bindSocket` (socket, bind, then `setPosture`: the group, then the mode — before any listen), `listenBound` (`listen(2)`, `net.FileListener`, unlink on close), `listenFailed` |
-| `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName` (the account's SID in the name, #1318), `pipeSDDL`, `listenAs`, `taken`/`holder`/`ownerOf` (a name that exists judged by its owner: `IN_USE` or `ENDPOINT_SQUATTED`), `pipeAcceptor` (descriptor `O:<SID>D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused); `pipeConn` keeps its peer and, for a named one, a handle on its process (`newPipeConn`, `openPeerProcess` — a process younger than the connection refused —, closed by `Close`) |
+| `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName` (the account's SID in the name, #1318), `listenAs` (the account and its canonical `AllowSIDs`), `taken`/`holder`/`ownerOf` (a name that exists judged by its owner: `IN_USE` or `ENDPOINT_SQUATTED`), `pipeAcceptor` (descriptor `pipeSDDL`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer` (the pid, and the identity from the client's token through the pipe), `accountOf` (a process token → SID), `admits` (an unreadable token refused), `dial`/`dialAs`/`dialOrder` (`SECURITY_IDENTIFICATION`, `clientAccess`, this account's pipe then each listed SID's), `serverPeer` (the server's process token; a listed account's pipe also by its owner); `pipeConn` keeps its peer and, for a named one, a handle on its process (`newPipeConn`, `openPeerProcess` — a process younger than the connection refused —, closed by `Close`) |
+| `sids_windows.go` | `AllowSIDs` on the pipe (#1349): `canonicalSIDs` (`ConvertStringSidToSid` and back, once each; Everyone, Anonymous Logon and the Null SID refused — `standsForEveryCaller`), `pipeSDDL` (`O:<SID>D:P(A;;GA;;;<SID>)` and `(A;;0x12008b;;;<listed>)`), `clientAccess`, `tokenIdentity` + `identityOf`/`tokenSIDs`/`tokenInfo` (user, enabled groups, restricting SIDs) and `admittedBy` (the kernel's two passes), `clientIdentity`/`clientToken` (`ImpersonateNamedPipeClient`, `OpenThreadToken` as self, `RevertToSelf` on a goroutine locked to its thread) |
 | `files.go` (`unix \|\| windows`), `files_unix.go`, `files_windows.go`, `files_other.go` | file passing (#936): `fdPassRefused`; `SCM_RIGHTS` on Unix (`fileConn`); a frame and `DuplicateHandle` out of the sender's process on Windows, a socket by `WSADuplicateSocketW` and `WSASocketW` (`SendFiles`, `prepare`, `fileFrame`, `RecvFiles`, `readEntries`, `take`); none elsewhere |
 | `dir_unix.go` / `dir_other.go` | `prepareDir` (path audited before AND after the `Mkdir`), `checkDir` (path above, own entry, holder), `checkEntry` (mode, owner, not a link), `ownerOf`: on Unix; a refusal elsewhere |
 | `chain_unix.go` | `checkChain` over `pathchain.Resolve` of the socket directory's parent, `checkHolder`, `steerable` (the rule), `ours`, `pathUnsafe` — see §Why-this-shape |
@@ -63,8 +64,10 @@ The codes — `0.3.91.1`–`11`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   let through (ADR 0031). darwin (raw syscalls deprecated), OpenBSD (pinned
   syscalls), illumos and Solaris (`getpeerucred` is libc's) stay unverified
   and the directory is the gate there (`peer_other.go`, `peer_unnamed.go`) —
-  `Peer.Verified` says which world a caller is in. Windows keeps its own rule:
-  the pipe's DACL admits a client whose account could not be read. The BSD
+  `Peer.Verified` says which world a caller is in. Windows has its own rule
+  since #1349: a client whose token cannot be read is refused, as on Linux —
+  it used to be admitted as the DACL's, when the DACL named this account
+  alone. The BSD
   readers never ran on this lot's VM: `peer_bsd_internal_test.go` runs on the
   e2e-cross FreeBSD and NetBSD lanes.
 - **The gate is the whole PATH, not its last component.** `checkEntry`'s
@@ -213,6 +216,56 @@ The codes — `0.3.91.1`–`11`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
   pipe pre-created under `D:P(A;;GR;;;WD)` and one owned by another account
   through `listenAs`, the SID in the name, the owner read back) and
   `TestASecondPipeListenerIsInUse`; they run on e2e-cross's Windows lane only.
+- **A Windows pipe opened to listed SIDs (#1349, ADR 0148 amendment
+  2026-11-13).** `Config.AllowSIDs` holds SIDs as text; `canonicalSIDs`
+  converts each with `ConvertStringSidToSid` and back, so the DACL and the
+  admission compare one spelling and nothing an entry spells reaches the
+  descriptor's text; an entry that is not a SID, and Everyone, Anonymous
+  Logon or the Null SID, are `MISCONFIGURED` with `rule` and `sid` — at
+  `NewListener`, `NewDialer` and `Dial` — and a non-empty list is
+  `MISCONFIGURED` on Unix (`socket.go`'s `checkSIDs`). `AllowUIDs` and
+  `AllowGIDs` stay what they were on Windows: checked for a negative id, then
+  ignored, as `Config`'s doc and ADR 0148 point 6 say — not refused, so one
+  configuration still serves every platform. **The DACL is the first
+  barrier**: each listed SID gets `clientAccess` (`0x0012008B`,
+  `FILE_GENERIC_READ` and `FILE_WRITE_DATA`), not the issue's
+  `GENERIC_READ|GENERIC_WRITE`: `FILE_GENERIC_WRITE` carries
+  `FILE_APPEND_DATA`, which on a pipe IS `FILE_CREATE_PIPE_INSTANCE`
+  (Microsoft's "Named Pipe Security and Access Rights" says so and advises the
+  individual rights), so a listed account could have served an instance of the
+  pipe and posed as the listener to its clients. `Dial` opens with the same
+  mask, for every account. The first instance keeps
+  `FILE_FLAG_FIRST_PIPE_INSTANCE` and the owner `O:<SID>`. **The token is read
+  again** at every `Accept` (`clientIdentity`): through the pipe, with
+  `ImpersonateNamedPipeClient` then `OpenThreadToken(TOKEN_QUERY, OpenAsSelf)`
+  then `RevertToSelf`, on a goroutine locked to its OS thread — never by the
+  client's pid, which may since name another process, and never with this
+  thread handed back to the runtime while it acts as the client: a failed
+  `RevertToSelf` leaves the goroutine locked, and the runtime ends the thread
+  with it. `admittedBy` mirrors the kernel's check of the DACL: the user
+  (unless a restricted token made it deny-only) or an enabled group is the
+  account or listed, and a restricted token's restricting SIDs must name one
+  too. A token that cannot be read — `SECURITY_ANONYMOUS`, a failed
+  impersonation — is `PEER_REFUSED` and counted. **Dial** tries this
+  account's pipe, then each listed SID's in the list's order; only a pipe
+  that does not exist passes the turn, so a refused name is never stepped
+  over. This account's pipe keeps its rule (the server's process token, read
+  or `DIAL_FAILED`); a listed account's pipe must be owned by that account
+  and, where the server's process token can be read, run by it
+  (`ENDPOINT_FOREIGN` with `owner` or `sid`); when it cannot — another
+  account's process, unless this one is privileged — the owner alone names
+  it, `Peer.Verified` false, which also keeps files from being passed to it.
+  The owner is sound there because only it can serve an instance of a pipe
+  this package made. **Not verified anywhere**: a second account. Every
+  Windows row runs as the CI runner's one account (`sids_windows_internal_test.go`,
+  `TestAPipeOpenedToAListAdmitsThisAccount`): the DACL read back from the
+  kernel, the canonical list, the refusals at every entry point, the re-check
+  with the listener standing as LocalSystem, an anonymous client, restricted
+  tokens made with `CreateRestrictedToken`, and the dial order with squatted
+  names (the row a pipe Administrators own needs an elevated token and skips,
+  saying so, elsewhere). Whether a non-privileged listener may open another
+  account's identification token (`OpenAsSelf`, the token's own DACL) has not
+  run: where it may not, that client is refused — never admitted.
 - **The directory rule is split by side (#1092).** `NewListener` keeps
   `checkDir`: the directory is this account's. `Dial` runs `checkDialDir`: the
   same chain, holder and entry rules — a real directory nobody but its owner can
@@ -277,8 +330,9 @@ a directory by a rule of their own, compared side by side in
 - **`Mkdir`, never `MkdirAll`**: the parent must already exist and is audited
   first, so nothing is ever created inside a steered tree.
 - **No DACL is READ on Windows**: there is no directory there. The named pipe
-  carries a DACL this package BUILDS (`D:P(A;;GA;;;<SID>)`, ADR 0148 §3), so the
-  kernel's reader, `internal/kernel/fs/winacl`, is not this package's.
+  carries a DACL this package BUILDS (`D:P(A;;GA;;;<SID>)` and, since #1349, an
+  entry `(A;;0x12008b;;;<SID>)` per listed SID, ADR 0148 §3), so the kernel's
+  reader, `internal/kernel/fs/winacl`, is not this package's.
 
 ## Do NOT
 

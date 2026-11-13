@@ -134,14 +134,31 @@ func (e *exactlyOnce) note(seq uint32) {
 }
 
 // TestShards_deliversExactlyOnce pins the criterion's run: 100 000 datagrams
-// from 64 source ports over four shards, each read once and acknowledged, with
-// every shard reached.
+// from 64 source ports over four shards, each read once and its echo
+// byte-exact, with every shard reached; and the same run on Shards(1) and on
+// a group without the option, the base whose socket Shards(1) is
+// (TestShards_defaultOneSocket): one socket serves the run byte-exact as the
+// base does (#977).
 func TestShards_deliversExactlyOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts []GroupOption
+	}{
+		{"Shards(4)", []GroupOption{Shards(4)}},
+		{"Shards(1)", []GroupOption{Shards(1)}},
+		{"without the option", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) { shardsRun(t, tc.opts) })
+	}
+}
+
+// shardsRun is TestShards_deliversExactlyOnce's run on a group with opts.
+func shardsRun(t *testing.T, opts []GroupOption) {
 	const flows, perFlow = 64, 100_000 / 64
 	total := flows * perFlow
 	tally := &exactlyOnce{seen: make([]atomic.Bool, total)}
 	srv := New()
-	srv.PacketGroup("p", Listen("udp4", "127.0.0.1:0"), Shards(4), ReceiveBuffer(4<<20)).
+	srv.PacketGroup("p", append([]GroupOption{Listen("udp4", "127.0.0.1:0"), ReceiveBuffer(4 << 20)}, opts...)...).
 		HandleFunc(func(_ context.Context, p corenet.Packet) error {
 			tally.note(binary.BigEndian.Uint32(p.Data()))
 			_, err := p.Reply(p.Data())
@@ -163,8 +180,13 @@ func TestShards_deliversExactlyOnce(t *testing.T) {
 	}
 }
 
+// shardsPayload is one datagram of a flow: its index, then bytes that make
+// one out of place visible, 1 200 in all as L3's.
+const shardsPayload = 1200
+
 // sendFlow is one 4-tuple, lock-step: each datagram waits for its echo, so the
-// kernel's queues never overflow and exactly-once is the only outcome.
+// kernel's queues never overflow and exactly-once is the only outcome; every
+// echo must be the datagram sent, byte for byte.
 func sendFlow(t *testing.T, addr string, base uint32, n int) {
 	t.Helper()
 	conn, err := stdnet.Dial("udp4", addr)
@@ -173,9 +195,13 @@ func sendFlow(t *testing.T, addr string, base uint32, n int) {
 		return
 	}
 	defer func() { swallowErr(conn.Close()) }()
-	var buf, ack [4]byte
+	var buf, ack [shardsPayload]byte
 	for i := range n {
-		binary.BigEndian.PutUint32(buf[:], base+uint32(i))
+		id := base + uint32(i)
+		binary.BigEndian.PutUint32(buf[:], id)
+		for k := 4; k < len(buf); k++ {
+			buf[k] = byte(id) ^ byte(k)
+		}
 		if _, err := conn.Write(buf[:]); err != nil {
 			t.Errorf("write: %v", err)
 			return
@@ -184,8 +210,13 @@ func sendFlow(t *testing.T, addr string, base uint32, n int) {
 			t.Errorf("deadline: %v", err)
 			return
 		}
-		if _, err := conn.Read(ack[:]); err != nil {
+		k, err := conn.Read(ack[:])
+		if err != nil {
 			t.Errorf("flow base %d, datagram %d: %v", base, i, err)
+			return
+		}
+		if k != len(buf) || ack != buf {
+			t.Errorf("flow base %d, datagram %d: echo of %d bytes differs from the %d sent", base, i, k, len(buf))
 			return
 		}
 	}

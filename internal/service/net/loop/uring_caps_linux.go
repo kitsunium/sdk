@@ -3,6 +3,7 @@
 package loop
 
 import (
+	"slices"
 	"syscall"
 	"time"
 
@@ -271,14 +272,16 @@ func (ul *uLoop) reportMinTimeout(features uint32) {
 func (ul *uLoop) reportSelfTest(direct bool) {
 	ul.rep.found(ul.sw, corenet.CapabilityURingPbuf, true, "")
 	ul.rep.found(ul.sw, corenet.CapabilityURingMultishotRecv, true, "")
+	ul.reportSockCmd(direct)
 	//: the operator's switch: the release check never ran.
 	if ul.sw.disabled(corenet.CapabilityURingDirect) {
 		//: disabled.
 		return
 	}
-	//: a Unix listener keeps the group on process descriptors, never probed.
-	if unixListener(ul.lfds) {
-		ul.rep.set(corenet.CapabilityURingDirect, statusUnprobed, "a Unix listener: LoopPeer asks the process descriptor")
+	//: a Unix listener without the socket command keeps the group on
+	//: process descriptors, never probed.
+	if slices.Contains(ul.peers.unix, true) && !ul.peers.cmd {
+		ul.rep.set(corenet.CapabilityURingDirect, statusUnprobed, "a Unix listener without uring-sock-getsockopt: LoopPeer asks the process descriptor")
 		//: not judged.
 		return
 	}
@@ -314,4 +317,29 @@ func probeReason(step string, errno syscall.Errno) string {
 	}
 	//: the kernel's answer.
 	return step + ": " + errno.Error()
+}
+
+// reportSockCmd records the socket command's row (#974): unprobed without a
+// Unix listener or with uring-direct switched off, absent with the
+// self-test's reason, on while direct descriptors serve, available once the
+// release check put the group on process descriptors.
+func (ul *uLoop) reportSockCmd(direct bool) {
+	//: by what decided.
+	switch {
+	//: nothing to read a peer of.
+	case !slices.Contains(ul.peers.unix, true):
+		ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusUnprobed, "no Unix listener")
+	//: process descriptors by the operator's switch: never asked.
+	case ul.sw.disabled(corenet.CapabilityURingDirect):
+		ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusUnprobed, "uring-direct switched off: LoopPeer asks the process descriptor")
+	//: the kernel lacks it.
+	case !ul.peers.cmd:
+		ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusAbsent, ul.peers.why)
+	//: present, but the release check chose process descriptors.
+	case !direct:
+		ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusAvailable, "process descriptors: LoopPeer asks the socket")
+	//: in use.
+	default:
+		ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusOn, "")
+	}
 }

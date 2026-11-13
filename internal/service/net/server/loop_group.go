@@ -175,6 +175,7 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 	var owners []int
 	plan := s.operator.plan(group.loopBackend(), nativePoller)
 	resolveLanes(group)
+	group.hsLog = s.handshakeLog(group)
 	//: inherited sockets first, as for every group.
 	for _, name := range group.adopt {
 		adopted, err := s.adoptStream(name)
@@ -277,13 +278,15 @@ func (s *Server) registerLoopListeners(group *StreamGroup, lns []stdnet.Listener
 		}
 		//: bound here: what the bind did; adopted: what the supervisor set.
 		if rep != nil {
-			row.Exclusive, row.BindWait = rep.exclusive, corenet.DurationValue(rep.wait)
-			row.Shared = rep.shared
+			row.Exclusive, row.BindWait = rep.traits.has(traitExclusive), corenet.DurationValue(rep.wait)
+			row.Shared = rep.traits.has(traitShared)
 			row.Backlog = rep.backlog
 			row.ReceiveBuffer, row.SendBuffer = rep.receiveBuffer, rep.sendBuffer
+			row.MultipathTCP = rep.traits.has(traitMultipath)
 			row.Degraded, row.DegradedReason = rep.backlogReason != "", rep.backlogReason
 		} else {
 			row.Exclusive = exclusiveOf(listenerSocket(ln))
+			row.MultipathTCP = multipathOf(listenerSocket(ln))
 			var why string
 			row.ReceiveBuffer, row.SendBuffer, why = adoptedBuffers(listenerSocket(ln), bufferSpec(group.limits))
 			row.Degraded, row.DegradedReason = why != "", why

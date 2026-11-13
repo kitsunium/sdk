@@ -3585,7 +3585,7 @@
       "canonical": "string",
       "value": "\"net_server_suppressed_logs_total\"",
       "init": "go:github.com/kitsunium/sdk/internal/service/net/server.MetricSuppressedLogs",
-      "doc": "MetricSuppressedLogs names the lines of net/http's own log the server did not write:\nState's SuppressedLogs.\n",
+      "doc": "MetricSuppressedLogs names the lines of net/http's own log, and the failed TLS\nhandshakes, the server did not write: State's SuppressedLogs.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -4773,7 +4773,7 @@
       "name": "WithLogger",
       "spelled": "func(l corelogger.Logger) Option",
       "canonical": "func(l github.com/kitsunium/sdk/internal/core/observe/logger.Logger) github.com/kitsunium/sdk/pkg/v1/net/server.Option",
-      "doc": "WithLogger gives the server the logger that carries what net/http reports\nthrough http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream\nerror, a superfluous WriteHeader, a failed accept — as warn records with\nsource=net/http, at most ten a second; State counts the rest in\nSuppressedLogs. Without a logger, or with a nil one, nothing is written to\nstderr or anywhere else, and every line is counted there.\n",
+      "doc": "WithLogger gives the server the logger that carries what net/http reports\nthrough http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream\nerror, a superfluous WriteHeader, a failed accept — and every failed TLS\nhandshake as warn records with source=net/http (net/server on a group\nnet/http does not serve), at most ten a second; State counts the rest in\nSuppressedLogs. Without a logger, or with a nil one, nothing is written to\nstderr or anywhere else, and every line is counted there.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

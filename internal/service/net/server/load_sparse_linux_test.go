@@ -5,7 +5,7 @@
 // It is the load a single-vCPU HTTP benchmark puts on the loop engine (ten
 // thousand users, about a thousand requests a second), the one the grouped
 // wait (ADR 0199, ADR 0202) and the per-request cost are measured against.
-// The server runs in a child, as L1's and L2's (load_gate_linux_test.go), and
+// The server runs in a child, as L1's and L2's (load_gate_test.go), and
 // the metrics are ITS CPU, its context switches and its loop's batches, each
 // divided by the requests of the window, so the client's cost never counts.
 
@@ -221,13 +221,18 @@ type sparsePool struct {
 // dialSparse opens sparseConns connections to addr and serves one round trip
 // on each, so every one is accepted and served before the window.
 func dialSparse(b *testing.B, addr string) *sparsePool {
+	return dialSparseN(b, addr, sparseConns)
+}
+
+// dialSparseN is dialSparse with conns connections.
+func dialSparseN(b *testing.B, addr string, conns int) *sparsePool {
 	p := &sparsePool{rnd: rand.New(rand.NewPCG(1, 2))}
 	b.Cleanup(func() {
 		for _, c := range p.conns {
 			_ = c.Close()
 		}
 	})
-	for i := range sparseConns {
+	for i := range conns {
 		c, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
 		if err != nil {
 			b.Fatalf("dial %d: %v", i, err)

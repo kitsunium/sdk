@@ -665,7 +665,7 @@ Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricRep
 const MetricSuppressedLogs string = "net_server_suppressed_logs_total"
 ```
 
-MetricSuppressedLogs names the lines of net/http's own log the server did not write: State's SuppressedLogs.
+MetricSuppressedLogs names the lines of net/http's own log, and the failed TLS handshakes, the server did not write: State's SuppressedLogs.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/net/server.MetricSuppressedLogs`.
 
@@ -1837,7 +1837,7 @@ WithDrainTimeout bounds how long Shutdown waits for in-flight connections before
 func WithLogger(l corelogger.Logger) Option
 ```
 
-WithLogger gives the server the logger that carries what net/http reports through http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream error, a superfluous WriteHeader, a failed accept — as warn records with source=net/http, at most ten a second; State counts the rest in SuppressedLogs. Without a logger, or with a nil one, nothing is written to stderr or anywhere else, and every line is counted there.
+WithLogger gives the server the logger that carries what net/http reports through http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream error, a superfluous WriteHeader, a failed accept — and every failed TLS handshake as warn records with source=net/http (net/server on a group net/http does not serve), at most ten a second; State counts the rest in SuppressedLogs. Without a logger, or with a nil one, nothing is written to stderr or anywhere else, and every line is counted there.
 
 <a name="WriteTimeout"></a>
 ## func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -2530,6 +2530,17 @@ type ListenerState struct {
 	// SendBuffer is the socket's send buffer as the kernel holds it, read back
 	// as ReceiveBuffer is (SO_SNDBUF, wmem_max).
 	SendBuffer     int                         `json:"send_buffer"`
+	// MultipathTCP reports a stream listener whose socket is Multipath TCP,
+	// read back from the socket (SO_PROTOCOL is IPPROTO_MPTCP) after bind or
+	// adoption: on Linux, what Go's net.Listen opens by default since Go 1.24
+	// where the kernel has MPTCP (net.mptcp.enabled), unless GODEBUG's
+	// multipathtcp says otherwise. A loop group that opts into uring-send-zc
+	// on io_uring binds plain TCP instead, and its rows read false, because a
+	// socket accepted from an MPTCP listener refuses IORING_OP_SEND_ZC; the
+	// operator switching uring-send-zc off, or capping the group at epoll or
+	// the portable backend, gives it Go's default back (#969, ADR 0189).
+	// False on every other platform, for a Unix socket and for a datagram one.
+	MultipathTCP   bool                        `json:"multipath_tcp"`
 	// ProxyRefused counts the connections a ProxyProtocol group refused — peers
 	// outside Trusted, and headers malformed or not finished within Timeout. It
 	// is the group's count, on each of its listeners' rows.
@@ -4234,10 +4245,10 @@ type State struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs   uint64               `json:"accept_backoffs"`
-	// SuppressedLogs counts the lines of net/http's own log the server did not
-	// write: over the cap of ten records a second, or with no logger to write
-	// them to (WithLogger). A count that rises is a port being probed, or a
-	// handler that panics.
+	// SuppressedLogs counts the lines of net/http's own log, and the failed TLS
+	// handshakes, the server did not write: over the cap of ten records a second,
+	// or with no logger to write them to (WithLogger). A count that rises is a
+	// port being probed, or a handler that panics.
 	SuppressedLogs   uint64               `json:"suppressed_logs"`
 	// Datagrams counts what the batched datagram paths drop (ADR 0192).
 	Datagrams        DatagramStateValue   `json:"datagrams"`

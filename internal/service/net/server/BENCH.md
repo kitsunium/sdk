@@ -166,7 +166,7 @@ only as the order of magnitude the gate starts from:
 | `LoadL2/engine=handwritten` | 6 403 |
 | `LoadL3/engine=recvmmsg` (loopback, 55.7 datagrams a receive, receiver's rusage) | 621 |
 
-L1h2 (#963, `load_gate_h2_linux_test.go`) is L1's request over h2c by prior
+L1h2 (#963, `load_gate_h2_test.go`) is L1's request over h2c by prior
 knowledge, 1 000 connections with eight streams in flight each, the client
 writing pre-encoded frames: `BenchmarkLoadL1h2/pair=goroutine-h2:loop-h2` (P9),
 `pair=loop-h2:loop-h2` (cal-L1h2) and `pair=loop:loop-h2` (h1-h2, reported). No
@@ -227,6 +227,129 @@ above, including the one that turned out not to help.
 - `AcquireRelease_ReadBuffer16K` above 0 allocs/op means the scratch buffer
   stopped coming from `kernel/concur/buffer`'s 16 KiB class — check that
   `acquire` still calls `buffer.GetSize(size)`.
+
+## Edition 2026-11-13 — the gate's new rows (#852, #977, #969, #982, #979, #961, #976)
+
+**L3 on the runner, read back from net-kernel-gate's `net-bench-<sha>`
+artefacts** (GitHub-hosted, Linux 7.0.0-1019-azure, 4 CPUs, ten paired rounds
+each, judged by `tools/netgate -only uring-recvmsg,shards`): medians of each
+engine, then the interval of the rounds' ratios B/A.
+
+| Run (commit) | Pair | `cpu-ns/datagram` A → B | ratio interval (median) | `datagrams/syscall` B/A |
+|---|---|---|---|---|
+| 43178495012 (`30d507939`) | `recvmmsg:uring-recvmsg` | 3 152 → 1 045 | 0.321–0.347 (0.330) | 3.19 |
+| 43306975342 (`7d428ae2f`) | `recvmmsg:uring-recvmsg` | 2 873 → 738 | 0.251–0.280 (0.260) | 2.32 |
+| 43320386560 (`b302953a2`) | `recvmmsg:uring-recvmsg` | 2 806 → 752 | 0.250–0.299 (0.264) | 2.33 |
+| 43178495012 | `recvmmsg:recvmmsg+shards` | 3 120 → 3 219 | 1.014–1.070 (1.035) | 1.00 |
+| 43306975342 | `recvmmsg:recvmmsg+shards` | 2 768 → 2 834 | 0.987–1.050 (1.017) | 1.00 |
+| 43320386560 | `recvmmsg:recvmmsg+shards` | 2 773 → 2 805 | 0.960–1.039 (1.013) | 1.00 |
+
+The io_uring datagram lane holds P4a's 0.75 on every run, by a margin: its
+upper bound never passed 0.35, so its row, `uring-recvmsg`, is a required
+gate from this edition. Four shards at L3's fixed rate cost what one socket
+does, within 7 % at worst: the rate is one core's, and the 1.8× datagrams/s at
+saturation that would make `Shards(0)` the default is not what this load
+measures — its row stays reported. Each pair's `kernel-drops/op` and `lost/op`
+were 0 on every round.
+
+**L1big locally** (`load_big_linux_test.go`; AMD EPYC 7351P, 8 vCPU,
+`GOMAXPROCS=4`, Linux 6.12.101, go1.27.4, `RLIMIT_MEMLOCK` 8 MiB, ten rounds of
+`-test.benchtime=400000x`, judged by `netgate -only send-zc,files`):
+
+| Pair | `cpu-ns/req` A → B (medians) | ratio interval (median) | row's bound |
+|---|---|---|---|
+| `loop:loop-sendzc` | 88 686 → 94 406 | 1.033–1.114 (1.067) | ≤ 0.9, reported — not met |
+| `goroutine-static:loop-files` | 106 410 → 73 987 | 0.669–0.774 (0.694) | ≤ 0.70, reported — not met on the bound |
+
+The zero-copy send costs more than the copy here, on loopback, where the kernel
+copies a zero-copy skb into the receiver anyway, and with 1 000 connections of
+64 KiB in flight past the 8 MiB `RLIMIT_MEMLOCK` io_uring charges the pinned
+pages to: those flights are refused `ENOMEM` and leave plainly
+(`zeroCopyRefused`, `internal/service/net/loop`), each after a send that sent
+nothing. The runner's figures are the `bench` job's from this edition on.
+
+**`BenchmarkCopyFile`, the floor** (#970; the box above, `-benchmem
+-benchtime=20x -count=3`, every count including the file's open):
+
+| Benchmark | MB/s | B/op | allocs/op |
+|---|---|---|---|
+| `CopyFile/after_ReadFrom` (sendfile, no bound) | 4 468–4 600 | 272–374 | 7 |
+| `CopyFile/bounded_ReadFrom` (`WriteTimeout`, sendfile a MiB a deadline) | 4 845–4 992 | 5 928–5 930 | 264 |
+| `CopyFile/bare_TCPConn` (the standard library alone, no engine) | 4 737–5 020 | 192–204 | 4 |
+| `CopyFile/before_generic` (32 KiB loop) | 1 273–1 399 | 32 957–33 054 | 4 |
+
+`io.Copy(c, f)` allocates a constant of the call in Go 1.27, whoever `c` is:
+192 to 204 B and 4 allocations on a bare `*net.TCPConn`, the open's included.
+Through the engine's connection it is 80 to 170 B and 3 allocations more: the
+connection is not a `syscall.Conn`, so `os.File.WriteTo` takes its generic
+path, `io.Copy` into the connection's `ReadFrom` with the file wrapped, and the
+socket's sendfile asks the wrapped file for its `SyscallConn` (Go 1.27.4,
+`os/zero_copy_linux.go`, `net/sendfile.go`). "0 B/op" is not reachable through
+the standard library's copy. A bounded group now
+sends a file by sendfile too, one deadline a mebibyte: 64 steps, about four
+allocations each, and the 32 KiB buffer gone.
+
+**The runner's rows** (#852, #977, #969, #982, #979, #961, #976), read back
+from net-kernel-gate's artefacts: medians of each engine, then the interval of
+the ten rounds' ratios B/A and its median, as `tools/netgate` computes them.
+Two runs on GitHub-hosted Linux 7.0.0-1019-azure, 4 CPUs: run 43352723813
+(#1367, commit `87bad7a06`, AMD EPYC 7763), its `netgate-report.json`; and run
+43358351908 (#1368, commit `e8b003d3f`, Intel Xeon Platinum 8370C), whose
+`bench` job stopped on the blackhole test before its netgate step — its rows
+are `tools/netgate` (same commit) run on that job's `bench.txt` afterwards.
+L3 runs over the veth pair, `Sparse` over it with GRO on its far end (a NAPI
+instance, which loopback lacks), L1, L1big and L1h2 on loopback.
+
+| Row | Pair | Metric | Run | A → B (medians) | ratio interval (median) | Bound | Verdict |
+|---|---|---|---|---|---|---|---|
+| `uring-recvmsg` | `recvmmsg:uring-recvmsg` | `cpu-ns/datagram` | 43352723813 | 4 770.5 → 1 492 | 0.3043–0.3274 (0.3121) | ≤ 0.75, required | pass |
+| `uring-recvmsg` | `recvmmsg:uring-recvmsg` | `cpu-ns/datagram` | 43358351908 | 3 172.5 → 1 232.5 | 0.3644–0.4063 (0.3921) | ≤ 0.75, required | pass |
+| `uring-recvmsg` | `recvmmsg:uring-recvmsg` | `datagrams/syscall` | 43352723813 | 54.01 → 149.65 | 2.683–2.794 (2.771) | ≥ 4, reported | not met |
+| `uring-recvmsg` | `recvmmsg:uring-recvmsg` | `datagrams/syscall` | 43358351908 | 54.01 → 187.8 | 3.378–3.508 (3.475) | ≥ 4, reported | not met |
+| `shards` | `recvmmsg:recvmmsg+shards` | `cpu-ns/datagram` | 43352723813 | 4 653.5 → 4 955.5 | 1.035–1.117 (1.0665) | ≤ 1.25, reported | pass |
+| `shards` | `recvmmsg:recvmmsg+shards` | `cpu-ns/datagram` | 43358351908 | 3 120 → 3 149.5 | 0.9643–1.036 (1.0145) | ≤ 1.25, reported | pass |
+| `send-zc` | `loop:loop-sendzc` (L1big) | `cpu-ns/req` | 43352723813 | 80 055.5 → 75 000.5 | 0.8897–0.9886 (0.9311) | ≤ 0.9, reported | not met |
+| `send-zc` | `loop:loop-sendzc` (L1big) | `cpu-ns/req` | 43358351908 | 68 527 → 68 736 | 0.971–1.023 (1.0002) | ≤ 0.9, reported | not met |
+| `files` | `goroutine-static:loop-files` (L1big) | `cpu-ns/req` | 43352723813 | 93 602.5 → 70 204.5 | 0.7324–0.7746 (0.7549) | ≤ 0.70, reported | not met |
+| `files` | `goroutine-static:loop-files` (L1big) | `cpu-ns/req` | 43358351908 | 62 283.5 → 46 796 | 0.727–0.774 (0.7455) | ≤ 0.70, reported | not met |
+| `busy-poll` | `loop:loop-busypoll` (Sparse) | `p99-ns` | 43352723813 | 130 198 → 127 981 | 0.9508–1.004 (0.9876) | ≤ 1.0, reported | not met |
+| `busy-poll` | `loop:loop-busypoll` (Sparse) | `p99-ns` | 43358351908 | 118 064.5 → 118 411.5 | 0.9494–1.029 (0.9763) | ≤ 1.0, reported | not met |
+| `busy-poll` | `loop:loop-busypoll` (Sparse) | `cpu-ns/req` | 43352723813 | 56 444 → 55 617 | 0.9701–1.004 (0.9813) | ≤ 1.0, reported | not met |
+| `busy-poll` | `loop:loop-busypoll` (Sparse) | `cpu-ns/req` | 43358351908 | 43 850 → 43 443.5 | 0.9596–1.024 (0.9828) | ≤ 1.0, reported | not met |
+| `P9` | `goroutine-h2:loop-h2` (L1h2) | `cpu-ns/req` | 43352723813 | 57 139.5 → 4 057 | 0.07003–0.07169 (0.0714) | ≤ 0.7, reported | pass |
+| `P9` | `goroutine-h2:loop-h2` (L1h2) | `cpu-ns/req` | 43358351908 | 45 843 → 3 162.5 | 0.0686–0.07035 (0.0692) | ≤ 0.7, reported | pass |
+| `cal-L1h2` | `loop-h2:loop-h2` (L1h2) | `cpu-ns/req` | 43352723813 | 4 102 → 4 010.5 | 0.969–0.9969 (0.9834) | 1/1.05 to 1.05 | pass |
+| `cal-L1h2` | `loop-h2:loop-h2` (L1h2) | `cpu-ns/req` | 43358351908 | 3 143 → 3 127 | 0.9533–1.001 (0.9908) | 1/1.05 to 1.05 | pass |
+| `h1-h2` | `loop:loop-h2` (L1h2) | `cpu-ns/req` | 43352723813 | 11 664 → 4 113 | 0.3434–0.363 (0.3537) | ≤ 1.0, reported | pass |
+| `h1-h2` | `loop:loop-h2` (L1h2) | `cpu-ns/req` | 43358351908 | 8 058 → 3 112.5 | 0.3779–0.404 (0.3875) | ≤ 1.0, reported | pass |
+
+`uring-recvmsg` holds P4a's 0.75 on both, its upper bound at 0.41 at most;
+`datagrams/syscall` is reported beside it and stays under 4. `shards` stays
+within 1.25: four shards at L3's fixed rate cost what one socket does.
+`send-zc` and `files` miss their bounds on both runners, `files` by 0.03 to
+0.07 on its upper bound. Busy polling neither lowers the p99 nor the CPU a
+request below 1.0 on `Sparse` over the veth pair: every interval straddles
+it, so the row reports and sets no threshold yet (#979). The h2 rows hold by
+far: an h2c request on the loop costs a fourteenth of net/http's.
+
+**kqueue on macos-15** (#976): the `bench-darwin` job of run 43358351908
+(#1368, commit `e8b003d3f`; Darwin 24.6.0, Apple M1 (Virtual), 3 CPUs, arm64),
+`BenchmarkLoadL1` ten paired rounds, its `netgate-darwin-report.json`
+(`-only kqueue,cal-L1-kqueue`):
+
+| Row | Pair | A → B (`cpu-ns/req` medians) | rounds' ratios, lowest–highest | ratio interval (median) | Bound | Verdict |
+|---|---|---|---|---|---|---|
+| `kqueue` | `goroutine:loop-kqueue` | 18 535.5 → 7 137.5 | 0.3294–0.4059 | 0.3313–0.3995 (0.3767) | ≤ 0.7 (P6) | pass |
+| `cal-L1-kqueue` | `loop-kqueue:loop-kqueue` | 7 161.5 → 7 158.5 | 0.8155–1.087 | 0.8946–1.068 (0.9867) | 1/1.05 to 1.05 | fail |
+
+kqueue holds P6's threshold on macos-15 with its whole interval under 0.40.
+The calibration row does not hold its ±5 %: the virtual M1 reads kqueue
+against itself between 0.89 and 1.07, so the darwin runner is noisier than
+Linux's (0.9816–1.016 for `cal-L1` on the two runs above). Its widest deviation from 1, 11 % at
+0.8946, would move the kqueue row's upper bound from 0.3995 to 0.4466
+(0.3995 / 0.8946), still under 0.7. `auto` takes kqueue on darwin from this
+edition (ADR 0222, amended 2026-11-13). No BSD has a measured row: `auto`
+stays portable on FreeBSD, OpenBSD, NetBSD and DragonFly.
 
 ## Edition 2026-11-10 — the loop's counters (#975)
 

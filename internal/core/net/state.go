@@ -30,10 +30,10 @@ type StateValue struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs uint64 `json:"accept_backoffs"`
-	// SuppressedLogs counts the lines of net/http's own log the server did not
-	// write: over the cap of ten records a second, or with no logger to write
-	// them to (WithLogger). A count that rises is a port being probed, or a
-	// handler that panics.
+	// SuppressedLogs counts the lines of net/http's own log, and the failed TLS
+	// handshakes, the server did not write: over the cap of ten records a second,
+	// or with no logger to write them to (WithLogger). A count that rises is a
+	// port being probed, or a handler that panics.
 	SuppressedLogs uint64 `json:"suppressed_logs"`
 	// Datagrams counts what the batched datagram paths drop (ADR 0192).
 	Datagrams DatagramStateValue `json:"datagrams"`
@@ -149,6 +149,17 @@ type ListenerStateValue struct {
 	// SendBuffer is the socket's send buffer as the kernel holds it, read back
 	// as ReceiveBuffer is (SO_SNDBUF, wmem_max).
 	SendBuffer int `json:"send_buffer"`
+	// MultipathTCP reports a stream listener whose socket is Multipath TCP,
+	// read back from the socket (SO_PROTOCOL is IPPROTO_MPTCP) after bind or
+	// adoption: on Linux, what Go's net.Listen opens by default since Go 1.24
+	// where the kernel has MPTCP (net.mptcp.enabled), unless GODEBUG's
+	// multipathtcp says otherwise. A loop group that opts into uring-send-zc
+	// on io_uring binds plain TCP instead, and its rows read false, because a
+	// socket accepted from an MPTCP listener refuses IORING_OP_SEND_ZC; the
+	// operator switching uring-send-zc off, or capping the group at epoll or
+	// the portable backend, gives it Go's default back (#969, ADR 0189).
+	// False on every other platform, for a Unix socket and for a datagram one.
+	MultipathTCP bool `json:"multipath_tcp"`
 	// ProxyRefused counts the connections a ProxyProtocol group refused — peers
 	// outside Trusted, and headers malformed or not finished within Timeout. It
 	// is the group's count, on each of its listeners' rows.

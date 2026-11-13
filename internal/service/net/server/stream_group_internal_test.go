@@ -60,7 +60,7 @@ func Test_StreamGroup_resolved(t *testing.T) {
 
 		//: a plaintext group is not wrapped at all, so it pays nothing for a
 		//: bound it has no negotiation to apply.
-		_, wrapped := resolved.(handshakeHandler)
+		_, wrapped := resolved.(*handshakeHandler)
 		if wrapped != c.secured {
 			t.Fatalf("the resolved handler is a %T, want wrapped = %v", resolved, c.secured)
 		}

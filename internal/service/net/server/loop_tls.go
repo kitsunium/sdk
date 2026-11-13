@@ -225,8 +225,8 @@ func (g *StreamGroup) handshakeBound() time.Duration {
 }
 
 // handshake negotiates c, a TLS connection, within d, and reports whether it
-// completed: a failed or stalled negotiation closes c.
-func handshake(c stdnet.Conn, d time.Duration) bool {
+// completed: a failed or stalled negotiation closes c, recorded by log.
+func handshake(c stdnet.Conn, d time.Duration, log *errorLogWriter) bool {
 	tc, ok := c.(*tls.Conn)
 	//: not TLS: nothing to negotiate.
 	if !ok {
@@ -237,6 +237,7 @@ func handshake(c stdnet.Conn, d time.Duration) bool {
 	defer cancel()
 	//: negotiated, or given up.
 	if err := tc.HandshakeContext(ctx); err != nil {
+		log.handshakeFailed(context.Background(), c.RemoteAddr(), err)
 		swallowErr(c.Close())
 		//: closed.
 		return false

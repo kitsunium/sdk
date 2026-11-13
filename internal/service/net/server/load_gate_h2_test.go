@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 // L1h2, the HTTP/2 lane of the merge gate (#963): L1's request over h2c by
 // prior knowledge, loadConns kept-alive connections, h2LoadStreams streams in

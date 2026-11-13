@@ -82,3 +82,26 @@ as before.
 - Plan P8 §Gates; `tools/netgate/`, `.github/workflows/net-kernel-gate.yml`,
   `internal/service/net/server/load_gate_linux_test.go`,
   `internal/service/net/server/load_l3_linux_internal_test.go`.
+
+## Amendment 2026-11-13 (#852, #977, #969, #982, #979, #976): six rows, two loads, a darwin lane
+
+The table gains a row per measured engine the plan's issues asked for, each
+reported until its numbers have been read on the runner: `uring-recvmsg` (L3,
+`recvmmsg:uring-recvmsg`, P4a's criteria) is turned on in the same change, its
+upper bound 0.347, 0.280 and 0.299 on three runs of the runner already
+measured (#852); `shards` (L3, `recvmmsg:recvmmsg+shards`, CPU a datagram
+within 1.25, reported: the 1.8× datagrams/s at saturation the default change
+needs is not L3's to measure, #977); `send-zc` (`loop:loop-sendzc`, ≤ 0.9,
+#969) and `files` (`goroutine-static:loop-files`, P6's 0.70, #982) on a new
+load, L1big — L1's request answered with 64 KiB, a round an eighth of L1's
+requests; `busy-poll` (`loop:loop-busypoll`, `p99-ns` and `cpu-ns/req` against
+1.0, #979) on a new load, Sparse — the sparse keep-alive load over the veth
+pair, run after the others once GRO is on on the pair's far end, L3 being
+measured as `up` leaves it; and `kqueue` with its calibration `cal-L1-kqueue`
+(L1, `goroutine:loop-kqueue` and `loop-kqueue:loop-kqueue`, #976), measured by
+a `bench-darwin` job on macos-15. `netgate -only step,…` judges the rows named
+alone: the darwin job's samples hold no Linux load, which the whole table
+would count missing. That job runs on pull requests only and is no part of the
+verdict while its rows are reported. The L1 and L1h2 harness moved to
+`load_gate_test.go` and `load_gate_h2_test.go`, built on Linux and darwin; a
+platform's own loads sit behind `load_gate_hooks_*_test.go`.

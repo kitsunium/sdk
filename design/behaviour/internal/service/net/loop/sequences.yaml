@@ -7718,6 +7718,8 @@ sequences:
         kind: self
       - id: ul.rep.found
         kind: internal
+      - id: ul.reportSockCmd
+        kind: internal
       - id: ul.rep.set
         kind: internal
     steps:
@@ -7725,16 +7727,18 @@ sequences:
         to: ul.rep.found
       - eval: ul.rep.found(ul.sw, corenet.CapabilityURingMultishotRecv, true, "")
         to: ul.rep.found
+      - eval: ul.reportSockCmd(direct)
+        to: ul.reportSockCmd
       - opt:
           do:
             - return: ""
           when: ul.sw.disabled(corenet.CapabilityURingDirect)
       - opt:
           do:
-            - eval: "ul.rep.set(corenet.CapabilityURingDirect, statusUnprobed, \"a Unix listener: LoopPeer asks the process descriptor\")"
+            - eval: "ul.rep.set(corenet.CapabilityURingDirect, statusUnprobed, \"a Unix listener without uring-sock-getsockopt: LoopPeer asks the process descriptor\")"
               to: ul.rep.set
             - return: ""
-          when: unixListener(ul.lfds)
+          when: slices.Contains(ul.peers.unix, true) && !ul.peers.cmd
       - bind: reason
         eval: "\"\""
       - opt:
@@ -7759,6 +7763,37 @@ sequences:
             - return: "\"probe defect: \" + step + \": \" + errno.Error()"
           when: errno == syscall.EEXIST
       - return: "step + \": \" + errno.Error()"
+  - of: (*uLoop).reportSockCmd
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).reportSockCmd
+        kind: self
+      - id: ul.rep.set
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "!slices.Contains(ul.peers.unix, true)"
+              do:
+                - eval: ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusUnprobed, "no Unix listener")
+                  to: ul.rep.set
+            - case: ul.sw.disabled(corenet.CapabilityURingDirect)
+              do:
+                - eval: "ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusUnprobed, \"uring-direct switched off: LoopPeer asks the process descriptor\")"
+                  to: ul.rep.set
+            - case: "!ul.peers.cmd"
+              do:
+                - eval: ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusAbsent, ul.peers.why)
+                  to: ul.rep.set
+            - case: "!direct"
+              do:
+                - eval: "ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusAvailable, \"process descriptors: LoopPeer asks the socket\")"
+                  to: ul.rep.set
+            - default: true
+              do:
+                - eval: ul.rep.set(corenet.CapabilityURingSockGetsockopt, statusOn, "")
+                  to: ul.rep.set
   - of: slowFanWake
     participants:
       - id: caller
@@ -8404,8 +8439,8 @@ sequences:
         kind: internal
       - id: rr.credit
         kind: internal
-      - id: slices
-        kind: stdlib
+      - id: ul.indexTables
+        kind: internal
       - id: ul.registerFan
         kind: internal
       - id: rr.fillAtStart
@@ -8472,9 +8507,9 @@ sequences:
           when: err != nil
       - eval: rr.credit(0, u.bufProvided)
         to: rr.credit
-      - set: rr.slotOf
-        to: slices
-        value: slices.Repeat([]int32{-1}, ul.slotSpace(table))
+      - set: rr.slotOf, rr.creds
+        to: ul.indexTables
+        value: ul.indexTables(table)
       - opt:
           do:
             - eval: u.close()
@@ -8711,7 +8746,7 @@ sequences:
           value: fd
   - of: (*uRing).acceptsNothing
     steps:
-      - return: rr.paused || rr.fill&fillClosed != 0 || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+      - return: rr.ul.stopping() || rr.paused || rr.fill&fillClosed != 0 || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
   - of: (*uRing).passedOver
     steps:
       - return: rr.r.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
@@ -9320,6 +9355,8 @@ sequences:
         kind: internal
       - id: rr.onConnOp
         kind: internal
+      - id: rr.onPeer
+        kind: internal
       - id: rr.onWake
         kind: internal
       - id: rr.onFan
@@ -9337,6 +9374,10 @@ sequences:
               do:
                 - eval: rr.onConnOp(op, int32(udSlot(ud)), udGen(ud), c)
                   to: rr.onConnOp
+            - case: udPeer
+              do:
+                - eval: rr.onPeer(int32(udSlot(ud)), udGen(ud), c)
+                  to: rr.onPeer
             - case: udWake
               do:
                 - eval: rr.onWake(c)
@@ -9423,9 +9464,7 @@ sequences:
         kind: internal
       - id: r.take
         kind: internal
-      - id: rr.armRecv
-        kind: internal
-      - id: r.opened
+      - id: rr.openAccepted
         kind: internal
     steps:
       - bind: r, lp
@@ -9479,10 +9518,8 @@ sequences:
         value: slot
       - set: rr.backoff
         value: backoffMin
-      - eval: rr.armRecv(slot)
-        to: rr.armRecv
-      - eval: r.opened(slot)
-        to: r.opened
+      - eval: rr.openAccepted(li, index, slot)
+        to: rr.openAccepted
   - of: (*uRing).countAccept
     participants:
       - id: caller
@@ -9540,7 +9577,7 @@ sequences:
     steps:
       - bind: lp
         eval: rr.ul.lp
-      - return: (rr.r.draining && !lp.draining) || (lp.sz.maxConns > 0 && lp.grp.live.Load() >= int64(lp.sz.maxConns)) || int(index) >= len(rr.slotOf)
+      - return: rr.ul.stopping() || (rr.r.draining && !lp.draining) || (lp.sz.maxConns > 0 && lp.grp.live.Load() >= int64(lp.sz.maxConns)) || int(index) >= len(rr.slotOf)
   - of: (*uRing).orphanClose
     participants:
       - id: caller
@@ -9883,7 +9920,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: cc.zcFlight && rr.zeroCopyDone(slot, c)
+          when: cc.zc != zcOff && rr.zeroCopyHandled(slot, c)
       - op: "--"
         set: cc.ops
       - switch:
@@ -9974,8 +10011,8 @@ sequences:
         to: rr.ul.lp.slab.free
       - set: cc.flight
         value: "chunkRef{idx: noChunk}"
-      - set: cc.zcFlight
-        value: "false"
+      - set: cc.zc
+        value: zcOff
       - op: "&^="
         set: cc.flags
         value: fSending
@@ -10409,8 +10446,13 @@ sequences:
           when: c.out.empty() || c.out.off == c.out.len
       - set: c.flight, c.out
         value: "c.out, chunkRef{idx: noChunk}"
-      - set: c.zcFlight
-        value: rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin
+      - set: c.zc
+        value: zcOff
+      - opt:
+          do:
+            - set: c.zc
+              value: zcOn
+          when: rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin
       - eval: rr.sendFlight(slot)
         to: rr.sendFlight
   - of: (*uRing).sendFlight
@@ -10448,6 +10490,15 @@ sequences:
       - bind: ud
         eval: udPack(udSend, c.gen, uint32(slot))
         to: udPack
+      - opt:
+          do:
+            - set: c.zc
+              value: zcHold
+            - op: "|="
+              set: c.flags
+              value: fSending
+            - return: ""
+          when: c.zc == zcOn && c.zcPend == math.MaxUint8
       - alt:
           - do:
               - eval: prepSendZC(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
@@ -10456,7 +10507,7 @@ sequences:
                 set: c.ops
               - op: ++
                 set: c.zcPend
-            when: c.zcFlight
+            when: c.zc == zcOn
           - do:
               - eval: prepSend(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
                 to: prepSend
@@ -10635,12 +10686,15 @@ sequences:
         kind: actor
       - id: (*uRing).peer
         kind: self
+      - id: rr.directPeer
+        kind: internal
       - id: peerOf
         kind: internal
     steps:
       - opt:
           do:
-            - return: corenet.LoopPeerValue{}, false
+            - return: rr.directPeer(r, slot)
+              to: rr.directPeer
           when: rr.ul.direct
       - return: peerOf(int(r.conns[slot].fd))
         to: peerOf
@@ -10890,20 +10944,31 @@ sequences:
           key: _
           range: ul.rings
           value: rr
+  - of: (*uLoop).stopping
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).stopping
+        kind: self
+      - id: ul.stopBy.IsZero
+        kind: value
+    steps:
+      - return: "!ul.stopBy.IsZero()"
+        to: ul.stopBy.IsZero
   - of: (*uLoop).closeAll
     participants:
       - id: caller
         kind: actor
       - id: (*uLoop).closeAll
         kind: self
+      - id: time.Now().Add
+        kind: value
       - id: r.fail
         kind: internal
       - id: rr.cancelAccepts
         kind: internal
       - id: rr.u.submit
         kind: internal
-      - id: time.Now().Add
-        kind: value
       - id: ul.rings[0].u.wait
         kind: internal
       - id: rr.reapAll
@@ -10911,6 +10976,9 @@ sequences:
       - id: rr.r.publish
         kind: internal
     steps:
+      - set: ul.stopBy
+        to: time.Now().Add
+        value: time.Now().Add(time.Second)
       - loop:
           do:
             - bind: r
@@ -10927,13 +10995,10 @@ sequences:
           key: _
           range: ul.rings
           value: rr
-      - bind: deadline
-        eval: time.Now().Add(time.Second)
-        to: time.Now().Add
       - bind: tick
         eval: "kernelTimespec{nsec: int64(tickEvery)}"
       - loop:
-          cond: ul.live() > 0 && time.Now().Before(deadline)
+          cond: ul.live() > 0 && time.Now().Before(ul.stopBy)
           do:
             - eval: ul.rings[0].u.wait(&tick, 1)
               to: ul.rings[0].u.wait
@@ -11405,12 +11470,215 @@ sequences:
       - op: "|="
         set: c.flags
         value: fSending
+  - of: prepPeerCred
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepPeerCred
+        kind: self
+      - id: fixedFd
+        kind: internal
+    steps:
+      - set: s.opcode
+        value: opURingCmd
+      - set: s.fd
+        to: fixedFd
+        value: fixedFd(index)
+      - set: s.flags
+        value: sqeFixedFile
+      - set: s.off
+        value: uint64(sockOpGetsockopt)
+      - set: s.addr
+        value: uint64(syscall.SOL_SOCKET) | uint64(syscall.SO_PEERCRED)<<32
+      - set: s.fileIdx
+        value: uint32(ucredLen)
+      - set: s.addr3
+        value: uint64(uintptr(unsafe.Pointer(cred)))
+      - set: s.userData
+        value: ud
+  - of: prepInstall
+    steps:
+      - set: s.opcode
+        value: opFilesUpdate
+      - set: s.fd
+        value: "-1"
+      - set: s.addr
+        value: uint64(uintptr(unsafe.Pointer(fd)))
+      - set: s.len
+        value: "1"
+      - set: s.off
+        value: uint64(fileIndexAlloc)
+      - set: s.userData
+        value: ud
+  - of: unixListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: unixListeners
+        kind: self
+      - id: unixListener
+        kind: internal
+    steps:
+      - bind: out
+        eval: make([]bool, len(fds))
+      - loop:
+          do:
+            - set: out[i]
+              to: unixListener
+              value: "unixListener(fds[i : i+1])"
+          key: i
+          range: fds
+      - return: out
+  - of: (*uLoop).peerCmd
+    steps:
+      - return: ul.direct && ul.peers.cmd && li < len(ul.peers.unix) && ul.peers.unix[li]
+  - of: (*uRing).askPeer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).askPeer
+        kind: self
+      - id: rr.u.get
+        kind: internal
+      - id: rr.armRecv
+        kind: internal
+      - id: rr.r.opened
+        kind: internal
+      - id: prepPeerCred
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - bind: index
+        eval: uint32(c.fd)
+      - bind: cell
+        eval: "&rr.creds[index]"
+      - set: "*cell"
+        value: peerCell{}
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - opt:
+          do:
+            - op: ++
+              set: rr.r.st.retries
+            - eval: rr.armRecv(slot)
+              to: rr.armRecv
+            - eval: rr.r.opened(slot)
+              to: rr.r.opened
+            - return: ""
+          when: s == nil
+      - eval: prepPeerCred(s, index, &cell.cred, udPack(udPeer, c.gen, uint32(slot)))
+        to: prepPeerCred
+      - op: ++
+        set: c.ops
+      - set: c.state
+        value: stPeer
+  - of: (*uRing).onPeer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).onPeer
+        kind: self
+      - id: rr.maybeClose
+        kind: internal
+      - id: rr.armRecv
+        kind: internal
+      - id: rr.r.opened
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!rr.owns(slot, gen) || rr.r.conns[slot].state != stPeer"
+      - bind: cc
+        eval: "&rr.r.conns[slot]"
+      - op: "--"
+        set: cc.ops
+      - bind: cell
+        eval: "&rr.creds[cc.fd]"
+      - set: cell.ok
+        value: c.res == ucredLen && cell.cred.Pid > 0
+      - opt:
+          do:
+            - set: cc.state
+              value: stDead
+            - eval: rr.maybeClose(slot)
+              to: rr.maybeClose
+            - return: ""
+          when: rr.ul.stopping()
+      - set: cc.state
+        value: stOpen
+      - eval: rr.armRecv(slot)
+        to: rr.armRecv
+      - eval: rr.r.opened(slot)
+        to: rr.r.opened
+  - of: (*uRing).directPeer
+    steps:
+      - bind: index
+        eval: r.conns[slot].fd
+      - opt:
+          do:
+            - return: corenet.LoopPeerValue{}, false
+          when: int(index) >= len(rr.creds) || !rr.creds[index].ok
+      - bind: u
+        eval: rr.creds[index].cred
+      - return: "corenet.LoopPeerValue{UID: u.Uid, GID: u.Gid, PID: uint32(u.Pid), Verified: true}, true"
+  - of: (*uLoop).indexTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).indexTables
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: slotOf
+        eval: slices.Repeat([]int32{-1}, ul.slotSpace(table))
+        to: slices
+      - opt:
+          do:
+            - return: slotOf, nil
+          when: "!ul.direct || !ul.peers.cmd"
+      - return: slotOf, slices.Repeat([]peerCell{{}}, len(slotOf))
+  - of: (*uRing).openAccepted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).openAccepted
+        kind: self
+      - id: rr.askPeer
+        kind: internal
+      - id: rr.armRecv
+        kind: internal
+      - id: rr.r.opened
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: rr.askPeer(slot)
+              to: rr.askPeer
+            - return: ""
+          when: rr.ul.peerCmd(li)
+      - opt:
+          do:
+            - set: rr.creds[index]
+              value: peerCell{}
+          when: int(index) < len(rr.creds)
+      - eval: rr.armRecv(slot)
+        to: rr.armRecv
+      - eval: rr.r.opened(slot)
+        to: rr.r.opened
   - of: (*uLoop).selfTest
     participants:
       - id: caller
         kind: actor
       - id: (*uLoop).selfTest
         kind: self
+      - id: unixListeners
+        kind: internal
+      - id: slices
+        kind: stdlib
       - id: selfTestRing
         kind: internal
       - id: rg.close
@@ -11435,6 +11703,8 @@ sequences:
         kind: internal
       - id: run.verdict
         kind: internal
+      - id: ul.peerCommand
+        kind: internal
       - id: run.releases
         kind: internal
     steps:
@@ -11442,8 +11712,14 @@ sequences:
           do:
             - return: false, false, probeError("self_test", syscall.EIO)
           when: ul.hooks.failStage == "self_test"
+      - set: ul.peers.unix
+        to: unixListeners
+        value: unixListeners(ul.lfds)
+      - bind: unix
+        eval: slices.Contains(ul.peers.unix, true)
+        to: slices
       - bind: fds
-        eval: ul.sw.disabled(corenet.CapabilityURingDirect) || unixListener(ul.lfds)
+        eval: ul.sw.disabled(corenet.CapabilityURingDirect) || (unix && !ul.sw.wants(corenet.CapabilityURingSockGetsockopt))
       - bind: rg, err
         eval: selfTestRing(flags, !fds)
         to: selfTestRing
@@ -11501,6 +11777,16 @@ sequences:
           do:
             - return: false, false, nil
           when: fds
+      - opt:
+          do:
+            - set: ul.peers.cmd, ul.peers.why
+              to: ul.peerCommand
+              value: ul.peerCommand(run)
+            - opt:
+                do:
+                  - return: false, false, nil
+                when: "!ul.peers.cmd"
+          when: unix
       - set: direct, deferred
         to: run.releases
         value: run.releases(port)
@@ -11835,6 +12121,14 @@ sequences:
               do:
                 - set: st.closed
                   value: "true"
+            - case: udPeer
+              do:
+                - set: st.peer
+                  value: "cmdResult{done: true, res: c.res}"
+            - case: udFilesUpdate
+              do:
+                - set: st.install
+                  value: "cmdResult{done: true, res: c.res}"
             - case: udRecv
               do:
                 - eval: st.onRecv(c)
@@ -11980,6 +12274,143 @@ sequences:
             - return: "-1, 0, syscall.EAFNOSUPPORT"
           when: "!ok"
       - return: fd, in4.Port, nil
+  - of: (*uLoop).peerCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).peerCommand
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: closeFDs
+        kind: internal
+      - id: ul.installProbe
+        kind: internal
+      - id: st.closeDirect
+        kind: internal
+      - id: st.u.get
+        kind: internal
+      - id: prepPeerCred
+        kind: internal
+      - id: st.pump
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false, \"SOCKET_URING_OP_GETSOCKOPT: \" + syscall.EOPNOTSUPP.Error() + \" (before 6.7)\""
+          when: ul.hooks.failStage == "sock_getsockopt"
+      - bind: pair, err
+        eval: syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: "false, \"SOCKET_URING_OP_GETSOCKOPT: no Unix socket pair to probe: \" + err.Error()"
+          when: err != nil
+      - defer: closeFDs(pair[:])
+        to: closeFDs
+      - bind: index, why
+        eval: ul.installProbe(st, pair[0])
+        to: ul.installProbe
+      - opt:
+          do:
+            - return: false, why
+          when: why != ""
+      - defer: st.closeDirect(index)
+        to: st.closeDirect
+      - bind: s
+        eval: st.u.get()
+        to: st.u.get
+      - opt:
+          do:
+            - return: "false, \"SOCKET_URING_OP_GETSOCKOPT: no submission room\""
+          when: s == nil
+      - set: ul.peers.probe
+        value: syscall.Ucred{}
+      - eval: prepPeerCred(s, index, &ul.peers.probe, udPack(udPeer, 0, 0))
+        to: prepPeerCred
+      - eval: st.pump(func() bool { return st.peer.done })
+        to: st.pump
+      - switch:
+          cases:
+            - case: "!st.peer.done"
+              do:
+                - return: "false, \"SOCKET_URING_OP_GETSOCKOPT: no completion within 500 ms\""
+            - case: st.peer.res < 0
+              do:
+                - return: "false, \"SOCKET_URING_OP_GETSOCKOPT on a Unix socket: \" + syscall.Errno(-st.peer.res).Error()"
+            - case: st.peer.res != ucredLen
+              do:
+                - return: "false, \"SOCKET_URING_OP_GETSOCKOPT: an unexpected length\""
+            - case: ul.peers.probe.Pid != int32(syscall.Getpid())
+              do:
+                - return: "false, \"SOCKET_URING_OP_GETSOCKOPT: SO_PEERCRED named pid \" + strconv.Itoa(int(ul.peers.probe.Pid)) + \", not this process\""
+      - return: true, ""
+  - of: (*uLoop).installProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).installProbe
+        kind: self
+      - id: st.u.get
+        kind: internal
+      - id: prepInstall
+        kind: internal
+      - id: st.pump
+        kind: internal
+    steps:
+      - bind: s
+        eval: st.u.get()
+        to: st.u.get
+      - opt:
+          do:
+            - return: "0, \"IORING_OP_FILES_UPDATE: no submission room\""
+          when: s == nil
+      - set: ul.peers.probeFD
+        value: int32(fd)
+      - eval: prepInstall(s, &ul.peers.probeFD, udPack(udFilesUpdate, 0, 0))
+        to: prepInstall
+      - eval: st.pump(func() bool { return st.install.done })
+        to: st.pump
+      - switch:
+          cases:
+            - case: "!st.install.done"
+              do:
+                - return: "0, \"IORING_OP_FILES_UPDATE: no completion within 500 ms\""
+            - case: st.install.res == 1 && ul.peers.probeFD >= 0
+              do:
+                - return: uint32(ul.peers.probeFD), ""
+            - case: st.install.res < 0
+              do:
+                - return: "0, \"IORING_OP_FILES_UPDATE: \" + syscall.Errno(-st.install.res).Error()"
+      - return: "0, \"IORING_OP_FILES_UPDATE: installed \" + strconv.Itoa(int(st.install.res)) + \" descriptors\""
+  - of: (*selfTestRun).closeDirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).closeDirect
+        kind: self
+      - id: st.u.get
+        kind: internal
+      - id: prepCloseDirect
+        kind: internal
+      - id: st.pump
+        kind: internal
+    steps:
+      - bind: s
+        eval: st.u.get()
+        to: st.u.get
+      - opt:
+          do:
+            - return: ""
+          when: s == nil
+      - set: st.closed
+        value: "false"
+      - eval: prepCloseDirect(s, index, udPack(udClose, 0, 0))
+        to: prepCloseDirect
+      - eval: st.pump(func() bool { return st.closed })
+        to: st.pump
+      - set: st.closed
+        value: "false"
   - of: openURing
     participants:
       - id: caller
@@ -13316,6 +13747,8 @@ sequences:
         kind: self
       - id: rr.releaseFlight
         kind: internal
+      - id: rr.sendPlainly
+        kind: internal
       - id: rr.maybeClose
         kind: internal
     steps:
@@ -13338,14 +13771,82 @@ sequences:
         set: cc.zcPend
       - bind: alive
         eval: cc.state == stOpen || cc.state == stClosing
-      - opt:
-          do:
-            - eval: rr.releaseFlight(slot, alive)
-              to: rr.releaseFlight
-          when: cc.zcPend == 0 && cc.flags&fSending != 0 && cc.flight.off >= cc.flight.len
+      - switch:
+          cases:
+            - case: cc.zcPend != 0 || cc.flags&fSending == 0
+            - case: cc.flight.off >= cc.flight.len
+              do:
+                - eval: rr.releaseFlight(slot, alive)
+                  to: rr.releaseFlight
+            - case: cc.zc == zcHold
+              do:
+                - eval: rr.sendPlainly(slot, alive)
+                  to: rr.sendPlainly
       - eval: rr.maybeClose(slot)
         to: rr.maybeClose
       - return: "true"
+  - of: (*uRing).zeroCopyHandled
+    steps:
+      - return: rr.zeroCopyDone(slot, c) || (rr.r.conns[slot].zc == zcOn && rr.zeroCopyRefused(slot, c.res))
+  - of: (*uRing).zeroCopyRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).zeroCopyRefused
+        kind: self
+      - id: rr.sendPlainly
+        kind: internal
+      - id: rr.maybeClose
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: syscall.EOPNOTSUPP
+              do:
+                - set: rr.ul.uses.sendZCMin
+                  value: "0"
+            - case: syscall.ENOMEM
+            - default: true
+              do:
+                - return: "false"
+          "on": syscall.Errno(-res)
+      - bind: cc
+        eval: "&rr.r.conns[slot]"
+      - op: "--"
+        set: cc.ops
+      - opt:
+          do:
+            - set: cc.zc
+              value: zcHold
+            - return: "true"
+          when: cc.zcPend > 0
+      - eval: rr.sendPlainly(slot, cc.state == stOpen || cc.state == stClosing)
+        to: rr.sendPlainly
+      - eval: rr.maybeClose(slot)
+        to: rr.maybeClose
+      - return: "true"
+  - of: (*uRing).sendPlainly
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).sendPlainly
+        kind: self
+      - id: rr.sendFlight
+        kind: internal
+    steps:
+      - bind: cc
+        eval: "&rr.r.conns[slot]"
+      - set: cc.zc
+        value: zcOff
+      - opt:
+          do:
+            - eval: rr.sendFlight(slot)
+              to: rr.sendFlight
+            - return: ""
+          when: alive
+      - op: "&^="
+        set: cc.flags
+        value: fSending
   - of: newWheel
     steps:
       - bind: w

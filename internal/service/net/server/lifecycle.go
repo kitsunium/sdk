@@ -288,8 +288,8 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 				Address:        pc.LocalAddr().String(),
 				Network:        addr.Network,
 				Shards:         count,
-				Exclusive:      rep.exclusive,
-				Shared:         rep.shared,
+				Exclusive:      rep.traits.has(traitExclusive),
+				Shared:         rep.traits.has(traitShared),
 				BindWait:       corenet.DurationValue(rep.wait),
 				Degraded:       degraded,
 				DegradedReason: reason,
@@ -402,6 +402,7 @@ func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
 		//: no accept loop, no goroutine per connection on a native backend.
 		return s.bindLoopGroup(ctx, group)
 	}
+	group.hsLog = s.handshakeLog(group)
 	handler := group.resolved()
 	//: net/http's own log goes to the server's logger, not to stderr.
 	if group.httpAdapter != nil {
@@ -465,6 +466,7 @@ func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHand
 				HTTP2:   group.http2Bounds(),
 				//: read from the raw socket: TLS hides its descriptor.
 				Exclusive:      exclusiveOf(listenerSocket(raw)),
+				MultipathTCP:   multipathOf(listenerSocket(raw)),
 				Degraded:       why != "",
 				DegradedReason: why,
 				MaxBodyBytes:   group.reportedBodyBound(),
@@ -532,8 +534,8 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 				Shards:         count,
 				H2C:            group.servesH2C(),
 				HTTP2:          group.http2Bounds(),
-				Exclusive:      rep.exclusive,
-				Shared:         rep.shared,
+				Exclusive:      rep.traits.has(traitExclusive),
+				Shared:         rep.traits.has(traitShared),
 				BindWait:       corenet.DurationValue(rep.wait),
 				Degraded:       degraded || rep.backlogReason != "",
 				DegradedReason: joinReason(reason, rep.backlogReason),
@@ -541,6 +543,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 				Backlog:        rep.backlog,
 				ReceiveBuffer:  rep.receiveBuffer,
 				SendBuffer:     rep.sendBuffer,
+				MultipathTCP:   rep.traits.has(traitMultipath),
 			})
 			target = pinnedAddr(addr, ln)
 		}

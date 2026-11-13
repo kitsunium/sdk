@@ -143,6 +143,9 @@ type socketSpec struct {
 	reuse reuseMode
 	// trackCloses hands out sockets that report their own Close.
 	trackCloses bool
+	// plainTCP binds TCP without Go's default Multipath TCP: a loop group
+	// that sends zero-copy (plainTCPListens, #969).
+	plainTCP bool
 	// attempts bounds the binds of one address.
 	attempts int
 	// backlog is LimitsValue.Backlog; zero keeps the host's.
@@ -192,6 +195,10 @@ func listen(ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, 
 	//: applies.
 	cfg := stdnet.ListenConfig{Control: listenControl(spec.reuse != reuseNone, spec)}
 	applyKeepAlive(&cfg, spec.keepAlive)
+	//: plain TCP, for a group whose sends must reach SEND_ZC.
+	if spec.plainTCP {
+		cfg.SetMultipathTCP(false)
+	}
 	raw, wait, lerr := bindRetrying(ctx, spec.attempts, addrInUse, func() (stdnet.Listener, error) {
 		//: one attempt.
 		return cfg.Listen(ctx, addr.Network, addr.Addr)
@@ -202,8 +209,9 @@ func listen(ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, 
 		//: surface the address that could not be bound, AddressInUse when held.
 		return nil, rep, bindRefusal(addr, lerr)
 	}
-	rep.shared = spec.reuse == reuseShared
-	rep.exclusive = exclusiveOf(listenerSocket(raw))
+	rep.traits = traitIf(spec.reuse == reuseShared, traitShared) |
+		traitIf(exclusiveOf(listenerSocket(raw)), traitExclusive) |
+		traitIf(multipathOf(listenerSocket(raw)), traitMultipath)
 	rep.backlog, rep.backlogReason = applyBacklog(raw, spec.backlog)
 	rep.receiveBuffer, rep.sendBuffer = socketBuffers(listenerSocket(raw))
 	//: the same layers an adopted socket gets, from the same function.

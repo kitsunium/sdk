@@ -95,6 +95,13 @@ const (
 	// unacknowledged before the kernel closes the connection with an error. Switched
 	// off, or with no timeout asked for, it is not set.
 	CapabilityTCPUserTimeout Capability = "tcp-user-timeout"
+	// CapabilityURingSockGetsockopt is io_uring's socket getsockopt command
+	// (IORING_OP_URING_CMD with SOCKET_URING_OP_GETSOCKOPT, Linux 6.7), with which
+	// the loop reads a Unix connection's SO_PEERCRED on its direct descriptor at
+	// accept, so a group with a Unix listener keeps direct descriptors and LoopPeer
+	// still answers. Switched off, or absent, a group with a Unix listener runs on
+	// process descriptors, where LoopPeer asks the socket.
+	CapabilityURingSockGetsockopt Capability = "uring-sock-getsockopt"
 )
 
 // The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
@@ -163,7 +170,13 @@ const (
 	// through LoopValue.Capabilities, every flight of at least LoopValue.SendZCMin
 	// bytes then leaves zero-copy, released at the kernel's notification. The
 	// probe asks REGISTER_PROBE for the opcode, then sends one datagram zero-copy
-	// on loopback and waits for its notification.
+	// on loopback and waits for its notification. Such a group's listeners are
+	// bound with plain TCP, Go's default MPTCP switched off for that group alone
+	// (ListenerStateValue.MultipathTCP reads false): a socket accepted from an
+	// MPTCP listener answers EOPNOTSUPP, after which the loop sends plainly. A
+	// socket that refuses anyway — a Unix one, an adopted MPTCP listener's —
+	// turns the loop's later flights plain, and one past RLIMIT_MEMLOCK that
+	// flight alone.
 	CapabilityURingSendZC Capability = "uring-send-zc"
 	// CapabilityURingBundle is io_uring's send bundles; the receive bundle is
 	// CapabilityURingRecvBundle's (ADR 0205).

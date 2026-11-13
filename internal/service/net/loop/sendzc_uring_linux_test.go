@@ -7,12 +7,18 @@ package loop
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"io"
+	stdnet "net"
+	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -176,7 +182,7 @@ func TestSendZC_notificationHoldsTheFlight(t *testing.T) {
 		ref.len = 4096
 		// A zero-copy flight as sendFlight leaves it: the send and its
 		// notification counted.
-		cc.flight, cc.zcFlight, cc.zcPend = ref, true, 1
+		cc.flight, cc.zc, cc.zcPend = ref, zcOn, 1
 		cc.ops += 2
 		cc.flags |= fSending
 		gen := cc.gen
@@ -257,6 +263,277 @@ func TestSendZC_switchedOffAndRefused(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ipprotoMPTCP is IPPROTO_MPTCP (include/uapi/linux/in.h), absent from Go's
+// syscall: the protocol Go's net.Listen asks for by default since Go 1.24.
+const ipprotoMPTCP = 262
+
+// TestSendZC_refusedBySocket pins the refusal at send time (#969): a socket
+// the kernel cannot send zero-copy on — a Unix stream socket, and one
+// accepted from an MPTCP listener, which lacks SOCK_SUPPORT_ZC as every
+// connection Go's default listener accepts does — answers EOPNOTSUPP to
+// IORING_OP_SEND_ZC. The connection is not failed: the refused flight is
+// sent again by IORING_OP_SEND once its notification came, byte-exact at
+// 8 MiB read slowly, one opcode 47 issued in all, every later flight of the
+// ring plain.
+func TestSendZC_refusedBySocket(t *testing.T) {
+	b := backendCase{"iouring", corenet.LoopBackendIOURing}
+	if err := probeBackend(b.backend); err != nil {
+		t.Skipf("io_uring not present: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		listen func(t *testing.T) (fd int, network, addr string)
+	}{
+		{"unix", func(t *testing.T) (int, string, string) {
+			path := shortSockPath(t)
+			return unixListenFD(t, syscall.SOCK_STREAM, path), "unix", path
+		}},
+		{"mptcp", mptcpListenFD},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fd, network, addr := tc.listen(t)
+			if z, p := zcTransfer(t, b, fd, network, addr); z != 1 || p == 0 {
+				t.Fatalf("zc=%d plain=%d, want one refused SEND_ZC, then plain sends only", z, p)
+			}
+		})
+	}
+}
+
+// TestSendZC_goListener pins the transport server binds an opted-in group on
+// (#969): a listener of Go's net.ListenConfig with Multipath TCP switched off,
+// as server binds every group that opts into uring-send-zc on io_uring, takes
+// connections the kernel sends zero-copy on — every flight of the 8 MiB
+// answer and the ones behind it by opcode 47, none by opcode 26. The control
+// is the base's listener, Go's default, MPTCP since Go 1.24 where the kernel
+// has it: its first SEND_ZC is refused and every later flight leaves plainly,
+// so the opt-in sent nothing zero-copy past it. The control skips where the
+// default listener is plain TCP (no MPTCP in the kernel, or GODEBUG's
+// multipathtcp=0), after reading the listener's protocol.
+func TestSendZC_goListener(t *testing.T) {
+	b := backendCase{"iouring", corenet.LoopBackendIOURing}
+	if err := probeBackend(b.backend); err != nil {
+		t.Skipf("io_uring not present: %v", err)
+	}
+	t.Run("multipath-off", func(t *testing.T) {
+		fd, addr, mptcp := goListenFD(t, false)
+		if mptcp {
+			t.Fatal("SetMultipathTCP(false) bound an MPTCP socket")
+		}
+		if z, p := zcTransfer(t, b, fd, "tcp", addr); z == 0 || p != 0 {
+			t.Fatalf("zc=%d plain=%d, want every flight zero-copy", z, p)
+		}
+	})
+	t.Run("go-default", func(t *testing.T) {
+		fd, addr, mptcp := goListenFD(t, true)
+		if !mptcp {
+			t.Skipf("Go's default listener is plain TCP here (%s, GODEBUG=%q): nothing to refuse", kernelRelease(), os.Getenv("GODEBUG"))
+		}
+		if z, p := zcTransfer(t, b, fd, "tcp", addr); z != 1 || p == 0 {
+			t.Fatalf("zc=%d plain=%d, want the base's: one refused SEND_ZC, then plain sends only", z, p)
+		}
+	})
+}
+
+// goListenFD binds a loopback listener with Go's net.ListenConfig, Multipath
+// TCP as multipath says (true keeps Go's default), and hands back a
+// duplicated, non-blocking descriptor of it, as server does, its address, and
+// whether the kernel made it an MPTCP socket (SO_PROTOCOL).
+func goListenFD(t *testing.T, multipath bool) (int, string, bool) {
+	t.Helper()
+	var lc stdnet.ListenConfig
+	if !multipath {
+		lc.SetMultipathTCP(false)
+	}
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	rc, err := ln.(*stdnet.TCPListener).SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd, proto := -1, 0
+	var derr, perr error
+	if cerr := rc.Control(func(raw uintptr) {
+		proto, perr = syscall.GetsockoptInt(int(raw), syscall.SOL_SOCKET, syscall.SO_PROTOCOL)
+		syscall.ForkLock.RLock()
+		fd, derr = syscall.Dup(int(raw))
+		if derr == nil {
+			syscall.CloseOnExec(fd)
+		}
+		syscall.ForkLock.RUnlock()
+	}); cerr != nil || derr != nil || perr != nil {
+		t.Fatalf("the listener's descriptor: %v %v %v", cerr, derr, perr)
+	}
+	t.Cleanup(func() { _ = syscall.Close(fd) })
+	if err := syscall.SetNonblock(fd, true); err != nil {
+		t.Fatal(err)
+	}
+	return fd, ln.Addr().String(), proto == ipprotoMPTCP
+}
+
+// zcTransfer serves fd on b with uring-send-zc opted into and SendZCMin 1,
+// asks for an 8 MiB answer read slowly, an echo and a 64 KiB answer behind
+// it, checks each byte-exact, and returns the sends by opcode 47 and 26. It
+// skips where the kernel lacks zero-copy sends.
+func zcTransfer(t *testing.T, b backendCase, fd int, network, addr string) (zc, plain uint64) {
+	t.Helper()
+	var ops sendOps
+	cfg := Config{Group: t.Name(), Value: corenet.LoopValue{Backend: b.backend, OutputCap: 256 << 10}, Handler: &lineH{}, Listeners: []Listener{{FD: fd}}, Log: io.Discard}
+	zcCase(t, 1, 1, &ops)(&cfg)
+	g, err := Start(cfg)
+	if err != nil {
+		t.Fatalf("Start: %v %v", err, errs.FieldsOf(err))
+	}
+	t.Cleanup(func() { _ = g.Close() })
+	if row := capRow(t, g.State(), corenet.CapabilityURingSendZC); row.Status != statusOn {
+		t.Skipf("uring-send-zc %s on %s: %s", row.Status, kernelRelease(), row.Reason)
+	}
+	c, err := stdnet.DialTimeout(network, addr, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+	const n = 8 << 20
+	if _, err := c.Write([]byte("BIG " + strconv.Itoa(n) + "\nafter\nBIG 65536\n")); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReaderSize(c, 1024)
+	got := make([]byte, n)
+	for off := 0; off < n; {
+		k, err := r.Read(got[off:min(n, off+1+off%7919)])
+		if err != nil {
+			t.Fatalf("after %d bytes: %v", off, err)
+		}
+		off += k
+	}
+	if !bytes.Equal(got, pattern(n)) {
+		t.Fatal("the 8 MiB answer arrived altered or out of order")
+	}
+	if line, err := r.ReadString('\n'); err != nil || line != "after\n" {
+		t.Fatalf("the echo behind it = %q, %v", line, err)
+	}
+	if _, err := io.ReadFull(r, got[:65536]); err != nil || !bytes.Equal(got[:65536], pattern(65536)) {
+		t.Fatalf("the next flight: %v", err)
+	}
+	return ops.zc.Load(), ops.plain.Load()
+}
+
+// TestSendZC_refusedForMemory pins the other refusal at send time: the
+// pages a zero-copy send pins are charged to RLIMIT_MEMLOCK, and a load
+// past it is answered ENOMEM. With the limit lowered to zero after Start,
+// every zero-copy send of the 8 MiB answer is refused and the flight still
+// arrives byte-exact, sent plainly; the ring is not turned plain for good:
+// with the limit back, the next large flight leaves zero-copy again. A
+// process holding CAP_IPC_LOCK (root, as the kernel lanes run) is charged
+// nothing — io_uring accounts pinned pages only without it —, so there the
+// flight must leave zero-copy whole, and the test skips once that holds.
+func TestSendZC_refusedForMemory(t *testing.T) {
+	ipcLock := holdsIPCLock(t)
+	var ops sendOps
+	_, addr := codeCase(t, zcCase(t, 1, 1, &ops), corenet.CapabilityURingSendZC)
+	var was syscall.Rlimit
+	if err := syscall.Getrlimit(rlimitMemlock, &was); err != nil {
+		t.Fatal(err)
+	}
+	low := was
+	low.Cur = 0
+	if err := syscall.Setrlimit(rlimitMemlock, &low); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	restore := func() {
+		if !restored {
+			restored = true
+			if err := syscall.Setrlimit(rlimitMemlock, &was); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(restore)
+	c := dial(t, addr)
+	const n = 8 << 20
+	if _, err := c.Write([]byte("BIG " + strconv.Itoa(n) + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReaderSize(c, 64<<10)
+	got := make([]byte, n)
+	if _, err := io.ReadFull(r, got); err != nil || !bytes.Equal(got, pattern(n)) {
+		t.Fatalf("8 MiB under a zero memlock limit: %v", err)
+	}
+	refused := ops.zc.Load()
+	if ipcLock {
+		if refused == 0 || ops.plain.Load() != 0 {
+			t.Fatalf("zc=%d plain=%d with CAP_IPC_LOCK, want every send zero-copy and none refused", refused, ops.plain.Load())
+		}
+		t.Skip("CAP_IPC_LOCK held: io_uring charges no pinned page to RLIMIT_MEMLOCK, so nothing is refused for memory here; the flight left zero-copy whole")
+	}
+	if refused == 0 || ops.plain.Load() == 0 {
+		t.Fatalf("zc=%d plain=%d, want refused SEND_ZCs, then plain sends", refused, ops.plain.Load())
+	}
+	restore()
+	if _, err := c.Write([]byte("BIG 65536\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(r, got[:65536]); err != nil || !bytes.Equal(got[:65536], pattern(65536)) {
+		t.Fatalf("the next flight: %v", err)
+	}
+	waitFor(t, "a zero-copy send once the limit is back", func() bool { return ops.zc.Load() > refused })
+}
+
+// capIPCLock is CAP_IPC_LOCK's bit (include/uapi/linux/capability.h).
+const capIPCLock = 14
+
+// holdsIPCLock reports whether this process's effective set holds
+// CAP_IPC_LOCK, read from /proc/self/status's CapEff.
+func holdsIPCLock(t *testing.T) bool {
+	t.Helper()
+	status, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.Lines(string(status)) {
+		if hex, ok := strings.CutPrefix(line, "CapEff:"); ok {
+			eff, perr := strconv.ParseUint(strings.TrimSpace(hex), 16, 64)
+			if perr != nil {
+				t.Fatalf("CapEff %q: %v", hex, perr)
+			}
+			return eff&(1<<capIPCLock) != 0
+		}
+	}
+	t.Fatal("no CapEff line in /proc/self/status")
+	return false
+}
+
+// rlimitMemlock is RLIMIT_MEMLOCK (include/uapi/asm-generic/resource.h),
+// absent from Go's syscall on Linux.
+const rlimitMemlock = 8
+
+// mptcpListenFD binds a non-blocking MPTCP listener on loopback, as Go's
+// net.Listen does by default, and skips where the kernel has no MPTCP or it
+// is switched off (net.mptcp.enabled = 0).
+func mptcpListenFD(t *testing.T) (int, string, string) {
+	t.Helper()
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, ipprotoMPTCP)
+	if err != nil {
+		t.Skipf("no MPTCP socket here: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Close(fd) })
+	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Listen(fd, 128); err != nil {
+		t.Fatal(err)
+	}
+	sa, err := syscall.Getsockname(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fd, "tcp", "127.0.0.1:" + strconv.Itoa(sa.(*syscall.SockaddrInet4).Port)
 }
 
 // TestSendZC_negativeMinRefused refuses a negative SendZCMin by name.

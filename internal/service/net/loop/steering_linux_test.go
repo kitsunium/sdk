@@ -337,14 +337,23 @@ func TestConformance_notsentLowat(t *testing.T) {
 		}
 		//: the lowat and one segment more, or what the kernel itself leaves
 		//: on a plain socket with the option, and one segment more: never
-		//: what it leaves without the option.
-		if q := notsentBytes(port); q < lowat || q > lowat+lowatSegment {
-			plain, bare := kernelUnsent(t, lowat), kernelUnsent(t, 0)
-			t.Logf("%s: %d bytes unsent; a plain socket leaves %d with the lowat, %d without", b.name, q, plain, bare)
-			if plain >= bare {
-				t.Fatalf("a plain socket leaves %d bytes unsent with the lowat and %d without: this kernel does not bound sendmsg by TCP_NOTSENT_LOWAT", plain, bare)
+		//: what it leaves without the option. The kernel's own is measured
+		//: once, where the loop's count passes the lowat's segment.
+		bound, plain := lowat+lowatSegment, 0
+		kernelBound := func(q int) int {
+			if plain == 0 {
+				var bare int
+				plain, bare = kernelUnsent(t, lowat), kernelUnsent(t, 0)
+				t.Logf("%s: %d bytes unsent; a plain socket leaves %d with the lowat, %d without", b.name, q, plain, bare)
+				if plain >= bare {
+					t.Fatalf("a plain socket leaves %d bytes unsent with the lowat and %d without: this kernel does not bound sendmsg by TCP_NOTSENT_LOWAT", plain, bare)
+				}
+				bound = max(plain, lowat) + lowatSegment
 			}
-			if q < lowat || q > max(plain, lowat)+lowatSegment {
+			return bound
+		}
+		if q := notsentBytes(port); q < lowat || q > bound {
+			if q < lowat || q > kernelBound(q) {
 				t.Fatalf("%d bytes unsent with a peer that reads nothing, want the lowat %d and at most one segment more than the kernel's own %d (-1: no tcp_info)", q, lowat, plain)
 			}
 		}
@@ -363,8 +372,10 @@ func TestConformance_notsentLowat(t *testing.T) {
 			q := <-h.writable
 			seen++
 			most = max(most, q)
-			if q < 0 || q > lowat+lowatSegment {
-				t.Fatalf("OnWritable with %d bytes unsent, want at most %d", q, lowat+lowatSegment)
+			//: the same bound: Fedora's 6.14 filled the socket past the
+			//: lowat's segment at a flush as its own sendmsg does (#857).
+			if q < 0 || (q > bound && q > kernelBound(q)) {
+				t.Fatalf("OnWritable with %d bytes unsent, want at most %d", q, bound)
 			}
 		}
 		if seen == 0 {

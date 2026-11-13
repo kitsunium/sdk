@@ -62,7 +62,7 @@ func TestExtendedConnect(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), "--- PASS: TestXConnectEcho") {
 		t.Fatalf("the xconnect child: %v\n%s", err, out)
 	}
-	for _, name := range []string{"TestXConnectEcho", "TestXConnectAdversarial", "TestXConnectDrain"} {
+	for _, name := range []string{"TestXConnectEcho", "TestXConnectAdversarial", "TestXConnectDrain", "TestXConnectTransportRefusesProtocolField", "TestXConnectBeyondTheBodyBound"} {
 		if !strings.Contains(string(out), "--- PASS: "+name) {
 			t.Fatalf("the child did not pass %s:\n%s", name, out)
 		}
@@ -78,7 +78,7 @@ func inXConnectChild(t *testing.T) {
 }
 
 // h2Identity is a self-signed identity and the pool that trusts it.
-func h2Identity(t *testing.T) (corenet.IdentityValue, *x509.CertPool) {
+func h2Identity(t testing.TB) (corenet.IdentityValue, *x509.CertPool) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -115,7 +115,7 @@ func h2Identity(t *testing.T) (corenet.IdentityValue, *x509.CertPool) {
 
 // h2Group serves h on a TLS group with Protocols("h2") and returns the server
 // and its address.
-func h2Group(t *testing.T, h http.Handler) (*server.Server, string, *x509.CertPool) {
+func h2Group(t testing.TB, h http.Handler) (*server.Server, string, *x509.CertPool) {
 	t.Helper()
 	id, pool := h2Identity(t)
 	srv := server.New()
@@ -349,6 +349,27 @@ func TestXConnectEcho(t *testing.T) {
 	if ok, _ := dialH2WS(t, addr, pool, "connect-udp"); ok {
 		t.Fatal("a CONNECT naming connect-udp was answered 200: a tunnel outside WebSocket")
 	}
+}
+
+// TestXConnectBeyondTheBodyBound is #967 against the request-body bound of a
+// default group (#845, 1 MiB): an RFC 8441 WebSocket's frames are its
+// CONNECT's body, so more than 1 MiB of messages cross one stream, each
+// echoed — the bound once cut the tunnel after 255 messages of 4 KiB.
+func TestXConnectBeyondTheBodyBound(t *testing.T) {
+	inXConnectChild(t)
+	ended := make(chan error, 4)
+	_, addr, pool := h2Group(t, echoHandler(ended))
+	ok, peer := dialH2WS(t, addr, pool, "websocket")
+	if !ok {
+		t.Fatal("extended CONNECT was not answered 200")
+	}
+	msg := []byte(strings.Repeat("y", 4096))
+	for range 300 {
+		peer.send(0x2, true, msg)
+		peer.expectMessage(0x2, msg)
+	}
+	peer.send(0x8, true, []byte{0x03, 0xe8})
+	peer.expectClose(1000)
 }
 
 // TestXConnectAdversarial replays TestAdversarialFramesFailTheConnection's

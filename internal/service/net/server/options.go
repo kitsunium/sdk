@@ -44,9 +44,13 @@ func WithDrainGrace(d time.Duration) Option {
 // reach the process's standard logger: plain text on stderr, outside the
 // structured stream (#846, ADR 0030). Each line becomes one warn record with
 // source=net/http and the group's name, the lines after the first — a panic's
-// stack — in a detail attribute clipped at 2048 bytes.
+// stack — in a detail attribute clipped at 2048 bytes. The engine negotiates
+// TLS before net/http sees a connection, so a failed handshake is the
+// engine's to record, in net/http's words: one warn record naming the peer
+// and crypto/tls's reason, source=net/http on an HTTP group and
+// source=net/server on any other.
 //
-// At most ten records a second are written, across the server's HTTP groups;
+// At most ten records a second are written, across the server's groups;
 // State counts the rest in SuppressedLogs. Without a logger, or with a nil one,
 // nothing is written, and every line is counted there the same way: net/http's
 // own log is never stderr's.

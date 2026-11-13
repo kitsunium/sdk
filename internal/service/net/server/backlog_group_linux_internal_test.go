@@ -9,6 +9,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	stdnet "net"
 	"strconv"
@@ -136,7 +137,7 @@ func heldEngines() []heldEngine {
 			return hold, release
 		},
 	}}
-	for _, b := range []corenet.LoopBackend{corenet.LoopBackendIOURing, corenet.LoopBackendEpoll, corenet.LoopBackendPortable} {
+	for _, b := range []corenet.LoopBackend{corenet.LoopBackendIOURing, corenet.LoopBackendEpoll} {
 		extra := 0
 		switch b {
 		case corenet.LoopBackendIOURing:
@@ -319,13 +320,33 @@ const (
 	drainBacklogStagger = time.Millisecond
 )
 
-// heldEchoH is laneEchoH whose batch end holds on gate once asked to.
+// heldEchoH is laneEchoH whose batch end holds on gate once asked to, and
+// which records every line it echoed.
 type heldEchoH struct {
 	laneEchoH
 	holding atomic.Bool
 	gate    chan struct{}
 	held    chan struct{}
 	once    sync.Once
+	// lines are the lines echoed, a key each.
+	lines sync.Map
+}
+
+// OnData echoes as laneEchoH does and records each line it consumed.
+func (h *heldEchoH) OnData(lio corenet.LoopIO, ref corenet.LoopConnRef, buf []byte) int {
+	used := h.laneEchoH.OnData(lio, ref, buf)
+	for _, line := range bytes.SplitAfter(buf[:used], []byte("\n")) {
+		if len(line) > 0 {
+			h.lines.Store(string(line), true)
+		}
+	}
+	return used
+}
+
+// saw reports whether the handler echoed line.
+func (h *heldEchoH) saw(line string) bool {
+	_, ok := h.lines.Load(line)
+	return ok
 }
 
 func (h *heldEchoH) OnBatchEnd(corenet.LoopIO) {
@@ -339,114 +360,175 @@ func (h *heldEchoH) OnBatchEnd(corenet.LoopIO) {
 
 // TestBacklog_drainThroughASmallQueue pins #978's drain criterion on the
 // native backends, whose drain takes the listen queue (ADR 0196 §D3): a group
-// of Backlog(8) whose loop is held while 384 peers dial at once, then drained
-// with a grace, serves every peer — those the queue held are taken, those
-// whose SYN the kernel dropped retry and connect while the grace keeps the
-// listener accepting — each reading its echo, then the end, never a reset;
-// Shutdown returns nil.
+// of Backlog(8) whose loop is held while 384 peers dial, then drained with a
+// grace, serves every connection the kernel queued — each peer whose line the
+// handler read gets its echo, then the end, never a reset —, the group opens
+// and closes as many connections as peers it served, and Shutdown returns nil.
 //
-// The portable backend is not held to it, and the reason is measured, not
-// assumed: its acceptor is not the handler's goroutine, so the hold never
-// fills the kernel's queue, and the first retransmitted SYNs (1 s) arrive as
-// one burst it drains more slowly than the kernel completes handshakes.
-// Past eight requests in SYN_RECV the kernel answers with SYN cookies, and a
-// final ACK that finds the accept queue full is dropped with no request kept
-// (tcp_abort_on_overflow off): the peer believes itself connected, its
-// request is retransmitted only on its own RTO — 3 s after a lost SYN, then
-// 6 s —, the retransmissions of one cohort arrive together and overflow
-// again, and what comes after the grace meets the closed listener. On this
-// VM (6.12) 2 runs in 4 under -race and 4 in 4 without lost 3 to 97 peers so;
-// the native backends lost none in 8. A Backlog this small is the operator's
-// trade, and the kernel's, not the drain's.
+// A peer the kernel never queued is not the drain's to serve, and the test
+// tells it apart rather than counting it (#1353). Past eight requests in
+// SYN_RECV the kernel answers with SYN cookies, and a final ACK — or the
+// request behind it — that finds the accept queue full is dropped with no
+// request kept (tcp_abort_on_overflow off): the peer believes itself
+// connected and retransmits on its own RTO (1, 3, 7, 15 s), the
+// retransmissions of one cohort arrive together and overflow again, and one
+// that comes after the grace meets the closed listener and is reset. Such a
+// peer is lost only if the handler never read its line, nothing was echoed
+// to it, and its reset came once Shutdown had begun; any other failure is
+// the drain's. Under Bazel's parallel shards 38 of 385 were so (#1353), on
+// this VM with -race none to a few; the portable backend, whose acceptor is
+// not the handler's goroutine, meets the same kernel more often, and is
+// judged by TestBacklog_loopGroupServesThroughASmallQueue.
 func TestBacklog_drainThroughASmallQueue(t *testing.T) {
 	for _, b := range []corenet.LoopBackend{corenet.LoopBackendIOURing, corenet.LoopBackendEpoll} {
 		t.Run(b.String(), func(t *testing.T) {
-			srv := New(WithDrainGrace(drainBacklogGrace))
-			h := &heldEchoH{gate: make(chan struct{}), held: make(chan struct{})}
-			srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Plaintext(), Backlog(8),
-				Loop(corenet.LoopValue{Backend: b, Loops: 1, Rings: 1})).HandleLoop(h)
-			if err := srv.Start(t.Context()); err != nil {
-				if b == corenet.LoopBackendIOURing {
-					t.Skipf("io_uring refused on this host: %v", err)
-				}
-				t.Fatalf("Start: %v", err)
-			}
-			t.Cleanup(func() { swallowErr(srv.Close()) })
-			var release sync.Once
-			t.Cleanup(func() { release.Do(func() { close(h.gate) }) })
-			row := srv.State().Listeners[0]
-			if row.Backlog != 8 {
-				t.Fatalf("row = %+v, want Backlog 8", row)
-			}
-			c0 := loopDial(t, row.Address)
-			lineEcho(t, c0, "warm\n")
-			h.holding.Store(true)
-			lineWrite(c0, "hold\n")
-			select {
-			case <-h.held:
-			case <-time.After(5 * time.Second):
-				t.Fatal("the loop never reached a batch end")
-			}
+			served, lost := drainSmallQueue(t, b, drainBacklogGrace, drainBacklogStagger)
+			t.Logf("%d peers served, %d never queued by the kernel and refused or reset at the listener's close", served, lost)
+		})
+	}
+}
 
-			var wg sync.WaitGroup
-			failures := make(chan string, drainBacklogPeers+1)
-			var connected, dialing atomic.Int64
-			for i := range drainBacklogPeers {
-				wg.Go(func() {
-					//: one peer a millisecond: every one dials while the loop is
-					//: held, and their retransmissions keep that spacing.
-					time.Sleep(time.Duration(i) * drainBacklogStagger)
-					dialing.Add(1)
-					c, err := stdnet.DialTimeout("tcp", row.Address, drainBacklogGrace+5*time.Second)
-					if err != nil {
-						failures <- "peer " + strconv.Itoa(i) + ": dial: " + err.Error()
-						return
-					}
-					connected.Add(1)
-					defer func() { _ = c.Close() }()
-					if msg := echoThenEOF(c, "q\n"); msg != "" {
-						failures <- "peer " + strconv.Itoa(i) + ": " + msg
-					}
-				})
-			}
-			wg.Go(func() {
-				if msg := echoThenEOF(c0, ""); msg != "" {
-					failures <- "the held one: " + msg
+// TestBacklog_drainLossIsTheKernels reproduces #1353's loss on purpose: the
+// same drain with one cohort of peers and a grace of 300 ms, shorter than a
+// dropped final ACK's first retransmission. Peers are lost — every one of
+// them a connection the kernel never queued, refused or reset once the
+// listener closed, its line never read —, and the drain still served every
+// connection it opened.
+func TestBacklog_drainLossIsTheKernels(t *testing.T) {
+	served, lost := drainSmallQueue(t, corenet.LoopBackendEpoll, 300*time.Millisecond, 0)
+	t.Logf("%d peers served, %d never queued by the kernel", served, lost)
+	if lost == 0 {
+		t.Fatal("no peer was lost to a 300 ms grace: the cause #1353 names was not reproduced")
+	}
+}
+
+// drainSmallQueue runs TestBacklog_drainThroughASmallQueue's drain on b with
+// grace, the peers' dials spaced by stagger, and returns how many peers were
+// served and how many the kernel never queued. Any other failure fails t.
+func drainSmallQueue(t *testing.T, b corenet.LoopBackend, grace, stagger time.Duration) (served, lost int64) {
+	t.Helper()
+	srv := New(WithDrainGrace(grace))
+	h := &heldEchoH{gate: make(chan struct{}), held: make(chan struct{})}
+	srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Plaintext(), Backlog(8),
+		Loop(corenet.LoopValue{Backend: b, Loops: 1, Rings: 1})).HandleLoop(h)
+	if err := srv.Start(t.Context()); err != nil {
+		if b == corenet.LoopBackendIOURing {
+			t.Skipf("io_uring refused on this host: %v", err)
+		}
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { swallowErr(srv.Close()) })
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(h.gate) }) })
+	row := srv.State().Listeners[0]
+	if row.Backlog != 8 {
+		t.Fatalf("row = %+v, want Backlog 8", row)
+	}
+	c0 := loopDial(t, row.Address)
+	lineEcho(t, c0, "warm\n")
+	h.holding.Store(true)
+	lineWrite(c0, "hold\n")
+	select {
+	case <-h.held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the loop never reached a batch end")
+	}
+
+	var wg sync.WaitGroup
+	failures := make(chan string, drainBacklogPeers+1)
+	var connected, dialing, servedN, lostN atomic.Int64
+	var shutdownBegan atomic.Bool
+	for i := range drainBacklogPeers {
+		wg.Go(func() {
+			//: one peer a millisecond: every one dials while the loop is
+			//: held, and their retransmissions keep that spacing.
+			time.Sleep(time.Duration(i) * stagger)
+			dialing.Add(1)
+			c, err := stdnet.DialTimeout("tcp", row.Address, grace+5*time.Second)
+			if err != nil {
+				//: a SYN the kernel dropped, retried once the listener closed.
+				if errors.Is(err, syscall.ECONNREFUSED) && shutdownBegan.Load() {
+					lostN.Add(1)
+					return
 				}
-			})
-			// The queue is full, every peer dialed, and those it could not
-			// hold wait on their timers.
-			waitFor(t, func() bool { q, _ := listenQueueOf(t, boundListeners(srv)[0]); return q >= 8 })
-			waitFor(t, func() bool { return dialing.Load() == drainBacklogPeers })
-			time.Sleep(100 * time.Millisecond)
-			if n := connected.Load(); n >= drainBacklogPeers {
-				t.Fatalf("%d peers connected with the loop held: the backlog held nobody back", n)
+				failures <- "peer " + strconv.Itoa(i) + ": dial: " + err.Error()
+				return
 			}
-			done := make(chan error, 1)
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), drainBacklogGrace+20*time.Second)
-				defer cancel()
-				done <- srv.Shutdown(ctx)
-			}()
-			h.holding.Store(false)
-			release.Do(func() { close(h.gate) })
-			wg.Wait()
-			close(failures)
-			var all []string
-			for f := range failures {
-				all = append(all, f)
-			}
-			if len(all) > 0 {
-				t.Fatalf("%d of %d peers not served: %v", len(all), drainBacklogPeers+1, all[:min(len(all), 8)])
-			}
-			if err := <-done; err != nil {
-				t.Fatalf("Shutdown: %v", err)
-			}
-			if o, cl := h.opens.Load(), h.closes.Load(); o != drainBacklogPeers+1 || cl != o {
-				t.Fatalf("%d opened, %d closed, want %d each", o, cl, drainBacklogPeers+1)
+			connected.Add(1)
+			defer func() { _ = c.Close() }()
+			line := "q" + strconv.Itoa(i) + "\n"
+			msg, unqueued := echoOrUnqueued(c, line)
+			switch {
+			case msg == "":
+				servedN.Add(1)
+			case unqueued && !h.saw(line) && shutdownBegan.Load():
+				lostN.Add(1)
+			default:
+				failures <- "peer " + strconv.Itoa(i) + ": " + msg
 			}
 		})
 	}
+	wg.Go(func() {
+		if msg := echoThenEOF(c0, ""); msg != "" {
+			failures <- "the held one: " + msg
+		}
+	})
+	// The queue is full, every peer dialed, and those it could not
+	// hold wait on their timers.
+	waitFor(t, func() bool { q, _ := listenQueueOf(t, boundListeners(srv)[0]); return q >= 8 })
+	waitFor(t, func() bool { return dialing.Load() == drainBacklogPeers })
+	time.Sleep(100 * time.Millisecond)
+	if n := connected.Load(); n >= drainBacklogPeers {
+		t.Fatalf("%d peers connected with the loop held: the backlog held nobody back", n)
+	}
+	done := make(chan error, 1)
+	shutdownBegan.Store(true)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), grace+20*time.Second)
+		defer cancel()
+		done <- srv.Shutdown(ctx)
+	}()
+	h.holding.Store(false)
+	release.Do(func() { close(h.gate) })
+	wg.Wait()
+	close(failures)
+	var all []string
+	for f := range failures {
+		all = append(all, f)
+	}
+	if len(all) > 0 {
+		t.Fatalf("%d of %d peers not served: %v", len(all), drainBacklogPeers+1, all[:min(len(all), 8)])
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if o, cl := h.opens.Load(), h.closes.Load(); o != servedN.Load()+1 || cl != o {
+		t.Fatalf("%d opened, %d closed, want %d each: a connection the drain opened was not served", o, cl, servedN.Load()+1)
+	}
+	if servedN.Load() < 8 {
+		t.Fatalf("%d peers served: the drain did not take even the queue's 8", servedN.Load())
+	}
+	return servedN.Load(), lostN.Load()
+}
+
+// echoOrUnqueued is echoThenEOF for a peer, and says whether its failure is
+// the one a connection the kernel never queued meets: a reset, or an end,
+// before a byte of the echo.
+func echoOrUnqueued(c stdnet.Conn, line string) (string, bool) {
+	_ = c.SetDeadline(time.Now().Add(drainBacklogGrace + 20*time.Second))
+	if _, err := c.Write([]byte(line)); err != nil {
+		return "write: " + err.Error(), errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
+	}
+	got := make([]byte, len(line))
+	n, err := io.ReadFull(c, got)
+	if err != nil || string(got) != line {
+		return "echo " + strconv.Quote(string(got[:n])) + ": " + errString(err), n == 0 && (errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.EOF))
+	}
+	rest, err := io.ReadAll(c)
+	if err != nil || len(rest) > 0 {
+		return "end: " + errString(err) + " " + strconv.Quote(string(rest)), false
+	}
+	return "", false
 }
 
 // lineWrite writes line to c, its error left to the read that follows.

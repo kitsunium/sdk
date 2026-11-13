@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-09T00:00:00Z -->
+<!-- updated: 2026-11-13T00:00:00Z -->
 # internal/core/proc/ipc/
 
 ## Purpose
@@ -34,7 +34,7 @@ moved there from `ipc.go`, content moved and never deleted.
 
 | Symbol | Kind | Notes |
 |---|---|---|
-| `PeerValue` | value | `UID`/`GID`/`PID` as the kernel names them (`-1`/`0` when it does not), `SID` on Windows, `Verified` — false where only the directory admitted the peer |
+| `PeerValue` | value | `UID`/`GID`/`PID` as the kernel names them (`-1`/`0` when it does not), `SID` on Windows (a client's from the token its pipe captured, a listener's from its process token or its pipe's owner), `Verified` — false where only the directory admitted the peer, or where a Windows dialer named another account's listener by its pipe's owner alone (#1349) |
 | `Conn` | value | a `net.Conn` with its `Peer` |
 | `Listener` | port, frozen at five | `Accept() (*Conn, error)`, `Addr`, `Close`, `Path`, `Refused` |
 | `Dialer` | port, frozen at one | `Dial(ctx) (*Conn, error)` |
@@ -67,13 +67,13 @@ service.
 
 | Code | Sentinel | Exit | Meaning |
 |---|---|---|---|
-| 0.3.91.1 | `Misconfigured` | 78 | empty or relative path, beyond `sun_path`, a negative UID or GID |
+| 0.3.91.1 | `Misconfigured` | 78 | empty or relative path, beyond `sun_path`, a negative UID or GID, a SID list off Windows, or an entry of it that is not a SID or stands for every caller (#1349) |
 | 0.3.91.2 | `DirectoryUnsafe` | 78 | the socket's directory is a link, not a directory, not ours, or group/world writable |
 | 0.3.91.3 | `InUse` | 70 (default) | a live process answers on the path |
 | 0.3.91.4 | `ListenFailed` | 70 (default) | the kernel refused the listen |
-| 0.3.91.5 | `PeerRefused` | 70 (default) | a kernel-named peer the configuration does not admit |
+| 0.3.91.5 | `PeerRefused` | 70 (default) | a kernel-named peer the configuration does not admit; on Windows a client whose token names neither the listener's account nor a listed SID, or cannot be read (#1349) |
 | 0.3.91.6 | `DialFailed` | 70 (default) | nobody answered |
-| 0.3.91.7 | `EndpointForeign` | 78 | the socket file, or the pipe's server, is another account's |
+| 0.3.91.7 | `EndpointForeign` | 78 | the socket file, or the pipe's server or owner, is another account's than the one it stands for |
 | 0.3.91.8 | `Closed` | 70 (default) | `Accept` after `Close` |
 | 0.3.91.9 | `PathUnsafe` | 78 | a component ABOVE the directory another account could steer (ADR 0148, the `pathchain` rule) |
 | 0.3.91.10 | `FDPassRefused` | 70 (default) | descriptors not passed: an unnamed peer, an empty payload, a max that is not positive, a platform that passes none, a failed send or receive (#936) |

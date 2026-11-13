@@ -4,6 +4,7 @@ package loop
 
 import (
 	"cmp"
+	"math"
 	"runtime"
 	"slices"
 	"sync"
@@ -31,6 +32,12 @@ const (
 	udFileIn
 	udFileOut
 	udFilePoll
+	// udPeer is the socket command that reads a Unix connection's peer
+	// (#974).
+	udPeer
+	// udFilesUpdate is the self-test's install of a Unix socket into the
+	// direct-descriptor table, the socket command's probe (#974).
+	udFilesUpdate
 )
 
 const (
@@ -154,6 +161,10 @@ type uRing struct {
 	r  *ring
 	// slotOf maps a direct-descriptor index to its slot, -1 when none.
 	slotOf []int32
+	// creds holds, per direct-descriptor index, the peer of the Unix
+	// connection accepted on it (askPeer); nil when the loop accepts none on
+	// direct descriptors (#974).
+	creds []peerCell
 	// armed is how many single-shot accepts each listener has in flight;
 	// paused a
 	// ring that stopped accepting under its reserve.
@@ -279,6 +290,14 @@ type uLoop struct {
 	// direct is whether connections live in the rings' direct-descriptor
 	// tables (the probe's release check passed) or in the process table.
 	direct bool
+	// peers is how a Unix connection's peer is read on direct descriptors
+	// (#974).
+	peers peerReading
+	// stopBy is when closeAll's bounded wait ends, zero until it starts: from
+	// then on (stopping) an accept that completes is closed unopened and none
+	// is armed again, so every connection OnOpen named was failed before the
+	// loop returns. A peer read then lets its slot go unopened too.
+	stopBy time.Time
 	// sw is what the group may use; rep what the probe found (ADR 0189).
 	sw  capSwitches
 	rep capReport
@@ -330,7 +349,8 @@ type ringUses struct {
 	// fills several buffers in one completion (ADR 0205).
 	recvFlags uint16
 	// sendZCMin is the smallest flight sent zero-copy, zero while
-	// uring-send-zc is off (#969).
+	// uring-send-zc is off (#969) and once a socket of the loop refused it
+	// (zeroCopyRefused).
 	sendZCMin int
 }
 
@@ -598,7 +618,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 		return nil, err
 	}
 	rr.credit(0, u.bufProvided)
-	rr.slotOf = slices.Repeat([]int32{-1}, ul.slotSpace(table))
+	rr.slotOf, rr.creds = ul.indexTables(table)
 	//: a secondary's completions wake the primary.
 	if err := ul.registerFan(i, u); err != nil {
 		u.close()
@@ -776,12 +796,12 @@ func (rr *uRing) armAccepts() {
 	}
 }
 
-// acceptsNothing reports a ring that arms no accept: paused, draining,
-// closed until the rings before it are full, or the primary a test keeps
-// idle.
+// acceptsNothing reports a ring that arms no accept: its loop stopping,
+// paused, draining, closed until the rings before it are full, or the
+// primary a test keeps idle.
 func (rr *uRing) acceptsNothing() bool {
 	//: any of them.
-	return rr.paused || rr.fill&fillClosed != 0 || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
+	return rr.ul.stopping() || rr.paused || rr.fill&fillClosed != 0 || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
 }
 
 // passedOver reports a ring that accepts nothing for a reason of its own,
@@ -1272,6 +1292,9 @@ func (rr *uRing) handle(c *cqe) {
 	//: a connection's own operation.
 	case udRecv, udSend, udCancel, udClose, udShutdown, udFileIn, udFileOut, udFilePoll:
 		rr.onConnOp(op, int32(udSlot(ud)), udGen(ud), c)
+	//: a Unix connection's peer, read: it opens.
+	case udPeer:
+		rr.onPeer(int32(udSlot(ud)), udGen(ud), c)
 	//: posted work.
 	case udWake:
 		rr.onWake(c)
@@ -1354,8 +1377,7 @@ func (rr *uRing) onAccept(li int, c *cqe) {
 	}
 	rr.slotOf[index] = slot
 	rr.backoff = backoffMin
-	rr.armRecv(slot)
-	r.opened(slot)
+	rr.openAccepted(li, index, slot)
 }
 
 // countAccept counts a connection accepted on listener li in the group's
@@ -1421,14 +1443,15 @@ func takeWaits(res int32, live int64) bool {
 }
 
 // refuses reports whether a connection accepted on index is closed at once:
-// the watchdog drained the ring while the group serves, MaxConns is reached,
-// or the index is past the table. The group's drain adds no refusal of its
-// own: an accept that completed as its cancel crossed it, or one the drain's
-// take armed, is served unless MaxConns is reached, as at any time.
+// the loop stops, the watchdog drained the ring while the group serves,
+// MaxConns is reached, or the index is past the table. The group's drain adds
+// no refusal of its own: an accept that completed as its cancel crossed it,
+// or one the drain's take armed, is served unless MaxConns is reached, as at
+// any time.
 func (rr *uRing) refuses(index uint32) bool {
 	lp := rr.ul.lp
-	//: any of the three.
-	return (rr.r.draining && !lp.draining) || (lp.sz.maxConns > 0 && lp.grp.live.Load() >= int64(lp.sz.maxConns)) || int(index) >= len(rr.slotOf)
+	//: any of the four.
+	return rr.ul.stopping() || (rr.r.draining && !lp.draining) || (lp.sz.maxConns > 0 && lp.grp.live.Load() >= int64(lp.sz.maxConns)) || int(index) >= len(rr.slotOf)
 }
 
 // orphanClose closes a direct descriptor no slot owns.
@@ -1664,9 +1687,9 @@ func (rr *uRing) onSend(slot int32, gen uint32, c *cqe) {
 		return
 	}
 	cc := &rr.r.conns[slot]
-	//: a zero-copy send's notification, or its first CQE (#969).
-	if cc.zcFlight && rr.zeroCopyDone(slot, c) {
-		//: the notification settled it.
+	//: a zero-copy send's notification, or its refusal (#969).
+	if cc.zc != zcOff && rr.zeroCopyHandled(slot, c) {
+		//: settled, held or sent again.
 		return
 	}
 	cc.ops--
@@ -1730,7 +1753,7 @@ func (rr *uRing) releaseFlight(slot int32, alive bool) {
 	n := int(cc.flight.len)
 	rr.ul.lp.slab.free(cc.flight)
 	cc.flight = chunkRef{idx: noChunk}
-	cc.zcFlight = false
+	cc.zc = zcOff
 	cc.flags &^= fSending
 	//: alive: more output may wait, and a producer for room.
 	if alive {
@@ -2023,7 +2046,11 @@ func (rr *uRing) flush(r *ring, slot int32) {
 		return
 	}
 	c.flight, c.out = c.out, chunkRef{idx: noChunk}
-	c.zcFlight = rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin
+	c.zc = zcOff
+	//: large enough, on a loop whose sockets took zero-copy so far.
+	if rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin {
+		c.zc = zcOn
+	}
 	rr.sendFlight(slot)
 }
 
@@ -2039,8 +2066,16 @@ func (rr *uRing) sendFlight(slot int32) {
 		return
 	}
 	ud := udPack(udSend, c.gen, uint32(slot))
+	//: as many notifications pending as zcPend counts: none sent until they
+	//: came, the rest then plain.
+	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
+		c.zc = zcHold
+		c.flags |= fSending
+		//: held.
+		return
+	}
 	//: plain, or zero-copy: its notification is one more operation (#969).
-	if c.zcFlight {
+	if c.zc == zcOn {
 		prepSendZC(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
 		c.ops++
 		c.zcPend++
@@ -2255,12 +2290,15 @@ func (rr *uRing) cancelOld(slot int32) bool {
 }
 
 // peer implements peerer. A direct descriptor has no process descriptor to
-// ask, so it answers false; a process descriptor is asked, as epoll's is.
+// ask: it answers what the socket command read at accept (askPeer), false
+// for a TCP connection or where the command never ran; a process descriptor
+// is asked, as epoll's is.
 func (rr *uRing) peer(r *ring, slot int32) (corenet.LoopPeerValue, bool) {
-	//: a direct descriptor has no process descriptor to ask.
+	//: a direct descriptor has no process descriptor to ask: the peer the
+	//: socket command read at accept.
 	if rr.ul.direct {
-		//: unknown.
-		return corenet.LoopPeerValue{}, false
+		//: read at accept, or unknown.
+		return rr.directPeer(r, slot)
 	}
 	//: a process descriptor: asked as epoll's is.
 	return peerOf(int(r.conns[slot].fd))
@@ -2446,9 +2484,16 @@ func (ul *uLoop) startDrain() {
 	}
 }
 
+// stopping reports whether closeAll has started.
+func (ul *uLoop) stopping() bool {
+	//: its wait's end is set as it starts.
+	return !ul.stopBy.IsZero()
+}
+
 // closeAll fails every open connection as the loop stops, and lets the
 // cancels and closes they issue complete, a bounded time.
 func (ul *uLoop) closeAll() {
+	ul.stopBy = time.Now().Add(time.Second)
 	//: every ring.
 	for _, rr := range ul.rings {
 		r := rr.r
@@ -2459,10 +2504,9 @@ func (ul *uLoop) closeAll() {
 		rr.cancelAccepts()
 		rr.u.submit()
 	}
-	deadline := time.Now().Add(time.Second)
 	tick := kernelTimespec{nsec: int64(tickEvery)}
 	//: until every slot is released or the second is up.
-	for ul.live() > 0 && time.Now().Before(deadline) {
+	for ul.live() > 0 && time.Now().Before(ul.stopBy) {
 		ul.rings[0].u.wait(&tick, 1)
 		//: each ring.
 		for _, rr := range ul.rings {

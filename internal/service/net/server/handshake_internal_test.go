@@ -235,7 +235,7 @@ func Test_handshakeHandler_ServeConn(t *testing.T) {
 		if !c.stalled {
 			go negotiate(t.Context(), peer)
 		}
-		handler := handshakeHandler{
+		handler := &handshakeHandler{
 			next: corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
 				reached = true
 				return c.handlerErr
