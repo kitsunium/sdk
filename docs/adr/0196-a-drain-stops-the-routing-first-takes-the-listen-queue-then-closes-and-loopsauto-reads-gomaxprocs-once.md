@@ -8,6 +8,7 @@
   is v0 ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
 - **Deciders**: SDK maintainers, owner
 - **Amended 2026-11-10** (#856): a loop group's `Shards(0)` binds one SO_REUSEPORT listener per loop; each is taken by its one loop's rings (§D3's taker is the loop that owns the shard), and a loop whose watchdog gave up closes its own shards. A partial drain of a reuseport group stays `tcp_migrate_req=1`'s (§D3).
+- **Amended 2026-11-13** (#1385): §D3's rule 4 judges a connection only in a batch that handed it no bytes. The HTTP adapters answer a batch's requests at `OnBatchEnd`, which runs after the drain's look: a connection whose request came in that batch was marked closing first and its answer refused, so it ended unanswered well inside the drain — on every backend, h2c on every run measured, HTTP/1.1 spared only because its `OnDrain` deferred the close a batch. The drain now judges it at the next batch, and the HTTP/2 adapter's GOAWAY leaves a connection the batch fed to the batch's end, which writes its answers and then closes it.
 - **Amends**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   §D1 (the drain a loop group shares with the server) and §D5 (the loop
   count); [ADR 0187](0187-the-handler-type-chooses-the-engine.md) §D9
@@ -106,7 +107,10 @@ The drain of a loop group, per backend:
 4. The established connections drain as before, one rule added: a connection
    that has sent nothing yet closes only once it has, or once it stayed silent
    for a second (`drainQuiet`). A connection accepted by the take has its
-   request on the way; closing it unread would reset it.
+   request on the way; closing it unread would reset it. A connection is
+   judged only in a batch that handed it no bytes (amended 2026-11-13,
+   #1385): its handler may answer them at `OnBatchEnd`, after the drain's
+   look, and a close marked first would refuse that answer.
 
 The loop does not stop until its connections are gone **and** its listeners
 handed back.

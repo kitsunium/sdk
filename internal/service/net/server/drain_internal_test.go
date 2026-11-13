@@ -5,13 +5,14 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	stdnet "net"
 	"runtime"
-	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -71,7 +72,7 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend) 
 			for !stop.Load() {
 				after := notReady.Load()
 				t0 := time.Now()
-				if _, _, msg := p.exchange(addr); msg != "" {
+				if _, msg, _ := p.exchange(addr); msg != "" {
 					msg += " began " + t0.Format("15:04:05.000")
 					select {
 					case errc <- msg + ", ended " + time.Now().Format("15:04:05.000") + ", readiness false " + strconv.FormatBool(notReady.Load()):
@@ -138,12 +139,21 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend) 
 // close (ADR 0196 §D4). Nothing else may be.
 const drainCloseWindow = 20 * time.Millisecond
 
+// drainProbeDial bounds each dial of the probe that dates the listener's
+// close: a SYN the kernel drops instead of refusing is abandoned and dialled
+// again, so the refusal that dates the close is never one that waited for a
+// retransmission.
+const drainProbeDial = 5 * time.Millisecond
+
 // TestDrain_arrivalsAcrossTheDrain keeps arrivals going through the whole
 // drain, on every backend the platform has: clients dial back to back and
-// stop only once a dial is refused — the listener closed. Every connection
-// whose dial succeeded must read its echo, never a reset nor an end before
-// it, unless it was dialled within drainCloseWindow of the first refusal:
+// stop only once a dial fails — the listener closed. Every connection whose
+// dial succeeded must read its echo, never a reset nor an end before it,
+// unless its dial returned within drainCloseWindow of the listener's close:
 // the close's own window, which no sequence of calls on one listener closes.
+// The close is dated by the return of a refused dial, which follows it — the
+// kernel refuses a SYN only once no listener is left on the port —, so a
+// connection is judged against a date the close cannot be later than.
 // Each backend takes its listen queue before it closes the listener, so
 // what waited there is served.
 func TestDrain_arrivalsAcrossTheDrain(t *testing.T) {
@@ -171,14 +181,17 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 	}
 	addr := srv.State().Listeners[0].Address
 	type cut struct {
-		at  time.Time
-		msg string
+		at, failed time.Time
+		msg        string
 	}
 	var draining atomic.Bool
-	var during atomic.Int64
+	var during, refused atomic.Int64
 	var mu sync.Mutex
 	var cuts []cut
-	var refusedAt []time.Time
+	// accepted is when the last dial the listener accepted began: the close
+	// came after it. closed is the earliest return of a refused dial: the
+	// close came before it.
+	var accepted, closed time.Time
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
@@ -187,23 +200,33 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 				//: a connection is placed by when the kernel completed it:
 				//: an h2c exchange on a slow guest (NetBSD) began 20.036 ms
 				//: before the close and was completed inside the window.
-				dialled, at, msg := p.exchange(addr)
+				start := time.Now()
+				at, msg, derr := p.exchange(addr)
+				failed := time.Now()
 				mu.Lock()
+				if derr == nil && start.After(accepted) {
+					accepted = start
+				}
 				switch {
-				case !dialled && !began && !draining.Load():
-					cuts = append(cuts, cut{at, "refused before the drain: " + msg})
-				case !dialled:
-					refusedAt = append(refusedAt, at)
+				case derr != nil && !began && !draining.Load():
+					cuts = append(cuts, cut{at, failed, "refused before the drain: " + msg})
+				case derr != nil:
+					refused.Add(1)
+					if errors.Is(derr, syscall.ECONNREFUSED) && (closed.IsZero() || failed.Before(closed)) {
+						closed = failed
+					}
 				case msg != "":
-					cuts = append(cuts, cut{at, msg})
+					cuts = append(cuts, cut{at, failed, msg})
 				case began:
 					during.Add(1)
 				}
 				mu.Unlock()
-				if !dialled {
+				//: back to back, so arrivals reach the listener until it
+				//: closes: a pause between two exchanges left it idle for the
+				//: pause, which NetBSD's 10 ms clock makes 20 ms (#1385).
+				if derr != nil {
 					return
 				}
-				time.Sleep(time.Millisecond)
 			}
 		})
 	}
@@ -211,26 +234,73 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	draining.Store(true)
+	var probe drainDate
+	wg.Go(func() {
+		probe = drainProbe(addr, time.Now().Add(10*time.Second))
+	})
 	if err := srv.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
 	wg.Wait()
-	if during.Load() == 0 || len(refusedAt) == 0 {
-		t.Fatalf("arrivals did not cross the drain: %d served during it, %d refused after", during.Load(), len(refusedAt))
+	if during.Load() == 0 || refused.Load() == 0 {
+		t.Fatalf("arrivals did not cross the drain: %d served during it, %d refused after", during.Load(), refused.Load())
 	}
-	closed := slices.MinFunc(refusedAt, func(a, b time.Time) int { return a.Compare(b) })
+	if probe.refused.IsZero() {
+		t.Fatalf("the listener's close was never dated: no dial was refused within 10s of the drain")
+	}
+	if probe.accepted.After(accepted) {
+		accepted = probe.accepted
+	}
+	if closed.IsZero() || probe.refused.Before(closed) {
+		closed = probe.refused
+	}
 	window := 0
 	for _, c := range cuts {
 		if c.at.After(closed.Add(-drainCloseWindow)) {
 			window++
 			continue
 		}
-		t.Errorf("cut short %v before the listener closed: %s", closed.Sub(c.at), c.msg)
+		t.Errorf("cut short %v before the listener closed, failed %v before it; the last dial the listener accepted began %v after this one returned: %s", closed.Sub(c.at), closed.Sub(c.failed), accepted.Sub(c.at), c.msg)
 	}
-	t.Logf("%d served during the drain; %d reset within %v of the close", during.Load(), window, drainCloseWindow)
+	t.Logf("%d served during the drain; %d reset within %v of the close; the close dated %v after the last dial accepted began, the probe's refusal taking %v", during.Load(), window, drainCloseWindow, closed.Sub(accepted), probe.refused.Sub(probe.began))
 	if o, cl := counts(); o != cl {
 		t.Fatalf("%d opened, %d closed", o, cl)
 	}
+}
+
+// drainDate is what drainProbe saw of the listener's close: when the refused
+// dial that dates it began and returned, zero when none was refused, and when
+// the last dial the listener accepted began.
+type drainDate struct {
+	began, refused, accepted time.Time
+}
+
+// drainProbe dials addr back to back until a dial is refused or deadline
+// passes, each dial bounded by drainProbeDial and closed at once. A refusal's
+// return follows the close: the kernel refuses a SYN only once no listener is
+// left on the port. A dial that timed out proves nothing — FreeBSD answers a
+// SYN that met the closing listener only on its retransmission, a second
+// later (#1385) — and is dialled again, so the refusal kept is one the kernel
+// answered at once.
+func drainProbe(addr string, deadline time.Time) drainDate {
+	var d drainDate
+	//: until a refusal, bounded.
+	for time.Now().Before(deadline) {
+		start := time.Now()
+		c, err := stdnet.DialTimeout("tcp", addr, drainProbeDial)
+		end := time.Now()
+		switch {
+		//: the listener was still there when the SYN came.
+		case err == nil:
+			d.accepted = start
+			swallowErr(c.Close())
+		//: no listener left on the port.
+		case errors.Is(err, syscall.ECONNREFUSED):
+			d.began, d.refused = start, end
+			return d
+		}
+	}
+	return d
 }
 
 // TestDrain_graceBoundedByCtx pins that the grace never outlives the
@@ -308,28 +378,28 @@ func (h *laneEchoH) OnClose(corenet.LoopIO, corenet.LoopConnRef, error) { h.clos
 // oneExchange dials addr, sends one line, reads its echo and closes, and
 // says what went wrong: empty when nothing did.
 func oneExchange(addr string) string {
-	_, _, msg := exchange(addr)
+	_, msg, _ := exchange(addr)
 	return msg
 }
 
-// exchange is oneExchange that also says whether the dial succeeded and
-// when it returned.
-func exchange(addr string) (bool, time.Time, string) {
+// exchange is oneExchange that also says when the dial returned and how it
+// failed, nil when it succeeded.
+func exchange(addr string) (time.Time, string, error) {
 	c, err := stdnet.DialTimeout("tcp", addr, 2*time.Second)
 	connected := time.Now()
 	if err != nil {
-		return false, connected, "dial: " + err.Error()
+		return connected, "dial: " + err.Error(), err
 	}
 	defer func() { swallowErr(c.Close()) }()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := c.Write([]byte("a\n")); err != nil {
-		return true, connected, "write: " + err.Error()
+		return connected, "write: " + err.Error(), nil
 	}
 	got := make([]byte, 2)
 	if _, err := io.ReadFull(c, got); err != nil || string(got) != "a\n" {
-		return true, connected, "echo " + string(got) + ": " + errString(err)
+		return connected, "echo " + string(got) + ": " + errString(err), nil
 	}
-	return true, connected, ""
+	return connected, "", nil
 }
 
 // lineEcho writes line on c and requires it back.

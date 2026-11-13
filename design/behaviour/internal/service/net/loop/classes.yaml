@@ -2416,6 +2416,8 @@ files:
       - sendZCRound
       - sendZCReap
       - (*uRing).zeroCopyDone
+      - (*uRing).notified
+      - (*uRing).pagesBack
       - (*uRing).zeroCopyHandled
       - (*uRing).zeroCopyRefused
       - (*uRing).sendPlainly
@@ -3530,6 +3532,12 @@ types:
       - doc: reason is why the connection closed; errno its errno when it is rErrno.
         name: reason
         type: uint8
+      - doc: |-
+          heardNow says the handler was handed bytes since the drain last looked
+          at the slot: what they asked for may be written only at OnBatchEnd, so
+          the drain closes the connection no earlier than the next batch (#1385).
+        name: heardNow
+        type: bool
       - name: errno
         type: int32
       - doc: |-
@@ -3588,13 +3596,17 @@ types:
         type: uint8
       - doc: |-
           zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
-          send of it zero-copy, zcHold none for now — a zero-copy send of it was
-          refused, or zcPend is at its bound — until its notifications came, the
-          rest then sent plainly. zcPend counts its sends whose notification has
-          not come: the flight's chunk is the kernel's until it reaches zero.
+          send of it zero-copy, zcHold none for now — zcPend is at its bound —
+          until its notifications came, the rest then sent plainly. zcPend counts
+          its sends whose notification has not come: the flight's chunk is the
+          kernel's until it reaches zero. zcVoid counts the notifications still
+          to come of sends the kernel refused, which pinned nothing (#1396): they
+          hold the slot, never the flight.
         name: zc
         type: uint8
       - name: zcPend
+        type: uint8
+      - name: zcVoid
         type: uint8
       - doc: fileErr is the errno a file operation failed with, zero when none.
         name: fileErr
@@ -4257,7 +4269,9 @@ types:
           closeSettled starts the drain's close of every connection of r the drain
           may close (drainable) that has no answer out with a worker (R3): each
           closes once its output has left; mid-request ones, and ones waiting on a
-          worker, finish first.
+          worker, finish first. A connection the batch handed bytes to is judged at
+          the next batch: the handler may answer them at OnBatchEnd, which runs after
+          the drain, and a close marked before it would refuse that answer (#1385).
         name: closeSettled
         params: r *ring
         recv: lp *loop
@@ -6635,26 +6649,40 @@ types:
         recv: rr *uRing
       - doc: |-
           zeroCopyDone handles what a zero-copy send's CQEs owe beyond a plain
-          send's (#969). The notification — the flight's pages back — is one
-          operation less and one pending send less; once the last came for a flight
-          sent whole, the flight is released and the connection flushed again; it is
-          reported true. A send's own CQE without F_MORE, whose notification will
-          never come, takes that count back and is reported false: it is handled as
-          a plain send's.
+          send's (#969, #1396): a notification (notified), reported true; a send's
+          own CQE without F_MORE, whose notification will never come, takes its
+          count back, if one is left to take, and is reported false: it is handled as
+          a plain send's, as is every other CQE of the send.
         name: zeroCopyDone
         params: slot int32, c *cqe
         recv: rr *uRing
         results: bool
       - doc: |-
+          notified takes one notification of slot's back, one operation less: a
+          refused send's first (zcVoid), whose send pinned nothing, then a pending
+          one's (zcPend), whose pages are back (pagesBack). A notification nothing
+          counts — the kernel posting one for a send whose CQE promised none — is
+          dropped.
+        name: notified
+        params: slot int32
+        recv: rr *uRing
+      - doc: |-
+          pagesBack settles slot's flight once a pending notification came: the last
+          one for a flight sent whole releases it and flushes the connection again;
+          for one held at zcPend's bound, its rest leaves plainly.
+        name: pagesBack
+        params: slot int32
+        recv: rr *uRing
+      - doc: |-
           zeroCopyHandled handles what a CQE of a zero-copy flight owes beyond a
-          plain send's — its notification (zeroCopyDone), or a refusal
+          plain send's — a notification (zeroCopyDone), or a refusal
           (zeroCopyRefused) — and reports whether nothing more is to be done with it.
         name: zeroCopyHandled
         params: slot int32, c *cqe
         recv: rr *uRing
         results: bool
       - doc: |-
-          zeroCopyRefused handles a zero-copy send's CQE whose result res is a
+          zeroCopyRefused handles a zero-copy send's CQE c whose result is a
           refusal, nothing of the flight sent, and reports whether it was one:
           EOPNOTSUPP from a socket whose kernel object lacks SOCK_SUPPORT_ZC — a
           Unix socket, or one accepted from a listener that lacks it, as an MPTCP
@@ -6662,19 +6690,21 @@ types:
           1.24 (net: defaultMPTCPEnabledListen) and server binds plain TCP instead
           for a group that opts in (#969), so here an adopted one —, after which
           every ring of the loop sends every later flight plainly, its listeners
-          being the same; or ENOMEM,
-          the pages it would pin past RLIMIT_MEMLOCK, which io_uring charges them to
-          (io_uring/notif.c), a load's while its flights wait for their peers' ACKs,
-          after which only this flight does. Its rest leaves by IORING_OP_SEND once
-          its notifications came, or now when none is pending.
+          being the same; or ENOMEM, the pages it would pin past RLIMIT_MEMLOCK,
+          which io_uring charges them to (io_uring/notif.c), a load's while its
+          flights wait for their peers' ACKs, after which only this flight does. Its
+          rest leaves by IORING_OP_SEND at once, whatever notification is pending
+          (#1396): the refused send pinned nothing, so its own notification, which
+          F_MORE promises, is counted apart (zcVoid) — the slot waits for it, the
+          flight does not —, and only a send of it the kernel took (zcPend) holds the
+          chunk.
         name: zeroCopyRefused
-        params: slot, res int32
+        params: slot int32, c *cqe
         recv: rr *uRing
         results: bool
       - doc: |-
           sendPlainly sends the rest of slot's flight by IORING_OP_SEND, every send
-          of it: its zero-copy notifications all came. A dead slot sends nothing;
-          its flight is freed with it.
+          of it. A dead slot sends nothing; its flight is freed with it.
         name: sendPlainly
         params: slot int32, alive bool
         recv: rr *uRing

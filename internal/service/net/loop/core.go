@@ -308,6 +308,7 @@ func (r *ring) deliver(slot int32, data []byte) {
 	}
 	c.lastIO = r.lp.tick
 	c.flags |= fHeard
+	c.heardNow = true
 	r.st.bytesIn += uint64(len(data))
 	r.lruTouch(slot)
 	lp := r.lp
@@ -428,6 +429,7 @@ func (r *ring) deliverSpill(slot int32, n int) {
 	c.spill.len += int32(n)
 	c.lastIO = r.lp.tick
 	c.flags |= fHeard
+	c.heardNow = true
 	r.st.bytesIn += uint64(n)
 	r.lruTouch(slot)
 	lp := r.lp

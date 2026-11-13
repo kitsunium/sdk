@@ -291,7 +291,11 @@ func (st *laneState) announceDrain(io corenet.LoopIO) {
 }
 
 // announceConn writes GOAWAY(NO_ERROR) on one connection and closes it when
-// nothing is in flight.
+// nothing is in flight. A connection the batch fed is left to the batch's
+// end: the answers it was given wait in the batch's output, written at
+// OnBatchEnd, which then closes it (closeIfDone); a close here would refuse
+// them, and its streams, answered already, no longer count as in flight
+// (#1385).
 func (st *laneState) announceConn(io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry) {
 	//: one GOAWAY a connection, whoever asked first.
 	if e.flags&entryGoAway == 0 {
@@ -299,8 +303,8 @@ func (st *laneState) announceConn(io corenet.LoopIO, ref corenet.LoopConnRef, e 
 		st.jobOut = st.lane.GoAway(&e.conn, corehttp2.ErrCodeNoError, st.jobOut[:0])
 		swallowErr(io.Write(ref, st.jobOut))
 	}
-	//: nothing in flight: the connection ends now.
-	if st.lane.Done(&e.conn) {
+	//: nothing in flight and nothing the batch still owes it: it ends now.
+	if st.lane.Done(&e.conn) && e.activeAt != st.lane.epoch {
 		swallowErr(io.Close(ref))
 	}
 }

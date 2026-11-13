@@ -5391,6 +5391,13 @@ types:
       - doc: drained says the drain has told the handler about this connection.
         name: drained
         type: bool
+      - doc: |-
+          heardNow says the handler was handed bytes since the drain last looked
+          at the connection: what they asked for may be written only at
+          OnBatchEnd, so the drain closes it no earlier than the next batch
+          (#1385).
+        name: heardNow
+        type: bool
       - name: pressure
         type: bool
       - name: wantWrite
@@ -5807,7 +5814,10 @@ types:
         recv: pl *portableLoop
       - doc: |-
           closeSettled marks for closing, as the drain does, every open connection
-          the drain may close now (drainable).
+          the drain may close now (drainable). A connection the batch handed bytes to
+          is judged at the next batch: the handler may answer them at OnBatchEnd,
+          which runs after the drain, and a close marked before it would refuse that
+          answer (#1385).
         name: closeSettled
         recv: pl *portableLoop
       - doc: |-
