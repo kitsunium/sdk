@@ -3,11 +3,14 @@ package consensus
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
@@ -43,6 +46,25 @@ func staleVoterSetup(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode
 // configuration of every founder and of D.
 func staleVoterSetupWith(t *testing.T, tweak func(*Config)) (*testCA, coreconsensus.ClusterID, []*tcpNode, *tcpNode) {
 	t.Helper()
+	ca, cid, ns, d := staleVoterJoined(t, tweak)
+	live := ns[1:]
+	promoteWhenHeard(t, live, d)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := tcpLeader(t, live).node.TransferLeadership(ctx, "op:test", d.id); err != nil {
+		t.Fatalf("setup: transfer to D: %v", err)
+	}
+	if l := tcpLeader(t, append(append([]*tcpNode(nil), live...), d)); l != d {
+		t.Fatalf("setup: D does not lead: %d does", l.id)
+	}
+	return ca, cid, ns, d
+}
+
+// staleVoterJoined is the first half of staleVoterSetupWith: voters A, B
+// and C at protocol 2, A stopped, D joined as a learner and caught up. It
+// returns the founders and D.
+func staleVoterJoined(t *testing.T, tweak func(*Config)) (*testCA, coreconsensus.ClusterID, []*tcpNode, *tcpNode) {
+	t.Helper()
 	ca, cid, ns := newTCPClusterWith(t, tweak)
 	raiseNodes(t, tcpNodes(ns))
 	for i := range 5 {
@@ -64,18 +86,90 @@ func staleVoterSetupWith(t *testing.T, tweak func(*Config)) (*testCA, coreconsen
 	if !waitKV(t, d, "d", "1", 10*time.Second) {
 		t.Fatalf("setup: D never caught up: %+v", d.node.Status())
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if err := tcpLeader(t, live).node.Promote(ctx, "op:test", d.id); err != nil {
-		t.Fatalf("setup: promote D: %v", err)
-	}
-	if err := tcpLeader(t, live).node.TransferLeadership(ctx, "op:test", d.id); err != nil {
-		t.Fatalf("setup: transfer to D: %v", err)
-	}
-	if l := tcpLeader(t, append(append([]*tcpNode(nil), live...), d)); l != d {
-		t.Fatalf("setup: D does not lead: %d does", l.id)
-	}
 	return ca, cid, ns, d
+}
+
+// promoteWhenHeard promotes the learner d on the leader of ns once that
+// leader heard d in its own term, lately, at its commit: what the engine's
+// promote checks, and what D applying a write does not say. A leader that
+// took over meanwhile — an election under load, or a transfer — has not
+// heard d yet and refuses MEMBERSHIP_INVALID, rightly: a learner at match 0
+// promoted left the voters unable to elect anyone (#722). So does a leader
+// whose change of its own term is not committed yet, with
+// MEMBERSHIP_CHANGE_PENDING. The setup asked once, of whichever node led
+// when D had applied a write, and a linux/386 run under load was refused
+// (#1392); it now waits for the precondition on the leader it asks, and
+// after such a refusal waits for it again, on the leader then, until the
+// deadline. The engine's check is unchanged.
+func promoteWhenHeard(t *testing.T, ns []*tcpNode, d *tcpNode) {
+	t.Helper()
+	window := testTimingFast().ElectionTimeoutMin / 2
+	deadline := time.Now().Add(20 * time.Second)
+	var last error
+	for {
+		if l := tcpLeader(t, ns); hearsAtCommit(l, d.id, window) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			last = l.node.Promote(ctx, "op:test", d.id)
+			cancel()
+			//: admitted.
+			if last == nil {
+				return
+			}
+			//: a refusal on the merits other than the two a leader that has
+			//: not heard d yet gives.
+			if !errs.HasCode(last, coreconsensus.CodeMembershipInvalid) && !errs.HasCode(last, coreconsensus.CodeMembershipChangePending) &&
+				!errors.Is(last, coreconsensus.NotLeader) {
+				t.Fatalf("setup: promote D: %v", last)
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("setup: promote D: no leader heard it at its commit within 20s, last refusal %v", last)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// hearsAtCommit reports whether l leads and heard id in its term within
+// window, its durable progress at l's commit.
+func hearsAtCommit(l *tcpNode, id coreconsensus.NodeID, window time.Duration) bool {
+	st := l.node.Status()
+	//: a leader that stepped down hears no one for a promotion.
+	if st.Role != coreconsensus.RoleLeader {
+		return false
+	}
+	//: id among the leader's peers.
+	for _, p := range l.node.Health().Peers {
+		//: heard in the leader's term, lately, and caught up.
+		if p.ID == id {
+			return p.LastContact >= 0 && p.LastContact < window && p.Match >= st.Commit
+		}
+	}
+	return false
+}
+
+// TestAPromotionAskedOfANewLeaderWaitsUntilItHeardTheLearner is #1392's
+// cause, made certain: the leadership moves between D's catch-up and its
+// promotion, as an election under load moves it. Asked at once, the new
+// leader refused MEMBERSHIP_INVALID (D not heard in its term, match 0) or
+// MEMBERSHIP_CHANGE_PENDING (its own term's entry not committed), 10 runs of
+// 10; promoteWhenHeard asks it once it heard D, and D votes.
+func TestAPromotionAskedOfANewLeaderWaitsUntilItHeardTheLearner(t *testing.T) {
+	_, _, ns, d := staleVoterJoined(t, nil)
+	live := ns[1:]
+	l := tcpLeader(t, live)
+	other := live[0]
+	if other == l {
+		other = live[1]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := l.node.TransferLeadership(ctx, "op:test", other.id); err != nil {
+		t.Fatalf("setup: move the leadership to %d: %v", other.id, err)
+	}
+	promoteWhenHeard(t, live, d)
+	if m, ok := tcpLeader(t, live).node.Membership().Member(d.id); !ok || !m.Voter {
+		t.Fatalf("D is not a voter after its promotion: %+v", m)
+	}
 }
 
 // TestHuntR4ProveStaleVoterNewLeader is #542: a voter that was down while

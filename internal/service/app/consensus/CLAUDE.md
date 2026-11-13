@@ -1522,6 +1522,26 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   NetBSD D judged the `DenyPin` of B before E or F first answered it in
   its term and refused it MEMBERSHIP_INVALID, A down and B cut leaving D,
   E and F the only majority it could count (#1374).
+- Ask a test's promotion of whichever node leads once the learner applied
+  a write. `promote` admits a learner its leader heard in its own term
+  within the maximum election timeout, its durable progress within
+  `PromoteLag` of the commit and at its admission; a learner's applying a
+  write says none of that to a leader that took over since. An election
+  under load moved the leadership in the stale voter's setup, and the new
+  leader, D not heard yet at match 0, refused MEMBERSHIP_INVALID, rightly
+  (#722); asked at once after a transfer it refuses 10 times of 10,
+  MEMBERSHIP_INVALID or MEMBERSHIP_CHANGE_PENDING (#1392). The setup waits
+  until the leader it asks heard D in its term, lately, at its commit, and
+  asks again of the leader then after either refusal (`promoteWhenHeard`,
+  `TestAPromotionAskedOfANewLeaderWaitsUntilItHeardTheLearner`).
+- Lift a test's cut from the test's goroutine and want a lost read's
+  resend answered. `sweepReads` resends a follower's read once, a maximum
+  election timeout after it was sent, and answers LEADERSHIP_UNCONFIRMED
+  at two: no read waits for an election, and a read lost twice is refused.
+  A lift that came a maximum election timeout late lost the resend too
+  (held 250 ms, the test failed 5 runs of 5). The cut is lifted on the
+  follower's loop while the read is not resent yet, and an attempt that
+  came too late is held to the refusal (`lostReadAndForward`, #1381).
 - Drop #603's two bets on the leader, or let them pass unsaid: the leader
   counted at any address, and over a compacted log a voter listed after
   it taken to know it as a voter. Strict rules refuse D20's last move and
