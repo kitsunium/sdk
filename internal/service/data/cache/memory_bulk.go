@@ -42,7 +42,7 @@ func (m *memoryStripe[V]) fetchInto(found map[string]V, keys []string) {
 			continue
 		}
 		//: a live, positive entry is a hit.
-		if rec, ok := m.fetch(key); ok && rec.absent == nil {
+		if rec, ok := m.lru.Fetch(key); ok && rec.absent == nil {
 			found[key] = rec.value
 		}
 	}
@@ -100,7 +100,7 @@ func (s *memoryStore[V]) setInto(stripe *memoryStripe[V], keys []string, entries
 	//: the same write Set makes, per key.
 	for _, key := range keys {
 		entry := entries[key]
-		s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags, weight: weights[key]}, entry.TTL)
+		s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags}, entry.TTL, weights[key])
 	}
 }
 
@@ -115,14 +115,14 @@ func (s *memoryStore[V]) stripeIndex(key string) int {
 	return int(maphashString(s, key) % uint64(len(s.stripes)))
 }
 
-// remainingOf is the entry's remaining lifetime at now: 0 for an entry with
-// no deadline, and never negative.
-func remainingOf(expireAt, now time.Time) time.Duration {
+// remainingOf is the entry's remaining lifetime at now, its deadline the
+// primitive's: 0 for an entry with no deadline, and never negative.
+func remainingOf(deadline, now time.Time) time.Duration {
 	//: no deadline, nothing remaining to measure.
-	if expireAt.IsZero() {
+	if deadline.IsZero() {
 		//: unbounded.
 		return 0
 	}
 	//: what is left, floored at zero.
-	return max(expireAt.Sub(now), 0)
+	return max(deadline.Sub(now), 0)
 }

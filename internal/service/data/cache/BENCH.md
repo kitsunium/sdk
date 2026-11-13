@@ -123,6 +123,35 @@ over the 10 % #1059 allowed. Still 0 allocations on a hit. Tag invalidation
 keeps its O(k) shape (`InvalidateTag_In1k` and `_In100k` within ~5 % of each
 other and of the base).
 
+### #1059 (2026-11-13): one lock and a record in registers
+
+The owner kept #1059's bound — `Fetch_Hit` and `Load_Hit` within 10 % of
+`ee1f48b` — so the price stated above was taken back rather than accepted.
+What the compiler had made of the wave, read first (`-gcflags=-m=2` and
+`go tool objdump` of the `go.shape.string` instantiations at the base, at the
+kernel's #1038 change and here):
+
+| | base `ee1f48b` | wave L6 + #1038 | #1059 |
+|---|---|---|---|
+| locks on a hit | stripe-less store `Mutex` + primitive `RWMutex` | stripe `Mutex` + primitive `Mutex`, two deferred calls | the stripe's `Mutex` alone |
+| `record[string]` | 8 words | 11 words | 7 words |
+| how a hit's record comes back | registers (8 words + `ok` = the 9 result registers) | through the stack, copied at `Cache.Fetch`, the stripe and `fetchRecord` | registers |
+| calls below `Fetch` | `fetchRecord` → `Cache.Fetch` | `fetchRecord` → `stripeOf` → stripe `fetch` → `Cache.Fetch` → `UnlockedMap.fetch` | `lookup` → `UnlockedMap.Fetch` |
+
+The verdict is the interleaved A/B of `bench-ab.yml` on the runner — the
+upper end of the 95 % interval of the per-round ratios against 1.10 — and its
+figures replace this paragraph. Indicative only, on the shared VM (go1.27.4,
+`-cpu=4`, six interleaved rounds of 2 000 000 iterations, means): `Fetch_Hit`
+174 ns at the base, 231 ns at #1038, 131 ns now; `Load_Hit` 166 → 234 →
+142 ns; 0 allocations throughout. `Set_Untagged` 659 → 768 → 627 ns
+(212 → 260 → 196 B): a write reads the clock once, the primitive's, where the
+store read it a second time for its own copy of the deadline.
+
+The scale rows (`scale_bench_test.go`: `Fetch_Hit_1M`, `Load_Hit_1M`, a
+million entries with a TTL read in a uniform random order computed
+beforehand) run in the lane's scale mode; at a few hundred megabytes they
+never run on a shared machine.
+
 ### Stripes (#808)
 
 ```

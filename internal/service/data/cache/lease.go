@@ -147,9 +147,9 @@ func (s *memoryStore[V]) LoadLeased(ctx context.Context, key string, fill coreca
 		return s.Load(ctx, key, fill)
 	}
 	//: the hit path takes neither the group nor the lease.
-	if rec, ok := s.fetchRecord(key); ok {
+	if hit, ok, absent := s.lookup(key); ok {
 		//: a negative entry is an answer too.
-		return rec.value, rec.absent
+		return hit, absent
 	}
 	filled, _, groupErr := s.group.Do(ctx, key, func(callCtx context.Context) (V, error) {
 		//: one goroutine per key in this process; then the lease.
@@ -158,9 +158,9 @@ func (s *memoryStore[V]) LoadLeased(ctx context.Context, key string, fill coreca
 			waiter: s.waiter,
 			poll:   s.leasePoll,
 			lookup: func(context.Context) (V, bool, error) {
-				rec, ok := s.fetchRecord(key)
+				hit, ok, absent := s.lookup(key)
 				//: a negative entry is found, its error the answer.
-				return rec.value, ok, rec.absent
+				return hit, ok, absent
 			},
 			fill: func(fillCtx context.Context) (V, error) {
 				//: stored as Load stores, a negative answer included.

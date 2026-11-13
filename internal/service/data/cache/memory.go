@@ -19,31 +19,39 @@ import (
 // primitive and a tag index under a mutex of its own, and a singleflight group
 // in front of the fill path.
 //
-// # One mutex per stripe, taken for reads too
+// # One mutex per stripe, taken for reads too, and the only one
 //
 // A key lives in exactly one stripe, picked by a seeded hash of the key, and
 // everything that stripe holds is under its own sync.Mutex, which Fetch takes
-// exclusively. That is not an oversight: the primitive's own Fetch already
-// takes a WRITE lock, because a hit moves the entry and counters, so there was
-// never a shared-read path to lose. Serialising the stripe's tag index on the
-// SAME lock is what makes the index and the entries agree at every observable
-// moment — with two locks, a key would be briefly live but unindexed, and an
-// InvalidateTag crossing that window would report success while leaving the
-// entry fetchable. The argument holds per stripe because a key is in one.
-// Operations on keys of different stripes never wait for each other (#808).
+// exclusively. That is not an oversight: a hit moves the entry and counters,
+// so there was never a shared-read path to lose. Serialising the stripe's tag
+// index on the SAME lock is what makes the index and the entries agree at
+// every observable moment — with two locks, a key would be briefly live but
+// unindexed, and an InvalidateTag crossing that window would report success
+// while leaving the entry fetchable. The argument holds per stripe because a
+// key is in one. Operations on keys of different stripes never wait for each
+// other (#808).
+//
+// The primitive is the kernel's UnlockedMap, the cache without its lock: the
+// stripe's mutex already serialises every call into it, so a second lock
+// inside would protect nothing and cost every hit two atomics and a deferred
+// unlock (#1059).
 //
 // # onEvict must never lock
 //
-// The primitive calls OnEvict after releasing its own lock, but still on the
-// caller's goroutine — the goroutine that is inside one of the methods below,
-// holding the stripe's mutex. A callback that took it would deadlock outright,
-// sync.Mutex not being reentrant. So onEvict only APPENDS to the stripe's
-// evicted, a field that is by construction reachable solely while that mutex
-// is held, and the surrounding method drains it. The invariant is short and
-// must stay that way: no path into a primitive runs without its stripe's
-// mutex, and onEvict takes no lock.
+// The primitive calls OnEvict at the end of the call that evicted, once its
+// map is consistent, on the caller's goroutine — the goroutine that is inside
+// one of the methods below, holding the stripe's mutex. A callback that took
+// it would deadlock outright, sync.Mutex not being reentrant. So onEvict
+// takes no lock: it unlinks the key from the stripe's tag index, which that
+// mutex, held by the caller, already guards. The invariant is short and must
+// stay that way: no path into a primitive runs without its stripe's mutex,
+// and onEvict takes no lock.
 type memoryStore[V any] struct {
 	stripes []*memoryStripe[V]
+	// single is the one stripe of an unstriped store, nil otherwise: the
+	// common store finds its stripe without a hash or an index.
+	single *memoryStripe[V]
 	// seed keys the hash that picks a key's stripe.
 	seed maphash.Seed
 	clk  clock.Clock
@@ -66,11 +74,12 @@ type memoryStore[V any] struct {
 // memoryStripe is one stripe: a primitive, its tag index, and their mutex.
 type memoryStripe[V any] struct {
 	mu   sync.Mutex
-	lru  *kcache.Cache[string, record[V]]
+	lru  *kcache.UnlockedMap[string, record[V]]
 	tags *tagIndex
-	//: evicted collects the keys the primitive dropped during the call in
-	//: progress. Guarded by mu; see the memoryStore type comment.
-	evicted []string
+	//: writing is the weight of the write in progress, measured once by
+	//: validate and read back by the primitive's WeightOf during that write.
+	//: Guarded by mu.
+	writing int64
 	//: refreshing holds the keys a background refresh is running for (#838).
 	//: Guarded by mu.
 	refreshing map[string]struct{}
@@ -144,6 +153,10 @@ func newMemory[V any](cfg MemoryConfig, weigh func(value V) int64) (store coreca
 	}
 	//: the smallest share: an entry it cannot hold is refused at Set.
 	built.maxWeight = shareOf64(cfg.MaxBytes, count, count-1)
+	//: an unstriped store reaches its stripe directly.
+	if count == 1 {
+		built.single = built.stripes[0]
+	}
 	//: ready; every capability is reachable by type assertion.
 	return built, nil
 }
@@ -164,9 +177,9 @@ func (s *memoryStore[V]) newStripe(cfg MemoryConfig, entries int, bytes int64) *
 	//: the least that still counts it.
 	if s.weigh != nil {
 		primitive.MaxWeight = bytes
-		primitive.WeightOf = s.weightOf
+		primitive.WeightOf = stripe.weightOf
 	}
-	stripe.lru = kcache.NewCache(primitive)
+	stripe.lru = kcache.NewUnlockedMap(primitive)
 	//: an empty stripe.
 	return stripe
 }
@@ -183,21 +196,25 @@ func (s *memoryStore[V]) absentWeight() int64 {
 	return 1
 }
 
-// weightOf is the primitive's WeightOf: the weight Set measured, once.
-func (s *memoryStore[V]) weightOf(_ string, rec record[V]) int64 {
-	//: measured at Set, so the caller's weigher runs once per write.
-	return rec.weight
+// weightOf is the primitive's WeightOf: the weight validate measured for the
+// write in progress. The primitive weighs an entry when it is stored, on the
+// call that stores it, so the stripe's writing is that entry's weight; the
+// caller's weigher runs once per write, and the record carries no copy of
+// what the primitive keeps. Caller holds mu.
+func (m *memoryStripe[V]) weightOf(_ string, _ record[V]) int64 {
+	//: measured once, before the write began.
+	return m.writing
 }
 
 // stripeOf returns the stripe key lives in.
 func (s *memoryStore[V]) stripeOf(key string) *memoryStripe[V] {
 	//: one stripe needs no hash.
-	if len(s.stripes) == 1 {
+	if s.single != nil {
 		//: the only stripe.
-		return s.stripes[0]
+		return s.single
 	}
 	//: a seeded hash, so no input can be crafted to land in one stripe.
-	return s.stripes[maphashString(s, key)%uint64(len(s.stripes))]
+	return s.stripes[s.stripeIndex(key)]
 }
 
 // maphashString hashes key with the store's seed.
@@ -206,39 +223,13 @@ func maphashString[V any](s *memoryStore[V], key string) uint64 {
 	return maphash.String(s.seed, key)
 }
 
-// onEvict records a key the primitive dropped by capacity or expiry. It takes
-// NO lock — see the memoryStore type comment.
+// onEvict unlinks from the tag index a key the primitive dropped by capacity
+// or expiry, at the end of the primitive's call. It takes NO lock: the caller
+// holds mu — see the memoryStore type comment. Leaving a key behind would
+// grow the reverse index forever and make it name entries that do not exist.
 func (m *memoryStripe[V]) onEvict(key string, _ record[V]) {
-	//: the surrounding method holds m.mu and will drain this.
-	m.evicted = append(m.evicted, key)
-}
-
-// drainEvicted unlinks every key the primitive just dropped from the tag
-// index. Caller holds mu.
-func (m *memoryStripe[V]) drainEvicted() {
-	//: the overwhelmingly common case is that nothing was evicted.
-	if len(m.evicted) == 0 {
-		//: nothing to unlink.
-		return
-	}
-	//: unlink every key the primitive just dropped; leaving one behind grows
-	//: the reverse index forever and makes it name entries that do not exist.
-	for _, key := range m.evicted {
-		//: one unlink per evicted key.
-		m.tags.remove(key)
-	}
-	//: keep the backing array; this scratch buffer is reused every call.
-	m.evicted = m.evicted[:0]
-}
-
-// fetch is the one place a stripe's primitive is read. Caller holds mu.
-func (m *memoryStripe[V]) fetch(key string) (rec record[V], found bool) {
-	//: a hit records itself and a miss may reap an expired entry — both
-	//: mutate, and a reap fires onEvict, which is why the drain follows.
-	stored, ok := m.lru.Fetch(key)
-	m.drainEvicted()
-	//: the record as the primitive holds it.
-	return stored, ok
+	//: the index is guarded by the mutex the surrounding method holds.
+	m.tags.remove(key)
 }
 
 // Fetch returns the value under key. It MUTATES the store — recency, counters,
@@ -249,47 +240,54 @@ func (m *memoryStripe[V]) fetch(key string) (rec record[V], found bool) {
 // that can only ever pass. The parameter stays because the PORT needs it for
 // tiers that do block.
 func (s *memoryStore[V]) Fetch(_ context.Context, key string) (value V, found bool, err error) {
-	rec, ok := s.fetchRecord(key)
+	value, ok, absent := s.lookup(key)
 	//: a miss is not an error — a cache that does not hold something has done
 	//: nothing wrong — and a negative entry holds no value.
-	if !ok || rec.absent != nil {
+	if !ok || absent != nil {
 		var zero V
 		//: the miss.
 		return zero, false, nil
 	}
 	//: the live value.
-	return rec.value, true, nil
+	return value, true, nil
 }
 
 // FetchEntry returns the whole entry, with the REMAINING lifetime rather than
 // the one originally supplied. See [record] for why that distinction matters.
 func (s *memoryStore[V]) FetchEntry(_ context.Context, key string) (entry corecache.EntryValue[V], found bool, err error) {
-	rec, ok := s.fetchRecord(key)
+	stripe := s.stripeOf(key)
+	stripe.mu.Lock()
+	rec, ok := stripe.lru.Fetch(key)
 	//: a miss, or a negative entry, yields the zero entry.
 	if !ok || rec.absent != nil {
+		stripe.mu.Unlock()
 		//: nothing stored under this key.
 		return corecache.EntryValue[V]{}, false, nil
 	}
+	//: the primitive's deadline, read under the lock that found the entry.
+	deadline, _ := stripe.lru.Deadline(key)
+	stripe.mu.Unlock()
 	//: the entry as it stands NOW.
-	return s.entryOf(rec), true, nil
+	return s.entryOf(rec, deadline), true, nil
 }
 
-// entryOf turns a record into the entry a caller may hand back to Set.
-func (s *memoryStore[V]) entryOf(rec record[V]) corecache.EntryValue[V] {
+// entryOf turns a record and its deadline into the entry a caller may hand
+// back to Set.
+func (s *memoryStore[V]) entryOf(rec record[V], deadline time.Time) corecache.EntryValue[V] {
 	//: tags are copied out: the index owns the slice the store holds, and a
 	//: caller free to append to it could corrupt another entry's tag list.
-	return corecache.EntryValue[V]{Value: rec.value, TTL: s.remaining(rec), Tags: slices.Clone(rec.tags)}
+	return corecache.EntryValue[V]{Value: rec.value, TTL: s.remaining(deadline), Tags: slices.Clone(rec.tags)}
 }
 
-// remaining converts a stored deadline into a TTL a caller can hand back to
-// Set. Caller holds nothing — it only reads the clock.
-func (s *memoryStore[V]) remaining(rec record[V]) time.Duration {
+// remaining converts the primitive's deadline into a TTL a caller can hand
+// back to Set. Caller holds nothing — it only reads the clock.
+func (s *memoryStore[V]) remaining(deadline time.Time) time.Duration {
 	//: an entry with no deadline keeps having none wherever it is promoted.
-	if rec.expireAt.IsZero() {
+	if deadline.IsZero() {
 		//: the explicit "no deadline" spelling.
 		return corecache.NoExpiry
 	}
-	left := rec.expireAt.Sub(s.clk.Now())
+	left := deadline.Sub(s.clk.Now())
 	//: a deadline that has passed but has not yet been reaped must not become
 	//: a zero TTL, which Set would read as "use the default" and so REVIVE.
 	if left <= 0 {
@@ -300,16 +298,19 @@ func (s *memoryStore[V]) remaining(rec record[V]) time.Duration {
 	return left
 }
 
-// fetchRecord reads one key under its stripe's lock. The lock is released
-// by hand rather than deferred: this is every read's path, and nothing
-// between the two calls can panic short of a broken primitive.
-func (s *memoryStore[V]) fetchRecord(key string) (rec record[V], found bool) {
+// lookup reads one key under its stripe's lock and returns what a read
+// answers with: the value, whether the key was found, and a negative entry's
+// error. A hit records itself and a miss may reap an expired entry, whose
+// onEvict unlinks it from the tag index under the same lock. The lock is
+// released by hand rather than deferred: this is every read's path, and
+// nothing between the two calls can panic short of a broken primitive.
+func (s *memoryStore[V]) lookup(key string) (value V, found bool, absent error) {
 	stripe := s.stripeOf(key)
 	stripe.mu.Lock()
-	rec, found = stripe.fetch(key)
+	rec, ok := stripe.lru.Fetch(key)
 	stripe.mu.Unlock()
-	//: the record as the primitive holds it.
-	return rec, found
+	//: the value, or the negative entry's answer; the tags stay behind.
+	return rec.value, ok, rec.absent
 }
 
 // Set stores entry under key. An entry the store cannot represent is REFUSED
@@ -325,7 +326,7 @@ func (s *memoryStore[V]) Set(_ context.Context, key string, entry corecache.Entr
 	stripe := s.stripeOf(key)
 	stripe.mu.Lock()
 	defer stripe.mu.Unlock()
-	s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags, weight: weight}, entry.TTL)
+	s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags}, entry.TTL, weight)
 	//: stored.
 	return nil
 }
@@ -356,28 +357,22 @@ func (s *memoryStore[V]) validate(key string, entry corecache.EntryValue[V]) (we
 	return weight, nil
 }
 
-// store writes rec under key into stripe, its deadline from ttl. Caller holds
-// stripe.mu and has validated the entry; rec.tags is the caller's slice.
-func (s *memoryStore[V]) store(stripe *memoryStripe[V], key string, rec record[V], ttl time.Duration) {
-	lifetime := primitiveTTL(ttl, s.defaultTTL)
-	//: the deadline is computed once, here, so FetchEntry can report what is
-	//: left without asking the primitive for something it does not expose.
-	rec.expireAt = time.Time{}
-	//: only a positive lifetime produces a deadline; a zero one has already
-	//: been resolved by primitiveTTL and means "no deadline".
-	if lifetime > 0 {
-		//: an absolute deadline against the injected clock.
-		rec.expireAt = s.clk.Now().Add(lifetime)
-	}
+// store writes rec under key into stripe, its deadline from ttl and its
+// weight as validate measured it. The deadline is the primitive's, read off
+// the clock once, by the primitive. Caller holds stripe.mu and has validated
+// the entry; rec.tags is the caller's slice.
+func (s *memoryStore[V]) store(stripe *memoryStripe[V], key string, rec record[V], ttl time.Duration, weight int64) {
 	//: index first: add replaces this key's previous tags, so an overwrite
 	//: cannot leave the old ones pointing here. It hands back the copy IT
 	//: owns, which the record then shares — one slice, so the entry and the
 	//: index can never disagree, and the caller's own slice never reaches in.
 	rec.tags = stripe.tags.add(key, rec.tags)
-	stripe.lru.SetTTL(key, rec, lifetime)
-	//: the insert may have evicted OTHER keys (never this one — the entry
-	//: just written is never its own victim). Unlink them.
-	stripe.drainEvicted()
+	//: the weight the primitive's WeightOf reads during this write.
+	stripe.writing = weight
+	//: a zero lifetime, resolved by primitiveTTL, means "no deadline". The
+	//: insert may evict OTHER keys (never this one — the entry just written
+	//: is never its own victim), and onEvict unlinks them.
+	stripe.lru.SetTTL(key, rec, primitiveTTL(ttl, s.defaultTTL))
 }
 
 // Delete removes key. Idempotent: a key that names nothing reports nil.
@@ -449,15 +444,13 @@ func (s *memoryStore[V]) Expire(_ context.Context) (removed int, err error) {
 	return removed, nil
 }
 
-// expire sweeps one stripe.
+// expire sweeps one stripe; the sweep fires onEvict for each removal, which
+// unlinks it from the tag index.
 func (m *memoryStripe[V]) expire() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	reaped := m.lru.Expire()
-	//: the sweep fired onEvict for each removal; unlink them all.
-	m.drainEvicted()
 	//: the stripe's removals.
-	return reaped
+	return m.lru.Expire()
 }
 
 // Load returns the value for key, running fill at most once across all
@@ -467,9 +460,9 @@ func (m *memoryStripe[V]) expire() int {
 func (s *memoryStore[V]) Load(ctx context.Context, key string, fill corecache.Fill[V]) (value V, err error) {
 	//: the hit path must not enter the group at all: joining costs a mutex and
 	//: a channel, and a hit needs neither.
-	if rec, ok := s.fetchRecord(key); ok {
+	if hit, ok, absent := s.lookup(key); ok {
 		//: a negative entry is an answer too.
-		return rec.value, rec.absent
+		return hit, absent
 	}
 	filled, _, groupErr := s.group.Do(ctx, key, func(callCtx context.Context) (V, error) {
 		//: exactly one goroutine per key reaches here.
@@ -484,9 +477,9 @@ func (s *memoryStore[V]) fillOnce(ctx context.Context, key string, fill corecach
 	//: a caller that arrived just after a previous fill published would lead a
 	//: NEW call for a key the cache now holds. Re-checking turns that second
 	//: stampede — the one right after the first fill lands — into a hit.
-	if rec, ok := s.fetchRecord(key); ok {
+	if hit, ok, absent := s.lookup(key); ok {
 		//: someone else's fill already answered this.
-		return rec.value, rec.absent
+		return hit, absent
 	}
 	//: the fill, its answer stored as a value or as a negative entry.
 	return s.fillAndStore(ctx, key, fill)
@@ -507,7 +500,7 @@ func (s *memoryStore[V]) fillAndStore(ctx context.Context, key string, fill core
 		if ttl, absent := corecache.AbsentTTLOf(fillErr); absent && ttl > 0 && !slices.Contains(entry.Tags, "") {
 			stripe := s.stripeOf(key)
 			stripe.mu.Lock()
-			s.store(stripe, key, record[V]{tags: entry.Tags, absent: labelled, weight: s.absentWeight()}, ttl)
+			s.store(stripe, key, record[V]{tags: entry.Tags, absent: labelled}, ttl, s.absentWeight())
 			stripe.mu.Unlock()
 		}
 		//: the typed refusal, or the origin's own error.

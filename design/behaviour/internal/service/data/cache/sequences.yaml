@@ -1001,7 +1001,7 @@ sequences:
         kind: self
       - id: s.Load
         kind: internal
-      - id: s.fetchRecord
+      - id: s.lookup
         kind: internal
       - id: s.group.Do
         kind: value
@@ -1013,11 +1013,11 @@ sequences:
           when: locker == nil
       - opt:
           do:
-            - return: rec.value, rec.absent
+            - return: hit, absent
           init:
-            bind: rec, ok
-            eval: s.fetchRecord(key)
-            to: s.fetchRecord
+            bind: hit, ok, absent
+            eval: s.lookup(key)
+            to: s.lookup
           when: ok
       - bind: filled, _, groupErr
         eval: |-
@@ -1028,9 +1028,9 @@ sequences:
           			waiter: s.waiter,
           			poll:   s.leasePoll,
           			lookup: func(context.Context) (V, bool, error) {
-          				rec, ok := s.fetchRecord(key)
+          				hit, ok, absent := s.lookup(key)
           				//: a negative entry is found, its error the answer.
-          				return rec.value, ok, rec.absent
+          				return hit, ok, absent
           			},
           			fill: func(fillCtx context.Context) (V, error) {
           				//: stored as Load stores, a negative answer included.
@@ -1202,6 +1202,11 @@ sequences:
       - set: built.maxWeight
         to: shareOf64
         value: shareOf64(cfg.MaxBytes, count, count-1)
+      - opt:
+          do:
+            - set: built.single
+              value: built.stripes[0]
+          when: count == 1
       - return: built, nil
   - of: (*memoryStore).newStripe
     participants:
@@ -1227,11 +1232,11 @@ sequences:
             - set: primitive.MaxWeight
               value: bytes
             - set: primitive.WeightOf
-              value: s.weightOf
+              value: stripe.weightOf
           when: s.weigh != nil
       - set: stripe.lru
         to: kcache
-        value: kcache.NewCache(primitive)
+        value: kcache.NewUnlockedMap(primitive)
       - return: stripe
   - of: (*memoryStore).absentWeight
     steps:
@@ -1240,16 +1245,16 @@ sequences:
             - return: "0"
           when: s.weigh == nil
       - return: "1"
-  - of: (*memoryStore).weightOf
+  - of: (*memoryStripe).weightOf
     steps:
-      - return: rec.weight
+      - return: m.writing
   - of: (*memoryStore).stripeOf
     steps:
       - opt:
           do:
-            - return: s.stripes[0]
-          when: len(s.stripes) == 1
-      - return: s.stripes[maphashString(s, key)%uint64(len(s.stripes))]
+            - return: s.single
+          when: s.single != nil
+      - return: s.stripes[s.stripeIndex(key)]
   - of: maphashString
     participants:
       - id: caller
@@ -1262,124 +1267,112 @@ sequences:
       - return: maphash.String(s.seed, key)
         to: maphash
   - of: (*memoryStripe).onEvict
-    steps:
-      - set: m.evicted
-        value: append(m.evicted, key)
-  - of: (*memoryStripe).drainEvicted
     participants:
       - id: caller
         kind: actor
-      - id: (*memoryStripe).drainEvicted
+      - id: (*memoryStripe).onEvict
         kind: self
       - id: m.tags.remove
         kind: internal
     steps:
-      - opt:
-          do:
-            - return: ""
-          when: len(m.evicted) == 0
-      - loop:
-          do:
-            - eval: m.tags.remove(key)
-              to: m.tags.remove
-          key: _
-          range: m.evicted
-          value: key
-      - set: m.evicted
-        value: m.evicted[:0]
-  - of: (*memoryStripe).fetch
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*memoryStripe).fetch
-        kind: self
-      - id: m.lru.Fetch
-        kind: value
-      - id: m.drainEvicted
-        kind: internal
-    steps:
-      - bind: stored, ok
-        eval: m.lru.Fetch(key)
-        to: m.lru.Fetch
-      - eval: m.drainEvicted()
-        to: m.drainEvicted
-      - return: stored, ok
+      - eval: m.tags.remove(key)
+        to: m.tags.remove
   - of: (*memoryStore).Fetch
     participants:
       - id: caller
         kind: actor
       - id: (*memoryStore).Fetch
         kind: self
-      - id: s.fetchRecord
+      - id: s.lookup
         kind: internal
     steps:
-      - bind: rec, ok
-        eval: s.fetchRecord(key)
-        to: s.fetchRecord
+      - bind: value, ok, absent
+        eval: s.lookup(key)
+        to: s.lookup
       - opt:
           do:
             - var:
                 name: zero
                 type: V
             - return: zero, false, nil
-          when: "!ok || rec.absent != nil"
-      - return: rec.value, true, nil
+          when: "!ok || absent != nil"
+      - return: value, true, nil
   - of: (*memoryStore).FetchEntry
     participants:
       - id: caller
         kind: actor
       - id: (*memoryStore).FetchEntry
         kind: self
-      - id: s.fetchRecord
+      - id: s.stripeOf
         kind: internal
+      - id: stripe.mu.Lock
+        kind: value
+      - id: stripe.lru.Fetch
+        kind: value
+      - id: stripe.mu.Unlock
+        kind: value
+      - id: stripe.lru.Deadline
+        kind: value
       - id: s.entryOf
         kind: internal
     steps:
+      - bind: stripe
+        eval: s.stripeOf(key)
+        to: s.stripeOf
+      - eval: stripe.mu.Lock()
+        to: stripe.mu.Lock
       - bind: rec, ok
-        eval: s.fetchRecord(key)
-        to: s.fetchRecord
+        eval: stripe.lru.Fetch(key)
+        to: stripe.lru.Fetch
       - opt:
           do:
+            - eval: stripe.mu.Unlock()
+              to: stripe.mu.Unlock
             - return: corecache.EntryValue[V]{}, false, nil
           when: "!ok || rec.absent != nil"
-      - return: s.entryOf(rec), true, nil
+      - bind: deadline, _
+        eval: stripe.lru.Deadline(key)
+        to: stripe.lru.Deadline
+      - eval: stripe.mu.Unlock()
+        to: stripe.mu.Unlock
+      - return: s.entryOf(rec, deadline), true, nil
         to: s.entryOf
   - of: (*memoryStore).entryOf
     steps:
-      - return: "corecache.EntryValue[V]{Value: rec.value, TTL: s.remaining(rec), Tags: slices.Clone(rec.tags)}"
+      - return: "corecache.EntryValue[V]{Value: rec.value, TTL: s.remaining(deadline), Tags: slices.Clone(rec.tags)}"
   - of: (*memoryStore).remaining
     participants:
       - id: caller
         kind: actor
       - id: (*memoryStore).remaining
         kind: self
-      - id: rec.expireAt.Sub
+      - id: deadline.Sub
         kind: value
     steps:
       - opt:
           do:
             - return: corecache.NoExpiry
-          when: rec.expireAt.IsZero()
+          when: deadline.IsZero()
       - bind: left
-        eval: rec.expireAt.Sub(s.clk.Now())
-        to: rec.expireAt.Sub
+        eval: deadline.Sub(s.clk.Now())
+        to: deadline.Sub
       - opt:
           do:
             - return: time.Nanosecond
           when: left <= 0
       - return: left
-  - of: (*memoryStore).fetchRecord
+  - of: (*memoryStore).lookup
     participants:
       - id: caller
         kind: actor
-      - id: (*memoryStore).fetchRecord
+      - id: (*memoryStore).lookup
         kind: self
       - id: s.stripeOf
         kind: internal
       - id: stripe.mu.Lock
         kind: value
-      - id: stripe.fetch
-        kind: internal
+      - id: stripe.lru.Fetch
+        kind: value
       - id: stripe.mu.Unlock
         kind: value
     steps:
@@ -1388,12 +1381,12 @@ sequences:
         to: s.stripeOf
       - eval: stripe.mu.Lock()
         to: stripe.mu.Lock
-      - set: rec, found
-        to: stripe.fetch
-        value: stripe.fetch(key)
+      - bind: rec, ok
+        eval: stripe.lru.Fetch(key)
+        to: stripe.lru.Fetch
       - eval: stripe.mu.Unlock()
         to: stripe.mu.Unlock
-      - return: rec, found
+      - return: rec.value, ok, rec.absent
   - of: (*memoryStore).Set
     participants:
       - id: caller
@@ -1419,7 +1412,7 @@ sequences:
         to: s.stripeOf
       - lock:
           mutex: stripe.mu
-      - eval: "s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags, weight: weight}, entry.TTL)"
+      - eval: "s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags}, entry.TTL, weight)"
         to: s.store
       - return: nil
   - of: (*memoryStore).validate
@@ -1456,35 +1449,18 @@ sequences:
         kind: actor
       - id: (*memoryStore).store
         kind: self
-      - id: primitiveTTL
-        kind: internal
-      - id: s.clk.Now().Add
-        kind: value
       - id: stripe.tags.add
         kind: internal
       - id: stripe.lru.SetTTL
         kind: value
-      - id: stripe.drainEvicted
-        kind: internal
     steps:
-      - bind: lifetime
-        eval: primitiveTTL(ttl, s.defaultTTL)
-        to: primitiveTTL
-      - set: rec.expireAt
-        value: time.Time{}
-      - opt:
-          do:
-            - set: rec.expireAt
-              to: s.clk.Now().Add
-              value: s.clk.Now().Add(lifetime)
-          when: lifetime > 0
       - set: rec.tags
         to: stripe.tags.add
         value: stripe.tags.add(key, rec.tags)
-      - eval: stripe.lru.SetTTL(key, rec, lifetime)
+      - set: stripe.writing
+        value: weight
+      - eval: stripe.lru.SetTTL(key, rec, primitiveTTL(ttl, s.defaultTTL))
         to: stripe.lru.SetTTL
-      - eval: stripe.drainEvicted()
-        to: stripe.drainEvicted
   - of: (*memoryStore).Delete
     participants:
       - id: caller
@@ -1588,35 +1564,29 @@ sequences:
         kind: self
       - id: m.lru.Expire
         kind: value
-      - id: m.drainEvicted
-        kind: internal
     steps:
       - lock:
           mutex: m.mu
-      - bind: reaped
-        eval: m.lru.Expire()
+      - return: m.lru.Expire()
         to: m.lru.Expire
-      - eval: m.drainEvicted()
-        to: m.drainEvicted
-      - return: reaped
   - of: (*memoryStore).Load
     participants:
       - id: caller
         kind: actor
       - id: (*memoryStore).Load
         kind: self
-      - id: s.fetchRecord
+      - id: s.lookup
         kind: internal
       - id: s.group.Do
         kind: value
     steps:
       - opt:
           do:
-            - return: rec.value, rec.absent
+            - return: hit, absent
           init:
-            bind: rec, ok
-            eval: s.fetchRecord(key)
-            to: s.fetchRecord
+            bind: hit, ok, absent
+            eval: s.lookup(key)
+            to: s.lookup
           when: ok
       - bind: filled, _, groupErr
         eval: |-
@@ -1632,18 +1602,18 @@ sequences:
         kind: actor
       - id: (*memoryStore).fillOnce
         kind: self
-      - id: s.fetchRecord
+      - id: s.lookup
         kind: internal
       - id: s.fillAndStore
         kind: internal
     steps:
       - opt:
           do:
-            - return: rec.value, rec.absent
+            - return: hit, absent
           init:
-            bind: rec, ok
-            eval: s.fetchRecord(key)
-            to: s.fetchRecord
+            bind: hit, ok, absent
+            eval: s.lookup(key)
+            to: s.lookup
           when: ok
       - return: s.fillAndStore(ctx, key, fill)
         to: s.fillAndStore
@@ -1685,7 +1655,7 @@ sequences:
                     to: s.stripeOf
                   - eval: stripe.mu.Lock()
                     to: stripe.mu.Lock
-                  - eval: "s.store(stripe, key, record[V]{tags: entry.Tags, absent: labelled, weight: s.absentWeight()}, ttl)"
+                  - eval: "s.store(stripe, key, record[V]{tags: entry.Tags, absent: labelled}, ttl, s.absentWeight())"
                     to: s.store
                   - eval: stripe.mu.Unlock()
                     to: stripe.mu.Unlock
@@ -1744,8 +1714,8 @@ sequences:
         kind: actor
       - id: (*memoryStripe).fetchInto
         kind: self
-      - id: m.fetch
-        kind: internal
+      - id: m.lru.Fetch
+        kind: value
     steps:
       - lock:
           mutex: m.mu
@@ -1764,8 +1734,8 @@ sequences:
                     value: rec.value
                 init:
                   bind: rec, ok
-                  eval: m.fetch(key)
-                  to: m.fetch
+                  eval: m.lru.Fetch(key)
+                  to: m.lru.Fetch
                 when: ok && rec.absent == nil
           key: _
           range: keys
@@ -1858,7 +1828,7 @@ sequences:
           do:
             - bind: entry
               eval: entries[key]
-            - eval: "s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags, weight: weights[key]}, entry.TTL)"
+            - eval: "s.store(stripe, key, record[V]{value: entry.Value, tags: entry.Tags}, entry.TTL, weights[key])"
               to: s.store
           key: _
           range: keys
@@ -1875,8 +1845,8 @@ sequences:
       - opt:
           do:
             - return: "0"
-          when: expireAt.IsZero()
-      - return: max(expireAt.Sub(now), 0)
+          when: deadline.IsZero()
+      - return: max(deadline.Sub(now), 0)
   - of: (*memoryStore).LoadRefreshing
     participants:
       - id: caller
@@ -1887,8 +1857,10 @@ sequences:
         kind: internal
       - id: stripe.mu.Lock
         kind: value
-      - id: stripe.fetch
-        kind: internal
+      - id: stripe.lru.Fetch
+        kind: value
+      - id: stripe.lru.Deadline
+        kind: value
       - id: remainingOf
         kind: internal
       - id: stripe.mu.Unlock
@@ -1911,13 +1883,16 @@ sequences:
       - eval: stripe.mu.Lock()
         to: stripe.mu.Lock
       - bind: rec, ok
-        eval: stripe.fetch(key)
-        to: stripe.fetch
+        eval: stripe.lru.Fetch(key)
+        to: stripe.lru.Fetch
+      - bind: deadline, _
+        eval: stripe.lru.Deadline(key)
+        to: stripe.lru.Deadline
       - bind: left
-        eval: remainingOf(rec.expireAt, s.clk.Now())
+        eval: remainingOf(deadline, s.clk.Now())
         to: remainingOf
       - bind: start
-        eval: ok && rec.absent == nil && !rec.expireAt.IsZero() && left < before && stripe.claimRefresh(key)
+        eval: ok && rec.absent == nil && !deadline.IsZero() && left < before && stripe.claimRefresh(key)
       - eval: stripe.mu.Unlock()
         to: stripe.mu.Unlock
       - opt:

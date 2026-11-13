@@ -388,6 +388,21 @@ packages:
               - name: ok
                 type: bool
             recv: pointer
+          - doc: |-
+              Deadline returns the instant the entry under key expires, on the cache's
+              clock, and whether key is present; an entry without a deadline answers the
+              zero Time. It is a read, not a hit: the policy records nothing, no counter
+              moves, and an entry whose deadline has passed is reported, not reaped.
+            in:
+              - name: key
+                type: K
+            name: Deadline
+            out:
+              - name: deadline
+                type: time.Time
+              - name: ok
+                type: bool
+            recv: pointer
           - doc: Set stores key=val with the cache's default TTL.
             in:
               - name: key

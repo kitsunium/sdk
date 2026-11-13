@@ -1,6 +1,6 @@
 # ADR 0049 — `cache` becomes a domain, and gains the kernel primitive it needed to
 
-- **Status**: Accepted — amended 2026-11-02 (the L6 wave: `Expirer`, `BulkFetcher` / `BulkSetter`, `Refresher` and `Absent`, stripes, bytes and policy, and `Leaser` — a lease across processes)
+- **Status**: Accepted — amended 2026-11-02 (the L6 wave: `Expirer`, `BulkFetcher` / `BulkSetter`, `Refresher` and `Absent`, stripes, bytes and policy, and `Leaser` — a lease across processes); amended 2026-11-13 (#1059: one lock on a hit, the kernel's `UnlockedMap` under the stripe's mutex, and a record that keeps no copy of the primitive's deadline or weight)
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — the distributed backend this ADR defers to `third-party/`: a Valkey store implementing the four ports (`third-party/db/redis/cache`), the far tier of a chain, its cross-replica fill lease unfenced and said so; [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) §8 — `singleflight`'s shared context, the same one, keeps the root `context.WithoutCancel(leaderCtx)` built in the call record, one allocation fewer (#813)
@@ -412,3 +412,33 @@ The prices — a hit ~15–25 % dearer on the memory store, `FetchMany` above th
 40 % #840 asked for — are measured and stated in
 `internal/service/data/cache/BENCH.md`.
 
+## Amendment — 2026-11-13: one lock on a hit, and a record in registers ([#1059](https://github.com/kitsunium/sdk/issues/1059))
+
+The owner kept #1059's bound — `Fetch_Hit` within 10 % of `ee1f48ba2`, and
+`Load_Hit` with it — rather than the price the amendment above stated. What
+the compiler made of the wave, read before any change (`-gcflags=-m=2` and the
+disassembly of `Fetch` at the base and at ADR 0025's #1038 change): a hit took
+two mutexes, the stripe's and the primitive's, with two deferred calls and an
+eviction list; and the record had grown from eight words to eleven, past the
+amd64 ABI's nine result registers, so every level returned it through the
+stack. Three decisions follow, none of which changes what a caller observes.
+
+- **§6's one mutex is the only one.** Each stripe holds the kernel's
+  `UnlockedMap` (ADR 0025, amended 2026-11-13), the cache without its lock,
+  under the stripe's mutex, which already serialised every call into it.
+  `onEvict` still takes no lock; since the primitive runs `OnEvict` at the end
+  of its call, once its map is consistent, on the caller's goroutine, it
+  unlinks the key from the tag index directly instead of appending it to a
+  field the method drains.
+- **The record keeps nothing the primitive keeps.** The deadline is the
+  primitive's, read back by `UnlockedMap.Deadline` where `FetchEntry` reports
+  what is left of it (§8's remaining TTL) and `LoadRefreshing` measures its
+  window — the record had copied it only because the primitive did not
+  expose it. The weight is measured once per write, as before, and handed to the
+  primitive's `WeightOf` through the stripe's write in progress. A record is
+  seven words for a string value; a hit returns it in registers.
+- **An unstriped store hashes nothing**: its one stripe is a field of its own.
+
+The verdict on the bound is the interleaved A/B of `bench-ab.yml` on the
+runner, the upper end of the 95 % interval against 1.10; the figures go to
+`internal/service/data/cache/BENCH.md`.
