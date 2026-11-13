@@ -3,6 +3,7 @@ package stream_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -140,79 +141,162 @@ func TestSQLAFailedAppendLeavesTheCallersTransactionUsable(t *testing.T) {
 // while a reader follows it. Every committed record holds an offset, every
 // offset a committed record — no gap where a rollback was — and the reader,
 // which reads from where it stopped, never finds a hole it would have
-// skipped.
+// skipped. It runs on the serialising engine and on the concurrent one,
+// where only the head's row lock orders the appenders (#822).
 func TestSQLOffsetsCommitInOrderUnderConcurrentAppenders(t *testing.T) {
 	t.Parallel()
 	eachDialect(t, corestream.PolicyValue{}, func(t *testing.T, fx *sqlFixture, _ *clock.ManualClock) {
-		const writers, each = 8, 25
-		errRollback := errors.New("rolled back on purpose")
-		stop := make(chan struct{})
-		seen := make(chan int, 1)
-		go func() {
-			var next corestream.Offset
-			defer func() { seen <- int(next) }()
-			for {
-				//: a read begun after the stop sees every commit.
-				stopped := isClosed(stop)
-				entries, err := fx.stream.Read(context.Background(), 0, next, 64)
-				if err != nil {
-					t.Errorf("Read(%d) = %v", next, err)
-					return
-				}
-				for _, entry := range entries {
-					if entry.Offset != next {
-						t.Errorf("the reader at %d was handed offset %d", next, entry.Offset)
-						return
-					}
-					next++
-				}
-				if stopped && len(entries) == 0 {
+		if bad := appendersRace(t, fx); len(bad) > 0 {
+			t.Fatalf("on the serialising engine: %v", bad)
+		}
+	})
+	for _, dialect := range sqlDialects {
+		t.Run("concurrent/"+dialect.String(), func(t *testing.T) {
+			t.Parallel()
+			fx := newSQLFixtureOn(t, newConcurrentSQLEngine(dialect, eventsTable, true), clock.NewManualClock(epoch), corestream.PolicyValue{})
+			if bad := appendersRace(t, fx); len(bad) > 0 {
+				t.Fatalf("on the concurrent engine: %v", bad)
+			}
+		})
+	}
+}
+
+// The ordering test can fail: on a concurrent engine whose locking
+// statements lock nothing, the appenders read the same head, and the race
+// reports what a real engine without the lock would do — a commit refused on
+// a taken offset, or a reader handed a hole. Without this control the test
+// above proves nothing: on the serialising engine it cannot fail (#822).
+func TestSQLTheOrderingTestFailsOnAnEngineWithoutRowLocks(t *testing.T) {
+	t.Parallel()
+	for _, dialect := range sqlDialects {
+		t.Run(dialect.String(), func(t *testing.T) {
+			t.Parallel()
+			for range 5 {
+				fx := newSQLFixtureOn(t, newConcurrentSQLEngine(dialect, eventsTable, false), clock.NewManualClock(epoch), corestream.PolicyValue{})
+				if bad := appendersRace(t, fx); len(bad) > 0 {
+					t.Logf("caught without row locks: %s", bad[0])
 					return
 				}
 			}
-		}()
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-		committed := 0
-		for w := range writers {
-			wg.Go(func() {
-				for i := range each {
-					rollback := (w+i)%5 == 0
-					err := inTransaction(t, fx, func(ctx context.Context) error {
-						if _, err := fx.stream.Append(ctx, []corestream.RecordValue{record("r"), record("r")}); err != nil {
-							return err
-						}
-						if rollback {
-							return errRollback
-						}
-						return nil
-					})
-					switch {
-					case rollback && errors.Is(err, errRollback):
-					case !rollback && err == nil:
-						mu.Lock()
-						committed += 2
-						mu.Unlock()
-					default:
-						t.Errorf("Transact() = %v, rollback %v", err, rollback)
-					}
-				}
-			})
+			t.Fatal("five races on an engine without row locks found nothing wrong: the ordering test cannot fail")
+		})
+	}
+}
+
+// On MySQL the first Append to a partition inside a caller's transaction
+// creates its head on a second connection of the pool (#822): with a pool of
+// one, which the caller's transaction holds, it waits for that connection
+// until its context ends and fails StreamBackendFailed, leaving the caller's
+// transaction usable; once the head exists, the same Append needs no second
+// connection.
+func TestSQLAMySQLHeadIsCreatedOnASecondConnection(t *testing.T) {
+	t.Parallel()
+	engine := newSQLEngine(coresql.DialectMySQL, eventsTable)
+	engine.maxOpen = 1
+	fx := newSQLFixtureOn(t, engine, clock.NewManualClock(epoch), corestream.PolicyValue{})
+	err := inTransaction(t, fx, func(ctx context.Context) error {
+		short, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		_, appendErr := fx.stream.Append(short, []corestream.RecordValue{record("waits")})
+		if !errs.HasCode(appendErr, corestream.CodeStreamBackendFailed) {
+			t.Errorf("Append() in a pool of one = %v, want STREAM_BACKEND_FAILED at its deadline", appendErr)
 		}
-		wg.Wait()
-		close(stop)
-		if got := <-seen; got != committed {
-			t.Fatalf("the reader followed %d records, want the %d committed", got, committed)
-		}
-		if bounds := boundsOK(t, fx.stream, 0); bounds != (corestream.BoundsValue{Next: corestream.Offset(committed)}) {
-			t.Fatalf("Bounds() = %+v, want {0 %d}: a rollback left a gap", bounds, committed)
-		}
+		return nil
 	})
+	if err != nil {
+		t.Fatalf("the caller's transaction after the refused Append: %v", err)
+	}
+	appendOK(t, fx.stream, record("outside"))
+	err = inTransaction(t, fx, func(ctx context.Context) error {
+		_, appendErr := fx.stream.Append(ctx, []corestream.RecordValue{record("inside")})
+		return appendErr
+	})
+	if err != nil {
+		t.Fatalf("Append() in a pool of one once the head exists = %v", err)
+	}
+}
+
+// appendersRace runs the race of the ordering test on fx and returns what it
+// found wrong, nothing when the offsets committed in order.
+func appendersRace(t *testing.T, fx *sqlFixture) []string {
+	t.Helper()
+	const writers, each = 8, 25
+	errRollback := errors.New("rolled back on purpose")
+	var mu sync.Mutex
+	var bad []string
+	report := func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		bad = append(bad, fmt.Sprintf(format, args...))
+	}
+	stop := make(chan struct{})
+	seen := make(chan int, 1)
+	go func() {
+		var next corestream.Offset
+		defer func() { seen <- int(next) }()
+		for {
+			//: a read begun after the stop sees every commit.
+			stopped := isClosed(stop)
+			entries, err := fx.stream.Read(context.Background(), 0, next, 64)
+			if err != nil {
+				report("Read(%d) = %v", next, err)
+				return
+			}
+			for _, entry := range entries {
+				if entry.Offset != next {
+					report("the reader at %d was handed offset %d", next, entry.Offset)
+					return
+				}
+				next++
+			}
+			if stopped && len(entries) == 0 {
+				return
+			}
+		}
+	}()
+	var wg sync.WaitGroup
+	committed := 0
+	for w := range writers {
+		wg.Go(func() {
+			for i := range each {
+				rollback := (w+i)%5 == 0
+				err := inTransaction(t, fx, func(ctx context.Context) error {
+					if _, err := fx.stream.Append(ctx, []corestream.RecordValue{record("r"), record("r")}); err != nil {
+						return err
+					}
+					if rollback {
+						return errRollback
+					}
+					return nil
+				})
+				switch {
+				case rollback && errors.Is(err, errRollback):
+				case !rollback && err == nil:
+					mu.Lock()
+					committed += 2
+					mu.Unlock()
+				default:
+					report("Transact() = %v, rollback %v", err, rollback)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	close(stop)
+	if got := <-seen; got != committed {
+		report("the reader followed %d records, want the %d committed", got, committed)
+	}
+	if bounds, err := fx.stream.Bounds(t.Context(), 0); err != nil || bounds != (corestream.BoundsValue{Next: corestream.Offset(committed)}) {
+		report("Bounds() = %+v, %v; want {0 %d}: a rollback left a gap", bounds, err, committed)
+	}
+	return bad
 }
 
 // TestSQLStatementsPerCall pins the round trips: an Append is the head's lock,
 // its read, one INSERT per chunk of SQLRowsPerStatement records and the head's
-// advance; a Read is one statement whatever it returns; Bounds and Committed
+// advance — on MySQL the head's creation on the pool the first time a
+// partition is written, before the transaction, then its locking read
+// (#822); a Read is one statement whatever it returns; Bounds and Committed
 // one; Commit two, the head's next offset and the cursor's upsert.
 func TestSQLStatementsPerCall(t *testing.T) {
 	t.Parallel()
@@ -227,7 +311,16 @@ func TestSQLStatementsPerCall(t *testing.T) {
 			fx.engine.resetLog()
 			appendOK(t, fx.stream, batch...)
 			chunks := (n + chunk - 1) / chunk
-			want := append([]string{"lockHead", "head"}, repeat("insertRows", chunks)...)
+			want := []string{"lockHead", "head"}
+			if fx.engine.dialect == coresql.DialectMySQL {
+				// MySQL creates the head on the pool the first time, before
+				// the transaction, then locks it by reading it (#822).
+				want = []string{"head"}
+				if n == 1 {
+					want = []string{"createHead", "head"}
+				}
+			}
+			want = append(want, repeat("insertRows", chunks)...)
 			want = append(want, "advance")
 			assertStatements(t, fx.engine, "Append of "+strconv.Itoa(n), want)
 		}
@@ -445,6 +538,8 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 		{coresql.DialectSQLite, "lockHead", `INSERT INTO "app_events__heads" (part, next_offset, first_offset, last_at) VALUES (?, 0, 0, 0)` +
 			` ON CONFLICT (part) DO UPDATE SET next_offset = next_offset`},
 		{coresql.DialectPostgres, "head", `SELECT next_offset, first_offset, last_at FROM "app_events__heads" WHERE part = $1 FOR UPDATE`},
+		{coresql.DialectMySQL, "head", "SELECT next_offset, first_offset, last_at FROM `app_events__heads` WHERE part = ? FOR UPDATE"},
+		{coresql.DialectMySQL, "createHead", "INSERT IGNORE INTO `app_events__heads` (part, next_offset, first_offset, last_at) VALUES (?, 0, 0, 0)"},
 		{coresql.DialectSQLite, "head", `SELECT next_offset, first_offset, last_at FROM "app_events__heads" WHERE part = ?`},
 		{coresql.DialectPostgres, "read", `SELECT h.next_offset, h.first_offset, (SELECT MAX(x.record_offset) FROM "app_events" x` +
 			` WHERE x.part = h.part AND x.record_offset >= h.first_offset AND x.appended_at <= $1), r.record_offset, r.appended_at,` +
@@ -467,6 +562,7 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 			t.Errorf("%s %s is not rendered as pinned:\n%s", want.dialect, want.role, want.text)
 		}
 	}
+
 	if got := svcstream.RenderSQLForTest(coresql.DialectPostgres, eventsTable).InsertRows(2); got != `INSERT INTO "app_events"`+
 		` (part, record_offset, appended_at, record_key, payload) VALUES ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)` {
 		t.Errorf("InsertRows(2) = %s", got)

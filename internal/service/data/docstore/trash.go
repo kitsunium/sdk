@@ -69,10 +69,10 @@ func (s *Store[T]) Purge(key string) error {
 		return feedErr
 	}
 	persistErr := s.persist(key, nil, true, nil)
-	//: the filesystem refused: nothing changed anywhere.
+	//: the filesystem refused: nothing changed but the feed, which is answered.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
-		return persistErr
+		return s.compensate(key, persistErr)
 	}
 	s.mu.Lock()
 	s.setVersions(key, nil)
@@ -161,10 +161,10 @@ func (s *Store[T]) trash(key string) (applied bool, err error) {
 		return false, feedErr
 	}
 	persistErr := s.persist(key, nil, true, next)
-	//: the filesystem refused: nothing changed anywhere.
+	//: the filesystem refused: nothing changed but the feed, which is answered.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
-		return false, persistErr
+		return false, s.compensate(key, persistErr)
 	}
 	s.mu.Lock()
 	delete(s.docs, key)
@@ -218,10 +218,10 @@ func (s *Store[T]) restore(key string) (applied bool, err error) {
 		return false, feedErr
 	}
 	persistErr := s.persist(key, raw, false, next)
-	//: the filesystem refused: nothing changed anywhere.
+	//: the filesystem refused: nothing changed but the feed, which is answered.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
-		return false, persistErr
+		return false, s.compensate(key, persistErr)
 	}
 	s.mu.Lock()
 	s.docs[key] = raw

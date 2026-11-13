@@ -62,6 +62,7 @@ go_test(
     name = "docstore_test",
     srcs = [
         "batch_external_test.go",
+        "change_compensate_external_test.go",
         "change_external_test.go",
         "concurrency_external_test.go",
         "conformance_external_test.go",

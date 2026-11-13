@@ -1,6 +1,7 @@
 package stream_test
 
 import (
+	"cmp"
 	"strconv"
 	"testing"
 	"time"
@@ -75,7 +76,13 @@ type sqlFixture struct {
 // newSQLFixture builds the SQL engine on dialect over a fresh fake engine.
 func newSQLFixture(t *testing.T, dialect coresql.Dialect, clk clock.Clock, policy corestream.PolicyValue) *sqlFixture {
 	t.Helper()
-	engine := newSQLEngine(dialect, eventsTable)
+	return newSQLFixtureOn(t, newSQLEngine(dialect, eventsTable), clk, policy)
+}
+
+// newSQLFixtureOn is newSQLFixture over engine.
+func newSQLFixtureOn(t *testing.T, engine *sqlEngine, clk clock.Clock, policy corestream.PolicyValue) *sqlFixture {
+	t.Helper()
+	dialect := engine.dialect
 	tm := sqlTransactor(t, engine, dialect)
 	s, err := svcstream.NewSQL(svcstream.SQLConfig{
 		Transactor: tm, Dialect: dialect, Table: eventsTable, Policy: policy, Clock: clk,
@@ -90,7 +97,7 @@ func newSQLFixture(t *testing.T, dialect coresql.Dialect, clk clock.Clock, polic
 func sqlTransactor(t testing.TB, engine *sqlEngine, dialect coresql.Dialect) coresql.Transactor {
 	t.Helper()
 	tm, err := svcsql.NewTransactor(svcsql.Config{
-		DB: engine.open(t), Dialect: dialect, Pool: svcsql.PoolConfig{MaxOpen: 8},
+		DB: engine.open(t), Dialect: dialect, Pool: svcsql.PoolConfig{MaxOpen: cmp.Or(engine.maxOpen, 8)},
 	})
 	if err != nil {
 		t.Fatalf("NewTransactor() = %v", err)

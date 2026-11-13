@@ -11,11 +11,16 @@
 // real standard library and the real SDK. It is the queue's fake engine
 // (internal/service/data/queue/sqlfake_external_test.go), for these tables.
 //
-// What it does NOT verify is that an engine accepts the SQL, nor the row
-// lock: transactions are serialised — one writer from BEGIN to its end, as
-// SQLite runs them. The statement texts are pinned separately, and
-// e2e/integration/sql runs the same engine on the three real engines,
-// concurrent appenders included, behind the integration tag.
+// What it does NOT verify is that an engine accepts the SQL. By default
+// transactions are serialised — one writer from BEGIN to its end, as SQLite
+// runs them —, which cannot tell whether the head is locked. A concurrent
+// engine (newConcurrentSQLEngine) runs transactions side by side, each
+// reading the committed tables at every statement plus its own writes, and
+// gives the statements that lock a partition's head the row's lock until
+// the transaction ends; without row locks it is a faulty engine, the
+// ordering test's negative control (#822). The statement texts are pinned
+// separately, and e2e/integration/sql runs the same engine on the three real
+// engines, concurrent appenders included, behind the integration tag.
 package stream_test
 
 import (
@@ -26,6 +31,7 @@ import (
 	"errors"
 	"io"
 	"maps"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -79,6 +85,26 @@ type sqlEngine struct {
 	failures map[string][]error
 	stmts    svcstream.RenderedSQL
 	dialect  coresql.Dialect
+	// concurrent runs transactions side by side, and rowLocks gives the
+	// head's locking statements a row lock held until the transaction ends.
+	concurrent, rowLocks bool
+	// maxOpen is the pool's size, 8 unless a test says otherwise: a
+	// concurrent engine's is larger than the appenders it races, since on
+	// MySQL each creates a partition's head on a second connection.
+	maxOpen int
+	// locks are the partitions' head locks and their holders; unlocked is
+	// signalled, on mu, whenever one is released.
+	locks    map[int64]*fakeSQLTx
+	unlocked *sync.Cond
+}
+
+// newConcurrentSQLEngine returns an empty engine whose transactions run side
+// by side, with row locks on the heads or, rowLocks false, none.
+func newConcurrentSQLEngine(dialect coresql.Dialect, table string, rowLocks bool) *sqlEngine {
+	e := newSQLEngine(dialect, table)
+	e.concurrent, e.rowLocks, e.locks, e.maxOpen = true, rowLocks, map[int64]*fakeSQLTx{}, 16
+	e.unlocked = sync.NewCond(&e.mu)
+	return e
 }
 
 // newSQLEngine returns an empty engine for the stream keeping its records in
@@ -162,6 +188,7 @@ type fakeSQLConn struct {
 // savepoint is one savepoint of a transaction.
 type savepoint struct {
 	snapshot streamTables
+	delta    streamDelta
 	name     string
 }
 
@@ -171,6 +198,60 @@ type fakeSQLTx struct {
 	work       streamTables
 	savepoints []savepoint
 	aborted    bool
+	// delta is, on a concurrent engine, what the transaction wrote: work is
+	// then rebuilt at every statement from the committed tables and delta.
+	delta streamDelta
+}
+
+// streamDelta is a transaction's writes over the committed tables.
+type streamDelta struct {
+	records map[recordKey]recordRow
+	deleted map[recordKey]bool
+	heads   map[int64]headRow
+	cursors map[string]int64
+}
+
+// clone copies d, so a savepoint can be undone.
+func (d streamDelta) clone() streamDelta {
+	return streamDelta{records: maps.Clone(d.records), deleted: maps.Clone(d.deleted), heads: maps.Clone(d.heads), cursors: maps.Clone(d.cursors)}
+}
+
+// over returns committed with d applied.
+func (d streamDelta) over(committed streamTables) streamTables {
+	v := committed.clone()
+	for k := range d.deleted {
+		delete(v.records, k)
+	}
+	maps.Copy(v.records, d.records)
+	maps.Copy(v.heads, d.heads)
+	maps.Copy(v.cursors, d.cursors)
+	return v
+}
+
+// diff returns what view holds that committed does not, as a delta.
+func diff(view, committed streamTables) streamDelta {
+	d := streamDelta{records: map[recordKey]recordRow{}, deleted: map[recordKey]bool{}, heads: map[int64]headRow{}, cursors: map[string]int64{}}
+	for k, r := range view.records {
+		if c, ok := committed.records[k]; !ok || c.at != r.at || !slices.Equal(c.key, r.key) || !slices.Equal(c.payload, r.payload) {
+			d.records[k] = r
+		}
+	}
+	for k := range committed.records {
+		if _, ok := view.records[k]; !ok {
+			d.deleted[k] = true
+		}
+	}
+	for k, h := range view.heads {
+		if c, ok := committed.heads[k]; !ok || c != h {
+			d.heads[k] = h
+		}
+	}
+	for k, n := range view.cursors {
+		if c, ok := committed.cursors[k]; !ok || c != n {
+			d.cursors[k] = n
+		}
+	}
+	return d
 }
 
 // Prepare is required by driver.Conn; the context-aware paths are used.
@@ -188,8 +269,10 @@ func (c *fakeSQLConn) Begin() (driver.Tx, error) {
 
 // BeginTx takes the writer and a working copy.
 func (c *fakeSQLConn) BeginTx(_ context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	c.engine.writer.Lock()
 	e := c.engine
+	if !e.concurrent {
+		e.writer.Lock()
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	label := "BEGIN"
@@ -198,6 +281,9 @@ func (c *fakeSQLConn) BeginTx(_ context.Context, opts driver.TxOptions) (driver.
 	}
 	e.log = append(e.log, label)
 	c.tx = &fakeSQLTx{conn: c, work: e.committed.clone()}
+	if e.concurrent {
+		c.tx.delta = diff(e.committed, e.committed)
+	}
 	return c.tx, nil
 }
 
@@ -207,16 +293,71 @@ func (t *fakeSQLTx) Commit() error {
 	e.mu.Lock()
 	e.log = append(e.log, "COMMIT")
 	failed := t.aborted
-	if !failed {
+	var err error
+	if failed {
+		err = errAborted
+	}
+	switch {
+	case failed:
+	case e.concurrent:
+		err = t.publish()
+	default:
 		e.committed = t.work
 	}
 	t.conn.tx = nil
+	t.unlock()
 	e.mu.Unlock()
-	e.writer.Unlock()
-	if failed {
-		return errAborted
+	if !e.concurrent {
+		e.writer.Unlock()
 	}
+	return err
+}
+
+// publish applies a concurrent transaction's writes to the committed tables,
+// refusing the whole commit when a record it inserted was committed by
+// another transaction meanwhile, as a unique key would.
+func (t *fakeSQLTx) publish() error {
+	e := t.conn.engine
+	for k := range t.delta.records {
+		if _, taken := e.committed.records[k]; taken {
+			return errors.New("duplicate key value violates unique constraint at commit")
+		}
+	}
+	e.committed = t.delta.over(e.committed)
 	return nil
+}
+
+// unlock releases every head lock t holds; e.mu is held.
+func (t *fakeSQLTx) unlock() {
+	e := t.conn.engine
+	if !e.concurrent {
+		return
+	}
+	for part, holder := range e.locks {
+		if holder == t {
+			delete(e.locks, part)
+		}
+	}
+	e.unlocked.Broadcast()
+}
+
+// lock takes partition part's head lock for t, waiting while another
+// transaction holds it; t nil is an autocommit statement, which takes it for
+// itself and gives it back at once. e.mu is held.
+func (e *sqlEngine) lock(t *fakeSQLTx, part int64) {
+	if !e.rowLocks {
+		return
+	}
+	for {
+		holder, held := e.locks[part]
+		if !held || (t != nil && holder == t) {
+			break
+		}
+		e.unlocked.Wait()
+	}
+	if t != nil {
+		e.locks[part] = t
+	}
 }
 
 // Rollback drops the working copy and releases the writer.
@@ -225,8 +366,11 @@ func (t *fakeSQLTx) Rollback() error {
 	e.mu.Lock()
 	e.log = append(e.log, "ROLLBACK")
 	t.conn.tx = nil
+	t.unlock()
 	e.mu.Unlock()
-	e.writer.Unlock()
+	if !e.concurrent {
+		e.writer.Unlock()
+	}
 	return nil
 }
 
@@ -280,9 +424,14 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 	}
 	e := c.engine
 	role := e.recognise(query, len(args))
-	if c.tx == nil && writes(role) {
+	if c.tx == nil && writes(role) && !e.concurrent && role != "createHead" {
 		e.writer.Lock()
 		defer e.writer.Unlock()
+	}
+	if e.concurrent {
+		// Another transaction may run between two statements, as it may
+		// on a real engine.
+		defer runtime.Gosched()
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -295,6 +444,9 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 		return answer{}, queue[0]
 	}
 	if c.tx == nil {
+		if part, locks := e.locksHead(role, args); locks {
+			e.lock(nil, part)
+		}
 		work := e.committed.clone()
 		ans, err := execute(role, args, work)
 		if err == nil {
@@ -303,6 +455,26 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 		return ans, err
 	}
 	return c.tx.run(role, query, args)
+}
+
+// locksHead reports whether a statement of role locks a partition's head on
+// a concurrent engine, and which: the head's upsert, its locking read where
+// the dialect has one, its creation, and its updates.
+func (e *sqlEngine) locksHead(role string, args []driver.Value) (int64, bool) {
+	if !e.concurrent {
+		return 0, false
+	}
+	switch role {
+	case "lockHead", "createHead":
+		return args[0].(int64), true
+	case "head":
+		return args[0].(int64), e.dialect != coresql.DialectSQLite
+	case "advance":
+		return args[2].(int64), true
+	case "floor":
+		return args[1].(int64), true
+	}
+	return 0, false
 }
 
 // writes reports whether an autocommit statement of role takes the writer.
@@ -319,14 +491,14 @@ func writes(role string) bool {
 func (t *fakeSQLTx) run(role, query string, args []driver.Value) (answer, error) {
 	switch {
 	case strings.HasPrefix(query, "SAVEPOINT "):
-		t.savepoints = append(t.savepoints, savepoint{snapshot: t.work.clone(), name: strings.TrimPrefix(query, "SAVEPOINT ")})
+		t.savepoints = append(t.savepoints, savepoint{snapshot: t.work.clone(), delta: t.delta.clone(), name: strings.TrimPrefix(query, "SAVEPOINT ")})
 		return answer{}, nil
 	case strings.HasPrefix(query, "ROLLBACK TO SAVEPOINT "):
 		at := t.savepointAt(strings.TrimPrefix(query, "ROLLBACK TO SAVEPOINT "))
 		if at < 0 {
 			return answer{}, errors.New("no such savepoint")
 		}
-		t.work, t.aborted = t.savepoints[at].snapshot.clone(), false
+		t.work, t.delta, t.aborted = t.savepoints[at].snapshot.clone(), t.savepoints[at].delta.clone(), false
 		t.savepoints = t.savepoints[:at+1]
 		return answer{}, nil
 	case strings.HasPrefix(query, "RELEASE SAVEPOINT "):
@@ -340,11 +512,35 @@ func (t *fakeSQLTx) run(role, query string, args []driver.Value) (answer, error)
 	if t.aborted {
 		return answer{}, errAborted
 	}
+	e := t.conn.engine
+	if e.concurrent {
+		if part, locks := e.locksHead(role, args); locks {
+			e.lock(t, part)
+		}
+		t.work = t.delta.over(e.committed)
+	} else if _, mine := t.work.heads[headArg(role, args)]; role == "head" && !mine {
+		// A locking read reads the latest committed row: a head another
+		// connection created after this transaction began (MySQL's).
+		if h, ok := e.committed.heads[headArg(role, args)]; ok {
+			t.work.heads[headArg(role, args)] = h
+		}
+	}
 	ans, err := execute(role, args, t.work)
-	if err != nil && t.conn.engine.dialect == coresql.DialectPostgres {
+	if err != nil && e.dialect == coresql.DialectPostgres {
 		t.aborted = true
 	}
+	if e.concurrent {
+		t.delta = diff(t.work, e.committed)
+	}
 	return ans, err
+}
+
+// headArg is the partition a head read names, 0 for any other statement.
+func headArg(role string, args []driver.Value) int64 {
+	if role != "head" {
+		return 0
+	}
+	return args[0].(int64)
 }
 
 // savepointAt finds the savepoint named name, or -1.
@@ -375,6 +571,13 @@ func execute(role string, args []driver.Value, work streamTables) (answer, error
 		if _, found := work.heads[part]; !found {
 			work.heads[part] = headRow{}
 		}
+		return answer{affected: 1}, nil
+	case "createHead":
+		part := args[0].(int64)
+		if _, found := work.heads[part]; found {
+			return answer{}, nil
+		}
+		work.heads[part] = headRow{}
 		return answer{affected: 1}, nil
 	case "head", "headNext":
 		head, found := work.heads[args[0].(int64)]

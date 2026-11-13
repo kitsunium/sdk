@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-11-13T15:00:00Z -->
 # e2e/integration/
 
 ## Purpose
@@ -18,7 +18,7 @@ graph of every consumer of a database writer.
 
 | Directory | Suite | Servers |
 |---|---|---|
-| `sql/` | the SQL mechanisms (`pkg/v1/data/sql`, `docstore`, `queue`, and `app/forward` over the SQL broker) on the three engines — see `sql/CLAUDE.md` | SQLite (none), `postgres:17`, `mysql:8.4` |
+| `sql/` | the SQL mechanisms (`pkg/v1/data/sql`, `docstore`, `queue`, `data/stream`, and `app/forward` over the SQL broker) on the three engines, in CI's `sql-integration` job — see `sql/CLAUDE.md` | SQLite (none), `postgres:17`, `mysql:8.4`, or `POSTGRES_DSN` / `MYSQL_DSN` |
 | `writer/clickhouse/` | the `"clickhouse"` writer (`third-party/db/writer/clickhouse`) through `writer.Open`, rows read back | `clickhouse/clickhouse-server:24-alpine` |
 | `writer/mysql/` | the `"mysql"` writer over the bind-mounted Unix socket, rows read back | `mysql:8` |
 | `writer/redis/` | the `"redis"` writer over the bind-mounted Unix socket: XADD, MaxLen trimming, the `AddFailed` path | `redis:7-alpine` |
@@ -42,9 +42,12 @@ than sentinel codes — see `e2e/CLAUDE.md` §Rules.
 
 ## Run procedure (rule 12)
 
-No CI lane runs them — the runners do not start the containers — and the
-census lanes (ADR 0137) that loop over `e2e` compile none of them: the default
-build excludes every file by its tag. They are a named, manual lane. Run them
+The census lanes (ADR 0137) that loop over `e2e` compile none of them: the
+default build excludes every file by its tag. `sql/` runs in CI —
+`bazel-ci.yml`'s `sql-integration` job, PostgreSQL and MySQL as service
+containers named by `POSTGRES_DSN` and `MYSQL_DSN`, where a named server
+that does not answer fails the case (#822). The others are a named, manual
+lane. Run them
 from the `e2e` module, with Docker (or a Docker-compatible runtime) reachable —
 or, for the data adapters' suites, with `VALKEY_ADDR` (`host:port`) and
 `NATS_URL` naming servers already running, which needs no Docker:

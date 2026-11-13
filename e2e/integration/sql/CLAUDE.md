@@ -45,7 +45,7 @@ Docker, the PostgreSQL and MySQL cases skip and SQLite's still run.
 | `docstore_bench_test.go` + `BENCH.md` | what each call costs on each engine: its round trips on a server, its commit's flush on SQLite (rule 9) |
 | `queue_bench_test.go` | the SQL queue broker's `Publish`, `Receive` and `Ack` on each engine (kitsunium/sdk#1048), rows in the same `BENCH.md` — SQLite measured, PostgreSQL and MySQL waiting for a run with Docker |
 
-Run on 2026-11-13 on a Linux host (Debian 13, kernel 6.12 amd64, Docker 29.7.2), `cd e2e && GOWORK=off go test -tags integration -race -run 'TheSQLStreamOnEveryEngine|AnAppendJoinsTheCallers|ACommitInTheHandlersTransaction|ConcurrentAppendersCommitInOrder' ./integration/sql/`: the four stream tests pass on SQLite, PostgreSQL 17 and MySQL 8.4 (13.7 s and 24 s for the container starts), none skipped.
+Run on 2026-11-13 on a Linux host (Debian 13, kernel 6.12 amd64, Docker 29.7.2), `cd e2e && GOWORK=off go test -tags integration -race -run 'TheSQLStreamOnEveryEngine|AnAppendJoinsTheCallers|ACommitInTheHandlersTransaction|ConcurrentAppendersCommitInOrder' ./integration/sql/`: the four stream tests passed on SQLite and PostgreSQL 17 — and were documented green on MySQL 8.4, but the audit of lot L1 saw `TestConcurrentAppendersCommitInOrderOnEveryEngine/mysql` fail once (`SAVEPOINT_FAILED`, error 1305: the server had rolled the caller's transaction back, a deadlock on the new head row, #822). The engine's MySQL path was changed for it (`internal/service/data/stream/CLAUDE.md`); CI's `sql-integration` job is where it is verified.
 
 ## Run procedure (rule 12)
 
@@ -61,9 +61,14 @@ GOWORK=off go test -tags integration -race ./integration/sql/...
 GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./integration/sql/
 ```
 
-They are a named, manual lane, as the database writers' suites beside them
-are (`e2e/integration/CLAUDE.md`): CI's runners do not start the containers.
-Run them on any change to `internal/service/data/sql`, `internal/core/data/sql`, the SQL
+CI runs them: `bazel-ci.yml`'s `sql-integration` job, on every pull
+request, with PostgreSQL 17 and MySQL 8.4 as service containers named by
+`POSTGRES_DSN` and `MYSQL_DSN` (#822). A case whose named server does not
+answer fails, never skips, and no container is started when both are named;
+neither server has a password (PostgreSQL trusts the runner's loopback, MySQL
+allows an empty root password). Locally, without those variables, the suite
+starts the two servers with testcontainers, or skips their cases without
+Docker. Run them before a push on any change to `internal/service/data/sql`, `internal/core/data/sql`, the SQL
 engine of `internal/service/data/docstore`, the SQL broker of
 `internal/service/data/queue`, or the SQL engine of
 `internal/service/data/stream`.
@@ -75,3 +80,5 @@ engine of `internal/service/data/docstore`, the SQL broker of
 - Share a table between cases: the servers are shared, the tables are not.
 - Leave a container behind: start one through `postgresEngine` /
   `mysqlEngine`, which register it for `TestMain`.
+- Put a password in `sql-integration`'s services or DSNs: the repository's
+  secret scan blocks it, and the servers need none on the runner.

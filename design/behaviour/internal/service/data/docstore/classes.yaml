@@ -401,6 +401,8 @@ files:
       - validateChanges
       - (*Store).changeVersion
       - (*Store).feed
+      - (*Store).compensate
+      - (*Store).compensateBatch
       - (*Store).feedBatch
       - (*Store).ChangeStream
       - (*SQLStore).feedIn
@@ -1796,7 +1798,9 @@ types:
           the records of a key are in the order its writes stood. A crash
           between the two leaves a record of a write that did not land: the
           feed is at least once, and a reader skips a record whose version
-          the store does not hold. A record the stream refuses refuses the
+          the store does not hold. A publication the store refuses is
+          answered by a record that restates the key as it stands — put,
+          trash or delete. A record the stream refuses refuses the
           write, ChangeFeedFailed, nothing written. A batch appends one record
           per key it wrote, its final state. Nil writes no
           record.
@@ -1993,6 +1997,28 @@ types:
           caller's.
         name: feed
         params: op coredocstore.ChangeOp, key string, raw json.RawMessage, record *versionsRecord
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          compensate answers a write whose change record the feed already took and
+          whose publication the store then refused (kitsunium/sdk#831): it appends a
+          record that restates the key as it stands — put with its version and, when
+          asked, its document; trash with the trashed document; delete when absent —
+          so a reader replaying the feed by key ends where the store is, whatever the
+          refused record said. A crash between the record and the publication leaves
+          no such answer: the version the record names, absent from the store, is
+          what a reader skips on. It returns refused, joined with the feed's own
+          failure when the restating record is refused too. The caller holds the
+          writers' lock.
+        name: compensate
+        params: key string, refused error
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          compensateBatch is compensate for every key of a batch whose group entry
+          the store refused to publish.
+        name: compensateBatch
+        params: plan *batchPlan, refused error
         recv: s *Store[T]
         results: error
       - doc: |-

@@ -24,6 +24,11 @@ func (s *sqlStream) Trim(ctx context.Context, partition int, before corestream.O
 		//: UnknownPartition.
 		return refused
 	}
+	//: on MySQL outside a caller's transaction, the head exists before one opens.
+	if err := s.prepareHead(ctx, partition); err != nil {
+		//: StreamBackendFailed, the driver's text withheld.
+		return err
+	}
 	raised := false
 	floorErr := s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
 		var err error
@@ -51,13 +56,14 @@ func (s *sqlStream) raiseFloor(
 	ctx context.Context, ex coresql.Executor, partition int, before corestream.Offset,
 ) (bool, error) {
 	//: created when missing, and held until the transaction ends.
-	if _, err := ex.ExecContext(ctx, s.stmts.lockHead, int64(partition)); err != nil {
+	if err := s.lockHead(ctx, ex, partition); err != nil {
 		//: StreamBackendFailed, the driver's text withheld.
-		return false, s.failed("lock the head", err)
+		return false, err
 	}
 	var next, first, last int64
 	//: the head this transaction holds.
 	if err := ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan(&next, &first, &last); err != nil {
+		s.heads[partition].Store(false)
 		//: StreamBackendFailed, the driver's text withheld.
 		return false, s.failed("read the head", err)
 	}

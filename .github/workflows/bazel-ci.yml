@@ -574,6 +574,58 @@ jobs:
           done
           exit $fail
 
+  # The SQL mechanisms on the real engines (#822): e2e/integration/sql under
+  # the integration tag, PostgreSQL 17 and MySQL 8.4 as service containers
+  # named by POSTGRES_DSN and MYSQL_DSN, SQLite in process. The suite fails,
+  # never skips, a case whose named server does not answer, and starts no
+  # container of its own when the two are named. Both servers trust the
+  # runner's loopback: no password, anywhere (PostgreSQL's
+  # POSTGRES_HOST_AUTH_METHOD, MySQL's empty root password). The e2e module is
+  # outside go.work and Bazel (.bazelignore), so Go runs it, GOWORK=off, as
+  # e2e/integration/CLAUDE.md says.
+  sql-integration:
+    name: SQL suites on PostgreSQL, MySQL and SQLite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: sdk
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sdk"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: sdk
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: e2e/go.sum
+
+      - name: e2e/integration/sql on the three engines
+        working-directory: e2e
+        env:
+          GOWORK: "off"
+          POSTGRES_DSN: postgres://postgres@127.0.0.1:5432/sdk?sslmode=disable
+          MYSQL_DSN: root@tcp(127.0.0.1:3306)/sdk
+        run: go test -tags integration -race -count=1 -timeout 1200s ./integration/sql/...
+
   # The vector forms of internal/kernel/swar. They are compiled only with
   # GOEXPERIMENT=simd on amd64 (`//go:build goexperiment.simd && amd64`), a
   # tag no other lane sets, so nothing else compiles them and a Go upgrade can

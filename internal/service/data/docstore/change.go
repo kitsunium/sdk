@@ -116,6 +116,45 @@ func (s *Store[T]) feed(op coredocstore.ChangeOp, key string, raw json.RawMessag
 	return s.changes.append(context.Background(), s.path, string(op), []corestream.RecordValue{rec})
 }
 
+// compensate answers a write whose change record the feed already took and
+// whose publication the store then refused (kitsunium/sdk#831): it appends a
+// record that restates the key as it stands — put with its version and, when
+// asked, its document; trash with the trashed document; delete when absent —
+// so a reader replaying the feed by key ends where the store is, whatever the
+// refused record said. A crash between the record and the publication leaves
+// no such answer: the version the record names, absent from the store, is
+// what a reader skips on. It returns refused, joined with the feed's own
+// failure when the restating record is refused too. The caller holds the
+// writers' lock.
+func (s *Store[T]) compensate(key string, refused error) error {
+	//: no feed, nothing recorded to answer.
+	if !s.changes.on() {
+		return refused
+	}
+	op, raw, record := coredocstore.ChangeDelete, json.RawMessage(nil), s.versions[key]
+	//: what the key holds now.
+	if doc, found := s.docs[key]; found {
+		op, raw = coredocstore.ChangePut, doc
+	} else if record != nil && record.Trashed != nil {
+		op, raw = coredocstore.ChangeTrash, record.Trashed.Document
+	}
+	//: the restating record, or both failures.
+	if feedErr := s.feed(op, key, raw, record); feedErr != nil {
+		return errors.Join(refused, feedErr)
+	}
+	return refused
+}
+
+// compensateBatch is compensate for every key of a batch whose group entry
+// the store refused to publish.
+func (s *Store[T]) compensateBatch(plan *batchPlan, refused error) error {
+	//: each key once, in the batch's order.
+	for _, k := range plan.keys {
+		refused = s.compensate(k.key, refused)
+	}
+	return refused
+}
+
 // feedBatch appends the change records of a planned batch, one per key it
 // writes, its final state, before the group entry is published. A stream's
 // Append takes one partition's records, and the keys of a batch spread over

@@ -165,14 +165,37 @@ nodes (`stream_internal_test.go`).
   read returned.
 
 - **The SQL engine serialises the appenders of a partition on its head
-  row.** An Append's first statement is an upsert that creates the head row
-  or writes it back unchanged — the row lock on PostgreSQL and MySQL, the
-  write that takes SQLite's lock first (ADR 0140) — held until the
-  transaction ends, so offsets are assigned in commit order and a reader
-  following a partition never passes a record that commits later. Then the
-  head is read (`FOR UPDATE`), the records inserted 199 per statement, the
-  head advanced: 3 + chunks statements. A rolled-back Append takes its
-  offsets back with it.
+  row.** On PostgreSQL and SQLite an Append's first statement is an upsert
+  that creates the head row or writes it back unchanged — the row lock on
+  PostgreSQL, the write that takes SQLite's lock first (ADR 0140) — held
+  until the transaction ends, so offsets are assigned in commit order and a
+  reader following a partition never passes a record that commits later.
+  Then the head is read (`FOR UPDATE`), the records inserted 199 per
+  statement, the head advanced: 3 + chunks statements. A rolled-back Append
+  takes its offsets back with it.
+- **On MySQL the head is created apart, then locked by reading it**
+  (#822). The upsert, sent by sixteen transactions on a partition never
+  written, deadlocked them on the new key once the one that inserted it
+  rolled back, and the server rolled a caller's transaction back whole
+  (`e2e/integration/sql`, `TestConcurrentAppendersCommitInOrderOnEveryEngine/mysql`).
+  The row is now created by `INSERT IGNORE`, alone and committed at once on
+  the pool, then every Append locks it with the head's read `FOR UPDATE`.
+  Outside a caller's transaction the creation runs before the engine opens
+  its own, so it never waits for a connection that transaction holds;
+  inside one it runs after an unlocked read found no row (a locking read of
+  a missing row would take a gap lock the creation would wait on), on a
+  second connection of the pool, once per partition — a pool whose every
+  connection such transactions hold waits for one until the context ends
+  (`TestSQLAMySQLHeadIsCreatedOnASecondConnection`). Once the engine knows a
+  head exists it locks it at once: 2 + chunks statements.
+- **The fake engine can fail the ordering test.** `sqlfake_external_test.go`
+  serialises transactions by default, so nothing there could tell whether
+  the head is locked; `newConcurrentSQLEngine` runs them side by side, READ
+  COMMITTED, with a row lock on the head's locking statements.
+  `TestSQLOffsetsCommitInOrderUnderConcurrentAppenders` runs on both, and
+  `TestSQLTheOrderingTestFailsOnAnEngineWithoutRowLocks` runs the same race
+  on a concurrent engine that locks nothing and requires a failure (a commit
+  refused on a taken offset, or a hole handed to the reader).
 - **The SQL engine's Read is one unlocked statement**: the head row LEFT
   JOINed with the readable records, and the head's floor beside the highest
   stored offset past the age bound: the first readable offset is the floor

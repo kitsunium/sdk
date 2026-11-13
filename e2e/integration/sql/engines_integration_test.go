@@ -15,8 +15,11 @@
 //	cd e2e && GOWORK=off go test -tags integration -race ./integration/sql/...
 //
 // SQLite needs nothing (modernc.org/sqlite, no cgo). PostgreSQL 17 and MySQL
-// 8.4 are started with testcontainers on free ports and removed at the end;
-// without Docker their cases skip, so the lane stays green where Docker is
+// 8.4 are the servers POSTGRES_DSN and MYSQL_DSN name when set — CI's
+// service containers (bazel-ci.yml, sql-integration) — and a case fails,
+// never skips, when a named server does not answer. Otherwise they are
+// started with testcontainers on free ports and removed at the end; without
+// Docker their cases skip, so the manual lane stays green where Docker is
 // absent.
 package sql_test
 
@@ -122,6 +125,9 @@ func sqliteEngine(tb testing.TB, txlock string) *engine {
 // first time; it skips the case without Docker.
 func postgresEngine(tb testing.TB) *engine {
 	tb.Helper()
+	if dsn := os.Getenv("POSTGRES_DSN"); dsn != "" {
+		return namedServer(tb, "pgx", dsn, "postgres", sql.DialectPostgres)
+	}
 	postgresOnce.Do(func() {
 		ctx := context.Background()
 		ctr, err := postgresc.Run(ctx, "postgres:17",
@@ -146,6 +152,9 @@ func postgresEngine(tb testing.TB) *engine {
 // time; it skips the case without Docker.
 func mysqlEngine(tb testing.TB) *engine {
 	tb.Helper()
+	if dsn := os.Getenv("MYSQL_DSN"); dsn != "" {
+		return namedServer(tb, "mysql", dsn, "mysql", sql.DialectMySQL)
+	}
 	mysqlOnce.Do(func() {
 		ctx := context.Background()
 		ctr, err := mysqlc.Run(ctx, "mysql:8.4",
@@ -163,6 +172,18 @@ func mysqlEngine(tb testing.TB) *engine {
 		tb.Skipf("MySQL unavailable (Docker?): %v", mysqlErr)
 	}
 	return openServer(tb, "mysql", mysqlDSN, "mysql", sql.DialectMySQL)
+}
+
+// namedServer opens a pool onto the server the environment names and fails
+// the case, rather than skipping it, when the server does not answer: a lane
+// that names its servers has them.
+func namedServer(tb testing.TB, driverName, dsn, name string, dialect sql.Dialect) *engine {
+	tb.Helper()
+	e := openServer(tb, driverName, dsn, name, dialect)
+	if err := e.db.PingContext(tb.Context()); err != nil {
+		tb.Fatalf("%s named by the environment does not answer: %v", name, err)
+	}
+	return e
 }
 
 // openServer opens a pool onto a server for one case.

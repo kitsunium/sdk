@@ -76,7 +76,9 @@ type Config[T any] struct {
 	// the records of a key are in the order its writes stood. A crash
 	// between the two leaves a record of a write that did not land: the
 	// feed is at least once, and a reader skips a record whose version
-	// the store does not hold. A record the stream refuses refuses the
+	// the store does not hold. A publication the store refuses is
+	// answered by a record that restates the key as it stands — put,
+	// trash or delete. A record the stream refuses refuses the
 	// write, ChangeFeedFailed, nothing written. A batch appends one record
 	// per key it wrote, its final state. Nil writes no
 	// record.

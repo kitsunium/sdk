@@ -601,10 +601,10 @@ func putOp(trashed bool) coredocstore.ChangeOp {
 // files it in memory, then reports whether it took effect.
 func (s *Store[T]) commitDocument(key string, doc *givenDocument, trashed bool, record *versionsRecord) (applied bool, err error) {
 	persistErr := s.persistDocument(key, doc.raw, trashed, record)
-	//: the filesystem refused: nothing changed anywhere.
+	//: the filesystem refused: nothing changed but the feed, which is answered.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
-		return false, persistErr
+		return false, s.compensate(key, persistErr)
 	}
 	s.mu.Lock()
 	//: stored and filed, or only kept in the trash.

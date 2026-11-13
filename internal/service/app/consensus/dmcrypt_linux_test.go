@@ -243,7 +243,9 @@ func TestDMCryptSyncPathBench(t *testing.T) {
 	}
 	const perWindow = 200
 	open := func(name string, mode SyncPath) *fileLog {
-		d, err := NewDataDirWith(dir+"/syncpath-"+name, DataDirOptions{SyncPath: mode})
+		// DMCRYPT_RUNTIME_DIR lets a run without root keep its boot-scoped
+		// markers outside /run (#1366: the filesystems of a shared host).
+		d, err := NewDataDirWith(dir+"/syncpath-"+name, DataDirOptions{SyncPath: mode, RuntimeDir: os.Getenv("DMCRYPT_RUNTIME_DIR")})
 		if err != nil {
 			t.Fatal(err)
 		}
