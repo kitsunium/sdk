@@ -331,9 +331,16 @@ configurations and the file engine's `StatsValue` (ADR 0074).
   write runs in a transaction. A batch appends per write.
 - **File engine: before the publication.** `feed` runs under the writers'
   lock before `persist` (and `feedBatch` before the group entry), so a crash
-  or a refused publication between them leaves a record of a write that did
-  not land — at least once; a reader skips a record whose version the store
-  does not hold, and replays by (key, version). A stream's `Append` takes one
+  between them leaves a record of a write that did not land — at least once;
+  a reader skips a record whose version the store does not hold, and replays
+  by (key, version). A publication the store refuses is answered at once by
+  `compensate` (`compensateBatch` for a batch, one per key): a second record
+  that restates the key as it stands — put with its version and, when asked,
+  its document; trash; delete when absent —, because a refused delete, or any
+  write on a store without versions, names no version a reader could skip
+  on, and a replay diverged for good (#831,
+  `change_compensate_external_test.go`). A refused restating record is
+  joined to `PERSIST_FAILED`. A stream's `Append` takes one
   partition's records, so a batch appends one record per key, one Append
   each, its final state. The engine takes no context, so the record is
   appended under `context.Background()`.

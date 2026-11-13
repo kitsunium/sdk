@@ -219,7 +219,8 @@ func TestFileChangeFeedReplaysIntoTheSameDocuments(t *testing.T) {
 // TestFileChangeFeedIsAtLeastOnce pins the order of the file engine's two
 // writes: the record is appended first, so a publication that fails leaves a
 // record of a write that did not land — at least once — whose version the
-// store does not hold, and a stream that refuses the record refuses the
+// store does not hold, followed by a record that restates the key as it
+// stands (kitsunium/sdk#831); a stream that refuses the record refuses the
 // write with nothing published.
 func TestFileChangeFeedIsAtLeastOnce(t *testing.T) {
 	t.Parallel()
@@ -235,8 +236,8 @@ func TestFileChangeFeedIsAtLeastOnce(t *testing.T) {
 	requireCode(t, store.Put(account{ID: "a", Name: "lost"}), coredocstore.CodePersistFailed, "a publication refused")
 	faulty.set("", false, false)
 	changes := readChanges(t, feed)
-	if len(changes) != 2 || changes[1].Version != 2 {
-		t.Fatalf("changes = %+v, want the landed write's and the lost one's, version 2", changes)
+	if len(changes) != 3 || changes[1].Version != 2 || changes[2].Op != coredocstore.ChangePut || changes[2].Version != 1 {
+		t.Fatalf("changes = %+v, want the landed write's, the lost one's at version 2, and version 1 restated", changes)
 	}
 	versions, err := store.Versions("a")
 	must(t, err)

@@ -163,7 +163,7 @@ sequences:
         to: s.publishGroup
       - opt:
           do:
-            - return: false, groupErr
+            - return: false, s.compensateBatch(plan, groupErr)
           when: groupErr != nil && !kerrs.HasCode(groupErr, coredocstore.CodeWriteUnconfirmed)
       - eval: s.mu.Lock()
         to: s.mu.Lock
@@ -589,6 +589,63 @@ sequences:
           when: err != nil
       - return: s.changes.append(context.Background(), s.path, string(op), []corestream.RecordValue{rec})
         to: s.changes.append
+  - of: (*Store).compensate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).compensate
+        kind: self
+      - id: s.feed
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: refused
+          when: "!s.changes.on()"
+      - bind: op, raw, record
+        eval: coredocstore.ChangeDelete, json.RawMessage(nil), s.versions[key]
+      - alt:
+          - do:
+              - set: op, raw
+                value: coredocstore.ChangePut, doc
+            init:
+              bind: doc, found
+              eval: s.docs[key]
+            when: found
+          - do:
+              - set: op, raw
+                value: coredocstore.ChangeTrash, record.Trashed.Document
+            when: record != nil && record.Trashed != nil
+      - opt:
+          do:
+            - return: errors.Join(refused, feedErr)
+              to: errors
+          init:
+            bind: feedErr
+            eval: s.feed(op, key, raw, record)
+            to: s.feed
+          when: feedErr != nil
+      - return: refused
+  - of: (*Store).compensateBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Store).compensateBatch
+        kind: self
+      - id: s.compensate
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: refused
+              to: s.compensate
+              value: s.compensate(k.key, refused)
+          key: _
+          range: plan.keys
+          value: k
+      - return: refused
   - of: (*Store).feedBatch
     participants:
       - id: caller
@@ -7887,6 +7944,8 @@ sequences:
         kind: internal
       - id: s.persist
         kind: internal
+      - id: s.compensate
+        kind: internal
       - id: s.mu.Lock
         kind: value
       - id: s.setVersions
@@ -7932,7 +7991,8 @@ sequences:
         to: s.persist
       - opt:
           do:
-            - return: persistErr
+            - return: s.compensate(key, persistErr)
+              to: s.compensate
           when: persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed)
       - eval: s.mu.Lock()
         to: s.mu.Lock
@@ -8065,7 +8125,7 @@ sequences:
         to: s.persist
       - opt:
           do:
-            - return: false, persistErr
+            - return: false, s.compensate(key, persistErr)
           when: persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed)
       - eval: s.mu.Lock()
         to: s.mu.Lock
@@ -8164,7 +8224,7 @@ sequences:
         to: s.persist
       - opt:
           do:
-            - return: false, persistErr
+            - return: false, s.compensate(key, persistErr)
           when: persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed)
       - eval: s.mu.Lock()
         to: s.mu.Lock
@@ -8846,7 +8906,7 @@ sequences:
         to: s.persistDocument
       - opt:
           do:
-            - return: false, persistErr
+            - return: false, s.compensate(key, persistErr)
           when: persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed)
       - eval: s.mu.Lock()
         to: s.mu.Lock
@@ -9366,7 +9426,7 @@ sequences:
         to: s.persist
       - opt:
           do:
-            - return: false, persistErr
+            - return: false, s.compensate(p.key, persistErr)
           when: persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed)
       - eval: s.mu.Lock()
         to: s.mu.Lock
@@ -9432,7 +9492,7 @@ sequences:
         to: s.persist
       - opt:
           do:
-            - return: false, persistErr
+            - return: false, s.compensate(key, persistErr)
           when: persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed)
       - eval: s.mu.Lock()
         to: s.mu.Lock

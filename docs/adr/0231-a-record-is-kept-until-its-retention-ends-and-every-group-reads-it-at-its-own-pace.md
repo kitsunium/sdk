@@ -296,3 +296,61 @@ It resolves what this ADR deferred to #824:
    raises the floor, as a `Trim` does, before it deletes the expired rows,
    so their going does not move it either.
 
+
+## Amendment — a MySQL head is created apart (#822), 2026-11-13
+
+The SQL engine's amendment said the upsert that creates the head row took
+an exclusive lock on MySQL, "so the head's first creation by racing
+appenders does not deadlock". `e2e/integration/sql` showed otherwise: sixteen
+transactions appending to a partition never written, the first rolled back
+on purpose, and `TestConcurrentAppendersCommitInOrderOnEveryEngine/mysql`
+failed `SAVEPOINT_FAILED` (error 1305) — the server had rolled a caller's
+transaction back whole, a deadlock on the new key once its inserter rolled
+back. No offset was out of order; an Append failed and took its caller's
+transaction with it.
+
+1. **On MySQL the head row is created by a statement of its own**,
+   `INSERT IGNORE`, committed at once on the pool, and every Append then
+   locks the row with the head's read `FOR UPDATE`. Outside a caller's
+   transaction the creation runs before the engine opens its own, so it
+   never waits for a connection that transaction holds. Inside one, an
+   unlocked read comes first — a locking read of a missing row would take a
+   gap lock the creation, on another connection, would wait on — and the
+   creation runs on a second connection of the pool, once per partition: a
+   pool whose every connection such transactions hold waits for one until
+   the context ends. Once the engine knows a head exists, the Append locks
+   it at once: 2 + chunks statements on MySQL.
+2. **PostgreSQL and SQLite keep the upsert**, their statements pinned
+   unchanged.
+3. **The ordering test can fail.** The fake engine serialised every
+   transaction, so it could not tell whether the head was locked; a
+   concurrent fake runs them side by side, READ COMMITTED, with a row lock on
+   the head's locking statements, and the same race on a concurrent fake that
+   locks nothing must fail.
+4. **CI runs `e2e/integration/sql`**: `bazel-ci.yml`'s `sql-integration`
+   job, PostgreSQL 17 and MySQL 8.4 as service containers named by
+   `POSTGRES_DSN` and `MYSQL_DSN`, no password; a named server that does not
+   answer fails the case. MySQL's verdict is that job's.
+
+## Amendment — a refused publication is answered in the change feed (#831), 2026-11-13
+
+A document store's file engine appends a write's change record before it
+publishes the write, so a crash between the two leaves a record of a write
+that did not land, which a reader skips on the version it names. A
+publication the store REFUSES is not a crash: the engine knows the write
+did not land. A refused delete, and any write on a store that keeps no
+versions, names no version to skip on, and a reader replaying the feed
+diverged from the store for good (a document deleted in the replay and
+present in the store).
+
+1. **The refusal is answered at once** by a second record that restates the
+   key as it stands: put with its version and, when the store carries
+   documents, its JSON; trash with the trashed document; delete when the
+   key is absent. A batch whose group entry is refused restates each of its
+   keys. A replay by key ends where the store is.
+2. **A crash keeps the rule it had**: no restating record, the version the
+   record names is what a reader skips on.
+3. **A restating record the stream refuses** is joined to the write's
+   `PERSIST_FAILED`; the write was refused either way.
+4. The SQL engine is unchanged: its record is in the write's transaction,
+   and a write that does not commit leaves none.

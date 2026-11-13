@@ -50,7 +50,8 @@ var sqlWakes = struct {
 //
 // # Why offsets commit in order
 //
-// The head row of a partition is locked by the Append's first statement and
+// The head row of a partition is locked by the Append's first statement —
+// on MySQL by the head's read, after the row was created apart (#822) — and
 // held until its transaction ends, so a second appender of that partition
 // waits for the first to commit or roll back and then reads the next offset
 // the first left. Offsets are therefore assigned in commit order, and a
@@ -74,6 +75,13 @@ type sqlStream struct {
 	policy corestream.PolicyValue
 	// turn counts the unkeyed batches, which go to the partitions in turn.
 	turn atomic.Uint64
+	// pool runs, outside every transaction, the one statement that must
+	// commit on its own: a MySQL head's creation.
+	pool coresql.Executor
+	// heads are, per partition, whether this engine knows its MySQL head
+	// row exists: a head is never deleted while its table stands, so once
+	// known the Append locks it at once, with no read before.
+	heads []atomic.Bool
 }
 
 // NewSQL returns a stream kept in three tables of the caller's database,
@@ -86,8 +94,13 @@ type sqlStream struct {
 // commits, and the stream's Waker fires only after the commit. The head row
 // of the partition is locked for the rest of that transaction, so the
 // appenders of one partition are serialised and its offsets commit in
-// order, with no gap a reader could skip. A Commit made on a handler's own
-// transaction commits the group's offset with the handler's effect.
+// order, with no gap a reader could skip. On MySQL the head row of a
+// partition never written is created first, by a statement of its own
+// committed at once on the pool: inside a caller's transaction that takes
+// a second connection of the pool, once per partition, so a pool whose
+// every connection such transactions hold waits for one until the
+// context ends. A Commit made on a handler's own transaction commits the
+// group's offset with the handler's effect.
 //
 // It refuses a policy it cannot honour with the core's Validate, as every
 // engine does, and a RetainBytes or MaxBytes, which it does not keep, with
@@ -104,12 +117,15 @@ func NewSQL(cfg SQLConfig) (s corestream.Stream, err error) {
 		return nil, invalid
 	}
 	policy := cfg.Policy.Normalized()
+	pool, _ := parts.join.Join(context.Background())
 	//: usable.
 	return &sqlStream{
-		tm: cfg.Transactor, clk: sqlClockOrSystem(cfg.Clock), tx: parts,
+		pool: pool,
+		tm:   cfg.Transactor, clk: sqlClockOrSystem(cfg.Clock), tx: parts,
 		wake: sqlWakeFor(parts.join, cfg.Table), table: cfg.Table,
-		swept: make([]atomic.Int64, policy.Partitions), stmts: renderSQLStatements(cfg.Dialect, cfg.Table),
-		own: sqlOwnTxOptions(cfg.Dialect), policy: policy,
+		swept: make([]atomic.Int64, policy.Partitions), heads: make([]atomic.Bool, policy.Partitions),
+		stmts: renderSQLStatements(cfg.Dialect, cfg.Table),
+		own:   sqlOwnTxOptions(cfg.Dialect), policy: policy,
 	}, nil
 }
 
@@ -185,6 +201,11 @@ func (s *sqlStream) Append(
 		//: StreamMisconfigured, naming the clock.
 		return corestream.AppendValue{}, misconfigured("Clock")
 	}
+	//: on MySQL outside a caller's transaction, the head exists before one opens.
+	if err := s.prepareHead(ctx, partition); err != nil {
+		//: StreamBackendFailed, the driver's text withheld.
+		return corestream.AppendValue{}, err
+	}
 	var appended corestream.AppendValue
 	writeErr := s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
 		var err error
@@ -211,13 +232,14 @@ func (s *sqlStream) write(
 	ctx context.Context, ex coresql.Executor, partition int, records []corestream.RecordValue, now int64,
 ) (corestream.AppendValue, error) {
 	//: created when missing, and held until the transaction ends.
-	if _, err := ex.ExecContext(ctx, s.stmts.lockHead, int64(partition)); err != nil {
+	if err := s.lockHead(ctx, ex, partition); err != nil {
 		//: StreamBackendFailed, the driver's text withheld.
-		return corestream.AppendValue{}, s.failed("lock the head", err)
+		return corestream.AppendValue{}, err
 	}
 	var next, first, last int64
 	//: the head this transaction now holds.
 	if err := ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan(&next, &first, &last); err != nil {
+		s.heads[partition].Store(false)
 		//: StreamBackendFailed, the driver's text withheld.
 		return corestream.AppendValue{}, s.failed("read the head", err)
 	}
@@ -247,6 +269,80 @@ func (s *sqlStream) write(
 	return corestream.AppendValue{
 		Partition: partition, First: corestream.Offset(next), Last: corestream.Offset(end - 1),
 	}, nil
+}
+
+// lockHead makes sure partition's head row exists and, but on MySQL, locks
+// it until ex's transaction ends; on MySQL the head read that follows locks
+// it, FOR UPDATE.
+//
+// PostgreSQL and SQLite send the upsert, which creates and locks the row in
+// one statement. On MySQL that upsert, sent by many transactions on a
+// partition never written, deadlocked them on the new key once the one that
+// inserted it rolled back, and the server rolled a caller's transaction back
+// whole (#822): there the row is created by a statement of its own,
+// committed at once on the pool, before any transaction locks it. A head
+// this engine knows exists is locked at once; otherwise lockHead reads it
+// unlocked first — a locking read of a missing row would take a gap lock its
+// creation, on another connection, would then wait on.
+func (s *sqlStream) lockHead(ctx context.Context, ex coresql.Executor, partition int) error {
+	//: the upsert creates and locks the row.
+	if !s.stmts.headApart {
+		//: StreamBackendFailed on failure, the driver's text withheld.
+		if _, err := ex.ExecContext(ctx, s.stmts.lockHead, int64(partition)); err != nil {
+			return s.failed("lock the head", err)
+		}
+		return nil
+	}
+	//: known: the locking read takes it.
+	if s.heads[partition].Load() {
+		return nil
+	}
+	var next int64
+	err := ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan(&next)
+	//: the row exists, and the locking read takes it.
+	if err == nil {
+		s.heads[partition].Store(true)
+		return nil
+	}
+	//: anything but a missing row.
+	if !errors.Is(err, stdsql.ErrNoRows) {
+		//: StreamBackendFailed, the driver's text withheld.
+		return s.failed("read the head", err)
+	}
+	//: inside a caller's transaction: a second connection, for one statement.
+	return s.createHead(ctx, partition)
+}
+
+// prepareHead creates partition's MySQL head on the pool before an Append
+// or a Trim opens a transaction of its own, so the creation never waits for
+// a connection while that transaction holds one. Inside a caller's
+// transaction there is none to wait for before: lockHead creates it there,
+// on a second connection of the pool, the first time the partition is
+// written — a pool whose every connection such transactions hold waits for
+// one until ctx ends. Nothing on PostgreSQL and SQLite.
+func (s *sqlStream) prepareHead(ctx context.Context, partition int) error {
+	//: the upsert's dialects, or a head already known.
+	if !s.stmts.headApart || s.heads[partition].Load() {
+		return nil
+	}
+	//: inside a caller's transaction, lockHead decides.
+	if _, inTx := s.tx.join.Join(ctx); inTx {
+		return nil
+	}
+	return s.createHead(ctx, partition)
+}
+
+// createHead creates partition's MySQL head on the pool, committed at once
+// whatever the transaction that asked becomes, and leaves an existing one
+// as it is.
+func (s *sqlStream) createHead(ctx context.Context, partition int) error {
+	//: committed on its own, before any transaction locks it.
+	if _, err := s.pool.ExecContext(ctx, s.stmts.createHead, int64(partition)); err != nil {
+		//: StreamBackendFailed, the driver's text withheld.
+		return s.failed("create the head", err)
+	}
+	s.heads[partition].Store(true)
+	return nil
 }
 
 // nullable binds an empty key or payload as NULL, which reads back as nil,

@@ -170,10 +170,10 @@ func (s *Store[T]) commitBatch(ops []batchOp) (applied bool, err error) {
 		return false, feedErr
 	}
 	groupErr := s.publishGroup(plan)
-	//: the group entry was not published: nothing changed anywhere.
+	//: the group entry was not published: nothing changed but the feed, which is answered.
 	if groupErr != nil && !kerrs.HasCode(groupErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
-		return false, groupErr
+		return false, s.compensateBatch(plan, groupErr)
 	}
 	s.mu.Lock()
 	s.applyBatch(plan)

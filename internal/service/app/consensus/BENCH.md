@@ -90,7 +90,7 @@ make profile-consensus WAVE=before && make profile-consensus WAVE=after
 make benchstat-diff BEFORE=before AFTER=after
 ```
 
-## Hand-run micro-benchmarks (#913, #922, #923, #1109, #1364)
+## Hand-run micro-benchmarks (#913, #922, #923, #1109, #1364, #1365)
 
 Not written by the generator above: refreshed by the commands each part names (`filelog_bench_test.go`: `cd internal && go test -run '^$' -bench BenchmarkFileLogEntries -benchmem -count=3 ./service/app/consensus/`).
 
@@ -216,6 +216,9 @@ is >= 1.00 and its Sync p99 ratio's upper bound is <= 1.00.
 |---|---|---|---|---|
 | dm-crypt over a loop device | ext4 | [0.958, 1.034] | [0.586, 2.162] | gate not met: Fdatasync stays the default |
 | dm-crypt over a loop device | xfs | [0.955, 1.064] | [0.470, 1.967] | gate not met: Fdatasync stays the default |
+| devbox data disk `/dev/sdb`, no dm-crypt | ext4 | [0.983, 1.038] | [0.574, 1.357] | gate not met: Fdatasync stays the default |
+| devbox root disk `/dev/sda1`, no dm-crypt | ext4 | [0.989, 1.010] | [0.739, 1.573] | gate not met: Fdatasync stays the default |
+| devbox `/dev/shm` | tmpfs | [0.967, 1.113] | [0.794, 1.531] | gate not met: Fdatasync stays the default |
 | OVH VPS of D16 | — | not measured | not measured | Fdatasync stays the default |
 
 Ten rounds a filesystem on devbox on 2026-11-13 (Debian 13, Linux 6.12.101
@@ -226,6 +229,17 @@ intervals straddle 1.00 on both filesystems; the suite, its fuzz seeds and
 12 of 12 power cuts pass with every log writing `RWF_DSYNC`. The OVH VPS is
 not measured. `SyncFdatasync` stays the default everywhere until a row
 meets the gate.
+
+The three devbox rows without dm-crypt were taken on 2026-11-13 (#1366)
+on every filesystem of this host its user can write to, nothing mounted or
+tuned for the run: the same test, ten rounds each, `DMCRYPT_DIR` on the
+filesystem and `DMCRYPT_RUNTIME_DIR` outside `/run` (no root), e.g.
+`DMCRYPT_DIR=<dir> DMCRYPT_RUNTIME_DIR=<dir> DMCRYPT_FS=ext4 go test -tags dmcrypt -run '^TestDMCryptSyncPathBench$' -v ./service/app/consensus/`.
+The host's xfs, btrfs, LUKS, LVM, RAID 1, vfat and zfs mounts are not
+writable to it and were not measured. Every interval straddles 1.00, the
+p99 ratio's by far the most: no filesystem here lets `RWF_DSYNC` become a
+default, so the io_uring mode, the smaller gain #923 lists, is not built;
+it has no number of its own, because it does not exist to be measured.
 
 ### The apply side: applied1 (#1109)
 
@@ -294,6 +308,83 @@ go1.27.4), `GOMAXPROCS=4`, three runs alike to the byte.
   the 64 entries and one block of headers, whatever N; before, each
   follower's frame was encoded from nil (18 allocations of a growing buffer
   each).
-- The loop-turn p99 at 1 000 proposals/s (#1364's other half) is not in
-  this file: the generator that would read it (#911) does not exist before
-  lot L1, so no "before" can be taken by copying it.
+- **The turn's time** follows its bytes. The same runs, taken
+  2026-11-13 on the same host with the two test binaries alternated
+  (before, after, after, before, before, after), `-count=3` each:
+
+| Followers | before: ns/op | after: ns/op |
+|---|---|---|
+| 2 | 48 655 – 57 876 | 5 457 – 6 832 |
+| 4 | 95 700 – 108 793 | 5 503 – 6 850 |
+
+### A leader's loop turn at 1 000 proposals/s (#912, #1364)
+
+From `loopturn_bench_test.go`; refresh with `cd internal && go test -run='^$' -bench=BenchmarkALeaderLoopTurnAt1000PerSecond -benchtime=1x -count=2 ./service/app/consensus/`.
+`consensus_loop_turn_seconds` on the leader, every observation kept raw by
+the leader's `Meter` (the histogram's buckets, 0.5 ms and up, are too
+coarse for turns of microseconds), while three or five nodes over loopback
+mutual TLS with memory logs take 1 000 proposals/s of 256 B for 5 s, each
+proposal on its own goroutine at its due time; TCP so that the leader
+takes #912's `BatchSender` path, which the memory transport does not
+implement. The file uses nothing lot L1 added: the "before" side is the
+same file copied onto `main` before the lot (a7eb89f0d), built as its own
+test binary. Taken 2026-11-13 on devbox (AMD EPYC 7351P, 8 cores, Linux
+6.12.101 amd64, go1.27.4), `GOMAXPROCS=4`; three rounds in the order
+before, after, after, before, before, after, two runs a binary a round,
+so six runs a side. A run is some 34 800 turns with 2 followers and
+54 700 with 4, alike on both sides.
+
+| Followers | Side | turn p99 (six runs) | median | turn p50 (median) | commit p99 (range) |
+|---|---|---|---|---|---|
+| 2 | before | 32.4, 33.1, 34.7, 34.8, 38.2, 39.4 µs | 34.8 µs | 4.14 µs | 1.36 – 1.44 ms |
+| 2 | after | 32.6, 33.9, 35.5, 36.0, 37.6, 39.5 µs | 35.8 µs | 4.58 µs | 1.38 – 1.41 ms |
+| 4 | before | 39.2, 39.3, 40.1, 40.9, 43.2, 47.6 µs | 40.5 µs | 3.46 µs | 1.41 – 1.54 ms |
+| 4 | after | 35.6, 38.3, 39.1, 39.3, 39.7, 42.3 µs | 39.2 µs | 3.84 µs | 1.44 – 1.49 ms |
+
+Per round, the mean p99 of the after runs over the before runs' is 0.964,
+1.062 and 1.010 with 2 followers, 0.834, 0.989 and 0.994 with 4.
+
+- **The turn p99 moved by less than its own spread**: the two sides' six
+  runs overlap entirely, and no round moves it by more than the spread of
+  one side's runs (some 7 µs). "Before" is main before the lot
+  (a7eb89f0d), not the parent of #912's commit, whose tests do not build.
+- **The median turn is some 10 % longer after the lot** (4.14 to 4.58 µs,
+  3.46 to 3.84 µs), every after run above every before run. That is lot L1
+  as a whole, measured through a whole turn; the encoding it cut is the
+  smaller part of a turn that sends nothing big, and this bench does not
+  say which other change of the lot added the 0.4 µs.
+
+### Commit p99 while a snapshot streams (#920, #1365)
+
+From `streamcommit_bench_test.go`; refresh with `cd internal && go test -run='^$' -bench=BenchmarkACommitWhileASnapshotStreams -benchtime=1x -count=5 -v ./service/app/consensus/` (`-v` prints each window's seconds).
+#920's third criterion: the data lane's commit p99 while a paced stream
+runs, within 10 % of the no-stream baseline. Three voters over loopback
+mutual TLS with memory logs, a state of six seconds of stream (values of
+4 KiB of random bytes, so that #917's compression leaves its size: 12 MiB
+at 2 MiB/s, 48 MiB at 8 MiB/s), cut once when loaded and never in a
+window; then three windows of 4 s at 1 000 proposals/s of 256 B: with no
+stream, then from the first byte a fourth node that JOINed as a learner
+is streamed the snapshot at the rate `SnapshotStreamBytesPerSecond` names
+(the run fails unless the stream is still in flight at the window's
+end), then once the learner installed it and follows. One run is one new
+cluster. Taken 2026-11-13 on devbox (AMD EPYC 7351P, 8 cores, Linux
+6.12.101 amd64, go1.27.4), `GOMAXPROCS=4`, five runs a rate.
+
+| Rate | baseline p99 | streaming p99 | following p99 | ratio streaming / baseline |
+|---|---|---|---|---|
+| 2 MiB/s | 1.362 – 1.405 ms | 1.390 – 1.425 ms | 1.404 – 1.477 ms | 1.014, 1.000, 1.022, 1.020, 1.028 |
+| 8 MiB/s | 1.382 – 5.576 ms | 1.416 – 6.234 ms | 1.423 – 4.893 ms | 4.105, 1.118, 0.994, 0.683, 1.024 |
+
+- **At 2 MiB/s the bound holds** in every run: the stream moves the p99 by
+  at most 2.8 %.
+- **At 8 MiB/s this bench cannot judge it.** Stalls of 10 to 20 ms land
+  in some seconds of every kind of window, the baseline and the window
+  after the stream included (`-v`'s per-second lines): two runs of five
+  are dominated by them, one each way. The four nodes share one process,
+  one heap of four 48 MiB states and its four Ps, and the learner's
+  receiving side runs on the leader's CPUs, which no deployment does. The
+  stalls are not attributed here; the three quiet runs are within 2.4 %.
+- An exploratory variant that let a cut of the 48 MiB state land in a
+  window measured a p99 of 118 and 121 ms there: a cut, not a stream, is
+  what a window must not hold, so the bench sizes `SnapshotEveryBytes` to
+  cut once, before the windows.

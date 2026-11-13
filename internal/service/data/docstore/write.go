@@ -257,10 +257,10 @@ func (s *Store[T]) persistAndApply(p prepared, stamp coredocstore.StampValue) (a
 		return false, feedErr
 	}
 	persistErr := s.persist(p.key, p.raw, false, versions)
-	//: the filesystem refused: nothing changed anywhere.
+	//: the filesystem refused: nothing changed but the feed, which is answered.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
-		return false, persistErr
+		return false, s.compensate(p.key, persistErr)
 	}
 	s.mu.Lock()
 	s.docs[p.key] = p.raw
@@ -293,10 +293,10 @@ func (s *Store[T]) remove(key string) (applied bool, err error) {
 		return false, feedErr
 	}
 	persistErr := s.persist(key, nil, true, nil)
-	//: the filesystem refused: nothing changed anywhere.
+	//: the filesystem refused: nothing changed but the feed, which is answered.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
-		return false, persistErr
+		return false, s.compensate(key, persistErr)
 	}
 	s.mu.Lock()
 	delete(s.docs, key)
