@@ -5,6 +5,8 @@ name: Kernel Benchmarks
 # `go test`, so they never run on a normal push. This workflow gives CI-driven
 # bench runs three ways: on demand, on a weekly cron (rolling baseline), and
 # opt-in per-PR via the `run-bench` label for performance-sensitive changes.
+# A base against a head, judged against the performance lot's thresholds, is
+# bench-ab.yml's: interleaved rounds of two test binaries on one runner.
 on:
   workflow_dispatch:
     inputs:
@@ -72,14 +74,3 @@ jobs:
           name: bench-${{ github.run_number }}
           path: bench-current.txt
           retention-days: 90
-
-      # benchstat A/B is a placeholder until baseline storage is decided (see the
-      # follow-up in #22). It must never fail the run, hence continue-on-error.
-      - name: benchstat A/B (when baseline available)
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        run: |
-          # Future: download the latest main-branch bench-*.txt artefact via
-          # gh api, then `benchstat main.txt bench-current.txt`. Baseline
-          # storage is an open follow-up — see issue #22.
-          echo "benchstat A/B not wired yet — baseline storage is a follow-up (see #22)."
