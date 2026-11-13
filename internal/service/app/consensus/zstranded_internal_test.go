@@ -3,6 +3,7 @@ package consensus
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -66,6 +67,32 @@ func waitUnheard(t *testing.T, l *testNode, id coreconsensus.NodeID) {
 			}
 		}
 		return false
+	})
+}
+
+// waitHeard waits until the leader l has heard each of ids in its term
+// within half the minimum election timeout. A change that must commit
+// counts as answering only the voters its leader heard in its own term
+// within that timeout (activeMajority, R2-27), and a leader that has just
+// taken over has heard none of them yet: a change asked of it at once is
+// refused MEMBERSHIP_INVALID for a voter that does answer, only later. On
+// NetBSD, D judged the DenyPin of B before E or F first answered it in its
+// term, and D, E and F were the three voters it needs (#1374). The half
+// leaves the change asked next that margin before a voter heard now goes
+// stale.
+func waitHeard(t *testing.T, l *testNode, ids ...coreconsensus.NodeID) {
+	t.Helper()
+	window := testTimingFast().ElectionTimeoutMin / 2
+	waitFor(t, "the leader hears the voters a change counts", func() bool {
+		heard := 0
+		//: each of ids among the leader's peers.
+		for _, p := range l.node.Health().Peers {
+			//: heard in the leader's term, and lately.
+			if slices.Contains(ids, p.ID) && p.LastContact >= 0 && p.LastContact < window {
+				heard++
+			}
+		}
+		return heard == len(ids)
 	})
 }
 
@@ -145,7 +172,10 @@ func TestADenyPinThatLeavesAStoppedVoterNoVoucherIsSaidEverywhere(t *testing.T) 
 		t.Fatalf("setup: D's health lists A %v with flags %#b before B's pin was denied", ok, f)
 	}
 
-	// B's pin is denied: C, gone, and B, refused, leave A no voucher.
+	// B's pin is denied: C, gone, and B, refused, leave A no voucher. With
+	// A down and B cut, the DenyPin needs D, E and F answering: D, which
+	// took over just now, must have heard E and F in its term first.
+	waitHeard(t, d, e.id, joined[2].id)
 	//: the DenyPin is never refused for what it leaves a stopped voter with.
 	if err := onTheMerits(func() error { return d.node.DenyPin(ctx, "op:test", b.id) }); err != nil {
 		t.Fatalf("DenyPin(B) = %v, want it admitted: a key's fence never waits for a voter that is down", err)

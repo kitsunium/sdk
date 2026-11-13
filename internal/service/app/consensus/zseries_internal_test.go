@@ -28,6 +28,23 @@ func hasAttr(attrs []coreotel.AttrValue, key, v string) bool {
 	return false
 }
 
+// timerOvershoot is how late a wait of this host ends at worst, measured:
+// the longest overshoot of ten sleeps of a millisecond. A timer fires on
+// the host's clock tick, not at its deadline: NetBSD's clock ticks at
+// 100 Hz, and a wait there ends up to a tick late or more, where Linux's
+// ends within tens of microseconds. Two such waits made the round trip of
+// 30 ms injected 42 to 45 ms there (#1373).
+func timerOvershoot() time.Duration {
+	var worst time.Duration
+	//: ten sleeps, the longest overshoot kept.
+	for range 10 {
+		start := time.Now()
+		time.Sleep(time.Millisecond)
+		worst = max(worst, time.Since(start)-time.Millisecond)
+	}
+	return worst
+}
+
 // D13 (#914): the three series observe.go lacked, published with the
 // labels D13 names: consensus_peer_rtt_seconds a histogram by peer whose
 // observations are the injected round trip, consensus_prevotes_lost_total
@@ -83,10 +100,18 @@ func TestTheD13SeriesArePublishedWithTheirLabels(t *testing.T) {
 		return true
 	})
 	snap := meter.Collect()
+	// Measured while the cluster still runs, as its round trips were.
+	late := timerOvershoot()
+	t.Logf("a timer of this host ends up to %v late", late)
 	want := 2 * oneWay
-	tick := time.Duration(l.node.tickEvery.Load())
-	//: each peer's round trips are the injected one, within a tick and the
-	//: scheduling of a loaded machine.
+	// A round trip waits twice in delayedTransport, once each way, and each
+	// wait may end as late as a timer of this host does: the bound is the
+	// injected round trip, two overshoots and the scheduling of a loaded
+	// machine. The raft step measures it between two events of the loops,
+	// on no tick of theirs.
+	slack := 2*late + 10*time.Millisecond
+	//: each peer's round trips are the injected one, within two timer
+	//: overshoots and the scheduling of a loaded machine.
 	for _, peer := range peers {
 		h, _ := rtt(snap, peer)
 		mean := time.Duration(h.Sum / float64(h.Count) * float64(time.Second))
@@ -98,8 +123,8 @@ func TestTheD13SeriesArePublishedWithTheirLabels(t *testing.T) {
 				t.Errorf("peer %s: %d round trips at or under %vs, below the injected %v", peer, h.Counts[i], bound, want)
 			}
 		}
-		if mean < want || mean > want+tick+10*time.Millisecond {
-			t.Errorf("peer %s: mean round trip %v over %d samples, want %v within a tick (%v) and 10ms", peer, mean, h.Count, want, tick)
+		if mean < want || mean > want+slack {
+			t.Errorf("peer %s: mean round trip %v over %d samples, want %v within two timer overshoots (%v each) and 10ms", peer, mean, h.Count, want, late)
 		}
 	}
 	lost, ok := snap.Sums[mPreVotesLost]

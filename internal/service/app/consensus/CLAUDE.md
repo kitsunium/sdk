@@ -1111,7 +1111,11 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   stream ends; an ended pin's age reads 0) were absent, and three alerts of
   D13 could not be written (#914,
   `TestTheD13SeriesArePublishedWithTheirLabels`,
-  `TestThePinGaugesCountAndAgeEachPinAndResetOneThatEnded`).
+  `TestThePinGaugesCountAndAgeEachPinAndResetOneThatEnded`). The test
+  bounds the mean round trip by two overshoots of the host's timers, as
+  `timerOvershoot` measures them while the cluster runs, never by a fixed
+  tick: each way waits once in the delayed transport, and NetBSD's 100 Hz
+  clock made 30 ms injected 42 to 45 ms (#1373).
 - Trace a Propose from submission to apply on the follower alone, or set
   `FlagTrace` on a forward before the committed cluster version is 4: the
   span recorded `applied` only, and a forwarded write's leader side was in
@@ -1512,6 +1516,12 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   change forwarded from a follower is refused with the code alone: the
   answer frame carries nothing more, and the leader's health names only a
   voter stranded already, never one the refused change alone would strand.
+  A test asks such a change of a leader that has just taken over only once
+  that leader heard, in its term, the voters the change counts
+  (`waitHeard`): `activeMajority` counts no voter not heard yet, and on
+  NetBSD D judged the `DenyPin` of B before E or F first answered it in
+  its term and refused it MEMBERSHIP_INVALID, A down and B cut leaving D,
+  E and F the only majority it could count (#1374).
 - Drop #603's two bets on the leader, or let them pass unsaid: the leader
   counted at any address, and over a compacted log a voter listed after
   it taken to know it as a voter. Strict rules refuse D20's last move and
