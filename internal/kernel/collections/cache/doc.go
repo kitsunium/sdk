@@ -26,4 +26,9 @@
 //
 // Package cache — Striped: independent Caches behind one hash, each with
 // its own lock.
+//
+// Package cache — UnlockedMap: the cache without its lock, for a caller that
+// already serialises every call.
+//
+// Package cache — the expiry heap: a 4-ary heap of int64 deadlines.
 package cache
