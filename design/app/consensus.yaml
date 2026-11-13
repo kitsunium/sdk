@@ -129,6 +129,20 @@ packages:
             value: "0x00_02_39_19"
         type: errs.Code
       - const:
+          - doc: |-
+              CodeSessionDigestMismatch identifies a session command whose session and
+              sequence were already recorded with another payload digest.
+            name: CodeSessionDigestMismatch
+            value: "0x00_02_39_1A"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeSessionExpired identifies a session command whose session is not open,
+              or whose sequence is below the one the session last recorded.
+            name: CodeSessionExpired
+            value: "0x00_02_39_1B"
+        type: errs.Code
+      - const:
           - doc: CodeLogCorrupt identifies damage to the log that is not a torn tail.
             name: CodeLogCorrupt
             value: "0x00_03_5C_01"
@@ -289,6 +303,17 @@ packages:
         name: EntryTransfer
         type: EntryKind
         value: "8"
+      - blockDoc: |-
+          The entry kinds of protocol version 1. The range 0x80-0x8F is reserved for
+          ADR 0173 and refused until the cluster version enables it.
+        doc: |-
+          EntrySessionCommand carries a caller's command under a client session: the
+          session, its sequence and the command (ADR 0241). It is written only once
+          the cluster version is 4, and the state machine is handed the command it
+          carries at most once per session and sequence, as an EntryCommand.
+        name: EntrySessionCommand
+        type: EntryKind
+        value: "9"
       - blockDoc: The message kinds of protocol version 1.
         doc: |-
           MsgPreVote asks whether the sender COULD win at Term, without raising
@@ -431,6 +456,30 @@ packages:
         name: FlagProtocol3
         type: MessageFlags
         value: "32"
+      - blockDoc: The flags.
+        doc: |-
+          FlagProtocol4 marks a frame from a node that speaks protocol version
+          4, which sets FlagProtocol2 and FlagProtocol3 beside it. A leader of
+          protocol 4 carries its last index in the RejectHint of every
+          heartbeat, which a follower reads only beside this flag (#919); a
+          forward may carry a trace context (FlagTrace, #1115) and a session
+          command is appended (#918) only once the committed cluster version is
+          4. A node of protocol 3 or below tests the bits it names only and
+          ignores it, and a leader refuses to raise the cluster version to 4
+          while a member's last frame of the term lacks it.
+        name: FlagProtocol4
+        type: MessageFlags
+        value: "64"
+      - blockDoc: The flags.
+        doc: |-
+          FlagTrace marks a forward that carries its proposer's trace context
+          after its entry (Trace). A follower sets it only once the committed
+          cluster version is 4, which every member announced, so a node of
+          protocol 3 or below never meets the trailing bytes; on any other
+          kind it is refused as a frame that does not parse (#1115).
+        name: FlagTrace
+        type: MessageFlags
+        value: "128"
       - blockDoc: The states of a stamp.
         doc: |-
           StampJoining is a directory Init prepared: it may join as an empty
@@ -547,6 +596,7 @@ packages:
           - doc: |-
               Barrier returns once the local state machine reflects every write
               committed before the call, with the token of the applied index.
+              Reads queued in one turn share one round.
             in:
               - name: ctx
                 type: context.Context
@@ -574,6 +624,52 @@ packages:
             out:
               - type: StatusValue
         name: Replicated
+      - doc: |-
+          SessionProposer is the sibling a node implements for exactly-once commands
+          (ADR 0241): a client opens a session once, then numbers its commands, and
+          retries one blindly after OUTCOME_UNKNOWN, through a leader change or a
+          crash, without it being applied twice. A session is replicated state: it
+          survives restarts, snapshots and installs, and the cluster keeps at most
+          1024 of them, evicting the one used least recently.
+        methods:
+          - doc: |-
+              OpenSession opens session s, a random identifier the client draws once.
+              Opening an open session again is a no-op, so the call is retried
+              blindly. A session that answered SESSION_EXPIRED is never opened
+              again: the client draws another identifier.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: s
+                type: SessionID
+            name: OpenSession
+            out:
+              - type: error
+          - doc: |-
+              ProposeSession replicates data as command seq of session s, seq from 1
+              and increasing, and returns, once it is applied, its token and the
+              value Apply returned. A retry of the same session, sequence and data
+              is answered with the first one's token, applying nothing again, and
+              with its value while the node still holds it, nil otherwise. The same
+              session and sequence with other data is SESSION_DIGEST_MISMATCH, a
+              session not open or a sequence below the last one is
+              SESSION_EXPIRED, and neither appends anything once the first one is
+              committed. OUTCOME_UNKNOWN is retried with the same arguments.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: s
+                type: SessionID
+              - name: seq
+                type: uint64
+              - name: data
+                type: "[]byte"
+            name: ProposeSession
+            out:
+              - type: TokenValue
+              - type: any
+              - type: error
+        name: SessionProposer
       - doc: |-
           StateMachine is the caller's replicated program. Apply is a PURE transition
           of state the state machine owns: no side effect outside that state, no
@@ -667,7 +763,11 @@ packages:
           - doc: |-
               Entries returns entries in [lo, hi), at most maxBytes, and always at
               least one entry when lo < hi, even above maxBytes. lo below first is
-              COMPACTED.
+              COMPACTED. The returned entries own their Data, valid after the call and
+              never written by the store, whatever it appends, truncates or compacts
+              later: the caller keeps it without a copy. Entry data may share one
+              buffer the store read for the whole call, each payload capped at its own
+              length, so a caller that keeps one entry's data keeps that buffer.
             in:
               - name: lo
               - name: hi
@@ -896,6 +996,27 @@ packages:
               - type: func(NodeID)
             name: Unreachable
         name: UnreachableReporter
+      - doc: |-
+          BatchSender is the sibling of a transport that sends one frame as a
+          header and a body several peers share: the leader encodes the entries
+          of an append once per Ready and hands the same body to every follower
+          whose append carries them (#912). A node that finds it sends every
+          append with entries through it, and every other frame through Send.
+        methods:
+          - doc: |-
+              SendShared hands over the frame header then body, the bytes Send
+              would have been handed. It never blocks and may drop, as Send; the
+              transport owns header after the call. body is shared: neither the
+              transport nor the caller mutates it, and several peers' queues may
+              hold it at once.
+            in:
+              - name: to
+                type: NodeID
+              - name: header
+              - name: body
+                type: "[]byte"
+            name: SendShared
+        name: BatchSender
       - doc: Joiner is the sibling a transport implements to carry a pre-admission JOIN.
         methods:
           - doc: |-
@@ -940,6 +1061,22 @@ packages:
               - type: <-chan StatusValue
         name: LeadershipWatcher
       - doc: |-
+          MembershipWatcher is the sibling of a node that notifies configuration
+          changes: a learner added, promoted, a member removed or moved. The
+          configuration is its own value, apart from StatusValue.
+        methods:
+          - doc: |-
+              WatchMembership returns its OWN channel, of capacity one, holding the
+              latest configuration; it is unsubscribed and closed when ctx ends or the
+              node closes.
+            in:
+              - name: ctx
+                type: context.Context
+            name: WatchMembership
+            out:
+              - type: <-chan MembershipValue
+        name: MembershipWatcher
+      - doc: |-
           JoinReasonBinder is the sibling of a transport that carries the reason of
           a refused JOIN back to the joiner. A node that finds it binds this join
           callback in place of Bind's: the reason is what the JoinAuthorizer chose
@@ -981,7 +1118,8 @@ packages:
             doc: |-
               OutcomeUnknown is returned when a proposal was appended, or possibly
               delivered, and its answer was lost. The entry may still commit: never
-              retry blindly, read the state through Barrier first.
+              retry a Propose blindly, read the state through Barrier first. A
+              ProposeSession is retried with the same arguments (ADR 0241).
             exit: TEMPFAIL
             name: OutcomeUnknown
             private: "core/app/consensus: the proposal was appended or possibly delivered, then the answer was lost to a leadership change, a context's end or a broken connection"
@@ -1138,6 +1276,28 @@ packages:
             private: "core/app/consensus: the precondition names an alarm, contract or version generation that is not the current one"
             public: The administrative operation's precondition no longer holds
             reason: ADMIN_PRECONDITION_FAILED
+          - code: CodeSessionDigestMismatch
+            doc: |-
+              SessionDigestMismatch is returned by ProposeSession for a session and
+              sequence already recorded with another payload: nothing is applied, and
+              nothing is appended once the recorded command is committed.
+            exit: DATAERR
+            name: SessionDigestMismatch
+            private: "core/app/consensus: the session and sequence were recorded with another payload digest; the command is not applied"
+            public: This session sequence was already used for another command
+            reason: SESSION_DIGEST_MISMATCH
+          - code: CodeSessionExpired
+            doc: |-
+              SessionExpired is returned by ProposeSession for a session the cluster
+              does not hold open, never opened or evicted, or for a sequence below the
+              one the session last recorded: nothing is applied now, and whether an
+              earlier copy was is unknown. The client reads its state through Barrier
+              and opens a new session.
+            exit: TEMPFAIL
+            name: SessionExpired
+            private: "core/app/consensus: the session is not open, or the sequence is below the one it last recorded; the command is not applied"
+            public: The client session is no longer recorded
+            reason: SESSION_EXPIRED
           - code: CodeLogCorrupt
             doc: |-
               LogCorrupt is a CRC failure that is not a torn tail, or a gap in the
@@ -1229,10 +1389,15 @@ packages:
           - code: CodeBootstrapRefused
             doc: |-
               BootstrapRefused is returned when a listed peer already holds a history,
-              or the founding member lists differ.
+              or the founding member lists differ. A running founder stops with it
+              once a leader that committed past entry 1 shows another entry 1 than
+              its own that it may not take: the founders passed Bootstrap different
+              member lists, or, in a data directory founded before entry 1 was left
+              uncommitted, different initial timings, and a majority founded the
+              cluster on the other one (#698).
             exit: CONFIG
             name: BootstrapRefused
-            private: "core/app/consensus: the data directory already holds log entries, or a bootstrap with another member list is pending"
+            private: "core/app/consensus: the data directory already holds log entries, a bootstrap with another member list is pending, or a majority founded the cluster with another entry 1"
             public: The cluster cannot be bootstrapped
             reason: BOOTSTRAP_REFUSED
           - code: CodeTransportMisconfigured
@@ -1298,7 +1463,9 @@ packages:
           state machine; every other kind is the engine's own replicated state. A kind
           a node does not know stops it with VERSION_UNSUPPORTED: it is never skipped.
         methods:
-          - doc: Known reports whether the kind is one protocol version 1 defines.
+          - doc: |-
+              Known reports whether the kind is one this release defines: those of
+              protocol version 1, and EntrySessionCommand of protocol version 4.
             name: Known
             out:
               - type: bool
@@ -1341,6 +1508,36 @@ packages:
                 the engine before Apply and never encoded in the log.
               name: Token
               type: TokenValue
+      - doc: |-
+          SessionID names a client session: 16 random bytes the client draws once and
+          opens with OpenSession (ADR 0241).
+        name: SessionID
+        underlying: "[16]byte"
+      - doc: |-
+          SessionValue is the replicated record of one client session: the last
+          sequence it applied, that command's payload digest and position, and the
+          index of its last entry, which orders the eviction of the least recently
+          used session.
+        name: SessionValue
+        struct:
+          fields:
+            - doc: ID names the session.
+              name: ID
+              type: SessionID
+            - doc: Seq is the last sequence the session applied, 0 for none yet.
+              name: Seq
+              type: uint64
+            - doc: BodySum is the CRC-32C of that command's entry payload.
+              name: BodySum
+              type: uint32
+            - doc: |-
+                Position is where that command was applied, or where the session was
+                opened while Seq is 0.
+              name: Position
+              type: PositionValue
+            - doc: Last is the index of the session's last committed entry.
+              name: Last
+              type: uint64
       - doc: |-
           HardState is what a node must never forget: its term, its vote in that term
           and the commit index it knows of. Term and vote are durable before any reply
@@ -1722,6 +1919,28 @@ packages:
                 carries with a zero position.
               name: Entries
               type: "[]EntryValue"
+            - doc: |-
+                Trace is the proposer's span context a forward carries beside
+                FlagTrace, the zero value without it.
+              name: Trace
+              type: TraceContextValue
+      - doc: |-
+          TraceContextValue is the span context a forwarded proposal travels with:
+          the W3C trace and parent span identifiers and the proposer's sampling
+          decision, written on the wire after the forward's entry, in that order
+          (ADR 0152 D13, #1115).
+        name: TraceContextValue
+        struct:
+          fields:
+            - doc: TraceID identifies the whole trace.
+              name: TraceID
+              type: "[16]byte"
+            - doc: SpanID is the proposer's span, the parent of the leader's.
+              name: SpanID
+              type: "[8]byte"
+            - doc: Sampled is the proposer's sampling decision.
+              name: Sampled
+              type: bool
       - doc: |-
           PositionValue is an entry's place in the log: the term it was created in and its
           index. The index is a fencing token: unique, strictly increasing over the
@@ -1790,6 +2009,11 @@ packages:
             - doc: NoSpace is the no-space alarm raised at Position, 0 for none.
               name: NoSpace
               type: AlarmID
+            - doc: |-
+                Sessions are the client sessions recorded at Position, ordered by ID.
+                They are encoded from metadata version 4, at cluster version 4.
+              name: Sessions
+              type: "[]SessionValue"
             - doc: Reserved is carried uninterpreted for ADR 0173.
               name: Reserved
               type: "[]byte"
@@ -2272,6 +2496,36 @@ packages:
         name: TruncateAndStaySilent
         type: QuarantineExit
         value: "2"
+      - doc: |-
+          PreallocateZeroFill writes zeros over a new segment's full size, then
+          syncs it. It is the zero value and the default (D4).
+        name: PreallocateZeroFill
+        type: Preallocate
+        value: "0"
+      - doc: |-
+          PreallocateFallocate reserves a new segment's full size with
+          fallocate(2) on Linux, its blocks unwritten extents that read as zeros,
+          then syncs it: no zero is written. A filesystem or a platform without
+          it opens the log in PreallocateZeroFill, with one line logged (#922).
+        name: PreallocateFallocate
+        type: Preallocate
+        value: "1"
+      - doc: |-
+          SyncFdatasync writes a batch's records with pwrite(2), then makes them
+          durable with fdatasync(2): two calls per durability point. It is the
+          zero value and the default (D4, #417).
+        name: SyncFdatasync
+        type: SyncPath
+        value: "0"
+      - doc: |-
+          SyncRWFDsync writes a batch's records with pwritev2(2) flagged
+          RWF_DSYNC on Linux, which returns once they are durable: one call per
+          durability point, the same two points as SyncFdatasync. A kernel or a
+          platform without it opens the log in SyncFdatasync, with one line
+          logged (#923).
+        name: SyncRWFDsync
+        type: SyncPath
+        value: "1"
     doc: |-
       Package consensus is the Raft engine of ADR 0152 and everything it ships
       around the step function of package raft: the event loop that drives it,
@@ -2288,7 +2542,8 @@ packages:
 
       A failed write or sync stops the node with STORAGE_FAILED and is never
       retried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],
-      [Inspect] and [ClearQuarantine] work on a stopped node's directory only.
+      [Inspect], [ClearQuarantine] and [Preflight] work on a stopped node's
+      directory only.
     functions:
       - doc: |-
           Bootstrap founds a cluster on one founding node's log, in phases that are
@@ -2348,6 +2603,25 @@ packages:
         out:
           - type: coreconsensus.TokenValue
           - type: bool
+      - doc: |-
+          NewStream presents node as a replicated corestream.Stream of one partition
+          whose offsets are the log's indexes (#832). Append proposes each record as
+          one entry, in order, the next once the previous is applied here; Read
+          reads what this node applied, on a leader or a follower alike, and skips
+          the entries that are not records; Bounds is the log's first index and the
+          next index after the applied one. The stream implements corestream.Waker
+          from the node's status: a wake follows every apply and leadership change.
+          It keeps no cursor: a consumer's Committer is its own store, never the
+          log. The node stays the caller's to close.
+        in:
+          - name: node
+            type: "*Node"
+          - name: cfg
+            type: StreamConfig
+        name: NewStream
+        out:
+          - type: corestream.Stream
+          - type: error
       - doc: |-
           JoinRefusalReason reads the reason a refused JOIN carried back to the
           joiner: what the member's JoinAuthorizer chose to say, or the engine's
@@ -2462,8 +2736,33 @@ packages:
           - type: ReportValue
           - type: error
       - doc: |-
+          Preflight measures, on a stopped node, the disk the log of dir would trust
+          (D16): it writes opts.Syncs records of opts.RecordBytes, each followed by
+          the log's own fdatasync, into a scratch file it creates, zero-filled at
+          their total size like a segment, in dir's log directory (dir itself when
+          there is none yet, named preflight-*.tmp, which the log's recovery
+          deletes should a crash leave one), then removes it: the directory holds
+          after it what it held before. dir must exist. Where dir holds a LOCK,
+          Preflight takes it as NewDataDir does, so a directory a live node holds
+          is refused DATA_DIR_LOCKED; where the platform has no flock(2) (illumos,
+          Solaris) it takes none and reports Flock false. It refuses nothing on
+          what it measures: the verdicts are returned, and logged at Warn to
+          opts.Logger, for the product to decide (D17). A failed write or sync is
+          STORAGE_FAILED, options out of their bounds CONSENSUS_MISCONFIGURED.
+        in:
+          - name: dir
+            type: string
+          - name: opts
+            type: PreflightOptions
+        name: Preflight
+        out:
+          - type: PreflightValue
+          - type: error
+      - doc: |-
           ClearQuarantine clears a quarantined, or stopped, directory through one of
           the two exits. There is no third exit that keeps the damaged node voting.
+          It gives TruncateAndStaySilent no means to ask a live member, so on a
+          member's directory that exit is refused: ClearQuarantineWith takes them.
         in:
           - name: d
             type: DataDir
@@ -2472,6 +2771,30 @@ packages:
           - name: op
             type: coreconsensus.Operator
         name: ClearQuarantine
+        out:
+          - type: error
+      - doc: |-
+          ClearQuarantineWith is ClearQuarantine with opt's means to read, from a
+          live member, the configuration the cluster runs with. A member's
+          TruncateAndStaySilent asks every other member its log names, takes the
+          newest configuration answered, and is refused, its log and silence
+          condition untouched (only the audit line records the attempt), when no
+          member answers, when that configuration no longer lists this node, or
+          when it lists none of the members the truncation keeps: the node would
+          restart silent, asking and admitting only members that have left, and
+          never vote again (#763). ctx bounds the asking.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: DataDir
+          - name: exit
+            type: QuarantineExit
+          - name: op
+            type: coreconsensus.Operator
+          - name: opt
+            type: "*QuarantineOptions"
+        name: ClearQuarantineWith
         out:
           - type: error
       - doc: ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
@@ -2584,6 +2907,45 @@ packages:
           - type: coreconsensus.SnapshotMetaValue
           - type: error
       - doc: |-
+          VerifyBackup checks a backup offline, writing nothing: each record's sum,
+          the export's snapshot against its metadata (sizes and SHA-256, decoded as
+          OpenSnapshot does, bounded by opt.MaxDecoded), and every entry of the
+          export and of the tails, in order, against the chain from the snapshot's
+          ChainTip. It returns the point the backup restores to. opt.Expected is
+          ignored: the export carries the metadata.
+        in:
+          - name: p
+            type: "*BackupParams"
+          - name: opt
+            type: "*RestoreOptions"
+        name: VerifyBackup
+        out:
+          - type: BackupPointValue
+          - type: error
+      - doc: |-
+          RestoreBackup starts a new history on an empty, joining directory from a
+          backup: the files are checked as VerifyBackup checks them, the chain
+          before anything is written, then the export's snapshot and every entry
+          after it are handed to ImportObserved, which replays them through
+          p.Machine and restores the state they reach, its last entry the point
+          VerifyBackup returns. opt.Expected is ignored: the export carries the
+          metadata.
+        in:
+          - name: d
+            type: DataDir
+          - name: p
+            type: "*BackupParams"
+          - name: newCluster
+            type: coreconsensus.ClusterID
+          - name: members
+            type: "[]coreconsensus.MemberValue"
+          - name: opt
+            type: "*RestoreOptions"
+        name: RestoreBackup
+        out:
+          - type: coreconsensus.SnapshotMetaValue
+          - type: error
+      - doc: |-
           ProposeAs types the Apply result. A result of another dynamic type is
           RESULT_TYPE_MISMATCH carrying the committed token: the entry IS committed.
           A nil result is the zero R.
@@ -2674,6 +3036,7 @@ packages:
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
       coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
       coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
+      corestream: github.com/kitsunium/sdk/internal/core/data/stream
       coretransform: github.com/kitsunium/sdk/internal/core/data/transform
       ed25519: crypto/ed25519
       errs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -2695,7 +3058,9 @@ packages:
         methods:
           - doc: |-
               MemoryBudget is the node's memory budget with two peers, the sum of its
-              bounds (D14).
+              bounds (D14) and of the file log's index: 4 bytes for each record
+              MaxLogBytes holds at most, each at least an empty payload's record
+              (minRecordBytes).
             in:
               - name: peers
                 type: int
@@ -2757,6 +3122,17 @@ packages:
               type: int64
             - name: LogReserveBytes
               type: int64
+            - doc: |-
+                MaxSnapshotStreams bounds the snapshot streams this node sends at
+                once; 0 is 1. A peer in need beyond it waits, its transfer pending,
+                and is served when a stream ends.
+              name: MaxSnapshotStreams
+              type: int
+            - doc: |-
+                SnapshotStreamBytesPerSecond paces the snapshot streams this node
+                sends, all of them together, on Clock; 0 is unlimited.
+              name: SnapshotStreamBytesPerSecond
+              type: int64
             - doc: SnapshotCodec compresses snapshot chunks; nil is flate.
               name: SnapshotCodec
               type: coretransform.BoundedDecompressor
@@ -2794,7 +3170,8 @@ packages:
             - name: Logger
               type: corelogger.Logger
       - doc: |-
-          DataDirOptions tunes NewDataDirWith: the size of a log segment and the
+          DataDirOptions tunes NewDataDirWith: the size of a log segment, how a
+          new one is preallocated, how a batch is made durable, and the
           boot-scoped directory of the second STORAGE_FAILED marker.
         name: DataDirOptions
         struct:
@@ -2802,6 +3179,22 @@ packages:
             - doc: SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
               name: SegmentBytes
               type: int64
+            - doc: |-
+                Preallocate is how a new segment is given its fixed size: zeros
+                written (PreallocateZeroFill, the zero value) or fallocate(2)
+                (PreallocateFallocate). Either way the segment occupies its whole
+                size, as the no-space guard counts it. Another value is refused
+                CONSENSUS_MISCONFIGURED.
+              name: Preallocate
+              type: Preallocate
+            - doc: |-
+                SyncPath is how a batch's records are made durable: pwrite(2) then
+                fdatasync(2) (SyncFdatasync, the zero value) or one pwritev2(2)
+                flagged RWF_DSYNC (SyncRWFDsync). Either way a batch has the same two
+                durability points, its end record written once the rest is durable.
+                Another value is refused CONSENSUS_MISCONFIGURED.
+              name: SyncPath
+              type: SyncPath
             - doc: |-
                 RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
                 marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
@@ -2873,6 +3266,14 @@ packages:
                 answered in this term.
               name: LastContact
               type: time.Duration
+            - doc: |-
+                SnapshotSent is how many bytes of the snapshot streamed to it the
+                transport has read, resumed offset included; 0 with no stream.
+              name: SnapshotSent
+              type: int64
+            - doc: SnapshotSize is the EncodedSize of that snapshot; 0 with no stream.
+              name: SnapshotSize
+              type: int64
       - doc: |-
           PeerFlags are a peer's yes/no facts in a health verdict, one bit each,
           read with Has.
@@ -2922,6 +3323,20 @@ packages:
             - doc: ApplyLagEntries is commit minus applied.
               name: ApplyLagEntries
               type: uint64
+            - doc: |-
+                ReplicationLagEntries is, on a node that does not lead, how far its
+                durable log trails the leader's last index as the leader's last
+                heartbeat carried it; 0 on the leader, and while no heartbeat of a
+                leader of protocol 4 reached it. It is informative: readiness does not
+                refuse on it (R2-28, #919).
+              name: ReplicationLagEntries
+              type: uint64
+            - doc: |-
+                LeaderLastAppend is, on a node that does not lead, how long ago it last
+                took an append with entries from the leader of its term; negative on the
+                leader, and while it took none from this one (#919).
+              name: LeaderLastAppend
+              type: time.Duration
             - doc: Peers is the leader's view of every peer, nil elsewhere.
               name: Peers
               type: "[]PeerHealthValue"
@@ -3214,6 +3629,21 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
+              AskMembership reads, from member m, the configuration it runs with, as
+              the TCP transport does (#763): m is reached when the link is up both
+              ways, authenticated under the key the memory transport gives it, and
+              answers only a node it admits, while a node runs bound to its transport.
+            in:
+              - name: _
+                type: context.Context
+              - name: m
+                type: coreconsensus.MemberValue
+            name: AskMembership
+            out:
+              - type: coreconsensus.MembershipValue
+              - type: error
+            recv: pointer
+          - doc: |-
               Close stops delivery; a later Bind starts it again, as a restarted node
               does.
             name: Close
@@ -3274,10 +3704,23 @@ packages:
             out:
               - type: <-chan coreconsensus.StatusValue
             recv: pointer
-          - doc: Membership returns the configuration the node last appended.
+          - doc: |-
+              Membership returns the configuration the node last appended, as its last
+              turn published it; it never waits for the event loop.
             name: Membership
             out:
               - type: coreconsensus.MembershipValue
+            recv: pointer
+          - doc: |-
+              WatchMembership implements MembershipWatcher. Each call launches one
+              goroutine that closes the returned channel and ends when ctx ends or the
+              node's event loop stops.
+            in:
+              - name: ctx
+                type: context.Context
+            name: WatchMembership
+            out:
+              - type: <-chan coreconsensus.MembershipValue
             recv: pointer
           - doc: |-
               Propose replicates data and returns, once the entry is applied locally,
@@ -3296,8 +3739,46 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
+              OpenSession opens client session s for ProposeSession (ADR 0241). It is
+              refused PAYLOAD_VERSION_REFUSED before the cluster version is 4, and
+              opening an open session again is a no-op, so the call is retried
+              blindly.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: s
+                type: coreconsensus.SessionID
+            name: OpenSession
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              ProposeSession replicates data as command seq of the open session s and
+              returns, once it is applied, its token and the value Apply returned:
+              the state machine applies it at most once, whatever the retries. A
+              retry after OUTCOME_UNKNOWN, with the same arguments, through any node,
+              is answered with the first one's token and, while this node holds it,
+              its value (ADR 0241). SESSION_DIGEST_MISMATCH and SESSION_EXPIRED apply
+              nothing.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: s
+                type: coreconsensus.SessionID
+              - name: seq
+                type: uint64
+              - name: data
+                type: "[]byte"
+            name: ProposeSession
+            out:
+              - type: coreconsensus.TokenValue
+              - type: any
+              - type: error
+            recv: pointer
+          - doc: |-
               Barrier returns once the local state machine reflects every write
               committed before the call (D9).
+              Reads queued in one turn share one round.
             in:
               - name: ctx
                 type: context.Context
@@ -3484,6 +3965,43 @@ packages:
               - type: "[]coreconsensus.EntryValue"
               - type: error
             recv: pointer
+          - doc: |-
+              ExportBackup writes a full backup to w: the snapshot SaveSnapshot cuts
+              now, then the committed entries after it up to the commit at the call,
+              once applied here, then a trailer. It returns the point the file ends at,
+              for AppendBackup. A tail entry that changes the engine's own state (a
+              cluster version, a timing contract, the no-space alarm) is refused, as
+              ImportObserved would refuse it: export again once it is in a snapshot.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: op
+                type: coreconsensus.Operator
+              - name: w
+                type: io.Writer
+            name: ExportBackup
+            out:
+              - type: BackupPointValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              AppendBackup writes to w the committed entries after since, the point a
+              previous ExportBackup or AppendBackup returned, up to the commit at the
+              call, once applied here, then a trailer, and returns the point it ends
+              at. since below the first entry the log keeps is COMPACTED: export again.
+              An entry that does not continue since's chain is RESTORE_REFUSED.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: since
+                type: BackupPointValue
+              - name: w
+                type: io.Writer
+            name: AppendBackup
+            out:
+              - type: BackupPointValue
+              - type: error
+            recv: pointer
         name: Node
         struct:
           unexported: true
@@ -3524,8 +4042,103 @@ packages:
               type: string
             - name: Markers
               type: "[]string"
+      - doc: |-
+          PreflightOptions tunes Preflight: how much it writes, the timing contract
+          it judges the measurement against, and where its time and its verdicts
+          go.
+        name: PreflightOptions
+        struct:
+          fields:
+            - doc: |-
+                Syncs is the number of records written, each synced; 0 is 256. It is
+                refused negative or above 65536.
+              name: Syncs
+              type: int
+            - doc: |-
+                RecordBytes is the size of one record; 0 is 4096. It is refused
+                negative, and Syncs records of it above DefaultSegmentBytes.
+              name: RecordBytes
+              type: int
+            - doc: |-
+                Timing is the contract judged against the measurement; the zero value
+                judges nothing (ADR 0031).
+              name: Timing
+              type: coreconsensus.TimingContractSpec
+            - doc: |-
+                LogReserveBytes is the reserve the free space is judged against; 0 is
+                Config's default, 256 MiB.
+              name: LogReserveBytes
+              type: int64
+            - doc: Clock times each sync; nil is clock.System.
+              name: Clock
+              type: clock.Timed
+            - doc: Logger receives each verdict at Warn; nil logs nothing.
+              name: Logger
+              type: corelogger.Logger
+      - doc: |-
+          PreflightValue is what Preflight measured: the latency of one fdatasync of
+          a record, at the median, the 99th percentile (nearest rank) and its
+          highest, the free bytes of the filesystem, what the platform offers, and
+          a verdict per rule the measurement or the platform breaks. A sync faster
+          than the clock's resolution reads 0: on Windows, whose clock advances in
+          steps, a fast disk's median may be 0 while its tail is not. The verdicts
+          read the 99th percentile and the free bytes, never the median.
+        name: PreflightValue
+        struct:
+          fields:
+            - name: FsyncP50
+            - name: FsyncP99
+            - name: FsyncMax
+              type: time.Duration
+            - doc: FreeBytes is what an unprivileged writer may still use there, -1 when unknown.
+              name: FreeBytes
+              type: int64
+            - doc: Flock is false where the platform has no flock(2), and NewDataDir refuses (ADR 0144).
+              name: Flock
+              type: bool
+            - doc: |-
+                UserTimeout is false where the transport sets no kernel bound on
+                unacknowledged bytes (the BSDs, illumos, Solaris): a dead stream is
+                closed by the read-silence bound alone (#1116).
+              name: UserTimeout
+              type: bool
+            - doc: Verdicts lists each rule broken, empty when none is.
+              name: Verdicts
+              type: "[]PreflightVerdictValue"
+      - doc: |-
+          PreflightVerdictValue is one rule Preflight found broken: the field it judges,
+          spelled as Config spells it, and the rule.
+        name: PreflightVerdictValue
+        struct:
+          fields:
+            - name: Field
+            - name: Rule
+              type: string
       - doc: QuarantineExit is one of the two exits ClearQuarantine allows (R3-09).
         name: QuarantineExit
+        underlying: uint8
+      - doc: |-
+          QuarantineOptions are what a member's TruncateAndStaySilent needs beyond
+          ClearQuarantine's arguments: the means to read the configuration the
+          cluster runs with from a live member (#763).
+        name: QuarantineOptions
+        struct:
+          fields:
+            - doc: |-
+                Ask reads, from member m, the configuration it runs with, and fails
+                when m does not answer. It reaches m at the address, and authenticates
+                it under the key, that the node's own log names for it: a
+                TCPTransport's AskMembership, built with this node's own certificate,
+                or a MemoryTransport's in tests.
+              name: Ask
+              type: func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+      - doc: |-
+          Preallocate is how the file log gives a new segment its fixed size
+          before it holds a record (D4, #922).
+        name: Preallocate
+        underlying: uint8
+      - doc: SyncPath is how the file log makes a batch's records durable (D4, #923).
+        name: SyncPath
         underlying: uint8
       - doc: |-
           RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
@@ -3548,6 +4161,25 @@ packages:
             - doc: "WitnessKeys verify the receipts: one per witness, each must sign."
               name: WitnessKeys
               type: "[]ed25519.PublicKey"
+      - doc: |-
+          StreamConfig configures NewStream: the record bound and the clock that
+          stamps every batch.
+        name: StreamConfig
+        struct:
+          fields:
+            - doc: |-
+                Clock stamps each batch's AppendedAt on the node that appends it; the
+                instant travels IN the entry, so every node reads the same one. Nil is
+                clock.System.
+              name: Clock
+              type: clock.Clock
+            - doc: |-
+                MaxRecordBytes bounds one record, its key and payload together. Zero is
+                the smaller of corestream.DefaultMaxRecordBytes and what the node's
+                MaxEntryBytes leaves after the record's frame; negative, or above that
+                room, is STREAM_MISCONFIGURED.
+              name: MaxRecordBytes
+              type: int
       - doc: |-
           RestoreOptions are RestoreSnapshot's preconditions (R3-15). Expected and
           both bounds are required; the stream is refused when its size or digest
@@ -3589,6 +4221,38 @@ packages:
               name: Tail
               type: "[]coreconsensus.EntryValue"
             - doc: Machine is a fresh state machine; the snapshot is restored into it and the tail applied.
+              name: Machine
+              type: coreconsensus.StateMachine
+      - doc: |-
+          BackupPointValue is where a backup file ends, and where the next one starts:
+          the position of the last entry it holds, or of the snapshot when it holds
+          none, and the chain value at that position. AppendBackup takes it to
+          write the tail after it.
+        name: BackupPointValue
+        struct:
+          fields:
+            - doc: Position is the last entry the backup holds.
+              name: Position
+              type: coreconsensus.PositionValue
+            - doc: ChainTip is the ChainSum at Position, which the next entry continues.
+              name: ChainTip
+              type: uint32
+      - doc: |-
+          BackupParams are the files RestoreBackup restores and VerifyBackup
+          checks: the export, read twice (its metadata follows its snapshot), the
+          tail files appended after it, in the order they were written, and the
+          state machine the restore replays through. Export is required; Machine is
+          required by RestoreBackup alone.
+        name: BackupParams
+        struct:
+          fields:
+            - doc: Export is the file ExportBackup wrote.
+              name: Export
+              type: io.ReadSeeker
+            - doc: Tails are the files AppendBackup wrote after it, in order.
+              name: Tails
+              type: "[]io.Reader"
+            - doc: "Machine is a fresh state machine; RestoreBackup restores into it."
               name: Machine
               type: coreconsensus.StateMachine
       - doc: |-
@@ -3681,6 +4345,14 @@ packages:
               type: time.Duration
             - name: JoinTimeout
               type: time.Duration
+            - doc: |-
+                Clock reads every age the transport keeps — a link's against
+                MaxConnectionAge, the redial backoff, the peer certificate's end — and
+                drives the accept backoff; nil is clock.System. A connection deadline
+                is a wall time the kernel needs, so it is the wall clock's reading plus
+                the duration this clock left.
+              name: Clock
+              type: clock.Timed
       - doc: |-
           TCPTransport is the shipped transport: TLS 1.3 with mutual
           authentication, a pinned SPKI per member, three connections per peer and
@@ -3712,15 +4384,37 @@ packages:
                 type: "[]byte"
             name: Send
             recv: pointer
-          - doc: Unreachable implements UnreachableReporter.
+          - doc: |-
+              SendShared implements BatchSender: the frame is queued as Send queues
+              one, counted at the length of header and body, and written as header
+              then body under the batch's one deadline and flush. body is never
+              written to, so the frames of several peers share it.
+            in:
+              - name: to
+                type: coreconsensus.NodeID
+              - name: header
+              - name: body
+                type: "[]byte"
+            name: SendShared
+            recv: pointer
+          - doc: |-
+              Unreachable implements UnreachableReporter: f hears every unreachable
+              peer, beside the callback each Node binds under its group.
             in:
               - name: f
                 type: func(coreconsensus.NodeID)
             name: Unreachable
             recv: pointer
-          - doc: Bind implements Transport.
+          - doc: |-
+              Bind implements Transport, keyed by group: the transport serves every
+              group bound to it on one listener. A frame goes to the group its header
+              names, a snapshot offer to the group its lane names, and one of a group
+              nothing bound is dropped and counted. A lane that names no group, the
+              JOIN's and group 1's snapshot lane, is served to the only group bound,
+              or with several to group 1 (ADR 0244). A second Bind of a group
+              replaces its callbacks.
             in:
-              - name: _
+              - name: group
                 type: coreconsensus.GroupID
               - name: deliver
                 type: func(coreconsensus.AuthenticatedPeerValue, []byte)
@@ -3750,7 +4444,9 @@ packages:
             out:
               - type: error
             recv: pointer
-          - doc: Stream implements Transport.
+          - doc: |-
+              Stream implements Transport, on the snapshot lane that names no group,
+              which the receiver serves to its only group or to group 1 (ADR 0244).
             in:
               - name: ctx
                 type: context.Context
@@ -3778,10 +4474,29 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
-              BindJoinReason implements JoinReasonBinder: the JOIN callback that also
-              says why it refused.
+              AskMembership reads, from member m, the configuration it runs with
+              (#763): the connection is dialled to m's address, the handshake must
+              present m's pinned key on a certificate of this cluster naming m's slot,
+              and the answer must list m under that key. m answers only a node its
+              membership admits, under the certificate this transport presents: built
+              with a member's own, it is what that member's TruncateAndStaySilent asks
+              through (QuarantineOptions.Ask). A member that predates the lane ends the
+              connection unanswered.
             in:
-              - name: _
+              - name: ctx
+                type: context.Context
+              - name: m
+                type: coreconsensus.MemberValue
+            name: AskMembership
+            out:
+              - type: coreconsensus.MembershipValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              BindJoinReason implements JoinReasonBinder: the JOIN callback that also
+              says why it refused, keyed by group as Bind is.
+            in:
+              - name: group
                 type: coreconsensus.GroupID
               - name: join
                 type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
@@ -3814,6 +4529,465 @@ packages:
         name: TCPTransport
         struct:
           unexported: true
+  - constants:
+      - doc: DefaultPositionTable is the table SQLConfig.Table names when it is empty.
+        name: DefaultPositionTable
+        type: string
+        value: "\"kit_consensus_applied\""
+    doc: |-
+      Package machine holds state machines for the consensus engine (ADR 0152
+      D3): the glue every product wrote by hand around a database, and the
+      reference key-value machine the linearizability checker models.
+
+      [SQL] is a [coreconsensus.DurableStateMachine] and a
+      [coreconsensus.BatchingStateMachine] over a [coresql.Transactor]. A
+      batch of committed commands is applied in ONE transaction: the caller's
+      [SQLConfig].Apply runs each command on the transaction's executor, and
+      the machine writes the log identity and the position of the last one
+      into its position row in that same transaction before it commits. A
+      crash between the batch and the position, or during the commit, loses
+      both or neither, so the engine resumes after exactly the entries the
+      database holds: none applied twice, none skipped. A batch that cannot
+      complete — the database's failure or Apply's — panics, and the node
+      stops with STATE_MACHINE_FAILED: the entries are committed, and the
+      restart applies them again from the position the database kept.
+
+      A snapshot is read in a read-only transaction the machine opens on the
+      apply goroutine (REPEATABLE READ, SERIALIZABLE on SQLite) and holds
+      until Release, so [SQLConfig].Dump streams the state of the batch last
+      committed while the next batches commit. A restore runs
+      [SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in
+      one transaction.
+
+      	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
+      		Transactor: tm, Dialect: sql.DialectPostgres,
+      		Apply:    applyCommand, // func(ctx, ex, entry) (result, error)
+      		Dump:     dumpTables, Truncate: truncateTables, Load: loadTables,
+      	})
+      	node, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})
+
+      [KV] is the reference machine: get, put and compare-and-swap on a
+      per-key revision that only grows, so a value written back to an earlier
+      one never passes a swap the caller read before (D6's ABA defence). Its
+      commands are built with [KVGet], [KVPut] and [KVCompareAndSwap], and
+      each answers a [KVResult]. It keeps its state in memory: a volatile
+      machine, rebuilt from the latest snapshot and the log at every start.
+    functions:
+      - doc: |-
+          NewSQL builds an SQL machine: it creates the position table when it is
+          absent, with a zero position row, and reads the position the database
+          holds. A configuration it cannot run is CONSENSUS_MISCONFIGURED; a
+          database that fails is STATE_MACHINE_FAILED.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: SQLConfig
+        name: NewSQL
+        out:
+          - type: "*SQL"
+          - type: error
+      - doc: NewKV returns an empty KV.
+        name: NewKV
+        out:
+          - type: "*KV"
+      - doc: KVGet returns the command that reads key through the log.
+        in:
+          - name: key
+            type: string
+        name: KVGet
+        out:
+          - type: "[]byte"
+      - doc: KVPut returns the command that stores value under key.
+        in:
+          - name: key
+            type: string
+          - name: value
+            type: "[]byte"
+        name: KVPut
+        out:
+          - type: "[]byte"
+      - doc: |-
+          KVCompareAndSwap returns the command that stores value under key only
+          while the key's revision is revision; revision 0 asks that the key be
+          absent.
+        in:
+          - name: key
+            type: string
+          - name: value
+            type: "[]byte"
+          - name: revision
+            type: uint64
+        name: KVCompareAndSwap
+        out:
+          - type: "[]byte"
+    imports:
+      context: context
+      coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+      coresql: github.com/kitsunium/sdk/internal/core/data/sql
+      io: io
+    path: github.com/kitsunium/sdk/internal/service/app/consensus/machine
+    types:
+      - doc: |-
+          SQLConfig builds an SQL machine. Every field but Table is required: the
+          machine runs the caller's statements and owns the position table alone.
+        name: SQLConfig
+        struct:
+          fields:
+            - doc: Transactor runs the machine's transactions.
+              name: Transactor
+              type: coresql.Transactor
+            - doc: Dialect spells the position table's statements.
+              name: Dialect
+              type: coresql.Dialect
+            - doc: |-
+                Table names the position table, a bare lower-case identifier of at
+                most 63 bytes; empty is DefaultPositionTable.
+              name: Table
+              type: string
+            - doc: |-
+                Apply applies one committed command on ex, the batch's transaction,
+                and returns its result. A refusal is a result; an error means the
+                command cannot complete, and stops the node.
+              name: Apply
+              type: func(ctx context.Context, ex coresql.Executor, e coreconsensus.EntryValue) (any, error)
+            - doc: |-
+                Dump writes the machine's state, read on ex, the snapshot's read-only
+                transaction.
+              name: Dump
+              type: func(ctx context.Context, ex coresql.Executor, w io.Writer) error
+            - doc: Truncate removes the machine's state on ex, before a Load.
+              name: Truncate
+              type: func(ctx context.Context, ex coresql.Executor) error
+            - doc: Load writes on ex the state Dump wrote into r.
+              name: Load
+              type: func(ctx context.Context, ex coresql.Executor, r io.Reader) error
+      - doc: |-
+          SQL is a durable, batching state machine over a database: the state is
+          the caller's tables, the applied position one row of its own, written
+          in the transaction of the batch it ends.
+        methods:
+          - doc: "Apply applies one committed command: ApplyBatch of one entry."
+            in:
+              - name: e
+                type: coreconsensus.EntryValue
+            name: Apply
+            out:
+              - type: any
+            recv: pointer
+          - doc: |-
+              ApplyBatch applies es in one transaction, writes the position of the
+              last one in that same transaction, commits, then fills results. It
+              panics when the batch cannot complete (D3).
+            in:
+              - name: es
+                type: "[]coreconsensus.EntryValue"
+              - name: results
+                type: "[]any"
+            name: ApplyBatch
+            recv: pointer
+          - doc: |-
+              AppliedPosition returns the log identity and the position the database
+              holds applied.
+            name: AppliedPosition
+            out:
+              - type: coreconsensus.LogIdentityValue
+              - type: coreconsensus.PositionValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              Snapshot opens the read-only transaction the view is read from and
+              reads the position in it, so that the database pins its view now.
+              It starts one goroutine, which holds that transaction and serves
+              WriteTo in it: the goroutine ends at Release, or at once when the
+              transaction does not open, and Snapshot waits for it then.
+            name: Snapshot
+            out:
+              - type: coreconsensus.Snapshot
+              - type: error
+            recv: pointer
+          - doc: |-
+              Restore replaces the state with a snapshot's: Truncate, Load and the
+              snapshot's position, in one transaction. A snapshot no SQL machine
+              wrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.
+            in:
+              - name: r
+                type: io.Reader
+              - name: meta
+                type: coreconsensus.SnapshotMetaValue
+            name: Restore
+            out:
+              - type: error
+            recv: pointer
+        name: SQL
+        struct:
+          unexported: true
+      - doc: |-
+          KVResult is what a KV command answers: the key's value and revision
+          after the command, whether the key exists, and whether a put or a swap
+          took effect. Value is the machine's own: the caller does not write to it.
+        name: KVResult
+        struct:
+          fields:
+            - name: Value
+              type: "[]byte"
+            - name: Revision
+              type: uint64
+            - name: Found
+              type: bool
+            - name: Applied
+              type: bool
+      - doc: |-
+          KV is the reference key-value state machine: get, put and
+          compare-and-swap on a per-key revision. A command it does not read is
+          answered a VERSION_UNSUPPORTED error, not applied.
+        methods:
+          - doc: |-
+              Apply applies one command and returns its KVResult, or a refusal of a
+              command this machine does not read.
+            in:
+              - name: e
+                type: coreconsensus.EntryValue
+            name: Apply
+            out:
+              - type: any
+            recv: pointer
+          - doc: |-
+              Get reads key from this node's state: no read through the log, so not
+              linearizable.
+            in:
+              - name: key
+                type: string
+            name: Get
+            out:
+              - name: value
+                type: "[]byte"
+              - name: revision
+                type: uint64
+              - name: found
+                type: bool
+            recv: pointer
+          - doc: "Snapshot copies the map: the entries' bytes are shared, never copied."
+            name: Snapshot
+            out:
+              - type: coreconsensus.Snapshot
+              - type: error
+            recv: pointer
+          - doc: |-
+              Restore replaces the state with a snapshot's. A snapshot no KV wrote
+              is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.
+            in:
+              - name: r
+                type: io.Reader
+              - name: _
+                type: coreconsensus.SnapshotMetaValue
+            name: Restore
+            out:
+              - type: error
+            recv: pointer
+        name: KV
+        struct:
+          unexported: true
+  - constants:
+      - blockDoc: The defaults a zero bound of Config clamps to.
+        doc: |-
+          DefaultMaxCommands is the commands one entry carries when
+          Config.MaxCommands is zero.
+        name: DefaultMaxCommands
+        type: int
+        value: "4096"
+      - blockDoc: The defaults a zero bound of Config clamps to.
+        doc: |-
+          DefaultMaxBytes is the largest packed body when Config.MaxBytes is zero:
+          the engine's default MaxEntryBytes.
+        name: DefaultMaxBytes
+        type: int
+        value: 1 << 20
+      - blockDoc: The defaults a zero bound of Config clamps to.
+        doc: |-
+          DefaultMaxInFlight is the packed entries in flight at once when
+          Config.MaxInFlight is zero: one, so every command proposed while an
+          entry is in flight waits for it and leaves in the next.
+        name: DefaultMaxInFlight
+        type: int
+        value: "1"
+    doc: |-
+      Package multi packs many small commands into one consensus entry and splits
+      their results, on top of the Replicated port and with no change to the
+      engine (ADR 0152 D6, D19, #926). A [Packer] packs the commands its callers
+      propose at one moment into one length-prefixed body and issues ONE
+      Propose; a [Machine] on every node splits that body and applies the
+      commands in order through its inner BatchingStateMachine, as one batch,
+      and the Packer answers each caller with the entry's token, the command's
+      index in it and its own result.
+
+      An entry carries a header, a slot, a checksum and an apply result
+      whatever its size: for commands of a few dozen bytes, the entry count,
+      not the bytes, bounds a leader's turn and a follower's parse.
+    functions:
+      - doc: NewPacker starts a Packer proposing through r, bounded by cfg.
+        in:
+          - name: r
+            type: coreconsensus.Replicated
+          - name: cfg
+            type: Config
+        name: NewPacker
+        out:
+          - type: "*Packer"
+      - doc: |-
+          NewMachine returns the Machine that applies, through inner, the
+          commands a Packer packed.
+        in:
+          - name: inner
+            type: coreconsensus.BatchingStateMachine
+        name: NewMachine
+        out:
+          - type: "*Machine"
+    imports:
+      coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+    path: github.com/kitsunium/sdk/internal/service/app/consensus/multi
+    types:
+      - doc: |-
+          Config bounds what a Packer packs into one entry. A zero bound takes its
+          default.
+        name: Config
+        struct:
+          fields:
+            - doc: MaxCommands is the most commands one entry carries.
+              name: MaxCommands
+              type: int
+            - doc: |-
+                MaxBytes is the largest packed body; it must not exceed the node's
+                MaxEntryBytes, or a full entry is refused ENTRY_TOO_LARGE.
+              name: MaxBytes
+              type: int
+            - doc: |-
+                MaxInFlight is the most packed entries proposed and not yet answered;
+                the commands proposed while every one is in flight leave together in
+                the next.
+              name: MaxInFlight
+              type: int
+      - doc: |-
+          Machine is the state machine of a node whose commands a Packer packs:
+          it splits each entry's body into its commands and applies them in order, as
+          one batch, through Inner. The result of an entry is a []any holding one
+          result per command, in the order the Packer packed them, which the Packer
+          hands back to each caller; a body that does not parse is answered
+          FRAME_INVALID, the same on every node, and Inner sees none of it.
+
+          Every command proposed to a node running a Machine must come through a
+          Packer: a body proposed whole does not parse. A sub-entry is a copy of its
+          entry whose Data is the command and whose BodySum is the command's own
+          CRC-32C; ChainSum is zero. Inner may keep a sub-entry's Data: it is a slice
+          of the entry's payload, capped at the command's end. Apply and ApplyBatch
+          run on the apply goroutine, one call at a time, as the engine calls them; a
+          Machine is not shared between nodes. It forwards no sibling port of
+          Inner's: a node running it keeps its state in memory.
+        methods:
+          - doc: |-
+              Apply splits e's body and applies its commands through Inner in one
+              batch; the result is their results, in order, or FRAME_INVALID.
+            in:
+              - name: e
+                type: coreconsensus.EntryValue
+            name: Apply
+            out:
+              - type: any
+            recv: pointer
+          - doc: |-
+              ApplyBatch splits every entry of es and applies all their commands through
+              ONE call of Inner.ApplyBatch, then writes into results each entry's
+              sub-results, a []any of one result per command, or FRAME_INVALID.
+            in:
+              - name: es
+                type: "[]coreconsensus.EntryValue"
+              - name: results
+                type: "[]any"
+            name: ApplyBatch
+            recv: pointer
+          - doc: Snapshot captures Inner's state.
+            name: Snapshot
+            out:
+              - type: coreconsensus.Snapshot
+              - type: error
+            recv: pointer
+          - doc: Restore replaces Inner's state with a snapshot's.
+            in:
+              - name: r
+                type: io.Reader
+              - name: meta
+                type: coreconsensus.SnapshotMetaValue
+            name: Restore
+            out:
+              - type: error
+            recv: pointer
+        name: Machine
+        struct:
+          fields:
+            - doc: Inner applies the commands.
+              name: Inner
+              type: coreconsensus.BatchingStateMachine
+          unexported: true
+      - doc: |-
+          Packer packs the commands its callers propose at one moment into one entry
+          and proposes it with ONE Propose, then answers each caller with its own
+          result. There is no linger timer (ADR 0152 D6): a command proposed while
+          fewer than MaxInFlight entries are in flight leaves at once, and those
+          proposed while every one is in flight leave together in the next. The
+          node's state machine must be a Machine. A Packer is safe for
+          concurrent use; Close stops it.
+        methods:
+          - doc: |-
+              Propose packs cmd with the commands proposed beside it and returns once
+              their entry is applied locally, with the entry's token, the command's index
+              in it and its own result. A command whose packed body would exceed MaxBytes
+              alone is ENTRY_TOO_LARGE. A ctx that ends before the command is packed
+              answers ctx.Err(), the command never proposed; once it is packed, the
+              answer is OUTCOME_UNKNOWN, as Propose's. The errors of the entry's Propose
+              reach every caller packed in it; a result that is not one per command is
+              RESULT_TYPE_MISMATCH, the entry committed and its token returned. A Packer
+              closed answers NODE_STOPPED. The caller may reuse cmd once Propose returns.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: cmd
+                type: "[]byte"
+            name: Propose
+            out:
+              - type: ResultValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              Close stops the Packer: a command still queued is answered NODE_STOPPED,
+              the entries in flight are waited for within ctx. When ctx ends first, their
+              Proposes are cancelled, their callers answered OUTCOME_UNKNOWN, and
+              Close returns OUTCOME_UNKNOWN. A second Close waits for the first.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Packer
+        struct:
+          unexported: true
+      - doc: |-
+          ResultValue is what a Packer answers one caller: the token of the entry its
+          command was packed into, the command's index in that entry, and the result
+          Inner returned for it.
+        name: ResultValue
+        struct:
+          fields:
+            - doc: Token is the packed entry's token, shared by every command in it.
+              name: Token
+              type: coreconsensus.TokenValue
+            - doc: Sub is the command's index in the entry, in packing order.
+              name: Sub
+              type: int
+            - doc: Value is the result Inner's ApplyBatch wrote for the command.
+              name: Value
+              type: any
   - constants:
       - blockDoc: The facts a PeerStatValue carries.
         doc: StatVoter is set for a voter, clear for a learner.
@@ -3894,10 +5068,15 @@ packages:
           Version 2 adds the snapshot metadata's checksum, the admin payload's
           Origin and the log identity's AdoptedFrom, each written only once the
           committed cluster version is 2 (lot S3). Version 3 adds the retired keys
-          of the configuration, written only once it is 3 (#648).
+          of the configuration, written only once it is 3 (#648). Version 4 adds
+          the leader's last index to every heartbeat, which a follower reads
+          beside FlagProtocol4 at any cluster version (#919), the trace context of
+          a forward (#1115), and the client sessions, their entry kind and the
+          metadata that records them (#918), those two written only once the
+          committed cluster version is 4.
         name: ProtocolMax
         type: uint32
-        value: "3"
+        value: "4"
       - doc: |-
           Protocol2 is the protocol version whose formats a node writes once the
           cluster version is raised to it.
@@ -3911,6 +5090,23 @@ packages:
         name: Protocol3
         type: uint32
         value: "3"
+      - doc: |-
+          Protocol4 is the protocol version whose heartbeats carry the leader's
+          last index, announced by FlagProtocol4 (#919), and from which a forward
+          carries its trace context (#1115), a session command is appended and a
+          snapshot records the client sessions (#918).
+        name: Protocol4
+        type: uint32
+        value: "4"
+      - doc: |-
+          MaxSessions is how many client sessions the cluster keeps: opening one
+          more evicts the one whose last entry is the oldest. It is part of
+          protocol version 4, the same on every node, since the eviction is
+          replicated state; it bounds the table each node holds and the metadata
+          a snapshot carries (ADR 0241).
+        name: MaxSessions
+        type: int
+        value: "1024"
     doc: |-
       Package raft is the consensus engine's step function (ADR 0152 D15): a
       value with no goroutine, no I/O and no clock. Every decision of the
@@ -3939,6 +5135,15 @@ packages:
         name: NewRaft
         out:
           - type: "*Raft"
+      - doc: |-
+          NewSessionTable returns the session table a snapshot recorded, vs, empty
+          for none.
+        in:
+          - name: vs
+            type: "[]core.SessionValue"
+        name: NewSessionTable
+        out:
+          - type: "*SessionTable"
     imports:
       core: github.com/kitsunium/sdk/internal/core/app/consensus
       errs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -3948,7 +5153,8 @@ packages:
           PeerStatValue is the leader's view of one peer, for Health (D13). Flags
           say whether it votes, answered in this term, is probed, is being sent a
           snapshot or last announced protocol 3; LastHeard is meaningful only once
-          StatHeard is set.
+          StatHeard is set. RTT is the round trip of the heartbeat round RTTRound
+          names, 0 before the peer answered one.
         name: PeerStatValue
         struct:
           fields:
@@ -3964,6 +5170,16 @@ packages:
               type: int
             - name: LastHeard
               type: time.Time
+            - doc: |-
+                RTT is the time from the heartbeat round RTTRound names to the peer's
+                first answer to it (D13, consensus_peer_rtt_seconds).
+              name: RTT
+              type: time.Duration
+            - doc: |-
+                RTTRound is the heartbeat round RTT was measured on, 0 for none: the
+                driver records a sample once per round.
+              name: RTTRound
+              type: uint64
       - doc: |-
           PeerStatFlags are a peer's yes/no facts in the leader's view, one bit
           each, read with Has.
@@ -4287,6 +5503,28 @@ packages:
                 consensus_chain_refusals_total.
               name: ChainRefusedBy
               type: "[]core.NodeID"
+            - doc: |-
+                Diverged names an append of a leader that committed past an index
+                this node holds, committed or its founding entry 1, and carried
+                another entry there than this node's (#698): no majority holds this
+                node's entry, and the driver stops it.
+              name: Diverged
+              type: DivergenceValue
+      - doc: |-
+          DivergenceValue is an entry of this node's log, committed or its founding
+          entry 1, that the append of a leader which committed past it
+          contradicted; Index is 0 when there is none.
+        name: DivergenceValue
+        struct:
+          fields:
+            - doc: |-
+                Index is the index, committed or 1, at or below which the leader's
+                log differs from this node's.
+              name: Index
+              type: uint64
+            - doc: Leader is the leader whose append carried it.
+              name: Leader
+              type: core.NodeID
       - doc: |-
           UnsupportedEntryValue is an entry a leader sent that this version cannot
           apply; Index is 0 when there is none.
@@ -4355,6 +5593,23 @@ packages:
             name: Propose
             out:
               - type: "[]core.PositionValue"
+              - type: errs.Code
+            recv: pointer
+          - doc: |-
+              ProposeSession appends one session command at the leader, unless the
+              session already holds its sequence: a copy of the same payload is
+              answered with the position of the one appended or committed, and
+              nothing is appended; another payload is SESSION_DIGEST_MISMATCH, an
+              older sequence or a session not open SESSION_EXPIRED. It is refused
+              PAYLOAD_VERSION_REFUSED below cluster version 4 (#918).
+            in:
+              - name: now
+                type: time.Time
+              - name: e
+                type: core.EntryValue
+            name: ProposeSession
+            out:
+              - type: core.PositionValue
               - type: errs.Code
             recv: pointer
           - doc: |-
@@ -4572,6 +5827,13 @@ packages:
               - name: ok
                 type: bool
             recv: pointer
+          - doc: |-
+              ReadRounds counts the heartbeat rounds opened to confirm reads since the
+              node started: every read pending when a round opens shares it (D9).
+            name: ReadRounds
+            out:
+              - type: uint64
+            recv: pointer
           - doc: LeaseValid reports whether the leader's lease holds at now (D9).
             in:
               - name: now
@@ -4653,7 +5915,9 @@ packages:
             recv: pointer
           - doc: |-
               Step handles one message. The driver has already checked that m.From is
-              the peer the transport authenticated (R7-05).
+              the peer the transport authenticated (R7-05). The entries' Data are the
+              caller's gift: Step keeps them without a copy, so the caller hands bytes
+              it never writes again, a frame it parsed into a buffer of its own.
             in:
               - name: now
                 type: time.Time
@@ -4662,6 +5926,35 @@ packages:
             name: Step
             recv: pointer
         name: Raft
+        struct:
+          unexported: true
+      - doc: |-
+          SessionTable is the replicated record of the client sessions (ADR 0241): a
+          pure fold of the committed session commands in log order, the same on
+          every node, which the step function reads to answer a retry before it
+          appends and the driver to apply a command at most once. It is not safe
+          for concurrent use.
+        methods:
+          - doc: |-
+              Apply folds the committed session command e and says what it is:
+              its own position and no code for a command to apply or a session
+              opened, the recorded position for a copy of the command applied
+              there, SESSION_DIGEST_MISMATCH or SESSION_EXPIRED for one never
+              applied, VERSION_UNSUPPORTED for a payload that does not parse.
+            in:
+              - name: e
+                type: "*core.EntryValue"
+            name: Apply
+            out:
+              - type: core.PositionValue
+              - type: errs.Code
+            recv: pointer
+          - doc: Values returns the sessions recorded, ordered by ID, for a snapshot.
+            name: Values
+            out:
+              - type: "[]core.SessionValue"
+            recv: pointer
+        name: SessionTable
         struct:
           unexported: true
       - doc: |-
@@ -4701,6 +5994,25 @@ packages:
                 campaign for this term, 0 for a term it won by an election.
               name: HandedBy
               type: core.NodeID
+            - doc: |-
+                PreVotesLost is how many PreVote refusals this node's campaigns were
+                answered since it started, one per voter and campaign: a node whose
+                count climbs while the cluster has a leader keeps asking for an
+                election it cannot win (D13, consensus_prevotes_lost_total).
+              name: PreVotesLost
+              type: uint64
+            - doc: |-
+                LeaderLast is, on a node that does not lead, the leader's last index as
+                its last heartbeat of this term carried it (FlagProtocol4), 0 while
+                none did: a leader of protocol 3 or below sends none (#919).
+              name: LeaderLast
+              type: uint64
+            - doc: |-
+                Appended is, on a node that does not lead, the instant of the last
+                append with entries it took from the leader of this term, zero while
+                it took none (#919).
+              name: Appended
+              type: time.Time
       - doc: |-
           EngineValue is the engine's own replicated state: the timing contract, the
           cluster version and its generation, and the no-space alarm.
@@ -4759,6 +6071,12 @@ packages:
         name: ChangeSnapshotLimit
         type: uint8
         value: "8"
+      - doc: |-
+          MessageHeaderLen is the length AppendHeader writes: the frame header and
+          a message's fixed fields, up to and including its entry count.
+        name: MessageHeaderLen
+        type: int
+        value: "112"
       - doc: |-
           AdminVersion2 is the payload version of an engine entry whose admin
           carries Origin. A leader writes it once the committed cluster version is
@@ -4830,6 +6148,37 @@ packages:
           - type: AdminValue
           - type: error
       - doc: |-
+          AppendSession appends the payload of an EntrySessionCommand: the session,
+          the sequence, then the command (#918).
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: s
+            type: coreconsensus.SessionID
+          - name: seq
+            type: uint64
+          - name: data
+            type: "[]byte"
+        name: AppendSession
+        out:
+          - type: "[]byte"
+      - doc: |-
+          ParseSession decodes the payload of an EntrySessionCommand. The command
+          aliases b. A payload shorter than its header is FRAME_INVALID.
+        in:
+          - name: b
+            type: "[]byte"
+        name: ParseSession
+        out:
+          - name: id
+            type: coreconsensus.SessionID
+          - name: seq
+            type: uint64
+          - name: cmd
+            type: "[]byte"
+          - name: err
+            type: error
+      - doc: |-
           BodySum returns the CRC-32C of an entry's payload, the checksum a proposer
           computes.
         in:
@@ -4867,6 +6216,34 @@ packages:
           - name: m
             type: "*coreconsensus.MessageValue"
         name: AppendMessage
+        out:
+          - type: "[]byte"
+      - doc: |-
+          AppendHeader appends to dst the part of m's frame before its entries:
+          the frame header, whose length counts bodyLen bytes of entries after it,
+          and m's fixed fields with the count of m.Entries, whose contents it does
+          not read. Followed by AppendEntries of m.Entries, whose length is
+          bodyLen, it writes AppendMessage's bytes: the body of an append is the
+          same for every peer, only this header differs (#912).
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: m
+            type: "*coreconsensus.MessageValue"
+          - name: bodyLen
+            type: int
+        name: AppendHeader
+        out:
+          - type: "[]byte"
+      - doc: |-
+          AppendEntries appends to dst the entries body of an append message: each
+          entry's fixed header, then its payload, EntryLen bytes each.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: ents
+            type: "[]coreconsensus.EntryValue"
+        name: AppendEntries
         out:
           - type: "[]byte"
       - doc: |-
@@ -4915,10 +6292,11 @@ packages:
           AppendSnapshotMeta appends the versioned encoding of m. The version
           follows the cluster version m carries: a meta of a cluster below protocol
           version 2 is written in version 1, one of a cluster at 2 in version 2,
-          checksummed, which the release before already reads (D18, #546), and one
-          of a cluster at 3 or above in version 3, which adds the retired keys of
-          its configuration (#648). Only a cluster whose every member announced a
-          protocol reaches its version.
+          checksummed, which the release before already reads (D18, #546), one
+          of a cluster at 3 in version 3, which adds the retired keys of its
+          configuration (#648), and one of a cluster at 4 or above in version 4,
+          which adds the client sessions (#918). Only a cluster whose every member
+          announced a protocol reaches its version.
         in:
           - name: dst
             type: "[]byte"
@@ -4929,8 +6307,8 @@ packages:
           - type: "[]byte"
       - doc: |-
           ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:
-          version 1, or version 2 or 3 once its trailing CRC-32C holds. Another
-          version is VERSION_UNSUPPORTED, a version 2 or 3 whose sum fails
+          version 1, or version 2, 3 or 4 once its trailing CRC-32C holds. Another
+          version is VERSION_UNSUPPORTED, a version 2, 3 or 4 whose sum fails
           FRAME_INVALID.
         in:
           - name: b
@@ -5033,6 +6411,21 @@ packages:
       decide, or carry a per-key revision in the command, because a replayed
       compare-and-swap is not harmless under ABA (D6, R1-04).
 
+      # Exactly once, through a client session
+
+      A command without a natural key — an event appended, a counter moved —
+      is retried through a client session instead (ADR 0241). Once the
+      cluster version is 4, a client opens a session it names with 16 random
+      bytes, Node.OpenSession, then submits each command under the next
+      sequence, Node.ProposeSession, and retries it after OUTCOME_UNKNOWN with
+      the same session, sequence and command, through any node: the state
+      machine applies it once, and the retry is answered with the first
+      one's token. The same sequence with another command is
+      SESSION_DIGEST_MISMATCH. The cluster keeps 1024 sessions, the one used
+      least recently evicted first, and a command of a session
+      evicted, or of a sequence below its last, is SESSION_EXPIRED: read the
+      state through Barrier, then open a new session.
+
       # Reads
 
       Barrier returns once the local state machine reflects every write
@@ -5040,6 +6433,27 @@ packages:
       round started after the read arrived. ReadLease is opt-in and sound only
       under the four conditions of D9; a leader paused after its lease check
       serves a stale read, which ReadIndex never does.
+
+      # Backup
+
+      A backup is three calls. Node.ExportBackup writes a full file: the
+      snapshot SaveSnapshot cuts, then the committed entries after it up to
+      the commit at the call, then a trailer naming the point it ends at.
+      Node.AppendBackup writes, from that point, only the entries committed
+      since, and returns the next point; keep the last point beside the
+      files. VerifyBackup checks the files offline (every record's sum, the
+      snapshot's SHA-256, the chain from its ChainTip), and RestoreBackup
+      restores the export and its tails, in order, through ImportObserved on
+      every node of the new cluster, refusing a tail that does not continue
+      the chain before anything is written.
+
+      The recovery point is the last committed entry the backup node had
+      applied when the last append ran: a restore loses only what committed
+      after it. Store the tail files in the repository beside the export
+      (restic keeps them as it keeps the snapshot), export again when an
+      append is refused COMPACTED or names an entry that changes the
+      engine's state, and restore from the newest export and every tail
+      written after it.
 
       # Apply is a pure transition
 
@@ -5063,6 +6477,10 @@ packages:
             target: coreconsensus.PositionValue
           - name: EntryValue
             target: coreconsensus.EntryValue
+          - name: SessionID
+            target: coreconsensus.SessionID
+          - name: SessionValue
+            target: coreconsensus.SessionValue
           - name: TokenValue
             target: coreconsensus.TokenValue
           - name: EntryKind
@@ -5075,6 +6493,8 @@ packages:
             target: coreconsensus.StampState
           - name: MessageValue
             target: coreconsensus.MessageValue
+          - name: TraceContextValue
+            target: coreconsensus.TraceContextValue
           - name: MessageKind
             target: coreconsensus.MessageKind
           - name: FrameLane
@@ -5126,6 +6546,9 @@ packages:
           - blank: true
             name: Replicated
             target: coreconsensus.Replicated
+          - blank: true
+            name: SessionProposer
+            target: coreconsensus.SessionProposer
           - name: StateMachine
             target: coreconsensus.StateMachine
           - name: DurableStateMachine
@@ -5144,8 +6567,12 @@ packages:
             target: coreconsensus.Transport
           - name: UnreachableReporter
             target: coreconsensus.UnreachableReporter
+          - name: BatchSender
+            target: coreconsensus.BatchSender
           - name: LeadershipWatcher
             target: coreconsensus.LeadershipWatcher
+          - name: MembershipWatcher
+            target: coreconsensus.MembershipWatcher
           - blank: true
             name: HealthValue
             target: svcconsensus.HealthValue
@@ -5176,16 +6603,32 @@ packages:
             target: svcconsensus.DataDir
           - name: DataDirOptions
             target: svcconsensus.DataDirOptions
+          - name: Preallocate
+            target: svcconsensus.Preallocate
+          - name: SyncPath
+            target: svcconsensus.SyncPath
           - name: ReportValue
             target: svcconsensus.ReportValue
+          - name: PreflightOptions
+            target: svcconsensus.PreflightOptions
+          - name: PreflightValue
+            target: svcconsensus.PreflightValue
+          - name: PreflightVerdictValue
+            target: svcconsensus.PreflightVerdictValue
           - name: QuarantineExit
             target: svcconsensus.QuarantineExit
+          - name: QuarantineOptions
+            target: svcconsensus.QuarantineOptions
           - name: RecoverOptions
             target: svcconsensus.RecoverOptions
           - name: RestoreOptions
             target: svcconsensus.RestoreOptions
           - name: ImportParams
             target: svcconsensus.ImportParams
+          - name: BackupPointValue
+            target: svcconsensus.BackupPointValue
+          - name: BackupParams
+            target: svcconsensus.BackupParams
           - name: TransportConfig
             target: svcconsensus.TransportConfig
           - name: TCPTransport
@@ -5203,6 +6646,26 @@ packages:
             type: svcconsensus.QuarantineExit
             value: "2"
         doc: The two exits of ClearQuarantine.
+      - const:
+          - name: PreallocateZeroFill
+            reexport: svcconsensus.PreallocateZeroFill
+            type: svcconsensus.Preallocate
+            value: "0"
+          - name: PreallocateFallocate
+            reexport: svcconsensus.PreallocateFallocate
+            type: svcconsensus.Preallocate
+            value: "1"
+        doc: How a new log segment is preallocated.
+      - const:
+          - name: SyncFdatasync
+            reexport: svcconsensus.SyncFdatasync
+            type: svcconsensus.SyncPath
+            value: "0"
+          - name: SyncRWFDsync
+            reexport: svcconsensus.SyncRWFDsync
+            type: svcconsensus.SyncPath
+            value: "1"
+        doc: How the file log makes a batch durable.
       - func:
           doc: NewDataDir takes the directory lock first, then recovers the log.
           forward: svcconsensus.NewDataDir
@@ -5262,8 +6725,25 @@ packages:
             - type: error
       - func:
           doc: |-
+            Preflight measures the fdatasync latency of the disk under dir on a
+            stopped node, writing a scratch file it removes, and returns the
+            verdicts of the rules the measurement or the platform breaks; it
+            refuses DATA_DIR_LOCKED a directory a live node holds.
+          forward: svcconsensus.Preflight
+          in:
+            - name: dir
+              type: string
+            - name: opts
+              type: PreflightOptions
+          name: Preflight
+          out:
+            - type: PreflightValue
+            - type: error
+      - func:
+          doc: |-
             ClearQuarantine clears a quarantined or stopped directory by one of its
-            two exits.
+            two exits. On a member's directory TruncateAndStaySilent is refused:
+            it needs ClearQuarantineWith's means to ask a live member.
           forward: svcconsensus.ClearQuarantine
           in:
             - name: d
@@ -5273,6 +6753,28 @@ packages:
             - name: op
               type: Operator
           name: ClearQuarantine
+          out:
+            - type: error
+      - func:
+          doc: |-
+            ClearQuarantineWith is ClearQuarantine with the means to read the
+            cluster's configuration from a live member, which a member's
+            TruncateAndStaySilent needs: it is refused when no member answers, or
+            when that configuration no longer lists the node or lists none of the
+            members the truncation keeps.
+          forward: svcconsensus.ClearQuarantineWith
+          in:
+            - name: ctx
+              type: context.Context
+            - name: d
+              type: DataDir
+            - name: exit
+              type: QuarantineExit
+            - name: op
+              type: Operator
+            - name: opt
+              type: "*QuarantineOptions"
+          name: ClearQuarantineWith
           out:
             - type: error
       - func:
@@ -5355,6 +6857,36 @@ packages:
             - name: opt
               type: "*RestoreOptions"
           name: ImportObserved
+          out:
+            - type: SnapshotMetaValue
+            - type: error
+      - func:
+          doc: VerifyBackup checks a backup's files offline, its snapshot's digest and its chain, writing nothing.
+          forward: svcconsensus.VerifyBackup
+          in:
+            - name: p
+              type: "*BackupParams"
+            - name: opt
+              type: "*RestoreOptions"
+          name: VerifyBackup
+          out:
+            - type: BackupPointValue
+            - type: error
+      - func:
+          doc: RestoreBackup starts a new history from a backup's export and tails, checked before anything is written, offline.
+          forward: svcconsensus.RestoreBackup
+          in:
+            - name: d
+              type: DataDir
+            - name: p
+              type: "*BackupParams"
+            - name: newCluster
+              type: ClusterID
+            - name: members
+              type: "[]MemberValue"
+            - name: opt
+              type: "*RestoreOptions"
+          name: RestoreBackup
           out:
             - type: SnapshotMetaValue
             - type: error
@@ -5530,6 +7062,10 @@ packages:
             reexport: coreconsensus.EntryCommand
             type: coreconsensus.EntryKind
             value: "1"
+          - name: EntrySessionCommand
+            reexport: coreconsensus.EntrySessionCommand
+            type: coreconsensus.EntryKind
+            value: "9"
           - name: LaneControl
             reexport: coreconsensus.LaneControl
             type: coreconsensus.FrameLane
@@ -5578,6 +7114,14 @@ packages:
             reexport: coreconsensus.FlagProtocol3
             type: coreconsensus.MessageFlags
             value: "32"
+          - name: FlagProtocol4
+            reexport: coreconsensus.FlagProtocol4
+            type: coreconsensus.MessageFlags
+            value: "64"
+          - name: FlagTrace
+            reexport: coreconsensus.FlagTrace
+            type: coreconsensus.MessageFlags
+            value: "128"
           - name: MsgForward
             reexport: coreconsensus.MsgForward
             type: coreconsensus.MessageKind
@@ -5840,8 +7384,8 @@ packages:
             - type: "[]byte"
       - func:
           doc: |-
-            ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2 or
-            3 once its trailing CRC-32C holds.
+            ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2, 3
+            or 4 once its trailing CRC-32C holds.
           forward: wire.ParseSnapshotMeta
           in:
             - name: b
@@ -5934,6 +7478,12 @@ packages:
           - name: AdminPreconditionFailed
             reexport: coreconsensus.AdminPreconditionFailed
             type: "*errs.Error"
+          - name: SessionDigestMismatch
+            reexport: coreconsensus.SessionDigestMismatch
+            type: "*errs.Error"
+          - name: SessionExpired
+            reexport: coreconsensus.SessionExpired
+            type: "*errs.Error"
           - name: LogCorrupt
             reexport: coreconsensus.LogCorrupt
             type: "*errs.Error"
@@ -6021,3 +7571,110 @@ packages:
       wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
       x509: crypto/x509
     path: github.com/kitsunium/sdk/pkg/v1/app/consensus
+  - doc: |-
+      Package machine is the public facade of the consensus domain's state
+      machines (ADR 0152 D3): the durable machine over a database every
+      product otherwise writes by hand, and the reference key-value machine.
+
+      [NewSQL] builds a [SQL] machine over a transactor of package
+      [github.com/kitsunium/sdk/pkg/v1/data/sql]. It applies a batch of
+      committed commands in one transaction and writes the applied log identity
+      and position in that same transaction, so a crash between the two loses
+      both or neither and a node configured with DurabilityDurable resumes after
+      exactly the entries the database holds: none applied twice, none skipped.
+      A batch that cannot complete panics, and the node stops with
+      STATE_MACHINE_FAILED. A snapshot streams from a read-only transaction
+      opened when it is taken; a restore truncates and loads in one transaction
+      with the snapshot's position.
+
+      	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
+      		Transactor: tm, Dialect: sql.DialectPostgres,
+      		Apply:    applyCommand, // func(ctx, ex, entry) (result, error)
+      		Dump:     dumpTables, Truncate: truncateTables, Load: loadTables,
+      	})
+      	node, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})
+
+      [KV] keeps keys in memory, each with a revision that only grows: [KVPut]
+      stores a value, [KVGet] reads it through the log, [KVCompareAndSwap]
+      stores one only while the revision is the one the caller read, so a value
+      written back to an earlier one never passes a stale swap. Each command
+      answers a [KVResult] from Propose.
+
+      	_, res, err := node.Propose(ctx, machine.KVCompareAndSwap("leader", []byte("fra"), 0))
+      	if r, ok := res.(machine.KVResult); ok && r.Applied { … } // took the key at revision r.Revision
+    facade:
+      - alias:
+          - name: SQLConfig
+            target: svcmachine.SQLConfig
+          - name: SQL
+            target: svcmachine.SQL
+          - name: KVResult
+            target: svcmachine.KVResult
+          - name: KV
+            target: svcmachine.KV
+      - const:
+          - doc: DefaultPositionTable is the table SQLConfig.Table names when it is empty.
+            name: DefaultPositionTable
+            reexport: svcmachine.DefaultPositionTable
+            type: string
+            typed: true
+            value: "\"kit_consensus_applied\""
+      - func:
+          doc: |-
+            NewSQL builds an SQL machine: it creates the position table when it is
+            absent and reads the position the database holds.
+          forward: svcmachine.NewSQL
+          in:
+            - name: ctx
+              type: context.Context
+            - name: cfg
+              type: SQLConfig
+          name: NewSQL
+          out:
+            - type: "*SQL"
+            - type: error
+      - func:
+          doc: NewKV returns an empty KV.
+          forward: svcmachine.NewKV
+          name: NewKV
+          out:
+            - type: "*KV"
+      - func:
+          doc: KVGet returns the command that reads key through the log.
+          forward: svcmachine.KVGet
+          in:
+            - name: key
+              type: string
+          name: KVGet
+          out:
+            - type: "[]byte"
+      - func:
+          doc: KVPut returns the command that stores value under key.
+          forward: svcmachine.KVPut
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: "[]byte"
+          name: KVPut
+          out:
+            - type: "[]byte"
+      - func:
+          doc: |-
+            KVCompareAndSwap returns the command that stores value under key only
+            while the key's revision is revision; revision 0 asks that the key be
+            absent.
+          forward: svcmachine.KVCompareAndSwap
+          in:
+            - name: key
+              type: string
+            - name: value
+              type: "[]byte"
+            - name: revision
+              type: uint64
+          name: KVCompareAndSwap
+          out:
+            - type: "[]byte"
+    imports:
+      svcmachine: github.com/kitsunium/sdk/internal/service/app/consensus/machine
+    path: github.com/kitsunium/sdk/pkg/v1/app/consensus/machine

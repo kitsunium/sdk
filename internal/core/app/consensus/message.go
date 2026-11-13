@@ -81,6 +81,22 @@ const (
 	// raise the cluster version to 3 while a member's last frame of the term
 	// lacks it.
 	FlagProtocol3
+	// FlagProtocol4 marks a frame from a node that speaks protocol version
+	// 4, which sets FlagProtocol2 and FlagProtocol3 beside it. A leader of
+	// protocol 4 carries its last index in the RejectHint of every
+	// heartbeat, which a follower reads only beside this flag (#919); a
+	// forward may carry a trace context (FlagTrace, #1115) and a session
+	// command is appended (#918) only once the committed cluster version is
+	// 4. A node of protocol 3 or below tests the bits it names only and
+	// ignores it, and a leader refuses to raise the cluster version to 4
+	// while a member's last frame of the term lacks it.
+	FlagProtocol4
+	// FlagTrace marks a forward that carries its proposer's trace context
+	// after its entry (Trace). A follower sets it only once the committed
+	// cluster version is 4, which every member announced, so a node of
+	// protocol 3 or below never meets the trailing bytes; on any other
+	// kind it is refused as a frame that does not parse (#1115).
+	FlagTrace
 )
 
 // Lane returns the connection the kind belongs on.
@@ -141,4 +157,20 @@ type MessageValue struct {
 	// Entries are the entries an append carries, or the proposal a forward
 	// carries with a zero position.
 	Entries []EntryValue
+	// Trace is the proposer's span context a forward carries beside
+	// FlagTrace, the zero value without it.
+	Trace TraceContextValue
+}
+
+// TraceContextValue is the span context a forwarded proposal travels with:
+// the W3C trace and parent span identifiers and the proposer's sampling
+// decision, written on the wire after the forward's entry, in that order
+// (ADR 0152 D13, #1115).
+type TraceContextValue struct {
+	// TraceID identifies the whole trace.
+	TraceID [16]byte
+	// SpanID is the proposer's span, the parent of the leader's.
+	SpanID [8]byte
+	// Sampled is the proposer's sampling decision.
+	Sampled bool
 }

@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/app/consensus/machine
+  name: machine
+  purpose: "Package machine is the public facade of the consensus domain's state machines (ADR 0152 D3): the durable machine over a database every product otherwise writes by hand, and the reference key-value machine."
+types: []

@@ -125,3 +125,40 @@ func OwnStores() SubscriptionOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.OwnStores()
 }
+
+// FromBeginning starts a streamed topic's subscription at the first message
+// its stream still keeps, the first time its group meets the stream: a
+// subscription added to a product that already published reads every
+// message published before it. A subscription of a topic that is not
+// streamed refuses it.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func FromBeginning() SubscriptionOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.FromBeginning()
+}
+
+// FromNow starts a streamed topic's subscription after the last message
+// published, the first time its group meets the stream: it reads what is
+// published from then on, as a subscription of a topic that is not streamed
+// does. It is the default. A subscription of a topic that is not streamed
+// refuses it.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func FromNow() SubscriptionOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.FromNow()
+}
+
+// FromTime starts a streamed topic's subscription at the first message published
+// at or after at, the first time its group meets the stream; a zero instant
+// is refused. A subscription of a topic that is not streamed refuses it.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func FromTime(at time.Time) SubscriptionOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.FromTime(at)
+}

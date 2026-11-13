@@ -1,0 +1,52 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "multi",
+    srcs = [
+        "body.go",
+        "doc.go",
+        "machine.go",
+        "multi_compliance.go",
+        "packer.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/kernel/errs",
+        "//internal/service/app/consensus/wire",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":multi",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "multi_test",
+    srcs = [
+        "body_internal_test.go",
+        "cluster_external_test.go",
+        "export_test.go",
+        "gen_api_test.go",
+        "multi_bench_test.go",
+        "packer_external_test.go",
+    ],
+    embed = [":multi"],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/kernel/errs",
+        "//internal/service/app/consensus",
+        "//internal/service/app/consensus/wire",
+    ],
+)

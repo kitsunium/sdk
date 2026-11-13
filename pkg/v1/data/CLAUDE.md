@@ -21,7 +21,8 @@ a value becomes and the places those bytes are kept — rather than what the
 data is for: the bytes a value is written as (`codec`, every format and the
 JSON tools in one tree — ADR 0155 §3), the tables of the caller's database
 (`sql`) and the documents kept above them or on a filesystem (`docstore`), the
-messages one process leaves for another (`queue`), the copies kept close
+messages one process leaves for another (`queue`) and the records it keeps
+for every reader (`stream`), the copies kept close
 (`cache`) and the files a value is published to (`vfs`). Compression is
 `transform`: the same bytes made smaller, a registry of its own beside the
 codec's, which `codec`'s compression frame goes through.
@@ -46,20 +47,22 @@ stays at the kernel's root, `internal/kernel/semver`.
 | `codec/jsonschema/` | `NewValidator` / `Validate` → a JSON Schema 2020-12 validation report (#882, ADR 0210) | `internal/service/data/codec/jsonschema` | `codec/jsonschema/README.md` |
 | `docstore/` | `Open` → a `Store[T]` over a `vfs` filesystem and `OpenSQL` → an `SQLStore[T]` over the caller's database, with unique and multi-valued indexes and versions (ADR 0110, ADR 0139, ADR 0143); the ports a double stands in for (ADR 0160) | `internal/core/data/docstore`, `internal/service/data/docstore` | `docstore/README.md` |
 | `queue/` | `NewFile` / `NewSQL` / `NewMemory` → a `Broker`, and `Consume` (ADR 0054, ADR 0104, ADR 0151) | `internal/core/data/queue`, `internal/service/data/queue` | `queue/README.md` |
+| `stream/` | `NewFile` / `NewSQL` / `NewMemory` → a partitioned `Stream` read by offset, `Subscribe` for a consumer group, `SQLMigration`, `PartitionOf` (ADR 0231) | `internal/core/data/stream`, `internal/service/data/stream` | `stream/README.md` |
 | `semver/` | `IsValid` / `Compare` / `Prerelease` and `IsPseudoVersion` / `PseudoVersionRev` / `PseudoVersionTime` (ADR 0156 §4) | `internal/kernel/semver` | `semver/README.md` |
 | `sql/` | `NewTransactor` / `NewChecker` / `NewMigrator` over `database/sql`, no driver and no ORM (ADR 0055, ADR 0139, ADR 0140) | `internal/core/data/sql`, `internal/service/data/sql` | `sql/README.md` |
 | `transform/` | `Compress` / `Decompress` / `DecompressBounded` / `Lookup` over the `Algorithm` registry, with `gzip`, `flate` and `zlib` registered by the import — compression without the codec package (ADR 0014) | `internal/core/data/transform`, `internal/service/data/transform` | `transform/README.md` |
 | `vfs/` | `NewOS` / `NewMem` → a `FullFS`, reading through `io/fs` unchanged and publishing atomically (ADR 0056) | `internal/core/data/vfs`, `internal/service/data/vfs` | `vfs/README.md` |
 
-`docstore` and `queue` name the `sql` facade's aliases in their SQL
+`docstore`, `queue` and `stream` name the `sql` facade's aliases in their SQL
 signatures — `sql.Dialect`, `sql.Migration` — so a consumer's documentation
 never shows an internal package: the one sibling import in the family, which
-both packages' `CLAUDE.md` files name.
+the three packages' `CLAUDE.md` files name.
 
 Each that existed before moved here from `pkg/v1/<name>` in one minor
 release, with no alias left at the old path — a clean break, permitted only
 while the module is v0 (ADR 0155 §4, extending ADR 0040). The per-format children, `transform` and
-`codec/strictjson/httpbody` are new in the same release and had no earlier path.
+`codec/strictjson/httpbody` are new in the same release and had no earlier path;
+`stream` is new since (kitsunium/sdk#825).
 
 ## Do NOT
 

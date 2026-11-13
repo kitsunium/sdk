@@ -255,7 +255,7 @@ func TestACutPastTheCommitTheNodeKnowsWaitsForIt(t *testing.T) {
 	dd := b.openDD(f.dir)
 	fl := dd.d.log
 	fl.mu.RLock()
-	s := fl.slots[j-fl.first]
+	s := fl.locate(j)
 	fl.mu.RUnlock()
 	if err := dd.Close(); err != nil {
 		t.Fatal(err)
@@ -270,7 +270,7 @@ func TestACutPastTheCommitTheNodeKnowsWaitsForIt(t *testing.T) {
 	if _, err := NewNode(b.conf(f)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
 	}
-	if err := ClearQuarantine(f.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), f.dd, TruncateAndStaySilent, "op:silent", askingAnswer(l.node.Membership())); err != nil {
 		t.Fatal(err)
 	}
 	if _, last := f.dd.Log().Bounds(); last >= j {

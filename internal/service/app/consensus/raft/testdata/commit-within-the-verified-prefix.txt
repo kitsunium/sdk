@@ -1,0 +1,27 @@
+# D6, "commit beyond the verified prefix" and "acknowledging lastIndex"
+# (mutCommitBeyondVerified, mutAckLastIndex): an empty append that verifies
+# entry 1 moves the commit no further than 1 and acknowledges 1, whatever
+# the stale suffix the follower still holds.
+add-nodes 1 voters=1,2,3 term=1 log=1,1,1
+----
+ok
+
+step 1 type=MsgApp from=2 term=2 logterm=1 index=1 commit=3
+----
+ok
+
+process-ready 1
+----
+> 1 handling Ready
+  seq=1
+  HardState term=2 vote=0 commit=1
+  Commit 1
+  AfterSync:
+    1->2 MsgAppResp term=2 index=1
+  Apply:
+    1/1 command "e1-t1"
+  Membership 1@0 2@0 3@0
+
+raft-state
+----
+1: follower term=2 vote=0 lead=2 commit=1 stable=3 last=3

@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"context"
 	"io"
 	"sync/atomic"
 	"time"
@@ -31,14 +32,22 @@ const pinScaleMax uint8 = 6
 // probes the peer after an install, and a cut that landed in that window
 // compacted past the entries the peer needed next, so it was offered
 // snapshot after snapshot (#550). follow, set once streamed, renews until
-// while the peer still catches up (renewPin).
+// while the peer still catches up (renewPin). since is when the pin to the
+// peer was taken, its offer, in Unix nanoseconds of n.clk, kept once the
+// stream ends: the age consensus_snapshot_pin_age_seconds publishes (D13).
 type sendPin struct {
 	index  uint64
+	since  int64
 	until  time.Time
 	sent   *atomic.Int64
 	moved  *atomic.Int64
 	follow *pinFollow
 	lifted bool
+	// progress is, while it streams, how many bytes of the snapshot the
+	// transport has read, from the offset it resumed at; size is the
+	// snapshot's EncodedSize (#920).
+	progress *atomic.Int64
+	size     int64
 }
 
 // pinFollow follows the catch-up of a streamed snapshot's peer: at is where
@@ -55,7 +64,7 @@ type pinFollow struct {
 // to ended at now, the leader's log then at last: it holds a pinBound,
 // renewed while the peer catches up (renewPin).
 func (n *Node) streamedPin(to coreconsensus.NodeID, index, last uint64, now time.Time) sendPin {
-	return sendPin{index: index, until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}
+	return sendPin{index: index, since: now.UnixNano(), until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}
 }
 
 // catchingUp reports whether the peer, at pos with the leader's log at
@@ -97,7 +106,7 @@ func (n *Node) renewPin(to coreconsensus.NodeID, pin sendPin, now time.Time) sen
 // while the peer catches up. A stream's pin ends once
 // its stream is due (streamDue), or once it was lifted. No pin holds once
 // the log is tight. It runs on the loop.
-func (n *Node) pinAt(to coreconsensus.NodeID, pin sendPin, now time.Time) (uint64, bool) {
+func (n *Node) pinAt(to coreconsensus.NodeID, pin *sendPin, now time.Time) (uint64, bool) {
 	if n.logTight() {
 		return 0, false
 	}
@@ -139,7 +148,7 @@ func (n *Node) pinBound(to coreconsensus.NodeID) time.Duration {
 // loop standing still in its judgment, since the bound ran from the last
 // byte only, and one removed while it was sent the snapshot, whose stream
 // only its end released (#623). It runs on the loop.
-func (n *Node) streamDue(to coreconsensus.NodeID, pin sendPin, now time.Time) bool {
+func (n *Node) streamDue(to coreconsensus.NodeID, pin *sendPin, now time.Time) bool {
 	if _, _, ok := n.r.Progress(to); !ok {
 		return true
 	}
@@ -195,7 +204,7 @@ func (n *Node) watchPins(now time.Time) {
 	ended := false
 	for to, pin := range n.sending {
 		pin = n.renewPin(to, pin, now)
-		_, held := n.pinAt(to, pin, now)
+		_, held := n.pinAt(to, &pin, now)
 		if pin.until.IsZero() {
 			if !held && n.releasePin(to, pin, now) {
 				ended = true
@@ -232,7 +241,7 @@ func (n *Node) prunePinScale() {
 // learner was ever installed (#622). Any other pin is dropped. It runs on
 // the loop.
 func (n *Node) releasePin(to coreconsensus.NodeID, pin sendPin, now time.Time) bool {
-	if pin.until.IsZero() && !n.streamDue(to, pin, now) {
+	if pin.until.IsZero() && !n.streamDue(to, &pin, now) {
 		if pin.lifted {
 			return false
 		}
@@ -262,20 +271,37 @@ func (n *Node) dropPin(to coreconsensus.NodeID) {
 
 // sentReader marks moved with n.clk's time at each read of r, and sent
 // once r reads to its end: the transport read the snapshot's last byte.
+// It counts the bytes read in progress, and, under a pacer, cuts each read
+// to the pacer's slice and pays it on ctx before the next (#920).
 type sentReader struct {
-	r     io.Reader
-	n     *Node
-	sent  *atomic.Int64
-	moved *atomic.Int64
+	ctx      context.Context
+	r        io.Reader
+	n        *Node
+	sent     *atomic.Int64
+	moved    *atomic.Int64
+	progress *atomic.Int64
 }
 
-// Read reads r, and marks the stream moving and its end.
+// Read reads r, and marks the stream moving and its end; a paced stream
+// waits for its budget after the read, and marks it moving again once the
+// wait is over, so the pacing never makes a stream look stalled.
 func (s *sentReader) Read(p []byte) (int, error) {
+	pace := s.n.pace
+	if pace != nil {
+		p = p[:pace.limit(len(p))]
+	}
 	k, err := s.r.Read(p)
+	s.progress.Add(int64(k))
 	now := s.n.clk.Now().UnixNano()
 	s.moved.Store(now)
 	if err == io.EOF {
 		s.sent.CompareAndSwap(0, now)
+	}
+	if pace != nil && k > 0 && err == nil {
+		if werr := pace.pay(s.ctx, k); werr != nil {
+			return k, werr
+		}
+		s.moved.Store(s.n.clk.Now().UnixNano())
 	}
 	return k, err
 }

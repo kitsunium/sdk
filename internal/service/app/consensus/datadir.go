@@ -28,11 +28,55 @@ const (
 	markerStopPrefix = "STOP-"
 )
 
-// DataDirOptions tunes NewDataDirWith: the size of a log segment and the
+const (
+	// PreallocateZeroFill writes zeros over a new segment's full size, then
+	// syncs it. It is the zero value and the default (D4).
+	PreallocateZeroFill Preallocate = iota
+	// PreallocateFallocate reserves a new segment's full size with
+	// fallocate(2) on Linux, its blocks unwritten extents that read as zeros,
+	// then syncs it: no zero is written. A filesystem or a platform without
+	// it opens the log in PreallocateZeroFill, with one line logged (#922).
+	PreallocateFallocate
+)
+
+const (
+	// SyncFdatasync writes a batch's records with pwrite(2), then makes them
+	// durable with fdatasync(2): two calls per durability point. It is the
+	// zero value and the default (D4, #417).
+	SyncFdatasync SyncPath = iota
+	// SyncRWFDsync writes a batch's records with pwritev2(2) flagged
+	// RWF_DSYNC on Linux, which returns once they are durable: one call per
+	// durability point, the same two points as SyncFdatasync. A kernel or a
+	// platform without it opens the log in SyncFdatasync, with one line
+	// logged (#923).
+	SyncRWFDsync
+)
+
+// Preallocate is how the file log gives a new segment its fixed size
+// before it holds a record (D4, #922).
+type Preallocate uint8
+
+// SyncPath is how the file log makes a batch's records durable (D4,
+type SyncPath uint8
+
+// DataDirOptions tunes NewDataDirWith: the size of a log segment, how a
+// new one is preallocated, how a batch is made durable, and the
 // boot-scoped directory of the second STORAGE_FAILED marker.
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
+	// Preallocate is how a new segment is given its fixed size: zeros
+	// written (PreallocateZeroFill, the zero value) or fallocate(2)
+	// (PreallocateFallocate). Either way the segment occupies its whole
+	// size, as the no-space guard counts it. Another value is refused
+	// CONSENSUS_MISCONFIGURED.
+	Preallocate Preallocate
+	// SyncPath is how a batch's records are made durable: pwrite(2) then
+	// fdatasync(2) (SyncFdatasync, the zero value) or one pwritev2(2)
+	// flagged RWF_DSYNC (SyncRWFDsync). Either way a batch has the same two
+	// durability points, its end record written once the rest is durable.
+	// Another value is refused CONSENSUS_MISCONFIGURED.
+	SyncPath SyncPath
 	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
 	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
 	// kitsunium-consensus in the temporary directory elsewhere. It must
@@ -45,10 +89,13 @@ type DataDirOptions struct {
 }
 
 type dataDir struct {
-	dir    string
-	opts   DataDirOptions
-	mu     sync.Mutex
-	lockf  *os.File
+	dir   string
+	opts  DataDirOptions
+	mu    sync.Mutex
+	lockf *os.File
+	// disk is the fault seam the log, the snapshot store and the offline
+	// operations write through: osDisk, a test's faultFS (fs).
+	disk   *diskFS
 	log    *fileLog
 	snaps  *fileSnapshots
 	closed bool
@@ -75,9 +122,25 @@ type DataDir struct{ d *dataDir }
 func NewDataDir(dir string) (DataDir, error) { return NewDataDirWith(dir, DataDirOptions{}) }
 
 // NewDataDirWith is NewDataDir with options.
+//
+//go:noinline
 func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
+	// Kept out of line (go:noinline): inlined, this call took NewDataDir
+	// and the facade's forwarder past their inline budget of 80 (kit gen).
+	return newDataDirOn(dir, opts, &osDisk)
+}
+
+// newDataDirOn is NewDataDirWith over the fault seam disk: osDisk in
+// production, a test's faultFS under the shim lane (D15).
+func newDataDirOn(dir string, opts DataDirOptions, disk *diskFS) (DataDir, error) {
 	if err := refuseUnmarked(dir); err != nil {
 		return DataDir{}, err
+	}
+	if opts.Preallocate > PreallocateFallocate {
+		return DataDir{}, misconfigured("Preallocate", "not a Preallocate mode")
+	}
+	if opts.SyncPath > SyncRWFDsync {
+		return DataDir{}, misconfigured("SyncPath", "not a SyncPath mode")
 	}
 	// The directory lock is the first thing taken (D11), and there is none to
 	// take where the kernel has no flock(2) — illumos and Solaris (ADR 0144):
@@ -87,10 +150,10 @@ func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	if !flock.Native {
 		return DataDir{}, coreproc.UnsupportedPlatform
 	}
-	if err := mkdirDurable(dir); err != nil {
+	if err := disk.mkdirDurable(dir); err != nil {
 		return DataDir{}, err
 	}
-	d := &dataDir{dir: dir, opts: opts}
+	d := &dataDir{dir: dir, opts: opts, disk: disk}
 	lf, err := os.OpenFile(filepath.Join(dir, fileLock), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return DataDir{}, storageFailed("lock", err)
@@ -124,12 +187,21 @@ func (d *dataDir) open() error {
 	if err != nil {
 		return err
 	}
-	s, err := newFileSnapshots(filepath.Join(d.dir, "snap"), l.syncFailedAtOpen)
+	s, err := newFileSnapshotsOn(filepath.Join(d.dir, "snap"), l.syncFailedAtOpen, d.fs())
 	if err != nil {
 		return alsoFailed(err, "close log", l.Close())
 	}
 	d.log, d.snaps = l, s
 	return nil
+}
+
+// fs is the directory's fault seam, osDisk for a dataDir built without
+// one.
+func (d *dataDir) fs() *diskFS {
+	if d.disk != nil {
+		return d.disk
+	}
+	return &osDisk
 }
 
 // Dir returns the directory.
@@ -219,10 +291,10 @@ func (l *fileLog) markStopEach(code errs.Code, detail string) (dirErr, runErr er
 	body := fmt.Appendf(nil, "boot=%s\n%s\n", bootID(), detail)
 	if code == coreconsensus.CodeStorageFailed {
 		if runErr = os.MkdirAll(l.runDir, 0o700); runErr == nil {
-			runErr = writeFileSync(l.runtimeMarker(reason), body)
+			runErr = l.fs().writeFileSync(l.runtimeMarker(reason), body)
 		}
 	}
-	dirErr = writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body)
+	dirErr = l.fs().writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body)
 	return dirErr, runErr
 }
 

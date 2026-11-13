@@ -184,6 +184,25 @@ workflows:
           key: i
           range: len(name)
       - return: "true"
+  - of: versionRowsOf
+    steps:
+      - bind: rows
+        eval: make([]versionRow, 0, len(given)+1)
+      - loop:
+          do:
+            - bind: row
+              eval: "versionRow{at: knownInstant(v.At), meta: v.Meta, num: v.Number}"
+            - opt:
+                do:
+                  - set: row.doc
+                    value: v.JSON
+                when: i > 0
+            - set: rows
+              value: append(rows, row)
+          key: i
+          range: given
+          value: v
+      - return: rows
   - of: rowArgs
     steps:
       - bind: args

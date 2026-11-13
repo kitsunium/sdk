@@ -1,0 +1,5664 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: admit
+        kind: self
+      - id: recordBytes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, invalidBatchSize("records", 0)
+          when: len(records) == 0
+      - loop:
+          do:
+            - bind: bytes
+              eval: recordBytes(record)
+              to: recordBytes
+            - opt:
+                do:
+                  - return: 0, recordTooLarge(i, bytes, maxRecord)
+                when: bytes > int64(maxRecord)
+            - op: +=
+              set: size
+              value: bytes
+          key: i
+          range: records
+          value: record
+      - return: size, nil
+  - of: recordBytes
+    steps:
+      - return: int64(len(record.Key)) + int64(len(record.Payload))
+  - of: keyedPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyedPartition
+        kind: self
+      - id: corestream
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: len(record.Key) == 0
+            - bind: placed
+              eval: corestream.PartitionOf(record.Key, partitions)
+              to: corestream
+            - opt:
+                do:
+                  - set: partition, keyed
+                    value: placed, true
+                  - continue: true
+                when: "!keyed"
+            - opt:
+                do:
+                  - return: 0, false, partitionsMixed(i, partition, placed)
+                when: placed != partition
+          key: i
+          range: records
+          value: record
+      - return: partition, keyed, nil
+  - of: carve
+    steps:
+      - opt:
+          do:
+            - return: arena, nil
+          when: len(src) == 0
+      - bind: start
+        eval: len(arena)
+      - set: arena
+        value: append(arena, src...)
+      - return: arena, arena[start:len(arena):len(arena)]
+  - of: copyEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: copyEntries
+        kind: self
+      - id: recordBytes
+        kind: internal
+      - id: carve
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(entries) == 0
+      - var:
+          name: size
+          type: int64
+      - loop:
+          do:
+            - op: +=
+              set: size
+              to: recordBytes
+              value: recordBytes(entries[i].Record)
+          key: i
+          range: entries
+      - bind: out
+        eval: make([]corestream.EntryValue, len(entries))
+      - bind: arena
+        eval: make([]byte, 0, size)
+      - loop:
+          do:
+            - set: out[i]
+              value: entries[i]
+            - set: arena, out[i].Record.Key
+              to: carve
+              value: carve(arena, entries[i].Record.Key)
+            - set: arena, out[i].Record.Payload
+              to: carve
+              value: carve(arena, entries[i].Record.Payload)
+          key: i
+          range: entries
+      - return: out
+  - of: compactLinesAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: compactLinesAt
+        kind: self
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: twice
+        eval: time.Duration(math.MaxInt64)
+        to: time
+      - opt:
+          do:
+            - set: twice
+              value: 2 * after
+          when: after <= math.MaxInt64/2
+      - return: "compactLines{old: now.Add(-after), tomb: now.Add(-twice)}"
+  - of: compactLines.compactable
+    participants:
+      - id: caller
+        kind: actor
+      - id: compactLines.compactable
+        kind: self
+      - id: at.After
+        kind: value
+    steps:
+      - return: "!at.After(c.old)"
+        to: at.After
+  - of: compactLines.drops
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(record.Key) == 0
+      - opt:
+          do:
+            - return: "true"
+          when: "!last"
+      - return: len(record.Payload) == 0 && !at.After(c.tomb)
+  - of: compactResult
+    steps:
+      - return: "corestream.CompactValue{Scanned: scanned, Kept: scanned - dropped, Dropped: dropped}"
+  - of: noteLast
+    steps:
+      - opt:
+          do:
+            - set: last[string(key)]
+              value: at
+          when: len(key) > 0
+  - of: lastOf
+    steps:
+      - return: last[string(key)]
+  - of: rootWritableByAnyone
+    participants:
+      - id: caller
+        kind: actor
+      - id: rootWritableByAnyone
+        kind: self
+      - id: info.Mode
+        kind: value
+    steps:
+      - bind: mode
+        eval: info.Mode()
+        to: info.Mode
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: mode&worldWritable == 0 || mode&os.ModeSticky != 0
+      - return: "\"world-writable\", mode.String(), true"
+  - of: subWritableByAnyone
+    participants:
+      - id: caller
+        kind: actor
+      - id: subWritableByAnyone
+        kind: self
+      - id: info.Mode
+        kind: value
+    steps:
+      - bind: mode
+        eval: info.Mode()
+        to: info.Mode
+      - opt:
+          do:
+            - return: "\"\", \"\", false"
+          when: mode&worldWritable == 0
+      - opt:
+          do:
+            - return: "\"sticky-world-writable\", mode.String(), true"
+          when: mode&os.ModeSticky != 0
+      - return: "\"world-writable\", mode.String(), true"
+  - of: reparsePoint
+    steps:
+      - return: "false"
+  - of: offsetField
+    participants:
+      - id: caller
+        kind: actor
+      - id: offsetField
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.String(key, strconv.FormatUint(uint64(offset), 10))
+        to: errs
+  - of: unknownPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownPartition
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.UnknownPartition, errs.WrapParams{},
+          		errs.Int("partition", partition), errs.Int("partitions", partitions))
+        to: errs
+  - of: invalidBatchSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: invalidBatchSize
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.InvalidBatchSize, errs.WrapParams{},
+          		errs.String("field", field), errs.Int("value", value))
+        to: errs
+  - of: recordTooLarge
+    participants:
+      - id: caller
+        kind: actor
+      - id: recordTooLarge
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.RecordTooLarge, errs.WrapParams{},
+          		errs.Int("index", index), errs.Int64("size", size), errs.Int("max", maxRecord))
+        to: errs
+  - of: partitionsMixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: partitionsMixed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.PartitionsMixed, errs.WrapParams{},
+          		errs.Int("index", index), errs.Int("partition", want), errs.Int("other", got))
+        to: errs
+  - of: offsetTrimmed
+    participants:
+      - id: caller
+        kind: actor
+      - id: offsetTrimmed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.OffsetTrimmed, errs.WrapParams{},
+          		offsetField("offset", offset), offsetField("first", first))
+        to: errs
+  - of: offsetAhead
+    participants:
+      - id: caller
+        kind: actor
+      - id: offsetAhead
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.OffsetAhead, errs.WrapParams{},
+          		offsetField("offset", offset), offsetField("next", next))
+        to: errs
+  - of: streamFull
+    participants:
+      - id: caller
+        kind: actor
+      - id: streamFull
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.StreamFull, errs.WrapParams{},
+          		errs.Int64("size", size), errs.Int64("held", held), errs.Int64("max", maxBytes))
+        to: errs
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.StreamMisconfigured, errs.WrapParams{},
+          		errs.String("field", field))
+        to: errs
+  - of: unknownGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: unknownGroup
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.UnknownGroup, errs.WrapParams{},
+          		errs.String("group", group), errs.Int("partition", partition))
+        to: errs
+  - of: NewFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewFile
+        kind: self
+      - id: platformRefusal
+        kind: internal
+      - id: cfg.Policy.Validate
+        kind: value
+      - id: cfg.Policy.Normalized
+        kind: value
+      - id: prepareRoot
+        kind: internal
+      - id: lockDir
+        kind: internal
+      - id: checkPartitions
+        kind: internal
+      - id: stream.open
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, refused
+          init:
+            bind: refused
+            eval: platformRefusal()
+            to: platformRefusal
+          when: refused != nil
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.Policy.Validate()
+            to: cfg.Policy.Validate
+          when: invalid != nil
+      - bind: policy
+        eval: cfg.Policy.Normalized()
+        to: cfg.Policy.Normalized
+      - opt:
+          do:
+            - return: nil, misconfigured("MaxRecordBytes")
+          when: policy.MaxRecordBytes > maxSegmentPayload-recordOverhead
+      - opt:
+          do:
+            - return: nil, unusable
+          init:
+            bind: unusable
+            eval: prepareRoot(cfg.Dir)
+            to: prepareRoot
+          when: unusable != nil
+      - bind: stream
+        eval: |-
+          &fileStream{
+          		clk:    clockOrSystem(cfg.Clock),
+          		wake:   newWakeSignal(),
+          		room:   newWakeSignal(),
+          		policy: policy,
+          	}
+      - defer: |-
+          func() {
+          		//: a stream returned is the caller's to close.
+          		if err != nil {
+          			abandonStream(stream)
+          		}
+          	}()
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: stream.lock, err
+            eval: lockDir(cfg.Dir)
+            op: =
+            to: lockDir
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: checkPartitions(cfg.Dir, policy.Partitions)
+            op: =
+            to: checkPartitions
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: stream.open(cfg.Dir)
+            op: =
+            to: stream.open
+          when: err != nil
+      - return: stream, nil
+  - of: (*fileStream).open
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).open
+        kind: self
+      - id: prepareSub
+        kind: internal
+      - id: svcvfs
+        kind: package
+      - id: backendFailed
+        kind: internal
+      - id: m.openPart
+        kind: internal
+      - id: part.between
+        kind: internal
+    steps:
+      - bind: cursors, err
+        eval: prepareSub(dir, cursorsDir)
+        to: prepareSub
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: backendFailed("open", cursors, err)
+              to: backendFailed
+          init:
+            bind: m.cursors, err
+            eval: svcvfs.NewOS(cursors)
+            op: =
+            to: svcvfs
+          when: err != nil
+      - loop:
+          do:
+            - bind: part, partErr
+              eval: m.openPart(dir, p)
+              to: m.openPart
+            - opt:
+                do:
+                  - return: partErr
+                when: partErr != nil
+            - set: m.parts
+              value: append(m.parts, part)
+          key: p
+          range: m.policy.Partitions
+      - loop:
+          do:
+            - op: +=
+              set: m.held
+              to: part.between
+              value: part.between(part.kept, part.next())
+          key: _
+          range: m.parts
+          value: part
+      - return: nil
+  - of: (*fileStream).openPart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).openPart
+        kind: self
+      - id: prepareSub
+        kind: internal
+      - id: seglog
+        kind: package
+      - id: part.rebuild
+        kind: internal
+      - id: abandonLog
+        kind: internal
+      - id: part.claim
+        kind: internal
+    steps:
+      - bind: sub, err
+        eval: prepareSub(dir, partitionDir(p))
+        to: prepareSub
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: log, err
+        eval: seglog.Open(sub, m.policy.SegmentBytes)
+        to: seglog
+      - opt:
+          do:
+            - return: nil, backendFailed("open", sub, err)
+          when: err != nil
+      - bind: part
+        eval: "&filePart{log: log}"
+      - bind: latest, err
+        eval: part.rebuild()
+        to: part.rebuild
+      - opt:
+          do:
+            - eval: abandonLog(log)
+              to: abandonLog
+            - return: nil, err
+          when: err != nil
+      - set: m.last
+        value: max(m.last, latest)
+      - eval: part.claim(part.bounded(part.kept, part.lastBatch(), 0, m.policy.RetainBytes))
+        to: part.claim
+      - return: part, nil
+  - of: partitionDir
+    steps:
+      - return: "\"p\" + strconv.Itoa(p)"
+  - of: lockDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: lockDir
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: flock
+        kind: package
+      - id: abandon
+        kind: internal
+    steps:
+      - bind: name
+        eval: filepath.Join(dir, lockName)
+        to: filepath
+      - bind: file, err
+        eval: os.OpenFile(name, os.O_RDWR|os.O_CREATE, fileMode)
+        to: os
+      - opt:
+          do:
+            - return: nil, backendFailed("open", name, err)
+          when: err != nil
+      - bind: held, err
+        eval: flock.TryLock(file)
+        to: flock
+      - opt:
+          do:
+            - eval: abandon(file.Close())
+              to: abandon
+            - opt:
+                do:
+                  - return: nil, directoryUnusable(dir, "no-file-lock", "")
+                when: errors.Is(err, errors.ErrUnsupported)
+            - return: nil, backendFailed("lock", name, err)
+          when: err != nil
+      - opt:
+          do:
+            - eval: abandon(file.Close())
+              to: abandon
+            - return: nil, directoryUnusable(dir, "in-use", "")
+          when: "!held"
+      - return: file, nil
+  - of: platformRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: platformRefusal
+        kind: self
+      - id: svcvfs
+        kind: package
+      - id: backendFailed
+        kind: internal
+    steps:
+      - bind: _, err
+        eval: svcvfs.NewOS("")
+        to: svcvfs
+      - opt:
+          do:
+            - return: backendFailed("open", "", err)
+              to: backendFailed
+          when: errors.Is(err, coreproc.UnsupportedPlatform)
+      - return: nil
+  - of: checkPartitions
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkPartitions
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: backendFailed
+        kind: internal
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: misconfigured
+        kind: internal
+    steps:
+      - bind: entries, err
+        eval: os.ReadDir(dir)
+        to: os
+      - opt:
+          do:
+            - return: backendFailed("readdir", dir, err)
+              to: backendFailed
+          when: err != nil
+      - loop:
+          do:
+            - bind: digits, isPart
+              eval: strings.CutPrefix(entry.Name(), "p")
+              to: strings
+            - bind: n, convErr
+              eval: strconv.Atoi(digits)
+              to: strconv
+            - opt:
+                do:
+                  - continue: true
+                when: "!isPart || convErr != nil || n < count"
+            - return: misconfigured("Partitions")
+              to: misconfigured
+          key: _
+          range: entries
+          value: entry
+      - return: nil
+  - of: abandon
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: failure == nil
+  - of: abandonLog
+    participants:
+      - id: caller
+        kind: actor
+      - id: abandonLog
+        kind: self
+      - id: abandon
+        kind: internal
+    steps:
+      - eval: abandon(log.Close())
+        to: abandon
+  - of: abandonStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: abandonStream
+        kind: self
+      - id: abandon
+        kind: internal
+    steps:
+      - eval: abandon(m.Close())
+        to: abandon
+  - of: (*fileStream).Partitions
+    steps:
+      - return: len(m.parts)
+  - of: (*fileStream).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Append
+        kind: self
+      - id: admit
+        kind: internal
+      - id: keyedPartition
+        kind: internal
+      - id: m.reserve
+        kind: internal
+      - id: part.wmu.Lock
+        kind: value
+      - id: m.write
+        kind: internal
+      - id: part.wmu.Unlock
+        kind: value
+      - id: m.release
+        kind: internal
+      - id: m.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, context.Cause(ctx)
+          when: ctx.Err() != nil
+      - bind: size, refused
+        eval: admit(records, m.policy.MaxRecordBytes)
+        to: admit
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, refused
+          when: refused != nil
+      - bind: partition, keyed, mixed
+        eval: keyedPartition(records, len(m.parts))
+        to: keyedPartition
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, mixed
+          when: mixed != nil
+      - set: partition, refused
+        to: m.reserve
+        value: m.reserve(ctx, size, partition, keyed)
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, refused
+          when: refused != nil
+      - bind: part
+        eval: m.parts[partition]
+      - eval: part.wmu.Lock()
+        to: part.wmu.Lock
+      - bind: appended, freed, failed
+        eval: m.write(part, partition, records, size)
+        to: m.write
+      - eval: part.wmu.Unlock()
+        to: part.wmu.Unlock
+      - eval: m.release(freed, failed != nil, size)
+        to: m.release
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, failed
+          when: failed != nil
+      - eval: m.wake.fire()
+        to: m.wake.fire
+      - return: appended, nil
+  - of: (*fileStream).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).write
+        kind: self
+      - id: part.next
+        kind: internal
+      - id: m.stamp
+        kind: internal
+      - id: encodeRecord
+        kind: internal
+      - id: recordBytes
+        kind: internal
+      - id: part.log.Append
+        kind: value
+      - id: backendFailed
+        kind: internal
+      - id: part.mu.RLock
+        kind: value
+      - id: part.first
+        kind: internal
+      - id: part.bounded
+        kind: internal
+      - id: part.mu.RUnlock
+        kind: value
+      - id: m.syncBatch
+        kind: internal
+      - id: part.mu.Lock
+        kind: value
+      - id: part.index
+        kind: internal
+      - id: part.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: appended, 0, part.broken
+          when: part.broken != nil
+      - bind: first
+        eval: part.next()
+        to: part.next
+      - bind: stamp
+        eval: m.stamp()
+        to: m.stamp
+      - bind: sizes
+        eval: make([]int64, len(records))
+      - loop:
+          do:
+            - bind: kind
+              eval: kindTail
+            - opt:
+                do:
+                  - set: kind
+                    value: kindHead
+                when: i == 0
+            - set: part.scratch
+              to: encodeRecord
+              value: encodeRecord(part.scratch[:0], stamp, record)
+            - set: sizes[i]
+              to: recordBytes
+              value: recordBytes(record)
+            - opt:
+                do:
+                  - set: part.broken
+                    to: backendFailed
+                    value: backendFailed("append", "", appendErr)
+                  - return: appended, 0, part.broken
+                init:
+                  bind: appendErr
+                  eval: part.log.Append(uint64(first)+uint64(i), kind, part.scratch)
+                  to: part.log.Append
+                when: appendErr != nil
+          key: i
+          range: records
+          value: record
+      - eval: part.mu.RLock()
+        to: part.mu.RLock
+      - bind: claim
+        eval: part.first(timeOf(stamp), m.policy.RetainFor)
+        to: part.first
+      - set: claim
+        to: part.bounded
+        value: part.bounded(claim, first, size, m.policy.RetainBytes)
+      - eval: part.mu.RUnlock()
+        to: part.mu.RUnlock
+      - opt:
+          do:
+            - set: part.broken
+              to: backendFailed
+              value: backendFailed("sync", "", syncErr)
+            - return: appended, 0, part.broken
+          init:
+            bind: syncErr
+            eval: m.syncBatch(part, claim)
+            to: m.syncBatch
+          when: syncErr != nil
+      - eval: part.mu.Lock()
+        to: part.mu.Lock
+      - set: freed
+        to: part.index
+        value: part.index(stamp, sizes, claim)
+      - eval: part.mu.Unlock()
+        to: part.mu.Unlock
+      - return: |-
+          corestream.AppendValue{
+          		Partition: partition,
+          		First:     first,
+          		Last:      first + corestream.Offset(len(records)-1),
+          	}, freed, nil
+  - of: (*fileStream).syncBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).syncBatch
+        kind: self
+      - id: part.log.Bounds
+        kind: value
+      - id: part.log.DropBefore
+        kind: value
+      - id: part.log.Sync
+        kind: value
+    steps:
+      - bind: first, _
+        eval: part.log.Bounds()
+        to: part.log.Bounds
+      - opt:
+          do:
+            - return: part.log.DropBefore(uint64(claim))
+              to: part.log.DropBefore
+          when: uint64(claim) > first
+      - return: part.log.Sync()
+        to: part.log.Sync
+  - of: (*fileStream).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).release
+        kind: self
+      - id: m.mu.Lock
+        kind: value
+      - id: m.mu.Unlock
+        kind: value
+      - id: m.room.fire
+        kind: internal
+    steps:
+      - eval: m.mu.Lock()
+        to: m.mu.Lock
+      - op: "-="
+        set: m.held
+        value: freed
+      - opt:
+          do:
+            - op: "-="
+              set: m.held
+              value: size
+          when: failed
+      - eval: m.mu.Unlock()
+        to: m.mu.Unlock
+      - opt:
+          do:
+            - eval: m.room.fire()
+              to: m.room.fire
+          when: freed > 0 || failed
+  - of: (*fileStream).stamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).stamp
+        kind: self
+      - id: m.clk.Now().UnixNano
+        kind: value
+    steps:
+      - lock:
+          mutex: m.mu
+      - bind: now
+        eval: m.clk.Now().UnixNano()
+        to: m.clk.Now().UnixNano
+      - set: m.last
+        value: max(m.last, now)
+      - return: m.last
+  - of: timeOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeOf
+        kind: self
+      - id: time.Unix(0, stamp).UTC
+        kind: value
+    steps:
+      - return: time.Unix(0, stamp).UTC()
+        to: time.Unix(0, stamp).UTC
+  - of: (*fileStream).usable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).usable
+        kind: self
+      - id: backendFailed
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - opt:
+          do:
+            - return: backendFailed("closed", "", seglog.Closed)
+              to: backendFailed
+          when: m.closed
+      - return: nil
+  - of: (*fileStream).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Close
+        kind: self
+      - id: m.mu.Lock
+        kind: value
+      - id: m.mu.Unlock
+        kind: value
+      - id: firstError
+        kind: internal
+    steps:
+      - eval: m.mu.Lock()
+        to: m.mu.Lock
+      - opt:
+          do:
+            - eval: m.mu.Unlock()
+              to: m.mu.Unlock
+            - return: nil
+          when: m.closed
+      - set: m.closed
+        value: "true"
+      - eval: m.mu.Unlock()
+        to: m.mu.Unlock
+      - return: firstError(m.closeParts(), m.closeCursors(), m.releaseLock())
+        to: firstError
+  - of: (*fileStream).closeParts
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).closeParts
+        kind: self
+      - id: part.wmu.Lock
+        kind: value
+      - id: part.log.Close
+        kind: value
+      - id: part.wmu.Unlock
+        kind: value
+      - id: backendFailed
+        kind: internal
+    steps:
+      - var:
+          name: first
+          type: error
+      - loop:
+          do:
+            - eval: part.wmu.Lock()
+              to: part.wmu.Lock
+            - bind: closeErr
+              eval: part.log.Close()
+              to: part.log.Close
+            - eval: part.wmu.Unlock()
+              to: part.wmu.Unlock
+            - opt:
+                do:
+                  - set: first
+                    to: backendFailed
+                    value: backendFailed("close", "", closeErr)
+                when: closeErr != nil && first == nil
+          key: _
+          range: m.parts
+          value: part
+      - return: first
+  - of: (*fileStream).closeCursors
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).closeCursors
+        kind: self
+      - id: closer.Close
+        kind: value
+      - id: backendFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: backendFailed("close", cursorsDir, closeErr)
+                    to: backendFailed
+                init:
+                  bind: closeErr
+                  eval: closer.Close()
+                  to: closer.Close
+                when: closeErr != nil
+          init:
+            bind: closer, ok
+            eval: m.cursors.(io.Closer)
+          when: ok
+      - return: nil
+  - of: (*fileStream).releaseLock
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).releaseLock
+        kind: self
+      - id: flock
+        kind: package
+      - id: m.lock.Close
+        kind: value
+      - id: backendFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: m.lock == nil
+      - bind: unlockErr
+        eval: flock.Unlock(m.lock)
+        to: flock
+      - bind: closeErr
+        eval: m.lock.Close()
+        to: m.lock.Close
+      - opt:
+          do:
+            - return: backendFailed("unlock", lockName, unlockErr)
+              to: backendFailed
+          when: unlockErr != nil
+      - opt:
+          do:
+            - return: backendFailed("close", lockName, closeErr)
+              to: backendFailed
+          when: closeErr != nil
+      - return: nil
+  - of: cursorName
+    participants:
+      - id: caller
+        kind: actor
+      - id: cursorName
+        kind: self
+      - id: sha256
+        kind: stdlib
+    steps:
+      - bind: digest
+        eval: sha256.Sum256([]byte(group))
+        to: sha256
+      - return: hex.EncodeToString(digest[:16]) + "." + strconv.Itoa(partition)
+  - of: encodeCursor
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeCursor
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - bind: out
+        eval: binary.LittleEndian.AppendUint64(make([]byte, 0, 8+len(group)), uint64(next))
+        to: binary.LittleEndian.AppendUint64
+      - return: append(out, group...)
+  - of: (*fileStream).Commit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Commit
+        kind: self
+      - id: misconfigured
+        kind: internal
+      - id: m.checkPartition
+        kind: internal
+      - id: m.usable
+        kind: internal
+      - id: part.mu.RLock
+        kind: value
+      - id: part.next
+        kind: internal
+      - id: part.mu.RUnlock
+        kind: value
+      - id: offsetAhead
+        kind: internal
+      - id: cursorName
+        kind: internal
+      - id: m.cursors.WriteAtomic
+        kind: value
+      - id: backendFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("group")
+              to: misconfigured
+          when: group == ""
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: closed
+          init:
+            bind: closed
+            eval: m.usable()
+            to: m.usable
+          when: closed != nil
+      - bind: part
+        eval: m.parts[partition]
+      - eval: part.mu.RLock()
+        to: part.mu.RLock
+      - bind: head
+        eval: part.next()
+        to: part.next
+      - eval: part.mu.RUnlock()
+        to: part.mu.RUnlock
+      - opt:
+          do:
+            - return: offsetAhead(next, head)
+              to: offsetAhead
+          when: next > head
+      - bind: name
+        eval: cursorName(group, partition)
+        to: cursorName
+      - opt:
+          do:
+            - return: backendFailed("commit", name, err)
+              to: backendFailed
+          init:
+            bind: err
+            eval: m.cursors.WriteAtomic(name, encodeCursor(group, next), fileMode)
+            to: m.cursors.WriteAtomic
+          when: err != nil
+      - return: nil
+  - of: (*fileStream).Committed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Committed
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.usable
+        kind: internal
+      - id: cursorName
+        kind: internal
+      - id: fs
+        kind: stdlib
+      - id: corestream
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: 0, misconfigured("group")
+          when: group == ""
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: 0, closed
+          init:
+            bind: closed
+            eval: m.usable()
+            to: m.usable
+          when: closed != nil
+      - bind: name
+        eval: cursorName(group, partition)
+        to: cursorName
+      - bind: data, err
+        eval: fs.ReadFile(m.cursors, name)
+        to: fs
+      - opt:
+          do:
+            - return: 0, unknownGroup(group, partition)
+          when: errors.Is(err, fs.ErrNotExist)
+      - opt:
+          do:
+            - return: 0, backendFailed("committed", name, err)
+          when: err != nil
+      - opt:
+          do:
+            - return: 0, backendFailed("cursor", name, nil)
+          when: len(data) < 8 || !bytes.Equal(data[8:], []byte(group))
+      - return: corestream.Offset(binary.LittleEndian.Uint64(data)), nil
+        to: corestream
+  - of: (*fileStream).Compact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Compact
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.usable
+        kind: internal
+      - id: part.wmu.Lock
+        kind: value
+      - id: m.compactPart
+        kind: internal
+      - id: part.wmu.Unlock
+        kind: value
+      - id: m.release
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, closed
+          init:
+            bind: closed
+            eval: m.usable()
+            to: m.usable
+          when: closed != nil
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, nil
+          when: m.policy.CompactAfter == 0
+      - bind: part
+        eval: m.parts[partition]
+      - eval: part.wmu.Lock()
+        to: part.wmu.Lock
+      - bind: value, freed, err
+        eval: m.compactPart(part)
+        to: m.compactPart
+      - eval: part.wmu.Unlock()
+        to: part.wmu.Unlock
+      - eval: m.release(freed, false, 0)
+        to: m.release
+      - return: value, err
+  - of: (*fileStream).compactPart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).compactPart
+        kind: self
+      - id: m.clk.Now
+        kind: value
+      - id: compactLinesAt
+        kind: internal
+      - id: part.mu.Lock
+        kind: value
+      - id: part.claim
+        kind: internal
+      - id: part.mu.Unlock
+        kind: value
+      - id: m.planCompaction
+        kind: internal
+      - id: decodeStored
+        kind: internal
+      - id: corestream
+        kind: package
+      - id: timeOf
+        kind: internal
+      - id: part.log.Rewrite
+        kind: value
+      - id: backendFailed
+        kind: internal
+      - id: part.forget
+        kind: internal
+      - id: compactResult
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, 0, part.broken
+          when: part.broken != nil
+      - bind: now
+        eval: m.clk.Now()
+        to: m.clk.Now
+      - bind: lines
+        eval: compactLinesAt(now, m.policy.CompactAfter)
+        to: compactLinesAt
+      - eval: part.mu.Lock()
+        to: part.mu.Lock
+      - bind: freed
+        eval: part.claim(part.first(now, m.policy.RetainFor))
+        to: part.claim
+      - bind: lo, line
+        eval: part.kept, part.youngFrom(lines)
+      - eval: part.mu.Unlock()
+        to: part.mu.Unlock
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, freed, nil
+          when: line <= lo
+      - bind: last, scanned, err
+        eval: m.planCompaction(part, lo, line)
+        to: m.planCompaction
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, freed, err
+          when: err != nil
+      - var:
+          name: dropped
+          type: "[]corestream.Offset"
+      - bind: edit
+        eval:
+          closure:
+            params: index uint64, kind uint8, payload []byte
+            results: uint8, []byte, bool
+            steps:
+              - bind: stamp, record, gone, ok
+                eval: decodeStored(payload)
+                to: decodeStored
+              - bind: offset
+                eval: corestream.Offset(index)
+                to: corestream
+              - opt:
+                  do:
+                    - return: kind, nil, false
+                  when: offset < lo || gone || !ok
+              - bind: at
+                eval: timeOf(stamp)
+                to: timeOf
+              - bind: held, keyed
+                eval: last[string(record.Key)]
+              - opt:
+                  do:
+                    - return: kind, nil, false
+                  when: "!lines.drops(record, at, keyed && held == offset)"
+              - set: dropped
+                value: append(dropped, offset)
+              - return: kind, encodeGone(nil, stamp), true
+      - opt:
+          do:
+            - set: part.broken
+              to: backendFailed
+              value: backendFailed("compact", "", rewriteErr)
+            - return: corestream.CompactValue{}, freed, part.broken
+          init:
+            bind: _, rewriteErr
+            eval: part.log.Rewrite(uint64(line), edit)
+            to: part.log.Rewrite
+          when: rewriteErr != nil
+      - eval: part.mu.Lock()
+        to: part.mu.Lock
+      - op: +=
+        set: freed
+        to: part.forget
+        value: part.forget(dropped)
+      - eval: part.mu.Unlock()
+        to: part.mu.Unlock
+      - return: compactResult(scanned, int64(len(dropped))), freed, nil
+        to: compactResult
+  - of: (*fileStream).planCompaction
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).planCompaction
+        kind: self
+      - id: part.log.Range
+        kind: value
+      - id: decodeStored
+        kind: internal
+      - id: noteLast
+        kind: internal
+    steps:
+      - set: last
+        value: lastOfKey{}
+      - var:
+          name: dst
+          type: "[][]byte"
+      - loop:
+          cond: from < line
+          do:
+            - bind: hi
+              eval: min(from+rebuildChunk, line)
+            - set: dst, err
+              to: part.log.Range
+              value: part.log.Range(uint64(from), uint64(hi), math.MaxInt, dst[:0])
+            - opt:
+                do:
+                  - return: nil, 0, backendFailed("compact", "", err)
+                when: err != nil
+            - loop:
+                do:
+                  - bind: _, record, gone, ok
+                    eval: decodeStored(payload)
+                    to: decodeStored
+                  - opt:
+                      do:
+                        - return: nil, 0, backendFailed("decode", "", nil)
+                      when: "!ok"
+                  - opt:
+                      do:
+                        - continue: true
+                      when: gone
+                  - op: ++
+                    set: scanned
+                  - eval: noteLast(last, record.Key, from+corestream.Offset(i))
+                    to: noteLast
+                key: i
+                range: dst
+                value: payload
+          init: from := lo
+          post: from += rebuildChunk
+      - return: last, scanned, nil
+  - of: (*filePart).youngFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).youngFrom
+        kind: self
+      - id: sort
+        kind: stdlib
+      - id: p.next
+        kind: internal
+    steps:
+      - bind: young
+        eval: |-
+          sort.Search(len(p.batches), func(i int) bool {
+          		//: younger than the line.
+          		return !lines.compactable(time.Unix(0, p.batches[i].stamp))
+          	})
+        to: sort
+      - opt:
+          do:
+            - return: p.next()
+              to: p.next
+          when: young == len(p.batches)
+      - return: max(p.batches[young].first, p.kept)
+  - of: prepareRoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepareRoot
+        kind: self
+      - id: errs
+        kind: package
+      - id: os
+        kind: stdlib
+      - id: directoryUnusable
+        kind: internal
+      - id: backendFailed
+        kind: internal
+      - id: rootUnusableBecause
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corestream.StreamDirectoryUnusable, errs.WrapParams{}, errs.String("field", "Dir"))
+              to: errs
+          when: dir == ""
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: directoryUnusable(dir, "not-a-directory", "")
+                    to: directoryUnusable
+                init:
+                  bind: info, statErr
+                  eval: os.Stat(dir)
+                  to: os
+                when: statErr == nil && !info.IsDir()
+            - return: backendFailed("mkdir", dir, mkErr)
+              to: backendFailed
+          init:
+            bind: mkErr
+            eval: os.MkdirAll(dir, streamDirMode)
+            to: os
+          when: mkErr != nil
+      - bind: info, statErr
+        eval: os.Stat(dir)
+        to: os
+      - opt:
+          do:
+            - return: backendFailed("stat", dir, statErr)
+              to: backendFailed
+          when: statErr != nil
+      - bind: why, observed, unusable
+        eval: rootUnusableBecause(dir, info)
+        to: rootUnusableBecause
+      - opt:
+          do:
+            - return: nil
+          when: "!unusable"
+      - return: directoryUnusable(dir, why, observed)
+        to: directoryUnusable
+  - of: prepareSub
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepareSub
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: subUnusableBecause
+        kind: internal
+    steps:
+      - bind: sub
+        eval: filepath.Join(dir, name)
+        to: filepath
+      - opt:
+          do:
+            - return: "\"\", backendFailed(\"mkdir\", sub, mkErr)"
+          init:
+            bind: mkErr
+            eval: os.Mkdir(sub, streamDirMode)
+            to: os
+          when: mkErr != nil && !os.IsExist(mkErr)
+      - bind: info, statErr
+        eval: os.Lstat(sub)
+        to: os
+      - opt:
+          do:
+            - return: "\"\", backendFailed(\"lstat\", sub, statErr)"
+          when: statErr != nil
+      - bind: why, observed, unusable
+        eval: subUnusableBecause(sub, info)
+        to: subUnusableBecause
+      - opt:
+          do:
+            - return: sub, nil
+          when: "!unusable"
+      - return: "\"\", directoryUnusable(sub, why, observed)"
+  - of: rootUnusableBecause
+    participants:
+      - id: caller
+        kind: actor
+      - id: rootUnusableBecause
+        kind: self
+      - id: indirectionOrFile
+        kind: internal
+      - id: rootWritableByAnyone
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: why, "", true
+          init:
+            bind: why, unusable
+            eval: indirectionOrFile(info)
+            op: =
+            to: indirectionOrFile
+          when: unusable
+      - return: rootWritableByAnyone(dir, info)
+        to: rootWritableByAnyone
+  - of: subUnusableBecause
+    participants:
+      - id: caller
+        kind: actor
+      - id: subUnusableBecause
+        kind: self
+      - id: indirectionOrFile
+        kind: internal
+      - id: subWritableByAnyone
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: why, "", true
+          init:
+            bind: why, unusable
+            eval: indirectionOrFile(info)
+            op: =
+            to: indirectionOrFile
+          when: unusable
+      - return: subWritableByAnyone(dir, info)
+        to: subWritableByAnyone
+  - of: indirectionOrFile
+    steps:
+      - opt:
+          do:
+            - return: "\"symlink\", true"
+          when: info.Mode()&fs.ModeSymlink != 0 || reparsePoint(info)
+      - opt:
+          do:
+            - return: "\"not-a-directory\", true"
+          when: "!info.IsDir()"
+      - return: "\"\", false"
+  - of: directoryUnusable
+    participants:
+      - id: caller
+        kind: actor
+      - id: directoryUnusable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: fields
+        eval: "[]errs.FieldValue{errs.String(\"field\", \"Dir\"), errs.String(\"value\", value), errs.String(\"why\", why)}"
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.String("observed", observed))
+          when: observed != ""
+      - return: errs.Wrap(corestream.StreamDirectoryUnusable, errs.WrapParams{}, fields...)
+        to: errs
+  - of: backendFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: backendFailed
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, corestream.StreamBackendFailed.Params(),
+          		errs.String("op", op), errs.String("path", path))
+        to: errs
+  - of: (*filePart).next
+    steps:
+      - return: p.base + corestream.Offset(len(p.prefix)-1)
+  - of: (*filePart).lastBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).lastBatch
+        kind: self
+      - id: p.next
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: p.next()
+              to: p.next
+          when: len(p.batches) == 0
+      - return: p.batches[len(p.batches)-1].first
+  - of: (*filePart).between
+    steps:
+      - return: p.prefix[hi-p.base] - p.prefix[lo-p.base]
+  - of: (*filePart).first
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).first
+        kind: self
+      - id: sort
+        kind: stdlib
+      - id: p.next
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: p.kept
+          when: retainFor == 0
+      - bind: young
+        eval: |-
+          sort.Search(len(p.batches), func(i int) bool {
+          		//: younger than the bound: kept.
+          		return now.Sub(time.Unix(0, p.batches[i].stamp)) < retainFor
+          	})
+        to: sort
+      - opt:
+          do:
+            - return: p.next()
+              to: p.next
+          when: young == len(p.batches)
+      - return: max(p.batches[young].first, p.kept)
+  - of: (*filePart).bounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).bounded
+        kind: self
+      - id: p.next
+        kind: internal
+      - id: sort
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: lo
+          when: retainBytes == 0 || limit <= lo
+      - bind: head
+        eval: p.next()
+        to: p.next
+      - bind: cut
+        eval: |-
+          sort.Search(int(limit-lo), func(i int) bool {
+          		//: the suffix from lo+i, and the size to come, fits.
+          		return p.between(lo+corestream.Offset(i), head)+size <= retainBytes
+          	})
+        to: sort
+      - return: lo + corestream.Offset(cut)
+  - of: (*filePart).index
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).index
+        kind: self
+      - id: p.claim
+        kind: internal
+    steps:
+      - set: p.batches
+        value: "append(p.batches, batchMark{first: p.next(), stamp: stamp})"
+      - bind: total
+        eval: p.prefix[len(p.prefix)-1]
+      - loop:
+          do:
+            - op: +=
+              set: total
+              value: size
+            - set: p.prefix
+              value: append(p.prefix, total)
+          key: _
+          range: sizes
+          value: size
+      - return: p.claim(claim)
+        to: p.claim
+  - of: (*filePart).claim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).claim
+        kind: self
+      - id: p.between
+        kind: internal
+      - id: p.forgetBelow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: to <= p.kept
+      - bind: freed
+        eval: p.between(p.kept, to)
+        to: p.between
+      - set: p.kept
+        value: to
+      - eval: p.forgetBelow()
+        to: p.forgetBelow
+      - return: freed
+  - of: (*filePart).forgetBelow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).forgetBelow
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: sort
+        kind: stdlib
+    steps:
+      - bind: drop
+        eval: int(p.kept - p.base)
+      - opt:
+          do:
+            - return: ""
+          when: drop < forgetAfter
+      - set: p.prefix
+        to: slices
+        value: slices.Clone(p.prefix[drop:])
+      - set: p.base
+        value: p.kept
+      - bind: keep
+        eval: |-
+          sort.Search(len(p.batches), func(i int) bool {
+          		//: the first batch starting past the new base.
+          		return p.batches[i].first > p.base
+          	})
+        to: sort
+      - set: p.batches
+        to: slices
+        value: slices.Clone(p.batches[max(keep-1, 0):])
+  - of: (*filePart).offsetAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).offsetAt
+        kind: self
+      - id: sort
+        kind: stdlib
+      - id: p.next
+        kind: internal
+    steps:
+      - bind: found
+        eval: |-
+          sort.Search(len(p.batches), func(i int) bool {
+          		//: at or after t.
+          		return !time.Unix(0, p.batches[i].stamp).Before(t)
+          	})
+        to: sort
+      - opt:
+          do:
+            - return: p.next()
+              to: p.next
+          when: found == len(p.batches)
+      - return: max(p.batches[found].first, from)
+  - of: (*filePart).oldestStamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).oldestStamp
+        kind: self
+      - id: sort
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: from >= p.next()
+      - bind: holding
+        eval: |-
+          sort.Search(len(p.batches), func(i int) bool {
+          		//: the first batch starting past from.
+          		return p.batches[i].first > from
+          	})
+        to: sort
+      - return: p.batches[holding-1].stamp, true
+  - of: (*filePart).rebuild
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).rebuild
+        kind: self
+      - id: p.log.Bounds
+        kind: value
+      - id: p.log.Range
+        kind: value
+      - id: decodeStored
+        kind: internal
+      - id: p.log.Kind
+        kind: value
+    steps:
+      - bind: first, next
+        eval: p.log.Bounds()
+        to: p.log.Bounds
+      - set: p.base, p.kept
+        value: corestream.Offset(first), corestream.Offset(first)
+      - set: p.prefix
+        value: append(make([]int64, 0, next-first+1), 0)
+      - var:
+          name: dst
+          type: "[][]byte"
+      - loop:
+          cond: lo < next
+          do:
+            - bind: hi
+              eval: min(lo+rebuildChunk, next)
+            - set: dst, err
+              to: p.log.Range
+              value: p.log.Range(lo, hi, math.MaxInt, dst[:0])
+            - opt:
+                do:
+                  - return: 0, backendFailed("rebuild", "", err)
+                when: err != nil
+            - loop:
+                do:
+                  - bind: stamp, record, _, ok
+                    eval: decodeStored(payload)
+                    to: decodeStored
+                  - opt:
+                      do:
+                        - return: 0, backendFailed("decode", "", nil)
+                      when: "!ok"
+                  - bind: index
+                    eval: lo + uint64(i)
+                  - bind: kind, kindErr
+                    eval: p.log.Kind(index)
+                    to: p.log.Kind
+                  - opt:
+                      do:
+                        - return: 0, backendFailed("rebuild", "", kindErr)
+                      when: kindErr != nil
+                  - opt:
+                      do:
+                        - set: p.batches
+                          value: "append(p.batches, batchMark{first: corestream.Offset(index), stamp: stamp})"
+                        - set: latest
+                          value: max(latest, stamp)
+                      when: kind == kindHead || index == first
+                  - set: p.prefix
+                    value: append(p.prefix, p.prefix[len(p.prefix)-1]+recordBytes(record))
+                key: i
+                range: dst
+                value: payload
+          init: lo := first
+          post: lo += rebuildChunk
+      - return: latest, nil
+  - of: (*filePart).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*filePart).forget
+        kind: self
+      - id: sort
+        kind: stdlib
+    steps:
+      - bind: first
+        eval: |-
+          sort.Search(len(dropped), func(i int) bool {
+          		//: still counted.
+          		return dropped[i] >= p.kept
+          	})
+        to: sort
+      - set: dropped
+        value: dropped[first:]
+      - opt:
+          do:
+            - return: "0"
+          when: len(dropped) == 0
+      - var:
+          name: freed
+          type: int64
+      - bind: next
+        eval: "0"
+      - loop:
+          cond: i < len(p.prefix)-1
+          do:
+            - bind: size
+              eval: p.prefix[i+1] - (p.prefix[i] + freed)
+            - opt:
+                do:
+                  - op: +=
+                    set: freed
+                    value: size
+                  - op: ++
+                    set: next
+                when: next < len(dropped) && dropped[next] == p.base+corestream.Offset(i)
+            - op: "-="
+              set: p.prefix[i+1]
+              value: freed
+          init: i := int(dropped[0] - p.base)
+          post: i++
+      - return: freed
+  - of: (*fileStream).checkPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).checkPartition
+        kind: self
+      - id: unknownPartition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: unknownPartition(partition, len(m.parts))
+              to: unknownPartition
+          when: partition < 0 || partition >= len(m.parts)
+      - return: nil
+  - of: (*fileStream).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Read
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.usable
+        kind: internal
+      - id: part.mu.RLock
+        kind: value
+      - id: part.mu.RUnlock
+        kind: value
+      - id: m.readFrom
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: nil, invalidBatchSize("max", maxEntries)
+          when: maxEntries <= 0
+      - opt:
+          do:
+            - return: nil, closed
+          init:
+            bind: closed
+            eval: m.usable()
+            to: m.usable
+          when: closed != nil
+      - bind: part
+        eval: m.parts[partition]
+      - eval: part.mu.RLock()
+        to: part.mu.RLock
+      - bind: first, next
+        eval: part.first(m.clk.Now(), m.policy.RetainFor), part.next()
+      - eval: part.mu.RUnlock()
+        to: part.mu.RUnlock
+      - opt:
+          do:
+            - return: nil, offsetTrimmed(from, first)
+          when: from < first
+      - opt:
+          do:
+            - return: nil, offsetAhead(from, next)
+          when: from > next
+      - return: m.readFrom(part, partition, from, next, maxEntries)
+        to: m.readFrom
+  - of: (*fileStream).readFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).readFrom
+        kind: self
+      - id: part.log.Range
+        kind: value
+      - id: appendEntries
+        kind: internal
+    steps:
+      - var:
+          name: entries
+          type: "[]corestream.EntryValue"
+      - loop:
+          cond: len(entries) < maxEntries && cursor < next
+          do:
+            - bind: hi
+              eval: cursor + corestream.Offset(min(uint64(maxEntries-len(entries)), uint64(next-cursor)))
+            - bind: payloads, err
+              eval: part.log.Range(uint64(cursor), uint64(hi), math.MaxInt, make([][]byte, 0, hi-cursor))
+              to: part.log.Range
+            - opt:
+                do:
+                  - return: nil, offsetTrimmed(from, m.firstOf(part))
+                when: errs.HasCode(err, seglog.CodeDropped)
+            - opt:
+                do:
+                  - return: nil, backendFailed("read", "", err)
+                when: err != nil
+            - opt:
+                do:
+                  - set: entries
+                    value: make([]corestream.EntryValue, 0, len(payloads))
+                when: entries == nil
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: entries, err
+                  eval: appendEntries(entries, partition, cursor, payloads)
+                  op: =
+                  to: appendEntries
+                when: err != nil
+            - set: cursor
+              value: hi
+          init: cursor := from
+      - return: entries, nil
+  - of: (*fileStream).firstOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).firstOf
+        kind: self
+      - id: part.first
+        kind: internal
+    steps:
+      - lock:
+          mutex: part.mu
+          read: true
+      - return: part.first(m.clk.Now(), m.policy.RetainFor)
+        to: part.first
+  - of: appendEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendEntries
+        kind: self
+      - id: decodeStored
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: stamp, record, gone, ok
+              eval: decodeStored(payload)
+              to: decodeStored
+            - opt:
+                do:
+                  - return: nil, backendFailed("decode", "", nil)
+                when: "!ok"
+            - opt:
+                do:
+                  - continue: true
+                when: gone
+            - set: entries
+              value: |-
+                append(entries, corestream.EntryValue{
+                			AppendedAt: timeOf(stamp),
+                			Record:     record,
+                			Partition:  partition,
+                			Offset:     from + corestream.Offset(i),
+                		})
+          key: i
+          range: payloads
+          value: payload
+      - return: entries, nil
+  - of: (*fileStream).Bounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Bounds
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - bind: part
+        eval: m.parts[partition]
+      - lock:
+          mutex: part.mu
+          read: true
+      - return: "corestream.BoundsValue{First: part.first(m.clk.Now(), m.policy.RetainFor), Next: part.next()}, nil"
+  - of: (*fileStream).OffsetAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).OffsetAt
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: part.offsetAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - bind: part
+        eval: m.parts[partition]
+      - lock:
+          mutex: part.mu
+          read: true
+      - return: part.offsetAt(part.first(m.clk.Now(), m.policy.RetainFor), t), nil
+        to: part.offsetAt
+  - of: (*fileStream).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Wake
+        kind: self
+      - id: m.wake.current
+        kind: internal
+    steps:
+      - return: m.wake.current()
+        to: m.wake.current
+  - of: encodeRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeRecord
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: binary
+        kind: stdlib
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, uint64(stamp))
+      - set: dst
+        to: binary
+        value: binary.AppendUvarint(dst, uint64(len(record.Key)))
+      - set: dst
+        value: append(dst, record.Key...)
+      - return: append(dst, record.Payload...)
+  - of: encodeGone
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeGone
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - return: binary.LittleEndian.AppendUint64(dst, uint64(stamp))
+        to: binary.LittleEndian.AppendUint64
+  - of: isGone
+    steps:
+      - return: len(payload) == stampBytes
+  - of: decodeStored
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStored
+        kind: self
+      - id: decodeRecord
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: int64(binary.LittleEndian.Uint64(payload)), corestream.RecordValue{}, true, true
+          when: isGone(payload)
+      - set: stamp, record, ok
+        to: decodeRecord
+        value: decodeRecord(payload)
+      - return: stamp, record, false, ok
+  - of: decodeRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeRecord
+        kind: self
+      - id: binary
+        kind: stdlib
+      - id: capped
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, corestream.RecordValue{}, false
+          when: len(payload) < stampBytes
+      - set: stamp
+        value: int64(binary.LittleEndian.Uint64(payload))
+      - bind: rest
+        eval: payload[stampBytes:]
+      - bind: keyLen, n
+        eval: binary.Uvarint(rest)
+        to: binary
+      - opt:
+          do:
+            - return: 0, corestream.RecordValue{}, false
+          when: n <= 0 || keyLen > uint64(len(rest)-n)
+      - bind: end
+        eval: n + int(keyLen)
+      - set: record.Key
+        to: capped
+        value: capped(rest[n:end])
+      - set: record.Payload
+        to: capped
+        value: capped(rest[end:])
+      - return: stamp, record, true
+  - of: capped
+    participants:
+      - id: caller
+        kind: actor
+      - id: capped
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(b) == 0
+      - return: slices.Clip(b)
+        to: slices
+  - of: (*fileStream).reserve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).reserve
+        kind: self
+      - id: m.mu.Lock
+        kind: value
+      - id: m.tryReserve
+        kind: internal
+      - id: m.mu.Unlock
+        kind: value
+      - id: m.await
+        kind: internal
+    steps:
+      - var:
+          name: deadline
+          type: time.Time
+      - loop:
+          do:
+            - eval: m.mu.Lock()
+              to: m.mu.Lock
+            - bind: turn
+              eval: m.tryReserve(&deadline, size, partition, keyed)
+              to: m.tryReserve
+            - eval: m.mu.Unlock()
+              to: m.mu.Unlock
+            - opt:
+                do:
+                  - return: 0, m.usable()
+                when: turn.closed
+            - opt:
+                do:
+                  - return: turn.partition, turn.err
+                when: turn.done
+            - opt:
+                do:
+                  - return: 0, stopped
+                init:
+                  bind: stopped
+                  eval: m.await(ctx, turn.room, turn.wait)
+                  to: m.await
+                when: stopped != nil
+          forever: true
+  - of: (*fileStream).tryReserve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).tryReserve
+        kind: self
+      - id: m.clk.Now
+        kind: value
+      - id: now.Add
+        kind: value
+      - id: deadline.Sub
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "reservation{closed: true}"
+          when: m.closed
+      - bind: now
+        eval: m.clk.Now()
+        to: m.clk.Now
+      - opt:
+          do:
+            - op: +=
+              set: m.held
+              value: size
+            - opt:
+                do:
+                  - set: partition
+                    value: m.turn
+                  - set: m.turn
+                    value: (m.turn + 1) % len(m.parts)
+                when: "!keyed"
+            - return: "reservation{done: true, partition: partition}"
+          when: m.fits(now, size)
+      - opt:
+          do:
+            - set: "*deadline"
+              to: now.Add
+              value: now.Add(m.policy.BlockTimeout)
+          when: deadline.IsZero()
+      - bind: remaining
+        eval: deadline.Sub(now)
+        to: deadline.Sub
+      - opt:
+          do:
+            - return: "reservation{done: true, err: streamFull(size, m.held, m.policy.MaxBytes)}"
+          when: remaining <= 0 || size > m.policy.MaxBytes
+      - return: "reservation{wait: m.untilExpiry(now, remaining), room: m.room.current()}"
+  - of: (*fileStream).fits
+    steps:
+      - return: m.policy.MaxBytes == 0 || m.expireAll(now)+size <= m.policy.MaxBytes
+  - of: (*fileStream).expireAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).expireAll
+        kind: self
+      - id: part.mu.Lock
+        kind: value
+      - id: part.claim
+        kind: internal
+      - id: part.mu.Unlock
+        kind: value
+    steps:
+      - loop:
+          do:
+            - eval: part.mu.Lock()
+              to: part.mu.Lock
+            - op: "-="
+              set: m.held
+              to: part.claim
+              value: part.claim(part.first(now, m.policy.RetainFor))
+            - eval: part.mu.Unlock()
+              to: part.mu.Unlock
+          key: _
+          range: m.parts
+          value: part
+      - return: m.held
+  - of: (*fileStream).untilExpiry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).untilExpiry
+        kind: self
+      - id: part.mu.RLock
+        kind: value
+      - id: part.oldestStamp
+        kind: internal
+      - id: part.mu.RUnlock
+        kind: value
+      - id: timeOf(stamp).Add(m.policy.RetainFor).Sub
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: limit
+          when: m.policy.RetainFor == 0
+      - bind: wait
+        eval: limit
+      - loop:
+          do:
+            - eval: part.mu.RLock()
+              to: part.mu.RLock
+            - bind: stamp, found
+              eval: part.oldestStamp(part.kept)
+              to: part.oldestStamp
+            - eval: part.mu.RUnlock()
+              to: part.mu.RUnlock
+            - opt:
+                do:
+                  - continue: true
+                when: "!found"
+            - bind: due
+              eval: timeOf(stamp).Add(m.policy.RetainFor).Sub(now)
+              to: timeOf(stamp).Add(m.policy.RetainFor).Sub
+            - opt:
+                do:
+                  - set: wait
+                    value: due
+                when: due > 0 && due < wait
+          key: _
+          range: m.parts
+          value: part
+      - return: wait
+  - of: (*fileStream).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).await
+        kind: self
+      - id: m.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: timer
+        eval: m.clk.NewTimer(wait)
+        to: m.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: context.Cause(ctx)
+                  to: context
+            - comm: <-room
+              do:
+                - return: nil
+            - comm: <-timer.C()
+              do:
+                - return: nil
+  - of: (*fileStream).Trim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).Trim
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.usable
+        kind: internal
+      - id: part.wmu.Lock
+        kind: value
+      - id: m.trim
+        kind: internal
+      - id: part.wmu.Unlock
+        kind: value
+      - id: m.release
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: closed
+          init:
+            bind: closed
+            eval: m.usable()
+            to: m.usable
+          when: closed != nil
+      - bind: part
+        eval: m.parts[partition]
+      - eval: part.wmu.Lock()
+        to: part.wmu.Lock
+      - bind: freed, err
+        eval: m.trim(part, before)
+        to: m.trim
+      - eval: part.wmu.Unlock()
+        to: part.wmu.Unlock
+      - eval: m.release(freed, false, 0)
+        to: m.release
+      - return: err
+  - of: (*fileStream).trim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileStream).trim
+        kind: self
+      - id: part.mu.RLock
+        kind: value
+      - id: part.mu.RUnlock
+        kind: value
+      - id: part.log.DropBefore
+        kind: value
+      - id: backendFailed
+        kind: internal
+      - id: part.mu.Lock
+        kind: value
+      - id: part.claim
+        kind: internal
+      - id: part.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, part.broken
+          when: part.broken != nil
+      - eval: part.mu.RLock()
+        to: part.mu.RLock
+      - bind: first, next
+        eval: part.first(m.clk.Now(), m.policy.RetainFor), part.next()
+      - eval: part.mu.RUnlock()
+        to: part.mu.RUnlock
+      - opt:
+          do:
+            - return: 0, offsetAhead(before, next)
+          when: before > next
+      - opt:
+          do:
+            - return: 0, nil
+          when: before <= first
+      - opt:
+          do:
+            - set: part.broken
+              to: backendFailed
+              value: backendFailed("trim", "", dropErr)
+            - return: 0, part.broken
+          init:
+            bind: dropErr
+            eval: part.log.DropBefore(uint64(before))
+            to: part.log.DropBefore
+          when: dropErr != nil
+      - eval: part.mu.Lock()
+        to: part.mu.Lock
+      - set: freed
+        to: part.claim
+        value: part.claim(before)
+      - eval: part.mu.Unlock()
+        to: part.mu.Unlock
+      - return: freed, nil
+  - of: (*memPartition).next
+    steps:
+      - return: p.nextOffset
+  - of: (*memPartition).index
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memPartition).index
+        kind: self
+      - id: sort
+        kind: stdlib
+    steps:
+      - return: |-
+          sort.Search(len(p.entries), func(i int) bool {
+          		//: at or past offset.
+          		return p.entries[i].Offset >= offset
+          	})
+        to: sort
+  - of: NewMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMemory
+        kind: self
+      - id: cfg.Policy.Validate
+        kind: value
+      - id: cfg.Policy.Normalized
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: cfg.Policy.Validate()
+            to: cfg.Policy.Validate
+          when: invalid != nil
+      - bind: policy
+        eval: cfg.Policy.Normalized()
+        to: cfg.Policy.Normalized
+      - return: |-
+          &memoryStream{
+          		clk:     clockOrSystem(cfg.Clock),
+          		wake:    newWakeSignal(),
+          		room:    newWakeSignal(),
+          		cursors: map[cursorKey]corestream.Offset{},
+          		parts:   make([]memPartition, policy.Partitions),
+          		policy:  policy,
+          	}, nil
+  - of: (*memoryStream).Partitions
+    steps:
+      - return: len(m.parts)
+  - of: (*memoryStream).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Append
+        kind: self
+      - id: admit
+        kind: internal
+      - id: keyedPartition
+        kind: internal
+      - id: m.reserve
+        kind: internal
+      - id: m.mu.Unlock
+        kind: value
+      - id: m.store
+        kind: internal
+      - id: m.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, context.Cause(ctx)
+          when: ctx.Err() != nil
+      - bind: size, refused
+        eval: admit(records, m.policy.MaxRecordBytes)
+        to: admit
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, refused
+          when: refused != nil
+      - bind: partition, keyed, mixed
+        eval: keyedPartition(records, len(m.parts))
+        to: keyedPartition
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, mixed
+          when: mixed != nil
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, full
+          init:
+            bind: full
+            eval: m.reserve(ctx, size)
+            to: m.reserve
+          when: full != nil
+      - defer: m.mu.Unlock()
+        to: m.mu.Unlock
+      - opt:
+          do:
+            - set: partition
+              value: m.turn
+            - set: m.turn
+              value: (m.turn + 1) % len(m.parts)
+          when: "!keyed"
+      - bind: appended
+        eval: m.store(partition, records, size)
+        to: m.store
+      - eval: m.wake.fire()
+        to: m.wake.fire
+      - return: appended, nil
+  - of: (*memoryStream).store
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).store
+        kind: self
+      - id: part.next
+        kind: internal
+      - id: m.stamp
+        kind: internal
+      - id: carve
+        kind: internal
+      - id: corestream
+        kind: package
+      - id: m.retainBytes
+        kind: internal
+    steps:
+      - bind: part
+        eval: "&m.parts[partition]"
+      - bind: first
+        eval: part.next()
+        to: part.next
+      - bind: stamp
+        eval: m.stamp()
+        to: m.stamp
+      - bind: arena
+        eval: make([]byte, 0, size)
+      - loop:
+          do:
+            - leaf: a var of several names, or of no type
+              stmt: var key, payload []byte
+            - set: arena, key
+              to: carve
+              value: carve(arena, record.Key)
+            - set: arena, payload
+              to: carve
+              value: carve(arena, record.Payload)
+            - set: part.entries
+              value: |-
+                append(part.entries, corestream.EntryValue{
+                			AppendedAt: stamp,
+                			Record:     corestream.RecordValue{Key: key, Payload: payload},
+                			Partition:  partition,
+                			Offset:     first + corestream.Offset(i),
+                		})
+          key: i
+          range: records
+          value: record
+      - op: +=
+        set: part.nextOffset
+        to: corestream
+        value: corestream.Offset(len(records))
+      - op: +=
+        set: part.bytes
+        value: size
+      - op: +=
+        set: m.held
+        value: size
+      - eval: m.retainBytes(part, len(records))
+        to: m.retainBytes
+      - return: |-
+          corestream.AppendValue{
+          		Partition: partition,
+          		First:     first,
+          		Last:      first + corestream.Offset(len(records)-1),
+          	}
+  - of: (*memoryStream).stamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).stamp
+        kind: self
+      - id: m.clk.Now
+        kind: value
+    steps:
+      - bind: now
+        eval: m.clk.Now()
+        to: m.clk.Now
+      - opt:
+          do:
+            - set: now
+              value: m.last
+          when: now.Before(m.last)
+      - set: m.last
+        value: now
+      - return: now
+  - of: (*memoryStream).Commit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Commit
+        kind: self
+      - id: misconfigured
+        kind: internal
+      - id: m.checkPartition
+        kind: internal
+      - id: m.parts[partition].next
+        kind: internal
+      - id: offsetAhead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("group")
+              to: misconfigured
+          when: group == ""
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+      - opt:
+          do:
+            - return: offsetAhead(next, head)
+              to: offsetAhead
+          init:
+            bind: head
+            eval: m.parts[partition].next()
+            to: m.parts[partition].next
+          when: next > head
+      - set: "m.cursors[cursorKey{group: group, partition: partition}]"
+        value: next
+      - return: nil
+  - of: (*memoryStream).Committed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Committed
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, misconfigured("group")
+          when: group == ""
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: next, found
+        eval: "m.cursors[cursorKey{group: group, partition: partition}]"
+      - opt:
+          do:
+            - return: 0, unknownGroup(group, partition)
+          when: "!found"
+      - return: next, nil
+  - of: (*memoryStream).Compact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Compact
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.clk.Now
+        kind: value
+      - id: m.drop
+        kind: internal
+      - id: compactLinesAt
+        kind: internal
+      - id: sort
+        kind: stdlib
+      - id: noteLast
+        kind: internal
+      - id: recordBytes
+        kind: internal
+      - id: m.room.fire
+        kind: internal
+      - id: compactResult
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, nil
+          when: m.policy.CompactAfter == 0
+      - lock:
+          mutex: m.mu
+      - bind: now
+        eval: m.clk.Now()
+        to: m.clk.Now
+      - bind: part
+        eval: "&m.parts[partition]"
+      - eval: m.drop(part, m.expired(part, now))
+        to: m.drop
+      - bind: lines
+        eval: compactLinesAt(now, m.policy.CompactAfter)
+        to: compactLinesAt
+      - bind: old
+        eval: |-
+          sort.Search(len(part.entries), func(i int) bool {
+          		//: younger than CompactAfter: never touched.
+          		return !lines.compactable(part.entries[i].AppendedAt)
+          	})
+        to: sort
+      - bind: last
+        eval: make(map[string]int)
+      - loop:
+          do:
+            - eval: noteLast(last, part.entries[i].Record.Key, i)
+              to: noteLast
+          key: i
+          range: old
+      - leaf: a var of several names, or of no type
+        stmt: var dropped, freed int64
+      - bind: kept
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: dropped
+                  - op: +=
+                    set: freed
+                    to: recordBytes
+                    value: recordBytes(entry.Record)
+                  - continue: true
+                when: i < old && lines.drops(entry.Record, entry.AppendedAt, lastOf(last, entry.Record.Key) == i)
+            - set: part.entries[kept]
+              value: entry
+            - op: ++
+              set: kept
+          key: i
+          range: part.entries
+          value: entry
+      - eval: clear(part.entries[kept:])
+      - set: part.entries
+        value: part.entries[:kept]
+      - op: "-="
+        set: part.bytes
+        value: freed
+      - op: "-="
+        set: m.held
+        value: freed
+      - opt:
+          do:
+            - eval: m.room.fire()
+              to: m.room.fire
+          when: dropped > 0
+      - return: compactResult(int64(old), dropped), nil
+        to: compactResult
+  - of: clockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: clk == nil
+      - return: clk
+  - of: (*memoryStream).checkPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).checkPartition
+        kind: self
+      - id: unknownPartition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: unknownPartition(partition, len(m.parts))
+              to: unknownPartition
+          when: partition < 0 || partition >= len(m.parts)
+      - return: nil
+  - of: (*memoryStream).retained
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).retained
+        kind: self
+      - id: m.expired
+        kind: internal
+    steps:
+      - bind: skip
+        eval: m.expired(part, now)
+        to: m.expired
+      - opt:
+          do:
+            - return: part.first, 0
+          when: skip == 0
+      - return: max(part.first, part.entries[skip-1].Offset+1), skip
+  - of: (*memoryStream).expired
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).expired
+        kind: self
+      - id: sort
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: m.policy.RetainFor == 0
+      - return: |-
+          sort.Search(len(part.entries), func(i int) bool {
+          		//: younger than RetainFor: kept.
+          		return now.Sub(part.entries[i].AppendedAt) < m.policy.RetainFor
+          	})
+        to: sort
+  - of: (*memoryStream).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Read
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.retained
+        kind: internal
+      - id: copyEntries
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: nil, invalidBatchSize("max", maxEntries)
+          when: maxEntries <= 0
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: part
+        eval: "&m.parts[partition]"
+      - bind: first, skip
+        eval: m.retained(part, m.clk.Now())
+        to: m.retained
+      - opt:
+          do:
+            - return: nil, offsetTrimmed(from, first)
+          when: from < first
+      - opt:
+          do:
+            - return: nil, offsetAhead(from, part.next())
+          when: from > part.next()
+      - bind: start
+        eval: max(part.index(from), skip)
+      - bind: end
+        eval: min(start+maxEntries, len(part.entries))
+      - return: copyEntries(part.entries[start:end]), nil
+        to: copyEntries
+  - of: (*memoryStream).Bounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Bounds
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.retained
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: part
+        eval: "&m.parts[partition]"
+      - bind: first, _
+        eval: m.retained(part, m.clk.Now())
+        to: m.retained
+      - return: "corestream.BoundsValue{First: first, Next: part.next()}, nil"
+  - of: (*memoryStream).OffsetAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).OffsetAt
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.retained
+        kind: internal
+      - id: sort
+        kind: stdlib
+      - id: part.next
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+          read: true
+      - bind: part
+        eval: "&m.parts[partition]"
+      - bind: _, skip
+        eval: m.retained(part, m.clk.Now())
+        to: m.retained
+      - bind: kept
+        eval: part.entries[skip:]
+      - bind: found
+        eval: |-
+          sort.Search(len(kept), func(i int) bool {
+          		//: at or after t.
+          		return !kept[i].AppendedAt.Before(t)
+          	})
+        to: sort
+      - opt:
+          do:
+            - return: part.next(), nil
+              to: part.next
+          when: found == len(kept)
+      - return: kept[found].Offset, nil
+  - of: (*memoryStream).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Wake
+        kind: self
+      - id: m.wake.current
+        kind: internal
+    steps:
+      - return: m.wake.current()
+        to: m.wake.current
+  - of: (*memoryStream).reserve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).reserve
+        kind: self
+      - id: m.mu.Lock
+        kind: value
+      - id: m.clk.Now
+        kind: value
+      - id: m.expireAll
+        kind: internal
+      - id: now.Add
+        kind: value
+      - id: deadline.Sub
+        kind: value
+      - id: streamFull
+        kind: internal
+      - id: m.mu.Unlock
+        kind: value
+      - id: m.untilExpiry
+        kind: internal
+      - id: m.room.current
+        kind: internal
+      - id: m.await
+        kind: internal
+    steps:
+      - var:
+          name: deadline
+          type: time.Time
+      - loop:
+          do:
+            - eval: m.mu.Lock()
+              to: m.mu.Lock
+            - bind: now
+              eval: m.clk.Now()
+              to: m.clk.Now
+            - eval: m.expireAll(now)
+              to: m.expireAll
+            - opt:
+                do:
+                  - return: nil
+                when: m.policy.MaxBytes == 0 || m.held+size <= m.policy.MaxBytes
+            - opt:
+                do:
+                  - set: deadline
+                    to: now.Add
+                    value: now.Add(m.policy.BlockTimeout)
+                when: deadline.IsZero()
+            - bind: remaining
+              eval: deadline.Sub(now)
+              to: deadline.Sub
+            - opt:
+                do:
+                  - bind: full
+                    eval: streamFull(size, m.held, m.policy.MaxBytes)
+                    to: streamFull
+                  - eval: m.mu.Unlock()
+                    to: m.mu.Unlock
+                  - return: full
+                when: remaining <= 0 || size > m.policy.MaxBytes
+            - bind: wait
+              eval: m.untilExpiry(now, remaining)
+              to: m.untilExpiry
+            - bind: room
+              eval: m.room.current()
+              to: m.room.current
+            - eval: m.mu.Unlock()
+              to: m.mu.Unlock
+            - opt:
+                do:
+                  - return: stopped
+                init:
+                  bind: stopped
+                  eval: m.await(ctx, room, wait)
+                  to: m.await
+                when: stopped != nil
+          forever: true
+  - of: (*memoryStream).untilExpiry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).untilExpiry
+        kind: self
+      - id: m.parts[i].entries[0].AppendedAt.Add(m.policy.RetainFor).Sub
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: limit
+          when: m.policy.RetainFor == 0
+      - bind: wait
+        eval: limit
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: len(m.parts[i].entries) == 0
+            - bind: due
+              eval: m.parts[i].entries[0].AppendedAt.Add(m.policy.RetainFor).Sub(now)
+              to: m.parts[i].entries[0].AppendedAt.Add(m.policy.RetainFor).Sub
+            - opt:
+                do:
+                  - set: wait
+                    value: due
+                when: due > 0 && due < wait
+          key: i
+          range: m.parts
+      - return: wait
+  - of: (*memoryStream).await
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).await
+        kind: self
+      - id: m.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: timer
+        eval: m.clk.NewTimer(wait)
+        to: m.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+              do:
+                - return: context.Cause(ctx)
+                  to: context
+            - comm: <-room
+              do:
+                - return: nil
+            - comm: <-timer.C()
+              do:
+                - return: nil
+  - of: (*memoryStream).expireAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).expireAll
+        kind: self
+      - id: m.drop
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: m.drop(&m.parts[i], m.expired(&m.parts[i], now))
+              to: m.drop
+          key: i
+          range: m.parts
+  - of: (*memoryStream).retainBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).retainBytes
+        kind: self
+      - id: recordBytes
+        kind: internal
+      - id: m.drop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: m.policy.RetainBytes == 0
+      - bind: excess
+        eval: part.bytes - m.policy.RetainBytes
+      - bind: count
+        eval: "0"
+      - loop:
+          cond: count < len(part.entries)-fresh && excess > 0
+          do:
+            - op: "-="
+              set: excess
+              to: recordBytes
+              value: recordBytes(part.entries[count].Record)
+            - op: ++
+              set: count
+      - eval: m.drop(part, count)
+        to: m.drop
+  - of: (*memoryStream).drop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).drop
+        kind: self
+      - id: recordBytes
+        kind: internal
+      - id: m.room.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: count == 0
+      - var:
+          name: freed
+          type: int64
+      - bind: to
+        eval: part.entries[count-1].Offset + 1
+      - loop:
+          do:
+            - op: +=
+              set: freed
+              to: recordBytes
+              value: recordBytes(part.entries[i].Record)
+            - set: part.entries[i]
+              value: corestream.EntryValue{}
+          key: i
+          range: count
+      - set: part.entries
+        value: part.entries[count:]
+      - opt:
+          do:
+            - set: part.entries
+              value: nil
+          when: len(part.entries) == 0
+      - set: part.first
+        value: max(part.first, to)
+      - op: "-="
+        set: part.bytes
+        value: freed
+      - op: "-="
+        set: m.held
+        value: freed
+      - eval: m.room.fire()
+        to: m.room.fire
+  - of: (*memoryStream).Trim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStream).Trim
+        kind: self
+      - id: m.checkPartition
+        kind: internal
+      - id: m.drop
+        kind: internal
+      - id: offsetAhead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: m.checkPartition(partition)
+            to: m.checkPartition
+          when: refused != nil
+      - lock:
+          mutex: m.mu
+      - bind: part
+        eval: "&m.parts[partition]"
+      - eval: m.drop(part, m.expired(part, m.clk.Now()))
+        to: m.drop
+      - opt:
+          do:
+            - return: offsetAhead(before, part.next())
+              to: offsetAhead
+          when: before > part.next()
+      - opt:
+          do:
+            - return: nil
+          when: before <= part.first
+      - eval: m.drop(part, part.index(before))
+        to: m.drop
+      - set: part.first
+        value: before
+      - return: nil
+  - of: NewSQL
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSQL
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: cfg.Policy.Normalized
+        kind: value
+    steps:
+      - bind: parts, invalid
+        eval: cfg.validate()
+        to: cfg.validate
+      - opt:
+          do:
+            - return: nil, invalid
+          when: invalid != nil
+      - bind: policy
+        eval: cfg.Policy.Normalized()
+        to: cfg.Policy.Normalized
+      - return: |-
+          &sqlStream{
+          		tm: cfg.Transactor, clk: sqlClockOrSystem(cfg.Clock), tx: parts,
+          		wake: sqlWakeFor(parts.join, cfg.Table), table: cfg.Table,
+          		swept: make([]atomic.Int64, policy.Partitions), stmts: renderSQLStatements(cfg.Dialect, cfg.Table),
+          		own: sqlOwnTxOptions(cfg.Dialect), policy: policy,
+          	}, nil
+  - of: sqlWakeFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: sqlWakeFor
+        kind: self
+      - id: join.Join
+        kind: value
+      - id: newWakeSignal
+        kind: internal
+    steps:
+      - bind: pool, _
+        eval: join.Join(context.Background())
+        to: join.Join
+      - opt:
+          do:
+            - return: newWakeSignal()
+              to: newWakeSignal
+          when: pool == nil || !reflect.TypeOf(pool).Comparable()
+      - bind: key
+        eval: "sqlStreamKey{pool: pool, table: table}"
+      - lock:
+          mutex: sqlWakes.mu
+      - bind: signal, found
+        eval: sqlWakes.signals[key]
+      - opt:
+          do:
+            - set: signal
+              to: newWakeSignal
+              value: newWakeSignal()
+            - set: sqlWakes.signals[key]
+              value: signal
+          when: "!found"
+      - return: signal
+  - of: sqlOwnTxOptions
+    steps:
+      - opt:
+          do:
+            - return: "coresql.TxOptionsValue{Isolation: stdsql.LevelReadCommitted}"
+          when: dialect == coresql.DialectMySQL
+      - return: coresql.TxOptionsValue{}
+  - of: (*sqlStream).Partitions
+    steps:
+      - return: s.policy.Partitions
+  - of: (*sqlStream).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Append
+        kind: self
+      - id: admit
+        kind: internal
+      - id: keyedPartition
+        kind: internal
+      - id: s.clk.Now
+        kind: value
+      - id: s.run
+        kind: internal
+      - id: s.announce
+        kind: internal
+      - id: s.sweep
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, context.Cause(ctx)
+          when: ctx.Err() != nil
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, refused
+          init:
+            bind: _, refused
+            eval: admit(records, s.policy.MaxRecordBytes)
+            to: admit
+          when: refused != nil
+      - bind: partition, keyed, mixed
+        eval: keyedPartition(records, s.policy.Partitions)
+        to: keyedPartition
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, mixed
+          when: mixed != nil
+      - opt:
+          do:
+            - set: partition
+              value: int((s.turn.Add(1) - 1) % uint64(s.policy.Partitions))
+          when: "!keyed"
+      - bind: now
+        eval: s.clk.Now()
+        to: s.clk.Now
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, misconfigured("Clock")
+          when: "!sqlNameable(now)"
+      - var:
+          name: appended
+          type: corestream.AppendValue
+      - bind: writeErr
+        eval: |-
+          s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+          		var err error
+          		appended, err = s.write(txCtx, ex, partition, records, now.UnixNano())
+          		//: the batch, or nothing.
+          		return err
+          	})
+        to: s.run
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, writeErr
+          when: writeErr != nil
+      - eval: s.announce(ctx)
+        to: s.announce
+      - eval: s.sweep(ctx, partition, now)
+        to: s.sweep
+      - return: appended, nil
+  - of: (*sqlStream).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).write
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, s.failed("lock the head", err)
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, s.stmts.lockHead, int64(partition))
+            to: ex.ExecContext
+          when: err != nil
+      - leaf: a var of several names, or of no type
+        stmt: var next, first, last int64
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, s.failed("read the head", err)
+          init:
+            bind: err
+            eval: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan(&next, &first, &last)
+            to: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+          when: err != nil
+      - bind: stamp
+        eval: max(now, last)
+      - bind: args
+        eval: make([]any, 0, min(len(records), sqlRowsPerStatement)*sqlRecordArgs)
+      - loop:
+          cond: start < len(records)
+          do:
+            - bind: chunk
+              eval: records[start:min(start+sqlRowsPerStatement, len(records))]
+            - set: args
+              value: args[:0]
+            - loop:
+                do:
+                  - set: args
+                    value: append(args, int64(partition), next+int64(start+i), stamp, nullable(record.Key), nullable(record.Payload))
+                key: i
+                range: chunk
+                value: record
+            - opt:
+                do:
+                  - return: corestream.AppendValue{}, s.failed("insert records", err)
+                init:
+                  bind: _, err
+                  eval: ex.ExecContext(ctx, s.stmts.insertFor(len(chunk)), args...)
+                  to: ex.ExecContext
+                when: err != nil
+          init: start := 0
+          post: start += sqlRowsPerStatement
+      - bind: end
+        eval: next + int64(len(records))
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, s.failed("advance the head", err)
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, s.stmts.advance, end, stamp, int64(partition))
+            to: ex.ExecContext
+          when: err != nil
+      - return: |-
+          corestream.AppendValue{
+          		Partition: partition, First: corestream.Offset(next), Last: corestream.Offset(end - 1),
+          	}, nil
+  - of: nullable
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(b) == 0
+      - return: b
+  - of: (*sqlStream).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).run
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: s.tm.Transact
+        kind: value
+    steps:
+      - bind: ex, inTx
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - opt:
+          do:
+            - return: s.tm.Transact(ctx, coresql.TxOptionsValue{}, work)
+              to: s.tm.Transact
+          when: inTx
+      - opt:
+          do:
+            - return: work(ctx, ex)
+          when: "!several"
+      - return: s.tm.Transact(ctx, s.own, work)
+        to: s.tm.Transact
+  - of: (*sqlStream).announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).announce
+        kind: self
+      - id: s.wake.fire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.tx.hold.Defer(ctx, s.wake.fire)
+      - eval: s.wake.fire()
+        to: s.wake.fire
+  - of: (*sqlStream).failed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).failed
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - return: |-
+          errors.Join(
+          		errs.Wrap(corestream.StreamBackendFailed, errs.WrapParams{}, errs.String("op", step), errs.String("table", s.table)),
+          		svcsql.NewWithheld(cause))
+        to: errors
+  - of: sqlNameable
+    steps:
+      - return: "!t.Before(time.Unix(0, 0)) && !t.After(time.Unix(0, math.MaxInt64))"
+  - of: (*sqlStream).cutoff
+    steps:
+      - opt:
+          do:
+            - return: math.MinInt64
+          when: s.policy.RetainFor == 0
+      - return: now.UnixNano() - int64(s.policy.RetainFor)
+  - of: (*sqlStream).Commit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Commit
+        kind: self
+      - id: misconfigured
+        kind: internal
+      - id: s.checkPartition
+        kind: internal
+      - id: s.headNext
+        kind: internal
+      - id: offsetAhead
+        kind: internal
+      - id: sha256
+        kind: stdlib
+      - id: s.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("group")
+              to: misconfigured
+          when: group == ""
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: head, err
+        eval: s.headNext(ctx, partition)
+        to: s.headNext
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: offsetAhead(next, head)
+              to: offsetAhead
+          when: next > head
+      - bind: digest
+        eval: sha256.Sum256([]byte(group))
+        to: sha256
+      - return: |-
+          s.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+          		_, execErr := ex.ExecContext(txCtx, s.stmts.commit, digest[:], int64(partition), int64(next), []byte(group), int64(next))
+          		//: kept, below the first retained offset included: the next Read says so.
+          		if execErr != nil {
+          			//: StreamBackendFailed, the driver's text withheld.
+          			return s.failed("commit a cursor", execErr)
+          		}
+          		//: committed.
+          		return nil
+          	})
+        to: s.run
+  - of: (*sqlStream).headNext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).headNext
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan
+        kind: value
+      - id: corestream
+        kind: package
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - var:
+          name: next
+          type: int64
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan(&next)
+        to: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan
+      - opt:
+          do:
+            - return: 0, nil
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: 0, s.failed("read the head", err)
+          when: err != nil
+      - return: corestream.Offset(next), nil
+        to: corestream
+  - of: (*sqlStream).Committed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Committed
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: sha256
+        kind: stdlib
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.committed, digest[:], int64(partition)).Scan
+        kind: value
+      - id: corestream
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: 0, misconfigured("group")
+          when: group == ""
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: digest
+        eval: sha256.Sum256([]byte(group))
+        to: sha256
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - var:
+          name: next
+          type: int64
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.committed, digest[:], int64(partition)).Scan(&next)
+        to: ex.QueryRowContext(ctx, s.stmts.committed, digest[:], int64(partition)).Scan
+      - opt:
+          do:
+            - return: 0, unknownGroup(group, partition)
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: 0, s.failed("read a cursor", err)
+          when: err != nil
+      - return: corestream.Offset(next), nil
+        to: corestream
+  - of: (*sqlStream).Compact
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Compact
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: s.clk.Now
+        kind: value
+      - id: compactLinesAt
+        kind: internal
+      - id: s.compactable
+        kind: internal
+      - id: planSQLCompaction
+        kind: internal
+      - id: s.deleteCompacted
+        kind: internal
+      - id: compactResult
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, nil
+          when: s.policy.CompactAfter == 0
+      - bind: now
+        eval: s.clk.Now()
+        to: s.clk.Now
+      - bind: lines
+        eval: compactLinesAt(now, s.policy.CompactAfter)
+        to: compactLinesAt
+      - bind: rows, err
+        eval: s.compactable(ctx, partition, now, lines)
+        to: s.compactable
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, err
+          when: err != nil
+      - bind: dropped
+        eval: planSQLCompaction(rows, lines)
+        to: planSQLCompaction
+      - bind: removed, err
+        eval: s.deleteCompacted(ctx, partition, dropped)
+        to: s.deleteCompacted
+      - opt:
+          do:
+            - return: corestream.CompactValue{}, err
+          when: err != nil
+      - return: compactResult(int64(len(rows)), removed), nil
+        to: compactResult
+  - of: (*sqlStream).compactable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).compactable
+        kind: self
+      - id: s.cutoff
+        kind: internal
+      - id: s.boundsAt
+        kind: internal
+      - id: s.compactPage
+        kind: internal
+    steps:
+      - bind: cutoff
+        eval: s.cutoff(now)
+        to: s.cutoff
+      - bind: bounds, err
+        eval: s.boundsAt(ctx, partition, cutoff)
+        to: s.boundsAt
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - var:
+          name: rows
+          type: "[]sqlCompactRow"
+      - loop:
+          do:
+            - bind: page, pageErr
+              eval: s.compactPage(ctx, partition, from, cutoff, lines.old.UnixNano())
+              to: s.compactPage
+            - opt:
+                do:
+                  - return: nil, s.failed("read compactable records", pageErr)
+                when: pageErr != nil
+            - set: rows
+              value: append(rows, page...)
+            - opt:
+                do:
+                  - return: rows, nil
+                when: len(page) < sqlCompactPage
+            - set: from
+              value: page[len(page)-1].offset + 1
+          init: from := int64(bounds.First)
+  - of: (*sqlStream).compactPage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).compactPage
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryContext
+        kind: value
+      - id: scanCompactRow
+        kind: internal
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, s.stmts.compactScan, int64(partition), from, cutoff, line, int64(sqlCompactPage))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: |-
+          func() {
+          		//: the first failure is the one reported.
+          		if closeErr := rows.Close(); closeErr != nil && err == nil {
+          			err = closeErr
+          		}
+          	}()
+      - loop:
+          cond: rows.Next()
+          do:
+            - bind: row, scanErr
+              eval: scanCompactRow(rows)
+              to: scanCompactRow
+            - opt:
+                do:
+                  - return: nil, scanErr
+                when: scanErr != nil
+            - set: page
+              value: append(page, row)
+      - return: page, rows.Err()
+  - of: scanCompactRow
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanCompactRow
+        kind: self
+      - id: rows.Scan
+        kind: internal
+    steps:
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          var (
+          		row   sqlCompactRow
+          		key   []byte
+          		empty stdsql.NullInt64
+          	)
+      - opt:
+          do:
+            - return: sqlCompactRow{}, err
+          init:
+            bind: err
+            eval: rows.Scan(&row.offset, &key, &row.at, &empty)
+            to: rows.Scan
+          when: err != nil
+      - set: row.key, row.tomb
+        value: string(key), empty.Int64 == 1
+      - return: row, nil
+  - of: (*sqlStream).deleteCompacted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).deleteCompacted
+        kind: self
+      - id: s.run
+        kind: internal
+    steps:
+      - var:
+          name: removed
+          type: int64
+      - bind: args
+        eval: make([]any, 0, min(len(dropped), sqlCompactPerDelete)+2)
+      - loop:
+          cond: start < len(dropped)
+          do:
+            - bind: chunk
+              eval: dropped[start:min(start+sqlCompactPerDelete, len(dropped))]
+            - set: args
+              value: append(args[:0], int64(partition), s.cutoff(s.clk.Now()))
+            - loop:
+                do:
+                  - set: args
+                    value: append(args, offset)
+                key: _
+                range: chunk
+                value: offset
+            - bind: err
+              eval: |-
+                s.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+                			result, execErr := ex.ExecContext(txCtx, s.stmts.compactFor(len(chunk)), args...)
+                			//: the statement did not complete.
+                			if execErr != nil {
+                				//: StreamBackendFailed, the driver's text withheld.
+                				return s.failed("delete compacted records", execErr)
+                			}
+                			affected, countErr := result.RowsAffected()
+                			//: a driver that cannot count: the rows asked for.
+                			if countErr != nil {
+                				affected = int64(len(chunk))
+                			}
+                			removed += affected
+                			//: deleted.
+                			return nil
+                		})
+              to: s.run
+            - opt:
+                do:
+                  - return: removed, err
+                when: err != nil
+          init: start := 0
+          post: start += sqlCompactPerDelete
+      - return: removed, nil
+  - of: (*SQLConfig).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLConfig).validate
+        kind: self
+      - id: c.Policy.Validate
+        kind: value
+      - id: validateSQLNames
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sqlParts{}, invalid
+          init:
+            bind: invalid
+            eval: c.Policy.Validate()
+            to: c.Policy.Validate
+          when: invalid != nil
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Policy.RetainBytes", "the SQL engine keeps no byte count")
+          when: c.Policy.RetainBytes != 0
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Policy.MaxBytes", "the SQL engine keeps no byte count")
+          when: c.Policy.MaxBytes != 0
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Transactor", "nil")
+          when: c.Transactor == nil
+      - bind: joiner, joins
+        eval: c.Transactor.(coresql.Joiner)
+      - bind: deferrer, defers
+        eval: c.Transactor.(coresql.Deferrer)
+      - opt:
+          do:
+            - return: sqlParts{}, sqlMisconfigured("Transactor", "not a core/data/sql Joiner and Deferrer")
+          when: "!joins || !defers"
+      - opt:
+          do:
+            - return: sqlParts{}, invalid
+          init:
+            bind: invalid
+            eval: validateSQLNames(c.Dialect, c.Table)
+            to: validateSQLNames
+          when: invalid != nil
+      - return: "sqlParts{join: joiner, hold: deferrer}, nil"
+  - of: validateSQLNames
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateSQLNames
+        kind: self
+      - id: sqlMisconfigured
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: "sqlMisconfigured(\"Dialect\", \"not one the SDK speaks: \"+dialect.String())"
+              to: sqlMisconfigured
+          when: "!dialect.Valid()"
+      - var:
+          name: problem
+          type: string
+      - switch:
+          cases:
+            - case: "!sqlTablePattern.MatchString(table)"
+              do:
+                - set: problem
+                  value: "\"not lower-case words joined by single underscores\""
+            - case: len(table) > sqlMaxTableLen
+              do:
+                - set: problem
+                  value: "\"longer than \" + strconv.Itoa(sqlMaxTableLen) + \" bytes\""
+            - case: strings.HasPrefix(table, sqlReservedPrefix)
+              do:
+                - set: problem
+                  value: "\"starts with sqlite_, which SQLite reserves\""
+            - default: true
+              do:
+                - return: nil
+      - return: |-
+          errs.Wrap(corestream.SQLStreamMisconfigured, errs.WrapParams{},
+          		errs.String("field", "Table"), errs.String("problem", problem), errs.String("table", table))
+        to: errs
+  - of: sqlMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: sqlMisconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corestream.SQLStreamMisconfigured, errs.WrapParams{},
+          		errs.String("field", field), errs.String("problem", problem))
+        to: errs
+  - of: sqlClockOrSystem
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: clk == nil
+      - return: clk
+  - of: renderSQLStatements
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderSQLStatements
+        kind: self
+      - id: dialect.QuoteIdent
+        kind: value
+      - id: s.insertRows
+        kind: internal
+      - id: s.compactDelete
+        kind: internal
+    steps:
+      - bind: p
+        eval: dialect.Placeholder
+      - bind: t
+        eval: dialect.QuoteIdent(table)
+        to: dialect.QuoteIdent
+      - bind: h
+        eval: dialect.QuoteIdent(table + sqlHeadsSuffix)
+        to: dialect.QuoteIdent
+      - bind: c
+        eval: dialect.QuoteIdent(table + sqlCursorsSuffix)
+        to: dialect.QuoteIdent
+      - bind: readable
+        eval: "\"r.part = h.part AND r.record_offset >= h.first_offset AND r.appended_at > \""
+      - bind: expired
+        eval:
+          closure:
+            params: n int
+            results: string
+            steps:
+              - return: |-
+                  "(SELECT MAX(x.record_offset) FROM " + t + " x WHERE x.part = h.part AND x.record_offset >= h.first_offset" +
+                  			" AND x.appended_at <= " + p(n) + ")"
+      - bind: s
+        eval: |-
+          sqlStatements{
+          		lockHead: lockHeadStatement(dialect, h),
+          		head:     "SELECT next_offset, first_offset, last_at FROM " + h + " WHERE part = " + p(1) + dialect.ForUpdate(),
+          		advance:  "UPDATE " + h + " SET next_offset = " + p(1) + ", last_at = " + p(2) + " WHERE part = " + p(3),
+          		floor:    "UPDATE " + h + " SET first_offset = " + p(1) + " WHERE part = " + p(2),
+          		read: "SELECT h.next_offset, h.first_offset, " + expired(1) + ", r.record_offset, r.appended_at, r.record_key, r.payload FROM " +
+          			h + " h LEFT JOIN " + t + " r ON " + readable + p(2) + " AND r.record_offset >= " + p(3) + " WHERE h.part = " + p(4) +
+          			" ORDER BY r.record_offset LIMIT " + p(5),
+          		bounds: "SELECT h.next_offset, h.first_offset, " + expired(1) + " FROM " + h + " h WHERE h.part = " + p(2),
+          		compactScan: "SELECT record_offset, record_key, appended_at, CASE WHEN payload IS NULL THEN 1 ELSE 0 END FROM " + t +
+          			" WHERE part = " + p(1) + " AND record_offset >= " + p(2) + " AND appended_at > " + p(3) + " AND appended_at <= " + p(4) +
+          			" ORDER BY record_offset LIMIT " + p(5),
+          		offsetAt: "SELECT h.next_offset, (SELECT MIN(r.record_offset) FROM " + t + " r WHERE " + readable + p(1) +
+          			" AND r.appended_at >= " + p(2) + ") FROM " + h + " h WHERE h.part = " + p(3),
+          		lowest:    "SELECT MIN(record_offset) FROM " + t + " WHERE part = " + p(1),
+          		release:   "DELETE FROM " + t + " WHERE part = " + p(1) + " AND record_offset < " + p(2),
+          		headNext:  "SELECT next_offset FROM " + h + " WHERE part = " + p(1),
+          		commit:    commitStatement(dialect, c),
+          		committed: "SELECT next_offset FROM " + c + " WHERE grp = " + p(1) + " AND part = " + p(2),
+          		records:   t,
+          		dialect:   dialect,
+          	}
+      - set: s.insertFull
+        to: s.insertRows
+        value: s.insertRows(sqlRowsPerStatement)
+      - set: s.compactFull
+        to: s.compactDelete
+        value: s.compactDelete(sqlCompactPerDelete)
+      - return: s
+  - of: lockHeadStatement
+    steps:
+      - bind: insert
+        eval: "\"INSERT INTO \" + h + \" (part, next_offset, first_offset, last_at) VALUES (\" + dialect.Placeholder(1) + \", 0, 0, 0)\""
+      - switch:
+          cases:
+            - case: coresql.DialectMySQL
+              do:
+                - return: insert + " ON DUPLICATE KEY UPDATE next_offset = next_offset"
+            - case: coresql.DialectPostgres
+              do:
+                - return: insert + " ON CONFLICT (part) DO UPDATE SET next_offset = " + h + ".next_offset"
+            - default: true
+              do:
+                - return: insert + " ON CONFLICT (part) DO UPDATE SET next_offset = next_offset"
+          "on": dialect
+  - of: commitStatement
+    steps:
+      - bind: p
+        eval: dialect.Placeholder
+      - bind: insert
+        eval: "\"INSERT INTO \" + c + \" (grp, part, next_offset, grp_name) VALUES (\" + p(1) + \", \" + p(2) + \", \" + p(3) + \", \" + p(4) + \")\""
+      - opt:
+          do:
+            - return: insert + " ON DUPLICATE KEY UPDATE next_offset = " + p(5)
+          when: dialect == coresql.DialectMySQL
+      - return: insert + " ON CONFLICT (grp, part) DO UPDATE SET next_offset = " + p(5)
+  - of: (*sqlStatements).insertRows
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).insertRows
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.WriteString("INSERT INTO " + s.records + " (part, record_offset, appended_at, record_key, payload) VALUES ")
+        to: b.WriteString
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteString(", ")
+                    to: b.WriteString
+                when: i > 0
+            - eval: b.WriteByte('(')
+              to: b.WriteByte
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - eval: b.WriteString(", ")
+                          to: b.WriteString
+                      when: j > 0
+                  - eval: b.WriteString(s.dialect.Placeholder(i*sqlRecordArgs + j + 1))
+                    to: b.WriteString
+                key: j
+                range: sqlRecordArgs
+            - eval: b.WriteByte(')')
+              to: b.WriteByte
+          key: i
+          range: "n"
+      - return: b.String()
+        to: b.String
+  - of: (*sqlStatements).compactDelete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).compactDelete
+        kind: self
+      - id: b.WriteString
+        kind: value
+      - id: b.WriteByte
+        kind: value
+      - id: b.String
+        kind: value
+    steps:
+      - bind: p
+        eval: s.dialect.Placeholder
+      - var:
+          name: b
+          type: strings.Builder
+      - eval: b.WriteString("DELETE FROM " + s.records + " WHERE part = " + p(1) + " AND appended_at > " + p(2) + " AND record_offset IN (")
+        to: b.WriteString
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: b.WriteString(", ")
+                    to: b.WriteString
+                when: i > 0
+            - eval: b.WriteString(p(i + 3))
+              to: b.WriteString
+          key: i
+          range: "n"
+      - eval: b.WriteByte(')')
+        to: b.WriteByte
+      - return: b.String()
+        to: b.String
+  - of: (*sqlStatements).compactFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).compactFor
+        kind: self
+      - id: s.compactDelete
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.compactFull
+          when: n == sqlCompactPerDelete
+      - return: s.compactDelete(n)
+        to: s.compactDelete
+  - of: (*sqlStatements).insertFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStatements).insertFor
+        kind: self
+      - id: s.insertRows
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: s.insertFull
+          when: n == sqlRowsPerStatement
+      - return: s.insertRows(n)
+        to: s.insertRows
+  - of: createStreamTableStatements
+    participants:
+      - id: caller
+        kind: actor
+      - id: createStreamTableStatements
+        kind: self
+      - id: dialect.QuoteIdent
+        kind: value
+    steps:
+      - bind: t
+        eval: dialect.QuoteIdent(table)
+        to: dialect.QuoteIdent
+      - bind: h
+        eval: dialect.QuoteIdent(table + sqlHeadsSuffix)
+        to: dialect.QuoteIdent
+      - bind: c
+        eval: dialect.QuoteIdent(table + sqlCursorsSuffix)
+        to: dialect.QuoteIdent
+      - bind: ints, longs, blobs, digest, options
+        eval: "\"INTEGER\", \"BIGINT\", \"BLOB\", \"BLOB\", \"\""
+      - switch:
+          cases:
+            - case: coresql.DialectMySQL
+              do:
+                - set: ints, blobs, digest, options
+                  value: "\"INT\", \"LONGBLOB\", \"VARBINARY(32)\", \" ENGINE=InnoDB\""
+            - case: coresql.DialectPostgres
+              do:
+                - set: ints, longs, blobs, digest
+                  value: "\"integer\", \"bigint\", \"bytea\", \"bytea\""
+            - default: true
+              do:
+                - set: longs
+                  value: "\"INTEGER\""
+          "on": dialect
+      - return: |-
+          []string{
+          		"CREATE TABLE IF NOT EXISTS " + t + " (part " + ints + " NOT NULL, record_offset " + longs + " NOT NULL, appended_at " + longs +
+          			" NOT NULL, record_key " + blobs + " NULL, payload " + blobs + " NULL, PRIMARY KEY (part, record_offset)," +
+          			" UNIQUE (part, appended_at, record_offset))" + options,
+          		"CREATE TABLE IF NOT EXISTS " + h + " (part " + ints + " NOT NULL, next_offset " + longs + " NOT NULL, first_offset " + longs +
+          			" NOT NULL, last_at " + longs + " NOT NULL, PRIMARY KEY (part))" + options,
+          		"CREATE TABLE IF NOT EXISTS " + c + " (grp " + digest + " NOT NULL, part " + ints + " NOT NULL, next_offset " + longs +
+          			" NOT NULL, grp_name " + blobs + " NULL, PRIMARY KEY (grp, part))" + options,
+          	}
+  - of: dropStreamTableStatements
+    steps:
+      - return: |-
+          []string{
+          		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table+sqlCursorsSuffix),
+          		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table+sqlHeadsSuffix),
+          		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table),
+          	}
+  - of: SQLMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: SQLMigration
+        kind: self
+      - id: validateSQLNames
+        kind: internal
+      - id: createStreamTableStatements
+        kind: internal
+      - id: migration.Validate
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, invalid
+          init:
+            bind: invalid
+            eval: validateSQLNames(dialect, table)
+            to: validateSQLNames
+          when: invalid != nil
+      - bind: up
+        eval: createStreamTableStatements(dialect, table)
+        to: createStreamTableStatements
+      - bind: migration
+        eval: |-
+          coresql.MigrationValue{
+          		Version:  version,
+          		Name:     sqlMigrationPrefix + table,
+          		Up:       svcsql.Statements(up...),
+          		Down:     svcsql.Statements(dropStreamTableStatements(dialect, table)...),
+          		Checksum: svcsql.ChecksumOf(up...),
+          	}
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, err
+          init:
+            bind: err
+            eval: migration.Validate()
+            to: migration.Validate
+          when: err != nil
+      - return: migration, nil
+  - of: (*sqlStream).checkPartition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).checkPartition
+        kind: self
+      - id: unknownPartition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: unknownPartition(partition, s.policy.Partitions)
+              to: unknownPartition
+          when: partition < 0 || partition >= s.policy.Partitions
+      - return: nil
+  - of: (*sqlStream).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Read
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: s.tx.join.Join
+        kind: value
+      - id: s.cutoff
+        kind: internal
+      - id: ex.QueryContext
+        kind: value
+      - id: s.scanEntries
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - opt:
+          do:
+            - return: nil, invalidBatchSize("max", maxEntries)
+          when: maxEntries <= 0
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - bind: cutoff
+        eval: s.cutoff(s.clk.Now())
+        to: s.cutoff
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, s.stmts.read, cutoff, cutoff, int64(from), int64(partition), int64(maxEntries))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, s.failed("read records", err)
+          when: err != nil
+      - bind: entries, bounds, err
+        eval: s.scanEntries(rows, partition, maxEntries)
+        to: s.scanEntries
+      - opt:
+          do:
+            - return: nil, s.failed("read records", err)
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, offsetAhead(from, bounds.Next)
+          when: from > bounds.Next
+      - opt:
+          do:
+            - return: nil, offsetTrimmed(from, bounds.First)
+          when: from < bounds.First
+      - return: entries, nil
+  - of: (*sqlStream).scanEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).scanEntries
+        kind: self
+      - id: rows.Scan
+        kind: internal
+      - id: firstReadable
+        kind: internal
+    steps:
+      - defer: |-
+          func() {
+          		//: the first failure is the one reported.
+          		if closeErr := rows.Close(); closeErr != nil && err == nil {
+          			err = closeErr
+          		}
+          	}()
+      - loop:
+          cond: rows.Next()
+          do:
+            - leaf: a const or type declaration in a body
+              stmt: |-
+                var (
+                			head, floor            int64
+                			expired, offset, stamp stdsql.NullInt64
+                			key, payload           []byte
+                		)
+            - opt:
+                do:
+                  - return: nil, corestream.BoundsValue{}, scanErr
+                init:
+                  bind: scanErr
+                  eval: rows.Scan(&head, &floor, &expired, &offset, &stamp, &key, &payload)
+                  to: rows.Scan
+                when: scanErr != nil
+            - set: bounds
+              to: firstReadable
+              value: firstReadable(head, floor, expired)
+            - opt:
+                do:
+                  - continue: true
+                when: "!offset.Valid"
+            - opt:
+                do:
+                  - set: entries
+                    value: make([]corestream.EntryValue, 0, maxEntries)
+                when: entries == nil
+            - set: entries
+              value: |-
+                append(entries, corestream.EntryValue{
+                			Partition:  partition,
+                			Offset:     corestream.Offset(offset.Int64),
+                			AppendedAt: time.Unix(0, stamp.Int64),
+                			Record:     corestream.RecordValue{Key: nonEmpty(key), Payload: nonEmpty(payload)},
+                		})
+      - return: entries, bounds, rows.Err()
+  - of: nonEmpty
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(b) == 0
+      - return: b
+  - of: (*sqlStream).Bounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Bounds
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: s.boundsAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - return: s.boundsAt(ctx, partition, s.cutoff(s.clk.Now()))
+        to: s.boundsAt
+  - of: (*sqlStream).boundsAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).boundsAt
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.bounds, cutoff, int64(partition)).Scan
+        kind: value
+      - id: firstReadable
+        kind: internal
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - leaf: a var of several names, or of no type
+        stmt: var head, floor int64
+      - var:
+          name: expired
+          type: stdsql.NullInt64
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.bounds, cutoff, int64(partition)).Scan(&head, &floor, &expired)
+        to: ex.QueryRowContext(ctx, s.stmts.bounds, cutoff, int64(partition)).Scan
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, nil
+          when: errors.Is(err, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: corestream.BoundsValue{}, s.failed("read the bounds", err)
+          when: err != nil
+      - return: firstReadable(head, floor, expired), nil
+        to: firstReadable
+  - of: firstReadable
+    steps:
+      - bind: first
+        eval: floor
+      - opt:
+          do:
+            - set: first
+              value: max(first, expired.Int64+1)
+          when: expired.Valid
+      - return: "corestream.BoundsValue{First: corestream.Offset(min(first, head)), Next: corestream.Offset(head)}"
+  - of: (*sqlStream).OffsetAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).OffsetAt
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: t.UnixNano
+        kind: value
+      - id: s.headAndLowest
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: at
+        eval: t.UnixNano()
+        to: t.UnixNano
+      - opt:
+          do:
+            - set: at
+              value: "0"
+          when: t.Before(time.Unix(0, 0))
+      - bind: _, found, err
+        eval: s.headAndLowest(ctx, s.stmts.offsetAt, "seek an instant", s.cutoff(s.clk.Now()), at, int64(partition))
+        to: s.headAndLowest
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - return: found, nil
+  - of: (*sqlStream).headAndLowest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).headAndLowest
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: ex.QueryRowContext(ctx, statement, args...).Scan
+        kind: value
+      - id: corestream
+        kind: package
+    steps:
+      - bind: ex, _
+        eval: s.tx.join.Join(ctx)
+        to: s.tx.join.Join
+      - var:
+          name: head
+          type: int64
+      - var:
+          name: low
+          type: stdsql.NullInt64
+      - bind: scanErr
+        eval: ex.QueryRowContext(ctx, statement, args...).Scan(&head, &low)
+        to: ex.QueryRowContext(ctx, statement, args...).Scan
+      - opt:
+          do:
+            - return: 0, 0, nil
+          when: errors.Is(scanErr, stdsql.ErrNoRows)
+      - opt:
+          do:
+            - return: 0, 0, s.failed(step, scanErr)
+          when: scanErr != nil
+      - set: next
+        to: corestream
+        value: corestream.Offset(head)
+      - opt:
+          do:
+            - return: next, next, nil
+          when: "!low.Valid"
+      - return: next, corestream.Offset(low.Int64), nil
+  - of: (*sqlStream).Wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Wake
+        kind: self
+      - id: s.wake.current
+        kind: internal
+    steps:
+      - return: s.wake.current()
+        to: s.wake.current
+  - of: (*sqlStream).Trim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).Trim
+        kind: self
+      - id: s.checkPartition
+        kind: internal
+      - id: s.run
+        kind: internal
+      - id: s.release
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: refused
+          init:
+            bind: refused
+            eval: s.checkPartition(partition)
+            to: s.checkPartition
+          when: refused != nil
+      - bind: raised
+        eval: "false"
+      - bind: floorErr
+        eval: |-
+          s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+          		var err error
+          		raised, err = s.raiseFloor(txCtx, ex, partition, before)
+          		//: raised, unchanged, OffsetAhead or StreamBackendFailed.
+          		return err
+          	})
+        to: s.run
+      - opt:
+          do:
+            - return: floorErr
+          when: floorErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: "!raised"
+      - return: s.release(ctx, partition, int64(before))
+        to: s.release
+  - of: (*sqlStream).raiseFloor
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).raiseFloor
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: false, s.failed("lock the head", err)
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, s.stmts.lockHead, int64(partition))
+            to: ex.ExecContext
+          when: err != nil
+      - leaf: a var of several names, or of no type
+        stmt: var next, first, last int64
+      - opt:
+          do:
+            - return: false, s.failed("read the head", err)
+          init:
+            bind: err
+            eval: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan(&next, &first, &last)
+            to: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+          when: err != nil
+      - opt:
+          do:
+            - return: false, offsetAhead(before, corestream.Offset(next))
+          when: before > corestream.Offset(next)
+      - opt:
+          do:
+            - return: false, nil
+          when: before <= corestream.Offset(first)
+      - opt:
+          do:
+            - return: false, s.failed("raise the floor", err)
+          init:
+            bind: _, err
+            eval: ex.ExecContext(ctx, s.stmts.floor, int64(before), int64(partition))
+            to: ex.ExecContext
+          when: err != nil
+      - return: true, nil
+  - of: (*sqlStream).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).release
+        kind: self
+      - id: s.run
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: done
+              eval: "false"
+            - bind: stepErr
+              eval: |-
+                s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+                			var lowest stdsql.NullInt64
+                			//: where the stored records start.
+                			if err := ex.QueryRowContext(txCtx, s.stmts.lowest, int64(partition)).Scan(&lowest); err != nil {
+                				//: StreamBackendFailed, the driver's text withheld.
+                				return s.failed("find the lowest record", err)
+                			}
+                			//: nothing stored below target.
+                			if !lowest.Valid || lowest.Int64 >= target {
+                				done = true
+                				return nil
+                			}
+                			upper := min(target, lowest.Int64+sqlOffsetsPerDelete)
+                			_, err := ex.ExecContext(txCtx, s.stmts.release, int64(partition), upper)
+                			//: one bounded step.
+                			if err != nil {
+                				//: StreamBackendFailed, the driver's text withheld.
+                				return s.failed("release records", err)
+                			}
+                			//: deleted.
+                			return nil
+                		})
+              to: s.run
+            - opt:
+                do:
+                  - return: stepErr
+                when: stepErr != nil || done
+          forever: true
+  - of: (*sqlStream).sweep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).sweep
+        kind: self
+      - id: s.swept[partition].Load
+        kind: value
+      - id: s.boundsAt
+        kind: internal
+      - id: s.swept[partition].Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.policy.RetainFor == 0
+      - bind: last
+        eval: s.swept[partition].Load()
+        to: s.swept[partition].Load
+      - bind: period
+        eval: min(s.policy.RetainFor, sqlSweepEvery)
+      - opt:
+          do:
+            - return: ""
+          when: now.UnixNano()-last < int64(period) || !s.swept[partition].CompareAndSwap(last, now.UnixNano())
+      - bind: bounds, err
+        eval: s.boundsAt(ctx, partition, s.cutoff(now))
+        to: s.boundsAt
+      - opt:
+          do:
+            - eval: s.swept[partition].Store(last)
+              to: s.swept[partition].Store
+            - return: ""
+          when: err != nil
+      - opt:
+          do:
+            - eval: s.swept[partition].Store(last)
+              to: s.swept[partition].Store
+          when: s.Trim(ctx, partition, bounds.First) != nil
+  - of: Subscribe
+    participants:
+      - id: caller
+        kind: actor
+      - id: Subscribe
+        kind: self
+      - id: subscriberMisconfigured
+        kind: internal
+      - id: cfg.validate
+        kind: internal
+      - id: group
+        kind: package
+      - id: workers.Go
+        kind: value
+      - id: workers.Wait
+        kind: value
+    steps:
+      - bind: committer, ok
+        eval: s.(corestream.Committer)
+      - opt:
+          do:
+            - return: subscriberMisconfigured("Stream")
+              to: subscriberMisconfigured
+          when: "!ok"
+      - opt:
+          do:
+            - return: invalid
+          init:
+            bind: invalid
+            eval: cfg.validate(s.Partitions())
+            to: cfg.validate
+          when: invalid != nil
+      - bind: sub
+        eval: "&subscriber{stream: s, committer: committer, cfg: cfg.normalized(s.Partitions())}"
+      - set: sub.waker, _
+        value: s.(corestream.Waker)
+      - bind: workers, _
+        eval: group.NewJoined(ctx, len(sub.cfg.Partitions))
+        to: group
+      - loop:
+          do:
+            - eval: |-
+                workers.Go(func(stop context.Context) error {
+                			//: nil for a stopped worker, the medium's error otherwise.
+                			return sub.run(stop, partition)
+                		})
+              to: workers.Go
+          key: _
+          range: sub.cfg.Partitions
+          value: partition
+      - return: workers.Wait()
+        to: workers.Wait
+  - of: (*subscriber).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).run
+        kind: self
+      - id: w.acquire
+        kind: internal
+      - id: ignoreStop
+        kind: internal
+      - id: w.sleep
+        kind: internal
+      - id: w.follow
+        kind: internal
+      - id: w.release
+        kind: internal
+    steps:
+      - loop:
+          cond: ctx.Err() == nil
+          do:
+            - bind: fence, held, err
+              eval: w.acquire(ctx, partition)
+              to: w.acquire
+            - opt:
+                do:
+                  - return: ignoreStop(ctx, err)
+                    to: ignoreStop
+                when: err != nil
+            - opt:
+                do:
+                  - eval: w.sleep(ctx, nil, w.cfg.PollInterval)
+                    to: w.sleep
+                  - continue: true
+                when: "!held"
+            - set: err
+              to: w.follow
+              value: "w.follow(ctx, &cursor{partition: partition, fence: fence})"
+            - eval: w.release(ctx, fence)
+              to: w.release
+            - opt:
+                do:
+                  - return: ignoreStop(ctx, err)
+                    to: ignoreStop
+                when: err != nil
+      - return: nil
+  - of: (*subscriber).follow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).follow
+        kind: self
+      - id: w.start
+        kind: internal
+      - id: c.retryAt.Sub
+        kind: value
+      - id: w.sleep
+        kind: internal
+      - id: w.turn
+        kind: internal
+    steps:
+      - bind: start, err
+        eval: w.start(ctx, c.partition)
+        to: w.start
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: c.next
+        value: start
+      - loop:
+          cond: ctx.Err() == nil
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: "!w.renew(ctx, c.fence)"
+            - opt:
+                do:
+                  - eval: w.sleep(ctx, nil, w.bounded(wait, c.fence))
+                    to: w.sleep
+                  - continue: true
+                init:
+                  bind: wait
+                  eval: c.retryAt.Sub(w.cfg.Clock.Now())
+                  to: c.retryAt.Sub
+                when: wait > 0
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: w.turn(ctx, c)
+                  to: w.turn
+                when: err != nil
+      - return: nil
+  - of: (*subscriber).start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).start
+        kind: self
+      - id: w.committer.Committed
+        kind: value
+      - id: w.stream.Bounds
+        kind: value
+    steps:
+      - bind: next, err
+        eval: w.committer.Committed(ctx, w.cfg.Group, partition)
+        to: w.committer.Committed
+      - opt:
+          do:
+            - bind: bounds, boundsErr
+              eval: w.stream.Bounds(ctx, partition)
+              to: w.stream.Bounds
+            - return: bounds.First, boundsErr
+          when: errs.HasCode(err, corestream.CodeUnknownGroup)
+      - return: next, err
+  - of: (*subscriber).turn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).turn
+        kind: self
+      - id: w.waker.Wake
+        kind: value
+      - id: w.stream.Read
+        kind: value
+      - id: w.stream.Bounds
+        kind: value
+      - id: w.sleep
+        kind: internal
+      - id: w.settle
+        kind: internal
+    steps:
+      - var:
+          name: signal
+          type: <-chan struct{}
+      - opt:
+          do:
+            - set: signal
+              to: w.waker.Wake
+              value: w.waker.Wake()
+          when: w.waker != nil
+      - bind: entries, err
+        eval: w.stream.Read(ctx, c.partition, c.next, w.limit(c))
+        to: w.stream.Read
+      - opt:
+          do:
+            - bind: bounds, boundsErr
+              eval: w.stream.Bounds(ctx, c.partition)
+              to: w.stream.Bounds
+            - set: c.next, c.failures
+              value: bounds.First, 0
+            - return: boundsErr
+          when: errs.HasCode(err, corestream.CodeOffsetTrimmed)
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - eval: w.sleep(ctx, signal, w.bounded(w.cfg.PollInterval, c.fence))
+              to: w.sleep
+            - return: nil
+          when: len(entries) == 0
+      - return: w.settle(ctx, c, entries)
+        to: w.settle
+  - of: (*subscriber).limit
+    steps:
+      - opt:
+          do:
+            - return: "1"
+          when: c.next < c.narrowUntil
+      - return: w.cfg.BatchSize
+  - of: (*subscriber).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).settle
+        kind: self
+      - id: w.advance
+        kind: internal
+      - id: w.narrowOrPark
+        kind: internal
+      - id: w.cfg.Clock.Now().Add
+        kind: value
+    steps:
+      - bind: past
+        eval: entries[len(entries)-1].Offset + 1
+      - opt:
+          do:
+            - set: c.failures, c.retryAt
+              value: 0, time.Time{}
+            - opt:
+                do:
+                  - set: c.next
+                    value: past
+                  - return: nil
+                when: w.cfg.Commit == CommitByHandler
+            - return: w.advance(ctx, c, past)
+              to: w.advance
+          when: w.handle(ctx, entries)
+      - opt:
+          do:
+            - return: nil
+          when: ctx.Err() != nil
+      - op: ++
+        set: c.failures
+      - opt:
+          do:
+            - return: w.narrowOrPark(ctx, c, entries)
+              to: w.narrowOrPark
+          when: w.cfg.Park != nil && c.failures >= w.cfg.Park.After
+      - set: c.retryAt
+        to: w.cfg.Clock.Now().Add
+        value: w.cfg.Clock.Now().Add(w.cfg.Retry.Delay(c.failures))
+      - return: nil
+  - of: (*subscriber).handle
+    steps:
+      - defer: |-
+          func() {
+          		//: the panic is the refusal.
+          		if recover() != nil {
+          			accepted = false
+          		}
+          	}()
+      - return: w.cfg.Handler(ctx, entries) == nil
+  - of: (*subscriber).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).advance
+        kind: self
+      - id: w.settled
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!w.renew(ctx, c.fence)"
+      - bind: err
+        eval: |-
+          w.settled(ctx, func(settleCtx context.Context) error {
+          		//: the group's offset.
+          		return w.committer.Commit(settleCtx, w.cfg.Group, c.partition, past)
+          	})
+        to: w.settled
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: c.next
+        value: past
+      - return: nil
+  - of: (*subscriber).sleep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).sleep
+        kind: self
+      - id: w.cfg.Clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - bind: timer
+        eval: w.cfg.Clock.NewTimer(max(d, 0))
+        to: w.cfg.Clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+            - comm: <-signal
+            - comm: <-timer.C()
+  - of: (*subscriber).settled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).settled
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: w.bound
+        kind: internal
+    steps:
+      - bind: settleCtx, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - defer: cancel()
+      - bind: done
+        eval: make(chan struct{})
+      - defer: close(done)
+      - go: w.bound(ctx, done, cancel)
+        to: w.bound
+      - return: call(settleCtx)
+  - of: (*subscriber).bound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).bound
+        kind: self
+      - id: w.cfg.Clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - select:
+          cases:
+            - comm: <-done
+              do:
+                - return: ""
+            - comm: <-ctx.Done()
+      - bind: timer
+        eval: w.cfg.Clock.NewTimer(w.cfg.SettleTimeout)
+        to: w.cfg.Clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-done
+            - comm: <-timer.C()
+              do:
+                - eval: cancel()
+  - of: ignoreStop
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ctx.Err() != nil
+      - return: cause
+  - of: subscriberMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: subscriberMisconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corestream.SubscriberMisconfigured, errs.WrapParams{}, errs.String("field", field))
+        to: errs
+  - of: (*SubscriberConfig).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SubscriberConfig).validate
+        kind: self
+      - id: c.missing
+        kind: internal
+      - id: subscriberMisconfigured
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: subscriberMisconfigured(field)
+              to: subscriberMisconfigured
+          init:
+            bind: field
+            eval: c.missing()
+            to: c.missing
+          when: field != ""
+      - bind: seen
+        eval: make(map[int]bool, len(c.Partitions))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corestream.SubscriberMisconfigured, errs.WrapParams{},
+                      				errs.String("field", "Partitions"), errs.Int("partition", partition), errs.Int("partitions", partitions))
+                    to: errs
+                when: partition < 0 || partition >= partitions || seen[partition]
+            - set: seen[partition]
+              value: "true"
+          key: _
+          range: c.Partitions
+          value: partition
+      - return: nil
+  - of: (*SubscriberConfig).missing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SubscriberConfig).missing
+        kind: self
+      - id: c.missingCollaborator
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: c.Handler == nil
+              do:
+                - return: "\"Handler\""
+            - case: c.Group == ""
+              do:
+                - return: "\"Group\""
+            - case: "!c.HandlerIsIdempotent"
+              do:
+                - return: "\"HandlerIsIdempotent\""
+            - case: c.Commit != CommitAfterHandler && c.Commit != CommitByHandler
+              do:
+                - return: "\"Commit\""
+            - default: true
+              do:
+                - return: c.missingCollaborator()
+                  to: c.missingCollaborator
+  - of: (*SubscriberConfig).missingCollaborator
+    steps:
+      - switch:
+          cases:
+            - case: c.Fence != nil && c.Name == ""
+              do:
+                - return: "\"Name\""
+            - case: c.Park != nil && c.Park.Broker == nil
+              do:
+                - return: "\"Park.Broker\""
+            - default: true
+              do:
+                - return: "\"\""
+  - of: (*SubscriberConfig).normalized
+    steps:
+      - bind: out
+        eval: "*c"
+      - set: out.BatchSize
+        value: max(out.BatchSize, 1)
+      - opt:
+          do:
+            - set: out.PollInterval
+              value: subscriberPollInterval
+          when: out.PollInterval <= 0
+      - opt:
+          do:
+            - set: out.SettleTimeout
+              value: subscriberSettleTimeout
+          when: out.SettleTimeout <= 0
+      - opt:
+          do:
+            - set: out.Retry
+              value: |-
+                backoff.Value{
+                			BaseDelay: retryBase, MaxDelay: retryCeiling, Multiplier: retryMultiplier, Jitter: retryJitter,
+                		}
+          when: out.Retry.BaseDelay <= 0
+      - opt:
+          do:
+            - set: out.Clock
+              value: clock.System
+          when: out.Clock == nil
+      - opt:
+          do:
+            - bind: park
+              eval: "*out.Park"
+            - set: park.After
+              value: max(park.After, 1)
+            - set: out.Park
+              value: "&park"
+          when: out.Park != nil
+      - opt:
+          do:
+            - set: out.Partitions
+              value: make([]int, 0, partitions)
+            - loop:
+                do:
+                  - set: out.Partitions
+                    value: append(out.Partitions, i)
+                key: i
+                range: partitions
+          when: len(out.Partitions) == 0
+      - return: out
+  - of: (*subscriber).fenceName
+    steps:
+      - return: "\"stream:\" + w.cfg.Name + \":\" + w.cfg.Group + \":\" + strconv.Itoa(partition)"
+  - of: (*subscriber).acquire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).acquire
+        kind: self
+      - id: w.cfg.Fence.TryAcquire
+        kind: value
+      - id: w.cfg.Clock.Now
+        kind: value
+      - id: now.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, true, nil
+          when: w.cfg.Fence == nil
+      - bind: lease, held, err
+        eval: w.cfg.Fence.TryAcquire(ctx, w.fenceName(partition))
+        to: w.cfg.Fence.TryAcquire
+      - opt:
+          do:
+            - return: nil, false, err
+          when: err != nil || !held
+      - bind: fence
+        eval: "&heldFence{lease: lease}"
+      - opt:
+          do:
+            - bind: now
+              eval: w.cfg.Clock.Now()
+              to: w.cfg.Clock.Now
+            - set: fence.every
+              value: max(deadliner.Deadline().Sub(now)/time.Duration(renewShare), 0)
+            - set: fence.renewAt
+              to: now.Add
+              value: now.Add(fence.every)
+          init:
+            bind: deadliner, ok
+            eval: lease.(corelock.Deadliner)
+          when: ok
+      - return: fence, true, nil
+  - of: (*subscriber).renew
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).renew
+        kind: self
+      - id: w.cfg.Clock.Now
+        kind: value
+      - id: w.cfg.Clock.Now().Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: fence == nil || fence.renewAt.IsZero()
+      - bind: now
+        eval: w.cfg.Clock.Now()
+        to: w.cfg.Clock.Now
+      - opt:
+          do:
+            - return: "true"
+          when: now.Before(fence.renewAt)
+      - opt:
+          do:
+            - return: "false"
+          when: fence.lease.Extend(ctx) != nil
+      - set: fence.renewAt
+        to: w.cfg.Clock.Now().Add
+        value: w.cfg.Clock.Now().Add(fence.every)
+      - return: "true"
+  - of: (*subscriber).bounded
+    steps:
+      - opt:
+          do:
+            - return: d
+          when: fence == nil || fence.renewAt.IsZero()
+      - return: min(d, fence.renewAt.Sub(w.cfg.Clock.Now()))
+  - of: (*subscriber).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).release
+        kind: self
+      - id: abandon
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: fence == nil
+      - eval: abandon(w.settled(ctx, fence.lease.Release))
+        to: abandon
+  - of: (*subscriber).narrowOrPark
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).narrowOrPark
+        kind: self
+      - id: w.park
+        kind: internal
+      - id: w.advance
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: c.narrowUntil
+              value: entries[len(entries)-1].Offset + 1
+            - set: c.failures
+              value: "0"
+            - return: nil
+          when: len(entries) > 1
+      - bind: err
+        eval: w.park(ctx, entries[0])
+        to: w.park
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: c.failures
+        value: "0"
+      - return: w.advance(ctx, c, entries[0].Offset+1)
+        to: w.advance
+  - of: (*subscriber).park
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*subscriber).park
+        kind: self
+      - id: json
+        kind: stdlib
+      - id: errs
+        kind: package
+      - id: w.settled
+        kind: internal
+    steps:
+      - bind: payload, err
+        eval: json.Marshal(entry)
+        to: json
+      - opt:
+          do:
+            - return: errs.Wrap(corestream.StreamBackendFailed, errs.WrapParams{}, errs.String("op", "encode a dead letter"))
+              to: errs
+          when: err != nil
+      - return: |-
+          w.settled(ctx, func(settleCtx context.Context) error {
+          		_, publishErr := w.cfg.Park.Broker.Publish(settleCtx, payload)
+          		//: the queue's own refusal, as it gave it.
+          		return publishErr
+          	})
+        to: w.settled
+  - of: newWakeSignal
+    steps:
+      - return: "&wakeSignal{ch: make(chan struct{})}"
+  - of: (*wakeSignal).current
+    steps:
+      - lock:
+          mutex: w.mu
+      - return: w.ch
+  - of: (*wakeSignal).fire
+    steps:
+      - lock:
+          mutex: w.mu
+      - bind: fired
+        eval: w.ch
+      - set: w.ch
+        value: make(chan struct{})
+      - eval: close(fired)

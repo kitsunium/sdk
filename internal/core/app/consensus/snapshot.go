@@ -42,8 +42,33 @@ type SnapshotMetaValue struct {
 	ClusterGeneration uint64
 	// NoSpace is the no-space alarm raised at Position, 0 for none.
 	NoSpace AlarmID
+	// Sessions are the client sessions recorded at Position, ordered by ID.
+	// They are encoded from metadata version 4, at cluster version 4.
+	Sessions []SessionValue
 	// Reserved is carried uninterpreted for ADR 0173.
 	Reserved []byte
+}
+
+// SessionID names a client session: 16 random bytes the client draws once and
+// opens with OpenSession (ADR 0241).
+type SessionID [16]byte
+
+// SessionValue is the replicated record of one client session: the last
+// sequence it applied, that command's payload digest and position, and the
+// index of its last entry, which orders the eviction of the least recently
+// used session.
+type SessionValue struct {
+	// ID names the session.
+	ID SessionID
+	// Seq is the last sequence the session applied, 0 for none yet.
+	Seq uint64
+	// BodySum is the CRC-32C of that command's entry payload.
+	BodySum uint32
+	// Position is where that command was applied, or where the session was
+	// opened while Seq is 0.
+	Position PositionValue
+	// Last is the index of the session's last committed entry.
+	Last uint64
 }
 
 // InstallOfferValue is what a leader sends before streaming a snapshot: the whole

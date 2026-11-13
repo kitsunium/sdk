@@ -85,6 +85,9 @@ type tcpNode struct {
 	node  *Node
 	// tweak, when set, changes the node's configuration before it starts.
 	tweak func(*Config)
+	// transport, when set, changes the transport's configuration before
+	// it listens: its Clock, its MaxConnectionAge.
+	transport func(*TransportConfig)
 }
 
 func tcpConfig(cid coreconsensus.ClusterID, tn *tcpNode) Config {
@@ -106,7 +109,11 @@ func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
 		addr = "127.0.0.1:0"
 	}
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		tr, err := NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
+		cfg := &TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr}
+		if tn.transport != nil {
+			tn.transport(cfg)
+		}
+		tr, err := NewTCPTransport(cfg)
 		if err == nil {
 			tn.tr, tn.addr = tr, tr.Addr()
 			return

@@ -18,6 +18,8 @@ go_library(
         "store.go",
         "store_interface.go",
         "store_refusal.go",
+        "stream.go",
+        "stream_interface.go",
         "studio.go",
         "studio_interface.go",
         "words.go",

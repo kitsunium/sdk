@@ -30,7 +30,11 @@ counter every write moves, which `Stats` reports too, the SQL engine from one
 aggregate statement over the versions table. **ADR 0143, amended for kit's
 Studio.** And both replace a document on the revision a caller read —
 `Revision`, `ReplaceIf` —: the file engine's token the SHA-256 of the
-document's JSON, the SQL engine's the row's `rev`. **ADR 0209.**
+document's JSON, the SQL engine's the row's `rev`. **ADR 0209.** And both
+write a change record of every write to a `core/data/stream` Stream when their
+configuration's `Changes` names one — the change feed, the store's CDC: the
+SQL engine inside the write's transaction, the file engine before it publishes.
+**kitsunium/sdk#831.**
 
 Public facade: `pkg/v1/data/docstore`.
 
@@ -38,7 +42,8 @@ Code range `0.3.80.*`, shared: both engines answer the same refusals under the
 same codes, and the SQL engine adds `STATEMENT_FAILED` and `KEY_TOO_LONG`;
 versions add `VERSIONS_NOT_KEPT`, `VERSION_NOT_FOUND` and
 `VERSIONS_REWRITE_REFUSED` to both, the trash `DOCUMENT_NOT_TRASHED`,
-`PutDocument` `VERSIONS_INVALID`, `ReplaceIf` `REVISION_MISMATCH`. The codes
+`PutDocument` `VERSIONS_INVALID`, `ReplaceIf` `REVISION_MISMATCH`, the change
+feed `CHANGE_FEED_FAILED` (`0.3.80.25`). The codes
 and sentinels, the values both engines read and return (`EntryValue`,
 `VersionValue`, `StampValue`, `TombstoneValue`, `VersionWeightValue`, `RevisionValue`), the index declaration both take
 (`IndexSpec`, `Unique`, `Index`, `Ordered`) and the ports are declared in
@@ -48,8 +53,8 @@ and sentinels, the values both engines read and return (`EntryValue`,
 `VersionedContext`, `TrashableContext`, `KeyListerContext`,
 `VersionWriterContext`, `VersionWeigherContext`, `RevisionedContext`,
 `BatcherContext`, `PagerContext` and `RangedContext` for the SQL engine — two families, because the engines differ on the one thing a
-single port would have to fix, a context (ADR 0139 §D2) — and `Announcer`,
-which both implement as they are. This package holds the engines, their
+single port would have to fix, a context (ADR 0139 §D2) — and `Announcer` and
+`ChangeFeeder`, which both implement as they are. This package holds the engines, their
 configurations and the file engine's `StatsValue` (ADR 0074).
 
 ## Contents
@@ -59,7 +64,7 @@ configurations and the file engine's `StatsValue` (ADR 0074).
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `docstore.go` | `Store[T]` (its `weight`, the versions' counter), `StatsValue` (`Versions`, that counter); the reads — `Get`, `GetInto` (into the caller's value, zeroed first: #813), `List`, `Filter`, `Entries`, `Keys` (the keys above `after`, taken and sorted once under the read lock when the range starts — the map's own strings, no document copied: ADR 0178) and `yieldKeys` (shared: the keys, then a failure once as the last yield), `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` → `decodeInto` (shared; a failed decode leaves the value zero), `jsonCause` (a decoding failure described without a byte of the document: `fieldPath` resolves `encoding/json`'s path against the decoded type and writes every map key on it — a store key, a metadata key — as `[key]`, #1061) |
 | `open.go` | `Open[T](Config[T], ...IndexSpec[T])`; `newStore`; `open` — load, rebuild, THEN fold, so a refused open writes no data |
-| `config.go` | `Config[T]` (`Key`, `FS`, `Clock`, `Held`, `Path`, `FoldAt`, `Versions`), `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` — over `core/data/docstore.IndexSpec` — and `validateVersions` (shared) |
+| `config.go` | `Config[T]` (`Key`, `FS`, `Clock`, `Held`, `Path`, `FoldAt`, `Versions`, `Changes`, `ChangesWithDocument`), `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` — over `core/data/docstore.IndexSpec` — and `validateVersions` (shared) |
 | `write.go` | `Put` / `Insert` / `Replace` (the three write modes), `Update`, `Delete`; `prepare` → `encodeAs` (shared, outside every lock; a store key or index key that is not valid UTF-8 is refused `DOCUMENT_UNENCODABLE` by `validKeys` / `invalidKey`, shared with the SQL engine's `prepare` / `indexRows` — JSON would rewrite it into another key, which the reopened store or `Reindex` files elsewhere, #459) → `commit` / `modify` / `remove` (under the writers' lock) → `persistAndApply`, which computes the versions a write leaves before it persists anything; `encodeCause` |
 | `version.go` | the file engine's `PutStamped` / `InsertStamped` / `ReplaceStamped` / `UpdateStamped`, `Versions`, `Version`, `RewriteVersions`; `versionsRecord` (a record is never changed once stored), `nextVersions` → `pruned` (asks `Held` only when something would go), `checkRewrite` and `pickVersion` (shared), `compactJSON`; the file engine's `PutDocument` (`preparedDocument`, `persistDocument`, `recordOf`) and, shared by both engines, `checkDocument` → `versionProblem`, `documentJSON`, `metaOrNil` and the `VERSIONS_INVALID` problems (ADR 0178); `setVersions` — the one place a key's record changes, which moves `weight` by what the new record weighs less what the old one did (`versionsRecord.weighed`: its former versions, its trashed document, their bytes) — and `VersionWeight`, that counter read under the read lock |
 | `trash.go` | the file engine's `Trash` / `Restore` / `Purge` / `Tombstones`: a trashed document is its versions record with `Trashed` (`trashedDocument`: the document and the instant), published as one deletion entry that keeps versions; `trashedRecord`, `notTrashed` (shared) |
@@ -71,8 +76,9 @@ configurations and the file engine's `StatsValue` (ADR 0074).
 | `sql_page.go` | the SQL engine's `Documents` (Reindex's `pageAfter`), `FindAfter` (`findAfter`), `Range` (`rangeFrom` / `rangeBelow`, resumed on a `rangeCursor` — the last index key and document key read); each page read whole and its rows closed before it is yielded, decoded as yielded |
 | `sql_batch.go` | the SQL engine's `Batch`: `sqlBatchWriter`, then every write through `writeIn` in one transaction (`run(ctx, true, …)`), the hooks after the commit |
 | `revision.go` | the file engine's `Revision` / `ReplaceIf` (`commitIf`: the comparison under the writers' lock, then `persistAndApply` as `Replace`); `revisionOf`, the SHA-256 of the document's JSON compacted and HTML-escaped as `json.Marshal` writes it — nothing persisted, so a fold, a reopen and the memory store keep it (ADR 0209) |
+| `change.go` | the change feed (#831), shared: `changeFeed` (the stream and `withDocument`), `record` (keyed by the document's key, the `core/data/docstore.ChangeValue` as JSON), `append` (`CHANGE_FEED_FAILED` joined to the stream's error), `validateChanges`; the file engine's `changeVersion`, `feed` (one record under the writers' lock before `persist`) and `feedBatch` (one Append per key a batch writes, before the group entry); the SQL engine's `feedIn` (the version read by `readHead` in the write's transaction, the record appended with the write's context); both `ChangeStream` |
 | `hooks.go` | `OnWrite` / `OnDelete`, called with the key after the write is durable (file engine) or committed (SQL engine), outside every lock |
-| `sql_config.go` | `SQLConfig[T]` (`Key`, `Clock`, `Held`, `Transactor`, `IndexKey`, `Table`, `Dialect`, `Versions`), `MaxSQLTableLen`, `MaxSQLKeyLen`, `MaxSQLIndexNameLen`, the table-name rule (`isTableName`, written out rather than a regular expression compiled at initialisation, held to `^[a-z_][a-z0-9_]*$` by `table_internal_test.go` — #276), `indexTable`, `versionsTable`, the refusals |
+| `sql_config.go` | `SQLConfig[T]` (`Key`, `Clock`, `Held`, `Transactor`, `IndexKey`, `Table`, `Dialect`, `Versions`, `Changes`, `ChangesWithDocument`), `MaxSQLTableLen`, `MaxSQLKeyLen`, `MaxSQLIndexNameLen`, the table-name rule (`isTableName`, written out rather than a regular expression compiled at initialisation, held to `^[a-z_][a-z0-9_]*$` by `table_internal_test.go` — #276), `indexTable`, `versionsTable`, the refusals |
 | `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`: the claim, the version rows' reads under `Dialect.ForUpdate`, the pruning, `keysAfter` — a page of keys alone, for `Keys` — and `trashStatements`' four: the key's lowest row, the trash row's removal, a trashed document's versions, the trash; and `versionWeight`, one aggregate over the versions table — former rows, trash rows, `LENGTH(doc)` of the binary documents —, for `VersionWeight`), `revisionStatements` (`revision`, `replaceIf`, `lockDocIf` — ADR 0209), the five rendered per call (a write's index rows and unique-key check, its version rows, `Reindex`'s shared-key check and unique marking), the DDL of the three tables and of the trash's index (`trashIndexStatements`, `trashIndexExistsStatement`); every marker, quoted name and row lock is `core/data/sql.Dialect`'s, and `shareLockClause` — MySQL's `LOCK IN SHARE MODE`, the one clause whose choice is this store's isolation reasoning rather than an engine's grammar — is the store's own |
 | `sql_store.go` | `OpenSQL`, `SQLStore[T]`; the reads — `Get`, `GetInto`, `List`, `Filter`, `Entries`, `Keys` (pages of `keysPageLen` = 256 keys, each one `keysAfter` statement on the primary key resuming after the last key read, on the context's transaction or the pool; no document read, and no trashed one listed, since the trash is a version row — ADR 0178), `Count`, `Lookup`, `Find`; `OnWrite` / `OnDelete`; `failed` (STATEMENT_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering) |
 | `sql_write.go` | `Put` / `Insert` / `Replace`, `Update`, `UpdateStamped`, `Delete`; `run` (a savepoint of the caller's transaction, a transaction of the store's own, or one statement), `several`, `claimRow` / `lockedReplace` (a store that keeps versions reads what it replaces first), `announce` (hooks through `Deferrer`), the unique check, `mayConflict` and `classify` (a raced collision asked about after the rollback) |
@@ -81,7 +87,7 @@ configurations and the file engine's `StatsValue` (ADR 0074).
 | `sql_revision.go` | the SQL engine's `Revision` (the `revision` statement: the row's `rev` and document) and `ReplaceIf` — `write` in the mode `replaceOnRevision`: `replaceIf`, Replace's UPDATE on `rev = ?`, or `lockDocIf` where versions are kept; `revisionRefused` asks `exists` which refusal a miss is; a token it never gave asks for revision 0, which no row has (ADR 0209) |
 | `sql_reindex.go` | `Reindex`: every index row rebuilt from the documents, a page at a time, `INDEX_BROKEN` for a unique key two documents share |
 | `sql_migration.go` | `SQLMigration`: the two tables as one idempotent `core/data/sql` migration the caller numbers; `SQLVersionsMigration`: the versions table, beside it; `SQLVersionsTrashIndexMigration`: the trash's index `<table>___tr`, after it, for every table — MySQL's two directions through `whenTrashIndex`, which asks `information_schema` first (ADR 0143, amended 2026-11-02) |
-| `docstore_compliance.go` | the compile-time assertions that `Store[T]` implements `core/data/docstore.Collection`, `Versioned`, `Trashable`, `KeyLister`, `VersionWriter` and `VersionWeigher`, `SQLStore[T]` `CollectionContext`, `VersionedContext`, `TrashableContext`, `KeyListerContext`, `VersionWriterContext`, `VersionWeigherContext` and `RevisionedContext`, and both `Announcer`; `Store[T]` also `Revisioned` |
+| `docstore_compliance.go` | the compile-time assertions that `Store[T]` implements `core/data/docstore.Collection`, `Versioned`, `Trashable`, `KeyLister`, `VersionWriter` and `VersionWeigher`, `SQLStore[T]` `CollectionContext`, `VersionedContext`, `TrashableContext`, `KeyListerContext`, `VersionWriterContext`, `VersionWeigherContext` and `RevisionedContext`, and both `Announcer` and `ChangeFeeder`; `Store[T]` also `Revisioned` |
 | `BENCH.md` | what a write costs as the file store grows, against the whole-file rewrite it replaces |
 
 ## Why-this-shape
@@ -303,6 +309,46 @@ configurations and the file engine's `StatsValue` (ADR 0074).
   weight recomputed from `Versions` and `Tombstones` —, the file engine's
   counter in `Stats`, through a reopen after a crash and after a fold, under
   concurrent writers, and the SQL statement on the context's transaction.
+
+### The change feed (kitsunium/sdk#831)
+
+- **One record per write that stands**, keyed by the document's key — so the
+  stream's key hash keeps a document's changes in one partition, in order —
+  its payload a `core/data/docstore.ChangeValue` as JSON: `op` (`put`,
+  `delete`, `trash`, `restore`), `key`, `version` (the document's current
+  version once the write stood; 0 for a delete and on a store that keeps no
+  versions; 1 for a document stored before versions were kept), `at` (the
+  store's clock) and, with `ChangesWithDocument`, `doc`. `Purge` is a
+  `delete`; `RewriteVersions` changes no document and records nothing; a
+  refused write records nothing.
+- **SQL engine: in the write's transaction.** `feedIn` runs at the end of each
+  write's work — `writeIn`, `modify`, `remove`, `trash`, `restore`, `purge`,
+  `putDocument` — inside its savepoint, and appends with the write's context:
+  the stream's SQL engine on the same `Transactor` joins that transaction, so
+  a write rolled back leaves no record and a committed one exactly one; a
+  stream on another transactor would commit apart, which the store cannot see
+  and its doc says. With `Changes`, `several()` is true: even a one-statement
+  write runs in a transaction. A batch appends per write.
+- **File engine: before the publication.** `feed` runs under the writers'
+  lock before `persist` (and `feedBatch` before the group entry), so a crash
+  or a refused publication between them leaves a record of a write that did
+  not land — at least once; a reader skips a record whose version the store
+  does not hold, and replays by (key, version). A stream's `Append` takes one
+  partition's records, so a batch appends one record per key, one Append
+  each, its final state. The engine takes no context, so the record is
+  appended under `context.Background()`.
+- **A refused record refuses the write**: `CHANGE_FEED_FAILED`, the stream's
+  error joined for `errors.Is`, nothing published or committed.
+- **Composition**: the package imports the `core/data/stream` port only; its
+  tests reach `service/data/stream` (the memory engine, `Subscribe`), and
+  `e2e/integration/sql` runs the SQL engine's feed on the stream's SQL engine.
+- `change_external_test.go` holds it: every write of the file engine recorded
+  in order with its version; a feed replayed over an empty store giving a
+  snapshot equal byte for byte; a refused publication leaving its record and
+  a refused record leaving no document; and on each SQL dialect, a write in a
+  rolled-back transaction leaving no record, committed writes one each, read
+  by a consumer group. `TestConformance/EveryWriteAppendsOneChangeRecord` is
+  the same sequence on every engine.
 
 ## Do NOT
 

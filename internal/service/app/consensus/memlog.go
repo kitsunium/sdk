@@ -53,6 +53,9 @@ func (l *MemoryLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Ent
 		if i > lo && size > maxBytes {
 			break
 		}
+		// The returned entries own their Data (LogReader.Entries): the
+		// double copies what production's file log reads fresh (#1110).
+		e.Data = slices.Clone(e.Data)
 		dst = append(dst, e)
 	}
 	return dst, nil

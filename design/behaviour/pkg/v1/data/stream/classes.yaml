@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/data/stream
+  name: stream
+  purpose: "Package stream is the public facade for the SDK's durable, partitioned, offset-addressed log: a producer appends records, and any number of consumer groups read every one of them, each at its own pace, until the stream's retention removes it (ADR 0231)."
+types: []

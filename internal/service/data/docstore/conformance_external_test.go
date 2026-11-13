@@ -8,6 +8,7 @@
 package docstore_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
+	corestream "github.com/kitsunium/sdk/internal/core/data/stream"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
@@ -35,6 +37,8 @@ type storeConfig struct {
 	held     func(key string) bool
 	versions int
 	foldAt   int
+	// changes is the change feed, with the documents (#831); nil writes none.
+	changes corestream.Stream
 	// ordered adds the ordered index "since" over an account's Name to the
 	// accounts indexes, for the paged reads' rows (#836).
 	ordered bool
@@ -72,6 +76,7 @@ func (f storeFactory) keeping(t *testing.T, versions int) (storeEngine, *clock.M
 func fileStoreConfig(fsys func() docstore.Config[account], cfg storeConfig) docstore.Config[account] {
 	c := fsys()
 	c.Versions, c.Clock, c.Held = cfg.versions, cfg.clock, cfg.held
+	c.Changes, c.ChangesWithDocument = cfg.changes, cfg.changes != nil
 	//: a fold threshold only where a row asks for one.
 	if cfg.foldAt != 0 {
 		c.FoldAt = cfg.foldAt
@@ -83,6 +88,7 @@ func fileStoreConfig(fsys func() docstore.Config[account], cfg storeConfig) docs
 func sqlStoreConfig(cfg storeConfig) func(*docstore.SQLConfig[account]) {
 	return func(c *docstore.SQLConfig[account]) {
 		c.Versions, c.Clock = cfg.versions, cfg.clock
+		c.Changes, c.ChangesWithDocument = cfg.changes, cfg.changes != nil
 		//: the hold asked with the key; its context is the SQL engine's own.
 		if cfg.held != nil {
 			c.Held = func(_ context.Context, key string) bool { return cfg.held(key) }
@@ -184,6 +190,7 @@ func conformanceRows() []conformanceRow {
 		{name: "RangeReadsAnOrderedIndexBetweenTwoKeys", run: ordered(rangeReadsAnOrderedIndexBetweenTwoKeys)},
 		{name: "RangeFollowsEveryWrite", run: ordered(rangeFollowsEveryWrite)},
 		{name: "PagedReadsRefusals", run: ordered(pagedReadsRefusals)},
+		{name: "EveryWriteAppendsOneChangeRecord", run: everyWriteAppendsOneChangeRecord},
 	}
 }
 
@@ -495,5 +502,29 @@ func versionsUnderContention(t *testing.T, f storeFactory) {
 		if current.Name != a.Name || !slices.Equal(current.Teams, a.Teams) {
 			t.Fatalf("%s's current version holds %+v, the document %+v", a.ID, current, a)
 		}
+	}
+}
+
+// everyWriteAppendsOneChangeRecord: each write that stands appends one
+// change record — its operation, the version it left and, asked, the
+// document — and a refused write none, on every engine alike (#831).
+func everyWriteAppendsOneChangeRecord(t *testing.T, f storeFactory) {
+	feed := changeStream(t)
+	e := f.open(t, storeConfig{versions: 2, clock: clock.NewManualClock(epoch), changes: feed})
+	must(t, e.put(account{ID: "acc", Email: "a@x"}))
+	must(t, e.update("acc", func(a *account) error { a.Name = "Ada"; return nil }))
+	if err := e.insert(account{ID: "acc"}); !errs.HasCode(err, coredocstore.CodeDocumentExists) {
+		t.Fatalf("Insert over a taken key = %v, want DOCUMENT_EXISTS", err)
+	}
+	must(t, e.trash("acc"))
+	must(t, e.restore("acc"))
+	must(t, e.del("acc"))
+	changes := readChanges(t, feed)
+	got := opsOf(changes)["acc"]
+	if want := []string{"put@1", "put@2", "trash@2", "restore@2", "delete@0"}; !slices.Equal(got, want) || len(changes) != len(want) {
+		t.Fatalf("changes = %v, want %v", got, want)
+	}
+	if !bytes.Contains(changes[1].Document, []byte(`"Ada"`)) || changes[4].Document != nil {
+		t.Fatalf("documents = %s / %s, want Ada's then none for the delete", changes[1].Document, changes[4].Document)
 	}
 }

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,13 +16,23 @@ import (
 // errDiskFull stands for the ENOSPC a zero-fill meets on a full disk.
 var errDiskFull = errors.New("no space left on device")
 
-// fullDisk zero-fills half of the range, then fails as a full disk does:
-// what a pre-fill leaves when the disk ran out under it.
-func fullDisk(f *os.File, off, size int64) error {
-	if _, err := f.WriteAt(make([]byte, (size-off)/2), off); err != nil {
-		return err
+// fullDisk is a shim whose zero-fill of a segment writes half its range,
+// then fails as a full disk does: what a pre-fill leaves when the disk ran
+// out under it.
+func fullDisk() *faultFS {
+	s := newFaultFS()
+	s.realSync = true
+	s.before = func(op *diskOp) error {
+		w, ok := op.file.(*faultFile)
+		if op.kind != "write" || !ok || !strings.HasSuffix(op.path, ".tmp") || !strings.HasPrefix(filepath.Base(op.path), "seg-") {
+			return nil
+		}
+		if _, err := w.segFile.WriteAt(op.data[:len(op.data)/2], op.off); err != nil {
+			return err
+		}
+		return errDiskFull
 	}
-	return errDiskFull
+	return s
 }
 
 // failingSnapKV is a kv machine whose every snapshot fails to be written,
@@ -128,7 +138,7 @@ func TestAFailedZeroFillLeavesNoPartialSegment(t *testing.T) {
 		}
 	}()
 	l := d.d.log
-	l.fill = fullDisk
+	useShim(d, fullDisk())
 	hs := coreconsensus.HardState{Term: 1}
 	var err error
 	for idx := uint64(1); idx < 2000 && err == nil; idx += 10 {

@@ -80,7 +80,7 @@ func TestASendToAPeerNotAdmittedStartsNoSender(t *testing.T) {
 func TestHaltClosesTheSendersOpenLink(t *testing.T) {
 	local, remote := net.Pipe()
 	defer func() { _ = remote.Close() }()
-	pc := &peerConn{queue: make(chan []byte, 1), stop: make(chan struct{})}
+	pc := &peerConn{queue: make(chan outFrame, 1), stop: make(chan struct{})}
 	pc.conn = local
 	pc.halt()
 	pc.halt()

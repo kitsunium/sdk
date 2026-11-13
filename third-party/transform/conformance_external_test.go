@@ -9,12 +9,11 @@
 // The table lives twice because it cannot live once: internal/service's test
 // cannot import this module — the module requires internal, and no layer
 // below third-party may reach it (scripts/check-layer-deps.sh) — and a _test
-// file is importable by nobody. An importable suite is #985's. Two rows of the
-// stdlib table do not transfer and are left out on purpose: the caller's
-// ceiling on the block path (DecompressBounded), which zstd and s2 do not
-// implement until #917 — their block ceiling is the instance's, held by
-// bomb_external_test.go — and "the stream form is what Compress writes",
-// which s2's framing format is not (TestTheStreamFormsAgainstTheBlockForms).
+// file is importable by nobody. An importable suite is #985's. One row of the
+// stdlib table does not transfer and is left out on purpose: "the stream form
+// is what Compress writes", which s2's framing format is not
+// (TestTheStreamFormsAgainstTheBlockForms). The caller's ceiling on the block
+// path (DecompressBounded) is a row since #917 gave zstd and s2 the method.
 package transform_test
 
 import (
@@ -90,6 +89,7 @@ func vendorRows() []vendorRow {
 	return []vendorRow{
 		{"compress-then-decompress-is-the-identity-and-keeps-dst", vendorRowRoundTrip},
 		{"a-malformed-stream-is-the-engine's-refusal-and-dst-comes-back", vendorRowGarbage},
+		{"the-caller's-ceiling-admits-max-and-refuses-one-more", vendorRowCeiling},
 		{"a-stream-round-trips", vendorRowStreamRoundTrip},
 		{"a-stream-hands-over-its-ceiling-then-refuses", vendorRowStreamCeiling},
 		{"a-malformed-stream-is-refused-through-the-reader", vendorRowStreamGarbage},
@@ -296,5 +296,32 @@ func vendorRowStreamClosed(t *testing.T, c coretransform.Compressor) {
 	}
 	if cerr := r.Close(); cerr != nil {
 		t.Fatalf("a second reader Close: %v", cerr)
+	}
+}
+
+// vendorRowCeiling: DecompressBounded admits exactly max bytes and refuses one
+// more with DecompressedTooLarge — never a truncated success — with dst back.
+func vendorRowCeiling(t *testing.T, c coretransform.Compressor) {
+	bounded, ok := c.(coretransform.BoundedDecompressor)
+	if !ok {
+		t.Fatalf("engine %q is not a BoundedDecompressor", c.Algorithm())
+	}
+	plain := bytes.Repeat([]byte{'z'}, 4096)
+	encoded, err := c.Compress(nil, plain)
+	if err != nil {
+		t.Fatalf("Compress: %v", err)
+	}
+	if out, derr := bounded.DecompressBounded(nil, encoded, 4096); derr != nil || !bytes.Equal(out, plain) {
+		t.Fatalf("at the ceiling: err=%v, %d bytes, want the 4096", derr, len(out))
+	}
+	for _, ceiling := range []int64{4095, 1024, 0, -1} {
+		dst := []byte("prefix")
+		out, derr := bounded.DecompressBounded(dst, encoded, ceiling)
+		if !errors.Is(derr, coretransform.DecompressedTooLarge) {
+			t.Fatalf("ceiling %d: err=%v and %d bytes, want DecompressedTooLarge", ceiling, derr, len(out))
+		}
+		if !bytes.Equal(out, dst) {
+			t.Fatalf("ceiling %d: a refusal returned %d bytes, want dst back", ceiling, len(out))
+		}
 	}
 }

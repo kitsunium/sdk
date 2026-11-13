@@ -1,0 +1,318 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The packed body's layout: a version byte, then uvarints, each seven bits a
+      byte, the high bit set on every byte but the last.
+    grouped: true
+    items:
+      - doc: |-
+          bodyVersion is the first byte of every packed body: the version of the
+          layout that follows. A body of another version does not parse.
+        name: bodyVersion
+        type: byte
+        value: "1"
+      - doc: |-
+          bodyHeaderMax is the most a body's header takes: its version byte and
+          the uvarint count of its commands.
+        name: bodyHeaderMax
+        type: int
+        value: 1 + binary.MaxVarintLen64
+      - doc: |-
+          uvarintMore is the bit of a uvarint byte that says another follows: a
+          value at or above it needs one byte more.
+        name: uvarintMore
+        type: uint64
+        value: "0x80"
+      - doc: uvarintBits is how many bits of the value one uvarint byte carries.
+        name: uvarintBits
+        type: uint
+        value: "7"
+    name: bodyVersion
+  - doc: The defaults a zero bound of Config clamps to.
+    grouped: true
+    items:
+      - doc: |-
+          DefaultMaxCommands is the commands one entry carries when
+          Config.MaxCommands is zero.
+        name: DefaultMaxCommands
+        type: int
+        value: "4096"
+      - doc: |-
+          DefaultMaxBytes is the largest packed body when Config.MaxBytes is zero:
+          the engine's default MaxEntryBytes.
+        name: DefaultMaxBytes
+        type: int
+        value: 1 << 20
+      - doc: |-
+          DefaultMaxInFlight is the packed entries in flight at once when
+          Config.MaxInFlight is zero: one, so every command proposed while an
+          entry is in flight waits for it and leaves in the next.
+        name: DefaultMaxInFlight
+        type: int
+        value: "1"
+    name: DefaultMaxCommands
+files:
+  - decls:
+      - bodyVersion
+      - cmdCost
+      - uvarintLen
+      - appendBody
+      - splitBody
+      - malformed
+      - origin
+    name: body.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Machine
+      - NewMachine
+      - (*Machine).Apply
+      - (*Machine).ApplyBatch
+      - (*Machine).Snapshot
+      - (*Machine).Restore
+    name: machine.go
+  - decls:
+      - _
+    name: multi_compliance.go
+  - decls:
+      - DefaultMaxCommands
+      - Config
+      - ResultValue
+      - request
+      - outcome
+      - Packer
+      - NewPacker
+      - startPacker
+      - (*Packer).Propose
+      - (*Packer).abandon
+      - (*Packer).Close
+      - (*Packer).loop
+      - (*Packer).send
+      - (*Packer).take
+      - answer
+      - (*Packer).failQueued
+    name: packer.go
+functions:
+  - doc: |-
+      cmdCost is what cmd adds to a packed body: its uvarint length, then its
+      bytes.
+    name: cmdCost
+    params: cmd []byte
+    results: int
+  - doc: uvarintLen is the length of v's uvarint encoding.
+    name: uvarintLen
+    params: v uint64
+    results: int
+  - doc: |-
+      appendBody appends the packed body of cmds to dst: the version, the count
+      of commands, then each command as its uvarint length and its bytes.
+    name: appendBody
+    params: dst []byte, cmds [][]byte
+    results: "[]byte"
+  - doc: |-
+      splitBody appends to dst one entry per command of e's packed body, each a
+      copy of e whose Data is the command — a slice of e.Data capped at its end —
+      and whose BodySum is the command's own; ChainSum, which chains the log's
+      headers, is zero. A body that does not parse is FRAME_INVALID and leaves
+      dst as it was.
+    name: splitBody
+    params: dst []coreconsensus.EntryValue, e *coreconsensus.EntryValue, sum func([]byte) uint32
+    results: "[]coreconsensus.EntryValue, error"
+  - doc: malformed is the FRAME_INVALID of a packed body, naming what failed.
+    name: malformed
+    params: what string
+    results: error
+  - doc: |-
+      origin returns sentinel itself with fields: an SDK cause keeps its code,
+      reason and texts (origin wins on wrap), and gains the fields.
+    name: origin
+    params: sentinel *errs.Error, fields ...errs.FieldValue
+    results: error
+  - name: NewMachine
+    params: inner coreconsensus.BatchingStateMachine
+    results: "*Machine"
+  - name: NewPacker
+    params: r coreconsensus.Replicated, cfg Config
+    results: "*Packer"
+  - doc: |-
+      startPacker builds the Packer of NewPacker over cfg, its bounds already
+      defaulted, and launches its loop goroutine. The loop runs until Close
+      closes stop, then waits for the entries in flight, answers what is still
+      queued NODE_STOPPED and closes done, which Close waits for: no goroutine
+      of the Packer outlives a Close that returned.
+    name: startPacker
+    params: r coreconsensus.Replicated, cfg Config
+    results: "*Packer"
+  - doc: answer hands each request of batch its sub-result of subs, or err.
+    name: answer
+    params: batch []*request, tok coreconsensus.TokenValue, subs []any, err error
+imports:
+  binary: encoding/binary
+  context: context
+  coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  io: io
+  slices: slices
+  sync: sync
+  wire: github.com/kitsunium/sdk/internal/service/app/consensus/wire
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/consensus/multi
+  name: multi
+  purpose: "Package multi packs many small commands into one consensus entry and splits their results, on top of the Replicated port and with no change to the engine (ADR 0152 D6, D19, #926)."
+types:
+  - fields:
+      - doc: Inner applies the commands.
+        name: Inner
+        type: coreconsensus.BatchingStateMachine
+      - doc: subs is the scratch of split commands, reused from call to call.
+        name: subs
+        type: "[]coreconsensus.EntryValue"
+      - doc: |-
+          ends holds, per entry of a batch, the end of its commands in subs, or
+          -1 for a body that did not parse.
+        name: ends
+        type: "[]int"
+      - doc: bad holds the FRAME_INVALID of each entry ends marks -1.
+        name: bad
+        type: "[]error"
+    kind: struct
+    methods:
+      - name: Apply
+        params: e coreconsensus.EntryValue
+        recv: m *Machine
+        results: any
+      - name: ApplyBatch
+        params: es []coreconsensus.EntryValue, results []any
+        recv: m *Machine
+      - name: Snapshot
+        recv: m *Machine
+        results: coreconsensus.Snapshot, error
+      - name: Restore
+        params: r io.Reader, meta coreconsensus.SnapshotMetaValue
+        recv: m *Machine
+        results: error
+    name: Machine
+  - fields:
+      - doc: MaxCommands is the most commands one entry carries.
+        name: MaxCommands
+        type: int
+      - doc: |-
+          MaxBytes is the largest packed body; it must not exceed the node's
+          MaxEntryBytes, or a full entry is refused ENTRY_TOO_LARGE.
+        name: MaxBytes
+        type: int
+      - doc: |-
+          MaxInFlight is the most packed entries proposed and not yet answered;
+          the commands proposed while every one is in flight leave together in
+          the next.
+        name: MaxInFlight
+        type: int
+    kind: struct
+    name: Config
+  - fields:
+      - doc: Token is the packed entry's token, shared by every command in it.
+        name: Token
+        type: coreconsensus.TokenValue
+      - doc: Sub is the command's index in the entry, in packing order.
+        name: Sub
+        type: int
+      - doc: Value is the result Inner's ApplyBatch wrote for the command.
+        name: Value
+        type: any
+    kind: struct
+    name: ResultValue
+  - doc: request is one caller's command, queued until the Packer takes it.
+    fields:
+      - name: cmd
+        type: "[]byte"
+      - name: taken
+        type: bool
+      - name: done
+        type: chan outcome
+    kind: struct
+    name: request
+  - doc: outcome is the answer to one request.
+    fields:
+      - name: res
+        type: ResultValue
+      - name: err
+        type: error
+    kind: struct
+    name: outcome
+  - fields:
+      - name: r
+        type: coreconsensus.Replicated
+      - name: cfg
+        type: Config
+      - name: mu
+        type: sync.Mutex
+      - name: queue
+        type: "[]*request"
+      - name: closed
+        type: bool
+      - doc: stopped closes stop once, whichever Close comes first.
+        name: stopped
+        type: sync.Once
+      - name: kick
+        type: chan struct{}
+      - name: slots
+        type: chan struct{}
+      - name: flight
+        type: sync.WaitGroup
+      - name: stop
+        type: chan struct{}
+      - name: done
+        type: chan struct{}
+      - name: life
+        type: context.Context
+      - name: cancel
+        type: context.CancelFunc
+    kind: struct
+    methods:
+      - name: Propose
+        params: ctx context.Context, cmd []byte
+        recv: p *Packer
+        results: ResultValue, error
+      - doc: |-
+          abandon answers a caller whose ctx ended: a command still queued is taken
+          out and never proposed; one already packed may still commit.
+        name: abandon
+        params: ctx context.Context, r *request
+        recv: p *Packer
+        results: ResultValue, error
+      - name: Close
+        params: ctx context.Context
+        recv: p *Packer
+        results: error
+      - doc: |-
+          loop proposes the queued commands, each packed entry on a goroutine of its
+          own and at most MaxInFlight at once, until Close; then it waits for those
+          in flight and answers what is left NODE_STOPPED.
+        name: loop
+        recv: p *Packer
+      - doc: send proposes one packed entry, answers its callers and frees its slot.
+        name: send
+        params: batch []*request, body []byte
+        recv: p *Packer
+      - doc: |-
+          take packs the head of the queue, within MaxCommands and MaxBytes, into a
+          fresh body, and marks its requests taken: from here their callers can no
+          longer withdraw them, and their buffers are no longer read.
+        name: take
+        recv: p *Packer
+        results: "[]*request, []byte"
+      - doc: |-
+          failQueued answers every queued request NODE_STOPPED. Close set closed
+          before it signalled stop, so nothing joins the queue after.
+        name: failQueued
+        recv: p *Packer
+    name: Packer
+vars:
+  - doc: Machine is the state machine of a node, applying in batches.
+    items:
+      - name: _
+        type: coreconsensus.BatchingStateMachine
+        value: (*Machine)(nil)
+    name: _

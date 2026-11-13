@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "machine",
+    srcs = [
+        "doc.go",
+        "errors.go",
+        "kv.go",
+        "machine_compliance.go",
+        "sql.go",
+        "sqlsnap.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/core/data/sql",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":machine",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "machine_test",
+    srcs = [
+        "cluster_external_test.go",
+        "gen_api_test.go",
+        "kv_external_test.go",
+        "lincheck_external_test.go",
+        "sql_external_test.go",
+        "sqldouble_external_test.go",
+    ],
+    deps = [
+        ":machine",
+        "//internal/core/app/consensus",
+        "//internal/core/data/sql",
+        "//internal/kernel/errs",
+        "//internal/service/app/consensus",
+        "//internal/service/data/sql",
+    ],
+)

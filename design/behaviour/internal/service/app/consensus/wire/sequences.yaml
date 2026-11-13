@@ -201,12 +201,12 @@ sequences:
         kind: value
       - id: binary.LittleEndian.PutUint64
         kind: value
-      - id: crc32
-        kind: stdlib
+      - id: headerSum
+        kind: internal
     steps:
       - var:
           name: b
-          type: "[4 + 8 + 8 + 1 + 4 + 4]byte"
+          type: "[chainHeaderLen]byte"
       - eval: binary.LittleEndian.PutUint32(b[0:], prev)
         to: binary.LittleEndian.PutUint32
       - eval: binary.LittleEndian.PutUint64(b[4:], e.Position.Term)
@@ -219,8 +219,20 @@ sequences:
         to: binary.LittleEndian.PutUint32
       - eval: binary.LittleEndian.PutUint32(b[25:], e.BodySum)
         to: binary.LittleEndian.PutUint32
-      - return: crc32.Checksum(b[:], castagnoli)
-        to: crc32
+      - return: headerSum(b[:])
+        to: headerSum
+  - of: headerSum
+    steps:
+      - bind: crc
+        eval: ^uint32(0)
+      - loop:
+          do:
+            - set: crc
+              value: castagnoli[byte(crc)^v] ^ (crc >> 8)
+          key: _
+          range: b
+          value: v
+      - return: ^crc
   - of: Lane
     participants:
       - id: caller
@@ -242,17 +254,80 @@ sequences:
         kind: actor
       - id: AppendMessage
         kind: self
-      - id: binary.LittleEndian.AppendUint32
-        kind: value
-      - id: binary.LittleEndian.AppendUint64
-        kind: value
-      - id: appendEntry
+      - id: appendFixed
+        kind: internal
+      - id: AppendEntries
         kind: internal
       - id: binary.LittleEndian.PutUint32
         kind: value
     steps:
       - bind: start
         eval: len(dst)
+      - set: dst
+        to: appendFixed
+        value: appendFixed(dst, m)
+      - set: dst
+        to: AppendEntries
+        value: AppendEntries(dst, m.Entries)
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, m.Trace.TraceID[:]...)
+            - set: dst
+              value: append(dst, m.Trace.SpanID[:]...)
+            - set: dst
+              value: append(dst, boolByte(m.Trace.Sampled))
+          when: m.Flags&coreconsensus.FlagTrace != 0
+      - eval: binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
+        to: binary.LittleEndian.PutUint32
+      - return: dst
+  - of: AppendHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendHeader
+        kind: self
+      - id: appendFixed
+        kind: internal
+      - id: binary.LittleEndian.PutUint32
+        kind: value
+    steps:
+      - bind: start
+        eval: len(dst)
+      - set: dst
+        to: appendFixed
+        value: appendFixed(dst, m)
+      - eval: binary.LittleEndian.PutUint32(dst[start:], uint32(MessageHeaderLen-4+bodyLen))
+        to: binary.LittleEndian.PutUint32
+      - return: dst
+  - of: AppendEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendEntries
+        kind: self
+      - id: appendEntry
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: dst
+              to: appendEntry
+              value: appendEntry(dst, &ents[i])
+          key: i
+          range: ents
+      - return: dst
+  - of: appendFixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFixed
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
       - set: dst
         to: binary.LittleEndian.AppendUint32
         value: binary.LittleEndian.AppendUint32(dst, 0)
@@ -301,19 +376,8 @@ sequences:
       - set: dst
         to: binary.LittleEndian.AppendUint32
         value: binary.LittleEndian.AppendUint32(dst, uint32(m.Code))
-      - set: dst
+      - return: binary.LittleEndian.AppendUint32(dst, uint32(len(m.Entries)))
         to: binary.LittleEndian.AppendUint32
-        value: binary.LittleEndian.AppendUint32(dst, uint32(len(m.Entries)))
-      - loop:
-          do:
-            - set: dst
-              to: appendEntry
-              value: appendEntry(dst, &m.Entries[i])
-          key: i
-          range: m.Entries
-      - eval: binary.LittleEndian.PutUint32(dst[start:], uint32(len(dst)-start-4))
-        to: binary.LittleEndian.PutUint32
-      - return: dst
   - of: appendEntry
     participants:
       - id: caller
@@ -363,7 +427,11 @@ sequences:
         kind: package
       - id: binary.LittleEndian.Uint32
         kind: value
+      - id: slices
+        kind: stdlib
       - id: parseEntry
+        kind: internal
+      - id: parseTrace
         kind: internal
     steps:
       - opt:
@@ -438,6 +506,9 @@ sequences:
             - return: frameInvalid("entry count", len(frame))
               to: frameInvalid
           when: uint64(n)*entryFixedLen > uint64(len(body))
+      - set: entries
+        to: slices
+        value: slices.Grow(entries, int(n))
       - loop:
           do:
             - var:
@@ -460,12 +531,42 @@ sequences:
           range: "n"
       - opt:
           do:
+            - var:
+                name: err
+                type: error
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: body, err
+                  eval: parseTrace(body, m)
+                  op: =
+                  to: parseTrace
+                when: err != nil
+          when: m.Flags&coreconsensus.FlagTrace != 0
+      - opt:
+          do:
             - return: frameInvalid("trailing bytes", len(frame))
               to: frameInvalid
           when: len(body) != 0
       - set: m.Entries
         value: entries
       - return: nil
+  - of: parseTrace
+    steps:
+      - opt:
+          do:
+            - return: nil, frameInvalid("trace flag", len(b))
+          when: m.Kind != coreconsensus.MsgForward && m.Kind != coreconsensus.MsgForwardAdmin
+      - opt:
+          do:
+            - return: nil, frameInvalid("trace context", len(b))
+          when: len(b) < traceLen || b[traceLen-1] > 1
+      - eval: copy(m.Trace.TraceID[:], b)
+      - eval: copy(m.Trace.SpanID[:], b[16:])
+      - set: m.Trace.Sampled
+        value: b[24] != 0
+      - return: b[traceLen:], nil
   - of: parseEntry
     participants:
       - id: caller
@@ -572,6 +673,10 @@ sequences:
     steps:
       - switch:
           cases:
+            - case: m.ClusterVersion >= metaProtocol4
+              do:
+                - return: appendMeta(dst, metaVersion4, m)
+                  to: appendMeta
             - case: m.ClusterVersion >= metaProtocol3
               do:
                 - return: appendMeta(dst, metaVersion3, m)
@@ -605,6 +710,8 @@ sequences:
       - id: appendBytes
         kind: internal
       - id: appendKeys
+        kind: internal
+      - id: appendSessions
         kind: internal
     steps:
       - bind: start
@@ -665,13 +772,19 @@ sequences:
             - set: dst
               to: appendKeys
               value: appendKeys(dst, m.Membership.RetiredKeys)
-          when: v == metaVersion3
+          when: v >= metaVersion3
+      - opt:
+          do:
+            - set: dst
+              to: appendSessions
+              value: appendSessions(dst, m.Sessions)
+          when: v == metaVersion4
       - opt:
           do:
             - set: dst
               to: binary.LittleEndian.AppendUint32
               value: binary.LittleEndian.AppendUint32(dst, crc32.Checksum(dst[start:], castagnoli))
-          when: v == metaVersion2 || v == metaVersion3
+          when: v >= metaVersion2
       - return: dst
   - of: ParseSnapshotMeta
     participants:
@@ -702,6 +815,8 @@ sequences:
       - id: slices
         kind: stdlib
       - id: r.keys
+        kind: internal
+      - id: r.sessions
         kind: internal
       - id: frameInvalid
         kind: internal
@@ -776,7 +891,13 @@ sequences:
             - set: out.Membership.RetiredKeys
               to: r.keys
               value: r.keys()
-          when: b[0] == metaVersion3
+          when: b[0] >= metaVersion3
+      - opt:
+          do:
+            - set: out.Sessions
+              to: r.sessions
+              value: r.sessions()
+          when: b[0] == metaVersion4
       - opt:
           do:
             - set: r.err
@@ -801,7 +922,7 @@ sequences:
             - case: metaVersion1
               do:
                 - return: b[1:], nil
-            - case: metaVersion2, metaVersion3
+            - case: metaVersion2, metaVersion3, metaVersion4
               do:
                 - opt:
                     do:
@@ -1000,6 +1121,74 @@ sequences:
           key: i
           range: keys
       - return: dst
+  - of: appendSessions
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendSessions
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(vs)))
+      - loop:
+          do:
+            - bind: v
+              eval: "&vs[i]"
+            - set: dst
+              value: append(dst, v.ID[:]...)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, v.Seq)
+            - set: dst
+              to: binary.LittleEndian.AppendUint32
+              value: binary.LittleEndian.AppendUint32(dst, v.BodySum)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, v.Position.Term)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, v.Position.Index)
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, v.Last)
+          key: i
+          range: vs
+      - return: dst
+  - of: AppendSession
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendSession
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, s[:]...)
+      - set: dst
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(dst, seq)
+      - return: append(dst, data...)
+  - of: ParseSession
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseSession
+        kind: self
+      - id: coreconsensus
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: coreconsensus.SessionID{}, 0, nil, frameInvalid("short session command", len(b))
+          when: len(b) < sessionHeaderLen
+      - return: coreconsensus.SessionID(b[:16]), binary.LittleEndian.Uint64(b[16:]), b[sessionHeaderLen:], nil
+        to: coreconsensus
   - of: appendBytes
     participants:
       - id: caller
@@ -1338,5 +1527,64 @@ sequences:
           do:
             - set: out
               value: append(out, [32]byte(r.n(keyLen)))
+          range: k
+      - return: out
+  - of: (*reader).sessions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).sessions
+        kind: self
+      - id: r.u32
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+      - id: coreconsensus
+        kind: package
+      - id: r.u64
+        kind: internal
+    steps:
+      - bind: k
+        eval: r.u32()
+        to: r.u32
+      - opt:
+          do:
+            - return: nil
+          when: r.err != nil
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("session count", len(r.b))
+            - return: nil
+          when: uint64(k)*uint64(sessionLen) > uint64(len(r.b))
+      - var:
+          name: out
+          type: "[]coreconsensus.SessionValue"
+      - loop:
+          do:
+            - var:
+                name: v
+                type: coreconsensus.SessionValue
+            - set: v.ID
+              to: coreconsensus
+              value: coreconsensus.SessionID(r.n(16))
+            - set: v.Seq
+              to: r.u64
+              value: r.u64()
+            - set: v.BodySum
+              to: r.u32
+              value: r.u32()
+            - set: v.Position.Term
+              to: r.u64
+              value: r.u64()
+            - set: v.Position.Index
+              to: r.u64
+              value: r.u64()
+            - set: v.Last
+              to: r.u64
+              value: r.u64()
+            - set: out
+              value: append(out, v)
           range: k
       - return: out

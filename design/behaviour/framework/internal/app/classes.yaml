@@ -1974,6 +1974,36 @@ constants:
         type: int
         value: "5"
     name: setFramework
+  - doc: streamPackage is the package a program imports for its streamed topics.
+    items:
+      - name: streamPackage
+        value: "\"github.com/kitsunium/sdk/framework/app/stream\""
+    name: streamPackage
+  - doc: |-
+      underStreams is what a streamed topic's stream is kept under in the data
+      directory, beside its service's name and its own.
+    items:
+      - name: underStreams
+        type: string
+        value: "\"streams\""
+    name: underStreams
+  - doc: |-
+      streamTableService is what a stream's tables are named under, in place of
+      a service: app_stream__<service>__<topic>.
+    items:
+      - name: streamTableService
+        type: string
+        value: frameworkName + "_stream"
+    name: streamTableService
+  - doc: |-
+      streamPartitions is how many partitions a streamed topic's stream has: a
+      message's key chooses one, and the records of one key keep their order.
+      It cannot change for the life of a stream.
+    items:
+      - name: streamPartitions
+        type: int
+        value: "8"
+    name: streamPartitions
   - doc: |-
       storePackage is the package a program imports for its stores and
       databases.
@@ -2016,6 +2046,15 @@ constants:
       - name: supervisedCheck
         value: "\"supervised:\""
     name: supervisedCheck
+  - doc: The places a subscription starts at; the zero is after the last record.
+    grouped: true
+    items:
+      - name: startNow
+        type: startKind
+        value: iota
+      - name: startBeginning
+      - name: startAt
+    name: startNow
   - doc: localName is the data directory and memory, as a refusal names them.
     items:
       - name: localName
@@ -2224,6 +2263,7 @@ files:
       - (*App).addIdle
       - (*App).addAnalysis
       - (*App).componentNodes
+      - (*componentGroups).sort
       - (*componentGroups).of
       - (*App).startGroups
       - (*App).component
@@ -5356,6 +5396,8 @@ files:
       - frameworkTable
       - (*App).frameworkTables
       - (*App).nodeTables
+      - (*App).journalTables
+      - (*App).queueTables
       - (*App).keptOn
       - storeTables
       - frameworkTable.withFormer
@@ -5392,6 +5434,7 @@ files:
       - (*App).frameworkTablesOf
       - freeVersion
       - tableMigration
+      - queueTableMigration
       - nameDigest
       - nextGeneration
       - (*App).applyFrameworkSet
@@ -5401,6 +5444,19 @@ files:
       - (*tableRegistry).knownTables
       - (*databaseRun).reindex
     name: store_sql_migrate.go
+  - decls:
+      - streamPackage
+      - underStreams
+      - streamTableService
+      - streamPartitions
+      - streameder
+      - (*App).openStreamWith
+      - (*App).openTopicStream
+      - streamTable
+      - streamsMissing
+      - streamsLinked
+      - needsStream
+    name: stream_plug.go
   - decls:
       - studioHost
       - studioHost.Graph
@@ -5517,6 +5573,7 @@ files:
       - (*TopicService).publishTo
       - (*TopicService).publishInto
       - (*TopicService).describe
+      - (*TopicService).brokerWhere
       - SubscriptionWorker
       - (*SubscriptionWorker).queueUnder
       - SubscriptionConfigurer
@@ -5544,6 +5601,26 @@ files:
       - (*SubscriptionWorker).describe
       - NewTopicService
     name: topic.go
+  - decls:
+      - startKind
+      - startNow
+      - streamStart
+      - topicStream
+      - (*TopicService).Streamed
+      - (*TopicService).streamed
+      - (*SubscriptionWorker).streamed
+      - (*TopicService).start
+      - (*TopicService).stop
+      - (*topicStream).in
+      - (*topicStream).keyOf
+      - (*TopicService).appendStreamed
+      - FromBeginning
+      - FromNow
+      - FromTime
+      - (*SubscriptionWorker).acceptsStart
+      - (*SubscriptionWorker).startStreamed
+      - (*SubscriptionWorker).deliverRecord
+    name: topic_stream.go
   - decls:
       - localName
       - Transact
@@ -9938,8 +10015,16 @@ functions:
       the SQL broker's one table (ADR 0178 C1), and for its trail column the
       column's addition to a table an earlier release made, which does nothing
       on a table that has it or is not there yet — so it may run before the
-      table's own, whose version it does not follow (issue #500).
+      table's own, whose version it does not follow (issue #500); as the stream
+      subsystem writes it, for a streamed topic, the SQL stream's three tables
+      (issue #826).
     name: tableMigration
+    params: dialect Dialect, t frameworkTable, version uint64
+    results: plug.MigrationValue, error
+  - doc: |-
+      queueTableMigration is the migration of a consumer's queue table, or of its
+      trail column when t is a trail.
+    name: queueTableMigration
     params: dialect Dialect, t frameworkTable, version uint64
     results: plug.MigrationValue, error
   - doc: nameDigest is the low half of a new table's version.
@@ -9960,9 +10045,30 @@ functions:
     params: gen uint64, err error
     results: uint64
   - doc: |-
-      needsQueue reports whether n needs the queue subsystem beside the topics
-      and the subscriptions — a watch is one —: a queued command, and a mailer
-      whose outbox is on a database, the queues' SQL broker (ADR 0178 C1).
+      streamTable is the base name of the tables of the streamed topic b's
+      stream on the database that keeps it: app_stream__<service>__<topic>.
+    name: streamTable
+    params: b *nodeBase
+    results: string
+  - doc: |-
+      streamsMissing is the refusal of what needs the stream subsystem in a
+      program that does not import it.
+    name: streamsMissing
+    results: error
+  - doc: streamsLinked reports whether the program imports framework/app/stream.
+    name: streamsLinked
+    results: bool
+  - doc: |-
+      needsStream reports whether n needs the stream subsystem: a streamed
+      topic, and each of its subscriptions.
+    name: needsStream
+    params: n node
+    results: bool
+  - doc: |-
+      needsQueue reports whether n needs the queue subsystem: a topic and a
+      subscription — a watch is one — but a streamed topic's, whose stream the
+      stream subsystem keeps (issue #826), a queued command, and a mailer whose
+      outbox is on a database, the queues' SQL broker (ADR 0178 C1).
     name: needsQueue
     params: a *App, n node
     results: bool
@@ -10055,6 +10161,13 @@ functions:
   - name: NewTopicService
     results: "*TopicService[T]"
     typeParams: T any
+  - name: FromBeginning
+    results: SubscriptionConfigurer
+  - name: FromNow
+    results: SubscriptionConfigurer
+  - name: FromTime
+    params: at time.Time
+    results: SubscriptionConfigurer
   - name: Transact
     params: ctx context.Context, fn func(context.Context) error, opts ...TransactOption
     results: error
@@ -10838,6 +10951,14 @@ types:
           not name: the queue subsystem applies it (plug.QueueConfig's Wrap). nil
           in every app a product builds.
         name: wrapQueue
+        type: any
+      - doc: |-
+          wrapStream, when a test sets it, stands in front of every stream the
+          app opens for a streamed topic: how a test counts its appends. It is a
+          func(stream.Stream) stream.Stream of the SDK's stream, which the core
+          does not name: the stream subsystem applies it (plug.StreamConfig's
+          Wrap). nil in every app a product builds.
+        name: wrapStream
         type: any
       - doc: |-
           streams ends every live event stream when the app starts draining: an
@@ -14320,6 +14441,18 @@ types:
         params: n node, d *database
         recv: a *App
         results: "[]frameworkTable"
+      - doc: journalTables are the tables of a workflow's journal, when it lives on d.
+        name: journalTables
+        params: n node, d *database
+        recv: a *App
+        results: "[]frameworkTable"
+      - doc: |-
+          queueTables are the tables of a consumer's queue and of its trail, when the
+          queue lives on d.
+        name: queueTables
+        params: n node, d *database
+        recv: a *App
+        results: "[]frameworkTable"
       - doc: keptOn reports whether st lives on d, not in memory.
         name: keptOn
         params: st placementSource, d *database
@@ -14373,6 +14506,23 @@ types:
         params: d *database, g *tableRegistry
         recv: a *App
         results: migrationSet, error
+      - doc: |-
+          openStreamWith opens the stream cfg places, through the stream subsystem:
+          refused when the program does not import it — which the start says
+          first, for every declaration at once (subsystem.go).
+        name: openStreamWith
+        params: cfg plug.StreamConfig
+        recv: a *App
+        results: plug.Stream, error
+      - doc: |-
+          openTopicStream opens the stream of the streamed topic b: on the open
+          database that keeps its service — a queue's rules, ADR 0178 C1 —, and the
+          database it returns is where an append made in a transaction on it joins
+          that transaction; else in the data directory, else in memory.
+        name: openTopicStream
+        params: b *nodeBase
+        recv: a *App
+        results: plug.Stream, *databaseRun, error
       - doc: |-
           unlinkedDeclarations are the declarations of the app whose subsystem the
           program does not link, in declaration order: the nodes of the services it
@@ -14612,6 +14762,8 @@ types:
         type: "[]node"
       - name: mailers
         type: "[]node"
+      - name: streams
+        type: "[]node"
       - name: subs
         type: "[]node"
       - name: commands
@@ -14624,6 +14776,10 @@ types:
         type: "[]*Job"
     kind: struct
     methods:
+      - doc: sort files n under its group, or drops it when it is no component.
+        name: sort
+        params: n node
+        recv: g *componentGroups
       - doc: |-
           of is the group of the nodes of kind, or nil for a kind that is no
           component.
@@ -26564,6 +26720,12 @@ types:
           table's name and trailSuffix, which no table name can hold.
         name: trailOf
         type: string
+      - doc: |-
+          stream marks a streamed topic's stream: the SDK's SQL stream's three
+          tables, named from this one, which the stream subsystem migrates
+          (issue #826).
+        name: stream
+        type: bool
     kind: struct
     methods:
       - doc: formerTable is t as a former release named it.
@@ -26692,6 +26854,15 @@ types:
         type: "[]tableRecord"
     kind: struct
     name: frameworkSet
+  - doc: |-
+      streameder is a node a streamed topic makes: the topic itself, and each
+      of its subscriptions.
+    kind: named
+    name: streameder
+    underlying: |-
+      interface {
+      	streamed() bool
+      }
   - doc: studioHost is an app, as the Studio's routes read it.
     fields:
       - name: a
@@ -26997,6 +27168,11 @@ types:
         type: time.Duration
       - name: onceFor
         type: "*SettingService[time.Duration]"
+      - doc: |-
+          log is the topic's stream when it is streamed (Streamed), nil
+          otherwise (topic_stream.go).
+        name: log
+        type: "*topicStream[T]"
     kind: struct
     methods:
       - doc: |-
@@ -27112,6 +27288,42 @@ types:
         params: a *App, out *model.Node
         recv: t *TopicService[T]
         results: "[]model.Edge"
+      - doc: |-
+          brokerWhere is where a subscription of the topic's own service waits:
+          every one, in a product whose one default database keeps them all.
+        name: brokerWhere
+        params: a *App
+        recv: t *TopicService[T]
+        results: string
+      - name: Streamed
+        params: key func(T) string
+        recv: t *TopicService[T]
+        results: "*TopicService[T]"
+      - doc: streamed reports whether the topic is streamed.
+        name: streamed
+        recv: t *TopicService[T]
+        results: bool
+      - doc: start opens a streamed topic's stream, before its subscriptions start.
+        name: start
+        params: _ context.Context, a *App
+        recv: t *TopicService[T]
+        results: error
+      - doc: stop closes a streamed topic's stream, after its subscriptions stopped.
+        name: stop
+        params: _ context.Context, a *App
+        recv: t *TopicService[T]
+        results: error
+      - doc: |-
+          appendStreamed appends msg to the topic's stream, once. Inside a
+          transaction it is encoded now and appended at the commit — in the
+          transaction, just before it commits, when the stream lives on the
+          transaction's database, a refusal failing it; once it committed
+          otherwise —, and a rollback drops it; the loops a publish wakes are woken
+          after it.
+        name: appendStreamed
+        params: ctx context.Context, a *App, sp *span, msg T, at time.Time
+        recv: t *TopicService[T]
+        results: error
     name: TopicService
     typeParams: T any
   - doc: |-
@@ -27156,9 +27368,14 @@ types:
           supervisor, which restarts it after its queue fails.
         name: sup
         type: "*lifecycle.Supervisor"
+      - doc: from is where it starts when its topic is streamed (topic_stream.go).
+        name: from
+        type: streamStart
     kind: struct
     methods:
-      - doc: queueUnder is what the subscription's queue is kept under.
+      - doc: |-
+          queueUnder is what the subscription's queue is kept under: none for a
+          streamed topic's, which reads the topic's stream.
         name: queueUnder
         recv: sb *SubscriptionWorker[T]
         results: string
@@ -27204,6 +27421,39 @@ types:
         params: _ *App, out *model.Node
         recv: sb *SubscriptionWorker[T]
         results: "[]model.Edge"
+      - doc: streamed reports whether the subscription reads a streamed topic.
+        name: streamed
+        recv: sb *SubscriptionWorker[T]
+        results: bool
+      - doc: |-
+          acceptsStart reports whether the options o, given to the subscription
+          named name of svc, suit its topic, and says why not: a start is a
+          streamed topic's, and a streamed topic's subscription takes none of a
+          queue's options.
+        name: acceptsStart
+        params: svc *Service, o subscriptionOptions, name string
+        recv: sb *SubscriptionWorker[T]
+        results: bool
+      - doc: |-
+          startStreamed runs the subscription as a consumer group of its topic's
+          stream, under the SDK's supervisor as a queue's consumer is: its
+          handler once per record, retried while it fails, its partition waiting.
+
+          Goroutine lifecycle: the supervisor's goroutine reads the stream until
+          stop cancels it and waits for it.
+        name: startStreamed
+        params: a *App
+        recv: sb *SubscriptionWorker[T]
+        results: error
+      - doc: |-
+          deliverRecord is the stream's handler: the subscription's handler in the
+          publisher's trace, as a queue's delivery runs it. A record that does not
+          decode is passed over, said as a problem: no retry makes it decode, and a
+          stream has no dead letters to keep it in.
+        name: deliverRecord
+        params: c *consumer
+        recv: sb *SubscriptionWorker[T]
+        results: func(context.Context, plug.StreamRecordValue) error
     name: SubscriptionWorker
     typeParams: T any
   - kind: named
@@ -27216,6 +27466,11 @@ types:
       - name: ""
         role: embedded
         type: deliveryOptions
+      - doc: |-
+          start is where a streamed topic's subscription starts (FromBeginning,
+          FromNow, FromTime), zero when no option said.
+        name: start
+        type: streamStart
       - doc: ownStores lets a watch hear its own module's stores (OwnStores).
         name: ownStores
         type: bool
@@ -27241,6 +27496,11 @@ types:
       - doc: knobs are the consumer's stop and lease (consumer_policy.go).
         name: knobs
         type: consumerKnobs
+      - doc: |-
+          given names the options given that a streamed topic's subscription
+          refuses: a queue's, which a stream has no use for (topic_stream.go).
+        name: given
+        type: "[]string"
     kind: struct
     name: deliveryOptions
   - kind: named
@@ -27263,6 +27523,55 @@ types:
         recv: f deliveryOption
     name: deliveryOption
     underlying: func(o *deliveryOptions)
+  - doc: |-
+      startKind is where a streamed topic's subscription starts, the first time
+      its group meets the stream.
+    kind: named
+    name: startKind
+    underlying: uint8
+  - doc: |-
+      streamStart is where a subscription starts: its kind, its instant for
+      startAt, and whether an option said it.
+    fields:
+      - name: at
+        type: time.Time
+      - name: kind
+        type: startKind
+      - name: set
+        type: bool
+    kind: struct
+    name: streamStart
+  - doc: |-
+      topicStream is a streamed topic's stream: the key a message is appended
+      under, and, while an app runs the topic, its stream and the database it
+      lives on.
+    fields:
+      - name: key
+        type: func(T) string
+      - name: mu
+        type: sync.Mutex
+      - name: app
+        type: "*App"
+      - name: s
+        type: plug.Stream
+      - name: db
+        type: "*databaseRun"
+    kind: struct
+    methods:
+      - doc: |-
+          in is the topic's stream in a and the database it lives on, nil while a
+          does not run the topic.
+        name: in
+        params: a *App
+        recv: l *topicStream[T]
+        results: plug.Stream, *databaseRun
+      - doc: keyOf is the key msg is appended under on the topic node.
+        name: keyOf
+        params: node string, msg T
+        recv: l *topicStream[T]
+        results: string
+    name: topicStream
+    typeParams: T any
   - fields:
       - doc: isolation is the level asked for, zero for none.
         name: isolation
@@ -29244,6 +29553,15 @@ vars:
         type: starter
         value: (*SubscriptionWorker[struct{}])(nil)
       - name: _
+        type: starter
+        value: (*TopicService[struct{}])(nil)
+      - name: _
+        type: streameder
+        value: (*SubscriptionWorker[struct{}])(nil)
+      - name: _
+        type: streameder
+        value: (*TopicService[struct{}])(nil)
+      - name: _
         type: mailbox
         value: (*Mailer)(nil)
       - name: _
@@ -30443,7 +30761,9 @@ vars:
       set plug.Mail — a mailer whose outbox is on a database needs the queues'
       too, the row above —; the jobs' since step 7, linked when
       framework/app/jobs set plug.Jobs; the OTLP export's since issue #483,
-      linked when framework/app/otlp set plug.OTLP. A test sets
+      linked when framework/app/otlp set plug.OTLP; the streams' since issue
+      #826, linked when framework/app/stream set plug.Streams, for a streamed
+      topic and its subscriptions — which need no queue. A test sets
       the hooks as a program that does not import the package would see them.
     items:
       - name: subsystems
@@ -30454,8 +30774,9 @@ vars:
           	linked: storesLinked,
           }, {
           	name: "queue", pkg: queuePackage,
-          	kinds: []model.NodeKind{model.KindTopic, model.KindSubscription},
           	needs: needsQueue, app: otlpOnADatabase, linked: queuesLinked,
+          }, {
+          	name: "stream", pkg: streamPackage, needs: func(_ *App, n node) bool { return needsStream(n) }, linked: streamsLinked,
           }, {
           	name: "workflow", pkg: workflowPackage,
           	kinds: []model.NodeKind{model.KindWorkflow}, linked: workflowsLinked,

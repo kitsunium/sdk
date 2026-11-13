@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-12T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -21,16 +21,85 @@ asynchronous, the entries handed by index read back from the disk model
 and a restart loading the committed commands past `recent` without their
 payloads, as the driver does (`TestSimBoundedApply*`, #663, #664).
 
+`perf_fixtures_test.go` (`//go:build !race`) holds the fixtures of
+`Step`'s two budgets in `design/sdk.yaml` (ADR 0152 D15, #921), which kit
+gen's `gen_perf_test.go` counts in the alloc lane: a leader acknowledged
+the oldest append of a full window (1, the next append's entries cloned by
+`memLog.slice`) and a follower taking 64 entries (65, the entry slice and
+`ownCopy`'s copy of each payload). Each fixture drains the outbox and lets
+the log go in place, the driver's part, so the count is `Step`'s alone.
+Both files are race off: the race suite's shards never see them.
+
+`walkthrough_internal_test.go` is D15's datadriven reader (#1112),
+stdlib only: `TestDataDriven` runs every `testdata/*.txt`, each a list of
+commands to the step function — `add-nodes`, `campaign`, `tick`,
+`propose`, `step` (a message written in the script), `read-index`,
+`transfer`, `install-snapshot`, `process-ready`, `storage-done`,
+`deliver-msgs`, `stabilize`, `raft-state`, `raft-log` — each followed by
+`----` and what it printed: the Ready's fields, the messages delivered or
+dropped, the writes made durable. A difference fails naming the file, the
+command's line and the first line that differs, with a line diff, and
+`go test -run TestDataDriven ./raft/ -rewrite` writes the expectations back
+(the flag after the package: before it, `go test` reads it as its own). A
+change of the step function that moves a script is read in its diff before
+it is rewritten. Each script is named after its rule and sits beside the
+Go check that pins it, not instead of it: D15's five schedules
+(`figure-8-commits-no-older-term-by-count`,
+`same-term-vote-kept-on-step-down`, `heartbeat-commit-clamped-to-match`,
+`learner-answers-a-vote`, `transfer-flag-at-another-term-is-refused`) and
+eleven more (the ack after its sync, the election restriction, the live
+leader's refusal, TimeoutNow's term, the verified prefix, an install's
+acknowledgement, an older term's append, a forward delivered twice, a
+silent node, a read index, an election and its first commit).
+
+The simulator's faults are values a scenario composes (#924,
+`nemesis_internal_test.go`): a `nemesis` is a kind on nodes from an
+offset for a duration with a parameter — `nemPartition`, `nemSkew` (a
+clock rate), `nemStallDisk` (no sync completes and no install is served
+until it ends, every write issued meanwhile queued behind it),
+`nemCrash`, `nemDrop`, `nemDup`, `nemCrashes` (random crashes per
+second), `nemQuiet` (no load) — and `sim.play(schedule, span, load)` runs
+a window under a `schedule`, cut at each instant one starts or ends, ends
+before starts, every one still holding ended at the span, so a window
+leaves the cluster healed with every node up. A schedule draws nothing
+from the generator: every scenario of `sim_scenarios_internal_test.go`
+is one, and each seed's run is the one the ad-hoc calls it replaced made,
+compared bit for bit on all 213 runs when they were rewritten.
+`simOptions.watch` runs the durable half of the driver's progress watch
+(consensus's `watchProgress`) at each tick, and
+`TestSimStalledDiskLeaderHandsOver` (`yieldonstall_internal_test.go`)
+stalls the leader's disk for three `ElectionTimeoutMax` under load: it
+hands over within one, a follower commits without it, and the same seed
+without the watch keeps the stalled leader (#554);
+`TestSimComposedScheduleKeepsSafetyAndProgress` composes a partition, a
+stall and a skew in one schedule. `FuzzStep`
+(`zfuzzstep_internal_test.go`) warms a 3-node cluster up, records every
+message, then steps ops that replay a recorded message or forge one
+(kind, term, index, log term, commit, entries, reject, receiver):
+replays keep every check and end on convergence, a forgery switches off
+the checks that compare nodes (`sim.forged`) and keeps each node's own;
+`sim.budget` and `maxReadyTurns` fail a run that never settles. Its seed
+corpus runs with the suite; `scripts/ci/consensus-fuzz.sh` fuzzes it 10
+minutes a night. Both files are named to sort after every seed suite.
+
 Bazel deals top-level tests to shards by their index, so a new test file
 whose name sorts before a seed suite's (`checks_*`, `lincheck_*`, `sim_*`,
 `unapplied_*`, every file calling `seedPart` or `eachSeed`) moves its seed
 parts to other shards: name it after them, or measure the shards again.
 `strictsilent_*` sorted before `unapplied_*` and put
 `TestSimBoundedApplyP2` beside `TestChecksPassUnmutated` and two more seed
-parts, a shard past 60 s under coverage (#790's PR).
+parts, a shard past 60 s under coverage (#790's PR). The datadriven reader
+was measured so (#1112): the sums per shard of a `-race -covermode=atomic
+-json` run, its subtests counted, on a machine shared with seven other
+suites, put the slowest of 27 at 95.7 s, `TestChecksPassUnmutated` beside
+`TestSimSafetyUnderFaultsP05`. Named `datadriven_*`, the issue's name, it
+sorted after `checks_*` and before the seed parts and made that shard
+136.1 s, `TestSimSafetyUnderFaultsP04` and `TestSimBoundedApplyP3` moved
+beside it; named `walkthrough_*`, after every seed suite, it leaves each
+shard as it was (95.7 s, the reader itself 0.14 s).
 
 The suites cost ~300 CPU-seconds under race and coverage against a 60 s cap
-per target, so `raft_test` has 26 shards and Bazel deals them TOP-LEVEL tests:
+per target, so `raft_test` has 27 shards and Bazel deals them TOP-LEVEL tests:
 a seed suite is split into top-level parts (`seedPart`) and a loop of seeds
 runs them as parallel subtests (`eachSeed`) — never fewer seeds (#126, #304).
 A new heavy suite follows the same shape; measure every shard side by side
@@ -38,8 +107,36 @@ under coverage before touching `shard_count`.
 
 ## Do NOT
 
+- Copy an appended entry's `Data` out of the message `Step` was handed: the
+  entries' Data are the caller's gift (`Step`'s doc), and `appendNew` keeps
+  them aliasing the frame the driver copied once out of the transport's
+  buffer; an empty one is kept nil. The copy made a follower's append of 64
+  entries cost 65 allocations (#1110). A caller that keeps the bytes it
+  hands copies them first, as the simulator does at each delivery
+  (`ownEntries`).
 - Iterate a map where the order reaches a message: a run must stay a pure
-  function of its seed.
+  function of its seed. `SessionTable.evictFor` scans its map for the
+  session whose last entry is the oldest: each index is the last of one
+  session at most, so the choice is order-free.
+- Append a session command below cluster version 4, from `ProposeSession`,
+  `Propose` or a forward: a node of protocol 3 does not know the kind
+  (`checkProposed`, PAYLOAD_VERSION_REFUSED; the raise to 4 waits for
+  every member's `FlagProtocol4`, `announcedAt`), nor append a copy the
+  leader knows: `sessionKnown` reads the latest entry of the session in
+  its tail past the commit, then the table the committed entries left
+  (`r.sessions`, folded in `applyCommitEffect`, from the snapshot at
+  `NewRaft` and `installEngine`), and answers its position, or refuses
+  another payload SESSION_DIGEST_MISMATCH and an older sequence or a
+  session not open SESSION_EXPIRED, appending nothing. That check is an
+  answer, never the safety: the driver's fold at apply is, which
+  `Config.sessionUnchecked` (a test-only switch, the mutations' type being
+  full) proves on its own (#918, ADR 0241,
+  `TestBlindSessionRetriesAreAppliedOnce`,
+  `TestBlindSessionRetriesWithoutTheTableAreCaught`,
+  `TestASessionSequenceWithAnotherPayloadIsRefusedAndAppendsNothing`,
+  `TestANodeOfProtocol3IsNeverSentASessionCommandBeforeTheRaise`). Nor
+  make `MaxSessions` a node's setting: two nodes evicting differently
+  apply differently.
 - Hand apply more than `MaxApplyLagBytes` past what the driver reports it
   holds (`SetApplyLag`), but one entry when it holds nothing, or anything
   in memory while it reads back entries handed by index: a follower slower
@@ -68,6 +165,25 @@ under coverage before touching `shard_count`.
   for more entries than one append carries (`fetchSpan`): a run of small
   entries was read whole for its head alone
   (`TestAFetchedBatchIsCutByItsEncoding`).
+- Measure a peer's round trip on `rounds`: a round a majority confirmed
+  leaves it at once, and the slower peer of three never measured one.
+  `measureRTT` reads the send time from `sentRounds`, the last
+  `rttRounds` broadcasts, and measures a round newer than the peer's last,
+  so a duplicate or an overtaken answer measures nothing
+  (`PeerStatValue.RTT`, #914, `TestAHeartbeatAnswerMeasuresItsRoundTrip`,
+  `TestTheSimulatorMeasuresEachPeersRoundTrip`). `Status.PreVotesLost`
+  counts a refusal once per voter and campaign, a later term's refusal
+  included (`TestAPreVoteRefusalCountsOncePerVoterAndCampaign`).
+- Read a heartbeat's `RejectHint` as the leader's last index without
+  `FlagProtocol4` beside it, or send one below protocol 4: a leader of
+  protocol 3 leaves it 0, and a follower of protocol 3 ignores it on a
+  heartbeat, so the field needs no raise (#919, `heartbeatLast`,
+  `hearLeader`). `Status.LeaderLast` and `Status.Appended` are read only
+  while the leader heard leads the node's term, and a raise to 4 waits for
+  every member to announce `FlagProtocol4` (`announcedBy`, a table so that
+  `checkAnnounced` stays inlined)
+  (`TestAFollowerHearsTheLeadersLastIndexOnlyBesideFlagProtocol4`,
+  `TestAMixedClusterOfProtocol3And4KeepsReplicatingAndRefusesTheRaise`).
 - Acknowledge a snapshot install past its index (review H1,
   `mutSnapshotAckLastIndex`).
 - Append, acknowledge or skip an entry kind `Known` refuses: report it in
@@ -120,6 +236,67 @@ under coverage before touching `shard_count`.
   rejection was contact for CheckQuorum and the trigger of an immediate
   resend, and the refusing majority never campaigned (#508,
   `mutRefusedLeadHeard`, `checkRefusedLeaderIsNotHeard`).
+- Re-base an append on the commit without comparing the committed entries
+  it carries, or count at once the refusals of a leader whose entry 1
+  differs from this founder's committed one: founders given different
+  timings each commit their own entry 1, and the odd one refused every
+  leader's chain, three refusals before the majority's leader first
+  committed, cut off for the term with nothing said (#698).
+  `committedDivergence` compares the entries at or below the commit an
+  append carries, `foundingDivergence` the chain of the entry after index
+  1 (entry 1 alone, the one entry a data directory founded before #698's
+  fix holds committed by fiat), each only on a body
+  and a chain the leader's own sums verify; `heldOnDivergence` names it in
+  `Ready.Diverged` once the leader's commit passed it, and otherwise drops
+  the append unanswered and uncounted for `ElectionTimeoutMax`, then lets
+  the chain check refuse it (`TestAnAppendOfALeaderThatCommittedPastAnotherEntry1IsADivergence`,
+  `TestADivergenceNoCommitProvesIsHeldBackThenRefused`; no mutation, the
+  type is full).
+- Match a held entry 1 of term 1 on its term alone, or take the chain
+  past a held entry from the append rather than from this log: entry 1 is
+  the one position no leader created, every founder writing its own from
+  its InitialTiming, and a founder that kept its own refused every
+  append, or, from index 0, appended the leader's entry 2 on top of it,
+  its chain broken (#698). Bootstrap leaves entry 1 uncommitted, and
+  `replacesFounding` lets a leader's founding entry over the same members,
+  verified by its own sums, replace this node's while it is uncommitted;
+  `firstNewEntry` chains past a held entry on `log.chain`, and refuses as a
+  broken chain an append carrying another entry at a position held
+  uncommitted under the same term. Nor acknowledge an append whose prefix
+  is the uncommitted founding entry matched by its term alone: the
+  leader's heartbeat, clamped to that match, committed the founder's own
+  entry 1 while a majority committed the leader's. `foundingUnproven`
+  refuses it uncounted, hint 0, unless its first entry verifies chained on
+  this node's entry 1
+  (`TestAnUncommittedFoundingEntryGivesWayToTheLeaders`,
+  `TestAFoundingEntryIsReplacedOnlyByAVerifiedOneOfTheSameMembers`,
+  `TestTheSameFoundingEntryIsKept`,
+  `TestAnEntry1MatchedByItsTermAloneIsNeverCommitted`,
+  `TestAnotherEntry1ThisNodeKeepsIsNeverAcknowledged`; no mutation,
+  the type is full).
+- Judge entry 1 on its successor's chain alone (`foundingDivergence`) in
+  any log but one that started holding entry 1 alone, committed
+  (`fiatFounding`, what a data directory founded before Bootstrap left
+  entry 1 uncommitted holds): a node whose entry 1 a leader committed
+  stopped `BOOTSTRAP_REFUSED` on an entry 2 whose chain field rotted in
+  the leader's memory (#698's review,
+  `TestARottedChainPastALeaderCommittedEntry1IsNoDivergence`, its control
+  in the same test).
+- Refuse in silence a leader's verified founding entry 1 over another
+  member list while this node's own is uncommitted: the divergence stop
+  asked a committed entry, and such a founder refused every leader for
+  good. `foundingContradicted` hands it to `heldOnDivergence`, which names
+  it in `Ready.Diverged` once the leader committed past 1 and holds it
+  back for `ElectionTimeoutMax` otherwise (#698's review,
+  `TestAFounderOfAnotherMemberListStopsOnceTheLeaderCommitsPastEntry1`).
+- Report to a heartbeat any generation but 0 while the node holds nothing
+  durably committed and no snapshot: its engine base is then its own
+  InitialTiming, which no entry confirmed. A founder before its entry 1
+  commits reported generation 1 on that guess, the leader sized it with
+  its own generation 1, and a founder given a shorter timing granted a
+  vote inside the leader's lease (#698's review, `reportedContract`,
+  `TestAFounderBeforeItsEntry1CommitsSizesNoLease`, its control in the
+  same test).
 - Admit a `ChangeSnapshotLimit` from any origin but the member it names
   (the authenticated origin `validateAdmin` holds, a forwarder or this
   leader), of a limit of 0 or below, or of the limit already recorded: only

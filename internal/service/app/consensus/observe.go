@@ -32,10 +32,15 @@ const (
 	mBatchBytes       = "consensus_batch_bytes"
 	mApplyLagEntries  = "consensus_apply_lag_entries"
 	mApplyLagBytes    = "consensus_apply_lag_bytes"
+	mReplicationLag   = "consensus_replication_lag_entries"
 	mPeerMatchLag     = "consensus_peer_match_lag_entries"
 	mPeerInflight     = "consensus_peer_inflight"
 	mPeerUnreachable  = "consensus_peer_unreachable"
 	mPeerLastContact  = "consensus_peer_last_contact_seconds"
+	mPeerRTT          = "consensus_peer_rtt_seconds"
+	mPreVotesLost     = "consensus_prevotes_lost_total"
+	mSnapshotPins     = "consensus_snapshot_pins"
+	mSnapshotPinAge   = "consensus_snapshot_pin_age_seconds"
 	mElectionsStarted = "consensus_elections_started_total"
 	mSnapshotDuration = "consensus_snapshot_duration_seconds"
 	mSnapshotBytes    = "consensus_snapshot_bytes"
@@ -43,6 +48,7 @@ const (
 	mNoSpace          = "consensus_nospace"
 	mFramesDropped    = "consensus_frames_dropped_total"
 	mBarrierLatency   = "consensus_barrier_latency_seconds"
+	mReadRounds       = "consensus_read_rounds_total"
 	mProposalsFailed  = "consensus_proposals_failed_total"
 	mProposalsPending = "consensus_proposals_pending"
 	mClusterVersion   = "consensus_cluster_version"
@@ -58,6 +64,11 @@ const (
 	mCertExpiry       = "consensus_tls_cert_expiry_seconds"
 	mPeerCertExpiry   = "consensus_tls_peer_cert_expiry_seconds"
 	mReloadFailures   = "consensus_tls_reload_failures_total"
+	mLinksAborted     = "consensus_links_aborted_total"
+
+	// mSnapshotStreamRate is the pace of each snapshot stream that ended,
+	// in bytes a second (#920).
+	mSnapshotStreamRate = "consensus_snapshot_stream_bytes_per_second"
 )
 
 // departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads
@@ -95,9 +106,17 @@ type obs struct {
 	// published: a series is never deleted, so a peer that left is reset
 	// rather than left at its last value (#532).
 	peersPub, certsPub map[coreconsensus.NodeID]bool
-	// seenTails and seenReloads are the running totals already added to
-	// their counters.
-	seenTails, seenReloads int64
+	// pinsPub are the peers whose pin age the last pass published, reset
+	// to 0 once their pin ends.
+	pinsPub map[coreconsensus.NodeID]bool
+	// rttSeen is, per peer, the heartbeat round whose round trip was last
+	// recorded: a sample is recorded once (D13).
+	rttSeen map[coreconsensus.NodeID]uint64
+	// seenTails, seenReloads, seenRounds and seenPreVotes are the running
+	// totals already added to their counters, as seenTimedOut and
+	// seenSilenced are consensus_links_aborted_total's by reason.
+	seenTails, seenReloads, seenRounds, seenPreVotes int64
+	seenTimedOut, seenSilenced                       int64
 }
 
 // newObs binds a node's instruments to its configured Meter, Tracer and
@@ -107,6 +126,7 @@ func newObs(cfg *Config) *obs {
 		meter: cfg.Meter, tracer: cfg.Tracer, log: cfg.Logger,
 		group: coreotel.Int64("group", int64(cfg.Group)),
 		gauge: map[string]coremetrics.Gauge{}, count: map[string]coremetrics.Counter{}, hist: map[string]coremetrics.Histogram{},
+		rttSeen: map[coreconsensus.NodeID]uint64{},
 	}
 }
 
@@ -162,19 +182,24 @@ func (o *obs) inc(name string, attrs ...coreotel.AttrValue) {
 	c.Inc()
 }
 
-// addTo brings a counter up to a running total kept elsewhere.
-func (o *obs) addTo(name string, seen *int64, total int64) {
-	if o.meter == nil || total <= *seen {
+// addTo brings a counter series up to a running total kept elsewhere. The
+// series exists from the first call, at 0, so an alert on its increase has
+// a series to read before the first event.
+func (o *obs) addTo(name string, seen *int64, total int64, attrs ...coreotel.AttrValue) {
+	if o.meter == nil {
 		return
 	}
-	k := key(name, nil)
+	k := key(name, attrs)
 	o.mu.Lock()
 	c, ok := o.count[k]
 	if !ok {
-		c = o.meter.Counter(name, o.group)
+		c = o.meter.Counter(name, append([]coreotel.AttrValue{o.group}, attrs...)...)
 		o.count[k] = c
 	}
 	o.mu.Unlock()
+	if total <= *seen {
+		return
+	}
 	c.Add(total - *seen)
 	*seen = total
 }
@@ -191,8 +216,12 @@ func (o *obs) record(name string, v float64, attrs ...coreotel.AttrValue) {
 	h, ok := o.hist[k]
 	if !ok {
 		buckets := latencyBuckets
-		if name == mBatchEntries || name == mBatchBytes || name == mSnapshotBytes {
+		switch name {
+		case mBatchEntries, mBatchBytes, mSnapshotBytes:
 			buckets = []float64{1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 1 << 20, 16 << 20, 256 << 20}
+		case mSnapshotStreamRate:
+			// From 64 KiB/s, a paced stream on a thin link, to 1 GiB/s.
+			buckets = []float64{64 << 10, 256 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20, 256 << 20, 1 << 30}
 		}
 		h = o.meter.Histogram(name, buckets, append([]coreotel.AttrValue{o.group}, attrs...)...)
 		o.hist[k] = h
@@ -310,8 +339,10 @@ func (o *obs) observeRoleChange(old, cur *coreconsensus.StatusValue) {
 		lattr("leader", uint64(cur.Leader)))
 }
 
-// observePeers publishes the leader's per-peer gauges and the failure
-// tolerance, at most every 100 ms, on the loop.
+// observePeers publishes the leader's per-peer gauges, each peer's round
+// trips, the snapshot pins, the lost PreVotes, the failure tolerance and,
+// on a node that does not lead, its replication lag (0 on the leader,
+// #919), at most every 100 ms, on the loop.
 func (n *Node) observePeers() {
 	o := n.obs
 	if o.meter == nil {
@@ -323,14 +354,37 @@ func (n *Node) observePeers() {
 	}
 	o.lastPeers = now
 	o.setGauge(mFailureTolerance, float64(n.r.FailureTolerance(now)))
-	last := n.r.Status().Last
-	window := n.r.Status().Timing.ElectionTimeoutMin
+	st := n.r.Status()
+	o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
+	lag, _ := replicationLag(&st, now)
+	o.setGauge(mReplicationLag, float64(lag))
 	seen := map[coreconsensus.NodeID]bool{}
 	for _, p := range n.r.PeerStats() {
 		seen[p.ID] = true
-		n.observePeer(&p, now, last, window)
+		n.observePeer(&p, now, st.Last, st.Timing.ElectionTimeoutMin)
 	}
 	o.resetDeparted(seen)
+	n.observePins(now)
+}
+
+// observePins publishes how many snapshot pins hold compaction for a peer
+// (n.sending, D13, R7-38) and, per peer, for how long its pin has held:
+// the alert of D13 compares the age with pinAfterStream maximum election
+// timeouts. A pin that ended reads 0.
+func (n *Node) observePins(now time.Time) {
+	o := n.obs
+	o.setGauge(mSnapshotPins, float64(len(n.sending)))
+	seen := make(map[coreconsensus.NodeID]bool, len(n.sending))
+	for to, pin := range n.sending {
+		seen[to] = true
+		o.setGauge(mSnapshotPinAge, now.Sub(time.Unix(0, pin.since)).Seconds(), coreotel.String("peer", to.String()))
+	}
+	for to := range o.pinsPub {
+		if !seen[to] {
+			o.setGauge(mSnapshotPinAge, 0, coreotel.String("peer", to.String()))
+		}
+	}
+	o.pinsPub = seen
 }
 
 // observePeer publishes one peer's gauges.
@@ -349,6 +403,10 @@ func (n *Node) observePeer(p *raft.PeerStatValue, now time.Time, last uint64, wi
 	if p.Flags.Has(raft.StatHeard) {
 		n.obs.setGauge(mPeerLastContact, now.Sub(p.LastHeard).Seconds(), peer)
 	}
+	if p.RTTRound != 0 && p.RTTRound != n.obs.rttSeen[p.ID] {
+		n.obs.rttSeen[p.ID] = p.RTTRound
+		n.obs.record(mPeerRTT, p.RTT.Seconds(), peer)
+	}
 }
 
 // resetDeparted resets once the gauges of every peer the last pass
@@ -365,6 +423,7 @@ func (o *obs) resetDeparted(seen map[coreconsensus.NodeID]bool) {
 		for _, name := range peerGauges {
 			o.setGauge(name, 0, peer)
 		}
+		delete(o.rttSeen, id)
 	}
 	o.peersPub = seen
 }
@@ -383,35 +442,69 @@ func (n *Node) observeResources() {
 	}
 	o.lastRes = now
 	o.setGauge(mLogQuota, float64(n.cfg.MaxLogBytes))
-	if ls, ok := n.cfg.Log.(interface {
+	n.observeLogStats(o)
+	n.observeCerts(o, now)
+	n.observeLinkAborts(o)
+}
+
+// observeLogStats publishes the log's size, the free space of its
+// filesystem and the tails it truncated, for a log that keeps them.
+func (n *Node) observeLogStats(o *obs) {
+	ls, ok := n.cfg.Log.(interface {
 		logStats() (bytes, free, tails int64)
-	}); ok {
-		b, free, tails := ls.logStats()
-		o.setGauge(mLogBytes, float64(b))
-		if free >= 0 {
-			o.setGauge(mFsFree, float64(free), coreotel.String("fs", "data"))
-		}
-		o.addTo(mTailTruncated, &o.seenTails, tails)
+	})
+	if !ok {
+		return
 	}
-	if ct, ok := n.cfg.Transport.(interface {
+	b, free, tails := ls.logStats()
+	o.setGauge(mLogBytes, float64(b))
+	if free >= 0 {
+		o.setGauge(mFsFree, float64(free), coreotel.String("fs", "data"))
+	}
+	o.addTo(mTailTruncated, &o.seenTails, tails)
+}
+
+// observeCerts publishes how long this node's certificate and each peer's
+// remain valid at now, and the reloads that failed, for a transport that
+// holds certificates. A peer no longer seen has its gauge set to
+// departedCertExpiry.
+func (n *Node) observeCerts(o *obs, now time.Time) {
+	ct, ok := n.cfg.Transport.(interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time
 		ReloadFailures() int
-	}); ok {
-		if e := ct.CertExpiry(); !e.IsZero() {
-			o.setGauge(mCertExpiry, e.Sub(now).Seconds())
-		}
-		seen := map[coreconsensus.NodeID]bool{}
-		for id, e := range ct.PeerCertExpiry() {
-			seen[id] = true
-			o.setGauge(mPeerCertExpiry, e.Sub(now).Seconds(), coreotel.String("peer", id.String()))
-		}
-		for id := range o.certsPub {
-			if !seen[id] {
-				o.setGauge(mPeerCertExpiry, departedCertExpiry, coreotel.String("peer", id.String()))
-			}
-		}
-		o.certsPub = seen
-		o.addTo(mReloadFailures, &o.seenReloads, int64(ct.ReloadFailures()))
+	})
+	if !ok {
+		return
 	}
+	if e := ct.CertExpiry(); !e.IsZero() {
+		o.setGauge(mCertExpiry, e.Sub(now).Seconds())
+	}
+	seen := map[coreconsensus.NodeID]bool{}
+	for id, e := range ct.PeerCertExpiry() {
+		seen[id] = true
+		o.setGauge(mPeerCertExpiry, e.Sub(now).Seconds(), coreotel.String("peer", id.String()))
+	}
+	for id := range o.certsPub {
+		if !seen[id] {
+			o.setGauge(mPeerCertExpiry, departedCertExpiry, coreotel.String("peer", id.String()))
+		}
+	}
+	o.certsPub = seen
+	o.addTo(mReloadFailures, &o.seenReloads, int64(ct.ReloadFailures()))
+}
+
+// observeLinkAborts publishes the sender links the transport aborted for
+// bytes left unacknowledged and for read silence, for a transport that
+// counts them (#1116).
+func (n *Node) observeLinkAborts(o *obs) {
+	la, ok := n.cfg.Transport.(interface {
+		linksAborted() (userTimeout, readSilence int64)
+	})
+	if !ok {
+		return
+	}
+	timedOut, silenced := la.linksAborted()
+	o.addTo(mLinksAborted, &o.seenTimedOut, timedOut, coreotel.String("reason", "user_timeout"))
+	o.addTo(mLinksAborted, &o.seenSilenced, silenced, coreotel.String("reason", "read_silence"))
 }

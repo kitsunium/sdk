@@ -429,6 +429,10 @@ constants:
           carried FlagProtocol3.
         name: peerProtocol3
       - doc: |-
+          peerProtocol4 is set while the peer's last message of the term
+          carried FlagProtocol4.
+        name: peerProtocol4
+      - doc: |-
           peerSilent is set while the peer's last answer, to an append or a
           heartbeat, said it is silent (FlagTruncated, #636): it answers, but
           acknowledges no append, so it counts for no change that must commit
@@ -485,11 +489,16 @@ constants:
       Version 2 adds the snapshot metadata's checksum, the admin payload's
       Origin and the log identity's AdoptedFrom, each written only once the
       committed cluster version is 2 (lot S3). Version 3 adds the retired keys
-      of the configuration, written only once it is 3 (#648).
+      of the configuration, written only once it is 3 (#648). Version 4 adds
+      the leader's last index to every heartbeat, which a follower reads
+      beside FlagProtocol4 at any cluster version (#919), the trace context of
+      a forward (#1115), and the client sessions, their entry kind and the
+      metadata that records them (#918), those two written only once the
+      committed cluster version is 4.
     items:
       - name: ProtocolMax
         type: uint32
-        value: "3"
+        value: "4"
     name: ProtocolMax
   - doc: |-
       Protocol2 is the protocol version whose formats a node writes once the
@@ -508,6 +517,44 @@ constants:
         type: uint32
         value: "3"
     name: Protocol3
+  - doc: |-
+      Protocol4 is the protocol version whose heartbeats carry the leader's
+      last index, announced by FlagProtocol4 (#919), and from which a forward
+      carries its trace context (#1115), a session command is appended and a
+      snapshot records the client sessions (#918).
+    items:
+      - name: Protocol4
+        type: uint32
+        value: "4"
+    name: Protocol4
+  - doc: |-
+      MaxSessions is how many client sessions the cluster keeps: opening one
+      more evicts the one whose last entry is the oldest. It is part of
+      protocol version 4, the same on every node, since the eviction is
+      replicated state; it bounds the table each node holds and the metadata
+      a snapshot carries (ADR 0241).
+    items:
+      - name: MaxSessions
+        type: int
+        value: "1024"
+    name: MaxSessions
+  - doc: |-
+      rttRounds is how many heartbeat rounds keep their send time for the
+      round trips (Raft.sentRounds). It is a uint64 because it indexes that
+      ring by a round id, which is one.
+    items:
+      - name: rttRounds
+        type: uint64
+        value: "64"
+    name: rttRounds
+  - doc: |-
+      sessionOpen is the sequence of the entry that opens a session: no command
+      carries it.
+    items:
+      - name: sessionOpen
+        type: uint64
+        value: "0"
+    name: sessionOpen
 files:
   - decls:
       - (*Raft).Debug
@@ -548,6 +595,7 @@ files:
       - (*Raft).followSilentReport
       - (*Raft).probeIfLost
       - (*Raft).ackRounds
+      - (*Raft).measureRTT
       - (*Raft).handleAppResp
       - (*Raft).ackMoved
       - (*Raft).handleAppReject
@@ -561,7 +609,9 @@ files:
       - (*Raft).checkClusterVersion
       - (*Raft).checkAnnounced
       - (*Raft).checkHeard
+      - announcedBy
       - announcementOf
+      - (*Raft).heartbeatLast
       - (*Raft).announces
       - announced
       - (*Raft).checkNoSpaceClear
@@ -601,6 +651,8 @@ files:
       - (*fwdTable).remember
       - (*Raft).handleForward
       - (*Raft).answerForward
+      - (*Raft).answerSessionForward
+      - (*Raft).noteForwarded
       - (*Raft).admitForward
       - (*Raft).ReadIndex
       - (*Raft).serveLeaseRead
@@ -704,6 +756,9 @@ files:
       - ProtocolMax
       - Protocol2
       - Protocol3
+      - Protocol4
+      - MaxSessions
+      - rttRounds
       - raftFacts
       - Config
       - fwdEntry
@@ -715,12 +770,15 @@ files:
       - ReadState
       - TransferResult
       - ReadyValue
+      - DivergenceValue
       - UnsupportedEntryValue
       - ReadBackSpec
       - FetchSpec
       - (*ReadyValue).NeedsWrite
       - confAt
       - readReq
+      - leaderHeard
+      - sentRound
       - round
       - Raft
       - NewRaft
@@ -747,6 +805,7 @@ files:
       - StatusValue
       - (*Raft).Status
       - (*Raft).Progress
+      - (*Raft).ReadRounds
       - (*Raft).LeaseValid
       - (*Raft).DropLease
       - (*Raft).HasReady
@@ -801,6 +860,20 @@ files:
       - (*Raft).ChainRefusal
     name: raft.go
   - decls:
+      - sessionOpen
+      - SessionTable
+      - NewSessionTable
+      - (*SessionTable).Apply
+      - recorded
+      - (*SessionTable).evictFor
+      - (*SessionTable).Values
+      - (*Raft).ProposeSession
+      - (*Raft).proposeSession
+      - (*Raft).sessionKnown
+      - (*Raft).sessionPending
+      - (*Raft).atProtocol4
+    name: session.go
+  - decls:
       - (*Raft).Step
       - (*Raft).stepTerm
       - (*Raft).stepHigherTerm
@@ -819,9 +892,12 @@ files:
       - (*Raft).tallyVotes
       - (*Raft).countVotes
       - (*Raft).stepCandidate
+      - (*Raft).tallyPreVoteResp
+      - (*Raft).tallyVoteResp
       - (*Raft).followWinner
       - (*Raft).stepFollower
       - (*Raft).followAppend
+      - (*Raft).hearLeader
       - (*Raft).followHeartbeat
       - (*Raft).heldOfTerm
       - (*Raft).reportSilence
@@ -829,13 +905,22 @@ files:
       - (*Raft).followTimeoutNow
       - (*Raft).handleAppend
       - (*Raft).rebaseOnCommit
+      - (*Raft).committedDivergence
+      - (*Raft).foundingDivergence
+      - (*Raft).heldOnDivergence
       - (*Raft).dropUnknownKinds
       - (*Raft).firstNewEntry
+      - (*Raft).contradictsHeld
+      - (*Raft).foundingUnproven
+      - (*Raft).replacesFounding
+      - (*Raft).foundingContradicted
+      - founding
       - (*Raft).appendNew
       - (*Raft).lowerSilence
       - (*Raft).verifyChain
       - (*Raft).acknowledgeAppend
       - (*Raft).chainRefused
+      - (*Raft).countRefusal
       - (*Raft).refuses
       - (*Raft).maybeEndSilence
       - (*Raft).rewrittenPastSilence
@@ -844,8 +929,8 @@ files:
 functions:
   - doc: |-
       announcementOf is the announcement every frame of a node speaking
-      protocol version v carries: FlagProtocol2 from 2, and FlagProtocol3 beside
-      it from 3 (D18, #648).
+      protocol version v carries: FlagProtocol2 from 2, FlagProtocol3 beside
+      it from 3 and FlagProtocol4 beside both from 4 (D18, #648, #919).
     name: announcementOf
     params: v uint32
     results: core.MessageFlags
@@ -995,12 +1080,30 @@ functions:
     name: adoptsTiming
     params: c, cur core.TimingContractSpec
     results: bool
+  - name: NewSessionTable
+    params: vs []core.SessionValue
+    results: "*SessionTable"
+  - doc: |-
+      recorded is what the session record v, held when ok, says of command seq
+      of body sum sum: known is false for a command it has not seen, which is
+      applied; otherwise the position of the copy applied, or the refusal.
+    name: recorded
+    params: v core.SessionValue, ok bool, seq uint64, sum uint32
+    results: core.PositionValue, errs.Code, bool
+  - doc: |-
+      founding returns the payload of e when e is a founding membership entry,
+      the entry 1 Bootstrap writes; ok is false for any other entry.
+    name: founding
+    params: e *core.EntryValue
+    results: wire.AdminValue, bool
 imports:
+  bytes: bytes
   cmp: cmp
   core: github.com/kitsunium/sdk/internal/core/app/consensus
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   fmt: fmt
+  maps: maps
   rand: math/rand/v2
   slices: slices
   strings: strings
@@ -1064,6 +1167,11 @@ types:
       - name: index
         type: uint64
       - name: logTerm
+        type: uint64
+      - doc: |-
+          commit is the leader's commit when it answered a session command:
+          a position at or below it was committed (#918).
+        name: commit
         type: uint64
     kind: struct
     name: fwdAnswer
@@ -1210,6 +1318,16 @@ types:
         type: int
       - name: LastHeard
         type: time.Time
+      - doc: |-
+          RTT is the time from the heartbeat round RTTRound names to the peer's
+          first answer to it (D13, consensus_peer_rtt_seconds).
+        name: RTT
+        type: time.Duration
+      - doc: |-
+          RTTRound is the heartbeat round RTT was measured on, 0 for none: the
+          driver records a sample once per round.
+        name: RTTRound
+        type: uint64
     kind: struct
     name: PeerStatValue
   - kind: named
@@ -1273,6 +1391,13 @@ types:
           over which a restart of the peer raises its truncation point past
           that no-op (SnapshotDone, #795).
         name: silentFed
+        type: uint64
+      - doc: |-
+          rtt is the round trip of heartbeat round rttRound: from its broadcast
+          to the peer's first answer covering it (ackRounds), 0 before one.
+        name: rtt
+        type: time.Duration
+      - name: rttRound
         type: uint64
     kind: struct
     methods:
@@ -1438,6 +1563,13 @@ types:
           release with it.
         name: speaks
         type: uint32
+      - doc: |-
+          sessionUnchecked, set by the package's own tests alone, appends every
+          session command without asking the table, so the apply's fold is
+          shown to be the safety on its own (#918); the mutations' type is
+          full.
+        name: sessionUnchecked
+        type: bool
     kind: struct
     name: Config
   - doc: fwdEntry is one forwarded command a leader appended.
@@ -1608,6 +1740,13 @@ types:
           consensus_chain_refusals_total.
         name: ChainRefusedBy
         type: "[]core.NodeID"
+      - doc: |-
+          Diverged names an append of a leader that committed past an index
+          this node holds, committed or its founding entry 1, and carried
+          another entry there than this node's (#698): no majority holds this
+          node's entry, and the driver stops it.
+        name: Diverged
+        type: DivergenceValue
     kind: struct
     methods:
       - name: NeedsWrite
@@ -1627,11 +1766,23 @@ types:
       - doc: |-
           hasStateNotice reports whether the Ready tells the driver of a state: the
           end of the silence or its lowered point, an entry this version cannot
-          apply, or a node that may not campaign and hears no leader.
+          apply, a node that may not campaign and hears no leader, or a committed
+          entry a majority does not hold (#698).
         name: hasStateNotice
         recv: rd *ReadyValue
         results: bool
     name: ReadyValue
+  - fields:
+      - doc: |-
+          Index is the index, committed or 1, at or below which the leader's
+          log differs from this node's.
+        name: Index
+        type: uint64
+      - doc: Leader is the leader whose append carried it.
+        name: Leader
+        type: core.NodeID
+    kind: struct
+    name: DivergenceValue
   - fields:
       - name: Index
         type: uint64
@@ -1673,6 +1824,30 @@ types:
         type: uint64
     kind: struct
     name: readReq
+  - doc: |-
+      leaderHeard is what a node that does not lead last heard of the leader
+      of a term: the leader's last index, as a heartbeat of protocol 4
+      carried it, and the instant of the last append with entries it took
+      (#919). It is read only while from leads the node's term.
+    fields:
+      - name: from
+        type: core.NodeID
+      - name: term
+        type: uint64
+      - name: last
+        type: uint64
+      - name: appended
+        type: time.Time
+    kind: struct
+    name: leaderHeard
+  - doc: sentRound is when heartbeat round id left.
+    fields:
+      - name: id
+        type: uint64
+      - name: at
+        type: time.Time
+    kind: struct
+    name: sentRound
   - fields:
       - name: id
         type: uint64
@@ -1786,6 +1961,11 @@ types:
       - name: now
         type: time.Time
       - doc: |-
+          heard is what this node last heard of the leader of its term, for the
+          replication lag Health reports (#919).
+        name: heard
+        type: leaderHeard
+      - doc: |-
           selfVoteSeq is the write that carries this candidate's own vote; its
           vote counts once that write is durable (D5b).
         name: selfVoteSeq
@@ -1816,8 +1996,23 @@ types:
         type: uint64
       - name: nextRound
         type: uint64
+      - doc: readRounds counts the rounds flushReads opened for reads (#1108).
+        name: readRounds
+        type: uint64
       - name: rounds
         type: "[]*round"
+      - doc: |-
+          sentRounds holds when each of the last rttRounds heartbeat rounds
+          left, at the slot of its id: a round a majority confirmed leaves
+          rounds at once, and a slower peer's answer still measures its round
+          trip from here (ackRounds).
+        name: sentRounds
+        type: "[rttRounds]sentRound"
+      - doc: |-
+          preVotesLost counts the PreVote refusals the campaigns were answered,
+          one per voter and campaign (Status.PreVotesLost).
+        name: preVotesLost
+        type: uint64
       - name: pendingReads
         type: "[]readReq"
       - name: waitingReads
@@ -1837,6 +2032,13 @@ types:
       - name: engines
         type: "[]engineAt"
       - doc: |-
+          sessions are the client sessions as the committed entries left them
+          (#918): the leader answers a retry from them before it appends. Not
+          an EngineAt record: a cut reads the driver's own table, at its
+          applied index.
+        name: sessions
+        type: "*SessionTable"
+      - doc: |-
           refusedLead is the leader this node refused for the rest of
           refusedTerm after MaxChainRefusals refusals of its chain (#508).
         name: refusedLead
@@ -1855,6 +2057,24 @@ types:
         type: core.NodeID
       - name: refusals
         type: int
+      - doc: |-
+          divergedFrom, divergedTerm and divergedSince are the leader whose
+          append first contradicted a committed entry in this term, and when:
+          heldOnDivergence holds its refusals back for ElectionTimeoutMax (#698).
+        name: divergedFrom
+        type: core.NodeID
+      - name: divergedTerm
+        type: uint64
+      - name: divergedSince
+        type: time.Time
+      - doc: |-
+          fiatFounding is set while the log holds entry 1 alone, of term 1,
+          committed at the start: a data directory founded before Bootstrap
+          left entry 1 uncommitted, whose entry 1 no majority may hold. Only
+          there does foundingDivergence judge entry 1 on its successor's chain
+          (#698's review). The first entry past 1 appended clears it.
+        name: fiatFounding
+        type: bool
       - doc: |-
           guardRefusal is what #603's guard found when it refused the change
           the last Propose was handed: the voters that change would strand, nil
@@ -2014,7 +2234,7 @@ types:
           is sent the batch at its next as before: followSilentReport holds it in
           probe, never in replicate, where its full window was sent nothing (#774).
         name: handleHeartbeatResp
-        params: pr *progress, m core.MessageValue
+        params: now time.Time, pr *progress, m core.MessageValue
         recv: r *Raft
       - doc: |-
           feedSilence appends a no-op of this term for a silent peer whose report
@@ -2129,6 +2349,15 @@ types:
           answer".
         name: ackRounds
         params: from core.NodeID, round, contract uint64
+        recv: r *Raft
+      - doc: |-
+          measureRTT takes peer pr's round trip at now from its answer to round,
+          when the round is newer than the last one measured and its send time is
+          still kept (D13): a duplicate, or an answer a later one overtook,
+          measures nothing. A round a majority confirmed leaves rounds at once, so
+          the send time is read from sentRounds.
+        name: measureRTT
+        params: now time.Time, pr *progress, round uint64
         recv: r *Raft
       - doc: |-
           handleAppResp moves a peer's progress on an append's answer, commits what
@@ -2249,6 +2478,13 @@ types:
         params: v uint32
         recv: r *Raft
         results: errs.Code
+      - doc: |-
+          heartbeatLast is the last index a heartbeat of this leader carries in
+          RejectHint: its own from protocol 4, 0 below, as a leader of the
+          previous release sends (#919).
+        name: heartbeatLast
+        recv: r *Raft
+        results: uint64
       - doc: |-
           announces is the announcement this node's own frames carry, as the facts
           a leader keeps of a peer that sent them.
@@ -2534,6 +2770,21 @@ types:
         params: m core.MessageValue
         recv: r *Raft
         results: fwdAnswer
+      - doc: |-
+          answerSessionForward proposes a forwarded session command, or answers it
+          with the position this leader already knows for it. The answer carries
+          the commit as it stands, so the follower tells a copy already committed,
+          whose position is the answer, from one appended and still to wait for.
+        name: answerSessionForward
+        params: e core.EntryValue, from core.NodeID
+        recv: r *Raft
+        results: fwdAnswer
+      - doc: |-
+          noteForwarded counts a forwarded command appended at index against the
+          forward bounds until it commits.
+        name: noteForwarded
+        params: index uint64, size int
+        recv: r *Raft
       - doc: |-
           admitForward applies to a forwarded command the bounds the driver applies
           to a local one before anything is appended: the entry size, the bytes
@@ -3098,6 +3349,9 @@ types:
         params: id core.NodeID
         recv: r *Raft
         results: match uint64, lastHeard time.Time, ok bool
+      - name: ReadRounds
+        recv: r *Raft
+        results: uint64
       - name: LeaseValid
         params: now time.Time
         recv: r *Raft
@@ -3377,6 +3631,42 @@ types:
       - name: ChainRefusal
         recv: r *Raft
         results: core.NodeID, uint64, int
+      - name: ProposeSession
+        params: now time.Time, e core.EntryValue
+        recv: r *Raft
+        results: core.PositionValue, errs.Code
+      - doc: |-
+          proposeSession is ProposeSession for a command received from origin: this
+          leader, or the member that forwarded it.
+        name: proposeSession
+        params: now time.Time, e core.EntryValue, origin core.NodeID
+        recv: r *Raft
+        results: core.PositionValue, errs.Code
+      - doc: |-
+          sessionKnown is what this leader already knows of command seq of session
+          s: the latest entry of s its log holds past the commit, or else the
+          session as the committed entries left it. A leader never truncates its own
+          log, so a copy appended in its term is the one that commits, or none does.
+        name: sessionKnown
+        params: s core.SessionID, seq uint64, sum uint32
+        recv: r *Raft
+        results: core.PositionValue, errs.Code, bool
+      - doc: |-
+          sessionPending is the first half of sessionKnown: the answer the latest
+          entry of session s past the commit gives command seq, found false when the
+          uncommitted tail holds none and the committed table decides instead.
+        name: sessionPending
+        params: s core.SessionID, seq uint64, sum uint32
+        recv: r *Raft
+        results: pos core.PositionValue, code errs.Code, known, found bool
+      - doc: |-
+          atProtocol4 reports whether the committed cluster version admits the
+          formats of protocol 4: the session command, and the metadata that
+          records the sessions. Every member announced it before the raise
+          committed (D18, #918).
+        name: atProtocol4
+        recv: r *Raft
+        results: bool
       - name: Step
         params: now time.Time, m core.MessageValue
         recv: r *Raft
@@ -3501,6 +3791,19 @@ types:
         params: now time.Time, m core.MessageValue
         recv: r *Raft
       - doc: |-
+          tallyPreVoteResp counts a pre-vote answer, while this node is still the
+          pre-candidate that asked for it.
+        name: tallyPreVoteResp
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          tallyVoteResp records a vote answer, while this node is still the
+          candidate that asked for it; the tally waits for its own vote to be
+          durable (D5b).
+        name: tallyVoteResp
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
           followWinner follows the leader of the campaign's term that m comes
           from, unless this node refused that leader for the term: its campaign is
           how the refusal ends, and the leader's messages do not end it (#508).
@@ -3521,6 +3824,13 @@ types:
         name: followAppend
         params: now time.Time, m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          hearLeader is the record of the leader from of this term, started over
+          when the leader or the term changed.
+        name: hearLeader
+        params: from core.NodeID
+        recv: r *Raft
+        results: "*leaderHeard"
       - doc: |-
           followHeartbeat records the leader's contact, commits what the heartbeat
           allows of the entries held, and answers the round.
@@ -3560,6 +3870,15 @@ types:
           entry or the commit that applied it was durable, let a restarted node
           fall back to the older, shorter window and vote or campaign inside the
           lease it had granted (#521, R3-07).
+
+          A node that holds nothing durably committed and no snapshot reports
+          generation 0, which sizes no lease: its engine base is then its own
+          InitialTiming, which no entry confirmed. A founder before its entry 1
+          commits (Bootstrap leaves it uncommitted, #698) reported generation 1 on
+          that guess while the leader sized it with its own generation 1: a
+          founder given a shorter timing promised the leader's window, granted a
+          vote inside it, and a second leader was elected while the first still
+          served lease reads.
         name: reportedContract
         recv: r *Raft
         results: uint64
@@ -3585,9 +3904,63 @@ types:
           entries past the commit are still news: it is re-based on the committed
           entry when it carries that entry with our term. A node that acknowledges
           nothing — a silent one — learns the rest of the log no other way. It
-          reports false, having answered with the commit, when m cannot be re-based.
+          reports false, having answered with the commit, when m cannot be re-based,
+          and false unanswered when it carries another entry than this log's at a
+          committed index (heldOnDivergence).
         name: rebaseOnCommit
         params: m *core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          committedDivergence returns the first index, at most the commit, at which
+          m carries another entry than this log holds committed, 0 when there is
+          none. Both logs then hold a different committed entry at one position:
+          Log Matching is broken by construction, as when founders passed Bootstrap
+          different initial timings and each wrote and committed its own entry 1
+          (#698). Only an entry the leader's own sums verify counts, chained on
+          this log's entry before it: an entry damaged in transit or in the
+          leader's memory fails its sums, and the chain check refuses it as before
+          (D4). The entries at or below the snapshot are not compared, nor any past
+          k, the commit.
+        name: committedDivergence
+        params: m *core.MessageValue, k int
+        recv: r *Raft
+        results: uint64
+      - doc: |-
+          foundingDivergence returns 1 when m is an append after index 1 whose
+          first entry carries a body its sum verifies but a chain that does not
+          continue this node's entry 1, committed and of term 1, 0 otherwise: the
+          leader's entry 1 is another than this node's. A founder that passed
+          Bootstrap another initial timing than the others met it at every append
+          past entry 1, the leader's entry 2 chained on its own entry 1 (#698).
+          Only entry 1 is judged on the chain alone: no other entry was ever
+          committed by fiat, and an entry whose chain field rotted in a leader's
+          memory, its body intact, would stop every follower it reached. Bootstrap
+          leaves entry 1 uncommitted since (replacesFounding), and a node whose
+          entry 1 a leader committed would stop on such a chain too: only a log
+          that started holding entry 1 alone, committed (fiatFounding), what a
+          data directory founded before holds, is judged so (#698's review).
+        name: foundingDivergence
+        params: m *core.MessageValue
+        recv: r *Raft
+        results: uint64
+      - doc: |-
+          heldOnDivergence handles an append that contradicts this log at the
+          committed index at, and reports whether it consumed it. A leader whose
+          commit passed at holds its entries through its commit on a majority,
+          each of which verified their chain, and so holds its own entry at at,
+          not this node's: the Ready names it (Ready.Diverged) and the driver stops
+          the node. A leader that committed nothing past at proves nothing about
+          which entry the cluster holds, and for ElectionTimeoutMax from the first
+          such append of its term the append is dropped unanswered and uncounted:
+          a leader of the majority that commits by then carries its commit in the
+          append it sends again at a heartbeat's answer. Counted at once, three
+          refusals reached a leader of the majority before its first commit, and
+          the odd founder refused it for the whole term, cut off with nothing said.
+          Past that window the append is refused as before (D4, R6-05): a leader
+          whose own entry is the odd one commits nothing, is refused and deposed.
+        name: heldOnDivergence
+        params: m *core.MessageValue, at uint64
         recv: r *Raft
         results: bool
       - doc: |-
@@ -3603,11 +3976,74 @@ types:
           term and returns the position in m.Entries of the first one it does not,
           -1 when it holds them all, with the chain value before it. ok is false,
           and the append is dropped unanswered, when the entries are not one per
-          index after m.Index.
+          index after m.Index, and refused as a broken chain (D4) when it carries
+          at a position this log holds uncommitted, under the same term, another
+          entry than this log's. An uncommitted founding entry the leader's is
+          another of (replacesFounding) is not held: it conflicts. The chain past
+          a held entry is this log's, never the one the message carries: entry 1
+          of term 1 is the one position two founders may hold differently, and a
+          founder that kept its own took the leader's chain on and appended the
+          leader's entry 2 on top of it, its log broken (#698).
         name: firstNewEntry
         params: m *core.MessageValue
         recv: r *Raft
         results: start int, prevChain uint32, ok bool
+      - doc: |-
+          contradictsHeld reports whether e, at a position this log holds under
+          the same term, is another entry than this log's while that position is
+          still uncommitted, refusing the append as firstNewEntry says: this log
+          does not take it, the append proves nothing from here, and acknowledged
+          it would commit this log's own (#698). A founding entry over another
+          member list is a divergence, named once the leader committed past it
+          (heldOnDivergence); any other is a broken chain (chainRefused).
+        name: contradictsHeld
+        params: m *core.MessageValue, e *core.EntryValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          foundingUnproven reports whether m's prefix is this node's entry 1,
+          uncommitted and of term 1, matched by its term alone: the one position
+          two founders may hold differently (#698). An append past it proves the
+          leader's entry 1 is this node's only when its first entry verifies
+          chained on this node's; an empty one proves nothing, and acknowledged,
+          the leader's next heartbeat, its commit clamped to that match, committed
+          this node's own entry 1, the one no majority held.
+        name: foundingUnproven
+        params: m *core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          replacesFounding reports whether e is a leader's entry 1 that this
+          node's uncommitted entry 1 must give way to: both founding entries of
+          term 1 over the same member list, e verified by its own sums, and
+          another chain than this node's. Every founder writes entry 1 at (1, 1)
+          from its own InitialTiming without contacting a peer, so two founders
+          given different timings hold different entries at one position, the one
+          position no leader created (#698). Bootstrap leaves it uncommitted: it
+          commits as any entry does, once the leader of a later term holds it on a
+          majority, and a founder that holds another one takes the leader's like
+          any uncommitted conflicting entry. Matched on the term alone, it was
+          kept, and the leader's entry 2, chained on the leader's entry 1, was
+          refused as a broken chain at every append. An entry whose sums do not
+          verify, damaged in transit, is skipped as before, and another member
+          list is never taken: founders given different lists stay refused.
+        name: replacesFounding
+        params: e *core.EntryValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          foundingContradicted reports whether e is a leader's entry 1 that
+          contradicts this node's uncommitted one and that this node does not take
+          (replacesFounding): a founding entry its own sums verify, over another
+          member list than this node's founding entry. Bootstrap compares no list
+          between founders, and a founder given another one refused every leader's
+          chain for good, the cluster with no failure tolerance and nothing said;
+          it now stops BOOTSTRAP_REFUSED once a leader that committed past entry 1
+          shows it (#698's review).
+        name: foundingContradicted
+        params: e *core.EntryValue
+        recv: r *Raft
+        results: bool
       - doc: |-
           appendNew verifies and appends m's entries from start on, truncating a
           conflicting suffix first. It reports false, and the append goes
@@ -3672,6 +4108,13 @@ types:
           index, that leader's heartbeats go unanswered for the term (D4, R6-05).
         name: chainRefused
         params: m core.MessageValue, at uint64
+        recv: r *Raft
+      - doc: |-
+          countRefusal counts a refusal of from's append at index at; after
+          MaxChainRefusals in a row at one index, that leader is refused for the
+          term (D4, R6-05).
+        name: countRefusal
+        params: from core.NodeID, at uint64
         recv: r *Raft
       - doc: |-
           refuses reports whether this node refused the leader from for the rest
@@ -3779,6 +4222,25 @@ types:
           campaign for this term, 0 for a term it won by an election.
         name: HandedBy
         type: core.NodeID
+      - doc: |-
+          PreVotesLost is how many PreVote refusals this node's campaigns were
+          answered since it started, one per voter and campaign: a node whose
+          count climbs while the cluster has a leader keeps asking for an
+          election it cannot win (D13, consensus_prevotes_lost_total).
+        name: PreVotesLost
+        type: uint64
+      - doc: |-
+          LeaderLast is, on a node that does not lead, the leader's last index as
+          its last heartbeat of this term carried it (FlagProtocol4), 0 while
+          none did: a leader of protocol 3 or below sends none (#919).
+        name: LeaderLast
+        type: uint64
+      - doc: |-
+          Appended is, on a node that does not lead, the instant of the last
+          append with entries it took from the leader of this term, zero while
+          it took none (#919).
+        name: Appended
+        type: time.Time
     kind: struct
     name: StatusValue
   - fields:
@@ -3800,3 +4262,36 @@ types:
         type: EngineValue
     kind: struct
     name: engineAt
+  - fields:
+      - name: byID
+        type: map[core.SessionID]core.SessionValue
+    kind: struct
+    methods:
+      - name: Apply
+        params: e *core.EntryValue
+        recv: t *SessionTable
+        results: core.PositionValue, errs.Code
+      - doc: |-
+          evictFor makes room for one more session: at MaxSessions, the session
+          whose last entry is the oldest goes. Each index is the last of one session
+          at most, so the choice is the same on every node whatever the map's order.
+        name: evictFor
+        recv: t *SessionTable
+      - name: Values
+        recv: t *SessionTable
+        results: "[]core.SessionValue"
+    name: SessionTable
+vars:
+  - doc: |-
+      announcedBy is, per protocol version up to ProtocolMax, the facts a
+      member's frames carry once it speaks that version: a table, so that
+      checkAnnounced stays under its inline budget as versions are added.
+    items:
+      - name: announcedBy
+        value: |-
+          [ProtocolMax + 1]peerFacts{
+          	Protocol2: peerProtocol2,
+          	Protocol3: peerProtocol2 | peerProtocol3,
+          	Protocol4: peerProtocol2 | peerProtocol3 | peerProtocol4,
+          }
+    name: announcedBy

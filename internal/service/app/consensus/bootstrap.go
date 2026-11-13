@@ -198,9 +198,18 @@ func foundingTiming(cfg *Config) (coreconsensus.TimingContractSpec, error) {
 }
 
 // writeFoundingEntry writes the founding configuration as entry 1, at term
-// 1 and committed, with the generation 1 contract timing, then syncs it; a
-// log that already holds an entry is left alone, which is what makes a
-// rerun idempotent.
+// 1, with the generation 1 contract timing, then syncs it; a log that
+// already holds an entry is left alone, which is what makes a rerun
+// idempotent.
+//
+// Entry 1 is left uncommitted. Bootstrap contacts no peer, and entry 1
+// carries this founder's own InitialTiming, so founders given different
+// timings write different entries at (1, 1). Written committed, each
+// founder committed its own, the one entry no majority ever held, and the
+// odd ones refused every leader's chain for good (#698). Uncommitted, it
+// commits as any entry does, once the first leader holds its own on a
+// majority, and a founder that holds another one takes the leader's
+// (raft's replacesFounding): one entry 1, one generation 1 contract.
 func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue, timing coreconsensus.TimingContractSpec) error {
 	if first, last := cfg.Log.Bounds(); last >= first {
 		return nil
@@ -215,7 +224,7 @@ func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue, timing
 		BodySum: wire.BodySum(data), Data: data,
 	}
 	e.ChainSum = wire.ChainSum(0, &e)
-	hs := new(coreconsensus.HardState{Term: 1, Commit: 1})
+	hs := new(coreconsensus.HardState{Term: 1})
 	if err := cfg.Log.Append([]coreconsensus.EntryValue{e}, hs); err != nil {
 		return storageFailed("append", err)
 	}

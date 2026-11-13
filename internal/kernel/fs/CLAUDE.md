@@ -24,6 +24,12 @@ it could not read and `queue` refuses one (ADR 0084 §D5, ADR 0095); `lock`
 and `session` put different gates in front of the same file lock. A package
 that decides, refuses or writes is a domain's, not the kernel's.
 
+One member writes, by decision (ADR 0230): `seglog`, a log being nothing
+but writes. It is admitted because what it writes is a mechanism with no
+policy around it — it never quarantines, retains by age, locks its directory
+or repairs anything but a torn tail it has proved torn; damage it refuses,
+changing nothing, and the caller decides what that means.
+
 The family is a family rather than a place at the root because its kind is not
 the root's: `errs`, `clock`, `backoff`, `semver` and `plugin` serve every family
 or none in particular, while these answer questions about one resource, the
@@ -35,6 +41,7 @@ filesystem.
 |---|---|---|
 | `flock/` | `TryLock(file)` / `Unlock(file)` / `Native` — an exclusive lock on a whole file, never a blocking call: `flock(2)` on the Unix kernels, `LockFileEx` over every byte on Windows, `errors.ErrUnsupported` elsewhere (ADR 0081, ADR 0159). The copy `lock` and `session` each carried | not published (ADR 0159 §4): a domain reaches it through `lock` |
 | `pathchain/` | `Resolve(path)` — a path walked one component at a time over `os.Root` handles, each indirection reported with the mode of the directory that holds it: the measurement `O_NOFOLLOW` cannot give (ADR 0083) | not published (ADR 0159 §4): a measurement a domain applies with a policy, and alone it invites the policy-free use its own document warns against |
+| `seglog/` | `Open(dir, segBytes)` / `Append` / `Sync` / `Read` / `Range` / `Kind` / `DropBefore` / `Rewrite` / `Bounds` / `Close` — a durable segmented log of indexed records: CRC-32C records, zero-filled segments, one batch under two syncs, every hole classified before a torn tail is zeroed, whole sealed segments dropped (ADR 0230, extracted from the consensus file log) | not published (ADR 0159 §4): a program reaches it through `data/stream` |
 | `winacl/` | `GrantsAnyone(dir, onDirectory, onFilesWithin)` — does an identifier meaning anybody hold a right in a Windows directory's DACL, on the directory or on what its files inherit; the rights and the three masks (`ReplaceRights`, `CreateRights`, `ContentRights`) the SDK's rules ask (ADR 0084, ADR 0086). Moved from `lock`, which exported it for `queue` | not published, for the same reason as `pathchain` |
 
 ## Five directory rules, deliberately not one

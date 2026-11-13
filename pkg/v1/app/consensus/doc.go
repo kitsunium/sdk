@@ -15,6 +15,21 @@
 // decide, or carry a per-key revision in the command, because a replayed
 // compare-and-swap is not harmless under ABA (D6, R1-04).
 //
+// # Exactly once, through a client session
+//
+// A command without a natural key — an event appended, a counter moved —
+// is retried through a client session instead (ADR 0241). Once the
+// cluster version is 4, a client opens a session it names with 16 random
+// bytes, Node.OpenSession, then submits each command under the next
+// sequence, Node.ProposeSession, and retries it after OUTCOME_UNKNOWN with
+// the same session, sequence and command, through any node: the state
+// machine applies it once, and the retry is answered with the first
+// one's token. The same sequence with another command is
+// SESSION_DIGEST_MISMATCH. The cluster keeps 1024 sessions, the one used
+// least recently evicted first, and a command of a session
+// evicted, or of a sequence below its last, is SESSION_EXPIRED: read the
+// state through Barrier, then open a new session.
+//
 // # Reads
 //
 // Barrier returns once the local state machine reflects every write
@@ -22,6 +37,27 @@
 // round started after the read arrived. ReadLease is opt-in and sound only
 // under the four conditions of D9; a leader paused after its lease check
 // serves a stale read, which ReadIndex never does.
+//
+// # Backup
+//
+// A backup is three calls. Node.ExportBackup writes a full file: the
+// snapshot SaveSnapshot cuts, then the committed entries after it up to
+// the commit at the call, then a trailer naming the point it ends at.
+// Node.AppendBackup writes, from that point, only the entries committed
+// since, and returns the next point; keep the last point beside the
+// files. VerifyBackup checks the files offline (every record's sum, the
+// snapshot's SHA-256, the chain from its ChainTip), and RestoreBackup
+// restores the export and its tails, in order, through ImportObserved on
+// every node of the new cluster, refusing a tail that does not continue
+// the chain before anything is written.
+//
+// The recovery point is the last committed entry the backup node had
+// applied when the last append ran: a restore loses only what committed
+// after it. Store the tail files in the repository beside the export
+// (restic keeps them as it keeps the snapshot), export again when an
+// append is refused COMPACTED or names an entry that changes the
+// engine's state, and restore from the newest export and every tail
+// written after it.
 //
 // # Apply is a pure transition
 //

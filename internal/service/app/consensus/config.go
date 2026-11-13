@@ -74,6 +74,13 @@ type Config struct {
 	SnapshotEvery, SnapshotTrailing, PromoteLag                 uint64
 	SnapshotEveryBytes, MaxSnapshotBytes, MaxLogBytes           int64
 	LogReserveBytes                                             int64
+	// MaxSnapshotStreams bounds the snapshot streams this node sends at
+	// once; 0 is 1. A peer in need beyond it waits, its transfer pending,
+	// and is served when a stream ends.
+	MaxSnapshotStreams int
+	// SnapshotStreamBytesPerSecond paces the snapshot streams this node
+	// sends, all of them together, on Clock; 0 is unlimited.
+	SnapshotStreamBytesPerSecond int64
 
 	// SnapshotCodec compresses snapshot chunks; nil is flate.
 	SnapshotCodec coretransform.BoundedDecompressor
@@ -172,6 +179,7 @@ func clampDefaults(c *Config) {
 	clampInt64(&c.LogReserveBytes, 256<<20)
 	clampInt(&c.MinVoters, 3)
 	clampU64(&c.PromoteLag, 1024)
+	clampInt(&c.MaxSnapshotStreams, 1)
 	if c.HardCloseTimeout <= 0 {
 		c.HardCloseTimeout = 5 * time.Second
 	}
@@ -264,6 +272,9 @@ func refuseBounds(c *Config) error {
 		// pending budget refuses it OVERLOADED on an idle cluster, forever
 		// (#557).
 		return misconfigured("MaxPendingBytes", "below MaxEntryBytes")
+	case c.SnapshotStreamBytesPerSecond < 0:
+		// Zero is the unlimited default; a negative rate means nothing.
+		return misconfigured("SnapshotStreamBytesPerSecond", "negative")
 	case framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead):
 		// A batch the transport cannot carry stalls every follower it is
 		// sent to (review M2).
@@ -325,9 +336,14 @@ func refuseDurability(c *Config) error {
 }
 
 // MemoryBudget is the node's memory budget with two peers, the sum of its
-// bounds (D14).
+// bounds (D14) and of the file log's index: 4 bytes for each record
+// MaxLogBytes holds at most, each at least an empty payload's record
+// (minRecordBytes).
 func (c *Config) MemoryBudget(peers int) int64 {
-	return c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes)
+	// The index's term: one offset per entry the log may retain, each at
+	// least an empty record on disk (#1111).
+	index := c.MaxLogBytes / minRecordBytes * indexEntryBytes
+	return c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes) + index
 }
 
 // defaultCodec is flate, whose registered singleton bounds its

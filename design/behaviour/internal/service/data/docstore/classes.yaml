@@ -394,6 +394,19 @@ files:
       - (*Store).settleGroup
     name: batch.go
   - decls:
+      - changeFeed
+      - changeFeed.on
+      - changeFeed.record
+      - changeFeed.append
+      - validateChanges
+      - (*Store).changeVersion
+      - (*Store).feed
+      - (*Store).feedBatch
+      - (*Store).ChangeStream
+      - (*SQLStore).feedIn
+      - (*SQLStore).ChangeStream
+    name: change.go
+  - decls:
       - DefaultFoldAt
       - overlaySuffix
       - versionsSuffix
@@ -700,6 +713,8 @@ files:
       - (*SQLStore).PutDocument
       - (*SQLStore).preparedDocument
       - (*SQLStore).putDocument
+      - versionRowsOf
+      - (*SQLStore).putTrashed
       - (*SQLStore).keyTaken
       - (*SQLStore).VersionWeight
     name: sql_version.go
@@ -785,6 +800,9 @@ files:
       - rewriteRefused
       - (*Store).PutDocument
       - (*Store).putDocument
+      - (*Store).putLocked
+      - putOp
+      - (*Store).commitDocument
       - givenDocument
       - (*Store).preparedDocument
       - (*Store).persistDocument
@@ -815,6 +833,13 @@ files:
       - encodeCause
     name: write.go
 functions:
+  - doc: |-
+      validateChanges refuses a document asked of a feed that does not exist:
+      a caller who sets ChangesWithDocument believes records are written. Both
+      engines refuse through it.
+    name: validateChanges
+    params: stream corestream.Stream, withDocument bool
+    results: error
   - doc: |-
       validateVersions refuses a negative number of versions, and a hold on a
       store that keeps none: a caller who sets Held believes versions are kept.
@@ -1327,6 +1352,13 @@ functions:
     name: knownInstant
     params: at time.Time
     results: "*time.Time"
+  - doc: |-
+      versionRowsOf is the version rows of given, newest first; the current
+      version's document is the documents' table's, or the trash's. The slice
+      has room for the tombstone a trashed write appends.
+    name: versionRowsOf
+    params: given []coredocstore.VersionValue
+    results: "[]versionRow"
   - doc: rowsAffected reads a statement's affected-row count, or its failure.
     name: rowsAffected
     params: result stdsql.Result, execErr error
@@ -1377,6 +1409,12 @@ functions:
     name: rewriteRefused
     params: store, problem string
     results: error
+  - doc: |-
+      putOp is the change a write announces: a document written into the trash
+      leaves every read, as Trash does.
+    name: putOp
+    params: trashed bool
+    results: coredocstore.ChangeOp
   - doc: |-
       recordOf is the versions record of checked versions, newest first: the
       first one's head as the current version, the others as the former ones.
@@ -1450,6 +1488,7 @@ imports:
   context: context
   coredocstore: github.com/kitsunium/sdk/internal/core/data/docstore
   coresql: github.com/kitsunium/sdk/internal/core/data/sql
+  corestream: github.com/kitsunium/sdk/internal/core/data/stream
   corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
   errors: errors
   fmt: fmt
@@ -1659,6 +1698,42 @@ types:
         results: bool
     name: batchView
     typeParams: T any
+  - doc: |-
+      changeFeed is a store's change feed (kitsunium/sdk#831): the stream every
+      write appends its change record to, and whether a record carries the
+      document. The zero value is no feed.
+    fields:
+      - doc: stream takes the records; nil writes none.
+        name: stream
+        type: corestream.Stream
+      - doc: |-
+          withDocument puts the document's JSON in a put's, a restore's and a
+          trash's record.
+        name: withDocument
+        type: bool
+    kind: struct
+    methods:
+      - doc: on reports whether the store writes change records.
+        name: "on"
+        recv: f changeFeed
+        results: bool
+      - doc: |-
+          record is the stream record of one change: keyed by the document's key, so
+          one partition keeps a document's changes in order, its payload the change
+          as JSON. A delete never carries the document.
+        name: record
+        params: store string, change coredocstore.ChangeValue, raw json.RawMessage
+        recv: f changeFeed
+        results: corestream.RecordValue, error
+      - doc: |-
+          append writes records to the stream under ctx — the write's transaction on
+          the SQL engine — or refuses the write: ChangeFeedFailed, naming the store and
+          the operation, the stream's own error joined for errors.Is to find.
+        name: append
+        params: ctx context.Context, store, op string, records []corestream.RecordValue
+        recv: f changeFeed
+        results: error
+    name: changeFeed
   - fields:
       - doc: |-
           Key returns the key a document is stored under. It must be a pure
@@ -1713,6 +1788,26 @@ types:
           that keeps versions has a trash, Trash's; one that keeps none has none.
         name: Versions
         type: int
+      - doc: |-
+          Changes is the store's change feed (kitsunium/sdk#831): every write
+          that stands appends one record to it — keyed by the document's key,
+          its payload a [coredocstore.ChangeValue] as JSON — under the
+          writers' lock and BEFORE the write's overlay entry is published, so
+          the records of a key are in the order its writes stood. A crash
+          between the two leaves a record of a write that did not land: the
+          feed is at least once, and a reader skips a record whose version
+          the store does not hold. A record the stream refuses refuses the
+          write, ChangeFeedFailed, nothing written. A batch appends one record
+          per key it wrote, its final state. Nil writes no
+          record.
+        name: Changes
+        type: corestream.Stream
+      - doc: |-
+          ChangesWithDocument puts the document's JSON in each change record
+          of a put, a restore and a trash, so a reader rebuilds the store from
+          the feed alone. It is refused without Changes.
+        name: ChangesWithDocument
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -1804,6 +1899,11 @@ types:
         name: onDelete
         type: hooks
       - doc: |-
+          changes is the change feed every write appends its record to, before
+          it is published.
+        name: changes
+        type: changeFeed
+      - doc: |-
           writing serialises writers, folds and Close; they hold it across the
           filesystem work.
         name: writing
@@ -1876,6 +1976,39 @@ types:
         name: settleGroup
         recv: s *Store[T]
         results: error
+      - doc: |-
+          changeVersion is the version a change record names: none for a delete and
+          on a store that keeps no versions, 1 for a document stored before its
+          store kept them, else the current version of record.
+        name: changeVersion
+        params: op coredocstore.ChangeOp, record *versionsRecord
+        recv: s *Store[T]
+        results: uint64
+      - doc: |-
+          feed appends the change record of one write of the file engine, before
+          the write is published: its key, the version record leaves, the instant
+          and, when asked, raw. The caller holds the writers' lock, so the records of
+          a key are in the order its writes stood. The file engine waits on nothing a
+          caller could abandon, so the record is appended without a deadline of the
+          caller's.
+        name: feed
+        params: op coredocstore.ChangeOp, key string, raw json.RawMessage, record *versionsRecord
+        recv: s *Store[T]
+        results: error
+      - doc: |-
+          feedBatch appends the change records of a planned batch, one per key it
+          writes, its final state, before the group entry is published. A stream's
+          Append takes one partition's records, and the keys of a batch spread over
+          several, so each record is its own Append: a failure part way leaves the
+          records already appended for a batch that did not land — at least once, as
+          a crash does. The caller holds the writers' lock.
+        name: feedBatch
+        params: plan *batchPlan
+        recv: s *Store[T]
+        results: error
+      - name: ChangeStream
+        recv: s *Store[T]
+        results: changes corestream.Stream, ok bool
       - name: Get
         params: key string
         recv: s *Store[T]
@@ -2337,6 +2470,21 @@ types:
         recv: s *Store[T]
         results: applied bool, err error
       - doc: |-
+          putLocked files the prepared document under key, in the trash when
+          trashedAt is set, and reports whether it took effect. The caller holds
+          writing and has checked that the key is free.
+        name: putLocked
+        params: key string, doc *givenDocument, trashedAt time.Time
+        recv: s *Store[T]
+        results: applied bool, err error
+      - doc: |-
+          commitDocument persists the document and, unless it went to the trash,
+          files it in memory, then reports whether it took effect.
+        name: commitDocument
+        params: key string, doc *givenDocument, trashed bool, record *versionsRecord
+        recv: s *Store[T]
+        results: applied bool, err error
+      - doc: |-
           preparedDocument checks what PutDocument is given and computes what it
           writes. It runs the caller's key and index functions, before any lock.
         name: preparedDocument
@@ -2753,6 +2901,25 @@ types:
           that keeps none has none.
         name: Versions
         type: int
+      - doc: |-
+          Changes is the store's change feed (kitsunium/sdk#831): every write
+          appends one record to it — keyed by the document's key, its payload a
+          [coredocstore.ChangeValue] as JSON — INSIDE the write's own
+          transaction or savepoint, with the write's context, so a write rolled
+          back leaves no record and a committed one exactly one. That holds
+          when Changes is the stream's SQL engine (internal/service/data/stream
+          NewSQL) opened on this store's Transactor: on another transactor the
+          record would commit apart from the write. A record the stream refuses
+          rolls the write back, ChangeFeedFailed. With Changes every write runs
+          in a transaction, even one of one statement. Nil writes no record.
+        name: Changes
+        type: corestream.Stream
+      - doc: |-
+          ChangesWithDocument puts the document's JSON in each change record
+          of a put, a restore and a trash, so a reader rebuilds the store from
+          the feed alone. It is refused without Changes.
+        name: ChangesWithDocument
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -3141,6 +3308,11 @@ types:
       - doc: onWrite and onDelete are the hooks called after a write or a deletion.
         name: onDelete
         type: hooks
+      - doc: |-
+          changes is the change feed every write appends its record to, in its
+          own transaction.
+        name: changes
+        type: changeFeed
       - doc: own are the options of a transaction the store opens itself.
         name: own
         type: coresql.TxOptionsValue
@@ -3151,6 +3323,19 @@ types:
         type: int
     kind: struct
     methods:
+      - doc: |-
+          feedIn appends the change record of one write of the SQL engine, inside
+          its transaction or savepoint: ctx carries it, so the stream's SQL engine on
+          the store's transactor appends in the same transaction, and a write
+          rolled back leaves no record. The version is the one the write left,
+          read in the same transaction on a store that keeps versions.
+        name: feedIn
+        params: ctx context.Context, ex coresql.Executor, op coredocstore.ChangeOp, key string, raw []byte
+        recv: s *SQLStore[T]
+        results: error
+      - name: ChangeStream
+        recv: s *SQLStore[T]
+        results: changes corestream.Stream, ok bool
       - name: Batch
         params: ctx context.Context, fn func(w coredocstore.BatchWriter[T]) error
         recv: s *SQLStore[T]
@@ -3526,6 +3711,13 @@ types:
         recv: s *SQLStore[T]
         results: error
       - doc: |-
+          putTrashed writes rows, the tombstone among them, and the change record of
+          a document written into the trash.
+        name: putTrashed
+        params: ctx context.Context, ex coresql.Executor, p *sqlPrepared, rows []versionRow
+        recv: s *SQLStore[T]
+        results: error
+      - doc: |-
           keyTaken refuses a key that holds anything: a version row — the trash's
           among them — or a document's row, a document stored while the store kept
           no versions included. Both reads lock what they find.
@@ -3627,8 +3819,8 @@ types:
         results: "[]indexRow, error"
       - doc: |-
           several reports whether every write of the store sends more than one
-          statement — its index rows, its versions — and so needs a transaction of
-          its own outside the caller's.
+          statement — its index rows, its versions, its change record — and so needs
+          a transaction of its own outside the caller's.
         name: several
         recv: s *SQLStore[T]
         results: bool
@@ -3985,7 +4177,8 @@ vars:
   - doc: |-
       Compile-time assertions that each engine still answers the ports
       core/data/docstore declares for it: the file engine the context-free ports,
-      the SQL engine the ports with a context on every call, and both the hooks.
+      the SQL engine the ports with a context on every call, and both the hooks
+      and the change feed.
 
       They matter because nothing else would notice. Open and OpenSQL return the
       ENGINES, not the ports, so a method renamed or re-typed on one engine would
@@ -4033,6 +4226,9 @@ vars:
         type: coredocstore.Announcer
         value: (*Store[struct{}])(nil)
       - name: _
+        type: coredocstore.ChangeFeeder
+        value: (*Store[struct{}])(nil)
+      - name: _
         type: coredocstore.CollectionContext[struct{}]
         value: (*SQLStore[struct{}])(nil)
       - name: _
@@ -4070,6 +4266,9 @@ vars:
         value: (*sqlBatchWriter[struct{}])(nil)
       - name: _
         type: coredocstore.Announcer
+        value: (*SQLStore[struct{}])(nil)
+      - name: _
+        type: coredocstore.ChangeFeeder
         value: (*SQLStore[struct{}])(nil)
     name: _
   - doc: The columns data/sql's InsertRows inserts the store's rows into (#837).

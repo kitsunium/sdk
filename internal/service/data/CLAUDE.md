@@ -18,7 +18,8 @@ a value becomes and the places those bytes are kept — rather than what the
 data is for: the bytes a value is written as (`codec`) and the same bytes made
 smaller (`transform`), the tables of the caller's database (`sql`) and the
 documents kept above them or on a filesystem (`docstore`), the messages one
-process leaves for another (`queue`), the copies kept close (`cache`) and the
+process leaves for another (`queue`) and the log every reader reads at its
+own pace (`stream`), the copies kept close (`cache`) and the
 files a value is published to (`vfs`).
 
 Every codec is under `codec/`: the sixteen format packages and their 24
@@ -43,8 +44,9 @@ the family, `security/secret` publishes its records through `vfs`, and
 | `codec/strictjson/` | one JSON document decoded one way, within a bound on reading — a decoder, not a Format (ADR 0102); the HTTP request body is `codec/strictjson/httpbody/`, so the decoder links no `net/http` | none — no port | `0.3.72.*` | `pkg/v1/data/codec/strictjson`, `pkg/v1/data/codec/strictjson/httpbody` |
 | `codec/jsonshape/` | a Go type's wire shape under `encoding/json` — not a Format (ADR 0133) | none — no port | none | `pkg/v1/data/codec/jsonshape` |
 | `codec/jsonpatch/` | two JSON documents' difference as RFC 6902 operations — not a Format (ADR 0143) | none — no port | `0.3.90.*` | `pkg/v1/data/codec/jsonpatch` |
-| `docstore/` | typed, keyed JSON documents with unique and multi-valued indexes, persisted as one overlay entry per write through `vfs` (ADR 0110), or in two tables of the caller's database through `sql` (ADR 0139), with a document's versions kept in its own write (ADR 0143) | `core/data/docstore` — `Collection` and `Versioned` (the file engine), `CollectionContext` and `VersionedContext` (the SQL engine), `Announcer` (both) — ADR 0160 §1 | `0.3.80.*`, declared in `core/data/docstore` | `pkg/v1/data/docstore` |
+| `docstore/` | typed, keyed JSON documents with unique and multi-valued indexes, persisted as one overlay entry per write through `vfs` (ADR 0110), or in two tables of the caller's database through `sql` (ADR 0139), with a document's versions kept in its own write (ADR 0143), and a change record of every write appended to a `stream` (#831) | `core/data/docstore` — `Collection` and `Versioned` (the file engine), `CollectionContext` and `VersionedContext` (the SQL engine), `Announcer` and `ChangeFeeder` (both) — ADR 0160 §1 | `0.3.80.*`, declared in `core/data/docstore` | `pkg/v1/data/docstore` |
 | `queue/` | the file broker (its state a directory, through `vfs`), the SQL broker (one table of the caller's database, through `sql`) and the memory broker, and the `Consume` loop that sleeps on the `Waker` sibling (ADR 0054, ADR 0104, ADR 0151) | `core/data/queue` | `0.3.53.*`, declared in `core/data/queue` | `pkg/v1/data/queue` |
+| `stream/` | the engines of the partitioned log — the memory engine and the conformance suite every engine runs (#819), a directory of segments over `kernel/fs/seglog` whose cursors are published through `vfs` (#821), and three tables of the caller's database joined to its transaction through `sql` (#822), and the subscriber that reads it for a consumer group (#823), compaction by key on every engine (#824) (ADR 0231) | `core/data/stream` | `0.3.94.*`, declared in `core/data/stream` | `pkg/v1/data/stream` (#825) |
 | `sql/` | the transaction manager — savepoints, the pool policy, `Join` and `Defer` — and the migration runner under a lock that dies with its holder, SQLite's on the database file's write lock (ADR 0055, ADR 0139, ADR 0140) | `core/data/sql` | `0.3.54.*`, declared in `core/data/sql` | `pkg/v1/data/sql` |
 | `transform/` | the stdlib compressors — gzip, raw DEFLATE (`flate`) and the RFC 1950 `zlib` envelope — and the bounded decompression (ADR 0014) | `core/data/transform` | `0.3.26.*`, declared in `core/data/transform` | `pkg/v1/data/transform`, and `pkg/v1/data/codec`'s compression frame through it |
 | `vfs/` | `NewOS`, confined by `os.Root`, and `NewMem`, with the five-step atomic publication (ADR 0056) | `core/data/vfs` | `0.3.55.*`, declared in `core/data/vfs` | `pkg/v1/data/vfs` |
@@ -66,7 +68,10 @@ left `//:audit_sources` for the core's.
   `lock`, a wait to `kernel/clock`, a recycled buffer to
   `kernel/concur/recycler` or `core/data/codec/scratch`.
 - Import one member from another without saying so in both `CLAUDE.md` files:
-  today `docstore` reaches `sql` (its `Withheld`) and `queue` reaches `sql` and
-  `vfs`, and no other member reaches a sibling — `docstore` persists through
+  today `docstore` reaches `sql` (its `Withheld`) and writes its change feed to a
+  `stream` through the `core/data/stream` port alone (its tests run it on
+  `stream`'s engines, #831), `queue` reaches `sql` and
+  `vfs`, `stream` reaches `vfs` (its cursors) and `sql` (its `Withheld`, `Statements`
+  and `ChecksumOf`), and no other member reaches a sibling — `docstore` persists through
   the `core/data/vfs` port alone, since the code it matched a publication's
   failure on moved there (ADR 0160).

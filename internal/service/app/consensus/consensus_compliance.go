@@ -20,6 +20,12 @@ var (
 	_ coreconsensus.SnapshotStore = (*fileSnapshots)(nil)
 	_ coreconsensus.Transport     = (*TCPTransport)(nil)
 	_ coreconsensus.Transport     = (*MemoryTransport)(nil)
+	_ coreconsensus.BatchSender   = (*TCPTransport)(nil)
+	// A product finds the membership watch by type assertion on its node
+	// (ADR 0039, #915).
+	_ coreconsensus.MembershipWatcher = (*Node)(nil)
+
+	_ coreconsensus.SessionProposer = (*Node)(nil)
 
 	_ interface {
 		compactPrefixAt(through, term uint64) error
@@ -58,9 +64,21 @@ var (
 	_ membershipSetter                 = (*MemoryTransport)(nil)
 	_ bindWarner                       = (*TCPTransport)(nil)
 	_ bindWarner                       = (*MemoryTransport)(nil)
+	_ bindWarner                       = (*fileLog)(nil)
 	// The transport hands the node an offer it could not decode, which
 	// stops it when its leader made it (#665).
 	_ undecodableBinder = (*TCPTransport)(nil)
+	// A member's offline truncation reads the configuration a live member
+	// runs with through its transport (#763).
+	_ interface {
+		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+	} = (*TCPTransport)(nil)
+	_ interface {
+		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+	} = (*MemoryTransport)(nil)
+	// The TCP transport serves several groups on one listener (#925).
+	_ groupBinder   = (*TCPTransport)(nil)
+	_ groupStreamer = (*TCPTransport)(nil)
 	_ interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time

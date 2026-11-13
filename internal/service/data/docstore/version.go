@@ -560,6 +560,14 @@ func (s *Store[T]) putDocument(key string, versions []coredocstore.VersionValue,
 		//: DocumentExists, naming no key.
 		return false, kerrs.Wrap(coredocstore.DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
+	//: the write itself, under the lock.
+	return s.putLocked(key, &doc, trashedAt)
+}
+
+// putLocked files the prepared document under key, in the trash when
+// trashedAt is set, and reports whether it took effect. The caller holds
+// writing and has checked that the key is free.
+func (s *Store[T]) putLocked(key string, doc *givenDocument, trashedAt time.Time) (applied bool, err error) {
 	record := recordOf(doc.given)
 	trashed := !trashedAt.IsZero()
 	//: in the trash at its instant, filed nowhere, the store holding no
@@ -572,6 +580,26 @@ func (s *Store[T]) putDocument(key string, versions []coredocstore.VersionValue,
 		//: UniqueKeyTaken, naming the index and never the key.
 		return false, kerrs.Wrap(coredocstore.UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", name))
 	}
+	//: the change record first.
+	if feedErr := s.feed(putOp(trashed), key, doc.raw, record); feedErr != nil {
+		//: ChangeFeedFailed: nothing changed anywhere.
+		return false, feedErr
+	}
+	return s.commitDocument(key, doc, trashed, record)
+}
+
+// putOp is the change a write announces: a document written into the trash
+// leaves every read, as Trash does.
+func putOp(trashed bool) coredocstore.ChangeOp {
+	if trashed {
+		return coredocstore.ChangeTrash
+	}
+	return coredocstore.ChangePut
+}
+
+// commitDocument persists the document and, unless it went to the trash,
+// files it in memory, then reports whether it took effect.
+func (s *Store[T]) commitDocument(key string, doc *givenDocument, trashed bool, record *versionsRecord) (applied bool, err error) {
 	persistErr := s.persistDocument(key, doc.raw, trashed, record)
 	//: the filesystem refused: nothing changed anywhere.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {

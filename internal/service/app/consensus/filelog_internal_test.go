@@ -446,10 +446,10 @@ func TestReadersDoNotWaitForASync(t *testing.T) {
 	}
 	in, out := make(chan struct{}), make(chan struct{})
 	var first sync.Once
-	l.duringSync = func() {
+	onBatchSync(d, func() {
 		first.Do(func() { close(in) })
 		<-out
-	}
+	})
 	done := make(chan error, 1)
 	go func() { done <- l.Sync() }()
 	<-in
@@ -515,7 +515,7 @@ func TestRecoverySyncsWhatItTrustsBeforeServing(t *testing.T) {
 	}
 	killed := t.TempDir()
 	var copied error
-	l.duringSync = func() { copied = copyTree(d.Dir(), killed) }
+	onBatchSync(d, func() { copied = copyTree(d.Dir(), killed) })
 	mustSync(t, l)
 	if copied != nil {
 		t.Fatal(copied)
@@ -709,7 +709,7 @@ func TestTheEndRecordIsWrittenOnceTheRestOfItsBatchIsDurable(t *testing.T) {
 	seg := filepath.Join(l.logDir(), segName(l.segs[len(l.segs)-1].n))
 	type seen struct{ recs, ends int }
 	var syncs []seen
-	l.duringSync = func() {
+	onBatchSync(d, func() {
 		b, err := os.ReadFile(seg)
 		if err != nil {
 			t.Error(err)
@@ -728,7 +728,7 @@ func TestTheEndRecordIsWrittenOnceTheRestOfItsBatchIsDurable(t *testing.T) {
 			o += r.length
 		}
 		syncs = append(syncs, s)
-	}
+	})
 	mustSync(t, l)
 	if len(syncs) != 2 {
 		t.Fatalf("%d fdatasync(s) for a batch of three records (%+v), want the body's then the end record's", len(syncs), syncs)
@@ -782,7 +782,7 @@ func TestRemovingAPinnedSnapshotIsNotAStorageFailure(t *testing.T) {
 func TestWipeAndRejoinRemovesTheSilenceCondition(t *testing.T) {
 	dir, d := base(t)
 	defer d.Close()
-	if err := writeFileSync(filepath.Join(dir, fileSilent), silenceRecord(9, 4)); err != nil {
+	if err := osDisk.writeFileSync(filepath.Join(dir, fileSilent), silenceRecord(9, 4)); err != nil {
 		t.Fatal(err)
 	}
 	if err := ClearQuarantine(d, WipeAndRejoin, "op:test"); err != nil {
@@ -846,7 +846,7 @@ func fillLog(t *testing.T, l *fileLog, payload int, size int64) uint64 {
 // whose log grew while its compaction stalled was OOM-killed at every
 // restart on a small host, Inspect and WipeAndRejoin with it (#630). The
 // open reads one segment at a time into the same buffer and keeps 40 bytes
-// per record past it, beside the index's 32 per entry: a 32 MiB log in
+// per record past it, beside the index's 40 per entry: a 32 MiB log in
 // 4 MiB segments, of entries of 4 KiB, where the open costs about a
 // segment, and of 64 B, where the per-record cost dominates. What the
 // reopen allocates in all bounds its peak from above, whenever the
@@ -1280,7 +1280,7 @@ func TestASegmentAnIntDoesNotHoldIsRefusedOn32Bits(t *testing.T) {
 		t.Fatalf("scan of a segment of %d bytes: %v, want STORAGE_FAILED", size, err)
 	}
 	l := &fileLog{segs: []*segment{{n: 1, f: f, size: size}}}
-	if _, err := l.readEntry(slot{seg: 1}); !errors.Is(err, coreconsensus.LogCorrupt) {
+	if _, err := l.readEntry(entryLoc{seg: 1}); !errors.Is(err, coreconsensus.LogCorrupt) {
 		t.Fatalf("an entry of 2^31 bytes: %v, want LOG_CORRUPT", err)
 	}
 }

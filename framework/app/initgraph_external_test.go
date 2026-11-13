@@ -29,6 +29,7 @@ var registration = []string{
 	"framework/app/mail",
 	"framework/app/jobs",
 	"framework/app/otlp",
+	"framework/app/stream",
 	"framework/app/server",
 	"framework/app/studio",
 }
@@ -115,6 +116,7 @@ var leaving = []leavingCase{
 // service halves whose names its symbols carry. The step is none.
 var optInSDK = []leavingCase{
 	{"pkg/v1/app/forward", "framework/app/otlp", 0, []string{"internal/core/app/forward.", "internal/service/app/forward."}},
+	{"pkg/v1/data/stream", "framework/app/stream", 0, []string{"internal/core/data/stream.", "internal/service/data/stream."}},
 }
 
 // leavingCase is one subsystem of leaving: the SDK package its engine lives
@@ -144,6 +146,7 @@ var kitEngines = map[string]string{
 	"framework/app/mail":     "framework/internal/app/mailengine.",
 	"framework/app/jobs":     "framework/internal/app/jobengine.",
 	"framework/app/otlp":     "framework/internal/app/otlpengine.",
+	"framework/app/stream":   "framework/internal/app/streamengine.",
 }
 
 // studioKit is the implementation package framework/app/studio alone

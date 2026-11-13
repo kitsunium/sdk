@@ -1,11 +1,12 @@
 package consensus
 
 import (
-	"bytes"
+	"cmp"
 	"fmt"
 	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
@@ -201,8 +202,8 @@ func (n *Node) applyRead(rg raft.ReadBackSpec) bool {
 }
 
 // readBack reads the committed entries from lo on, below hi, maxBytes of
-// payload at most but one entry, copied out of the store's buffers and
-// counted in the apply lag. A log that cannot give them back cannot be
+// payload at most but one entry, counted in the apply lag. The entries own
+// their Data (LogReader.Entries), so none is copied (#1110). A log that cannot give them back cannot be
 // trusted to agree with itself, and stops the node (D4): ok is false.
 func (n *Node) readBack(lo, hi uint64, maxBytes int) (es []coreconsensus.EntryValue, ok bool) {
 	es, err := n.cfg.Log.Entries(lo, hi, maxBytes, nil)
@@ -217,7 +218,6 @@ func (n *Node) readBack(lo, hi uint64, maxBytes int) (es []coreconsensus.EntryVa
 	}
 	var b int64
 	for i := range es {
-		es[i].Data = bytes.Clone(es[i].Data)
 		b += int64(len(es[i].Data))
 	}
 	n.obs.setGauge(mApplyLagBytes, float64(n.applyLag.Add(b)))
@@ -244,6 +244,13 @@ func (n *Node) applyEntries(es []coreconsensus.EntryValue) bool {
 			// Never skipped as a no-op: this version cannot apply it.
 			n.stop(unsupportedKind(e.Kind, e.Position.Index), false)
 			return false
+		}
+		if e.Kind == coreconsensus.EntrySessionCommand {
+			if !n.applySession(e) {
+				return false
+			}
+			i++
+			continue
 		}
 		if e.Kind != coreconsensus.EntryCommand {
 			n.applyLag.Add(-int64(len(e.Data)))
@@ -365,23 +372,32 @@ func (n *Node) answerCovered(index uint64) {
 }
 
 // applied1 records one applied entry and answers the Propose that created
-// it on this node.
+// it on this node. Its cost is independent of how many callers wait: it
+// releases only the parked ones its index reaches, and keeps its result in
+// a ring slot while a forward is outstanding (#1109).
 func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
+	n.appliedAnswer(e, val, e.Position, 0)
+}
+
+// appliedAnswer records one applied entry and answers the Propose that
+// created it on this node: with the token of answer, the entry's own
+// position or, for a session command already applied, the copy's, whose
+// value is the one recorded there while the node still holds it; or with
+// the refusal code a session command's fold decided (#918).
+func (n *Node) appliedAnswer(e *coreconsensus.EntryValue, val any, answer coreconsensus.PositionValue, code errs.Code) {
 	n.am.Lock()
 	n.applied = e.Position.Index
 	n.appliedTerm = e.Position.Term
 	n.logApplied.Store(e.Position.Index)
 	w := n.waiters[e.Position.Index]
 	delete(n.waiters, e.Position.Index)
-	if n.keepResults > 0 {
-		n.results[e.Position.Index] = applyResult{term: e.Position.Term, val: val}
-		n.resultOrder = append(n.resultOrder, e.Position.Index)
-		for len(n.resultOrder) > 4096 {
-			delete(n.results, n.resultOrder[0])
-			n.resultOrder = n.resultOrder[1:]
-		}
+	if r, ok := n.keptResult(answer.Index); ok && answer != e.Position && r.term == answer.Term {
+		val = r.val
 	}
-	n.acond.Broadcast()
+	if n.keepResults > 0 {
+		n.results[e.Position.Index%resultRing] = applyResult{index: e.Position.Index, term: e.Position.Term, val: val}
+	}
+	n.releaseApplied()
 	n.am.Unlock()
 	if w == nil {
 		return
@@ -389,48 +405,75 @@ func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
 	if w.local {
 		n.pendingBytes.Add(-int64(len(w.entry.Data)))
 	}
-	tok := n.token(e.Position)
-	if w.pos.Term != e.Position.Term {
+	switch {
+	case w.pos.Term != e.Position.Term:
 		// Another entry is COMMITTED at its position: certainly not
 		// committed (R7-15).
-		w.done <- propResult{err: withToken(coreconsensus.EntrySuperseded, tok)}
+		w.done <- propResult{err: withToken(coreconsensus.EntrySuperseded, n.token(e.Position))}
+	case code != 0:
+		// The session refused it: committed, and never applied (#918).
+		w.done <- propResult{err: origin(sentinelOf(code), errs.String("index", u64s(e.Position.Index)))}
+	default:
+		w.done <- propResult{tok: n.token(answer), val: val}
+	}
+}
+
+// keptResult is the Apply result kept at index, if its ring slot still
+// holds that index's. The caller holds am.
+func (n *Node) keptResult(index uint64) (applyResult, bool) {
+	if n.results == nil {
+		return applyResult{}, false
+	}
+	r := n.results[index%resultRing]
+	return r, r.index == index && index != 0
+}
+
+// releaseApplied releases every parked caller whose index is applied, and
+// no other: a caller is woken once, when its wait is over, never to check
+// again (#1109). The caller holds am.
+func (n *Node) releaseApplied() {
+	if n.appliedQ == nil {
 		return
 	}
-	w.done <- propResult{tok: tok, val: val}
+	for {
+		w, _, ok := n.appliedQ.Peek()
+		if !ok || w.index > n.applied {
+			return
+		}
+		n.appliedQ.Pop()
+		if n.onRelease != nil {
+			n.onRelease(w.index, n.applied)
+		}
+		w.ch <- struct{}{}
+	}
 }
 
 // waitApplied blocks until index is applied, the node stops, or done closes.
-// It launches one goroutine that turns done or the loop's end into a
-// broadcast on the apply condition, since a sync.Cond cannot select; that
-// goroutine ends after that one broadcast or, through stopWake, as soon as
-// waitApplied returns, so none accumulates across calls.
+// A caller not yet due parks in appliedQ and selects on its own release,
+// done and the loop's end: no goroutine is launched, and one that gives up
+// takes its waiter out of the queue (#1109).
 func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
-	stopWake := make(chan struct{})
-	defer close(stopWake)
-	go func() {
-		select {
-		case <-done:
-		case <-n.loopDone:
-		case <-stopWake:
-			return
-		}
-		n.am.Lock()
-		n.acond.Broadcast()
+	n.am.Lock()
+	if n.applied >= index {
 		n.am.Unlock()
-	}()
+		return true
+	}
+	if n.appliedQ == nil {
+		n.appliedQ = heap.NewIndexed(func(a, b *appliedWaiter) int { return cmp.Compare(a.index, b.index) })
+	}
+	w := &appliedWaiter{index: index, ch: make(chan struct{}, 1)}
+	h := n.appliedQ.Push(w)
+	n.am.Unlock()
+	select {
+	case <-w.ch:
+		return true
+	case <-done:
+	case <-n.loopDone:
+	}
 	n.am.Lock()
 	defer n.am.Unlock()
-	for n.applied < index {
-		select {
-		case <-done:
-			return false
-		case <-n.loopDone:
-			return false
-		default:
-		}
-		n.acond.Wait()
-	}
-	return true
+	n.appliedQ.Remove(h)
+	return n.applied >= index
 }
 
 // unsupportedKind stops a node that meets an entry kind it does not know

@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-01T18:00:00Z -->
+<!-- updated: 2026-11-12T13:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -9,14 +9,31 @@ in checksummed chunks, the segmented file log and its recovery procedure,
 the no-space guard over the log quota and the free space (`space.go`),
 the file snapshot store, the data directory with its lock, stamp and stop
 markers, the offline operations (`Init`, `Recover`, `RestoreSnapshot`,
-`Inspect`, `ClearQuarantine`), what a non-member observer reads and
+`Inspect`, `ClearQuarantine`, `ClearQuarantineWith`, and `Preflight`, which measures the disk's
+fdatasync against the timing contract, `preflight.go`), what a non-member observer reads and
 rebuilds from (`Node.ReadCommitted`, COMPACTED below the log's first
 index; `OpenSnapshot`, SNAPSHOT_CORRUPT at the end of a stream that
 differs from its metadata; `ImportObserved`, a snapshot and the tail read
 after it, its chain checked from the snapshot's `ChainTip` before anything
-is written, grouped as an `ImportParams`), the mTLS TCP transport over `net/tlsid` and
+is written, grouped as an `ImportParams`), a node presented as a replicated
+`data/stream` `Stream` (`NewStream`, `stream.go`, #832: one partition, the
+offset a log index, one framed command entry per record proposed in order,
+the instant of the append carried in the entry, every other entry skipped
+by a read, `OFFSET_TRIMMED` below the log's first index, a `Waker` on the
+node's status, an `OUTCOME_UNKNOWN` answered `STREAM_BACKEND_FAILED` with
+the token `TokenOf` reads when this node appended it, no cursor — a
+consumer's `Committer` is its own store), the incremental backup that
+pairs the snapshot's export with the log's (`Node.ExportBackup`, a snapshot and the committed tail
+after it in one framed file; `Node.AppendBackup`, the tail since a
+`BackupPointValue`; `VerifyBackup` and `RestoreBackup` over a `BackupParams`,
+`backup.go`, #927), the client sessions of ADR 0241 (`Node.OpenSession`,
+`Node.ProposeSession`, `session.go`: a command applied at most once per
+session and sequence, whatever its retries, #918), the mTLS TCP transport
+over `net/tlsid` and
 `net/server.Admission` (ADR 0174), and the in-memory doubles. It declares no
-code: it raises the core's.
+code: it raises the core's. The state machines a product plugs in — the
+durable, batching `SQL` machine and the reference `KV` — are `machine/`'s
+(#916), which imports nothing of this package.
 
 Platforms. The data directory's lock is `fs/flock`: where it has none
 (`flock.Native` false — illumos and Solaris, ADR 0144) `NewDataDir` refuses
@@ -25,18 +42,39 @@ that refusal and skips what needs a directory. The free-space gauge
 (`consensus_fs_free_bytes`, `fsfree_*.go`) is read with statfs(2) on Linux,
 macOS, FreeBSD, DragonFly and OpenBSD and with GetDiskFreeSpaceEx on Windows;
 on NetBSD, illumos and Solaris, whose statvfs(2) the standard library does not
-wrap, it is not published (`TestResourceMetrics` asserts both).
+wrap, it is not published (`TestResourceMetrics` asserts both). A sender
+link (control or data lane) is held to three bounds on bytes its peer never
+acknowledges (#1116). The write deadline (`WriteTimeout`) holds everywhere,
+for a write that blocks. The kernel's bound, `WriteTimeout` again, set by
+`boundUnacknowledged` at each dial: TCP_USER_TIMEOUT on Linux
+(`unacked_linux.go`), TCP_RXT_CONNDROPTIME on macOS (`unacked_darwin.go`) and
+TCP_MAXRT on Windows (`unacked_windows.go`), the last two in whole seconds
+rounded up; FreeBSD, OpenBSD, NetBSD, DragonFly, illumos and Solaris have
+none (`unacked_other.go`). The read-silence bound holds everywhere, and is
+the only one on those: a link written on while nothing was read from its
+peer, on any connection, for twice the maximum election timeout (the node
+sets it at each sweep, `boundSilence`) is closed and the next batch dialled
+again (`TCPTransport.silent`, `TestTCPLinkSilentPastTheBoundIsDialledAgain`).
+`consensus_links_aborted_total{reason}` counts the links the kernel aborted
+(`user_timeout`, a read ended by ETIMEDOUT, or WSAETIMEDOUT) and those the
+silence closed (`read_silence`).
 
 ## Lanes
 
 | Lane | How |
 |---|---|
 | unit, cluster, disk, TCP | `go test -race ./...` |
+| conformance (#1114) | `go test -run TestConformance .` (part of the unit lane): `conformance_internal_test.go` runs one row per sentence of `internal/core/app/consensus/gen_ports.go`, the sentence quoted in the row's name, over every engine of the port — `everyLog()` (`NewMemoryLog`, the file log of a data directory on 64 KiB segments), `everySnapshotStore()` (`NewMemorySnapshots`, `newFileSnapshots`), `everyTransport()` (a `MemoryNetwork` pair with its admission model on, two `TCPTransport`s over a test CA on loopback); `TestConformanceRowsQuoteThePorts` parses the port file and fails on a sentence it does not say. The memory doubles skip, by name and naming the sentence, the rows that need durability — a synced entry no longer depending on the buffer it was appended from (the double keeps the caller's), every reopen of the log, the stamp's reopen, a committed snapshot and a spool read again by a store opened again — and, on the transport, the frame above `PeerQueueBytes` dropped and counted (the double bounds a lane by frames, counts nothing) and `Unreachable` (the double is no `UnreachableReporter`). Two divergences the rows go around and say so: `MemoryLog.CompactPrefix` past the end with no term succeeds where the file log refuses it (the rows compact through `compactLog`, as the engine does), and an offer above the receiver's bound ends a TCP stream on a reset where the double answers FRAME_INVALID; an install refused with a code `sentinelByCode` does not hold (SNAPSHOT_CORRUPT) reaches a TCP sender as OUTCOME_UNKNOWN and a memory one as itself, so the row refuses NO_SPACE |
+| fault points (D15, #1113) | `go test -run TestEveryFaultPoint .` (part of the unit lane): the real data directory behind `faultfs_internal_test.go`'s `faultFS`, the shim behind the one fault seam every write, sync, rename and removal of the log, the snapshot store, the stamp, the markers and the offline operations goes through (`diskFS`, `disk.go`; production is `osDisk`). Six top-level tests, one per scenario — an append batch across two rotations, a compaction dropping a segment, a cut published then retained, an install spooled then committed, a `Recover`, `TruncateAndStaySilent` — each run once to count its N operations, then at every k in 1..N with operation k failed (EIO, ENOSPC for a write) and the power cut at the end, and with the process stopped at k and the bytes written since each file's last sync kept, dropped or torn at 4 KiB pages; the directory reopened is judged by the package's oracles (not quarantined, no acknowledged entry, commit or snapshot lost, an interrupted offline operation completing when run again to the state a run without faults leaves, `Inspect` reading it). A directory entry is taken as durable once its call returns: the shim does not revert a rename or a removal a directory sync did not follow. Each scenario is sized to a few seconds under race, well inside a shard's 60 s; the #417 reorder of `writeBatch` fails the append scenario at operation 18 of 73 |
 | simulator soak | `CONSENSUS_SIM_SOAK=1 go test -run TestSimSoak ./raft/`; a seed replays with `CONSENSUS_SIM_SEED` |
-| fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
-| dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
+| fuzz | `go test -fuzz` on the targets of `wire/` and this package, and on `raft/`'s `FuzzStep`, the step function under the simulator's invariants (#924); nightly in CI (`scripts/ci/consensus-fuzz.sh`, `FuzzStep` 10 minutes) |
+| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt` (`bazel test --config=alloc` it, or `go test -run 'TestALeaderTurnEncodes|TestApplied1Keeps' .` race off): `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go`, the leader turn's budget of #912 and applied1's of #1109 (`applied_alloc_internal_test.go`, with `appliedwait_internal_test.go`; `sendshared_alloc_internal_test.go`, with `sendshared_internal_test.go` for its helpers, the target's `-test.run` naming the gates) and the package's copy of `allocwindow_test.go`, nothing else of the suite |
+| alloc (D15) | `make test-alloc` (race off): `gen_perf_test.go` in `raft/` and in `wire/`, written by kit gen from `design/sdk.yaml`'s budgets over each package's `perf_fixtures_test.go` — the leader's `Step` on an append response (1) and the follower's on 64 entries (65), `AppendMessage`, `ParseMessage` and `ChainSum` (0) — and `TestTheRecordCodecAllocatesNothing` (`recordcodec_alloc_internal_test.go`, counted with `allocwindow_test.go`), the log record codec's 0; the bounds D15 revised are ADR 0152's amendment of 2026-11-12 (#921); `Propose` on three memory nodes is no budget — kit's 60 000 calls with the collector off hold some 2 GB — and is `BENCH.md`'s `MEM/propose` row |
+| bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`), `-bench BenchmarkApplied1` (`applied_bench_test.go`); numbers in `BENCH.md` |
+| dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate] [fdatasync\|rwfdsync]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922), G1's paired sync path row (`TestDMCryptSyncPathBench`, ADR 0190's shape, #923) and power cuts through LUKS, on ext4 or xfs; with `fallocate` or `rwfdsync` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`) or writing `RWF_DSYNC` (`CONSENSUS_SYNC_PATH=rwfdsync`), and with `rwfdsync` the power cuts too; results in `testdata/dmcrypt/RESULTS.md` |
+| bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911) |
 
-Under Bazel `consensus_test` has 24 shards: under race and coverage the suite
+Under Bazel `consensus_test` has 48 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
 #524 joined it (4 shards), and the snapshot and disk scenarios of #506,
 #512, #513, #515, #520, #525, #526 and #533 brought the slowest of 4 to
@@ -67,7 +105,10 @@ rest is spread thinner (24 shards): the sums per shard of a `-race
 -covermode=atomic -json` run, 43.6 s for the slowest of 12 on one
 machine, are 32.9 s at 24, and 34 s for the slowest on average over
 4,000 draws of up to 40 tests inserted anywhere (36 to 37 s at 19 or
-20, 31 s at 28).
+20, 31 s at 28). Lot L1 took the suite to 510 tests and some 13 minutes
+under race: at 24 the reopen test (38 s) shared a shard with 45 s of
+others and the shard timed out; the sums per shard of a `-test.v` run are
+83 s for the slowest of 24, 56 s of 32 and 46 s of 48 (48 shards).
 
 The BSD, illumos and Solaris guests of `e2e-cross.yml` run one test binary
 per package under a 5-minute `-test.timeout`, the alarm a hang panics on
@@ -81,9 +122,43 @@ took 18 s there (2 s on a Linux workstation) and
 `TestHealthWarnsBeforeTheSnapshotLimit` 13 s, settling its cuts after each
 of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 
+`consensus_bench_test.go` is gazelle-excluded and compiled only into
+`consensus_bench_test` (rule 12): it uses the package's production code and
+none of its test files, so that target needs no other source, and it must
+stay so. Under `go test` it joins the package's binary, where its generator
+returns at once unless `-run` names it and its benchmarks run only under
+`-bench`. The fdatasyncs are timed through `fileLog.timedSync`, which only
+the lane sets. Its numbers are a host's, never a budget (D15): the verdicts
+on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
+
 ## Do NOT
 
+- Hand the machine a session command the apply's table did not admit, or
+  decide it anywhere but on the apply goroutine: `applySession` folds every
+  `EntrySessionCommand` into `n.sessions` (raft's `SessionTable`) and hands
+  the machine, as an `EntryCommand` of the command alone, only one of a
+  sequence its session has not applied; an opening, a copy and a refusal
+  are answered and applied nowhere. The table is the machine's companion:
+  a cut records it at the applied index (`cut`, on that goroutine), a
+  restore takes the snapshot's with the machine (`restoreFrom`), a start
+  folds the session commands the tail holds through the index a durable
+  machine resumes from (`sessionsAt` — `readTail` drops a command's
+  payload only, never a session command's), and an offline import folds
+  the tail it replays (`replayObserved`). A copy the leader answers at or
+  below its commit (a forward's answer carries it) is the committed one,
+  answered once this node applied it with its value while `results` holds
+  it, nil otherwise (`appendedSession`); answered OUTCOME_UNKNOWN, the
+  blind retry would loop (#918,
+  `TestASessionCommandIsAppliedOnceThroughRetriesSnapshotsAndRestarts`;
+  the fault schedule is raft's `TestBlindSessionRetriesAreAppliedOnce`).
 - Let the event loop wait on storage or a socket (D5b).
+- Propose a stream's records concurrently, or hand its `OUTCOME_UNKNOWN`
+  back without the token: concurrent proposals, forwarded from a follower,
+  may reach the leader out of order, so `Append` proposes the next record
+  once the previous is applied; and only the proposal knows where it was
+  appended, which `Propose` does not return on an error (`submitProposal`,
+  `proposeRecord`, #832,
+  `TestATimedOutAppendCarriesTheTokenWaitAppliedResolves`).
 - Retry a failed sync: the node stops (D4).
 - Return a snapshot's STORAGE_FAILED without stopping the node: every cut
   ends in `cutFailed` (on its trigger, coalesced, requested by a peer, saved,
@@ -94,6 +169,10 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestARequestedCutWhoseSyncFailsStopsTheNode`,
   `TestAnInstallWhoseSyncFailsStopsTheNode`).
 - Truncate a hole before every segment is classified (R8-02, R9-03).
+- Fix a rule of `filelog.go`'s framing, batch protocol or recovery without
+  fixing it in `internal/kernel/fs/seglog` too: the kernel primitive is its
+  extraction (ADR 0230, #820), and the two hold the same rules until the log
+  is migrated onto it.
 - Serve a log recovery read without syncing it first: a process killed
   between a batch's write and its fdatasync leaves the batch in the page
   cache, and a same-boot restart would acknowledge it from there.
@@ -181,6 +260,65 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   to `appendForced`. Count what a reader holds with `fileLog.afterEntries`,
   not a sampled heap (`TestRecoverHoldsOneBatchOfTheLogAtATime`,
   `TestTheHistoryInForceIsReadPastTheSnapshot`).
+- Read synced entries one pread of a header and one of a record at a time:
+  past a batch's sync every read of its entries goes to the segment, and a
+  1 MiB fetch of 256-byte entries was 8 192 syscalls and as many
+  allocations (#913). `readRun` reads a run of one segment — each
+  record's extent bounded by the next entry's offset or its table's `end`,
+  at most `rangeReadBytes`, cut where the least payload those extents
+  allow passes `maxBytes` (records between entries count as payload, so a
+  read may stop short of `maxBytes`, never past it) — with ONE pread into
+  one buffer, parsed in place: each entry's `Data` aliases it, capped at
+  its length (`entryOf`), and a record that does not parse, or names
+  another index, is LOG_CORRUPT at its own offset. `readEntry` stays the
+  single-entry read, header first, for an entry with no extent
+  (`TestEntriesReadASyncedRunOfOneSegmentInOnePread`,
+  `TestEntriesReadOnePreadPerSegment`,
+  `TestADamagedRecordInsideARunIsCorruptAtItsOwnOffset`,
+  `TestAnEntryReadFromARunDoesNotReachIntoTheNext`, and in the alloc lane
+  `TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice`; `BENCH.md`).
+- Copy what `Entries` returns, or let a store write over it: the returned
+  entries own their `Data` (`LogReader.Entries`), valid after the call
+  whatever the store appends, truncates or compacts, so `fetch` and
+  `readBack` keep them as read, one allocation a run where they cloned
+  each entry again, and `MemoryLog.Entries` hands out copies as the file
+  log hands out what it read fresh. An entry kept holds the buffer of the
+  read that returned it (#1110,
+  `TestEntriesDataSurvivesTheStoresLaterWrites`,
+  `TestTheMemoryLogsEntriesAreCopies`).
+- Copy a received frame twice, or hand `Raft.Step` bytes the caller writes
+  again: `deliver` copies the frame once, out of the transport's reused
+  buffer, and that copy is the caller's gift Step keeps, `appendNew`
+  aliasing the entries' `Data` into it; the simulator, which keeps the
+  sender's entries, copies each delivery on its side. A follower's append
+  of 64 entries cost its payloads 65 allocations, now the frame's copy and
+  the entry slice (#1110, in the alloc lane
+  `TestAFollowerStepKeepsTheFramesPayloads`).
+- Keep a slot per retained entry: one `slot{seg, off, term, mem,
+  length}`, 40 bytes, from `first` to the last index, held the retained
+  log's index in heap at about a tenth of the log with 256-byte entries,
+  outside `MemoryBudget`, and `compactPrefixAt` cloned it at every
+  compaction (#1111). The index is `filelog_index.go`: a `segIndex` per
+  segment, the offsets of its retained entries over `recAlign` in a
+  `[]uint32` (32 GiB a segment at most, `maxIndexedOffset`; past it replay
+  quarantines and a sync stops the log) with its first index and an upper
+  bound of its last record's end; the term runs, one `termRun` per change
+  of term, which `Term` searches; and the unsynced batch's entries in
+  `mem`, the log's tail, which `relocate` moves to the tables once synced,
+  the last record of an index the retained one. A compaction drops whole
+  tables and reslices the one its point falls in, a truncation cuts the
+  tables, runs and tail; a table left for another segment is clipped to
+  its length once. `MemoryBudget` counts `MaxLogBytes / minRecordBytes *
+  indexEntryBytes`, and `indexBytes` reports what the index holds
+  (`TestTheIndexHoldsFourBytesAnEntry`: 1 048 576 entries of 256 B on
+  64 KiB segments in 4.6 bytes an entry, under 5 MiB, where slots took
+  40 MiB; `TestTermAgreesWithTheMemoryLogAcrossElections`;
+  `TestMemoryBudgetCountsTheIndex`; in the alloc lane
+  `TestACompactionThroughASegmentBoundaryCopiesNoEntries`, 0 allocations).
+  Nor make `termLocked`, `markDurable`, `applyCompaction`,
+  `applyCompactRecord` or `applyTruncate` stop inlining: `kit gen` holds
+  the inline set of the base and refuses a generation that loses one, so
+  their bodies call one helper of the index each.
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.
@@ -227,6 +365,14 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   narrower than one batch per heartbeat interval the append is still
   crossing, and the copies took the link (#767). Raft probes behind the
   window with an empty append, whose refusal finds a lost one.
+- Write, sync, rename or remove a file of the data directory past its
+  fault seam: the log, the snapshot store, the stamp, the markers and the
+  offline operations go through the `diskFS` their `dataDir` holds
+  (`disk.go`), or `TestEveryFaultPoint` never reaches the new write. Nor
+  add a hook of the log's own for a test's moment of a write: the
+  `fill`, `duringSync`, `afterSeal`, `syncFileAtOpen` and `syncDirAtOpen`
+  hooks were each one scenario's; a test reads the moment off the
+  operations the shim sees (`onBatchSync`, `useShim`, #1113).
 - Hold `mu` across a batch's write and fdatasync: writers serialise on
   `wmu`, readers must not wait for the disk (review L6).
 - Write a batch's end record before the rest of the batch is durable: a
@@ -359,8 +505,11 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   or drop the batch a reused connection failed: a link quiet since a
   partition keeps taking small writes into a stream the kernel retransmits
   under exponential backoff, and an election waited 15 s for it
-  (`TestTCPFrameOnALinkThatDiedQuietlyIsDelivered`). The snapshot and JOIN
-  lanes stay unbounded: a receiver writing a snapshot may stop reading.
+  (`TestTCPFrameOnALinkThatDiedQuietlyIsDelivered`). Nor keep writing on
+  one whose peer stayed silent for the read-silence bound (`retire`,
+  `silent`): where the platform has no kernel bound, the BSDs and illumos,
+  nothing else sees that stream (#1116). The snapshot and JOIN lanes stay
+  unbounded: a receiver writing a snapshot may stop reading.
 - Drop a snapshot trigger that falls while a cut is in flight: D7 coalesces
   it (`snapState.pending`, `cutPending`), and the cut is made once the one in
   flight is written. Dropped, a node that applied nothing more kept its tail
@@ -510,6 +659,33 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   the key it pins; at best: what the damage took is not known, and is not
   refused (#758, `TestATruncationBackToMembersAllRemovedSinceIsRefused`,
   `TestTheStrandingTruncationIsJudgedOnTheLogsNewestConfiguration`).
+- Take a member's `TruncateAndStaySilent` on its log alone, or blind: the
+  log holds no change committed while the node was down, and B, removed a
+  few milliseconds after V's crash, inside the vote window #764's guard
+  still judges V in, left V silent over {A, B, V} for good. `liveRefusal`
+  asks every other member the configurations read name (`peers`) through
+  `QuarantineOptions.Ask`, judges the newest answer as `stranded` judges
+  the log's, and refuses `RECOVER_REFUSED`, the log and SILENT untouched
+  (only the audit line is written), when it lists none of the kept members, no longer lists the node, or when no
+  member answers; `ClearQuarantine`, which gives no `Ask`, refuses a
+  member's exit (#763, the owner's option (c),
+  `TestATruncationBackToMembersRemovedWhileTheNodeWasDownIsRefused`,
+  `TestATruncationNoLiveMemberAnswersIsRefused`,
+  `TestTheNewestLiveConfigurationIsJudged`). A test whose subject is not
+  the asking stands in for the live members with `askingAnswer` once their
+  links are cut or they are down, and asks through the victim's own end
+  of the network otherwise (`askingFrom`).
+- Serve `laneMembership` to anyone but a member on its pinned key and
+  slot, or read its answer without the member's pin, its certificate's
+  slot, and the member listed under that key: the configuration decides a
+  truncation. Nor bound its answer by `MaxControlFrameBytes`: it lists
+  every retired ID, and past 64 KiB every live member's answer was refused
+  as if none ran; it is written and read under `MaxFrameBytes`
+  (`serveMembership`, `AskMembership`,
+  `TestAMembersConfigurationIsReadOverTCPByAMemberOnly`). A member built
+  before the lane ends the connection unanswered, as for `laneJoinV2`,
+  and the asker counts it as one that did not answer: no raft frame
+  changed, and `ProtocolMax` stays.
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN
@@ -527,7 +703,12 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   version or codec, stop the node (D18), and a start over one is refused.
   A snapshot is decoded with the codec its metadata names (#513, #512,
   `TestASnapshotOfAnUnknownFormatStopsTheNode`,
-  `TestASnapshotIsReadWithTheCodecItWasWrittenWith`).
+  `TestASnapshotIsReadWithTheCodecItWasWrittenWith`). zstd is a product's
+  `SnapshotCodec`, `third-party/transform.Zstd`, which this module cannot
+  link: a follower that does not link it stops on a leader's zstd snapshot
+  (#917, `TestAFollowerThatDoesNotLinkTheLeadersCodecStops`, the leader's
+  codec flate under the name `"zstd"`), and one that does installs it
+  (`third-party/transform`'s `TestAClusterInstallsAZstdSnapshot`).
 - Refuse at the transport, unjudged, an offer whose metadata does not
   decode for its version, or skip such a `.meta` as one that rotted: the
   stop of #513 and #640 runs only on a metadata that decodes, and the
@@ -625,6 +806,32 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `abandonTmp` removes it; `cutFailed` waits one second, doubling to a
   minute (#520, `TestAFailedZeroFillLeavesNoPartialSegment`,
   `TestAFailedCutWaitsBeforeTheNext`).
+- Refuse an open because fallocate is missing, or preallocate a segment
+  any other way than at its full size. `DataDirOptions.Preallocate =
+  PreallocateFallocate` is probed at open (`resolvePreallocate`, a 4 KiB
+  `fallocate-probe.tmp` reserved and removed, after the markers and before
+  recovery): a filesystem that answers EOPNOTSUPP, or a platform other than
+  Linux, opens in `PreallocateZeroFill` and logs one line, through the log
+  of the node the `DataDir` serves (`fileLog.bindWarn`, the log having no
+  logger of its own). A fallocated segment occupies its whole size as a
+  zero-filled one does, so `space.go`'s accounting holds, and an unwritten
+  extent reads as zeros, the hole recovery already classifies (#922,
+  `TestAFilesystemWithoutFallocateOpensTheLogInZeroFill`,
+  `TestAFallocatedLogRecoversAsAZeroFilledOne`).
+- Refuse an open because `pwritev2(2)` or `RWF_DSYNC` is missing, or make
+  a batch durable at any other points than its two. `DataDirOptions.SyncPath
+  = SyncRWFDsync` writes each of a batch's two parts with one `pwritev2`
+  flagged `RWF_DSYNC` instead of `pwrite` then `fdatasync`, the end record
+  still written once the rest is durable (#417). It is probed at open
+  (`resolveSyncPath`, one byte written to `rwfdsync-probe.tmp` and removed,
+  after the markers and before recovery): a kernel that answers ENOSYS,
+  EOPNOTSUPP or EINVAL, an architecture whose `pwritev2` number the package
+  does not know, or a platform other than Linux opens in `SyncFdatasync` and
+  logs one line through `fileLog.bindWarn`; a write the kernel refuses that
+  way after the probe falls back to `pwrite` then `fdatasync`. `SyncRWFDsync`
+  is the default nowhere until `TestDMCryptSyncPathBench`'s gate is met on
+  the device (`BENCH.md`; #923, `TestAKernelWithoutRWFDsyncOpensTheLogInFdatasync`,
+  `TestAnRWFDsyncLogRecoversAsAnFdatasyncOne`).
 - Let the log grow past `MaxLogBytes` less `LogReserveBytes`, or the
   filesystem under `LogReserveBytes`, without the no-space alarm:
   `guardSpace` proposes it at each tick and each completed write, the node
@@ -695,6 +902,25 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   write the old cluster acknowledged, and a token of the predecessor whose
   term cannot be read any more is LINEAGE_MISMATCH (#509,
   `TestWaitAppliedComparesTheTermRecoverKept`).
+- Write entry 1 committed at `Bootstrap`: it contacts no peer, and entry 1
+  carries the founder's own `InitialTiming`, so founders given different
+  timings each committed their own entry 1 at (1, 1), Log Matching broken
+  by construction; the odd one refused every leader's chain for good, the
+  cluster one failure from no commit, and three timings never committed
+  anything. `writeFoundingEntry` leaves it uncommitted, the first leader
+  commits its own, and raft's `replacesFounding` has a founder holding
+  another one take it (#698, `TestBootstrapLeavesEntry1Uncommitted`,
+  `TestAFounderWithAnotherTimingTakesTheCommittedEntry1`,
+  `TestFoundersWithThreeTimingsCommitOneEntry1`). A founder given another
+  member list never takes the leader's entry 1: raft names the divergence
+  once a leader that committed past it shows its own (`foundingContradicted`),
+  and the node stops `BOOTSTRAP_REFUSED`; left uncommitted, it refused every
+  leader's chain for good, with nothing said (#698's review,
+  `TestAFounderOfAnotherMemberListStopsOnceTheOthersCommit`). A data directory founded
+  before holds its own entry 1 committed: raft names the divergence once a
+  leader that committed past entry 1 shows another one
+  (`ReadyValue.Diverged`), and `stopOnDivergence` stops the node
+  `BOOTSTRAP_REFUSED`, `LOG_CORRUPT` past index 1.
 - Write the founding contract raw: `foundingTiming` completes and refuses
   `InitialTiming` as NewNode does, so the contract that rules every node is
   the one NewNode validated (#523,
@@ -776,6 +1002,14 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   terms; the default 1–2 s at most 4.8 s, and 11.4 s with syncs of
   500 ms–1 s (#598). Keep `ElectionTimeoutMin` above three times the p99
   of `consensus_fsync_latency_seconds`.
+  `Preflight` measures that p99 before a node runs, on a stopped node's
+  directory or an empty one, and names `InitialTiming.ElectionTimeoutMin`
+  when the rule fails; it refuses nothing (D17). Its scratch file is a
+  `.tmp` of the log directory, which recovery deletes, and it takes the
+  directory's LOCK only where one exists, so an empty directory is left
+  as it was (#1117, `TestPreflightMeasuresTheDiskAndLeavesNothingBehind`,
+  `TestPreflightNamesAnElectionTimeoutUnderThreeSyncs`,
+  `TestPreflightRefusesALockedDirectory`).
 - Forward a removal of the leader without moving leadership first: the
   leader refuses to remove itself, and the call failed MEMBERSHIP_INVALID
   on a follower only. `Remove` transfers to this node (or another voter),
@@ -867,12 +1101,74 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestTCPForgetsADepartedPeersCertificate`). The admission set is handed
   to the transport only when it changes (#531,
   `TestAnUnchangedMembershipIsNotRepublished`).
+- Leave a series D13 names unpublished: `consensus_peer_rtt_seconds`
+  (histogram by peer, one sample per heartbeat round, from raft's
+  `PeerStatValue.RTT` and `RTTRound`), `consensus_prevotes_lost_total`
+  (from raft's `Status.PreVotesLost`, present at 0 from the first pass, as
+  every counter `addTo` keeps) and `consensus_snapshot_pins` with
+  `consensus_snapshot_pin_age_seconds` by peer (`observePins`, over
+  `n.sending`, the age from `sendPin.since`, the offer, kept once the
+  stream ends; an ended pin's age reads 0) were absent, and three alerts of
+  D13 could not be written (#914,
+  `TestTheD13SeriesArePublishedWithTheirLabels`,
+  `TestThePinGaugesCountAndAgeEachPinAndResetOneThatEnded`).
+- Trace a Propose from submission to apply on the follower alone, or set
+  `FlagTrace` on a forward before the committed cluster version is 4: the
+  span recorded `applied` only, and a forwarded write's leader side was in
+  no trace. `submit` hands its span to the proposal, `traceAppended` records
+  `appended` at the position and `committed` once `traceReady` sees a Ready's
+  commit cover it, before `queueApply` hands the entry on; `forward` writes
+  the span's context into the frame at version 4 (`traceForwardFlags`), and
+  the leader's `traceForward` opens `consensus.Forward` with that context as
+  its parent, takes its position from the answer the Ready sends
+  (`traceAnswers`) and ends it at the commit, a lost leadership or a stop
+  (`traceEnd`). Every hook is behind a nil span or a nil Tracer, so a node
+  with none allocates as before; below version 4 a forward is the layout a
+  node of protocol 3 parses (#1115,
+  `TestAForwardedProposeIsOneTraceAcrossTheTwoNodes`).
+- Report a follower Ready on its apply alone and say nothing of how far
+  its log trails the leader's: a node 50 000 entries behind on a slow disk
+  answered Ready, and the only lag series were the leader's per peer.
+  `Health` reports, on a node that does not lead,
+  `ReplicationLagEntries` — the leader's last index as its last heartbeat
+  carried it (raft's `Status.LeaderLast`, protocol 4) less the node's
+  durable end, which is what the leader's match counts — and
+  `LeaderLastAppend`, since the last append with entries (raft's
+  `Status.Appended`, negative for none), and `observePeers` publishes
+  `consensus_replication_lag_entries`, 0 on the leader. Informative:
+  `isReady` does not refuse on it (R2-28). Nor read the lag from the last
+  index: entries held in memory behind a stalled fsync are no replication
+  (#919, `replicationLag`,
+  `TestAFollowerOnASlowDiskReportsItsReplicationLag`).
+- Answer `Membership()` on the event loop, or leave a product to poll it
+  for a configuration change: each poll was a closure run between protocol
+  turns, competing with the heartbeats for the loop whose turn length is
+  the lease's drift budget, and `Status` carries no configuration. The
+  loop publishes the configuration at the end of each turn that changed it
+  (`publishConf`, from `publish`, compared with `sameMembership` so an
+  unchanged one costs no allocation), `Membership()` reads that copy, and
+  `WatchMembership` pushes a clone of it to each watcher under Watch's
+  contract — own channel, capacity one, latest value, closed on ctx or the
+  loop's end (#915, `TestWatchMembershipDeliversEveryChange`,
+  `TestMembershipDoesNotEnterTheLoop`). Read in a turn, it is the
+  configuration as the previous turn ended.
 - Bound an election in a test by a fixed number of split votes: a split
   is a draw, about one round in a hundred on the memory network, and a
   third round fails a two-round total every ten to twenty runs. Derive
   the bound from the rounds the winner's term counts, each one election
   timeout and a tick, and cap the rounds by the odds of that many splits
   (`electionBound`, `maxRounds`).
+- Restore a backup whose tail has not been checked against the chain, or
+  read its metadata from anywhere but the export: `RestoreBackup` scans
+  every file first — each record's CRC-32C, the export's metadata, every
+  entry batch against the chain from the snapshot's `ChainTip` and the
+  point the file before ends at, each trailer — and only then rewinds the
+  export and hands its snapshot records and the entries to
+  `ImportObserved`, which checks the snapshot's digest before it writes. A
+  file is header, records, trailer (`backup.go`); an append starts where
+  the last file ended, and one the log compacted past is COMPACTED: export
+  again (#927, `TestABackupOfAnExportAndTwoAppendsRestoresTheState`,
+  `TestABackupWhoseTailBreaksTheChainIsRefusedBeforeAnythingIsWritten`).
 - Decode an offline restore with flate when the expected metadata names
   another codec: `OpenSnapshot`, `RestoreSnapshot` and `ImportObserved`
   read the codec `RestoreOptions.Expected` names when the caller gives
@@ -1001,6 +1297,24 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   receiving entries on lanes dialled before `DenyPin` (#551,
   `stillAdmitted`; `TestTCPFrameAfterACleanCloseByTheReceiverIsDelivered`,
   `TestTCPNothingIsSentOnAnOldLaneToAKeyNoLongerAdmitted`).
+- Keep one set of callbacks on a transport that several `Node`s share, or
+  hand a frame or an offer to a group it does not name: `Bind` ignored its
+  group, a second node replaced the first's callbacks and was handed every
+  frame of both groups (#925, ADR 0244). `TCPTransport` keeps one binding
+  per group (`tcp_groups.go`): `readFrames` routes by the group of the
+  frozen header (`frameGroup`, bytes 6 to 13 with the length), a group
+  nothing bound is dropped and counted (`unroutedGroup`); a node binds its
+  unreachable report and its undecodable judgment under its group
+  (`groupBinder`) and streams its group's snapshot through `groupStreamer`,
+  group 1 on `laneSnapshot` as before, any other on `laneSnapshotGroup`
+  (lane 7; 5 and 6 are ADR 0220's), an unbound group's offer refused
+  PEER_REJECTED. A lane that names no group (`laneSnapshot`, the JOIN
+  lanes) goes to the only group bound, or with several to group 1
+  (`legacyBinding`), never by a guess. A machine runs every group under one
+  id, incarnation, slot and key: its second log carries the first's stamp
+  (`TestTwoGroupsOnOneTransportElectCommitSnapshotAndInstallIndependently`,
+  `TestAnOfferForAnUnboundGroupIsRefusedAndCounted`,
+  `TestALaneThatNamesNoGroupIsServedToTheLegacyGroup`).
 - Install a JOIN answer in the engine's admission group, or send a snapshot
   whose configuration does not list the leader: the joiner's first older
   configuration cut its leader (#552, `joinGroup`,
@@ -1086,6 +1400,22 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   it for a follower that stopped or fell further behind: slower than the
   writes, it would hold the log growing until the log is tight
   (`TestARenewedStreamedPinEndsOnceItsFollowerNoLongerCatchesUp`).
+- Stream a snapshot to every peer in need at once, or as fast as the link
+  allows: two learners joining together streamed two snapshots over the
+  NIC and the TLS CPU of the data lane, one goroutine each, unbounded.
+  `sendSnapshot` starts at most `MaxSnapshotStreams` (default 1); a peer
+  beyond it waits in raft's snapshot state, holding no pin, and
+  `serveWaiting` starts it, first asked first served, when a stream ends
+  (`streamWait`, cleared by `leadershipChanged`).
+  `SnapshotStreamBytesPerSecond` paces every stream together with one token
+  bucket on the node's clock (`pacer`, `node_pace.go`), never the wall
+  clock: a read is cut to a tenth of the rate and paid after it, its
+  `moved` mark renewed after the wait, so a paced stream never looks
+  stalled to `streamDue`. `PeerHealthValue.SnapshotSent`/`SnapshotSize` say
+  how far a stream is, `consensus_snapshot_stream_bytes_per_second` how fast
+  each one went (#920, `TestTwoLearnersAreStreamedOneAfterTheOther`,
+  `TestAPacedStreamEndsInItsSizeOverItsRate`,
+  `TestThePacingWaitsOnTheInjectedClockOnly`).
 - Accept an offer of the snapshot this node is restoring: it was streamed
   again and committed over the file the restore reads (#610,
   `answerRestoring`, `TestAnOfferOfTheSnapshotBeingRestoredIsRefused`).
@@ -1151,7 +1481,8 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   good (#763, `reachedBy`, `TestARemovalWhileAHeardVoterIsDownWaitsForIt`,
   `TestARemovalIsJudgedOnAVotersConfigurationOnlyWhileItAnswers`). At
   best: a voter that failed less than a vote window before the change, or
-  before the change reached it, is still judged as heard.
+  before the change reached it, is still judged as heard; its truncation
+  then reads the change from a live member (`liveRefusal`).
 - Count the leader as a stale voter's voucher when that voter knows it as
   a learner only: a voter sends its PreVote to the voters of its
   configuration alone, and once the leadership moved to a member it did
@@ -1243,3 +1574,63 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   (`silenceUnderItsLeaderOnDisk`,
   `TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt`,
   `TestTheSilenceBenchSkipsOnAHandOffInFlight`).
+- Encode an append's entries once per follower, or mutate the body a
+  `BatchSender` was handed: the leader builds one append per follower over
+  the same slice of its log, and each was encoded and copied whole on the
+  loop, up to `MaxBatchBytes` a follower a turn (#912). `sendShared`
+  (`node_sendshared.go`) encodes a slice once per Ready (`appendBodies`,
+  known by its first element's address and length), the Ready's headers in
+  one buffer, each peer's part capped, and hands the same body to every
+  peer; the TCP transport queues it as an `outFrame`, head then body,
+  never written to (`TestAReadyEncodesTheEntriesOfItsAppendsOnceForEveryFollower`,
+  `TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers`, two
+  allocations a turn of 64 entries with two followers as with four). Nor
+  give `MemoryTransport` the sibling: the suites' doubles embed it and
+  filter or delay through `Send`, which a promoted `SendShared` would
+  bypass; a transport without it is sent `AppendMessage`'s frames as before
+  (`TestATransportWithoutTheSiblingIsSentWholeFrames`).
+- Hand the loop a `Barrier` through `exec`, or handle the Ready per read:
+  each closure ran in its own turn and flushed its read alone, so N
+  concurrent reads cost N heartbeat broadcasts (#1108). `Barrier` queues
+  on `readq`; `onReads` registers every read queued, asks raft for each,
+  then handles the Ready once, and `flushReads` opens one round after the
+  whole batch is registered, so no read rides an older round. A read
+  queued after the loop's last turn is answered by `failAllOnStop` or by
+  `awaitRead`'s wait on `loopDone`. `consensus_read_rounds_total`
+  (`Raft.ReadRounds`) counts the rounds
+  (`TestBarriersQueuedInOneTurnShareOneRound`,
+  `TestLeasedBarriersOpenNoRound`,
+  `TestABarrierQueuedAfterTheLoopEndedIsAnswered`).
+- Read the wall clock in the transport for an age, a backoff or an expiry:
+  a link's age against `MaxConnectionAge`, the redial backoff, the peer
+  certificate's end and the accept backoff ran on `time.Now`, so no test
+  could age a link or end a backoff but by sleeping (#948).
+  `TransportConfig.Clock` (nil is `clock.System`) reads them all; the only
+  wall-clock readings left are the deadlines the kernel arms, written
+  `conn.SetDeadline(time.Now().Add(d))` with `d` what the injected clock
+  left (`serveMember`'s read deadline). `TestTransportNeverWaitsOnTheWallClock`
+  holds the production `tcp*.go` to it over the AST, the BUILD shipping them
+  as data (`TestALinkPastMaxConnectionAgeIsRetiredOnTheClock`,
+  `TestARedialBacksOffOnTheClock`, on a `ManualClock`).
+- Wake the callers of `waitApplied` with a `sync.Cond`, or keep the
+  results of a forward in a map: `applied1` broadcast to every parked
+  `Barrier` and `WaitApplied` caller, each re-checking its index under `am`
+  and parking again, R callers times E entries, and each call launched a
+  helper goroutine to turn `done` into a broadcast; with a forward
+  outstanding every entry wrote a map, appended to an order slice and,
+  past 4 096, deleted and resliced (#1109). A parked caller is a one-slot
+  channel in `appliedQ`, a min-heap by index (`kernel/collections/heap`'s
+  `IndexedHeap`) that `releaseApplied` pops only up to the applied index,
+  O(1) when none is due; `waitApplied` selects on it, `done` and
+  `loopDone`, and one that gives up removes its handle. The results are a
+  ring of `resultRing` slots, `index % 4096`, each carrying its index,
+  allocated at the first forward (`keptResult`). `BENCH.md` records
+  applied1 at 0 allocs/op
+  (`TestWaitAppliedReleasesNoCallerBeforeItsIndex`,
+  `TestWaitAppliedLaunchesNoGoroutine`,
+  `TestTheResultRingAnswersOnlyItsOwnIndex`,
+  `TestApplied1KeepsAResultWithoutAllocating`).
+- Pack commands into one entry inside the engine: a product of many tiny
+  commands packs them with `multi/`'s `Packer` and `Machine`, on top of
+  `Replicated`, and the log, wire and apply code stay as they are (#926,
+  `multi/CLAUDE.md`, `multi/BENCH.md`).

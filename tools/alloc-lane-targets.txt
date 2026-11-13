@@ -189,6 +189,20 @@
 # 4 KiB and 4 MiB.
 //third-party/transform:transform_test
 
+# internal/service/app/consensus — the file log's range read (#913,
+# filelog_alloc_internal_test.go, //go:build !race): Entries over 64 synced
+# entries of 256 B of one segment is one pread and at most two allocations,
+# the read's buffer and the entry slice (ADR 0152 D15); the receive path
+# (#1110, receive_alloc_internal_test.go): a MsgApp of 64 entries costs its
+# payloads the frame's copy and the entry slice, Step none; and the leader
+# turn's budget (#912, sendshared_alloc_internal_test.go): 64 entries to two
+# or four followers allocate one entries body and one header block a turn,
+# where every follower used to cost an encoding of its own; and applied1's
+# (#1109, applied_alloc_internal_test.go): an applied command of a nil result
+# with a forward outstanding allocates nothing. Its own target, so the lane
+# runs the gates and not the whole consensus suite.
+//internal/service/app/consensus:consensus_alloc_test
+
 # internal/service/data/vfs — an uncontended publication on the disk engine
 # (kitsunium/sdk#813, alloc_external_test.go, //go:build !race): at most 22
 # allocations on the caller's stack, 19 here — os.Root's confinement 18, the
@@ -216,6 +230,8 @@
 //internal/kernel/jsonenc:jsonenc_test
 //internal/kernel/semver:semver_test
 //internal/kernel/swar:swar_test
+//internal/service/app/consensus/raft:raft_test
+//internal/service/app/consensus/wire:wire_test
 //internal/service/data/docstore:docstore_test
 //internal/service/data/queue:queue_test
 //internal/service/net/http1:http1_test

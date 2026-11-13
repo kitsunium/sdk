@@ -7,6 +7,7 @@ import (
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
+	corestream "github.com/kitsunium/sdk/internal/core/data/stream"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -132,6 +133,21 @@ type SQLConfig[T any] struct {
 	// A store that keeps versions has a trash, Trash's, in the same table; one
 	// that keeps none has none.
 	Versions int
+	// Changes is the store's change feed (kitsunium/sdk#831): every write
+	// appends one record to it — keyed by the document's key, its payload a
+	// [coredocstore.ChangeValue] as JSON — INSIDE the write's own
+	// transaction or savepoint, with the write's context, so a write rolled
+	// back leaves no record and a committed one exactly one. That holds
+	// when Changes is the stream's SQL engine (internal/service/data/stream
+	// NewSQL) opened on this store's Transactor: on another transactor the
+	// record would commit apart from the write. A record the stream refuses
+	// rolls the write back, ChangeFeedFailed. With Changes every write runs
+	// in a transaction, even one of one statement. Nil writes no record.
+	Changes corestream.Stream
+	// ChangesWithDocument puts the document's JSON in each change record
+	// of a put, a restore and a trash, so a reader rebuilds the store from
+	// the feed alone. It is refused without Changes.
+	ChangesWithDocument bool
 }
 
 // txParts are the two capabilities a SQL store needs of its transactor, found
@@ -172,6 +188,11 @@ func (c *SQLConfig[T]) validate(indexes []coredocstore.IndexSpec[T]) (txParts, e
 	if versionsErr := validateVersions(c.Versions, c.Held != nil); versionsErr != nil {
 		//: StoreMisconfigured, naming the setting.
 		return txParts{}, versionsErr
+	}
+	//: a document only for a feed that exists.
+	if changesErr := validateChanges(c.Changes, c.ChangesWithDocument); changesErr != nil {
+		//: StoreMisconfigured, naming the setting.
+		return txParts{}, changesErr
 	}
 	//: the declarations every engine refuses alike, then what a column holds.
 	if ixErr := validateSQLIndexes(indexes); ixErr != nil {

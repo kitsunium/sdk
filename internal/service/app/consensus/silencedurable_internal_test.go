@@ -39,7 +39,7 @@ func silenceOpen(t *testing.T, dir, run string) DataDir {
 
 // pendingRange is the first and the last entry index of the batch the file
 // log is about to sync, read from its pending buffer. It runs on the
-// storage actor's goroutine, inside duringSync: the actor holds the write
+// storage actor's goroutine, inside onBatchSync: the actor holds the write
 // lock, and the buffer is its own.
 func pendingRange(l *fileLog) (lo, hi uint64) {
 	for off := 0; off < len(l.pending); {
@@ -168,7 +168,7 @@ func TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt(t *testing.T) {
 	dd := silenceOpen(t, victim.dir, run)
 	l := dd.d.log
 	l.mu.RLock()
-	s := l.slots[acked["ack03"]-l.first]
+	s := l.locate(acked["ack03"])
 	l.mu.RUnlock()
 	if err := dd.Close(); err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt(t *testing.T) {
 	if _, err := NewNode(config(victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
 	}
-	if err := ClearQuarantine(victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), victim.dd, TruncateAndStaySilent, "op:silent", askingAnswer(lead.node.Membership())); err != nil {
 		t.Fatal(err)
 	}
 	_, hint := victim.dd.Log().Bounds()
@@ -200,7 +200,7 @@ func TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt(t *testing.T) {
 	var copied atomic.Bool
 	var pendingLo, pendingHi atomic.Uint64
 	copyDone := make(chan error, 1)
-	victim.dd.d.log.duringSync = func() {
+	onBatchSync(victim.dd, func() {
 		if copied.Load() {
 			return
 		}
@@ -212,7 +212,7 @@ func TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt(t *testing.T) {
 		pendingLo.Store(lo)
 		pendingHi.Store(hi)
 		copyDone <- copyTree(victim.dir, crashDir)
-	}
+	})
 	start(victim)
 	c.net.Isolate(victim.id, false)
 	go func() { _, _, _ = lead.node.Propose(context.Background(), []byte("trigger=1")) }()

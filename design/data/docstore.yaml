@@ -170,12 +170,61 @@ packages:
             name: CodeIndexNotOrdered
             value: "0x00_03_50_18"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeChangeFeedFailed identifies a write whose change record the
+              store's change stream did not take: nothing was written
+              (kitsunium/sdk#831).
+            name: CodeChangeFeedFailed
+            value: "0x00_03_50_19"
+        type: errs.Code
+    constants:
+      - blockDoc: |-
+          The four operations a change record names. A store's change stream
+          carries one record per write that stood, its [ChangeValue].Op one of
+          these.
+        doc: |-
+          ChangePut records a document stored: Put, Insert, Replace, Update, their
+          Stamped forms, ReplaceIf, a batch's write and PutDocument of a document
+          the store holds.
+        name: ChangePut
+        type: ChangeOp
+        value: "\"put\""
+      - blockDoc: |-
+          The four operations a change record names. A store's change stream
+          carries one record per write that stood, its [ChangeValue].Op one of
+          these.
+        doc: |-
+          ChangeDelete records a document removed for good: Delete, a batch's
+          deletion, and Purge, which empties the trash of one.
+        name: ChangeDelete
+        type: ChangeOp
+        value: "\"delete\""
+      - blockDoc: |-
+          The four operations a change record names. A store's change stream
+          carries one record per write that stood, its [ChangeValue].Op one of
+          these.
+        doc: |-
+          ChangeTrash records a document moved to the trash: Trash, and
+          PutDocument of a trashed document. It leaves every read.
+        name: ChangeTrash
+        type: ChangeOp
+        value: "\"trash\""
+      - blockDoc: |-
+          The four operations a change record names. A store's change stream
+          carries one record per write that stood, its [ChangeValue].Op one of
+          these.
+        doc: ChangeRestore records a document Restore brought back from the trash.
+        name: ChangeRestore
+        type: ChangeOp
+        value: "\"restore\""
     doc: |-
       Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
       ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21,
       ADR 0178 22, for a document written with its versions, and ADR 0209 23,
       for a replacement made on a revision, and 24, for a range read of an
-      index that keeps no order). Both
+      index that keeps no order, and kitsunium/sdk#831 25, for a change
+      record the change stream refused). Both
       engines answer every one of them alike, and the range keeps the LL = 3 its
       engine allocated it under now that it is declared here (ADR 0160).
 
@@ -201,9 +250,12 @@ packages:
           writes as one, through a [BatchWriter], [Pager] and [PagerContext] for
           the documents a page at a time, [Ranged] and [RangedContext] for an
           ordered index read between two keys, and [Announcer] is the pair of
-          hooks both engines answer exactly as they are;
+          hooks both engines answer exactly as they are, and [ChangeFeeder] the
+          stream of change records a store writes each write to, when it was
+          given one;
         - the values both engines read and return — [EntryValue], [VersionValue],
-          [StampValue], [TombstoneValue], [VersionWeightValue], [RevisionValue] —
+          [StampValue], [TombstoneValue], [VersionWeightValue], [RevisionValue],
+          and [ChangeValue], a change record's payload, with its [ChangeOp] —
           and [IndexSpec],
           the declaration both take, with its three constructors [Unique],
           [Index] and [Ordered];
@@ -298,6 +350,7 @@ packages:
           - constraint: any
             name: T
     imports:
+      corestream: github.com/kitsunium/sdk/internal/core/data/stream
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       json: encoding/json
     path: github.com/kitsunium/sdk/internal/core/data/docstore
@@ -1379,6 +1432,35 @@ packages:
         typeParams:
           - constraint: any
             name: T
+      - doc: |-
+          ChangeFeeder is a store that writes a change record for each of its
+          writes to a core/data/stream Stream — the change feed, its CDC: one record
+          per write that stood, keyed by the document's key so one partition keeps
+          a document's changes in order, its payload a [ChangeValue] as JSON. It is
+          an ADR 0039 sibling found by type assertion, for discovery alone: both
+          engines implement it, and the feed is configured on the engine (its
+          Changes field), never through this port.
+
+          The SQL engine appends the record inside the write's own transaction or
+          savepoint, so a write rolled back leaves no record and a committed one
+          exactly one — given the stream's SQL engine on the store's own
+          Transactor. The file engine appends it before the write's overlay entry
+          is published: a crash between the two leaves a record of a write that
+          did not land — at least once —, which a reader skips when the
+          document's version it names is not there, and replays idempotently by
+          (key, version). A record the stream refuses refuses the write
+          ([ChangeFeedFailed]), nothing written.
+        methods:
+          - doc: |-
+              ChangeStream returns the stream the store writes its change records
+              to, and false when it was given none.
+            name: ChangeStream
+            out:
+              - name: changes
+                type: corestream.Stream
+              - name: ok
+                type: bool
+        name: ChangeFeeder
     sentinels:
       - var:
           - code: CodeDocumentNotFound
@@ -1628,6 +1710,18 @@ packages:
             private: "service/data/docstore: Range reads an index in key order and was given one declared without Ordered; the index field names it"
             public: "The index keeps no order: declare it with Ordered"
             reason: INDEX_NOT_ORDERED
+          - code: CodeChangeFeedFailed
+            doc: |-
+              ChangeFeedFailed refuses a write whose change record the store's
+              change stream did not take — the stream's own error is joined, for
+              errors.Is to find. Nothing was written: the file engine appends
+              before it publishes, and the SQL engine rolls the write back.
+            exit: IOERR
+            http: 500
+            name: ChangeFeedFailed
+            private: "service/data/docstore: the change stream refused the write's change record; nothing was written, and the fields name the store and the operation, never the key"
+            public: The change could not be recorded, so the document was not written
+            reason: CHANGE_FEED_FAILED
     types:
       - doc: |-
           IndexSpec declares one secondary index: a name to read it by, whether it is
@@ -1775,6 +1869,55 @@ packages:
           which every write moves. Compare two only for equality.
         name: RevisionValue
         underlying: string
+      - doc: |-
+          ChangeOp is what a change record says a write did: [ChangePut],
+          [ChangeDelete], [ChangeTrash] or [ChangeRestore].
+        name: ChangeOp
+        underlying: string
+      - doc: |-
+          ChangeValue is one change record of a store's change feed
+          ([ChangeFeeder]): the payload of the stream record a write appends, as
+          JSON — decode it with encoding/json. The stream record's key is the
+          document's key.
+
+          A reader rebuilds a store by applying the records of a partition in
+          offset order, and replays one idempotently by (Key, Version): a record
+          whose version a store already holds, or holds a later one of, changes
+          nothing.
+        name: ChangeValue
+        struct:
+          fields:
+            - doc: |-
+                At is when the write ran, in UTC, read from the store's clock and
+                kept to the nanosecond.
+              name: At
+              tag: json:"at"
+              type: time.Time
+            - doc: |-
+                Document is the document's JSON as the store holds it, compact: the
+                stored document for a put or a restore, the trashed one for a trash.
+                It is there only when the store was configured with its
+                ChangesWithDocument, and never for a delete.
+              name: Document
+              tag: json:"doc,omitempty"
+              type: json.RawMessage
+            - doc: Key is the document's key.
+              name: Key
+              tag: json:"key"
+              type: string
+            - doc: Op is what the write did.
+              name: Op
+              tag: json:"op"
+              type: ChangeOp
+            - doc: |-
+                Version is the number of the document's current version once the
+                write stood — the one a put or a restore leaves, the trashed
+                document's for a trash —, as [Versioned].Versions numbers them; 1
+                for a document stored before its store kept versions, and 0 for a
+                delete and on a store that keeps no versions.
+              name: Version
+              tag: json:"version,omitempty"
+              type: uint64
   - constants:
       - doc: |-
           DefaultFoldAt is the least number of overlay entries that folds the overlay
@@ -2085,6 +2228,7 @@ packages:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       coredocstore: github.com/kitsunium/sdk/internal/core/data/docstore
       coresql: github.com/kitsunium/sdk/internal/core/data/sql
+      corestream: github.com/kitsunium/sdk/internal/core/data/stream
       corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
     path: github.com/kitsunium/sdk/internal/service/data/docstore
     types:
@@ -2148,6 +2292,26 @@ packages:
                 that keeps versions has a trash, Trash's; one that keeps none has none.
               name: Versions
               type: int
+            - doc: |-
+                Changes is the store's change feed (kitsunium/sdk#831): every write
+                that stands appends one record to it — keyed by the document's key,
+                its payload a [coredocstore.ChangeValue] as JSON — under the
+                writers' lock and BEFORE the write's overlay entry is published, so
+                the records of a key are in the order its writes stood. A crash
+                between the two leaves a record of a write that did not land: the
+                feed is at least once, and a reader skips a record whose version
+                the store does not hold. A record the stream refuses refuses the
+                write, ChangeFeedFailed, nothing written. A batch appends one record
+                per key it wrote, its final state. Nil writes no
+                record.
+              name: Changes
+              type: corestream.Stream
+            - doc: |-
+                ChangesWithDocument puts the document's JSON in each change record
+                of a put, a restore and a trash, so a reader rebuilds the store from
+                the feed alone. It is refused without Changes.
+              name: ChangesWithDocument
+              type: bool
         typeParams:
           - constraint: any
             name: T
@@ -2334,6 +2498,17 @@ packages:
             out:
               - name: remove
                 type: func()
+            recv: pointer
+          - doc: |-
+              ChangeStream returns the stream the store writes its change records
+              to — [Config].Changes — and false when it was given none
+              (core/data/docstore.ChangeFeeder).
+            name: ChangeStream
+            out:
+              - name: changes
+                type: corestream.Stream
+              - name: ok
+                type: bool
             recv: pointer
           - doc: |-
               Fold rewrites the snapshot with every document and removes the overlay
@@ -2745,6 +2920,25 @@ packages:
                 that keeps none has none.
               name: Versions
               type: int
+            - doc: |-
+                Changes is the store's change feed (kitsunium/sdk#831): every write
+                appends one record to it — keyed by the document's key, its payload a
+                [coredocstore.ChangeValue] as JSON — INSIDE the write's own
+                transaction or savepoint, with the write's context, so a write rolled
+                back leaves no record and a committed one exactly one. That holds
+                when Changes is the stream's SQL engine (internal/service/data/stream
+                NewSQL) opened on this store's Transactor: on another transactor the
+                record would commit apart from the write. A record the stream refuses
+                rolls the write back, ChangeFeedFailed. With Changes every write runs
+                in a transaction, even one of one statement. Nil writes no record.
+              name: Changes
+              type: corestream.Stream
+            - doc: |-
+                ChangesWithDocument puts the document's JSON in each change record
+                of a put, a restore and a trash, so a reader rebuilds the store from
+                the feed alone. It is refused without Changes.
+              name: ChangesWithDocument
+              type: bool
         typeParams:
           - constraint: any
             name: T
@@ -2994,6 +3188,17 @@ packages:
             out:
               - name: remove
                 type: func()
+            recv: pointer
+          - doc: |-
+              ChangeStream returns the stream the store writes its change records
+              to — [SQLConfig].Changes — and false when it was given none
+              (core/data/docstore.ChangeFeeder).
+            name: ChangeStream
+            out:
+              - name: changes
+                type: corestream.Stream
+              - name: ok
+                type: bool
             recv: pointer
           - doc: PutStamped is Put, with what the write says about the version it makes.
             in:
@@ -3754,6 +3959,12 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_50_18"
+          - doc: "CodeChangeFeedFailed: a write whose change record the change stream refused."
+            name: CodeChangeFeedFailed
+            reexport: coredocstore.CodeChangeFeedFailed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_19"
         doc: The codes of the store's refusals (0.3.80.*), for errs.HasCode.
       - doc: The store's sentinels, for errors.Is.
         var:
@@ -3857,6 +4068,55 @@ packages:
             name: IndexNotOrdered
             reexport: coredocstore.IndexNotOrdered
             type: "*errs.Error"
+          - doc: ChangeFeedFailed refuses a write whose change record the change stream refused; nothing was written.
+            name: ChangeFeedFailed
+            reexport: coredocstore.ChangeFeedFailed
+            type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Change is the public alias for one change record of a store's change
+              feed, the JSON payload of the stream record a write appends: its Op, the
+              document's Key and Version, the instant At, and the Document when the
+              store was configured with ChangesWithDocument.
+            name: Change
+            target: coredocstore.ChangeValue
+      - alias:
+          - doc: ChangeOp is the public alias for what a change record says a write did.
+            name: ChangeOp
+            target: coredocstore.ChangeOp
+      - alias:
+          - doc: |-
+              ChangeFeeder is the public alias for a store that writes a change record
+              of each write to a stream; both stores are one, and ChangeStream returns
+              the stream their configuration's Changes named.
+            name: ChangeFeeder
+            target: coredocstore.ChangeFeeder
+      - const:
+          - doc: ChangePut records a document stored.
+            name: ChangePut
+            reexport: coredocstore.ChangePut
+            type: ChangeOp
+            typed: true
+            value: "\"put\""
+          - doc: ChangeDelete records a document removed for good, by Delete or Purge.
+            name: ChangeDelete
+            reexport: coredocstore.ChangeDelete
+            type: ChangeOp
+            typed: true
+            value: "\"delete\""
+          - doc: ChangeTrash records a document moved to the trash.
+            name: ChangeTrash
+            reexport: coredocstore.ChangeTrash
+            type: ChangeOp
+            typed: true
+            value: "\"trash\""
+          - doc: ChangeRestore records a document brought back from the trash.
+            name: ChangeRestore
+            reexport: coredocstore.ChangeRestore
+            type: ChangeOp
+            typed: true
+            value: "\"restore\""
+        doc: The four operations a change record names.
       - alias:
           - doc: |-
               Store is the public alias for the document store: Get, GetInto, List,
@@ -3866,7 +4126,8 @@ packages:
               records; Versions and Version read a document's versions, RewriteVersions
               rewrites its former ones, VersionWeight says what they weigh; Trash,
               Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete
-              announce; Fold and Close bring it to rest.
+              announce, and ChangeStream names the change feed; Fold and Close bring
+              it to rest.
             name: Store
             target: svcdocstore.Store[T]
             typeParams:
@@ -3875,8 +4136,8 @@ packages:
       - alias:
           - doc: |-
               Config is the public alias for a store's configuration: Key (required), FS
-              and Path (both, or neither for a memory store), FoldAt, and Versions with
-              its Clock and Held.
+              and Path (both, or neither for a memory store), FoldAt, Versions with
+              its Clock and Held, and the change feed Changes with ChangesWithDocument.
             name: Config
             target: svcdocstore.Config[T]
             typeParams:
@@ -3936,7 +4197,7 @@ packages:
               and Delete write, and their Stamped forms say what the version they make
               records; Versions, Version, RewriteVersions and VersionWeight, Trash,
               Restore, Purge and Tombstones as for [Store]; OnWrite and OnDelete announce once the write's
-              transaction commits; Reindex files the stored documents again. Every call
+              transaction commits, and ChangeStream names the change feed; Reindex files the stored documents again. Every call
               takes a context.
             name: SQLStore
             target: svcdocstore.SQLStore[T]
@@ -3946,8 +4207,8 @@ packages:
       - alias:
           - doc: |-
               SQLConfig is the public alias for a SQL store's configuration: Key,
-              Transactor, Dialect and Table (required), IndexKey, and Versions with its
-              Clock and Held.
+              Transactor, Dialect and Table (required), IndexKey, Versions with its
+              Clock and Held, and the change feed Changes with ChangesWithDocument.
             name: SQLConfig
             target: svcdocstore.SQLConfig[T]
             typeParams:

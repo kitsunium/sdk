@@ -359,6 +359,51 @@ decompress at +8.4 % and s2's at +23 % on JSON: a stream decoder's history and
 an s2 writer's 1 MiB block buffer were built per stream. Pooling took them off
 the per-call path; the B/op column is what is left.
 
+## Consensus snapshots: cut and install of a 256 MiB state (kitsunium/sdk#917)
+
+`BenchmarkSnapshotCutAndInstall` (`snapshot_bench_test.go`) runs three nodes of
+`internal/service/app/consensus` on its memory doubles (log, snapshot store,
+network) with `Config.SnapshotCodec` set to each codec a node can run: flate,
+consensus's default, and the registered `Zstd` (`ZstdFastest`), through
+`DecompressBounded` on every 1 MiB chunk. The state is 256 MiB of the `json`
+corpus. **cut** is `SaveSnapshot` on the leader: the machine's stream chunked,
+compressed, checksummed and published. **install** is a follower stopped behind
+the leader's compacted log, timed from its restart to the snapshot applied: the
+transfer, the verification of every chunk and the restore, each a whole decode.
+
+```sh
+cd third-party/transform
+GOWORK=off go test -run '^$' -bench BenchmarkSnapshotCutAndInstall -benchtime=1x -count=3 .
+```
+
+| Dimension | Value |
+|---|---|
+| CPU cores          | 10 (Apple M1 Pro) |
+| RAM                | 16 GiB |
+| OS                 | macOS 26.6.2, darwin/arm64 |
+| Go toolchain       | go1.27.3 darwin/arm64 |
+| Library            | `github.com/klauspost/compress` v1.20.2 |
+| Git commit         | `b4c299a46` (pre-commit, branch `feat/sdk-lot-1-c-features`) |
+| Generated (UTC)    | 2026-11-11 |
+| Runs               | `-benchtime=1x -count=3`; best of 3, all three listed |
+
+The machine ran seven other build-and-test lanes at the same time, so the
+spread between runs is somebody else's CPU, not the codec's: the best of three
+is the least-contended sample. CPU time is a third of wall time in a profiled
+run (5.2 s of samples over 15.9 s), so these durations are the engine's, the
+store's and the scheduler's as much as the codec's.
+
+| Codec | Encoded | Cut (best) | Cut (runs) | Install (best) | Install (runs) |
+|---|---:|---:|---|---:|---|
+| flate | 42.61 MiB | 3.10 s | 3.10, 5.24, 8.16 | 3.74 s | 9.09, 9.95, 3.74 |
+| zstd  | 44.22 MiB | **1.20 s** | 3.00, 2.24, 1.20 | **1.35 s** | 1.35, 1.81, 2.33 |
+
+zstd cuts 2.6x faster and installs 2.8x faster at the best of three, for
+a snapshot 3.8 % larger — the ratio the corpus section above measures
+(`zstd-fastest` 5.75 against gzip's 6.02). Every zstd run beat the best flate
+run, on the cut and on the install. What sets D16's tolerance-0 window
+of a replacement is the install, its backfill time per node.
+
 ## What is deliberately not measured here
 
 - **Concurrent throughput.** `TestConcurrentUseIsSafe` proves the singletons are

@@ -27,7 +27,11 @@ func TestAnUnmarkedSyncFailureAtOpenRefusesAnyLaterOpenInTheProcess(t *testing.T
 	opts := DataDirOptions{SegmentBytes: 1 << 16, RuntimeDir: run}
 	// The device fails the sync and, from then on, every write: both
 	// places refuse their marker.
-	syncFileAtOpen = func(*os.File) error {
+	s := newFaultFS()
+	s.before = func(op *diskOp) error {
+		if op.kind != "datasync" {
+			return nil
+		}
 		for _, p := range []string{dir, run} {
 			if err := os.Chmod(p, 0o500); err != nil {
 				t.Error(err)
@@ -35,8 +39,7 @@ func TestAnUnmarkedSyncFailureAtOpenRefusesAnyLaterOpenInTheProcess(t *testing.T
 		}
 		return errWriteBack
 	}
-	t.Cleanup(func() { syncFileAtOpen = datasync })
-	_, err := NewDataDirWith(dir, opts)
+	_, err := newDataDirOn(dir, opts, s.disk())
 	for _, p := range []string{dir, run} {
 		if cerr := os.Chmod(p, 0o700); cerr != nil {
 			t.Fatal(cerr)
@@ -45,7 +48,6 @@ func TestAnUnmarkedSyncFailureAtOpenRefusesAnyLaterOpenInTheProcess(t *testing.T
 	if !errors.Is(err, coreconsensus.StorageFailed) {
 		t.Fatalf("an open whose sync fails: %v", err)
 	}
-	syncFileAtOpen = datasync
 	if _, err := NewDataDirWith(dir, opts); !errors.Is(err, coreconsensus.StopMarkerPresent) {
 		t.Fatalf("an open after an unmarked sync failure at open in this process: %v", err)
 	}

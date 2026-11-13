@@ -129,6 +129,8 @@ type cluster struct {
 	seed   uint64
 	// configure, when set, adjusts the configuration node tn starts with.
 	configure func(tn *testNode, cfg *Config)
+	// diskTune, when set, adjusts every configuration diskConfig builds.
+	diskTune func(cfg *Config)
 }
 
 func testTimingFast() coreconsensus.TimingContractSpec {

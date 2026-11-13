@@ -620,9 +620,18 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
     the term ends.
 
 **Durability, as the kernel gives it (R1-09, R7-22).** On Linux,
-`segment_linux.go` calls `fdatasync(2)`. `fallocate(2)` stays OFF: segments
-are zero-filled. If it is adopted later, recovery must know unwritten extents,
-which read as zeros although nothing was written there. On darwin,
+`segment_linux.go` calls `fdatasync(2)`. `fallocate(2)` stays OFF by
+default: segments are zero-filled. `DataDirOptions.Preallocate =
+PreallocateFallocate` opts in where it was measured not to cost
+(amendment of 2026-11-12, [#922](https://github.com/kitsunium/sdk/issues/922)):
+recovery already reads an unwritten extent as the zeros it reads, the hole
+`classifyTail` classifies, and the verdict per filesystem is in Deferred.
+`DataDirOptions.SyncPath = SyncRWFDsync` writes each durability point with
+one `pwritev2(2)` flagged `RWF_DSYNC` instead of `pwrite` then `fdatasync`,
+at the same two points (amendment of 2026-11-12,
+[#923](https://github.com/kitsunium/sdk/issues/923)); it is not the default
+anywhere, see Deferred.
+On darwin,
 `os.File.Sync` issues `F_FULLFSYNC`, which is stronger than `fdatasync`, and
 slower (R8-06). Elsewhere, `os.File.Sync` is the fallback, and it is stated
 as the weaker or slower path it is on each platform. A segment has a fixed size, 64 MiB (provisional),
@@ -1211,6 +1220,11 @@ longer answers as one it never heard (amendment of 2026-10-29,
 [#763](https://github.com/kitsunium/sdk/issues/763)), at best: a voter that
 failed less than a vote window before the change, or before the change
 reached it, is still judged on the configuration the leader heard it at.
+What that window lets through, the truncation refuses itself: a member's
+`TruncateAndStaySilent` reads the configuration the cluster runs with from
+a live member, and is refused when it lists none of the members the
+truncation keeps, and when no member answers (amendment of 2026-11-01,
+#763, the owner's option (c)).
 
 **Limits TLS does not set (R1-24, from raft-sql-poc).**
 - A frame's announced length is checked against `MaxFrameBytes` before
@@ -1978,7 +1992,45 @@ one term — once before the loss, once after — and elect two leaders.
   is compared and written in NodeID order, so its order on the command line
   does not matter: entry 1 is byte-identical on every founder, as the chain
   requires (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M1). The founders also pass the same initial
-  timing contract, which entry 1 carries.
+  timing contract, which entry 1 carries. `Bootstrap` contacts no peer and
+  cannot check it: founders given different timings write different
+  entries at (1, 1). `Bootstrap` therefore leaves entry 1 uncommitted (hard
+  state `{Term: 1, Commit: 0}`): it commits as any entry does, once the
+  first leader, of term 2 at least, holds its own entry 1 on a majority. A
+  founder whose uncommitted entry 1 differs from the leader's takes the
+  leader's as any conflicting uncommitted entry, when it is a founding
+  entry over the same member list that its own sums verify; another list
+  is never taken: a founder given another member list names the
+  divergence once a leader that committed past entry 1 shows its own, and
+  stops `BOOTSTRAP_REFUSED` with its marker; before that the append is held
+  back, unanswered and uncounted, for `ElectionTimeoutMax`, then refused as
+  a broken chain. The chain past an entry a follower already holds is the
+  follower's own, never the one the append carries. So no two nodes ever
+  hold different committed entries at (1, 1), every founder runs the one
+  generation 1 contract the first leader proposed, and a founder's
+  `InitialTiming` that differs from it is overridden once it holds the
+  leader's entry 1. Until its entry 1 commits, a node that holds nothing
+  durably committed and no snapshot answers a heartbeat with contract
+  generation 0, which sizes no lease: it runs its own `InitialTiming`
+  then, and reporting generation 1 on it let a founder given a shorter
+  timing vote inside the leader's lease
+  (amendment of 2026-11-12, #698; written committed, each founder committed
+  its own entry 1, the odd ones refused every leader's appends for good,
+  and founders that all differed never committed anything). A data
+  directory founded before it may still hold its own entry 1 committed: a
+  follower whose committed entry differs from the one a leader's append
+  carries, that leader's sums verifying it, stops `BOOTSTRAP_REFUSED` with
+  its marker once that leader's commit passed the entry, which then lies on
+  a majority; before that the append goes unanswered and uncounted for
+  `ElectionTimeoutMax`, then is refused as a broken chain, so an odd leader
+  is deposed; a log that started holding entry 1 alone, committed, is
+  also judged on the chain of the entry after it. Founders of such a
+  directory that all passed different timings still commit nothing, and
+  nothing stops them: no leader commits past entry 1. **A cluster founded
+  by this release is not rolled back to an earlier one before its first
+  commit**: an earlier release keeps its own entry 1 on its term, appends
+  the leader's entry 2 over it and commits it, #698 with a broken chain.
+  Once entry 1 is committed by a leader, the rollback is as before.
   **`Bootstrap`, `Recover` and `RestoreSnapshot` require a non-zero SPKI for
   every member (R9-04).** An empty pin is refused, so no member is ever
   admitted on its slot alone. A RUNNING server
@@ -2387,6 +2439,8 @@ Core `0.2.57.*` (`0x00_02_39_*`):
 | `0.2.57.23` | reserved | `APPLY_FINGERPRINT_REFUSED`, moved to ADR 0173 with its meaning (Q12) |
 | `0.2.57.24` | reserved | `SELF_TEST_FAILED`, moved to ADR 0173 with its meaning (Q12) |
 | `0.2.57.25` | `ADMIN_PRECONDITION_FAILED` | a clearing or raising operation named an alarm, version or contract that is not the current one (D17, R4-06) |
+| `0.2.57.26` | `SESSION_DIGEST_MISMATCH` | a session command whose session and sequence were recorded with another payload; never applied (ADR 0241) |
+| `0.2.57.27` | `SESSION_EXPIRED` | a session command whose session is not open, or whose sequence is below its last; never applied (ADR 0241) |
 
 **Reserved serials (R6-13, R7-04).** The five serials reserved for ADR 0173
 are declared in the same design file and the same package,
@@ -2431,21 +2485,25 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_commit_latency_seconds`, `consensus_apply_latency_seconds` | histograms |
 | `consensus_fsync_latency_seconds`, `consensus_batch_entries`, `consensus_batch_bytes` | histograms |
 | `consensus_apply_lag_bytes`, `consensus_apply_lag_entries` | gauges |
+| `consensus_replication_lag_entries` | gauge: on a node that does not lead, how far its durable log trails the leader's last index as the leader's last heartbeat carried it; 0 on the leader (#919) |
 | `consensus_peer_match_lag_entries`, `consensus_peer_inflight`, `consensus_peer_unreachable` | gauges by peer |
 | `consensus_elections_started_total`, `consensus_prevotes_lost_total` | counters |
 | `consensus_snapshot_duration_seconds`, `consensus_snapshot_bytes`, `consensus_snapshot_installs_total` | histogram, histogram, counter |
 | `consensus_log_bytes`, `consensus_log_quota_bytes`, `consensus_nospace` | gauges |
 | `consensus_tail_truncated_total`, `consensus_frames_dropped_total` | counters by reason |
 | `consensus_barrier_latency_seconds` | histogram by mode |
+| `consensus_read_rounds_total` | counter: heartbeat rounds opened to confirm reads (#1108) |
 | `consensus_failure_tolerance` | gauge: how many voters can fail now with a majority left |
 | `consensus_tls_cert_expiry_seconds` | gauge per identity |
 | `consensus_has_leader`, `consensus_peer_last_contact_seconds`, `consensus_peer_rtt_seconds` | gauge, gauge by peer, histogram by peer (R2-28) |
 | `consensus_proposals_failed_total`, `consensus_proposals_pending` | counter by code, gauge (R2-28) |
 | `consensus_fs_free_bytes`, `consensus_cluster_version`, `consensus_protocol_version` | gauges, `fs_free` by declared filesystem (R2-28, R7-33) |
 | `consensus_tls_reload_failures_total`, `consensus_tls_peer_cert_expiry_seconds` | counter, gauge by peer (R2-28) |
+| `consensus_links_aborted_total` | counter by reason: the sender links the kernel aborted for bytes left unacknowledged (`user_timeout`) and those closed after their peer stayed silent for twice the maximum election timeout while written to (`read_silence`, #1116) |
 | `consensus_loop_turn_seconds` | histogram (R7-20) |
-| `consensus_chain_refusals_total`, `consensus_snapshot_pins` | counter by leader, gauge (R7-19, R7-38) |
+| `consensus_chain_refusals_total`, `consensus_snapshot_pins`, `consensus_snapshot_pin_age_seconds` | counter by leader, gauge, gauge by peer: how long each pin has held since its offer (R7-19, R7-38, #914) |
 | `consensus_stopped` | gauge by `StopReason`, set before the process exits (R7-37) |
+| `consensus_snapshot_stream_bytes_per_second` | histogram: the pace of each snapshot stream that ended (#920) |
 
 **The product pushes stop reasons (R7-37).** A stopped node exits, so a
 scrape may never see `consensus_stopped`. The product sends the
@@ -2462,12 +2520,15 @@ thresholds, provisional like D16's numbers:
 | node stopped | any `consensus_stopped`, or the pushed stop reason, or 3 restarts in 10 min |
 | fsync slow | p99 of `consensus_fsync_latency_seconds` above 50 ms for 10 min |
 | apply lag | `consensus_apply_lag_bytes` above half of `MaxApplyLagBytes` for 5 min |
+| follower lag | `consensus_replication_lag_entries` above `PromoteLag` for 5 min on a follower or a learner: its log trails the leader's, a slow disk or a narrow link the apply lag does not see; informative, the node stays ready (R2-28, #919) |
 | no space | `consensus_nospace == 1`, or any `consensus_fs_free_bytes` under twice the reserve |
 | certificate | `consensus_tls_cert_expiry_seconds` under 7 days, or any reload failure |
 | peer unreachable | `consensus_peer_unreachable == 1` for 1 min |
 | chain refusals | `consensus_chain_refusals_total` increasing |
 | loop turn | p99 of `consensus_loop_turn_seconds` above the drift budget for 5 min |
-| snapshot pin | `consensus_snapshot_pins` held longer than the pin TTL of D19 |
+| snapshot pin | `consensus_snapshot_pins > 0` with a `consensus_snapshot_pin_age_seconds` above the pin TTL of D19, `pinAfterStream` (10) maximum election timeouts — 20 s under the default contract — for 5 min; a stream still moving, or a pin renewed while its peer catches up (#771), may pass it, so the rule warns (#914) |
+| peer round trip | p99 of `consensus_peer_rtt_seconds` above a tenth of `ElectionTimeoutMin` for 5 min, for a peer: a link degrading before CheckQuorum trips (#914) |
+| PreVotes lost | `consensus_prevotes_lost_total` increasing on a node while `consensus_has_leader == 1` across the cluster for 5 min: a node that keeps asking for an election it cannot win, a flapping link or clock (#914) |
 
 **A leader that makes no progress steps aside
 ([#554](https://github.com/kitsunium/sdk/issues/554)).** CheckQuorum
@@ -2507,10 +2568,30 @@ notifies leadership changes, so the product does not poll for them. **Each
 `Watch(ctx)` call returns its OWN channel (R7-11), unsubscribed and closed
 when `ctx` ends (R8-36).** It has capacity one and holds
 the latest value: the loop replaces an unread value without blocking. Every
-channel is closed on `Close` (R3-19). Through `trace` (ADR 0051): one span
+channel is closed on `Close` (R3-19). A `MembershipWatcher` sibling does the
+same for the configuration, under the same channel contract:
+`WatchMembership(ctx)` pushes the `Membership` the loop publishes at the end
+of the turn that changed it — an `AddLearner`, a `Promote`, a `Remove`, an
+`UpdateAddress` — and `Membership()` reads that published value without
+entering the loop, so a product that routes clients or feeds a registry
+neither polls nor takes a loop turn from the heartbeats (#915). `Status`
+stays frozen: the configuration is its own value. Through `trace` (ADR 0051): one span
 per `Propose` from submission to local apply, with events at append, commit
 and apply; the trace context travels in the forwarding frame only — never in
-the log, which must not grow with telemetry. Through `logger`: role and term
+the log, which must not grow with telemetry. The frame layout of that context
+(#1115): a `MsgForward` or `MsgForwardAdmin` carrying `FlagTrace` (bit 7 of the
+flags) is followed, after its entry, by 25 bytes — the trace id (16), the
+proposer's span id (8) and its sampled bit (one byte, 0 or 1) — and the flag on
+any other kind, a short context or another sampled byte is `FRAME_INVALID`;
+the frame version stays 1. A follower sets the flag only once the committed
+cluster version is 4, which every member announced, so a node of protocol 3
+never meets the trailing bytes; below 4 the forward is the layout before, byte
+for byte. The leader opens `consensus.Forward`, the child of the proposer's
+span, at the forward, records `appended` at the position it answers and ends
+it at its commit of that position (or at a lost leadership or a stop); the
+proposer's span records `appended` with the position, `committed` before the
+apply goroutine is handed the entry, and `applied`. With no `Tracer` nothing
+of it runs. Through `logger`: role and term
 changes, membership changes, snapshots and truncations at `Info`; nothing per
 entry.
 
@@ -2564,6 +2645,7 @@ type (
 	Transport            = coreconsensus.Transport
 	UnreachableReporter  = coreconsensus.UnreachableReporter
 	LeadershipWatcher    = coreconsensus.LeadershipWatcher // Watch(ctx) <-chan Status, unsubscribed when ctx ends (R2-28, R8-36)
+	MembershipWatcher    = coreconsensus.MembershipWatcher // WatchMembership(ctx) <-chan Membership, same contract (#915)
 
 	Health     = svcconsensus.Health   // includes Stopped, StopReason
 	ReadMode   = svcconsensus.ReadMode // ReadIndex (zero value) | ReadLease
@@ -2759,6 +2841,8 @@ transport. The cross-field rules are checked after defaults are applied
 | `JoinAuthorizer` | engine | none | without it, every JOIN is refused (R8-09) |
 | `HardCloseTimeout` | engine | 5 s | clamp (R7-11) |
 | `PromoteLag` | engine | 1 024 | clamp |
+| `MaxSnapshotStreams` | engine | 1 | clamp; a peer in need beyond it waits in raft's snapshot state, served when a stream ends (#920) |
+| `SnapshotStreamBytesPerSecond` | engine | 0, unlimited | refuse if negative; one token bucket on `Clock` paces every stream together (#920) |
 | `MaxFrameBytes` | transport | 16 MiB | clamp; refuse if < `MaxBatchBytes` + header |
 | `HandshakeTimeout` | transport | 1 s | clamp; refuse > 1 s |
 | `MaxUnauthenticatedPerIP`, `ReservedMemberSlots` | transport | 4, 8 | clamp |
@@ -2775,11 +2859,24 @@ transport. The cross-field rules are checked after defaults are applied
   `PeerQueueBytes` per peer and connection, and `InboundDataBytes`. With the
   defaults and two peers, that is under 1 GiB. `NewRaft` reports the total,
   so a product can check it against its own limit.
+- **The file log's index is in that sum** (amendment of 2026-11-12,
+  [#1111](https://github.com/kitsunium/sdk/issues/1111)): a table per
+  segment of its retained entries' offsets, 4 bytes an entry, the term runs
+  (one per change of term) and the unsynced batch's entries. It replaces a
+  40-byte slot per entry, a tenth of the log with 256-byte entries, which
+  no bound counted; `MemoryBudget` adds `MaxLogBytes / 56 * 4`, 56 bytes
+  being an empty entry's record, and 1 048 576 entries of 256 B on 64 KiB
+  segments were measured at 4.6 bytes an entry. A compaction drops whole
+  tables and copies none.
 - **Opening the log is outside that sum**: about one segment and 80 bytes
-  per record of one segment, plus 72 bytes per entry, before any of these
+  per record of one segment, plus 44 bytes per entry, before any of these
   bounds holds anything (amendments of 2026-10-24 and 2026-10-25,
   [#630](https://github.com/kitsunium/sdk/issues/630),
-  [#660](https://github.com/kitsunium/sdk/issues/660)).
+  [#660](https://github.com/kitsunium/sdk/issues/660); 72 until the index
+  kept each record's length, amendment of 2026-11-11,
+  [#913](https://github.com/kitsunium/sdk/issues/913), 80 until it kept
+  4 bytes an entry, amendment of 2026-11-12,
+  [#1111](https://github.com/kitsunium/sdk/issues/1111)).
 - **Snapshot slots are bounded and enforced, and the disk reservation is
   their actual maximum (R4-28, R5-01, R6-02).** At most FOUR snapshots exist
   at once: the two retained, one being written, and one being received.
@@ -3014,8 +3111,8 @@ fixture (R8-36). The three-node `Propose` row runs in the simulator under
 measures them in the race-off lane (`tools/alloc-lane-targets.txt`, rule 12).
 The absolute numbers of D16, `fdatasync` p99, commit p99 and entries per
 second, are NEVER design budgets. They go into a hand-run `BENCH.md` (rule 9)
-that `make bench` writes. That target runs only the codec's generator today,
-and the implementing change extends it. Only benchstat deltas are compared
+that `make bench` writes: its `bench-consensus` half, since #911 (the
+amendment of 2026-11-11). Only benchstat deltas are compared
 across changes.
 
 | Benchmark | Budget |
@@ -3025,6 +3122,9 @@ across changes.
 | encode / decode of a log record and a frame | 0 allocs/op |
 | `Propose` → applied, 3 in-process nodes, memory log and transport | ≤ 4 allocs/op |
 | segmented log, `Append` 64 × 256 B + one `Sync` | reported per device, as ADR 0056's `BENCH.md` reports publication |
+| segmented log, `Entries` of 64 × 256 B synced in one segment | 1 pread, ≤ 2 allocs/op (the read's buffer and the entry slice), the entries' data aliasing the buffer; the fetch cost per entry in the package's `BENCH.md` (amendment of 2026-11-11, [#913](https://github.com/kitsunium/sdk/issues/913)) |
+| a follower's receive of a `MsgApp` of 64 × 256 B (frame copied, parsed, stepped) | its payloads cost the frame's copy and the entry slice, Step none: the entries' data alias the frame copy (`Raft.Step`'s gift), and the entries `LogReader.Entries` returns own their data, so `fetch` and `readBack` copy nothing (amendment of 2026-11-12, [#1110](https://github.com/kitsunium/sdk/issues/1110)) |
+| segmented log, `compactPrefixAt` through a segment boundary | 0 slices proportional to the entries kept (≤ 2 allocs; measured 0), the tables before the point dropped whole (amendment of 2026-11-12, [#1111](https://github.com/kitsunium/sdk/issues/1111)) |
 | first consumer's table checksum, one update, at 10³ to 10⁶ repositories | constant time across sizes (R5-07) |
 
 **The implementing change's verifiers (R7-00f).** Each acceptance criterion
@@ -3047,6 +3147,12 @@ measurements exist:
   disk nobody will use.
 
 The first draft assumed 1–3 ms. That assumption is withdrawn until measured.
+`Preflight` (#1117) takes the second on a stopped node, over the data
+directory the log will trust: fdatasync p50, p99 and highest of records
+written the log's own way into a scratch file it removes, judged against
+the timing rule (`ElectionTimeoutMin` above three times the p99), the
+reserve, and what the platform offers; it refuses nothing, the product
+decides (D17).
 
 **What the targets rest on (R7-22).**
 - The RTTs of Context are MEANS. The p99 RTT of each pair is to be measured,
@@ -3088,11 +3194,15 @@ Provisional targets, to be confirmed or revised from the two measurements and
 recorded in `BENCH.md`:
 
 - p99 quorum commit from an FRA or RBX leader ≤ 2 × the nearest RTT + 2 ×
-  the measured fsync p99, at 1 000 proposals/s;
+  the measured fsync p99, at 1 000 proposals/s — **revised** on 2026-11-11
+  to 2 × the nearest RTT + 4 × the fsync p99 (`BENCH.md` rows `SIM/commit`
+  and `TCP/data-disk/paced`, the amendment of that date);
 - sustained ≥ 10 000 entries/s of 256 B committed with two `fdatasync` per
-  batch, the end record after the rest ([#417](https://github.com/kitsunium/sdk/issues/417));
+  batch, the end record after the rest ([#417](https://github.com/kitsunium/sdk/issues/417))
+  — **confirmed** on 2026-11-11 (`BENCH.md` row `TCP/data-disk/saturated`);
 - failover (leader killed, then first commit under the new leader): **p99 ≤
-  3.5 s, provisional**. The final number is derived from the simulator's
+  3.5 s, provisional** — **confirmed** on 2026-11-11 (`BENCH.md` row
+  `SIM/failover`). The final number is derived from the simulator's
   distribution with the chosen timeouts, not chosen first. The first draft's
   2.5 s did not account for detection, PreVote, the vote round and the
   no-op commit on a 27 ms link;
@@ -3167,7 +3277,7 @@ it proposes, so the product's audit and the log agree (R2-36):
   is validated before proposing and again in `Apply`. Each operation has its
   mutation test (D15);
 - `SaveSnapshot`, `Status`, `Health`, `Membership`, and the
-  `LeadershipWatcher` sibling.
+  `LeadershipWatcher` and `MembershipWatcher` siblings.
 Every one of them can be submitted on ANY node: the engine forwards it to
 the leader over the control connection, and its outcome follows D6 (Q8,
 R3-03). Every call is logged at `Warn` with its `Operator` (R3-14).
@@ -4247,7 +4357,10 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
 
 - **Multi-group (v2)**: groups multiplexed on one transport, heartbeat
   coalescing between node pairs, quiescing idle groups, and a routing table.
-  Its own ADR, after v1 has run in production.
+  Its own ADR, after v1 has run in production. Opened by
+  [ADR 0244](0244-several-consensus-groups-share-one-transport-routed-by-the-group-each-frame-names.md)
+  (#925): the routing built, coalescing, quiescing and a shared store
+  proposed with D11's numbers as their targets.
 - **Joint consensus**, for changes of more than one voter at once.
 - **A `lock.Locker` over this domain** (D10), answering ADR 0052 D11 inside
   the SDK.
@@ -4260,7 +4373,11 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
   identifier and FNV-64a content give the same answer, different content
   gives `0x0031`). Until then, a caller never retries blindly after
   `OUTCOME_UNKNOWN` (D6, R1-04): a compare-and-swap does not make a duplicate
-  harmless under ABA.
+  harmless under ABA. **Resolved by ADR 0241 (2026-11-12, #918):** a
+  `SessionProposer` sibling, `EntrySessionCommand` at protocol version 4, a
+  replicated session table recorded in the snapshot metadata, bounded by
+  count rather than by a TTL, `SESSION_DIGEST_MISMATCH` (`0.2.57.26`) and
+  `SESSION_EXPIRED` (`0.2.57.27`).
 - **A streaming publication sibling in `vfs`** (D4), with the snapshot store
   as its second consumer.
 - **Witness / non-data voters**, which would let two data nodes and a cheap
@@ -4268,11 +4385,74 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
 - **A Windows backend for the segmented log**: `FlushFileBuffers` semantics
   and preallocation differ; refused with `proc.UnsupportedPlatform` until
   measured, as ADR 0052 D8 did for `LockFileEx`.
-- **zstd snapshots (R7-06, R7-00b)**, once `third-party/transform` adds
-  `DecompressBounded` in its own change, through a product-side adapter.
-- **`fallocate` for segments (R7-22)**, once recovery knows unwritten
-  extents and a measurement shows `fdatasync` after it publishes no
-  metadata.
+- ~~**zstd snapshots (R7-06, R7-00b)**, once `third-party/transform` adds
+  `DecompressBounded` in its own change, through a product-side adapter.~~
+  Resolved on 2026-11-12 (#917): see the amendment "zstd snapshots, through
+  the vendor module's bounded decoder".
+- **`fallocate` for segments (R7-22): measured, opt-in, not the default**
+  (amendment of 2026-11-12, [#922](https://github.com/kitsunium/sdk/issues/922)).
+  `DataDirOptions.Preallocate` has two modes: `PreallocateZeroFill`, the
+  zero value, and `PreallocateFallocate`, `fallocate(2)` mode 0 over a new
+  segment's full size (`FALLOC_FL_ZERO_RANGE` first over any bytes it
+  already holds). The segment keeps its fixed size and occupies it whole,
+  so the no-space guard's accounting is unchanged, and its unwritten
+  extents read as zeros, the hole recovery classifies already. An open
+  probes it: a filesystem that answers EOPNOTSUPP, or a platform other than
+  Linux, opens in ZeroFill with one line logged, never a refusal; the
+  Windows backend stays deferred above. G1's row, `Append` 64 × 256 B +
+  `Sync` on 64 MiB segments (`TestDMCryptPreallocBench`, the dm-crypt lane
+  on a loop device in RAM, in Docker Desktop's VM on an Apple-silicon Mac,
+  under the load of seven other builds), then on Linux (amendment below):
+
+  | Host | Filesystem | Mode | `Sync` p50 | p99 | device bytes per segment |
+  |---|---|---|---|---|---|
+  | Docker Desktop, Apple silicon | ext4 | ZeroFill | 372 µs, 636 µs | 16.5 ms, 26.9 ms | 161.8 MB |
+  | Docker Desktop, Apple silicon | ext4 | Fallocate | 990 µs | 18.0 ms | 141.3 MB |
+  | devbox, Linux 6.12 amd64 | ext4 | ZeroFill | 2.28 ms, 2.35 ms | 3.8 ms, 5.7 ms | 161.9 MB |
+  | devbox, Linux 6.12 amd64 | ext4 | Fallocate | 3.71 ms, 4.28 ms | 7.3 ms, 13.3 ms | 141.2 MB |
+  | devbox, Linux 6.12 amd64 | xfs | ZeroFill | 2.46 ms, 2.41 ms | 9.2 ms, 9.8 ms | 161.8 MB |
+  | devbox, Linux 6.12 amd64 | xfs | Fallocate | 4.41 ms, 4.42 ms | 12.5 ms, 14.1 ms | 100.5 MB |
+
+  Each segment holds 67.1 MB of records. The devbox rows are the dm-crypt
+  lane (`run.sh 12 0 ext4 fallocate` and `run.sh 12 0 xfs fallocate`), LUKS2
+  `aes-xts-plain64` over a loop device whose image is a file on the host's
+  ext4 disk, the modes alternated twice, 10 081 syncs a row; the file log's
+  suite (41 tests and fuzz seeds, `FuzzParseRecord`, `FuzzClassifyTail`,
+  `FuzzScanSegment` among them) passed on both filesystems with every log
+  fallocated, and so did 12 of 12 power cuts on each (`testdata/dmcrypt/
+  RESULTS.md`). On ext4 `fallocate` saves 13 % of the bytes, on xfs 38 %,
+  not the 64 MiB of zeros: each `fdatasync` after a write into an unwritten
+  extent commits the extent's conversion through the journal, which is the
+  risk this item named, and the median `Sync` is 1.6 to 1.8 times
+  ZeroFill's on ext4 and 1.8 times on xfs, its p99 higher on both.
+  **Verdict, measured on ext4 and xfs: not adopted; ZeroFill stays the
+  default on both.** The OVH VPS of D16 are measured under their real load
+  before any filesystem adopts it.
+- **`RWF_DSYNC` and an io_uring write+fsync link for a batch: one built,
+  neither measured, neither the default** (amendment of 2026-11-12,
+  [#923](https://github.com/kitsunium/sdk/issues/923)). A batch stays two
+  durability points (#417). `DataDirOptions.SyncPath = SyncRWFDsync` makes
+  each one a single `pwritev2(2)` flagged `RWF_DSYNC` (Linux 4.7), which
+  can be one FUA write where the device has FUA, against `SyncFdatasync`'s
+  `pwrite` then `fdatasync`. An open probes it: a kernel answering ENOSYS,
+  EOPNOTSUPP or EINVAL, an architecture whose number the package does not
+  carry, or a platform other than Linux opens in `SyncFdatasync` with one
+  line logged, never a refusal. Both are device-dependent, so the paired
+  gate of ADR 0190 decides per device (`TestDMCryptSyncPathBench`, the
+  dm-crypt lane's fifth argument): `SyncRWFDsync` may be the default on a
+  device only if its entries/s ratio's lower bound is >= 1.00 and its
+  `Sync` p99 ratio's upper bound is <= 1.00. Measured on devbox (Linux
+  6.12 amd64, LUKS2 over a loop device, ten rounds, `run.sh 12 0 <fs>
+  zerofill rwfdsync`): the file log's suite, its fuzz seeds and 12 of 12
+  power cuts pass with every log writing `RWF_DSYNC`, on ext4 and on xfs,
+  with the verdicts of `SyncFdatasync`; the gate is not met on either.
+  ext4: entries/s ratio in [0.958, 1.034], `Sync` p99 ratio in [0.586,
+  2.162]; xfs: [0.955, 1.064] and [0.470, 1.967]. Both intervals straddle
+  1.00, so `SyncFdatasync` stays the default on both, and everywhere (the
+  OVH VPS are not measured). The io_uring mode (a
+  private ring in the storage actor, `opWrite` linked to `opFsync`) is
+  built only once `RWF_DSYNC` is measured, since it is the smaller gain
+  unless multi-group shares the ring.
 
 ## Amendment — the published names follow the SDK's roles (2026-10-13, v0 breaking changes)
 
@@ -5886,7 +6066,8 @@ operator ([#758](https://github.com/kitsunium/sdk/issues/758)).
   uncommitted removal that a later leader dropped may refuse an exit the
   node would have survived, and `WipeAndRejoin` stays open. A change
   committed while the node was down is not in its log at all: the leader
-  refuses it instead, at best (amendment of 2026-10-29, #763).
+  refuses it instead, at best (amendment of 2026-10-29, #763), and the
+  truncation reads it from a live member (amendment of 2026-11-01, #763).
 - **The way out the reason names.** `WipeAndRejoin` alone is not enough:
   the JOIN of the wiped directory is refused while the old ID holds the
   slot (R8-11), and the removal of the old ID is refused below `MinVoters`
@@ -5998,7 +6179,8 @@ failed, D and V, two live voters of three, committed nothing
   committed while it is down can still leave it, truncated, over members
   all gone. Closing that window takes the silent node a way back of its
   own, or the operator's word on the current configuration at the
-  truncation; neither is taken here.
+  truncation; neither is taken here. The owner chose the second, read
+  from a live member (amendment of 2026-11-01, #763).
 - No frame, payload or record format changes, nothing new is persisted,
   and no raft mutation (the type is full).
   `TestARemovalWhileAHeardVoterIsDownWaitsForIt` holds the issue's
@@ -6869,6 +7051,378 @@ side, as #763's option (b) would.
   #603, #748 (`movedAll`'s "A-and-B-moved"), #761, #763, #764, #773 and
   #785 stay green.
 
+## Amendment — a member's truncation reads the configuration the cluster runs with from a live member (2026-11-01, #763)
+
+The amendment of 2026-10-29 left a window to a decision
+([#763](https://github.com/kitsunium/sdk/issues/763)): the leader judges a
+voter on the configuration it last heard it at for one vote window after
+the voter stops answering, and between the judgement of a change and its
+arrival in the voter's log. A founder V of {A, B, V} saw D and E join and
+be promoted, D lead and A be removed: its log ended on {B, V, D, E}. V
+crashed, its log damaged before D's admission, and B, removed on D a few
+milliseconds later, inside that window, was then stopped for good. #758's
+refusal reads only V's log, whose newest configuration still lists B: the
+exit was taken, V restarted silent over {A, B, V}, asked A and B, both
+gone, refused D and E, and never voted again.
+
+Three options were put to the owner: (b) a silent node admits, for
+replication only and while the silence lasts, the members of the newest
+configuration the truncated part names, one more file persisted at the
+truncation; (c) the truncation reads the current configuration from a
+live member and is refused when no other kept member is listed there;
+(d) the residual accepted and documented.
+
+- **The owner's decision: option (c).** A member's `TruncateAndStaySilent`
+  reads the configuration the cluster runs with from a live member, and is
+  refused when it lists none of the members the truncation keeps. When no
+  member answers it is refused too: it is never taken blind.
+- **Who is asked.** Every other member the configurations the node reads
+  name — those logged past the snapshot, in the part kept or dropped, the
+  snapshot's, those logged below it, then the kept one — once each, under
+  its newest record; a member whose newest record carries the zero key
+  `DenyPin` leaves is not asked, under that key or an older one: no member
+  admits it, and the key withdrawn would authenticate it
+  (`truncationConfs.peers`).
+  Each is asked through `QuarantineOptions.Ask`, and the configuration of
+  the highest index answered is judged (`askNewest`); an answer that does
+  not list the member asked under the key it was asked under is not that
+  member's, and is set aside.
+- **What is refused.** Each refusal is `RECOVER_REFUSED`, the log and the
+  silence condition untouched and the directory still quarantined (the
+  audit line, written first, records the attempt), its `why` naming the
+  way out (`liveRefusal`):
+  - the configuration answered lists none of the kept configuration's
+    other members under the key it pins, as #758 judges the log's newest
+    (`stranded`): `WipeAndRejoin`, the `Promote` `MinVoters` may ask for,
+    then `Remove` of the old ID, as #758's;
+  - it no longer lists the node: `WipeAndRejoin`, then `Init` under a new
+    ID;
+  - no member answered, with `asked`, how many were: the case below;
+  - no means to ask was given, `ClearQuarantine` or no `Ask`: pass
+    `ClearQuarantineWith`.
+- **No member answers: the operator's way out.** The operator brings a
+  member back, any member the node's log names, started and reachable
+  under its key at the address the log names, and clears again: a member
+  answers whether or not it hears a leader, so a lone member of a cluster
+  that lost its majority answers too. Otherwise an existing procedure
+  applies: `WipeAndRejoin`, then the removal of the old ID on the cluster
+  and `Init` under a new one once the cluster is back (R8-11); `Recover`
+  from the survivor of the highest `(LastTerm, Last)` when the majority is
+  lost for good (R3-27).
+- **The read is authenticated as replication is.** The shipped transport
+  serves it on a lane of its own, `laneMembership` (byte 8: 5 and 6 are
+  left to ADR 0220's proposed lanes, 7 to ADR 0244's), to a member only, on
+  the key and the slot the membership pins: the dialer writes the lane
+  byte alone, the member answers one chunk, the configuration it runs
+  with (`Membership`) as `AppendMembership` encodes it, the encoding the
+  JOIN answer already carries, and the connection ends.
+  `TCPTransport.AskMembership` dials the member at the address the asking
+  node's log names, pins the key that log names, checks that the
+  certificate names this cluster and the member's slot, and requires the
+  answer to list the member under that key. Built with the asking node's
+  own certificate, it is answered only by a member whose membership still
+  admits that node; a member that no longer admits it ends the
+  connection. A node that stopped answers nothing. The answer lists every
+  retired ID, which only grow, so it is written and read under
+  `MaxFrameBytes`, the bound a snapshot offer travels under (#634), never
+  `MaxControlFrameBytes`: past about 8 100 removals a 64 KiB bound
+  refused every live member's answer, and the exit was refused as if no
+  member ran (`TestAMembersConfigurationIsReadOverTCPByAMemberOnly`).
+- **Mixed versions.** A member that predates the lane serves no unknown
+  lane and ends the connection without an answer, as for `laneJoinV2`
+  (amendment of 2026-10-22, #556): the asking node counts it as a member
+  that did not answer. No raft message changes, so the protocol version
+  stays where it is and nothing is announced. While every live member runs
+  an older build, the exit is refused, and upgrading one member opens it.
+- **The API, added only.** `QuarantineOptions` (its `Ask`),
+  `ClearQuarantineWith(ctx, d, exit, op, opt)`, and `AskMembership` on
+  `TCPTransport` and `MemoryTransport`, re-exported by
+  `pkg/v1/app/consensus`. `ClearQuarantine` keeps its signature; on a
+  member's directory its `TruncateAndStaySilent` is now refused, since it
+  can ask no one. A directory that is not a member's needs no
+  configuration and asks no one, and `WipeAndRejoin` asks no one.
+- **At best.** A member that lags, or one cut off from the leader, answers
+  a configuration older than the cluster's: the newest answered is taken.
+  The configuration a member answers is the one it runs with, committed or
+  not: an uncommitted removal a later leader drops may refuse an exit the
+  node would have survived, and `WipeAndRejoin` stays open. A member moved
+  while the node was down is not reached at the address the node's log
+  names, and counts as one that did not answer. The read is one look: a
+  removal committed after it, before the node restarts, is not seen; the
+  leader judges that removal with the node down, so on #764's guard, and
+  only a removal inside the vote window after the node's crash passes
+  it. A kept member is judged by its key, not its address: one moved
+  since is still counted, and the silent node's own question goes to the
+  address its kept configuration names, so it then hears that member only
+  on a link the member dials (a residual, not refused).
+- **What it leaves.** #764's window stays on the leader, but no truncation
+  passes through it any more: the truncation reads what the leader
+  decided. A directory an earlier release already truncated starts as
+  before.
+- No payload, record or raft frame changes, nothing new is persisted, no
+  protocol raise and no raft mutation; one transport lane is added, which
+  an older member ends unanswered.
+- **Tests.** `TestATruncationBackToMembersRemovedWhileTheNodeWasDownIsRefused`
+  (the issue's scenario, B removed a few milliseconds after V's crash:
+  refused, the directory unchanged; on main the exit was taken; the
+  control, damaged at the tail, keeps {B, V, D, E} and rejoins),
+  `TestATruncationNoLiveMemberAnswersIsRefused` (no means to ask, V cut
+  off, every live member of an older build, a configuration that no longer
+  lists V, then one member upgraded and V rejoins),
+  `TestTheNewestLiveConfigurationIsJudged` (who is asked, the newest
+  answer, an answer under another key, a context done) and
+  `TestAMembersConfigurationIsReadOverTCPByAMemberOnly` (the lane over
+  mutual TLS: another pin, a node the membership does not list, a member
+  of an older build beside one that answers, a stopped node). The tests of
+  #418, #636, #684, #723, #745, #758, #760 and #764 stay green, those
+  that take the exit asking the live members, or standing in for them
+  once their links are cut or they are down.
+
+## Amendment — an append's entries are encoded once per Ready, whatever its followers (2026-11-12, #912)
+
+The leader builds one append per follower over the same slice of its log,
+and the driver encoded each with `wire.AppendMessage(nil, …)`: a fresh
+buffer and a full copy of up to `MaxBatchBytes` per follower per turn, on
+the loop whose turn is the lease's drift budget (D9, R7-20). The entries
+body is the same for every peer; only the 112-byte header — the frame
+header and the fixed fields, up to the entry count — names one
+([#912](https://github.com/kitsunium/sdk/issues/912)).
+
+- **The wire is unchanged.** `wire.AppendHeader` writes the header, whose
+  length counts the body after it, and `wire.AppendEntries` the body;
+  header then body is `AppendMessage`'s frame byte for byte, which a node
+  of the previous release decodes (`TestAHeaderThenItsEntriesAreTheMessagesBytes`).
+- **A sibling of `Transport`, never a widening (ADR 0039).**
+  `BatchSender.SendShared(to, header, body)` queues one frame as a header
+  the transport owns and a body neither side mutates, which several peers'
+  queues may hold at once. The TCP transport implements it: a queued frame
+  is a header and a body, counted at their sum against `PeerQueueBytes`,
+  written head then body under the batch's one deadline and flush. The
+  memory double does not: its `Send` copies already, and the suites' doubles
+  that embed it filter through `Send`, which a promoted `SendShared` would
+  bypass.
+- **The driver.** With a `BatchSender`, every append with entries goes
+  through it: the entries slice is encoded once per Ready (known by its
+  first element's address and its length, which nothing mutates within a
+  Ready), the Ready's headers share one buffer, each peer its own capped
+  part; every other message, and every transport without the sibling, goes
+  through `Send` as before. A leader turn of 64 entries of 256 B allocates
+  two buffers with two followers as with four, gated in the alloc lane
+  (`TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers`,
+  `//internal/service/app/consensus:consensus_alloc_test`).
+- **Not measured here.** `consensus_loop_turn_seconds` p99 at 1 000
+  proposals/s waits for the bench lane of #911.
+
+## Amendment — the Barriers queued in one loop turn share one round (2026-11-12, #1108)
+
+D9 says concurrent reads share a round, and the step function did: its
+`flushReads` opens ONE round for every read pending. The driver did not
+let them be pending together. Every `Barrier` handed the loop its own
+closure through `exec`, the loop ran one closure a turn, and the closure
+handled its Ready at once, so N concurrent reads cost N heartbeat
+broadcasts, N loop turns and N publications, and past 64 rounds the
+oldest were forgotten and their reads waited for a later one
+([#1108](https://github.com/kitsunium/sdk/issues/1108)).
+
+- **The driver.** `Barrier` queues its wait on a queue of its own
+  (`readq`, the shape of the storage actor's), and the loop's turn takes
+  them all at once (`onReads`): it registers every read, asks raft for
+  each, then handles the Ready once, so `flushReads` opens one round for
+  the batch. The round is opened after the whole batch is registered, so
+  no read rides a round opened before it was queued
+  (`TestLinearizableUnderFaults`, and `mutReadNoRound` still caught by
+  `TestMutationsAreCaught`). A read queued after the loop's last turn is
+  answered NODE_STOPPED, by the stop's drain or by the wait on `loopDone`.
+- **The lease path is unchanged.** Under a valid lease `serveLeaseRead`
+  answers the batch at once, with no round.
+- **Out of scope.** A follower still sends one `MsgReadIndex` per read: it
+  is one message, not a broadcast.
+- **Measured.** 256 Barriers queued behind a held loop on an idle leader,
+  its ManualClock stopped, send one heartbeat per peer and open one read
+  round (`TestBarriersQueuedInOneTurnShareOneRound`); under `ReadLease`
+  with a valid lease, none (`TestLeasedBarriersOpenNoRound`).
+  `consensus_read_rounds_total` counts the rounds raft opened for reads
+  (`Raft.ReadRounds`), so the ratio of reads to rounds is visible beside
+  `consensus_barrier_latency_seconds`, unchanged.
+
+## Amendment — zstd snapshots, through the vendor module's bounded decoder (2026-11-12, #917)
+
+D7 left zstd out of v1 because `third-party/transform`'s zstd had no
+`DecompressBounded` and no SDK package may import a vendor module, and the
+Deferred list waited for both halves. The vendor module now implements
+`core/data/transform.BoundedDecompressor` on zstd and s2 (ADR 0066, amendment
+of the same day): a frame announcing more than the chunk's declared length
+is refused from its header, a sized frame is decoded into a buffer of
+exactly that size that the decoder cannot outgrow, and anything else is
+read through a bounded stream — the output is bounded before it is
+allocated, as D7 requires of every snapshot codec.
+
+- **The adapter is the product's assignment.** Nothing in consensus changes,
+  and nothing in it imports the vendor: a product that imports
+  `third-party/transform` sets `Config.SnapshotCodec` to `transform.Zstd`,
+  the registered singleton, which is a `BoundedDecompressor`. The cut writes
+  `"zstd"` in `SnapshotMeta.Codec`; every node that links the module reads
+  it through the registry, whatever its own codec (D18 "Compression",
+  `snapshotCodec`); a node that does not stops `VERSION_UNSUPPORTED` on the
+  offer, unknown meaning stop. No wire change: the chunks, their SHA-256 and
+  the per-chunk bound of R2-11 are unchanged.
+- **Proved on both sides of the link.** `third-party/transform`'s
+  `TestAClusterInstallsAZstdSnapshot` installs a zstd snapshot on a lagging
+  follower of a three-node memory cluster; the consensus suite's
+  `TestAFollowerThatDoesNotLinkTheLeadersCodecStops`, a binary that cannot
+  link zstd, stops the follower `VERSION_UNSUPPORTED` on a leader cutting
+  under the name `"zstd"`.
+- **Measured** (`third-party/transform/BENCH.md` §Consensus snapshots, best
+  of three on a shared Apple M1 Pro): a 256 MiB JSON state cuts in 1.20 s
+  with zstd against 3.10 s with flate and installs in 1.35 s against 3.74 s,
+  for 44.22 MiB encoded against 42.61. The install is D16's backfill time
+  per node.
+- **Rolling it out** is the codec change #548 already proved: one node at a
+  time, every node linking the module before the first sets it, since a
+  node that does not link it stops on the first zstd snapshot it is offered.
+
+## Amendment — D16's targets against the bench lane's first `BENCH.md` (2026-11-11, #911)
+
+D15 sends D16's absolute numbers to a hand-run `BENCH.md` that `make bench`
+writes, and the target ran only the codec's generator
+([#911](https://github.com/kitsunium/sdk/issues/911)): every target was still
+provisional, and no later change to the engine could be judged.
+
+**The lane.** `internal/service/app/consensus/consensus_bench_test.go`, built
+only into the `manual`, race-off Bazel target `consensus_bench_test`, and run
+by `make bench-consensus` (part of `make bench`):
+
+- `BenchmarkSegmentedLogAppendSync`, D15's row: the shipped log, `Append` of
+  64 × 256 B then one `Sync`, per device (`LOG/<device>`);
+- `BenchmarkThreeNodePropose`, `Propose` → applied over the memory doubles,
+  with its allocations (`MEM/propose`); the budget stays kit's;
+- `BenchmarkTCPCommit`, three nodes over loopback mTLS, each on a real data
+  directory of the device, paced at 1 000 proposals/s and saturated by 4 096
+  writers (`TCP/<device>/paced`, `TCP/<device>/saturated`): commit p50/p99,
+  the leader's fdatasync p50/p99, entries per second and fdatasyncs per
+  batch, the fdatasyncs timed through the log's `timedSync`, which only the
+  lane sets;
+- the simulator distributions D16 asks for, in a synctest bubble (a
+  Benchmark cannot open one): three memory nodes, every frame delayed by half
+  its pair's RTT of Context's matrix, each `Sync` the data disk's measured
+  `Sync` p99, FRA and RBX preferred (D8), D5's timing — commit at 1 000
+  proposals/s (`SIM/commit`) and failover over 60 seeds (`SIM/failover`).
+
+`TestGenerateBenchMD` writes `BENCH.md` with the device named and a table of
+the targets below; `make profile-consensus` captures a wave and `make
+benchstat-diff` compares two, the only comparison across changes (D15).
+
+**The verdicts**, on the first `BENCH.md` (an Apple M1 Pro, APFS on its
+internal disk, where Go's `Sync` is `F_FULLFSYNC`; the three nodes of a TCP
+row share that disk):
+
+- **Commit — revised.** The target was written before #417 made a batch cost
+  two fdatasyncs, and an entry proposed while its leader's `Sync` runs waits
+  for it, then for its own: two batches, four fdatasyncs. `SIM/commit`
+  measured p99 332 ms against 183 ms for 2 × RTT + 2 × fsync p99 (fsync p99
+  82 ms on `LOG/data-disk`), and 346 ms for the revised bound;
+  `TCP/data-disk/paced` 255 ms against 197 ms and 394 ms. The target is now
+  **p99 quorum commit ≤ 2 × the nearest RTT + 4 × the fsync p99**, at
+  1 000 proposals/s.
+- **Throughput — confirmed.** `TCP/data-disk/saturated` committed 25 954
+  entries/s of 256 B at 2.00 fdatasyncs per batch, three nodes on one disk.
+  A closed loop's rate is its writers over its latency: an earlier run of
+  the lane at 64 writers measured 534 entries/s, which said nothing of the
+  engine, so the saturated row runs 4 096.
+- **Failover — confirmed.** `SIM/failover`: p99 2 381 ms, the max of 60
+  seeds, under the 3.5 s target with D5's 1–2 s election timeout.
+
+**What stays to measure.** D16's second measurement, `fdatasync` on each of
+the three VPS under Consul, Nomad and Vault, is not in this `BENCH.md`: it is
+`make bench-consensus` run there, with `CONSENSUS_BENCH_DEVICES` naming the
+data disk, and a new verdict if a row moves. Run on one host, the TCP rows
+put three fdatasyncs on one disk at once; on three VPS each node has its own,
+and the RTT is Context's. The `Barrier`, restart and backfill targets are
+not measured by this lane.
+
+**The same lane on Linux** (devbox, 2026-11-13: AMD EPYC 7351P, 8 cores,
+Debian 13, kernel 6.12.101, ext4 on a virtual disk, where `fdatasync` is a
+real flush; `BENCH.md` now carries this host; the Apple figures above are in the
+history of that file): `LOG/data-disk` fdatasync p99 1.69 ms and `Sync` p99
+3.78 ms; `SIM/commit` p99 17.1 ms against 22.6 ms for the original bound
+(2 × RTT + 2 × fsync p99) and 25.9 ms for the revised one, `TCP/data-disk/
+paced` 12.5 ms against 13.7 ms and 27.4 ms; `TCP/data-disk/saturated`
+130 271 entries/s at 1.99 fdatasyncs per batch; `SIM/failover` p99
+3 211 ms against 3.5 s. The original commit bound is met on this host and
+the revised one with room: the revision stands as the target for a disk
+whose flush is as slow as APFS's `F_FULLFSYNC`, and the OVH VPS remain to
+measure.
+
+## Amendment — D15's allocation budgets are the design's, measured (2026-11-12, #921)
+
+D15 sends its allocation budgets to `design/sdk.yaml`'s `budgets:`, and none
+was there ([#921](https://github.com/kitsunium/sdk/issues/921)): no consensus
+package had a `gen_perf_test.go` and none was in the race-off lane, so an
+allocation added per entry on the hot path would have passed every gate.
+They are now, each with its fixture in the package's `perf_fixtures_test.go`
+(`//go:build !race`), and kit gen names `consensus_test`, `raft_test` and
+`wire_test` in the lane's section of `tools/alloc-lane-targets.txt`. The
+budgets sit in `design/sdk.yaml`, not in `design/app/consensus.yaml`: kit
+reads `budgets` from the file that declares the project alone. Measured on
+an Apple M1 Pro, darwin/arm64, go1.27.3, as totals over kit's 30 000 calls
+after as many warm-up calls (ADR 0165), three runs alike:
+
+| D15 row | Budget (`fn`, fixture) | D15 | Measured | Bound |
+|---|---|---|---|---|
+| leader handling one `AppendEntries` response | `raft.(*Raft).Step`, `StepAppResp` | 0 | 1 | **1, revised** |
+| follower handling 64 entries, memory log | `raft.(*Raft).Step`, `StepApp64` | ≤ 1 amortized, 0 per entry | 65 | **65, revised** |
+| encode / decode of a frame | `wire.AppendMessage`, `wire.ParseMessage` | 0 | 0 | 0 |
+| encode / decode of a log record | `TestTheRecordCodecAllocatesNothing` (hand-written) | 0 | 0 | 0 |
+| `Propose` → applied, 3 nodes, memory doubles | `BENCH.md`, `MEM/propose` (#911) | ≤ 4 | 183 to 184 | **not a budget** (below) |
+| segmented log, `Append` 64 × 256 B + one `Sync` | `BENCH.md`, `LOG/<device>` (#911) | reported per device | — | not a budget |
+
+- **Propose is reported, not budgeted.** It was a kit budget of 190 a call
+  until the BSD lanes ran it: kit's harness makes 30 000 warm-up and 30 000
+  counted calls with the collector held off, and a proposal on three nodes
+  allocates some 37 KB, so the window held about 2 GB that nothing freed —
+  out of memory under OpenBSD's default data size limit, and past the
+  5-minute test timeout on NetBSD, where it also measured 190.6 a call. A
+  hand-written gate cannot count it either: a proposal allocates on the three
+  nodes' goroutines, and the repository's gates count their own call stack
+  alone (`allocwindow_test.go`, `check-alloc-lane-coverage.sh`). Its
+  allocations stay measured in `BENCH.md`'s `MEM/propose` row (186 a call),
+  compared wave to wave with `make benchstat-diff`; a kit harness whose call
+  count a budget can lower would make it a budget again.
+- **The response.** The leader's fixture is a full pipeline: peer 2 in
+  replicate with its window of `MaxInflight` appends, each call acknowledging
+  the oldest. The slot it frees sends the next append, whose entries
+  `memLog.slice` clones out of the log: one allocation a response, whatever
+  the batch holds. A response that frees no slot allocates nothing. The
+  clone is what keeps an append valid while the log is compacted or
+  truncated under it; sharing it is the send side's work (#912), not this
+  budget's.
+- **The follower's append.** 65 is the entry slice `appendNew` makes and one
+  copy of each payload (`ownCopy`), the copy #1110 removes; the budget is
+  lowered to 1, D15's figure, with it. Measuring it found two more an entry:
+  `wire.ChainSum` handed its stack header to `crc32.Checksum`, whose update
+  is called through a function variable, so the header moved to the heap at
+  every chain value the leader computes and the follower verifies. It sums
+  the 29 bytes over the CRC-32C table itself now, the same value
+  (`TestChainSumIsTheCRC32COfItsHeader`), and `wire.ChainSum` has its own
+  budget of 0.
+- **The log record.** `appendRecord` and `parseRecord` are unexported, so
+  their bound is the hand-written gate ADR 0165 §6 keeps for unexported
+  paths, counted with `allocwindow_test.go`, and mutation-checked.
+- **`Propose`.** The fixture runs on the real clock, not in the simulator:
+  kit's generated test calls the fixture's call from its own goroutine, which
+  cannot enter a synctest bubble. Every goroutine of the three nodes is
+  counted (GOMAXPROCS pinned to 1). D15's 4 was written before the engine
+  existed; over a third of the 184 is the configuration cloned
+  (`MembershipValue.Clone`, first among its callers `Raft.Status` at each
+  Ready's publish), a fifth the frames' encoding, and the rest the
+  proposal's own path through the loop, the storage actor and apply. The
+  bound holds what is there so that a change that adds to it says so; a
+  change that removes some lowers it.
+- **Negative control.** One allocation added to `wire.AppendMessage` (its
+  version and kind bytes appended through `slices.Clone`) failed
+  `TestPerfAllocsAppendMessage` with 30 000 allocations over the 30 000
+  calls, and the change was reverted.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -6922,6 +7476,8 @@ side, as #763's option (b) would.
 | #795 | Raft hunt loop, 2026-11-01 | the leader keeps the index of the no-op it fed a silence, and a snapshot transfer the peer installed at or past it feeds the peer once more, so a node restarted on that snapshot, its point raised past the leader's whole log, ends its silence in a cluster that writes nothing; a snapshot the node cut itself left to a decision; no format change, no raft mutation (amendment of 2026-11-01, #795) |
 | #773 (c) | the owner's decision, 2026-11-01 | a `DenyPin` that leaves a stopped voter no voucher is admitted, and said: `Raft.Isolated` names, by #603's own judgement, every voter the leader may never reach again and the withdrawn pin that leaves it so; the health's `PeerStranded` and `PeerPinDenied`, the audit line's `isolated`, and the `why` and `isolated` of a refusal the guard decides; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #773) |
 | #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
+| #763 (c) | the owner's decision, 2026-11-01 | a member's `TruncateAndStaySilent` reads the configuration the cluster runs with from a live member, every other member its log names asked under the key the log pins, the newest answer judged, and is refused `RECOVER_REFUSED`, its log and silence condition untouched (the audit line is written first), when that configuration lists none of the kept members, no longer lists the node, or when no member answers; `QuarantineOptions`, `ClearQuarantineWith` and `AskMembership` added, a transport lane `laneMembership` (5) that an older member ends unanswered; no raft frame, payload or record change, nothing persisted, no protocol raise, no raft mutation (amendment of 2026-11-01, #763) |
+| #911 | bench lane, 2026-11-11 | `make bench` runs the consensus lane (`consensus_bench_test`, race off, `manual`) and writes `internal/service/app/consensus/BENCH.md`; D16's commit target is revised to 2 × the nearest RTT + 4 × the fsync p99, its throughput and failover targets confirmed, each on the `BENCH.md` row it rests on |
 
 ## raft-sql-poc (owner's prior Raft)
 

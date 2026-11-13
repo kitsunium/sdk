@@ -1,0 +1,32 @@
+# D5b, raft-sql-poc's unsafeAckBeforeSync (mutAckBeforeSync): an append is
+# acknowledged in AfterSync, which leaves only once its write is durable.
+add-nodes 1 voters=1,2,3 term=1
+----
+ok
+
+step 1 type=MsgApp from=2 term=1 ents=1,1
+----
+ok
+
+process-ready 1
+----
+> 1 handling Ready
+  seq=1
+  Entries:
+    1/1 command "e1-t1"
+    2/1 command "e2-t1"
+  AfterSync:
+    1->2 MsgAppResp term=1 index=2
+  Membership 1@0 2@0 3@0
+
+deliver-msgs 2 drop
+----
+ok
+
+storage-done 1
+----
+> 1 storage done seq=1 through 2/1
+
+deliver-msgs 2 drop
+----
+  dropped 1->2 MsgAppResp term=1 index=2

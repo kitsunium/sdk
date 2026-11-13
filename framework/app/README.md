@@ -222,6 +222,9 @@ Package app — workflows: a state machine over the entities of one store.
 - [func Fallback\[Req, Resp any\]\(op iapp.Operation\[Req, Resp\]\) iapp.PortConfigurer\[Req, Resp\]](<#Fallback>)
 - [func Forbidden\(message string\) \*Error](<#Forbidden>)
 - [func From\(name string, addr string\) MailerOption](<#From>)
+- [func FromBeginning\(\) SubscriptionOption](<#FromBeginning>)
+- [func FromNow\(\) SubscriptionOption](<#FromNow>)
+- [func FromTime\(at time.Time\) SubscriptionOption](<#FromTime>)
 - [func Generated\(bytes int\) SecretOption](<#Generated>)
 - [func GiveUpAfter\(restarts int, within time.Duration\) SupervisionOption](<#GiveUpAfter>)
 - [func HalfOpenTrials\(n int\) BreakerOption](<#HalfOpenTrials>)
@@ -529,6 +532,7 @@ Package app — workflows: a state machine over the entities of one store.
   - [func \(\*Topic\) Once\(key func\(T\) string, window time.Duration\) \*TopicService\[T\]](<#Topic.Once>)
   - [func \(\*Topic\) Publish\(ctx context.Context, msg T\) error](<#Topic.Publish>)
   - [func \(\*Topic\) PublishAt\(ctx context.Context, msg T, at time.Time\) error](<#Topic.PublishAt>)
+  - [func \(\*Topic\) Streamed\(key func\(T\) string\) \*TopicService\[T\]](<#Topic.Streamed>)
 - [type TransactOption](<#TransactOption>)
 - [type UID](<#UID>)
 - [type Violation](<#Violation>)
@@ -2312,6 +2316,39 @@ func From(name string, addr string) MailerOption
 ```
 
 From sets the sender of every message that names none.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="FromBeginning"></a>
+## func [FromBeginning](<https://github.com/kitsunium/sdk/blob/main/framework/app/topic.go>)
+
+```go
+func FromBeginning() SubscriptionOption
+```
+
+FromBeginning starts a streamed topic's subscription at the first message its stream still keeps, the first time its group meets the stream: a subscription added to a product that already published reads every message published before it. A subscription of a topic that is not streamed refuses it.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="FromNow"></a>
+## func [FromNow](<https://github.com/kitsunium/sdk/blob/main/framework/app/topic.go>)
+
+```go
+func FromNow() SubscriptionOption
+```
+
+FromNow starts a streamed topic's subscription after the last message published, the first time its group meets the stream: it reads what is published from then on, as a subscription of a topic that is not streamed does. It is the default. A subscription of a topic that is not streamed refuses it.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="FromTime"></a>
+## func [FromTime](<https://github.com/kitsunium/sdk/blob/main/framework/app/topic.go>)
+
+```go
+func FromTime(at time.Time) SubscriptionOption
+```
+
+FromTime starts a streamed topic's subscription at the first message published at or after at, the first time its group meets the stream; a zero instant is refused. A subscription of a topic that is not streamed refuses it.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -6228,6 +6265,17 @@ func (*Topic) PublishAt(ctx context.Context, msg T, at time.Time) error
 ```
 
 PublishAt sends msg to every subscription as \[TopicService.Publish] does, but no subscription receives it before at: a reminder, a trial that ends, an order cancelled if still unpaid. It is as durable as any message, held to the commit inside a transaction as a publication is; an instant already past is now. It does not recur — a job does. A topic that publishes once refuses it: the SDK has no publication once for later yet. It is the SDK's queue.PublishAt.
+
+<a name="Topic.Streamed"></a>
+### func \(Topic\) [Streamed](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic_stream.go>)
+
+```go
+func (*Topic) Streamed(key func(T) string) *TopicService[T]
+```
+
+Streamed makes the topic a stream: a publish appends the message ONCE to the topic's log, whatever its number of subscriptions, and each subscription is a consumer group that reads every record at its own pace, from an offset it commits — one durable write per message where a topic that is not streamed makes one per subscription. key chooses a message's partition, and the messages of one key are handled in the order they were published; nil, or a key that is empty, puts every message on the topic's own key, in one order. A handler that fails holds its partition until it succeeds: there are no dead letters.
+
+A subscription starts where [FromBeginning](#FromBeginning), [FromNow](#FromNow) — the default — or [FromTime](#FromTime) says, the first time its group meets the stream; [MaxDeliveries](#MaxDeliveries), [Lease](#Lease) and [AutoExtend](#AutoExtend) are a queue's and refused. It needs framework/app/stream, which the start names when the program does not import it. Streamed is said before the topic's subscriptions are declared, and refuses \[TopicService.Once]; \[TopicService.PublishAt] is refused on a streamed topic.
 
 <a name="TransactOption"></a>
 ## type [TransactOption](<https://github.com/kitsunium/sdk/blob/main/framework/app/database_interface.go>)

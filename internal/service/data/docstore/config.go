@@ -2,6 +2,7 @@ package docstore
 
 import (
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
+	corestream "github.com/kitsunium/sdk/internal/core/data/stream"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -68,6 +69,22 @@ type Config[T any] struct {
 	// refused rather than left to drop or corrupt them (ADR 0143). A store
 	// that keeps versions has a trash, Trash's; one that keeps none has none.
 	Versions int
+	// Changes is the store's change feed (kitsunium/sdk#831): every write
+	// that stands appends one record to it — keyed by the document's key,
+	// its payload a [coredocstore.ChangeValue] as JSON — under the
+	// writers' lock and BEFORE the write's overlay entry is published, so
+	// the records of a key are in the order its writes stood. A crash
+	// between the two leaves a record of a write that did not land: the
+	// feed is at least once, and a reader skips a record whose version
+	// the store does not hold. A record the stream refuses refuses the
+	// write, ChangeFeedFailed, nothing written. A batch appends one record
+	// per key it wrote, its final state. Nil writes no
+	// record.
+	Changes corestream.Stream
+	// ChangesWithDocument puts the document's JSON in each change record
+	// of a put, a restore and a trash, so a reader rebuilds the store from
+	// the feed alone. It is refused without Changes.
+	ChangesWithDocument bool
 }
 
 // validate refuses a configuration no store could honour, with the indexes
@@ -87,6 +104,11 @@ func (c *Config[T]) validate(indexes []coredocstore.IndexSpec[T]) error {
 	if versionsErr := validateVersions(c.Versions, c.Held != nil); versionsErr != nil {
 		//: StoreMisconfigured, naming the setting.
 		return versionsErr
+	}
+	//: a document only for a feed that exists.
+	if changesErr := validateChanges(c.Changes, c.ChangesWithDocument); changesErr != nil {
+		//: StoreMisconfigured, naming the setting.
+		return changesErr
 	}
 	//: the declarations every engine refuses alike.
 	return validateIndexes(indexes)

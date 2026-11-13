@@ -355,6 +355,41 @@ budget — which counts `len(dst)` — means the payload alone, so D4's ceiling
 keeps its meaning and a `dst` with room takes the payload with no allocation
 (#1163).
 
+## Amendment — 2026-11-12: both compressors honour the caller's ceiling ([#917](https://github.com/kitsunium/sdk/issues/917))
+
+D4 bound each compressor by its own ceiling, fixed at construction, and the
+block path had no way to hear a tighter one: a caller expecting 1 MiB — a
+consensus snapshot chunk, decoded under the length its header declares —
+could only let zstd materialise up to the instance's 64 MiB and judge the
+result after. `*ZstdCompressor` and `*S2Compressor` now implement
+`core/data/transform.BoundedDecompressor` (`DecompressBounded(dst, src,
+max)`, `third-party/transform/bounded.go`), and the registered singletons
+publish it: `Lookup("zstd")` answers a `BoundedDecompressor`.
+
+- **Bounded before it is allocated.** zstd reads the first frame's header: a
+  size announced past `max` is refused before a byte is decoded; a size
+  within it is decoded by a second shared decoder built with
+  `WithDecodeAllCapLimit`, into a buffer of exactly that capacity, which it
+  may not outgrow; any other input — a frame announcing nothing, a second
+  frame, a size that lies — is read through the bounded stream of ADR 0213
+  under `max`, `dst` growing 64 KiB at a time and never past it. s2 reads its
+  block header's length. Measured on a 64 MiB bomb under a 1 MiB ceiling
+  (`TestZstdDecompressBoundedRefusesABombBeforeAllocatingIt`): 0 bytes
+  allocated for the refusal from the header, 5.5 MiB for a forged size and
+  10 MiB for a stream without one — the window and the ceiling, never the
+  payload.
+- **The instance's ceiling stays the backstop.** A `max` above it decodes no
+  more than it, refused `DECOMPRESSION_LIMIT_EXCEEDED` as `Decompress`
+  refuses; past the caller's own the refusal is the port's
+  `DecompressedTooLarge`, and a refusal hands `dst` back.
+- **The cost.** The capped decoder is a second `zstd.Decoder` in each
+  compressor: 3 792 B at construction, zero goroutines, so D3's registration
+  on import stands.
+
+This closes ADR 0152's deferral of zstd snapshots (its amendment of the same
+day): a node runs zstd once a product imports this module and sets
+`Config.SnapshotCodec` to `transform.Zstd`.
+
 ## References
 
 - ADR 0034 §Decision.3 (the two placement criteria) · ADR 0022 §Context.1 (the

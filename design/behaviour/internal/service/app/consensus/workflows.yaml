@@ -110,6 +110,20 @@ workflows:
           key: i
           range: recs
       - return: "-1"
+  - of: entryRecords
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                when: s.recs[i].kind == recEntry
+          key: i
+          range: s.recs
+      - return: "n"
   - of: checkLayouts
     steps:
       - loop:
@@ -150,6 +164,38 @@ workflows:
           range: b
           value: x
       - return: "true"
+  - of: (*fileLog).segmentNumbered
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: x
+                when: x.n == n
+          key: _
+          range: l.segs
+          value: x
+      - return: nil
+  - of: (*fileLog).termAt
+    steps:
+      - bind: lo, hi
+        eval: 0, len(l.runs)
+      - loop:
+          cond: lo < hi
+          do:
+            - alt:
+                - do:
+                    - set: lo
+                      value: m + 1
+                  init:
+                    bind: m
+                    eval: int(uint(lo+hi) >> 1)
+                  when: l.runs[m].first <= i
+                - do:
+                    - set: hi
+                      value: m
+                  else: true
+      - return: l.runs[lo-1].term
   - of: (*fileLog).retainsEntryIn
     steps:
       - loop:
@@ -157,10 +203,9 @@ workflows:
             - opt:
                 do:
                   - return: "true"
-                when: s.seg == seg
-          key: _
-          range: l.slots
-          value: s
+                when: l.tables[i].seg == seg && len(l.tables[i].offs) > 0
+          key: i
+          range: l.tables
       - return: "false"
   - of: isolationFlags
     steps:
@@ -208,40 +253,6 @@ workflows:
           range: n.Membership().Members
           value: m
       - return: "false"
-  - of: (*MemoryLog).Entries
-    steps:
-      - lock:
-          mutex: l.mu
-          read: true
-      - opt:
-          do:
-            - return: dst, compacted(lo, l.first)
-          when: lo < l.first
-      - bind: last
-        eval: l.first + uint64(len(l.ents)) - 1
-      - opt:
-          do:
-            - return: dst, storageFailed("entries", errImpossible)
-          when: hi > last+1
-      - bind: size
-        eval: "0"
-      - loop:
-          cond: i < hi
-          do:
-            - bind: e
-              eval: l.ents[i-l.first]
-            - op: +=
-              set: size
-              value: len(e.Data)
-            - opt:
-                do:
-                  - break: true
-                when: i > lo && size > maxBytes
-            - set: dst
-              value: append(dst, e)
-          init: i := lo
-          post: i++
-      - return: dst, nil
   - of: (*MemoryNetwork).othersThan
     steps:
       - lock:
@@ -323,6 +334,52 @@ workflows:
           range: metas
           value: m
       - return: coreconsensus.SnapshotMetaValue{}, false
+  - of: askNewest
+    steps:
+      - var:
+          name: newest
+          type: coreconsensus.MembershipValue
+      - bind: found
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: ctx.Err() != nil
+            - bind: m, err
+              eval: ask(ctx, peers[i])
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil || !listsUnder(&m, &peers[i])
+            - opt:
+                do:
+                  - set: newest, found
+                    value: m, true
+                when: "!found || m.Index > newest.Index"
+          key: i
+          range: peers
+      - return: newest, found
+  - of: (*peerSet).add
+    steps:
+      - loop:
+          do:
+            - bind: x
+              eval: "&m.Members[i]"
+            - opt:
+                do:
+                  - continue: true
+                when: p.seen[x.ID]
+            - set: p.seen[x.ID]
+              value: "true"
+            - opt:
+                do:
+                  - set: p.out
+                    value: append(p.out, *x)
+                when: "!isZeroDigest(x.SPKI)"
+          key: i
+          range: m.Members
   - of: claimed
     steps:
       - bind: k
@@ -381,6 +438,30 @@ workflows:
           key: i
           range: stats
       - return: "false"
+  - of: (*TCPTransport).forgetDeparted
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: delete(t.heard, spki)
+                init:
+                  bind: _, ok
+                  eval: bySPKI[spki]
+                when: "!ok"
+          key: spki
+          range: t.heard
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: delete(t.peerExpiry, id)
+                init:
+                  bind: _, ok
+                  eval: byID[id]
+                when: "!ok"
+          key: id
+          range: t.peerExpiry
   - of: indexMembers
     steps:
       - var:
@@ -419,3 +500,24 @@ workflows:
           key: k
           range: shared
       - return: byID, bySPKI
+  - of: (*TCPTransport).unreachableHooks
+    steps:
+      - var:
+          name: fs
+          type: "[]func(coreconsensus.NodeID)"
+      - opt:
+          do:
+            - set: fs
+              value: append(fs, t.unreachable)
+          when: t.unreachable != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: fs
+                    value: append(fs, b.unreachable)
+                when: b.unreachable != nil
+          key: _
+          range: t.groups
+          value: b
+      - return: fs

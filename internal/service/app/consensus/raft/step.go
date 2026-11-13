@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"bytes"
 	"cmp"
 	"time"
 
@@ -9,7 +10,9 @@ import (
 )
 
 // Step handles one message. The driver has already checked that m.From is
-// the peer the transport authenticated (R7-05).
+// the peer the transport authenticated (R7-05). The entries' Data are the
+// caller's gift: Step keeps them without a copy, so the caller hands bytes
+// it never writes again, a frame it parsed into a buffer of its own.
 func (r *Raft) Step(now time.Time, m core.MessageValue) {
 	r.now = now
 	if m.Group != r.cfg.Group || r.stepLeaderRecord(now, m) || !r.stepTerm(now, m) || r.stepAnyRole(now, m) {
@@ -66,6 +69,11 @@ func (r *Raft) adoptTerm(m core.MessageValue) {
 		// The future term a granted PreVote answers.
 	case m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat:
 		r.becomeFollower(m.Term, m.From)
+	case m.Kind == core.MsgPreVoteResp && r.role == core.RolePreCandidate:
+		// A refusal from a later term ends the campaign: it is lost
+		// (D13), once.
+		r.preVotesLost++
+		r.becomeFollower(m.Term, 0)
 	default:
 		r.becomeFollower(m.Term, 0)
 	}
@@ -336,21 +344,41 @@ func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 	case core.MsgApp, core.MsgHeartbeat:
 		r.followWinner(now, m)
 	case core.MsgPreVoteResp:
-		if r.role == core.RolePreCandidate {
-			r.votes[m.From] = !m.Reject
-			r.tallyVotes()
-		}
+		r.tallyPreVoteResp(m)
 	case core.MsgVoteResp:
-		if r.role == core.RoleCandidate {
-			r.votes[m.From] = !m.Reject
-			if r.facts&raftSelfVoteDurable != 0 {
-				r.tallyVotes()
-			}
-		}
+		r.tallyVoteResp(m)
 	case core.MsgReadIndex:
 		r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: m.From, Context: m.Context, Code: codeNotLeader})
 	default:
 		// Nothing else concerns a campaign: it is dropped.
+	}
+}
+
+// tallyPreVoteResp counts a pre-vote answer, while this node is still the
+// pre-candidate that asked for it.
+func (r *Raft) tallyPreVoteResp(m core.MessageValue) {
+	if r.role != core.RolePreCandidate {
+		return
+	}
+	if v, ok := r.votes[m.From]; m.Reject && (!ok || v) {
+		// A refusal counts once per voter and campaign: a
+		// duplicate answer is not a second loss (D13).
+		r.preVotesLost++
+	}
+	r.votes[m.From] = !m.Reject
+	r.tallyVotes()
+}
+
+// tallyVoteResp records a vote answer, while this node is still the
+// candidate that asked for it; the tally waits for its own vote to be
+// durable (D5b).
+func (r *Raft) tallyVoteResp(m core.MessageValue) {
+	if r.role != core.RoleCandidate {
+		return
+	}
+	r.votes[m.From] = !m.Reject
+	if r.facts&raftSelfVoteDurable != 0 {
+		r.tallyVotes()
 	}
 }
 
@@ -400,9 +428,22 @@ func (r *Raft) followAppend(now time.Time, m core.MessageValue) {
 	r.lastLeaderContact = now
 	r.extendHint(now, m.From)
 	r.resetElection(now)
-	if r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal) {
+	ok := r.handleAppend(m)
+	if ok && len(m.Entries) > 0 {
+		r.hearLeader(m.From).appended = now
+	}
+	if ok || r.mutated(mutSilenceEndsOnARefusal) {
 		r.maybeEndSilence(m)
 	}
+}
+
+// hearLeader is the record of the leader from of this term, started over
+// when the leader or the term changed.
+func (r *Raft) hearLeader(from core.NodeID) *leaderHeard {
+	if r.heard.from != from || r.heard.term != r.term {
+		r.heard = leaderHeard{from: from, term: r.term}
+	}
+	return &r.heard
 }
 
 // followHeartbeat records the leader's contact, commits what the heartbeat
@@ -414,6 +455,11 @@ func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 	r.resetElection(now)
 	if c := min(m.Commit, r.log.lastIndex()); c > r.log.committed {
 		r.commitTo(c)
+	}
+	if m.Flags&core.FlagProtocol4 != 0 && r.speaks() >= Protocol4 {
+		// The leader's last index, which a node of protocol 3 or below,
+		// and a leader of it, neither reads nor sends (#919).
+		r.hearLeader(m.From).last = m.RejectHint
 	}
 	resp := core.MessageValue{
 		Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract(),
@@ -475,11 +521,24 @@ func (r *Raft) reportSilence(m *core.MessageValue) {
 // entry or the commit that applied it was durable, let a restarted node
 // fall back to the older, shorter window and vote or campaign inside the
 // lease it had granted (#521, R3-07).
+//
+// A node that holds nothing durably committed and no snapshot reports
+// generation 0, which sizes no lease: its engine base is then its own
+// InitialTiming, which no entry confirmed. A founder before its entry 1
+// commits (Bootstrap leaves it uncommitted, #698) reported generation 1 on
+// that guess while the leader sized it with its own generation 1: a
+// founder given a shorter timing promised the leader's window, granted a
+// vote inside it, and a second leader was elected while the first still
+// served lease reads.
 func (r *Raft) reportedContract() uint64 {
 	if r.mutated(mutReportUnsyncedContract) {
 		return r.timing.Generation
 	}
-	return r.EngineAt(min(r.log.committed, r.log.stable)).Timing.Generation
+	at := min(r.log.committed, r.log.stable)
+	if at == 0 && r.log.snapIndex == 0 {
+		return 0
+	}
+	return r.EngineAt(at).Timing.Generation
 }
 
 // followTimeoutNow starts an election at once, carrying the transfer flag,
@@ -515,6 +574,12 @@ func (r *Raft) handleAppend(m core.MessageValue) bool {
 	if !r.rebaseOnCommit(&m) {
 		return false
 	}
+	if r.foundingUnproven(&m) {
+		// Entry 1 matched by its term alone proves nothing (#698): ask
+		// for it, uncounted, as for a log that does not hold the prefix.
+		r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: 0})
+		return false
+	}
 	if !r.log.matchTerm(m.Index, m.LogTerm) {
 		hint := min(m.Index, r.log.lastIndex())
 		r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: hint})
@@ -533,7 +598,9 @@ func (r *Raft) handleAppend(m core.MessageValue) bool {
 // entries past the commit are still news: it is re-based on the committed
 // entry when it carries that entry with our term. A node that acknowledges
 // nothing — a silent one — learns the rest of the log no other way. It
-// reports false, having answered with the commit, when m cannot be re-based.
+// reports false, having answered with the commit, when m cannot be re-based,
+// and false unanswered when it carries another entry than this log's at a
+// committed index (heldOnDivergence).
 func (r *Raft) rebaseOnCommit(m *core.MessageValue) bool {
 	if m.Index >= r.log.committed {
 		return true
@@ -544,8 +611,95 @@ func (r *Raft) rebaseOnCommit(m *core.MessageValue) bool {
 		r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})
 		return false
 	}
+	if at := r.committedDivergence(m, k); at != 0 && r.heldOnDivergence(m, at) {
+		return false
+	}
 	m.Entries = m.Entries[k+1:]
 	m.Index, m.LogTerm = r.log.committed, t
+	return true
+}
+
+// committedDivergence returns the first index, at most the commit, at which
+// m carries another entry than this log holds committed, 0 when there is
+// none. Both logs then hold a different committed entry at one position:
+// Log Matching is broken by construction, as when founders passed Bootstrap
+// different initial timings and each wrote and committed its own entry 1
+// (#698). Only an entry the leader's own sums verify counts, chained on
+// this log's entry before it: an entry damaged in transit or in the
+// leader's memory fails its sums, and the chain check refuses it as before
+// (D4). The entries at or below the snapshot are not compared, nor any past
+// k, the commit.
+func (r *Raft) committedDivergence(m *core.MessageValue, k int) uint64 {
+	for j := 0; j <= k; j++ {
+		e := &m.Entries[j]
+		i := e.Position.Index
+		if i != m.Index+uint64(j)+1 {
+			return 0 // not one per index: firstNewEntry drops it
+		}
+		if i <= r.log.snapIndex || r.log.chain(i) == e.ChainSum {
+			continue
+		}
+		if wire.BodySum(e.Data) == e.BodySum && wire.ChainSum(r.log.chain(i-1), e) == e.ChainSum {
+			return i
+		}
+		return 0
+	}
+	return 0
+}
+
+// foundingDivergence returns 1 when m is an append after index 1 whose
+// first entry carries a body its sum verifies but a chain that does not
+// continue this node's entry 1, committed and of term 1, 0 otherwise: the
+// leader's entry 1 is another than this node's. A founder that passed
+// Bootstrap another initial timing than the others met it at every append
+// past entry 1, the leader's entry 2 chained on its own entry 1 (#698).
+// Only entry 1 is judged on the chain alone: no other entry was ever
+// committed by fiat, and an entry whose chain field rotted in a leader's
+// memory, its body intact, would stop every follower it reached. Bootstrap
+// leaves entry 1 uncommitted since (replacesFounding), and a node whose
+// entry 1 a leader committed would stop on such a chain too: only a log
+// that started holding entry 1 alone, committed (fiatFounding), what a
+// data directory founded before holds, is judged so (#698's review).
+func (r *Raft) foundingDivergence(m *core.MessageValue) uint64 {
+	if !r.fiatFounding || len(m.Entries) == 0 || m.Index != 1 || r.log.committed < 1 || r.log.snapIndex >= 1 {
+		return 0
+	}
+	if t, _ := r.log.term(1); t != 1 {
+		return 0
+	}
+	e := &m.Entries[0]
+	if wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(1), e) == e.ChainSum {
+		return 0
+	}
+	return 1
+}
+
+// heldOnDivergence handles an append that contradicts this log at the
+// committed index at, and reports whether it consumed it. A leader whose
+// commit passed at holds its entries through its commit on a majority,
+// each of which verified their chain, and so holds its own entry at at,
+// not this node's: the Ready names it (Ready.Diverged) and the driver stops
+// the node. A leader that committed nothing past at proves nothing about
+// which entry the cluster holds, and for ElectionTimeoutMax from the first
+// such append of its term the append is dropped unanswered and uncounted:
+// a leader of the majority that commits by then carries its commit in the
+// append it sends again at a heartbeat's answer. Counted at once, three
+// refusals reached a leader of the majority before its first commit, and
+// the odd founder refused it for the whole term, cut off with nothing said.
+// Past that window the append is refused as before (D4, R6-05): a leader
+// whose own entry is the odd one commits nothing, is refused and deposed.
+func (r *Raft) heldOnDivergence(m *core.MessageValue, at uint64) bool {
+	if m.Commit > at {
+		r.rd.Diverged = DivergenceValue{Index: at, Leader: m.From}
+		return true
+	}
+	if r.divergedFrom != m.From || r.divergedTerm != r.term {
+		r.divergedFrom, r.divergedTerm, r.divergedSince = m.From, r.term, r.now
+	}
+	if r.now.Sub(r.divergedSince) >= r.timing.ElectionTimeoutMax {
+		return false
+	}
+	r.rd.ChainRefusedBy = append(r.rd.ChainRefusedBy, m.From)
 	return true
 }
 
@@ -567,7 +721,14 @@ func (r *Raft) dropUnknownKinds(m *core.MessageValue) {
 // term and returns the position in m.Entries of the first one it does not,
 // -1 when it holds them all, with the chain value before it. ok is false,
 // and the append is dropped unanswered, when the entries are not one per
-// index after m.Index.
+// index after m.Index, and refused as a broken chain (D4) when it carries
+// at a position this log holds uncommitted, under the same term, another
+// entry than this log's. An uncommitted founding entry the leader's is
+// another of (replacesFounding) is not held: it conflicts. The chain past
+// a held entry is this log's, never the one the message carries: entry 1
+// of term 1 is the one position two founders may hold differently, and a
+// founder that kept its own took the leader's chain on and appended the
+// leader's entry 2 on top of it, its log broken (#698).
 func (r *Raft) firstNewEntry(m *core.MessageValue) (start int, prevChain uint32, ok bool) {
 	prevChain = r.log.chain(m.Index)
 	for k := range m.Entries {
@@ -575,13 +736,113 @@ func (r *Raft) firstNewEntry(m *core.MessageValue) (start int, prevChain uint32,
 		if e.Position.Index != m.Index+uint64(k)+1 {
 			return -1, prevChain, false
 		}
-		if t, held := r.log.term(e.Position.Index); held && t == e.Position.Term {
-			prevChain = e.ChainSum
-			continue
+		t, held := r.log.term(e.Position.Index)
+		if !held || t != e.Position.Term || r.replacesFounding(e) {
+			return k, prevChain, true
 		}
-		return k, prevChain, true
+		if r.contradictsHeld(m, e) {
+			return -1, prevChain, false
+		}
+		prevChain = r.log.chain(e.Position.Index)
 	}
 	return -1, prevChain, true
+}
+
+// contradictsHeld reports whether e, at a position this log holds under
+// the same term, is another entry than this log's while that position is
+// still uncommitted, refusing the append as firstNewEntry says: this log
+// does not take it, the append proves nothing from here, and acknowledged
+// it would commit this log's own (#698). A founding entry over another
+// member list is a divergence, named once the leader committed past it
+// (heldOnDivergence); any other is a broken chain (chainRefused).
+func (r *Raft) contradictsHeld(m *core.MessageValue, e *core.EntryValue) bool {
+	if own := r.log.chain(e.Position.Index); own == e.ChainSum || e.Position.Index <= r.log.committed {
+		return false
+	}
+	if r.foundingContradicted(e) && r.heldOnDivergence(m, 1) {
+		return true
+	}
+	r.chainRefused(*m, e.Position.Index)
+	return true
+}
+
+// foundingUnproven reports whether m's prefix is this node's entry 1,
+// uncommitted and of term 1, matched by its term alone: the one position
+// two founders may hold differently (#698). An append past it proves the
+// leader's entry 1 is this node's only when its first entry verifies
+// chained on this node's; an empty one proves nothing, and acknowledged,
+// the leader's next heartbeat, its commit clamped to that match, committed
+// this node's own entry 1, the one no majority held.
+func (r *Raft) foundingUnproven(m *core.MessageValue) bool {
+	if m.Index != 1 || m.LogTerm != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 || !r.log.matchTerm(1, 1) {
+		return false
+	}
+	if _, ok := founding(r.log.at(1)); !ok {
+		return false
+	}
+	if len(m.Entries) == 0 {
+		return true
+	}
+	e := &m.Entries[0]
+	return wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(1), e) != e.ChainSum
+}
+
+// replacesFounding reports whether e is a leader's entry 1 that this
+// node's uncommitted entry 1 must give way to: both founding entries of
+// term 1 over the same member list, e verified by its own sums, and
+// another chain than this node's. Every founder writes entry 1 at (1, 1)
+// from its own InitialTiming without contacting a peer, so two founders
+// given different timings hold different entries at one position, the one
+// position no leader created (#698). Bootstrap leaves it uncommitted: it
+// commits as any entry does, once the leader of a later term holds it on a
+// majority, and a founder that holds another one takes the leader's like
+// any uncommitted conflicting entry. Matched on the term alone, it was
+// kept, and the leader's entry 2, chained on the leader's entry 1, was
+// refused as a broken chain at every append. An entry whose sums do not
+// verify, damaged in transit, is skipped as before, and another member
+// list is never taken: founders given different lists stay refused.
+func (r *Raft) replacesFounding(e *core.EntryValue) bool {
+	i := e.Position.Index
+	if i != 1 || e.Position.Term != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 || r.log.chain(1) == e.ChainSum ||
+		wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(0), e) != e.ChainSum {
+		return false
+	}
+	theirs, ok := founding(e)
+	if !ok {
+		return false
+	}
+	ours, ok := founding(r.log.at(1))
+	return ok && bytes.Equal(wire.AppendMembership(nil, &theirs.Membership), wire.AppendMembership(nil, &ours.Membership))
+}
+
+// foundingContradicted reports whether e is a leader's entry 1 that
+// contradicts this node's uncommitted one and that this node does not take
+// (replacesFounding): a founding entry its own sums verify, over another
+// member list than this node's founding entry. Bootstrap compares no list
+// between founders, and a founder given another one refused every leader's
+// chain for good, the cluster with no failure tolerance and nothing said;
+// it now stops BOOTSTRAP_REFUSED once a leader that committed past entry 1
+// shows it (#698's review).
+func (r *Raft) foundingContradicted(e *core.EntryValue) bool {
+	if e.Position.Index != 1 || e.Position.Term != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 ||
+		wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(0), e) != e.ChainSum {
+		return false
+	}
+	if _, ok := founding(e); !ok {
+		return false
+	}
+	_, ok := founding(r.log.at(1))
+	return ok
+}
+
+// founding returns the payload of e when e is a founding membership entry,
+// the entry 1 Bootstrap writes; ok is false for any other entry.
+func founding(e *core.EntryValue) (wire.AdminValue, bool) {
+	if e.Kind != core.EntryMembership {
+		return wire.AdminValue{}, false
+	}
+	a, err := wire.ParseAdminAt(e.Version, e.Data)
+	return a, err == nil && a.Change == wire.ChangeFounding
 }
 
 // appendNew verifies and appends m's entries from start on, truncating a
@@ -589,6 +850,9 @@ func (r *Raft) firstNewEntry(m *core.MessageValue) (start int, prevChain uint32,
 // unacknowledged, when a body or a chain does not verify or when the
 // conflict would truncate a committed entry.
 func (r *Raft) appendNew(m *core.MessageValue, start int, prevChain uint32) bool {
+	if at := r.foundingDivergence(m); start == 0 && at != 0 && r.heldOnDivergence(m, at) {
+		return false
+	}
 	if !r.verifyChain(m, start, prevChain) {
 		return false
 	}
@@ -600,10 +864,16 @@ func (r *Raft) appendNew(m *core.MessageValue, start int, prevChain uint32) bool
 		r.truncateFrom(first)
 		r.lowerSilence(m.Term, first)
 	}
+	// The entries' Data are the caller's gift (Step): kept as they are,
+	// aliasing the frame the driver parsed into a buffer of its own, not
+	// copied a second time (#1110). An empty payload is nil, as a copy
+	// left it, so an entry compares equal to its original.
 	es := make([]core.EntryValue, len(m.Entries)-start)
 	for k := range es {
 		es[k] = m.Entries[start+k]
-		es[k].Data = ownCopy(es[k].Data)
+		if len(es[k].Data) == 0 {
+			es[k].Data = nil
+		}
 	}
 	r.appendEntries(es)
 	return true
@@ -685,16 +955,23 @@ func (r *Raft) acknowledgeAppend(m *core.MessageValue) {
 // answers it with a rejection; after MaxChainRefusals in a row at one
 // index, that leader's heartbeats go unanswered for the term (D4, R6-05).
 func (r *Raft) chainRefused(m core.MessageValue, at uint64) {
-	if r.refusedAt == at && r.refusedFrom == m.From {
-		r.refusals++
-	} else {
-		r.refusedAt, r.refusedFrom, r.refusals = at, m.From, 1
-	}
-	if r.cfg.MaxChainRefusals > 0 && r.refusals >= r.cfg.MaxChainRefusals {
-		r.refusedLead, r.refusedTerm = m.From, r.term
-	}
+	r.countRefusal(m.From, at)
 	r.rd.ChainRefusedBy = append(r.rd.ChainRefusedBy, m.From)
 	r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})
+}
+
+// countRefusal counts a refusal of from's append at index at; after
+// MaxChainRefusals in a row at one index, that leader is refused for the
+// term (D4, R6-05).
+func (r *Raft) countRefusal(from core.NodeID, at uint64) {
+	if r.refusedAt == at && r.refusedFrom == from {
+		r.refusals++
+	} else {
+		r.refusedAt, r.refusedFrom, r.refusals = at, from, 1
+	}
+	if r.cfg.MaxChainRefusals > 0 && r.refusals >= r.cfg.MaxChainRefusals {
+		r.refusedLead, r.refusedTerm = from, r.term
+	}
 }
 
 // refuses reports whether this node refused the leader from for the rest

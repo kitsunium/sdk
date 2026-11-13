@@ -1582,6 +1582,16 @@ rules:
   # finding (KTN-STRUCT-ROLE-COMPATALIAS). Scoped to the one file.
   KTN-STRUCT-ROLE:
     exclude:
+      # service/app/consensus/multi.Machine is the state machine of ADR 0152
+      # D3, the role every engine of the domain names its applier by —
+      # coreconsensus.StateMachine, BatchingStateMachine, machine.SQL — and
+      # the word the Packer's contract is written in ("the node's state
+      # machine must be a Machine"). The suffix the rule infers would read
+      # multi.MachineService and name the applier differently from the port it
+      # implements, the docstore.Store argument below (#926). Scoped to the
+      # one file.
+      - "**/internal/service/app/consensus/multi/machine.go"
+      - "internal/service/app/consensus/multi/machine.go"
       # kernel/jsonenc.Object is a value — two words, copied by every member
       # method, and a stale copy is a snapshot — but the rule infers "Service"
       # from its methods and unexported fields. "Object" is JSON's word for what
@@ -1722,6 +1732,22 @@ rules:
       # one file.
       - "**/internal/service/net/loop/group.go"
       - "internal/service/net/loop/group.go"
+      # service/data/stream.NewMemory(cfg MemoryConfig), NewFile(cfg
+      # FileConfig), NewSQL(cfg SQLConfig) and Subscribe(ctx, s, cfg
+      # SubscriberConfig) take their published config BY VALUE (ADR 0231), the
+      # NewCircuitBreaker(cfg) class below: a composite literal at the call site
+      # whose zero fields are the documented defaults (ADR 0031) — a pointer
+      # would make nil a second zero and let a caller mutate it after the
+      # constructor resolved it — copied once per engine or subscriber built,
+      # never on an Append or Read path. Scoped to those files.
+      - "**/internal/service/data/stream/memory.go"
+      - "internal/service/data/stream/memory.go"
+      - "**/internal/service/data/stream/file.go"
+      - "internal/service/data/stream/file.go"
+      - "**/internal/service/data/stream/sql.go"
+      - "internal/service/data/stream/sql.go"
+      - "**/internal/service/data/stream/subscribe.go"
+      - "internal/service/data/stream/subscribe.go"
       # service/app/resilience.BreakerConfig (72 bytes) and
       # service/app/lifecycle.SupervisorConfig (88 bytes) crossed 64 bytes when
       # ADR 0184 gave them HalfOpenTrials and GiveUpAfter. Both are published
@@ -1735,6 +1761,13 @@ rules:
       - "internal/service/app/resilience/breaker.go"
       - "**/internal/service/app/lifecycle/supervise.go"
       - "internal/service/app/lifecycle/supervise.go"
+      # service/app/consensus.Preflight(dir, opts PreflightOptions) is the
+      # same class (#1117): an offline check a product runs once before a node
+      # starts, its options a composite literal whose zero fields are the
+      # defaults, and its PreflightValue returned by value as Inspect's report
+      # is. The helpers behind it take both by pointer. Scoped to the one file.
+      - "**/internal/service/app/consensus/preflight.go"
+      - "internal/service/app/consensus/preflight.go"
       # service/app/forward.Config (168 bytes) is the published configuration
       # New takes BY VALUE, as NewCircuitBreaker takes its config: a composite
       # literal at the call site whose zero fields are the documented defaults
@@ -1743,6 +1776,12 @@ rules:
       # built, never on Enqueue's path (ADR 0185).
       - "**/internal/service/app/forward/forwarder.go"
       - "internal/service/app/forward/forwarder.go"
+      # service/app/consensus/machine.NewSQL(ctx, cfg SQLConfig) (ADR 0152 D3,
+      # #916) is the same class: the machine's config, a composite literal at
+      # the call site, copied once per machine built, never on an Apply path.
+      # Scoped to the one file.
+      - "**/internal/service/app/consensus/machine/sql.go"
+      - "internal/service/app/consensus/machine/sql.go"
       # core/app/consensus.MembershipValue (80 bytes) crossed 64 bytes when
       # #648 gave it RetiredKeys beside Members and Retired: three slice
       # headers and an index. Its methods — Member, IsRetired, IsRetiredKey,

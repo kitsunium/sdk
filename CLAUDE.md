@@ -26,8 +26,9 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `codec` | data | 24 wire formats behind one `Marshal` / `Unmarshal` dispatch with per-format facades, strict JSON decoding, a type's wire shape and JSON patch | 0003, 0021, 0022, 0023, 0036, 0037, 0102, 0133, 0134, 0143, 0156 |
 | `transform` | data | Compression: stdlib gzip, raw DEFLATE and zlib, each at a level of the caller's; zstd — with a dictionary of the caller's — and s2 opt-in under `third-party/`, with a ceiling that cannot be omitted; whole buffers, or streams read under the caller's ceiling | 0014, 0066, 0213 |
 | `sql` | data | Ports over `database/sql`, never an ORM or a driver: structural transaction ownership, savepoints, migrations under a lock that dies with its holder, checksummed when built from statements; a retrying root transactor, a statement budget, read-only transactions on a replica, a statement observer under the pool | 0055, 0139, 0140 |
-| `docstore` | data | Typed keyed JSON documents with indexes, versions and a trash, replaced on the revision they were read at — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143, 0178, 0209 |
+| `docstore` | data | Typed keyed JSON documents with indexes, versions and a trash, replaced on the revision they were read at, each write's change record appended to a `stream` — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143, 0178, 0209 |
 | `queue` | data | Durable at-least-once queue over a directory, a SQL table joined to the caller's transaction, or memory; retried — with a jitter on request — and dead-lettered with its cause's codes, its trail's included, a dead letter and a live message movable between brokers as they lie; a message held until one instant, a retry after the handler's delay, a publication once per key over a window; a message's age bounded, a backlog counted, purged, published and acknowledged in batches, dead letters paged, replayed and purged in bulk and kept for a retention, a handler that acknowledges in its own transaction, five priority levels served strictly | 0054, 0104, 0151, 0178, 0183 |
+| `stream` | data | A durable, partitioned, offset-addressed log read by independent consumer groups, each record kept until its retention ends — the port, its siblings and its policy, the memory engine, the conformance suite every engine runs, a file engine over segments retained by age and bytes, a SQL engine joined to the caller's transaction, a subscriber per group committing its offset after the handler or in the handler's own transaction, and compaction by key with tombstones, offsets kept; published as `pkg/v1/data/stream` | 0231 |
 | `cache` | data | The kernel LRU+TTL primitive and the domain above it: tag invalidation, in-process stampede protection, L1/L2 chaining; a Valkey far tier under `third-party/` | 0025, 0049, 0211 |
 | `vfs` | data | `io/fs` reading unchanged and atomic publication, with how far "atomic" reaches stated, a batch under one directory flush; an S3 filesystem under `third-party/` | 0056, 0211 |
 | `config` | app | Environment, file and `fs.FS` layering, typed decode, a schema (required keys, defaults, unknown keys refused), provenance, a poll watcher | 0028, 0061, 0097 |
@@ -41,7 +42,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `resilience` | app | Retry, circuit breaker, keyed rate limit, bulkhead, timeout, fallback, hedging, and the published backoff curve; a retry budget shared by retry and hedge, and the delay a failure imposes (`RetryAfter`); a breaker that opens on a rate of failures or slow calls over a sliding window, and says where it stands (`BreakerState`); a bulkhead and a limiter that wait a bounded time, three jitters, and the SRE book's adaptive client-side throttle | 0026, 0031, 0103, 0184 |
 | `lifecycle` | app | Ordered start and reverse stop with a per-component budget, and the supervisor that restarts a loop — and gives up past an Erlang restart intensity | 0050, 0112, 0184 |
 | `health` | app | Startup, readiness and liveness as three types, every wait bounded, and the loopback readiness probe | 0060, 0072, 0131 |
-| `consensus` | app | A write is committed when a majority holds it on disk: a Raft with PreVote and CheckQuorum always on, snapshots, single-server membership through learners, a segmented log that classifies every hole before it repairs one, an mTLS transport pinned by SPKI | 0152, 0174 |
+| `consensus` | app | A write is committed when a majority holds it on disk: a Raft with PreVote and CheckQuorum always on, snapshots, single-server membership through learners, a segmented log that classifies every hole before it repairs one, an mTLS transport pinned by SPKI, several groups on one transport routed by the group each frame names, a node presented as a replicated `stream` (offset = log index), exactly-once commands through client sessions | 0152, 0174, 0241, 0244 |
 | `lock` | app | Named exclusive leases over one process or one machine, with fencing tokens and the guarantee that is not made said out loud | 0052, 0081, 0082, 0083, 0084, 0086 |
 | `id` | app | UUIDv4/v7, ULID, snowflake, NanoID, KSUID and TypeID | 0024, 0038 |
 | `mail` | app | MIME composition and SMTP with header injection refused, and a durable spool | 0064, 0111, 0141 |
@@ -63,7 +64,7 @@ internal/
 │                          recycler, sema, singleflight, snapshot,
 │                          worker},
 │                  collections/{cache, heap, ring},
-│                  fs/{flock, pathchain, winacl}
+│                  fs/{flock, pathchain, seglog, winacl}
 ├── core/          domain interfaces + domain values — each package by its path
 │                  crypto, crypto/key/jwk, net, net/http2,
 │                  proc, proc/bpf, proc/dbus, proc/ipc, proc/ipc/rpc, proc/service,
@@ -75,7 +76,7 @@ internal/
 │                               form, jcs, json, jsonpatch, jsonschema,
 │                               msgpack, multipart, ndjson, pem,
 │                               strictjson, tlv, toml, xml, yaml},
-│                        docstore, queue, sql, transform, vfs},
+│                        docstore, queue, sql, stream, transform, vfs},
 │                  observe/{logger, logger/{level, writer},
 │                           logger/middleware/{async, encwrite, failover,
 │                           multi, recover, route, sample, tee},
@@ -144,6 +145,11 @@ internal/
                              loop waiting on the Waker sibling; the SQL
                              broker joins the context's transaction —
                              ADR 0151;
+                           stream — the engines of the partitioned log:
+                             memory + the conformance suite every engine
+                             runs + file over kernel/fs/seglog + SQL joined
+                             to the context's transaction + Subscribe,
+                             a worker per partition — ADR 0231;
                            sql — transaction manager + savepoints + pool
                              policy + Join/Defer siblings + migration
                              runner, SQLite's on the database file's write
@@ -208,9 +214,12 @@ internal/
                            health — check registry + per-check timeouts +
                              drain latch + HTTP handler + the loopback Ask;
                            consensus — the Raft engine (step function in
-                             raft/, wire layouts in wire/), segmented
+                             raft/, wire layouts in wire/, state machines
+                             in machine/), segmented
                              file log, snapshot store, data directory and
-                             offline operations, mTLS transport — ADR 0152;
+                             offline operations, mTLS transport, and
+                             multi/, a packer of many commands into one
+                             entry — ADR 0152;
                            lock — in-process leases + file locker over
                              flock(2) or LockFileEx + keepalive;
                            id — uuidv4, uuidv7, ulid, snowflake, nanoid,
@@ -260,6 +269,8 @@ pkg/
     │                   a document's versions, in its own write — ADR 0143;
     │                   its trash, Trash/Restore/Purge — ADR 0143 amended (ADR 0178);
     │                 queue/ — durable at-least-once broker, no lock — ADR 0054;
+    │                 stream/ — a partitioned log every group reads at its own
+    │                   pace, by offset — ADR 0231;
     │                 cache/ — the ADR 0025 primitive AND the ADR 0049 domain,
     │                   side by side;
     │                 vfs/ — io/fs reading unchanged + atomic publication — ADR 0056;
@@ -361,11 +372,12 @@ framework/         the layer above pkg/v1, packages of the root module — ADR 0
                      — the workflows, step 5 —, mail — the mailers,
                      step 6 —, jobs — the jobs, step 7 — and otlp —
                      the product's OTLP export over app/forward, issue
-                     #483 —, storetest, the stores' conformance suite, and
+                     #483 —, stream — a streamed topic's log over
+                     data/stream, issue #826 —, storetest, the stores' conformance suite, and
                      apptest, a product's tests on disk — ADR 0175;
                      its engine internal/app, + plug, serverengine,
                      studioengine, storeengine, queueengine, workflowengine,
-                     mailengine, jobengine, otlpengine), telemetry (the
+                     mailengine, jobengine, otlpengine, streamengine), telemetry (the
                      telemetry port + exporter — ADR 0149, the tool's
                      channel, apart from the OTLP export),
                    entitlement, selfupdate, gate, git (the distribution
@@ -700,5 +712,9 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0219 — a supervisor adopts, hears and hands over only what it can verify, accepted on 2026-11-07 (kitsunium/sdk#726, #729, #730, #739 — SB1, S3, S4, S5 of supervizio/agent#326): `Spec.Env` refusing `__KITSUNIUM_SDK_PROC_*` (`RESERVED_ENV` `0.2.6.31`), `exec.Attach` / `AttachPIDFile` adopting through a pidfd from a PID file walked safely, trusted only when root or this user made every step, else bounded by an `AttachValue` (`PID_FILE_REFUSED`, `ADOPTION_REFUSED`, `STATUS_UNKNOWN`, `0.2.6.32`–`34`), the sd_notify listener reading descriptors, `BARRIER=1`, `MAINPIDFD=1` and the sender's uid with every assignment bounded, `Spec.PIDEnv` giving a child its own `LISTEN_PID`, `systemd/listen`'s `PrepareFiles` and `CheckName` (`INVALID_FD_NAME` `0.2.6.35`); amends ADR 0016 and 0018; amended 2026-11-08: adoption on darwin and the BSDs through two kqueue knotes, a signal by pid only while one is silent, the process record decoded by `proc/internal/bsdabi`; the notify listener on FreeBSD through `LOCAL_CREDS_PERSISTENT` (`SCM_CREDS2`) — `docs/adr/0219-a-supervisor-adopts-hears-and-hands-over-only-what-it-can-verify.md`
 - ADR 0221 — an HTTP/2 connection is frames, HPACK and a state machine on bytes, accepted on 2026-11-09 for kitsunium/sdk#959 and #960, revisable while v0 (ADR 0040): amends ADR 0186 §D6 and §Deferred — the frame layer (`ParseFrameHeader`, the `Append` family) and an in-house HPACK on `[]byte` in `internal/service/net/http2`, its values and codes `0.3.109.*` in `internal/core/net/http2` (`FrameValue`, `LimitsValue` — ADR 0195 §D3's numbers —, `ErrCode`); `Decoder` a pointer-free value over caller-given table memory, a list ceiling charged before any copy or insert (RFC 7541 §7.3's bomb), two refusal classes by whether the table survives; `Encoder` static-table names and never-indexed literals; one connection's streams, windows and SETTINGS as a pointer-free state machine; `pkg/v1/net/http2` comes with the adapter (#961) — `docs/adr/0221-an-http2-connection-is-frames-hpack-and-a-state-machine-on-bytes.md`
 - ADR 0222 — a loop runs on kqueue on darwin and the BSDs, beside epoll, accepted on 2026-11-11 (kitsunium/sdk#976), revisable while v0 (ADR 0040): resolves ADR 0186 §D5's deferral — `LoopBackendKqueue` and the engine token `kqueue` at epoll's rank, switched off apart; a level-triggered driver on the shared core, a staged probe, the Linux-only rows absent; kqueue opt-in (`LoopBackendKqueue`) until the paired gate holds, `auto` portable there (amended the same day); the backend-neutral conformance cases, the drain and the idle-memory bound on kqueue; the macos-15 paired gate next — `docs/adr/0222-a-loop-runs-on-kqueue-on-darwin-and-the-bsds-beside-epoll.md`
+- ADR 0230 — a segmented log is a kernel primitive that writes, and never decides, accepted on 2026-11-12 (kitsunium/sdk#820): `kernel/fs/seglog` (`0.1.8.*`), the consensus file log's mechanism without its vocabulary; amends ADR 0159; amended for `Rewrite` (#824) — `docs/adr/0230-a-segmented-log-is-a-kernel-primitive-that-writes-and-never-decides.md`
+- ADR 0231 — a record is kept until its retention ends, and every group reads it at its own pace, accepted on 2026-11-12 (kitsunium/sdk#818, milestone 1 of #890): the `data/stream` domain, `Stream` frozen at four methods with five siblings, `0.2.38.*` and `0.3.94.*`; amended for the file engine (#821), the SQL engine (#822), the subscriber (#823) and compaction by key (#824) — `docs/adr/0231-a-record-is-kept-until-its-retention-ends-and-every-group-reads-it-at-its-own-pace.md`
+- ADR 0241 — a client session applies a command once, whatever its retries, accepted on 2026-11-12 (kitsunium/sdk#918): `SessionProposer` (`OpenSession`, `ProposeSession`) beside the frozen `Replicated`, `EntrySessionCommand` and `FlagProtocol4` at protocol version 4, a replicated session table folded at commit and at apply and recorded in the snapshot metadata of version 4, `MaxSessions` 1024 evicted least recently used, `SESSION_DIGEST_MISMATCH` `0.2.57.26` and `SESSION_EXPIRED` `0.2.57.27`; resolves ADR 0152's Deferred client sessions — `docs/adr/0241-a-client-session-applies-a-command-once-whatever-its-retries.md`
+- ADR 0244 — several consensus groups share one transport, routed by the group each frame names, D1–D4 accepted on 2026-11-11 (kitsunium/sdk#925), D5–D7 (coalescing, quiescing, a shared log) proposed — `docs/adr/0244-several-consensus-groups-share-one-transport-routed-by-the-group-each-frame-names.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

@@ -1,0 +1,1165 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      errSegmentTooLarge is a segment file larger than an int holds, which a
+      32-bit platform cannot read into one buffer.
+    items:
+      - name: errSegmentTooLarge
+        type: cause
+        value: "\"segment larger than an int holds\""
+    name: errSegmentTooLarge
+  - doc: |-
+      A log is a directory of fixed-size, zero-filled segment files. Every
+      record is 8-byte aligned:
+
+      	length u32 | crc u32 | version u8 | kind u8 | end u8 | tag u8 |
+      	batch u64 | index u64 | payload | zero padding
+
+      little-endian; length counts the bytes after the crc field, padding
+      excluded, and the crc is the CRC-32C of those bytes. Records are written
+      in batches: every record of a batch carries its sequence number, the last
+      one the end-of-batch flag, and batch k+1 is written only after batch k was
+      synced, so any valid record of batch k+1 proves batch k durable. It is the
+      framing of the consensus file log (ADR 0152 D4) without its term, its
+      hard state and its entry fields (ADR 0230).
+    grouped: true
+    items:
+      - name: recHeader
+        type: int
+        value: "8"
+      - name: recFixed
+        type: int
+        value: "20"
+      - name: recVersion
+        type: uint8
+        value: "1"
+      - doc: "recEntry is a caller's record: its tag is the caller's kind byte."
+        name: recEntry
+        type: uint8
+        value: "1"
+      - doc: recCheckpt opens every segment (checkpoint).
+        name: recCheckpt
+        type: uint8
+        value: "2"
+      - doc: |-
+          recSeal closes a segment, in a synced batch of its own; its index is
+          its own offset.
+        name: recSeal
+        type: uint8
+        value: "3"
+      - doc: "recDrop records a DropBefore: its index is the log's new first."
+        name: recDrop
+        type: uint8
+        value: "4"
+      - doc: |-
+          recAlign is the boundary every record starts on: recovery looks for a
+          valid record after a hole at each multiple of it, and nowhere else.
+        name: recAlign
+        type: int
+        value: "8"
+      - doc: "checkpointLen is a checkpoint record's payload: three uint64s."
+        name: checkpointLen
+        type: int
+        value: "24"
+      - doc: sealReserve keeps room for the seal record at a segment's end.
+        name: sealReserve
+        type: int64
+        value: "64"
+      - doc: |-
+          growSlack is what a segment made larger than segBytes, for a batch
+          that does not fit one, holds beyond the batch and its checkpoint.
+        name: growSlack
+        type: int64
+        value: "1024"
+      - doc: |-
+          scanChunk is how far ahead of its parse recovery reads a segment: a
+          sealed one is read up to its seal and at most this much past it, not
+          to its preallocated size.
+        name: scanChunk
+        type: int64
+        value: 1 << 20
+      - doc: |-
+          maxPayload is the largest payload one record carries: its length
+          stays far inside the u32 the header holds and the int a 32-bit
+          platform indexes a batch with.
+        name: maxPayload
+        type: int
+        value: 1<<30 - recHeader - recFixed
+    name: recHeader
+  - doc: |-
+      DefaultSegmentBytes is a segment's size when Open is given none: 64 MiB, the
+      consensus log's.
+    items:
+      - name: DefaultSegmentBytes
+        type: int64
+        value: 64 << 20
+    name: DefaultSegmentBytes
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - errSegmentTooLarge
+      - cause
+      - cause.Error
+      - origin
+      - failed
+      - damaged
+      - u64
+      - outside
+      - abandon
+    name: errors.go
+  - decls:
+      - slot
+      - durable
+      - Log
+      - prepared
+      - Open
+      - mkdirDurable
+      - (*Log).usable
+      - (*Log).add
+      - (*Log).Append
+      - (*Log).Sync
+      - (*Log).syncLocked
+      - (*Log).writeBatch
+      - (*Log).writeAndSync
+      - (*Log).settleBatch
+      - (*Log).markDurable
+      - (*Log).restamp
+      - (*Log).DropBefore
+      - (*Log).applyDrop
+      - (*Log).Bounds
+      - (*Log).Kind
+      - (*Log).Read
+      - (*Log).Range
+      - (*Log).cut
+      - (*Log).run
+      - (*Log).pendingPayload
+      - (*Log).readRun
+      - checkedPayload
+      - (*Log).segment
+      - (*Log).Close
+    name: log.go
+  - decls:
+      - recHeader
+      - DefaultSegmentBytes
+      - castagnoli
+      - align8
+      - recordLen
+      - record
+      - appendRecord
+      - boolByte
+      - sealRecord
+      - sealedBody
+      - parseRecord
+      - checkpoint
+      - checkpoint.encode
+      - decodeCheckpoint
+      - knownKind
+      - allZero
+    name: record.go
+  - decls:
+      - scanRec
+      - scanRecOf
+      - scanned
+      - (*scanned).note
+      - unknownVersionAt
+      - (*Log).recover
+      - (*Log).recoverExisting
+      - (*Log).scanAndTrim
+      - (*Log).segmentNumbers
+      - scanSegments
+      - scanSegment
+      - (*scanned).parse
+      - (*scanned).holeAt
+      - scanBufs
+      - (*scanBufs).reader
+      - statReader
+      - segRead
+      - (*segRead).record
+      - (*segRead).upTo
+      - checkBatchSequence
+      - checkLayouts
+      - batchSeq
+      - (*batchSeq).follow
+      - continuesBatch
+      - trimTornTail
+      - classifyTail
+      - recordsAfter
+      - judgeAfterHole
+      - tornBatchStart
+      - (*Log).replay
+      - (*Log).replayRecord
+      - (*Log).replayDrop
+      - (*Log).openSegments
+      - (*Log).syncAtOpen
+      - (*Log).positionTail
+    name: recover.go
+  - decls:
+      - rewritten
+      - (*Log).Rewrite
+      - (*Log).rewriteSegment
+      - editFunc
+      - rebuildPlan
+      - rebuilt
+      - rebuildSegment
+      - (*rebuilt).encode
+      - (*Log).writeTmp
+      - writeSyncer
+      - fillTmp
+      - (*Log).publishRewrite
+    name: rewrite.go
+  - decls:
+      - segment
+      - segName
+      - (*Log).segPath
+      - (*Log).tmpPath
+      - zeroFrom
+      - zeroRange
+      - abandonTmp
+      - (*Log).createSegment
+      - (*Log).segmentFile
+      - (*Log).prepare
+      - (*Log).takePrepared
+      - (*Log).rotate
+      - (*Log).publishNext
+      - (*Log).dropSegmentsLocked
+    name: segment.go
+  - decls:
+      - datasync
+    name: sync_linux.go
+  - decls:
+      - syncDir
+    name: syncdir_other.go
+functions:
+  - doc: origin builds a fresh error on its own sentinel, with fields.
+    name: origin
+    params: sentinel *errs.Error, fields ...errs.FieldValue
+    results: error
+  - doc: |-
+      failed is the Failed of operation op, its cause kept as a field rather
+      than wrapped, so the code a caller matches on is always Failed.
+    name: failed
+    params: op string, c error
+    results: error
+  - doc: damaged is the Damaged of segment seg at offset off, for why.
+    name: damaged
+    params: seg uint64, off int64, why string
+    results: error
+  - doc: u64 renders v in decimal, the spelling of every index field.
+    name: u64
+    params: v uint64
+    results: string
+  - doc: |-
+      outside is the error of a read of index on a log holding first through
+      next-1: Dropped below, OutOfRange at or past the end.
+    name: outside
+    params: index, first, next uint64
+    results: error
+  - doc: |-
+      abandon is where an error with no reader goes: the cleanup of a file
+      nothing will read again, whose outcome is already decided.
+    name: abandon
+    params: err error
+  - name: Open
+    params: dir string, segBytes int64
+    results: "*Log, error"
+  - doc: |-
+      mkdirDurable creates dir, private to the owner, and when it did not
+      exist syncs its parent, which publishes the new entry.
+    name: mkdirDurable
+    params: dir string
+    results: error
+  - doc: |-
+      checkedPayload is the payload of the record at the start of b, which must
+      be the entry at index that slot s locates in segment seg: a record that is
+      not is Damaged, the log disagreeing with what it wrote. The payload is
+      capped, so a caller that appends to it cannot reach the bytes after it.
+    name: checkedPayload
+    params: seg uint64, b []byte, s slot, index uint64
+    results: "[]byte, error"
+  - doc: align8 rounds n up to the next record boundary.
+    name: align8
+    params: n int
+    results: int
+  - doc: recordLen is the aligned length on disk of a record of n payload bytes.
+    name: recordLen
+    params: n int
+    results: int
+  - doc: |-
+      appendRecord encodes r at the end of dst, crc sealed and zero-padded to
+      the record boundary, and returns the extended slice.
+    name: appendRecord
+    params: dst []byte, r *record
+    results: "[]byte"
+  - doc: boolByte is v as the record's flag byte.
+    name: boolByte
+    params: v bool
+    results: byte
+  - doc: |-
+      sealRecord recomputes a record's crc over its body. The body's end is
+      summed in uint64, where a length near 2^31 cannot wrap as an int sum does
+      on 32 bits.
+    name: sealRecord
+    params: b []byte
+  - doc: |-
+      sealedBody is the body of the record at b[0:] when its length is in range
+      and its crc holds, whatever version it carries; nil otherwise. The length
+      is bounded as the u32 it is, before any int sum: on 32 bits one near 2^31
+      wrapped recHeader+n negative and the slice panicked.
+    name: sealedBody
+    params: b []byte
+    results: "[]byte"
+  - doc: |-
+      parseRecord decodes the record at b[0:]; ok is false for a hole: a short
+      read, a zero header, a length out of range or a crc that fails — and for
+      a sealed record of a version this build does not write, which recovery
+      tells apart with unknownVersionAt before it calls anything a hole.
+    name: parseRecord
+    params: b []byte
+    results: rec record, ok bool
+  - doc: |-
+      decodeCheckpoint parses encode's payload; ok is false for any other
+      length, which recovery reads as a damaged checkpoint.
+    name: decodeCheckpoint
+    params: b []byte
+    results: checkpoint, bool
+  - doc: knownKind reports whether k is a record kind this build reads.
+    name: knownKind
+    params: k uint8
+    results: bool
+  - doc: allZero reports whether b holds only zero bytes.
+    name: allZero
+    params: b []byte
+    results: bool
+  - doc: scanRecOf is the scanRec of r, parsed at offset off.
+    name: scanRecOf
+    params: r *record, off int64
+    results: scanRec
+  - doc: |-
+      unknownVersionAt looks, at every record boundary from off to the end of
+      b, for a record whose crc holds but whose version this build does not
+      write. Such a record is no damage: a newer build wrote it, synced, and
+      may have acknowledged it; taken for a hole it would be zeroed as a torn
+      tail. Unknown means stop, never skip.
+    name: unknownVersionAt
+    params: b []byte, seg uint64, off int64
+    results: error
+  - doc: |-
+      scanSegments reads and parses every segment of dir in order. A segment is
+      judged as soon as it is read, so the first damage found is the one
+      reported, and nothing after it is read. Only the last segment's bytes are
+      kept.
+    name: scanSegments
+    params: dir string, nums []uint64, sb *scanBufs
+    results: "[]*scanned, error"
+  - doc: |-
+      scanSegment reads segment n of dir and parses its records up to the
+      first hole, or through its seal: a sealed segment is read up to its seal,
+      and the rest of a segment is read only for a hole, which is classified on
+      the whole file. The bytes and the records go to sb's buffers, which the
+      next segment reuses.
+    name: scanSegment
+    params: dir string, n uint64, sb *scanBufs
+    results: "*scanned, error"
+  - doc: |-
+      checkBatchSequence refuses a log whose batch sequence is not contiguous
+      across the whole log, at the first record that breaks it.
+    name: checkBatchSequence
+    params: segs []*scanned
+    results: error
+  - doc: |-
+      checkLayouts refuses, before any tail is classified or trimmed, a record
+      of a kind this build does not read: left to replay, one in an unfinished
+      last batch would be trimmed with the tear and zeroed.
+    name: checkLayouts
+    params: segs []*scanned
+    results: error
+  - doc: |-
+      continuesBatch reports whether r may follow prev: in prev's batch, or
+      first of the next one once prev ended its own.
+    name: continuesBatch
+    params: prev, r *scanRec
+    results: bool
+  - doc: |-
+      trimTornTail decides the fate of a hole in the last segment: a torn tail
+      is dropped from the records, its truncation point kept for positionTail
+      to zero and sync before any new record; any other hole is Damaged.
+    name: trimTornTail
+    params: last *scanned
+    results: error
+  - doc: |-
+      classifyTail returns where to truncate a torn tail in the segment bytes
+      b, whose valid records before the hole are recs, or -1 and why the hole
+      is damage.
+    name: classifyTail
+    params: b []byte, recs []scanRec, hole int64
+    results: int64, string
+  - doc: recordsAfter is every valid record after the hole, at record boundaries.
+    name: recordsAfter
+    params: b []byte, hole int64
+    results: "[]record"
+  - doc: |-
+      judgeAfterHole returns why a hole is damage given the valid records after
+      it, or "" when they do not forbid a tear.
+    name: judgeAfterHole
+    params: after []record, torn uint64
+    results: string
+  - doc: |-
+      tornBatchStart is where the torn batch, which never completed, begins:
+      all of it is dropped, as it was never synced and never acknowledged. A
+      torn batch that starts with the segment's checkpoint is damage.
+    name: tornBatchStart
+    params: recs []scanRec, lastOff int64, torn uint64
+    results: int64, string
+  - doc: |-
+      rebuildSegment parses the segment bytes p.data and encodes them again,
+      every entry from p.first up to below excluded offered to p.edit. A sealed
+      segment is read through its seal; the last one up to its end.
+    name: rebuildSegment
+    params: p *rebuildPlan
+    results: rebuilt, error
+  - doc: |-
+      fillTmp writes out at the start of f, zero-fills it up to size and syncs
+      it.
+    name: fillTmp
+    params: f writeSyncer, out []byte, size int64
+    results: error
+  - doc: |-
+      segName is segment n's file name; fixed-width hex, so the names sort in
+      segment order and recovery accepts no other spelling of n.
+    name: segName
+    params: n uint64
+    results: string
+  - doc: |-
+      zeroFrom zeroes f from off to size, 1 MiB at a time, and syncs it; the
+      sync runs even when there is nothing to zero.
+    name: zeroFrom
+    params: f *os.File, off, size int64
+    results: error
+  - doc: |-
+      zeroRange writes zeros over f from off to size, 1 MiB at a time, and
+      syncs nothing.
+    name: zeroRange
+    params: f io.WriterAt, off, size int64
+    results: error
+  - doc: |-
+      abandonTmp closes f, the segment .tmp at path a failure leaves
+      unpublished, removes it, and returns c, the failure being reported. A
+      removal that fails leaves it to recovery, which deletes every .tmp.
+    name: abandonTmp
+    params: f io.Closer, path string, c error
+    results: error
+  - doc: |-
+      datasync makes a segment's written bytes durable with fdatasync(2): the
+      segment is zero-filled at its full size, so there is no size to publish.
+    name: datasync
+    params: f *os.File
+    results: error
+  - doc: |-
+      syncDir makes a directory's entries durable: a rename or an unlink is
+      published only once its directory is synced. The directory is only read,
+      so its Close loses nothing; a failure there is still reported when the
+      sync succeeded.
+    name: syncDir
+    params: dir string
+    results: err error
+imports:
+  binary: encoding/binary
+  crc32: hash/crc32
+  errors: errors
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
+  fmt: fmt
+  io: io
+  math: math
+  os: os
+  slices: slices
+  strconv: strconv
+  strings: strings
+  sync: sync
+  syscall: syscall
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/fs/seglog
+  name: seglog
+  purpose: "Package seglog is a durable, append-only log of records addressed by a contiguous uint64 index, kept in a directory of fixed-size, zero-filled segment files: the segmented log the consensus file log wrote for itself (ADR 0152 D4), extracted without its vocabulary so that any engine needing an ordered, crash-recovering sequence of byte payloads builds on it rather than rewriting it (ADR 0159, ADR 0230)."
+types:
+  - doc: |-
+      cause is the text of a failure's cause, recorded as a field of the error
+      a caller matches on and never wrapped as an error of its own.
+    kind: named
+    methods:
+      - doc: Error returns the cause's text unchanged.
+        name: Error
+        recv: c cause
+        results: string
+    name: cause
+    underlying: string
+  - doc: |-
+      slot locates one retained entry: in the pending batch before its sync,
+      in segment seg after.
+    fields:
+      - name: seg
+        type: uint64
+      - name: "off"
+        type: int64
+      - name: size
+        type: uint32
+      - name: kind
+        type: uint8
+      - name: pending
+        type: bool
+    kind: struct
+    name: slot
+  - doc: |-
+      durable is the state the synced records describe, which a rotation's
+      checkpoint is written from, never from the pending batch it precedes.
+    fields:
+      - name: next
+        type: uint64
+      - name: first
+        type: uint64
+    kind: struct
+    name: durable
+  - fields:
+      - name: dir
+        type: string
+      - name: segBytes
+        type: int64
+      - doc: mu guards the state below; readers hold it shared.
+        name: mu
+        type: sync.RWMutex
+      - name: segs
+        type: "[]*segment"
+      - doc: off is the write offset in the last segment.
+        name: "off"
+        type: int64
+      - doc: batch is the sequence number of the pending batch.
+        name: batch
+        type: uint64
+      - name: pending
+        type: "[]byte"
+      - doc: pendingLast is the offset in pending of its last record, -1 for none.
+        name: pendingLast
+        type: int
+      - name: first
+        type: uint64
+      - name: next
+        type: uint64
+      - doc: slots[i] locates entry first+i.
+        name: slots
+        type: "[]slot"
+      - name: dur
+        type: durable
+      - name: prep
+        type: "*prepared"
+      - doc: failed is the failure that stopped the log, nil while it is healthy.
+        name: failed
+        type: error
+      - name: closed
+        type: bool
+      - doc: tornTails counts the torn tails recovery repaired; a test reads it.
+        name: tornTails
+        type: int
+      - doc: |-
+          afterSeal runs once a rotation's seal is durable and before the next
+          segment is published; duringSync runs between each write of a batch
+          and its sync, the lock released. Only a test sets them.
+        name: afterSeal
+        type: func()
+      - name: duringSync
+        type: func()
+      - doc: |-
+          wmu serialises the writers. A sync holds it, not mu, across its write
+          and sync, so readers do not wait for the disk.
+        name: wmu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: |-
+          usable is why the log refuses a call: closed, then the failure that
+          stopped it, nil while it is healthy.
+        name: usable
+        recv: l *Log
+        results: error
+      - doc: |-
+          add appends r to the pending batch and remembers it as the batch's last
+          record, the one Sync flags end-of-batch.
+        name: add
+        params: r *record
+        recv: l *Log
+      - name: Append
+        params: index uint64, kind uint8, payload []byte
+        recv: l *Log
+        results: error
+      - name: Sync
+        recv: l *Log
+        results: error
+      - doc: syncLocked is Sync; the caller holds wmu and mu.
+        name: syncLocked
+        recv: l *Log
+        results: error
+      - doc: |-
+          writeBatch makes the pending batch durable at l.off in segment cur in two
+          steps: every record before the last, synced, then the last one, which
+          carries the end-of-batch flag, synced. A power cut during one sync may
+          persist any subset of its dirty pages, the end record's without an
+          earlier one's; written last and on its own, a valid end record proves the
+          rest of its batch durable before it, so a hole before it is damage to
+          synced data, and nothing else.
+        name: writeBatch
+        params: cur *segment
+        recv: l *Log
+        results: error
+      - doc: writeAndSync writes b at off in segment cur and syncs it.
+        name: writeAndSync
+        params: cur *segment, b []byte, off int64
+        recv: l *Log
+        results: error
+      - doc: |-
+          settleBatch records the pending batch, now synced in segment seg, as
+          durable: its entries are read from disk from here on, the write offset
+          moves past it, and the next batch gets the next sequence number.
+        name: settleBatch
+        params: seg uint64
+        recv: l *Log
+      - doc: markDurable records the state the synced records now describe.
+        name: markDurable
+        recv: l *Log
+      - doc: restamp rewrites the batch sequence of every pending record.
+        name: restamp
+        params: batch uint64
+        recv: l *Log
+      - name: DropBefore
+        params: index uint64
+        recv: l *Log
+        results: error
+      - doc: |-
+          applyDrop makes index the first: the slots below it go, and past the
+          next the log is empty and starts there.
+        name: applyDrop
+        params: index uint64
+        recv: l *Log
+      - name: Bounds
+        recv: l *Log
+        results: first, next uint64
+      - name: Kind
+        params: index uint64
+        recv: l *Log
+        results: uint8, error
+      - name: Read
+        params: index uint64
+        recv: l *Log
+        results: "[]byte, error"
+      - name: Range
+        params: lo, hi uint64, maxBytes int, dst [][]byte
+        recv: l *Log
+        results: "[][]byte, error"
+      - doc: |-
+          cut is how many records from lo up to hi Range returns: at least one, and
+          then as many as stay within maxBytes of payload.
+        name: cut
+        params: lo, hi uint64, maxBytes int
+        recv: l *Log
+        results: int
+      - doc: |-
+          run is how many of the at most max slots from slot i are durable,
+          contiguous and in one segment: what one read returns.
+        name: run
+        params: i uint64, maxRun int
+        recv: l *Log
+        results: int
+      - doc: pendingPayload is a copy of the payload of the pending record s locates.
+        name: pendingPayload
+        params: s slot
+        recv: l *Log
+        results: "[]byte"
+      - doc: |-
+          readRun reads the contiguous records slots locate, the first at index,
+          with one read, checks each against what the log recorded, and appends
+          their payloads to dst. A record that does not match is Damaged: the log
+          disagrees with what it wrote.
+        name: readRun
+        params: index uint64, slots []slot, dst [][]byte
+        recv: l *Log
+        results: "[][]byte, error"
+      - doc: segment is the open segment numbered n, nil when none is.
+        name: segment
+        params: n uint64
+        recv: l *Log
+        results: "*segment"
+      - name: Close
+        recv: l *Log
+        results: error
+      - doc: |-
+          recover scans every segment, classifies every hole, and only then changes
+          anything: a torn tail zeroed, the next segment published.
+        name: recover
+        recv: l *Log
+        results: error
+      - doc: |-
+          recoverExisting recovers a directory holding the segments nums: it
+          checks them, replays them, and reopens the log at the end of the last.
+        name: recoverExisting
+        params: nums []uint64
+        recv: l *Log
+        results: error
+      - doc: |-
+          scanAndTrim scans the segments nums, refuses the ones whose batches or
+          layout do not hold together, and zeroes the torn tail of the last, which
+          is the only change recovery makes before it has judged them all.
+        name: scanAndTrim
+        params: nums []uint64
+        recv: l *Log
+        results: "[]*scanned, error"
+      - doc: |-
+          segmentNumbers lists the published segments, sorted, deleting on the way
+          every .tmp: only an incomplete one exists, one that never reached its
+          rename. A name that is not exactly a segment's is ignored.
+        name: segmentNumbers
+        recv: l *Log
+        results: "[]uint64, error"
+      - doc: |-
+          replay builds the log's index from every segment's checkpoint and
+          records, in order, and judges continuity on the result.
+        name: replay
+        params: segs []*scanned
+        recv: l *Log
+        results: error
+      - doc: replayRecord applies one record of segment seg to the index being built.
+        name: replayRecord
+        params: seg uint64, r *scanRec
+        recv: l *Log
+        results: error
+      - doc: |-
+          replayDrop is applyDrop during the replay: the front resliced away, not
+          copied, which replay does once at its end.
+        name: replayDrop
+        params: index uint64
+        recv: l *Log
+      - doc: |-
+          openSegments opens every scanned segment for reading and writing, in
+          order; those already opened stay in l.segs for Close.
+        name: openSegments
+        params: segs []*scanned
+        recv: l *Log
+        results: error
+      - doc: |-
+          syncAtOpen makes durable everything recovery is about to trust, before
+          anything is reported from it. A process killed between a batch's write
+          and its sync leaves that batch in the page cache, complete with its end
+          record: a restart in the same boot reads it as written, and would report
+          records no device holds. The same holds for a rename or an unlink whose
+          directory sync never ran.
+        name: syncAtOpen
+        recv: l *Log
+        results: error
+      - doc: |-
+          positionTail sets the write offset in the last segment: at the torn
+          tail's truncation point, zeroing and syncing what lies past it unless it
+          is zero already, else right after the last valid record.
+        name: positionTail
+        params: last *scanned, tail *segment
+        recv: l *Log
+        results: error
+      - name: Rewrite
+        params: below uint64, edit func(index uint64, kind uint8, payload []byte) (uint8, []byte, bool)
+        recv: l *Log
+        results: int, error
+      - doc: |-
+          rewriteSegment writes segment s again with the records edit changes, the
+          last segment of the log when last. The caller holds wmu and nothing is
+          pending, so no writer moves the segment or its records meanwhile.
+        name: rewriteSegment
+        params: |2
+
+          	s *segment, last bool, first, below uint64,
+          	edit editFunc,
+        recv: l *Log
+        results: bool, error
+      - doc: |-
+          writeTmp writes out, zero-filled to size, into segment n's .tmp and syncs
+          it. A failure removes the .tmp and leaves the log as it was.
+        name: writeTmp
+        params: n uint64, out []byte, size int64
+        recv: l *Log
+        results: error
+      - doc: |-
+          publishRewrite renames segment s's .tmp over it, reopens it, moves the
+          entries it holds to where the rewrite put them and syncs the directory.
+          The old file is closed before the rename: Windows refuses to replace a
+          file a handle holds open. A rename refused leaves the old segment, which
+          is reopened; anything after it is final.
+        name: publishRewrite
+        params: s *segment, out []byte, size int64, last bool, moved []rewritten
+        recv: l *Log
+        results: error
+      - doc: segPath is the path of segment n's file.
+        name: segPath
+        params: n uint64
+        recv: l *Log
+        results: string
+      - doc: tmpPath is the path of segment n's file before its publication.
+        name: tmpPath
+        params: n uint64
+        recv: l *Log
+        results: string
+      - doc: |-
+          createSegment publishes segment n opening with cp: a zero-filled .tmp,
+          the checkpoint, a sync, the rename, a sync of the directory. size is the
+          segment's size.
+        name: createSegment
+        params: n uint64, size int64, cp *checkpoint
+        recv: l *Log
+        results: error
+      - doc: |-
+          segmentFile is the zero-filled .tmp of segment n at size: the prepared
+          one when it is that segment at that size, else one created and zeroed
+          now, on the writer's path.
+        name: segmentFile
+        params: n uint64, size int64, tmp string
+        recv: l *Log
+        results: "*os.File, error"
+      - doc: |-
+          prepare launches the goroutine that zero-fills segment n off the
+          writer's path. It ends on its own once the .tmp is zeroed or has failed,
+          closing done; takePrepared and Close only ever wait on it.
+        name: prepare
+        params: n uint64, size int64
+        recv: l *Log
+      - doc: |-
+          takePrepared waits for the prepared segment n, when it is the one wanted
+          at that size; nil means prepare it now.
+        name: takePrepared
+        params: n uint64, size int64
+        recv: l *Log
+        results: "*os.File"
+      - doc: |-
+          rotate seals the current segment in its own synced batch, then publishes
+          the next one. It runs between batches only. need is the size of the
+          batch that did not fit.
+        name: rotate
+        params: need int
+        recv: l *Log
+        results: error
+      - doc: |-
+          publishNext publishes the segment after the current one, whose seal is
+          durable, from the durable state and the next batch number. A batch
+          larger than a segment gets a segment of its own size.
+        name: publishNext
+        params: need int
+        recv: l *Log
+        results: error
+      - doc: |-
+          dropSegmentsLocked unlinks the prefix of sealed segments that hold only
+          records below the first index, then syncs the directory. It runs after a
+          sync, so the drop record that justifies it is durable first.
+        name: dropSegmentsLocked
+        recv: l *Log
+        results: error
+    name: Log
+  - doc: |-
+      prepared is the next segment, zero-filled in the background as a .tmp
+      while the current one fills. It is never published early: recovery
+      deletes any .tmp, and its checkpoint is written at activation.
+    fields:
+      - name: "n"
+        type: uint64
+      - name: size
+        type: int64
+      - name: done
+        type: chan struct{}
+      - name: f
+        type: "*os.File"
+      - name: err
+        type: error
+    kind: struct
+    name: prepared
+  - doc: record is one decoded record; data aliases the bytes it was parsed from.
+    fields:
+      - name: kind
+        type: uint8
+      - name: tag
+        type: uint8
+      - name: end
+        type: bool
+      - name: batch
+        type: uint64
+      - name: index
+        type: uint64
+      - name: data
+        type: "[]byte"
+      - name: length
+        type: int
+    kind: struct
+    name: record
+  - doc: |-
+      checkpoint is the record that opens every segment: the index its first
+      entry takes, the log's first index when it was activated, and the batch
+      sequence number the segment starts with.
+    fields:
+      - name: next
+        type: uint64
+      - name: first
+        type: uint64
+      - name: nextBatch
+        type: uint64
+    kind: struct
+    methods:
+      - doc: |-
+          encode is the checkpoint record's payload: three little-endian uint64s,
+          in the order decodeCheckpoint reads them back.
+        name: encode
+        recv: c checkpoint
+        results: "[]byte"
+    name: checkpoint
+  - doc: |-
+      scanRec is what recovery keeps of a record past the scan: everything but
+      its payload.
+    fields:
+      - name: "off"
+        type: int64
+      - name: batch
+        type: uint64
+      - name: index
+        type: uint64
+      - name: length
+        type: uint32
+      - name: size
+        type: uint32
+      - name: kind
+        type: uint8
+      - name: tag
+        type: uint8
+      - name: end
+        type: bool
+    kind: struct
+    name: scanRec
+  - doc: scanned is one segment as recovery read it, before anything is changed.
+    fields:
+      - name: "n"
+        type: uint64
+      - name: size
+        type: int64
+      - doc: |-
+          data is the bytes read of the last segment, nil for the others: the
+          whole file, unless it is sealed and was read up to its seal only.
+        name: data
+        type: "[]byte"
+      - name: recs
+        type: "[]scanRec"
+      - doc: |-
+          cp is the checkpoint the segment opens with; cpOK is false when its
+          first record holds no checkpoint payload.
+        name: cp
+        type: checkpoint
+      - name: cpOK
+        type: bool
+      - doc: |-
+          layout is the VersionUnsupported of the segment's first record of a
+          kind this build does not read, nil when there is none.
+        name: layout
+        type: error
+      - doc: |-
+          seqBreak is the offset of the first record that does not continue
+          the batch sequence of the log read before it, -1 when none.
+        name: seqBreak
+        type: int64
+      - name: hole
+        type: int64
+      - name: sealed
+        type: bool
+      - name: trimmed
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          note appends to recs the scanRec of r, parsed at offset off, and judges
+          what only its payload tells: the checkpoint the segment opens with, and a
+          record of a kind this build does not read.
+        name: note
+        params: recs []scanRec, r *record, off int64
+        recv: s *scanned
+        results: "[]scanRec"
+      - doc: |-
+          parse appends to recs the records of s read through reader, up to the
+          first hole or through the seal, and returns them.
+        name: parse
+        params: reader *segRead, recs []scanRec
+        recv: s *scanned
+        results: "[]scanRec, error"
+      - doc: |-
+          holeAt records the hole at off once the rest of the file is read, which
+          is where it is classified. A record a newer build wrote, here or past the
+          hole, stops the open before anything is classified or changed.
+        name: holeAt
+        params: reader *segRead, off int64
+        recv: s *scanned
+        results: error
+    name: scanned
+  - doc: |-
+      scanBufs is what the scan reuses from one segment to the next: the
+      buffer a segment is read into and the records parsed from it. chunk is
+      how far ahead it reads, scanChunk when zero; only a test sets it.
+    fields:
+      - name: b
+        type: "[]byte"
+      - name: recs
+        type: "[]scanRec"
+      - name: chunk
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          reader is the read of segment file f into sb's buffer, grown when the
+          file is larger than any before it. A file larger than an int holds is
+          refused before the buffer is made.
+        name: reader
+        params: f statReader
+        recv: sb *scanBufs
+        results: "*segRead, error"
+    name: scanBufs
+  - doc: |-
+      statReader is a segment file as the scan sees it: something to read and
+      to size.
+    kind: named
+    name: statReader
+    underlying: |-
+      interface {
+      	io.Reader
+      	Stat() (os.FileInfo, error)
+      }
+  - doc: |-
+      segRead is a segment file read in order into b, the file's size, of
+      which the first n bytes are read, chunk at least at a time. What lies
+      past n is an earlier segment's bytes, and no parse looks at it.
+    fields:
+      - name: f
+        type: io.Reader
+      - name: b
+        type: "[]byte"
+      - name: "n"
+        type: int64
+      - name: chunk
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          record reads enough for parseRecord to judge the record at off on
+          b[off:n] as it would on the whole file.
+        name: record
+        params: off int64
+        recv: r *segRead
+        results: error
+      - doc: |-
+          upTo reads the file up to end, at most its size, a chunk at least at a
+          time.
+        name: upTo
+        params: end int64
+        recv: r *segRead
+        results: error
+    name: segRead
+  - doc: |-
+      batchSeq follows the batch sequence across the log, segment after
+      segment.
+    fields:
+      - name: prev
+        type: scanRec
+      - name: any
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          follow returns the offset of the first record of recs that does not
+          continue the sequence read so far, -1 when every one does.
+        name: follow
+        params: recs []scanRec
+        recv: q *batchSeq
+        results: int64
+    name: batchSeq
+  - doc: |-
+      rewritten is one entry a segment rewrite moved: its index and where it now
+      lies.
+    fields:
+      - name: index
+        type: uint64
+      - name: at
+        type: slot
+    kind: struct
+    name: rewritten
+  - doc: |-
+      editFunc is the edit a rewrite offers every retained record: it returns
+      the kind and payload the record takes and true, or false to keep it.
+    kind: named
+    name: editFunc
+    underlying: func(index uint64, kind uint8, payload []byte) (uint8, []byte, bool)
+  - doc: |-
+      rebuildPlan is what rebuildSegment is asked to do: parse data, the bytes
+      of segment n, and offer every entry from first up to below excluded to
+      edit. last says data is the end of the log, where a record that does not
+      parse is the torn tail and not damage.
+    fields:
+      - name: data
+        type: "[]byte"
+      - name: edit
+        type: editFunc
+      - name: "n"
+        type: uint64
+      - name: first
+        type: uint64
+      - name: below
+        type: uint64
+      - name: last
+        type: bool
+    kind: struct
+    name: rebuildPlan
+  - doc: |-
+      rebuilt is the outcome of rebuildSegment: the new bytes of the segment,
+      where each retained entry now lies, and whether edit changed any.
+    fields:
+      - name: data
+        type: "[]byte"
+      - name: moved
+        type: "[]rewritten"
+      - name: changed
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          encode appends record r to the new bytes, after offering it to the edit
+          when it is an entry in the range, and notes where an entry now lies. It
+          reports whether r was the seal, which ends the segment.
+        name: encode
+        params: p *rebuildPlan, r *record
+        recv: b *rebuilt
+        results: bool
+    name: rebuilt
+  - doc: writeSyncer is the part of a segment file fillTmp writes through.
+    kind: named
+    name: writeSyncer
+    underlying: |-
+      interface {
+      	io.WriterAt
+      	Sync() error
+      }
+  - doc: segment is one published segment file, open for reading and writing.
+    fields:
+      - name: "n"
+        type: uint64
+      - name: f
+        type: "*os.File"
+      - doc: size is the file's fixed size.
+        name: size
+        type: int64
+      - doc: "start is the index its first entry takes: its checkpoint's next."
+        name: start
+        type: uint64
+    kind: struct
+    name: segment
+vars:
+  - doc: castagnoli is the CRC-32C table every record's crc is computed with.
+    items:
+      - name: castagnoli
+        value: crc32.MakeTable(crc32.Castagnoli)
+    name: castagnoli

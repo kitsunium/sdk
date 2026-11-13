@@ -1,0 +1,36 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: bareIdent
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == "" || len(s) > maxTableName || (s[0] >= '0' && s[0] <= '9')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!identByte(s[i])"
+          key: i
+          range: len(s)
+      - return: "true"
+  - of: positionArgs
+    steps:
+      - bind: nums
+        eval: "[6]uint64{li.Epoch, li.PredecessorEpoch, li.KeptIndex, li.AdoptedFrom, pos.Term, pos.Index}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - panic: origin(coreconsensus.StateMachineFailed, errs.String("why", "a position past 2^63"))
+                when: x > math.MaxInt64
+          key: _
+          range: nums
+          value: x
+      - return: |-
+          []any{
+          		li.Cluster.String(), int64(nums[0]), li.Predecessor.String(), int64(nums[1]),
+          		int64(nums[2]), int64(nums[3]), int64(nums[4]), int64(nums[5]),
+          	}

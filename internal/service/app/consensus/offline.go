@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/hex"
@@ -62,6 +63,26 @@ const (
 	// whyRepeatedID is the reason Recover and RestoreSnapshot refuse two
 	// members under one NodeID.
 	whyRepeatedID = "two members under one id"
+	// whyStrandedExit ends the reason of a truncation refused because the
+	// configuration it keeps strands the node: what it would come to, and
+	// the way out (#758, #763).
+	whyStrandedExit = "the node would ask and admit only removed members and stay silent for good; clear the quarantine with WipeAndRejoin, " +
+		"then Remove this node's ID on the cluster, after a Promote of one more voter when MinVoters refuses the removal, " +
+		"so that its slot takes a JOIN again (R8-11)"
+	// whyNoAsk is the reason a member's TruncateAndStaySilent is refused
+	// when it was given no means to ask a live member (#763).
+	whyNoAsk = "a member's truncation reads the configuration the cluster runs with from a live member, and no means to ask one was given: " +
+		"pass QuarantineOptions.Ask, a TCPTransport's AskMembership built with this node's certificate, to ClearQuarantineWith"
+	// whyNoLive is the reason a member's TruncateAndStaySilent is refused
+	// when no member answered (#763).
+	whyNoLive = "no live member answered: the configuration the cluster runs with cannot be read, and a change made while this node was down " +
+		"may have left none of the members it keeps; start a member this node's log names and clear again, or clear the quarantine with WipeAndRejoin, " +
+		"then Remove this node's ID on the cluster and Init under a new one (R8-11)"
+	// whyNotListed is the reason a member's TruncateAndStaySilent is refused
+	// when the configuration a live member runs with no longer lists the
+	// node (#763).
+	whyNotListed = "the configuration the cluster runs with, read from a live member, no longer lists this node: " +
+		"clear the quarantine with WipeAndRejoin and Init under a new NodeID (R8-11)"
 )
 
 // offlineBatchBytes and offlineBatchEntries bound one read of the log by an
@@ -125,7 +146,7 @@ func wipeMarker(dir string) error {
 // operation it records runs. Its Close is part of the write: a failure there
 // is a storage failure like the sync's, never a detail dropped at return.
 func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
-	f, err := os.OpenFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := d.d.fs().openFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return storageFailed("audit", err)
 	}
@@ -142,7 +163,7 @@ func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
 	}
 	// The first line creates the file: its entry is durable only once the
 	// directory is synced (#422).
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("audit", err)
 	}
 	return nil
@@ -306,9 +327,36 @@ func stopMarkers(dir string) ([]string, error) {
 // QuarantineExit is one of the two exits ClearQuarantine allows (R3-09).
 type QuarantineExit uint8
 
+// QuarantineOptions are what a member's TruncateAndStaySilent needs beyond
+// ClearQuarantine's arguments: the means to read the configuration the
+// cluster runs with from a live member (#763).
+type QuarantineOptions struct {
+	// Ask reads, from member m, the configuration it runs with, and fails
+	// when m does not answer. It reaches m at the address, and authenticates
+	// it under the key, that the node's own log names for it: a
+	// TCPTransport's AskMembership, built with this node's own certificate,
+	// or a MemoryTransport's in tests.
+	Ask func(ctx context.Context, m coreconsensus.MemberValue) (coreconsensus.MembershipValue, error)
+}
+
 // ClearQuarantine clears a quarantined, or stopped, directory through one of
 // the two exits. There is no third exit that keeps the damaged node voting.
+// It gives TruncateAndStaySilent no means to ask a live member, so on a
+// member's directory that exit is refused: ClearQuarantineWith takes them.
 func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) error {
+	return ClearQuarantineWith(context.Background(), d, exit, op, nil)
+}
+
+// ClearQuarantineWith is ClearQuarantine with opt's means to read, from a
+// live member, the configuration the cluster runs with. A member's
+// TruncateAndStaySilent asks every other member its log names, takes the
+// newest configuration answered, and is refused, its log and silence
+// condition untouched (only the audit line records the attempt), when no
+// member answers, when that configuration no longer lists this node, or
+// when it lists none of the members the truncation keeps: the node would
+// restart silent, asking and admitting only members that have left, and
+// never vote again (#763). ctx bounds the asking.
+func ClearQuarantineWith(ctx context.Context, d DataDir, exit QuarantineExit, op coreconsensus.Operator, opt *QuarantineOptions) error {
 	if err := d.offline(); err != nil {
 		return err
 	}
@@ -333,7 +381,7 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 		if err := d.audit(op, "clear-quarantine truncate-and-stay-silent"); err != nil {
 			return err
 		}
-		return d.truncateAndStaySilent()
+		return d.truncateAndStaySilent(ctx, opt)
 	default:
 		return misconfigured("exit", "unknown")
 	}
@@ -372,7 +420,7 @@ func (d DataDir) wipeAndRejoin(op coreconsensus.Operator) error {
 
 // markWipe publishes STOP-WIPE, durably, before the wipe removes anything.
 func (d DataDir) markWipe() error {
-	if err := writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail)); err != nil {
+	if err := d.d.fs().writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail)); err != nil {
 		return storageFailed("wipe marker", err)
 	}
 	return d.wipeStep("marker")
@@ -382,10 +430,10 @@ func (d DataDir) markWipe() error {
 // removes is durably gone: until then nothing tells a directory this wipe
 // has not finished from the old member's.
 func (d DataDir) clearWipeMarker() error {
-	if err := os.Remove(filepath.Join(d.d.dir, markerWipe)); err != nil {
+	if err := d.d.fs().remove(filepath.Join(d.d.dir, markerWipe)); err != nil {
 		return storageFailed("wipe marker", err)
 	}
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("wipe", err)
 	}
 	return d.wipeStep("done")
@@ -405,14 +453,14 @@ func (d DataDir) wipeStep(step string) error {
 // the stamp the last trace of the old member but STOP-WIPE.
 func (d DataDir) removeStores() error {
 	for _, name := range []string{"log", "snap"} {
-		if err := os.RemoveAll(filepath.Join(d.d.dir, name)); err != nil {
+		if err := d.d.fs().removeAll(filepath.Join(d.d.dir, name)); err != nil {
 			return storageFailed("wipe", err)
 		}
 		if err := d.wipeStep(name); err != nil {
 			return err
 		}
 	}
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("wipe", err)
 	}
 	return nil
@@ -430,7 +478,7 @@ func (d DataDir) removeStampAndMarkers() error {
 	}
 	for _, e := range ents {
 		if wipedWithStamp(e.Name()) {
-			if err := os.Remove(filepath.Join(d.d.dir, e.Name())); err != nil {
+			if err := d.d.fs().remove(filepath.Join(d.d.dir, e.Name())); err != nil {
 				return storageFailed("wipe", err)
 			}
 		}
@@ -438,7 +486,7 @@ func (d DataDir) removeStampAndMarkers() error {
 	if err := d.removeBootMarker(); err != nil {
 		return err
 	}
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("wipe", err)
 	}
 	return d.wipeStep("stamp")
@@ -462,7 +510,7 @@ func wipedWithStamp(name string) bool {
 // exists only after a storage failure of this boot; one that cannot be
 // removed would refuse the next start anyway, so the wipe says so now.
 func (d DataDir) removeBootMarker() error {
-	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := d.d.fs().remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return storageFailed("wipe", err)
 	}
 	return nil
@@ -880,7 +928,7 @@ func (d DataDir) finishRecover(newCluster coreconsensus.ClusterID, opt *RecoverO
 func (d DataDir) writeRecoverIntent(in *recoverIntent) error {
 	body := fmt.Sprintf("cluster=%s\nkept=%d\nRecover to cluster %s was interrupted: run Recover again to cluster %s to complete it\n",
 		in.cluster, in.kept, in.cluster, in.cluster)
-	if err := writeFileSync(filepath.Join(d.d.dir, markerRecover), []byte(body)); err != nil {
+	if err := d.d.fs().writeFileSync(filepath.Join(d.d.dir, markerRecover), []byte(body)); err != nil {
 		return storageFailed("recover marker", err)
 	}
 	return nil
@@ -913,10 +961,10 @@ func (d DataDir) readRecoverIntent() (*recoverIntent, error) {
 // clearRecoverIntent removes STOP-RECOVER once the new stamp is durable,
 // and syncs the directory, so the removal is as durable as the stamp.
 func (d DataDir) clearRecoverIntent() error {
-	if err := os.Remove(filepath.Join(d.d.dir, markerRecover)); err != nil {
+	if err := d.d.fs().remove(filepath.Join(d.d.dir, markerRecover)); err != nil {
 		return storageFailed("recover marker", err)
 	}
-	if err := syncDir(d.d.dir); err != nil {
+	if err := d.d.fs().syncDir(d.d.dir); err != nil {
 		return storageFailed("recover marker", err)
 	}
 	return nil
@@ -1541,7 +1589,7 @@ func (l *fileLog) resetTo(index, term uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.add(&record{kind: recCompact, batch: l.batch, index: index, term: term})
-	l.slots = nil
+	l.clearIndex()
 	l.first, l.prevTerm = index+1, term
 	l.compact, l.compactTerm = index, term
 	return nil
@@ -1576,7 +1624,13 @@ func (l *fileLog) resetTo(index, term uint64) error {
 // the cluster, after one more voter is promoted when MinVoters refuses the
 // removal: until then the old ID holds the slot, and the JOIN is refused
 // (R8-11).
-func (d DataDir) truncateAndStaySilent() error {
+//
+// The log holds no change committed while the node was down: a member's
+// truncation also reads the configuration the cluster runs with from a live
+// member (liveRefusal, #763), and is refused the same way when it lists none
+// of the kept configuration's other members, and with its own reason when it
+// no longer lists this node or when no member answers.
+func (d DataDir) truncateAndStaySilent(ctx context.Context, opt *QuarantineOptions) error {
 	segN, off, err := d.quarantinePoint()
 	if err != nil {
 		return err
@@ -1589,15 +1643,15 @@ func (d DataDir) truncateAndStaySilent() error {
 	if !keeps {
 		return recoverRefused("the truncation leaves no configuration: the node would admit and ask no member; clear the quarantine with WipeAndRejoin")
 	}
-	strands, err := d.truncationStrands(logDir, segN, off)
+	strands, seen, err := d.truncationStrands(logDir, segN, off)
 	if err != nil {
 		return err
 	}
 	if strands {
-		return recoverRefused("the truncation keeps a configuration none of whose other members the log's newest configuration still lists: " +
-			"the node would ask and admit only removed members and stay silent for good; clear the quarantine with WipeAndRejoin, " +
-			"then Remove this node's ID on the cluster, after a Promote of one more voter when MinVoters refuses the removal, " +
-			"so that its slot takes a JOIN again (R8-11)")
+		return recoverRefused("the truncation keeps a configuration none of whose other members the log's newest configuration still lists: " + whyStrandedExit)
+	}
+	if err := liveRefusal(ctx, seen, opt); err != nil {
+		return err
 	}
 	maxTerm, err := logMaxTerm(logDir)
 	if err != nil {
@@ -1612,13 +1666,13 @@ func (d DataDir) truncateAndStaySilent() error {
 	// crash in between leaves a silent node, never a voting one. Its index
 	// is filled in once the truncated log is read (0 means "the end of the
 	// log").
-	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0)); err != nil {
+	if err := d.d.fs().writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0)); err != nil {
 		return storageFailed("silence condition", err)
 	}
-	if err := truncateAtDamage(logDir, segN, off); err != nil {
+	if err := d.d.fs().truncateAtDamage(logDir, segN, off); err != nil {
 		return err
 	}
-	if err := syncDir(logDir); err != nil {
+	if err := d.d.fs().syncDir(logDir); err != nil {
 		return storageFailed("truncate", err)
 	}
 	if d.d.afterTruncate != nil {
@@ -1626,7 +1680,7 @@ func (d DataDir) truncateAndStaySilent() error {
 			return err
 		}
 	}
-	if err := os.Remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
+	if err := d.d.fs().remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
 		return storageFailed("clear marker", err)
 	}
 	return d.reopenSilenced(maxTerm)
@@ -1830,24 +1884,26 @@ func holdsConfiguration(b []byte) bool {
 // entry the damage itself took cannot be read: when no configuration entry
 // past the kept one can be read there, nothing is known, and the truncation
 // is taken. What the reopen keeps is cut as truncationKeepsMembers cuts it
-// (reopenKeeps, #745).
-func (d DataDir) truncationStrands(logDir string, segN uint64, off int64) (bool, error) {
+// (reopenKeeps, #745). It returns what it read, which liveRefusal judges
+// against a live member's configuration, nil for a directory that is not a
+// member's.
+func (d DataDir) truncationStrands(logDir string, segN uint64, off int64) (bool, *truncationConfs, error) {
 	if d.d.log.stamp.State != coreconsensus.StampMember {
-		return false, nil
+		return false, nil, nil
 	}
 	metas, err := d.d.snaps.List()
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	segs, err := logSegments(logDir)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	seen := newTruncationConfs(d.d.log.stamp.ID, metas)
 	for _, n := range slices.Sorted(maps.Keys(segs)) {
 		b, err := os.ReadFile(segs[n])
 		if err != nil {
-			return false, storageFailed("read segment", err)
+			return false, nil, storageFailed("read segment", err)
 		}
 		switch {
 		case n < segN:
@@ -1862,7 +1918,7 @@ func (d DataDir) truncationStrands(logDir string, segN uint64, off int64) (bool,
 			seen.read(b)
 		}
 	}
-	return seen.strands(), nil
+	return seen.strands(), seen, nil
 }
 
 // truncationConfs follows a member's configurations through its log, in
@@ -2005,9 +2061,128 @@ func stranded(self coreconsensus.NodeID, kept, newest *coreconsensus.MembershipV
 	})
 }
 
+// liveRefusal is the refusal of a member's truncation that the
+// configuration the cluster runs with strands, nil when it does not (#763).
+// seen is what truncationStrands read, nil for a directory that is not a
+// member's, which needs no configuration. The log holds no change committed
+// while the node was down: a voter that #603's guard still judged on the
+// configuration the leader last heard it at, a vote window after it failed,
+// had the last of the members it keeps removed then, and its truncation,
+// which the log's newest configuration let through, brought it back silent
+// over members that had all left.
+//
+// Every other member the configurations read name is asked, under the
+// newest record of it, through opt.Ask (askNewest); the newest
+// configuration answered is judged as truncationConfs judges the log's
+// newest (stranded). Without opt.Ask, or with no answer, the truncation is
+// refused: it is never taken blind.
+//
+// It refuses at best: a member that lags, or a partitioned one, answers a
+// configuration older than the cluster's, and the newest answered is taken.
+func liveRefusal(ctx context.Context, seen *truncationConfs, opt *QuarantineOptions) error {
+	if seen == nil || !seen.keeps {
+		// No configuration kept is #723's refusal, judged before.
+		return nil
+	}
+	if opt == nil || opt.Ask == nil {
+		return recoverRefused(whyNoAsk)
+	}
+	peers := seen.peers()
+	live, ok := askNewest(ctx, opt.Ask, peers)
+	switch {
+	case !ok:
+		return origin(coreconsensus.RecoverRefused, errs.String("why", whyNoLive), errs.Int("asked", len(peers)))
+	case !slices.ContainsFunc(live.Members, func(m coreconsensus.MemberValue) bool { return m.ID == seen.self }):
+		return recoverRefused(whyNotListed)
+	case stranded(seen.self, &seen.kept, &live):
+		return recoverRefused("the truncation keeps a configuration none of whose other members the configuration the cluster runs with, " +
+			"read from a live member, still lists: " + whyStrandedExit)
+	}
+	return nil
+}
+
+// askNewest asks each of peers, in turn, for the configuration it runs
+// with, and returns the one of the highest index; ok is false when none
+// answered. An answer that does not list the member asked, under the key
+// it was asked under, is not that member's and is set aside. It stops
+// asking once ctx is done.
+func askNewest(ctx context.Context, ask func(context.Context, coreconsensus.MemberValue) (coreconsensus.MembershipValue, error), peers []coreconsensus.MemberValue) (coreconsensus.MembershipValue, bool) {
+	var newest coreconsensus.MembershipValue
+	found := false
+	for i := range peers {
+		if ctx.Err() != nil {
+			break
+		}
+		m, err := ask(ctx, peers[i])
+		if err != nil || !listsUnder(&m, &peers[i]) {
+			continue
+		}
+		if !found || m.Index > newest.Index {
+			newest, found = m, true
+		}
+	}
+	return newest, found
+}
+
+// listsUnder reports whether m lists member p under p's key.
+func listsUnder(m *coreconsensus.MembershipValue, p *coreconsensus.MemberValue) bool {
+	x, ok := m.Member(p.ID)
+	return ok && x.SPKI == p.SPKI
+}
+
+// peers is every member other than self that the configurations read name,
+// each under its newest record: the members a member's truncation asks for
+// the configuration the cluster runs with. The configurations are taken
+// newest first: those logged past the snapshot, the snapshot's, those
+// logged below it, then the kept one. A member whose newest record carries
+// the zero key DenyPin leaves is not asked, under that key or an older one:
+// no member admits it, and the key withdrawn would authenticate it.
+func (c *truncationConfs) peers() []coreconsensus.MemberValue {
+	p := peerSet{seen: map[coreconsensus.NodeID]bool{c.self: true}}
+	for i := len(c.logged) - 1; i >= 0; i-- {
+		if c.logged[i].index > c.snapAt {
+			p.add(&c.logged[i].m)
+		}
+	}
+	if c.snap != nil {
+		p.add(c.snap)
+	}
+	for i := len(c.logged) - 1; i >= 0; i-- {
+		if c.logged[i].index <= c.snapAt {
+			p.add(&c.logged[i].m)
+		}
+	}
+	// The kept configuration, which an entry of the dropped part may have
+	// overwritten in the log, is the one the node restarts with.
+	p.add(&c.kept)
+	return p.out
+}
+
+// peerSet gathers members once each, under the first record met.
+type peerSet struct {
+	seen map[coreconsensus.NodeID]bool
+	out  []coreconsensus.MemberValue
+}
+
+// add adds every member of m not met yet, unless its record carries the
+// zero key; either way the member is met, and an older record of it is
+// never taken.
+func (p *peerSet) add(m *coreconsensus.MembershipValue) {
+	for i := range m.Members {
+		x := &m.Members[i]
+		if p.seen[x.ID] {
+			continue
+		}
+		p.seen[x.ID] = true
+		if !isZeroDigest(x.SPKI) {
+			p.out = append(p.out, *x)
+		}
+	}
+}
+
 // truncateAtDamage deletes every segment after segment segN, and segN too
 // when the damage is at its start, and zeroes segN from off otherwise.
-func truncateAtDamage(logDir string, segN uint64, off int64) error {
+func (d *diskFS) truncateAtDamage(logDir string, segN uint64, off int64) error {
 	segs, err := logSegments(logDir)
 	if err != nil {
 		return err
@@ -2017,7 +2192,7 @@ func truncateAtDamage(logDir string, segN uint64, off int64) error {
 		if err != nil {
 			return storageFailed("read segment", err)
 		}
-		if err := truncateSegment(path, n, segN, off, st.Size()); err != nil {
+		if err := d.truncateSegment(path, n, segN, off, st.Size()); err != nil {
 			return err
 		}
 	}
@@ -2057,14 +2232,14 @@ func recordTerm(r *record) uint64 {
 // truncateSegment applies the truncation at (segN, off) to segment n of
 // size bytes at path: deleted when it lies wholly past the damage, zeroed
 // from off when the damage is inside it, untouched before it.
-func truncateSegment(path string, n, segN uint64, off, size int64) error {
+func (d *diskFS) truncateSegment(path string, n, segN uint64, off, size int64) error {
 	switch {
 	case n > segN || (n == segN && off == 0):
-		if err := os.Remove(path); err != nil {
+		if err := d.remove(path); err != nil {
 			return storageFailed("truncate", err)
 		}
 	case n == segN:
-		return zeroSegmentFrom(path, off, size)
+		return d.zeroSegmentFrom(path, off, size)
 	}
 	return nil
 }
@@ -2072,8 +2247,8 @@ func truncateSegment(path string, n, segN uint64, off, size int64) error {
 // zeroSegmentFrom zeroes and syncs the segment at path from off to size.
 // Its Close is part of the write: a failure there is reported like the
 // zeroing's.
-func zeroSegmentFrom(path string, off, size int64) (err error) {
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
+func (d *diskFS) zeroSegmentFrom(path string, off, size int64) (err error) {
+	f, err := d.openFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return storageFailed("truncate", err)
 	}
@@ -2082,7 +2257,7 @@ func zeroSegmentFrom(path string, off, size int64) (err error) {
 			err = storageFailed("truncate", cerr)
 		}
 	}()
-	if err := zeroFrom(f, off, size); err != nil {
+	if err := d.zeroFrom(f, off, size); err != nil {
 		return storageFailed("truncate", err)
 	}
 	return nil
@@ -2104,10 +2279,10 @@ func (d DataDir) reopenSilenced(maxTerm uint64) error {
 		return err
 	}
 	_, last := d.d.log.Bounds()
-	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, last+1)); err != nil {
+	if err := d.d.fs().writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, last+1)); err != nil {
 		return storageFailed("silence condition", err)
 	}
-	return syncDir(d.d.dir)
+	return d.d.fs().syncDir(d.d.dir)
 }
 
 // silence reads the persisted silence condition, if any. An index of 0, a
@@ -2134,7 +2309,7 @@ func (l *fileLog) silence() (term, index uint64, unreadable, err error) {
 	term, index = binary.LittleEndian.Uint64(b), binary.LittleEndian.Uint64(b[8:])
 	if index == 0 {
 		index = last + 1
-		if err := writeFileSync(filepath.Join(l.dir, fileSilent), silenceRecord(term, index)); err != nil {
+		if err := l.fs().writeFileSync(filepath.Join(l.dir, fileSilent), silenceRecord(term, index)); err != nil {
 			return 0, 0, nil, err
 		}
 	}
@@ -2162,13 +2337,13 @@ func (l *fileLog) lowerSilence(index uint64) error {
 	if cur == 0 || index == 0 || index >= cur {
 		return nil
 	}
-	return writeFileSync(path, silenceRecord(term, index))
+	return l.fs().writeFileSync(path, silenceRecord(term, index))
 }
 
 // endSilence removes the silence condition durably.
 func (l *fileLog) endSilence() error {
-	if err := os.Remove(filepath.Join(l.dir, fileSilent)); err != nil && !os.IsNotExist(err) {
+	if err := l.fs().remove(filepath.Join(l.dir, fileSilent)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return syncDir(l.dir)
+	return l.fs().syncDir(l.dir)
 }

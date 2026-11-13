@@ -59,7 +59,9 @@ type subsystem struct {
 // set plug.Mail — a mailer whose outbox is on a database needs the queues'
 // too, the row above —; the jobs' since step 7, linked when
 // framework/app/jobs set plug.Jobs; the OTLP export's since issue #483,
-// linked when framework/app/otlp set plug.OTLP. A test sets
+// linked when framework/app/otlp set plug.OTLP; the streams' since issue
+// #826, linked when framework/app/stream set plug.Streams, for a streamed
+// topic and its subscriptions — which need no queue. A test sets
 // the hooks as a program that does not import the package would see them.
 var subsystems = []subsystem{{
 	name: "store", pkg: storePackage,
@@ -67,8 +69,9 @@ var subsystems = []subsystem{{
 	linked: storesLinked,
 }, {
 	name: "queue", pkg: queuePackage,
-	kinds: []model.NodeKind{model.KindTopic, model.KindSubscription},
 	needs: needsQueue, app: otlpOnADatabase, linked: queuesLinked,
+}, {
+	name: "stream", pkg: streamPackage, needs: func(_ *App, n node) bool { return needsStream(n) }, linked: streamsLinked,
 }, {
 	name: "workflow", pkg: workflowPackage,
 	kinds: []model.NodeKind{model.KindWorkflow}, linked: workflowsLinked,
@@ -82,10 +85,20 @@ var subsystems = []subsystem{{
 	name: "otlp", pkg: otlpPackage, app: otlpDeclared, linked: otlpLinked,
 }}
 
-// needsQueue reports whether n needs the queue subsystem beside the topics
-// and the subscriptions — a watch is one —: a queued command, and a mailer
-// whose outbox is on a database, the queues' SQL broker (ADR 0178 C1).
+// needsQueue reports whether n needs the queue subsystem: a topic and a
+// subscription — a watch is one — but a streamed topic's, whose stream the
+// stream subsystem keeps (issue #826), a queued command, and a mailer whose
+// outbox is on a database, the queues' SQL broker (ADR 0178 C1).
 func needsQueue(a *App, n node) bool {
+	if s, ok := n.(streameder); ok && s.streamed() {
+		return false
+	}
+	switch n.base().kind {
+	case model.KindTopic, model.KindSubscription:
+		return true
+	default:
+		// Every other kind needs a queue only as the switch below says.
+	}
 	switch q := n.(type) {
 	case *Mailer:
 		return queueWhere(a, &q.nodeBase) == "sql"

@@ -164,6 +164,11 @@ func (s *Store[T]) commitBatch(ops []batchOp) (applied bool, err error) {
 		//: DocumentExists, DocumentNotFound or UniqueKeyTaken.
 		return false, planErr
 	}
+	//: the change records first, one per key the batch writes.
+	if feedErr := s.feedBatch(plan); feedErr != nil {
+		//: ChangeFeedFailed: nothing of this batch changed.
+		return false, feedErr
+	}
 	groupErr := s.publishGroup(plan)
 	//: the group entry was not published: nothing changed anywhere.
 	if groupErr != nil && !kerrs.HasCode(groupErr, coredocstore.CodeWriteUnconfirmed) {

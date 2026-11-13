@@ -51,10 +51,10 @@ func (l *fileLog) probeRuntimeDir() error {
 	probe := l.runtimeMarker("PROBE")
 	err := os.MkdirAll(l.runDir, 0o700)
 	if err == nil {
-		err = writeFileSync(probe, nil)
+		err = l.fs().writeFileSync(probe, nil)
 	}
 	if err == nil {
-		err = os.Remove(probe)
+		err = l.fs().remove(probe)
 	}
 	if err != nil {
 		return misconfigured("RuntimeDir", fmt.Sprintf("the boot-scoped marker directory %s is not writable: %v", l.runDir, err))

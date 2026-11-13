@@ -41,8 +41,13 @@ const (
 // Version 2 adds the snapshot metadata's checksum, the admin payload's
 // Origin and the log identity's AdoptedFrom, each written only once the
 // committed cluster version is 2 (lot S3). Version 3 adds the retired keys
-// of the configuration, written only once it is 3 (#648).
-const ProtocolMax uint32 = 3
+// of the configuration, written only once it is 3 (#648). Version 4 adds
+// the leader's last index to every heartbeat, which a follower reads
+// beside FlagProtocol4 at any cluster version (#919), the trace context of
+// a forward (#1115), and the client sessions, their entry kind and the
+// metadata that records them (#918), those two written only once the
+// committed cluster version is 4.
+const ProtocolMax uint32 = 4
 
 // Protocol2 is the protocol version whose formats a node writes once the
 // cluster version is raised to it.
@@ -52,6 +57,24 @@ const Protocol2 uint32 = 2
 // key of every member removed, and of every pin denied, and refuses it to
 // any new member (#648).
 const Protocol3 uint32 = 3
+
+// Protocol4 is the protocol version whose heartbeats carry the leader's
+// last index, announced by FlagProtocol4 (#919), and from which a forward
+// carries its trace context (#1115), a session command is appended and a
+// snapshot records the client sessions (#918).
+const Protocol4 uint32 = 4
+
+// MaxSessions is how many client sessions the cluster keeps: opening one
+// more evicts the one whose last entry is the oldest. It is part of
+// protocol version 4, the same on every node, since the eviction is
+// replicated state; it bounds the table each node holds and the metadata
+// a snapshot carries (ADR 0241).
+const MaxSessions int = 1024
+
+// rttRounds is how many heartbeat rounds keep their send time for the
+// round trips (Raft.sentRounds). It is a uint64 because it indexes that
+// ring by a round id, which is one.
+const rttRounds uint64 = 64
 
 // raftFacts are the step function's own yes/no state, one bit each.
 type raftFacts uint8
@@ -120,6 +143,11 @@ type Config struct {
 	// of ProtocolMax: the package's own tests run a node of the previous
 	// release with it.
 	speaks uint32
+	// sessionUnchecked, set by the package's own tests alone, appends every
+	// session command without asking the table, so the apply's fold is
+	// shown to be the safety on its own (#918); the mutations' type is
+	// full.
+	sessionUnchecked bool
 }
 
 // fwdEntry is one forwarded command a leader appended.
@@ -295,6 +323,22 @@ type ReadyValue struct {
 	// follower refused for a broken chain, for D13's
 	// consensus_chain_refusals_total.
 	ChainRefusedBy []core.NodeID
+	// Diverged names an append of a leader that committed past an index
+	// this node holds, committed or its founding entry 1, and carried
+	// another entry there than this node's (#698): no majority holds this
+	// node's entry, and the driver stops it.
+	Diverged DivergenceValue
+}
+
+// DivergenceValue is an entry of this node's log, committed or its founding
+// entry 1, that the append of a leader which committed past it
+// contradicted; Index is 0 when there is none.
+type DivergenceValue struct {
+	// Index is the index, committed or 1, at or below which the leader's
+	// log differs from this node's.
+	Index uint64
+	// Leader is the leader whose append carried it.
+	Leader core.NodeID
 }
 
 // UnsupportedEntryValue is an entry a leader sent that this version cannot
@@ -334,6 +378,23 @@ type readReq struct {
 	index uint64
 	from  core.NodeID // 0 for local
 	round uint64
+}
+
+// leaderHeard is what a node that does not lead last heard of the leader
+// of a term: the leader's last index, as a heartbeat of protocol 4
+// carried it, and the instant of the last append with entries it took
+// (#919). It is read only while from leads the node's term.
+type leaderHeard struct {
+	from     core.NodeID
+	term     uint64
+	last     uint64
+	appended time.Time
+}
+
+// sentRound is when heartbeat round id left.
+type sentRound struct {
+	id uint64
+	at time.Time
 }
 
 type round struct {
@@ -413,6 +474,9 @@ type Raft struct {
 	heartbeatDue      time.Time
 	lastLeaderContact time.Time
 	now               time.Time
+	// heard is what this node last heard of the leader of its term, for the
+	// replication lag Health reports (#919).
+	heard leaderHeard
 
 	// selfVoteSeq is the write that carries this candidate's own vote; its
 	// vote counts once that write is durable (D5b).
@@ -434,8 +498,18 @@ type Raft struct {
 	campaignIssuer core.NodeID
 	campaignTerm   uint64
 
-	nextRound    uint64
-	rounds       []*round
+	nextRound uint64
+	// readRounds counts the rounds flushReads opened for reads (#1108).
+	readRounds uint64
+	rounds     []*round
+	// sentRounds holds when each of the last rttRounds heartbeat rounds
+	// left, at the slot of its id: a round a majority confirmed leaves
+	// rounds at once, and a slower peer's answer still measures its round
+	// trip from here (ackRounds).
+	sentRounds [rttRounds]sentRound
+	// preVotesLost counts the PreVote refusals the campaigns were answered,
+	// one per voter and campaign (Status.PreVotesLost).
+	preVotesLost uint64
 	pendingReads []readReq
 	waitingReads []readReq
 
@@ -446,6 +520,11 @@ type Raft struct {
 	noSpace    core.AlarmID
 	engBase    EngineValue
 	engines    []engineAt
+	// sessions are the client sessions as the committed entries left them
+	// (#918): the leader answers a retry from them before it appends. Not
+	// an EngineAt record: a cut reads the driver's own table, at its
+	// applied index.
+	sessions *SessionTable
 	// refusedLead is the leader this node refused for the rest of
 	// refusedTerm after MaxChainRefusals refusals of its chain (#508).
 	refusedLead core.NodeID
@@ -457,6 +536,18 @@ type Raft struct {
 	refusedAt   uint64
 	refusedFrom core.NodeID
 	refusals    int
+	// divergedFrom, divergedTerm and divergedSince are the leader whose
+	// append first contradicted a committed entry in this term, and when:
+	// heldOnDivergence holds its refusals back for ElectionTimeoutMax (#698).
+	divergedFrom  core.NodeID
+	divergedTerm  uint64
+	divergedSince time.Time
+	// fiatFounding is set while the log holds entry 1 alone, of term 1,
+	// committed at the start: a data directory founded before Bootstrap
+	// left entry 1 uncommitted, whose entry 1 no majority may hold. Only
+	// there does foundingDivergence judge entry 1 on its successor's chain
+	// (#698's review). The first entry past 1 appended clears it.
+	fiatFounding bool
 	// guardRefusal is what #603's guard found when it refused the change
 	// the last Propose was handed: the voters that change would strand, nil
 	// when the guard did not refuse it (GuardRefusal, #773). Never
@@ -510,6 +601,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 		node.ownTiming = node.timing.Generation
 	}
 	node.noSpace = sm.NoSpace
+	node.sessions = NewSessionTable(sm.Sessions)
 	node.adoptClusterVersion(&sm)
 	node.voteWindow = node.timing.ElectionTimeoutMin
 	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
@@ -521,6 +613,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.log.applied = max(st.Applied, node.log.snapIndex)
 	node.log.applied = min(node.log.applied, node.log.committed)
 	node.applyCommitEffects(node.log.snapIndex+1, node.log.committed)
+	node.fiatFounding = node.log.snapIndex == 0 && node.log.lastIndex() == 1 && node.log.committed == 1 && node.log.matchTerm(1, 1)
 	node.hs = core.HardState{Term: node.term, Vote: node.vote, Commit: node.log.committed}
 	node.role = core.RoleFollower
 	if !node.isVoter(node.id) {
@@ -822,6 +915,19 @@ type StatusValue struct {
 	// HandedBy is, while the node leads, the leader whose TimeoutNow made it
 	// campaign for this term, 0 for a term it won by an election.
 	HandedBy core.NodeID
+	// PreVotesLost is how many PreVote refusals this node's campaigns were
+	// answered since it started, one per voter and campaign: a node whose
+	// count climbs while the cluster has a leader keeps asking for an
+	// election it cannot win (D13, consensus_prevotes_lost_total).
+	PreVotesLost uint64
+	// LeaderLast is, on a node that does not lead, the leader's last index as
+	// its last heartbeat of this term carried it (FlagProtocol4), 0 while
+	// none did: a leader of protocol 3 or below sends none (#919).
+	LeaderLast uint64
+	// Appended is, on a node that does not lead, the instant of the last
+	// append with entries it took from the leader of this term, zero while
+	// it took none (#919).
+	Appended time.Time
 }
 
 // Status returns the step function's view.
@@ -831,7 +937,10 @@ func (r *Raft) Status() StatusValue {
 		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
 		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
-		Transfer: r.transferTo,
+		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
+	}
+	if r.role != core.RoleLeader && r.heard.term == r.term && r.heard.from == r.lead {
+		st.LeaderLast, st.Appended = r.heard.last, r.heard.appended
 	}
 	if r.role == core.RoleLeader {
 		// The issuer of the TimeoutNow whose campaign won this term, 0 for
@@ -850,6 +959,10 @@ func (r *Raft) Progress(id core.NodeID) (match uint64, lastHeard time.Time, ok b
 	}
 	return pr.match, pr.lastHeard, true
 }
+
+// ReadRounds counts the heartbeat rounds opened to confirm reads since the
+// node started: every read pending when a round opens shares it (D9).
+func (r *Raft) ReadRounds() uint64 { return r.readRounds }
 
 // LeaseValid reports whether the leader's lease holds at now (D9).
 func (r *Raft) LeaseValid(now time.Time) bool {
@@ -896,9 +1009,11 @@ func (rd *ReadyValue) hasNotices() bool {
 
 // hasStateNotice reports whether the Ready tells the driver of a state: the
 // end of the silence or its lowered point, an entry this version cannot
-// apply, or a node that may not campaign and hears no leader.
+// apply, a node that may not campaign and hears no leader, or a committed
+// entry a majority does not hold (#698).
 func (rd *ReadyValue) hasStateNotice() bool {
-	return rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard
+	return rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard ||
+		rd.Diverged.Index != 0
 }
 
 // Ready returns the work of the turns since the last call and resets it.
@@ -1235,6 +1350,9 @@ func (r *Raft) truncateFrom(i uint64) {
 // appendEntries appends es to the log and to the Ready's write, noting what
 // each changes at append time.
 func (r *Raft) appendEntries(es []core.EntryValue) {
+	if n := len(es); n > 0 && es[n-1].Position.Index > 1 {
+		r.fiatFounding = false
+	}
 	for i := range es {
 		r.log.ents = append(r.log.ents, es[i])
 		r.log.window += int64(len(es[i].Data))
@@ -1259,6 +1377,14 @@ func (r *Raft) applyCommitEffects(lo, hi uint64) {
 // parse changes nothing, whatever its kind. It reports whether the walk
 // must stop because the entry is one this version cannot apply.
 func (r *Raft) applyCommitEffect(i uint64, e *core.EntryValue) bool {
+	if e.Kind == core.EntrySessionCommand {
+		// A payload the start or the store evicted cannot be folded: the
+		// table answers retries only, and the apply's fold decides.
+		if e.Data != nil {
+			r.sessions.Apply(e)
+		}
+		return false
+	}
 	if !actsAtCommit(e.Kind) {
 		return false
 	}
@@ -1525,6 +1651,7 @@ func (r *Raft) PeerStats() []PeerStatValue {
 		pr := r.prs[id]
 		out = append(out, PeerStatValue{
 			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
+			RTT: pr.rtt, RTTRound: pr.rttRound,
 			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
 				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot) |
 				statFlag(StatProtocol3, pr.facts&peerProtocol3 != 0),

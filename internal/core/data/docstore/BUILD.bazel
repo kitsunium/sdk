@@ -16,7 +16,10 @@ go_library(
         "//:__subpackages__",
         "//internal/core:core_consumers",
     ],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/core/data/stream",
+        "//internal/kernel/errs",
+    ],
 )
 
 alias(

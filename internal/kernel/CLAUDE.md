@@ -18,7 +18,7 @@ internal/kernel/
 ├── errs/  clock/  backoff/  semver/  plugin/  swar/  jsonenc/     the root: no family describes them
 ├── concur/        batcher, buffer, commit, group, pool, recycler, sema, singleflight, snapshot, worker
 ├── collections/   cache, heap, ring
-└── fs/            flock, pathchain, winacl
+└── fs/            flock, pathchain, seglog, winacl
 ```
 
 ### The root — what no family describes
@@ -62,6 +62,7 @@ internal/kernel/
 |---|---|---|
 | `fs/flock/` | `TryLock(file)` / `Unlock(file)` / `Native` — an exclusive lock on a whole file that never blocks: `flock(LOCK_EX\|LOCK_NB)` on Linux and the BSDs, `LockFileEx` over every byte with `LOCKFILE_FAIL_IMMEDIATELY` on Windows (ADR 0081), `errors.ErrUnsupported` where neither exists; a caller polls on its own clock. The copy `service/app/lock` and `service/security/session` each carried (ADR 0159 §3) | (none — contention is `(false, nil)`, any other failure the kernel's errno, unwrapped) |
 | `fs/pathchain/` | `Resolve(path)` — a path resolved one COMPONENT at a time over `os.Root` directory handles, reporting every indirection together with the mode of the directory that holds it. It is the measurement `O_NOFOLLOW` cannot give, since that flag governs the final component only (ADR 0083); it refuses nothing, because its callers — `service/app/lock`, `service/proc/ipc`, `service/security/session` — want different verdicts on the same shape | (none — returns the filesystem's own `*os.PathError`) |
+| `fs/seglog/` | a durable segmented log of records addressed by a contiguous `uint64` index (#820, ADR 0230): `Open`, `Append` buffering, `Sync` under two syncs (body, then the end record), `Read`, `Range` (one `pread` per run), `Kind`, `DropBefore` (whole sealed segments, then a directory sync), `Rewrite` (a segment written again with records the caller changed, renamed over it), `Bounds`; recovery classifies every hole before a torn tail is zeroed, and refuses damage unchanged. Extracted from the consensus file log without term or hard state; not published | `0.1.8.*` (DAMAGED / VERSION_UNSUPPORTED / OUT_OF_SEQUENCE / DROPPED / OUT_OF_RANGE / FAILED / CLOSED / TOO_LARGE) |
 | `fs/winacl/` | `GrantsAnyone(dir, onDirectory, onFilesWithin)` — reads a Windows directory's DACL and reports whether Everyone, Authenticated Users or BUILTIN\Users holds a right on the directory or on what the files created in it inherit, naming every answer that is not a verdict; plus the rights and the three masks (`ReplaceRights`, `CreateRights`, `ContentRights`) the SDK's directory rules ask (ADR 0084, ADR 0086, ADR 0095). Moved from `service/app/lock`, which exported it for `service/data/queue`. The reader is Windows-only; the vocabulary compiles everywhere | (none — a failed Win32 call travels as its status inside `observed`) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
@@ -154,6 +155,14 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   the M1 at every length but one and was dropped, its benchmark kept to re-ask
   on x86-64, where it was not measured.
 - `jsonenc` admitted on rule 1: stdlib-only, and its signatures name a slice, a string and a number — no logger, no token, no codec. It has four consumers on the day it lands (the logger's JSON encoder, the OTLP emitters, `redact` and the token formats), which replace four string escapers that disagreed on `\b`, `\f`, invalid UTF-8 and U+2028/U+2029. Published through the codec domain rather than on its own (ADR 0186 §D10): it is JSON, and `codec/json` is where a program looks for JSON. It searches with `swar` and holds the one line of `unsafe` the byte search needs. NOT migrated, on purpose: `consensus/wire`, `session/encode.go`, the Prometheus exporter and the logger's text encoder — none is JSON, and a changed byte in consensus forks the nodes.
+- `seglog` admitted on rule 1, and as an EXTRACTION before a second copy
+  (ADR 0230): its signatures name a directory, an index, a kind byte and a
+  payload — no term, no vote, no stream, no queue — and its mechanism is the
+  consensus file log's, whose every rule an incident paid for. `data/stream`'s
+  file engine (#821) is its first caller; the consensus log keeps its own copy
+  until it is migrated, gated on the two fuzzers agreeing. It is the one `fs/`
+  member that writes, and it decides nothing: damage is refused unchanged and
+  what it means is the caller's.
 - `group` and `heap` admitted on **rule 1 alone**, which is the only
   admission criterion there has ever been: stdlib-only AND generic. Each is
   domain-neutral down to its signatures — `Go`/`Wait`/`Collect` with no `Job` or
@@ -232,4 +241,5 @@ The root:
 
 - `fs/flock/` — see `internal/kernel/fs/flock/CLAUDE.md` (a file lock that never blocks, over `flock(2)` and `LockFileEx` — the measured row where the two kernels are opposites, ADR 0081)
 - `fs/pathchain/` — see `internal/kernel/fs/pathchain/CLAUDE.md` (a path resolved one component at a time — the measurement `O_NOFOLLOW` cannot give, ADR 0083)
+- `fs/seglog/` — see `internal/kernel/fs/seglog/CLAUDE.md` (the segmented log extracted from consensus — the record, the two-sync batch, and the eight tail cases it is held to, ADR 0230)
 - `fs/winacl/` — see `internal/kernel/fs/winacl/CLAUDE.md` (a Windows directory's DACL read for "can anybody?" — the reader's rules from ADR 0084/0086/0095, and its two callers' opposite answers to "could not look")

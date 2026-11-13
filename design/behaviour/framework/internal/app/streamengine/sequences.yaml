@@ -1,0 +1,466 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: clockOf
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c == nil
+      - return: "sdkClock{Clock: c}"
+  - of: sdkClock.NewTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTimer
+        kind: self
+      - id: c.Clock.NewTimer
+        kind: value
+    steps:
+      - return: c.Clock.NewTimer(d)
+        to: c.Clock.NewTimer
+  - of: sdkClock.NewTicker
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTicker
+        kind: self
+      - id: c.Clock.NewTicker
+        kind: value
+    steps:
+      - return: c.Clock.NewTicker(d)
+        to: c.Clock.NewTicker
+  - of: (*stream).Append
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stream).Append
+        kind: self
+      - id: s.s.Append
+        kind: value
+    steps:
+      - bind: _, err
+        eval: "s.s.Append(ctx, []sdkstream.Record{{Key: []byte(key), Payload: payload}})"
+        to: s.s.Append
+      - return: err
+  - of: (*stream).Subscribe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stream).Subscribe
+        kind: self
+      - id: s.Join
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: s.drainAfter
+        kind: internal
+      - id: sdkstream
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.Join(ctx, cfg)
+            to: s.Join
+          when: err != nil
+      - bind: inner, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - defer: cancel()
+      - bind: run
+        eval: "&running{idle: make(chan struct{}, 1)}"
+      - bind: done
+        eval: make(chan struct{})
+      - defer: close(done)
+      - go: s.drainAfter(ctx, done, cfg.DrainTimeout, run, cancel)
+        to: s.drainAfter
+      - bind: slots
+        eval: make(chan struct{}, max(cfg.Parallelism, 1))
+      - bind: handle
+        eval: cfg.Handler
+      - return: |-
+          sdkstream.Subscribe(inner, s.s, sdkstream.SubscriberConfig{
+          		Group:               cfg.Group,
+          		Name:                s.name,
+          		HandlerIsIdempotent: true,
+          		Clock:               s.clock,
+          		PollInterval:        cfg.PollInterval,
+          		SettleTimeout:       cfg.SettleTimeout,
+          		Handler: func(hctx context.Context, entries []sdkstream.Entry) error {
+          			for i := range entries {
+          				select {
+          				case slots <- struct{}{}:
+          				case <-hctx.Done():
+          					return hctx.Err()
+          				}
+          				err := run.handle(ctx, func() error { return handle(hctx, pluggedRecord(&entries[i])) })
+          				<-slots
+          				if err != nil {
+          					return err
+          				}
+          			}
+          			return nil
+          		},
+          	})
+        to: sdkstream
+  - of: (*running).handle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*running).handle
+        kind: self
+      - id: r.mu.Lock
+        kind: value
+      - id: stop.Err
+        kind: value
+      - id: r.mu.Unlock
+        kind: value
+    steps:
+      - eval: r.mu.Lock()
+        to: r.mu.Lock
+      - opt:
+          do:
+            - eval: r.mu.Unlock()
+              to: r.mu.Unlock
+            - return: err
+          init:
+            bind: err
+            eval: stop.Err()
+            to: stop.Err
+          when: err != nil
+      - op: ++
+        set: r.busy
+      - eval: r.mu.Unlock()
+        to: r.mu.Unlock
+      - defer: |-
+          func() {
+          		r.mu.Lock()
+          		r.busy--
+          		r.mu.Unlock()
+          		select {
+          		case r.idle <- struct{}{}:
+          		default:
+          		}
+          	}()
+      - return: fn()
+  - of: (*running).quiet
+    steps:
+      - lock:
+          mutex: r.mu
+      - return: r.busy == 0
+  - of: (*stream).drainAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stream).drainAfter
+        kind: self
+      - id: s.clock.After
+        kind: value
+      - id: time
+        kind: stdlib
+    steps:
+      - defer: cancel()
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+            - comm: <-done
+              do:
+                - return: ""
+      - var:
+          name: deadline
+          type: <-chan time.Time
+      - alt:
+          - do:
+              - set: deadline
+                to: s.clock.After
+                value: s.clock.After(max(drain, 0))
+            when: s.clock != nil
+          - do:
+              - set: deadline
+                to: time
+                value: time.After(max(drain, 0))
+            else: true
+      - loop:
+          cond: "!run.quiet()"
+          do:
+            - select:
+                cases:
+                  - comm: <-run.idle
+                  - comm: <-deadline
+                    do:
+                      - return: ""
+                  - comm: <-done
+                    do:
+                      - return: ""
+  - of: (*stream).Join
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stream).Join
+        kind: self
+      - id: lacks
+        kind: internal
+      - id: committer.Committed
+        kind: value
+      - id: s.startOf
+        kind: internal
+      - id: committer.Commit
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: cfg.FromBeginning
+      - bind: committer, ok
+        eval: s.s.(sdkstream.Committer)
+      - opt:
+          do:
+            - return: lacks(s.name, "Committer")
+              to: lacks
+          when: "!ok"
+      - loop:
+          do:
+            - bind: _, err
+              eval: committer.Committed(ctx, cfg.Group, p)
+              to: committer.Committed
+            - opt:
+                do:
+                  - continue: true
+                when: err == nil
+            - opt:
+                do:
+                  - return: err
+                when: "!errs.HasCode(err, sdkstream.CodeUnknownGroup)"
+            - bind: start, err
+              eval: s.startOf(ctx, p, cfg.From)
+              to: s.startOf
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: committer.Commit(ctx, cfg.Group, p, start)
+                  to: committer.Commit
+                when: err != nil
+          key: p
+          range: s.s.Partitions()
+      - return: nil
+  - of: (*stream).startOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stream).startOf
+        kind: self
+      - id: seeker.OffsetAt
+        kind: value
+      - id: s.s.Bounds
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: seeker, ok
+              eval: s.s.(sdkstream.Seeker)
+            - opt:
+                do:
+                  - return: 0, lacks(s.name, "Seeker")
+                when: "!ok"
+            - return: seeker.OffsetAt(ctx, partition, from)
+              to: seeker.OffsetAt
+          when: "!from.IsZero()"
+      - bind: bounds, err
+        eval: s.s.Bounds(ctx, partition)
+        to: s.s.Bounds
+      - return: bounds.Next, err
+  - of: (*stream).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stream).Close
+        kind: self
+      - id: c.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: c.Close()
+              to: c.Close
+          init:
+            bind: c, ok
+            eval: s.s.(io.Closer)
+          when: ok
+      - return: nil
+  - of: pluggedRecord
+    steps:
+      - return: |-
+          plug.StreamRecordValue{
+          		AppendedAt: e.AppendedAt, Key: string(e.Record.Key), Payload: e.Record.Payload,
+          		Partition: e.Partition, Offset: int64(e.Offset),
+          	}
+  - of: lacks
+    participants:
+      - id: caller
+        kind: actor
+      - id: lacks
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(sdkstream.StreamMisconfigured, errs.WrapParams{},
+          		errs.String("stream", name), errs.String("sibling", sibling))
+        to: errs
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.Streams.Store
+        kind: value
+    steps:
+      - eval: "plug.Streams.Store(&plug.StreamDriverConfig{Open: open, TableMigration: tableMigration})"
+        to: plug.Streams.Store
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: clockOf
+        kind: internal
+      - id: openStream
+        kind: internal
+    steps:
+      - bind: clk
+        eval: clockOf(cfg.Clock)
+        to: clockOf
+      - bind: s, err
+        eval: openStream(&cfg, clk)
+        to: openStream
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - set: s
+              value: wrap(s)
+          init:
+            bind: wrap, ok
+            eval: cfg.Wrap.(func(sdkstream.Stream) sdkstream.Stream)
+          when: ok && wrap != nil
+      - return: "&stream{s: s, clock: clk, name: cfg.Name}, nil"
+  - of: openStream
+    participants:
+      - id: caller
+        kind: actor
+      - id: openStream
+        kind: self
+      - id: openSQL
+        kind: internal
+      - id: sdkstream
+        kind: package
+    steps:
+      - bind: policy
+        eval: "sdkstream.Policy{Partitions: cfg.Partitions}"
+      - switch:
+          cases:
+            - case: cfg.Database != nil
+              do:
+                - return: openSQL(cfg, policy, clk)
+                  to: openSQL
+            - case: cfg.Dir != ""
+              do:
+                - return: "sdkstream.NewFile(sdkstream.FileConfig{Clock: clk, Dir: cfg.Dir, Policy: policy})"
+                  to: sdkstream
+      - return: "sdkstream.NewMemory(sdkstream.MemoryConfig{Clock: clk, Policy: policy})"
+        to: sdkstream
+  - of: openSQL
+    participants:
+      - id: caller
+        kind: actor
+      - id: openSQL
+        kind: self
+      - id: storeengine
+        kind: package
+      - id: sdkstream
+        kind: package
+    steps:
+      - bind: tm, dialect, ok
+        eval: storeengine.SQLOf(cfg.Database)
+        to: storeengine
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(sdkstream.SQLStreamMisconfigured, errs.WrapParams{},
+                			errs.String("stream", cfg.Name), errs.String("problem", "the stream's database was not opened by the store subsystem"))
+          when: "!ok"
+      - bind: sqlCfg
+        eval: "sdkstream.SQLConfig{Table: cfg.Table, Policy: policy, Transactor: tm, Dialect: dialect}"
+      - opt:
+          do:
+            - set: sqlCfg.Clock
+              value: clk
+          when: clk != nil
+      - return: sdkstream.NewSQL(sqlCfg)
+        to: sdkstream
+  - of: tableMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: tableMigration
+        kind: self
+      - id: dialectOf
+        kind: internal
+      - id: sdkstream
+        kind: package
+    steps:
+      - bind: d, err
+        eval: dialectOf(dialect)
+        to: dialectOf
+      - opt:
+          do:
+            - return: plug.MigrationValue{}, err
+          when: err != nil
+      - bind: m, err
+        eval: sdkstream.SQLMigration(d, table, version)
+        to: sdkstream
+      - opt:
+          do:
+            - return: plug.MigrationValue{}, err
+          when: err != nil
+      - return: "plug.MigrationValue{Version: m.Version, Name: m.Name, Up: pluggedStep(m.Up), Down: pluggedStep(m.Down)}, nil"
+  - of: dialectOf
+    steps:
+      - switch:
+          cases:
+            - case: model.EnginePostgres
+              do:
+                - return: sql.DialectPostgres, nil
+            - case: model.EngineMySQL
+              do:
+                - return: sql.DialectMySQL, nil
+            - case: model.EngineSQLite
+              do:
+                - return: sql.DialectSQLite, nil
+          "on": name
+      - return: 0, errs.Wrap(sql.UnknownDialect, errs.WrapParams{}, errs.String("dialect", name))
+  - of: pluggedStep
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: s == nil
+      - return:
+          closure:
+            params: ctx context.Context, ex plug.Executor
+            results: error
+            steps:
+              - return: s(ctx, ex)

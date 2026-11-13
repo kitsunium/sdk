@@ -62,6 +62,9 @@ type Store[T any] struct {
 	indexes []*index[T]
 	// onWrite and onDelete are the hooks called after a write or a deletion.
 	onWrite, onDelete hooks
+	// changes is the change feed every write appends its record to, before
+	// it is published.
+	changes changeFeed
 	// writing serialises writers, folds and Close; they hold it across the
 	// filesystem work.
 	writing sync.Mutex

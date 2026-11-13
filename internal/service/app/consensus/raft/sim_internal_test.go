@@ -105,6 +105,15 @@ type simNode struct {
 	queued   int64
 	reads    int
 	applyDue bool
+	// stallUntil is the true instant the node's disk is stalled until
+	// (nemStallDisk): no sync completes and no install is served before
+	// it. It outlives a crash, as the device does.
+	stallUntil time.Time
+	// watchStable and watchAt are the driver's progress watch under
+	// simOptions.watch: the durable index last seen moving, and when, on
+	// the node's own clock.
+	watchStable uint64
+	watchAt     time.Time
 }
 
 // simApply is one item of a node's apply queue: entries in memory, or a
@@ -151,6 +160,13 @@ type simOptions struct {
 	// committed commands past recent without their payloads, as the
 	// driver does (#663, #664).
 	applyLag int64
+	// watch runs the driver's progress watch at every tick (the durable
+	// half of consensus's watchProgress, #554): a leader whose durable
+	// index trailed its log without moving for ElectionTimeoutMax hands
+	// its leadership to the most caught-up voter.
+	watch bool
+	// sessionUnchecked appends every session command unasked (#918).
+	sessionUnchecked bool
 }
 
 type sim struct {
@@ -179,6 +195,13 @@ type sim struct {
 	// reads counts the reads of the disk model apply made, of entries
 	// handed by index.
 	reads int
+	// budget, when not 0, is the number of events run may still dispatch:
+	// past it the run fails, the hang FuzzStep detects (#924).
+	budget int
+	// forged is set once a message no node sent was stepped (FuzzStep):
+	// the checks that compare nodes are off from then on, a node's own
+	// invariants still checked.
+	forged bool
 }
 
 func rtt(a, b core.NodeID) time.Duration {
@@ -242,7 +265,7 @@ func (s *sim) cfg(id core.NodeID) Config {
 		ID: id, Group: 1, Seed: s.opt.seed*31 + uint64(id), Timing: s.timing,
 		MaxInflight: 16, MaxInflightBytes: 1 << 20, MaxBatchBytes: 64 << 10, MinVoters: 1,
 		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent,
-		MaxApplyLagBytes: s.opt.applyLag, speaks: s.opt.speaks[id],
+		MaxApplyLagBytes: s.opt.applyLag, speaks: s.opt.speaks[id], sessionUnchecked: s.opt.sessionUnchecked,
 	}
 }
 
@@ -347,11 +370,31 @@ func (s *sim) deliver(m core.MessageValue) {
 	}
 }
 
+// ownEntries is m with each entry's Data copied, as the driver's frame copy
+// hands Step bytes of its own: Step keeps them as the caller's gift (#1110),
+// and the simulator keeps the sender's. The copy is made at delivery, where
+// the driver parses the frame and where appendNew copied before, so the bytes
+// a follower judges are the sender's as they stand when the message lands.
+func ownEntries(m core.MessageValue) core.MessageValue {
+	if len(m.Entries) == 0 {
+		return m
+	}
+	m.Entries = slices.Clone(m.Entries)
+	for i := range m.Entries {
+		m.Entries[i].Data = slices.Clone(m.Entries[i].Data)
+	}
+	return m
+}
+
 func (s *sim) process(n *simNode) {
 	if s.opt.applyLag > 0 && n.alive {
 		n.r.SetApplyLag(n.queued, n.reads > 0)
 	}
-	for n.alive && n.r.HasReady() {
+	for turns := 0; n.alive && n.r.HasReady(); turns++ {
+		if turns == maxReadyTurns {
+			s.fail("node %d: Ready never empties (%d turns)", n.id, turns)
+			return
+		}
 		rd := n.r.Ready()
 		if rd.Unsupported.Index != 0 && n.unsupported.Index == 0 {
 			n.unsupported = rd.Unsupported
@@ -364,6 +407,9 @@ func (s *sim) process(n *simNode) {
 			at := n.lastDone
 			if at.Before(s.now) {
 				at = s.now
+			}
+			if at.Before(n.stallUntil) {
+				at = n.stallUntil
 			}
 			at = at.Add(d)
 			n.lastDone = at
@@ -414,6 +460,10 @@ func (s *sim) process(n *simNode) {
 	s.checkNode(n)
 }
 
+// maxReadyTurns bounds the Readys one process call drains: a step function
+// that never runs out of them is a hang, reported, not a loop forever.
+const maxReadyTurns = 1 << 16
+
 // applyEntry applies one committed entry on n, right after the previous
 // one, and checks it against every other node's.
 func (s *sim) applyEntry(n *simNode, e *core.EntryValue) {
@@ -429,7 +479,7 @@ func (s *sim) applyEntry(n *simNode, e *core.EntryValue) {
 		s.kv.applied(s, n, e)
 	}
 	k := keyOf(e)
-	if prev, ok := s.applied[e.Position.Index]; ok && prev != k {
+	if prev, ok := s.applied[e.Position.Index]; ok && prev != k && !s.forged {
 		s.fail("agreement: node %d applied %v at %d, another node applied %v", n.id, k, e.Position.Index, prev)
 	}
 	s.applied[e.Position.Index] = k
@@ -522,7 +572,7 @@ func (s *sim) checkNode(n *simNode) {
 	}
 	st := n.r.Status()
 	if st.Role == core.RoleLeader {
-		if l, ok := s.leaders[st.Term]; ok && l != n.id {
+		if l, ok := s.leaders[st.Term]; ok && l != n.id && !s.forged {
 			s.fail("two leaders in term %d: %d and %d", st.Term, l, n.id)
 		}
 		s.leaders[st.Term] = n.id
@@ -533,7 +583,7 @@ func (s *sim) checkNode(n *simNode) {
 			continue
 		}
 		k := keyOf(&e)
-		if prev, ok := s.commits[i]; ok && prev != k {
+		if prev, ok := s.commits[i]; ok && prev != k && !s.forged {
 			s.fail("committed history: node %d committed %v at %d, another committed %v", n.id, k, i, prev)
 		}
 		s.commits[i] = k
@@ -602,6 +652,39 @@ func (s *sim) storageDone(n *simNode) {
 	s.process(n)
 }
 
+// watchProgress is the durable half of the driver's watch (consensus's
+// watchProgress, #554): a leader whose durable index has trailed its log
+// without moving for ElectionTimeoutMax transfers its leadership to the
+// voter with the highest acknowledged index, and its clock restarts.
+func (s *sim) watchProgress(n *simNode) {
+	st := n.r.Status()
+	now := s.clock(n)
+	if st.Role != core.RoleLeader {
+		n.watchStable, n.watchAt = st.Stable, now
+		return
+	}
+	if st.Stable != n.watchStable || st.Stable >= st.Last {
+		n.watchStable, n.watchAt = st.Stable, now
+	}
+	if now.Sub(n.watchAt) <= st.Timing.ElectionTimeoutMax || st.Transfer != 0 {
+		return
+	}
+	var to core.NodeID
+	var best uint64
+	for _, m := range st.Conf.Members {
+		if !m.Voter || m.ID == n.id {
+			continue
+		}
+		if match, _, ok := n.r.Progress(m.ID); ok && (to == 0 || match > best) {
+			to, best = m.ID, match
+		}
+	}
+	if to != 0 {
+		n.r.TransferLeadership(now, to)
+		n.watchAt = now
+	}
+}
+
 func (s *sim) leader() *simNode {
 	var best *simNode
 	for _, id := range s.ids {
@@ -630,6 +713,12 @@ func (s *sim) run(until time.Time, load bool) {
 		}
 		heap.Pop(&s.q)
 		s.now = e.at
+		if s.budget > 0 {
+			if s.budget--; s.budget == 0 {
+				s.fail("event budget exhausted: the run does not settle")
+				break
+			}
+		}
 		if load && !s.now.Before(nextLoad) {
 			nextLoad = s.now.Add(20 * time.Millisecond)
 			if l := s.leader(); l != nil {
@@ -662,6 +751,12 @@ func (s *sim) run(until time.Time, load bool) {
 				s.start(n)
 			}
 		case evInstall:
+			if s.now.Before(n.stallUntil) {
+				// A stalled disk serves the install once it moves.
+				e.at = n.stallUntil
+				s.push(e)
+				continue
+			}
 			s.install(n, e)
 		case evSnapDone:
 			if n.alive {
@@ -673,16 +768,25 @@ func (s *sim) run(until time.Time, load bool) {
 				continue
 			}
 			n.r.Tick(s.clock(n))
+			if s.opt.watch {
+				s.watchProgress(n)
+			}
 			s.process(n)
 			s.push(&event{at: s.now.Add(10 * time.Millisecond), kind: evTick, node: n.id, life: n.life})
 		case evDeliver:
 			if !n.alive {
 				continue
 			}
-			n.r.Step(s.clock(n), e.msg)
+			n.r.Step(s.clock(n), ownEntries(e.msg))
 			s.process(n)
 		case evStorage:
 			if !n.alive || e.life != n.life || len(n.writes) == 0 {
+				continue
+			}
+			if s.now.Before(n.stallUntil) {
+				// A sync in flight completes once the stall ends.
+				e.at = n.stallUntil
+				s.push(e)
 				continue
 			}
 			s.storageDone(n)
@@ -774,6 +878,9 @@ func (s *sim) cutSnapshot(n *simNode, force bool) {
 		Membership: n.r.ConfAt(c), Timing: eng.Timing, ClusterVersion: eng.Cluster,
 		ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
 	}
+	if s.kv != nil {
+		s.kv.cut(n)
+	}
 	n.r.Compact(c)
 }
 
@@ -842,6 +949,9 @@ func (s *sim) install(n *simNode, e *event) {
 	n.noTable = false
 	n.applied, n.appliedFrom = nil, idx
 	n.hs.Commit = max(n.hs.Commit, idx)
+	if s.kv != nil {
+		s.kv.reload(n)
+	}
 	n.r.InstallSnapshot(meta)
 	s.process(n)
 	ok = true

@@ -53,6 +53,11 @@ type ZstdCompressor struct {
 	enc *zstd.Encoder
 	// dec is the shared decoder, built with the output ceiling baked in.
 	dec *zstd.Decoder
+	// capped is the shared decoder DecompressBounded decodes a sized frame
+	// with: built with WithDecodeAllCapLimit, it never writes past the
+	// capacity of the buffer it is handed, so a frame that lies about its
+	// size is refused at that capacity instead of growing it.
+	capped *zstd.Decoder
 	// maxDecompressedBytes is the ceiling, retained for the reported field.
 	maxDecompressedBytes int64
 	// level is the encoder level, kept for the encoders NewWriter builds.
@@ -192,9 +197,16 @@ func newZstd(level ZstdLevel, maxDecompressedBytes int64, dict []byte, dictID ui
 		//: release error joins the option fault rather than being swallowed.
 		return nil, errs.Wrap(errors.Join(derr, enc.Close()), zstdWrap)
 	}
-	//: both halves built — hand back the compressor.
+	//: the capped decoder: the same options, and the capacity a hard bound.
+	capped, cerr := zstd.NewReader(nil, append(decOpts, zstd.WithDecodeAllCapLimit(true))...)
+	//: an option fault leaves both halves dangling — release them first.
+	if cerr != nil {
+		dec.Close()
+		return nil, errs.Wrap(errors.Join(cerr, enc.Close()), zstdWrap)
+	}
+	//: every half built — hand back the compressor.
 	return &ZstdCompressor{
-		enc: enc, dec: dec, maxDecompressedBytes: maxDecompressedBytes,
+		enc: enc, dec: dec, capped: capped, maxDecompressedBytes: maxDecompressedBytes,
 		level: encoderLevel(level), dictionaryID: dictID, dict: dict,
 		//: empty pools: a stream codec is built on its first miss only.
 		streamDecoders: recycler.NewPool(func() *zstd.Decoder { return nil }),
@@ -367,8 +379,9 @@ func (z *ZstdCompressor) DictionaryID() uint32 {
 // compressor must not be used afterwards. The package singleton is never
 // closed — it is owned by the process, not by any caller.
 func (z *ZstdCompressor) Close() error {
-	//: the decoder's Close has no error to report.
+	//: the decoders' Close has no error to report.
 	z.dec.Close()
+	z.capped.Close()
 	//: the encoder's Close flushes nothing here (nil sink) but still releases.
 	return z.enc.Close()
 }

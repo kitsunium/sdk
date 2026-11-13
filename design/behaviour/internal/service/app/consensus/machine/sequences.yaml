@@ -1,0 +1,913 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: origin
+    participants:
+      - id: caller
+        kind: actor
+      - id: origin
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+        to: errs
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - return: origin(coreconsensus.ConsensusMisconfigured, errs.String("why", why))
+        to: origin
+  - of: failed
+    participants:
+      - id: caller
+        kind: actor
+      - id: failed
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - bind: f
+        eval: "[]errs.FieldValue{errs.String(\"op\", op)}"
+      - opt:
+          do:
+            - set: f
+              value: append(f, errs.String("cause", cause.Error()))
+          when: cause != nil
+      - return: origin(coreconsensus.StateMachineFailed, f...)
+        to: origin
+  - of: corrupt
+    participants:
+      - id: caller
+        kind: actor
+      - id: corrupt
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - return: origin(coreconsensus.SnapshotCorrupt, errs.String("why", why))
+        to: origin
+  - of: unsupported
+    participants:
+      - id: caller
+        kind: actor
+      - id: unsupported
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - return: origin(coreconsensus.VersionUnsupported, errs.String("what", what), errs.Int("version", int(version)))
+        to: origin
+  - of: NewKV
+    steps:
+      - return: "&KV{m: map[string]kvEntry{}}"
+  - of: KVGet
+    participants:
+      - id: caller
+        kind: actor
+      - id: KVGet
+        kind: self
+      - id: kvCommand
+        kind: internal
+    steps:
+      - return: kvCommand(kvOpGet, key, nil, 0)
+        to: kvCommand
+  - of: KVPut
+    participants:
+      - id: caller
+        kind: actor
+      - id: KVPut
+        kind: self
+      - id: kvCommand
+        kind: internal
+    steps:
+      - return: kvCommand(kvOpPut, key, value, 0)
+        to: kvCommand
+  - of: KVCompareAndSwap
+    participants:
+      - id: caller
+        kind: actor
+      - id: KVCompareAndSwap
+        kind: self
+      - id: kvCommand
+        kind: internal
+    steps:
+      - return: kvCommand(kvOpCAS, key, value, revision)
+        to: kvCommand
+  - of: kvCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: kvCommand
+        kind: self
+      - id: binary
+        kind: stdlib
+    steps:
+      - bind: b
+        eval: make([]byte, 0, 1+2*binary.MaxVarintLen64+len(key)+len(value))
+      - set: b
+        value: append(b, op)
+      - set: b
+        to: binary
+        value: binary.AppendUvarint(b, uint64(len(key)))
+      - set: b
+        value: append(b, key...)
+      - set: b
+        to: binary
+        value: binary.AppendUvarint(b, rev)
+      - return: append(b, value...)
+  - of: (*KV).Apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*KV).Apply
+        kind: self
+      - id: decodeKV
+        kind: internal
+      - id: origin
+        kind: internal
+    steps:
+      - bind: op, key, rev, value, ok
+        eval: decodeKV(e.Data)
+        to: decodeKV
+      - opt:
+          do:
+            - return: origin(coreconsensus.VersionUnsupported, errs.String("what", "kv command"), errs.String("why", "the command does not decode"))
+              to: origin
+          when: "!ok"
+      - lock:
+          mutex: s.mu
+      - bind: cur, found
+        eval: s.m[key]
+      - switch:
+          cases:
+            - case: kvOpGet
+              do:
+                - return: "KVResult{Value: cur.value, Revision: cur.rev, Found: found}"
+            - case: kvOpCAS
+              do:
+                - opt:
+                    do:
+                      - return: "KVResult{Value: cur.value, Revision: cur.rev, Found: found}"
+                    when: cur.rev != rev
+          "on": op
+      - bind: next
+        eval: "kvEntry{value: bytes.Clone(value), rev: cur.rev + 1}"
+      - set: s.m[key]
+        value: next
+      - return: "KVResult{Value: next.value, Revision: next.rev, Found: true, Applied: true}"
+  - of: decodeKV
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeKV
+        kind: self
+      - id: binary
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, "", 0, nil, false
+          when: len(b) == 0 || b[0] < kvOpGet || b[0] > kvOpCAS
+      - set: op, b
+        value: b[0], b[1:]
+      - bind: n, w
+        eval: binary.Uvarint(b)
+        to: binary
+      - opt:
+          do:
+            - return: 0, "", 0, nil, false
+          when: w <= 0 || n > uint64(len(b)-w)
+      - set: key, b
+        value: string(b[w:w+int(n)]), b[w+int(n):]
+      - set: rev, w
+        to: binary
+        value: binary.Uvarint(b)
+      - opt:
+          do:
+            - return: 0, "", 0, nil, false
+          when: w <= 0
+      - return: op, key, rev, b[w:], true
+  - of: (*KV).Get
+    steps:
+      - lock:
+          mutex: s.mu
+          read: true
+      - bind: e, found
+        eval: s.m[key]
+      - return: e.value, e.rev, found
+  - of: (*KV).Snapshot
+    steps:
+      - lock:
+          mutex: s.mu
+          read: true
+      - return: "kvSnap{m: maps.Clone(s.m)}, nil"
+  - of: kvSnap.WriteTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: kvSnap.WriteTo
+        kind: self
+      - id: bufio
+        kind: stdlib
+      - id: bw.Flush
+        kind: value
+    steps:
+      - bind: cw
+        eval: "&countingWriter{w: w}"
+      - bind: bw
+        eval: bufio.NewWriter(cw)
+        to: bufio
+      - var:
+          name: tmp
+          type: "[binary.MaxVarintLen64]byte"
+      - var:
+          name: werr
+          type: error
+      - bind: keep
+        eval:
+          closure:
+            params: _ int, err error
+            steps:
+              - opt:
+                  do:
+                    - set: werr
+                      value: err
+                  when: werr == nil
+      - bind: uv
+        eval:
+          closure:
+            params: x uint64
+            steps:
+              - eval: keep(bw.Write(binary.AppendUvarint(tmp[:0], x)))
+      - eval: keep(bw.WriteString(kvSnapshotMagic))
+      - eval: keep(0, bw.WriteByte(kvSnapshotVersion))
+      - eval: uv(uint64(len(k.m)))
+      - loop:
+          do:
+            - bind: e
+              eval: k.m[key]
+            - eval: uv(uint64(len(key)))
+            - eval: keep(bw.WriteString(key))
+            - eval: uv(e.rev)
+            - eval: uv(uint64(len(e.value)))
+            - eval: keep(bw.Write(e.value))
+          key: _
+          range: slices.Sorted(maps.Keys(k.m))
+          value: key
+      - opt:
+          do:
+            - return: cw.n, err
+          init:
+            bind: err
+            eval: bw.Flush()
+            to: bw.Flush
+          when: err != nil
+      - return: cw.n, werr
+  - of: kvSnap.Release
+  - of: (*KV).Restore
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*KV).Restore
+        kind: self
+      - id: bufio
+        kind: stdlib
+      - id: io
+        kind: stdlib
+      - id: corrupt
+        kind: internal
+      - id: unsupported
+        kind: internal
+      - id: binary
+        kind: stdlib
+      - id: readEntry
+        kind: internal
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - bind: br
+        eval: bufio.NewReader(r)
+        to: bufio
+      - var:
+          name: head
+          type: "[len(kvSnapshotMagic) + 1]byte"
+      - opt:
+          do:
+            - return: corrupt("the snapshot is not one a KV wrote")
+              to: corrupt
+          init:
+            bind: _, err
+            eval: io.ReadFull(br, head[:])
+            to: io
+          when: err != nil || string(head[:len(kvSnapshotMagic)]) != kvSnapshotMagic
+      - opt:
+          do:
+            - return: unsupported("kv snapshot", v)
+              to: unsupported
+          init:
+            bind: v
+            eval: head[len(kvSnapshotMagic)]
+          when: v != kvSnapshotVersion
+      - bind: n, err
+        eval: binary.ReadUvarint(br)
+        to: binary
+      - opt:
+          do:
+            - return: corrupt("the snapshot's count does not read")
+              to: corrupt
+          when: err != nil
+      - bind: m
+        eval: map[string]kvEntry{}
+      - loop:
+          do:
+            - bind: key, e, err
+              eval: readEntry(br)
+              to: readEntry
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: m[key]
+              value: e
+          range: "n"
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - set: s.m
+        value: m
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - return: nil
+  - of: readEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: readEntry
+        kind: self
+      - id: readField
+        kind: internal
+      - id: binary
+        kind: stdlib
+    steps:
+      - bind: key, err
+        eval: readField(br)
+        to: readField
+      - opt:
+          do:
+            - return: "\"\", kvEntry{}, err"
+          when: err != nil
+      - bind: rev, err
+        eval: binary.ReadUvarint(br)
+        to: binary
+      - opt:
+          do:
+            - return: "\"\", kvEntry{}, corrupt(\"a revision does not read\")"
+          when: err != nil
+      - bind: value, err
+        eval: readField(br)
+        to: readField
+      - opt:
+          do:
+            - return: "\"\", kvEntry{}, err"
+          when: err != nil
+      - return: "string(key), kvEntry{value: value, rev: rev}, nil"
+  - of: readField
+    participants:
+      - id: caller
+        kind: actor
+      - id: readField
+        kind: self
+      - id: binary
+        kind: stdlib
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: n, err
+        eval: binary.ReadUvarint(br)
+        to: binary
+      - opt:
+          do:
+            - return: nil, corrupt("a field's length does not read")
+          when: err != nil || n > maxKVField
+      - bind: b
+        eval: make([]byte, n)
+      - opt:
+          do:
+            - return: nil, corrupt("a field is cut short")
+          init:
+            bind: _, err
+            eval: io.ReadFull(br, b)
+            to: io
+          when: err != nil
+      - return: b, nil
+  - of: NewSQL
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewSQL
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: cfg.Dialect.QuoteIdent
+        kind: value
+      - id: cfg.Transactor.Transact
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: cfg.validate()
+            to: cfg.validate
+          when: err != nil
+      - bind: m
+        eval: "&SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead}"
+      - opt:
+          do:
+            - set: m.snapIso
+              value: stdsql.LevelSerializable
+          when: cfg.Dialect == coresql.DialectSQLite
+      - bind: t
+        eval: cfg.Dialect.QuoteIdent(cfg.Table)
+        to: cfg.Dialect.QuoteIdent
+      - bind: ph
+        eval: cfg.Dialect.Placeholder
+      - set: m.sel
+        value: "\"SELECT \" + positionColumns + \" FROM \" + t + \" WHERE id = 1\""
+      - set: m.upd
+        value: |-
+          "UPDATE " + t + " SET cluster = " + ph(1) + ", epoch = " + ph(2) + ", predecessor = " + ph(3) +
+          		", predecessor_epoch = " + ph(4) + ", kept_index = " + ph(5) + ", adopted_from = " + ph(6) +
+          		", applied_term = " + ph(7) + ", applied_index = " + ph(8) + " WHERE id = 1"
+      - set: m.ins
+        value: |-
+          "INSERT INTO " + t + " (id, " + positionColumns + ") VALUES (1, " + ph(1) + ", " + ph(2) + ", " +
+          		ph(3) + ", " + ph(4) + ", " + ph(5) + ", " + ph(6) + ", " + ph(7) + ", " + ph(8) + ")"
+      - bind: create
+        eval: |-
+          "CREATE TABLE IF NOT EXISTS " + t + " (id INTEGER NOT NULL PRIMARY KEY, cluster VARCHAR(32) NOT NULL," +
+          		" epoch BIGINT NOT NULL, predecessor VARCHAR(32) NOT NULL, predecessor_epoch BIGINT NOT NULL," +
+          		" kept_index BIGINT NOT NULL, adopted_from BIGINT NOT NULL, applied_term BIGINT NOT NULL," +
+          		" applied_index BIGINT NOT NULL)"
+      - bind: err
+        eval: |-
+          cfg.Transactor.Transact(ctx, coresql.TxOptionsValue{}, func(ctx context.Context, ex coresql.Executor) error {
+          		if _, err := ex.ExecContext(ctx, create); err != nil {
+          			return err
+          		}
+          		li, pos, found, err := m.readPosition(ctx, ex)
+          		if err != nil {
+          			return err
+          		}
+          		if !found {
+          			//: a new table: the zero position, so every later write is one UPDATE.
+          			_, err = ex.ExecContext(ctx, m.ins, positionArgs(li, pos)...)
+          			return err
+          		}
+          		m.li, m.pos = li, pos
+          		return nil
+          	})
+        to: cfg.Transactor.Transact
+      - opt:
+          do:
+            - return: nil, failed("open", err)
+          when: err != nil
+      - return: m, nil
+  - of: (*SQLConfig).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLConfig).validate
+        kind: self
+      - id: c.validateParts
+        kind: internal
+      - id: misconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: c.Table
+              value: DefaultPositionTable
+          when: c.Table == ""
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: c.validateParts()
+            to: c.validateParts
+          when: err != nil
+      - opt:
+          do:
+            - return: misconfigured("Table is not a bare identifier of at most 63 bytes")
+              to: misconfigured
+          when: "!bareIdent(c.Table)"
+      - return: nil
+  - of: (*SQLConfig).validateParts
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQLConfig).validateParts
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: c.Transactor == nil
+              do:
+                - return: misconfigured("Transactor is nil")
+                  to: misconfigured
+            - case: "!c.Dialect.Valid()"
+              do:
+                - return: misconfigured("Dialect is not one this SDK spells")
+                  to: misconfigured
+            - case: c.Apply == nil || c.Dump == nil || c.Truncate == nil || c.Load == nil
+              do:
+                - return: misconfigured("Apply, Dump, Truncate and Load are all required")
+                  to: misconfigured
+      - return: nil
+  - of: identByte
+    steps:
+      - return: (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'
+  - of: (*SQL).Apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).Apply
+        kind: self
+      - id: m.ApplyBatch
+        kind: internal
+    steps:
+      - var:
+          name: r
+          type: "[1]any"
+      - eval: m.ApplyBatch([]coreconsensus.EntryValue{e}, r[:])
+        to: m.ApplyBatch
+      - return: r[0]
+  - of: (*SQL).ApplyBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).ApplyBatch
+        kind: self
+      - id: m.cfg.Transactor.Transact
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(es) == 0
+      - lock:
+          mutex: m.mu
+      - bind: last
+        eval: es[len(es)-1]
+      - bind: li
+        eval: m.li
+      - opt:
+          do:
+            - set: li
+              value: "coreconsensus.LogIdentityValue{Cluster: last.Token.Cluster, Epoch: last.Token.Epoch}"
+          when: "!li.Same(coreconsensus.LogIdentityValue{Cluster: last.Token.Cluster, Epoch: last.Token.Epoch})"
+      - bind: out
+        eval: make([]any, len(es))
+      - bind: err
+        eval: |-
+          m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{}, func(ctx context.Context, ex coresql.Executor) error {
+          		for i := range es {
+          			r, err := m.cfg.Apply(ctx, ex, es[i])
+          			if err != nil {
+          				return err
+          			}
+          			out[i] = r
+          		}
+          		return m.writePosition(ctx, ex, li, last.Position)
+          	})
+        to: m.cfg.Transactor.Transact
+      - opt:
+          do:
+            - panic: failed("apply", err)
+          when: err != nil
+      - set: m.li, m.pos
+        value: li, last.Position
+      - eval: copy(results, out)
+  - of: (*SQL).AppliedPosition
+    steps:
+      - lock:
+          mutex: m.mu
+      - return: m.li, m.pos, nil
+  - of: (*SQL).Restore
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).Restore
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: corrupt
+        kind: internal
+      - id: unsupported
+        kind: internal
+      - id: m.cfg.Transactor.Transact
+        kind: value
+      - id: failed
+        kind: internal
+    steps:
+      - var:
+          name: head
+          type: "[len(sqlSnapshotMagic) + 1]byte"
+      - opt:
+          do:
+            - return: corrupt("the snapshot is shorter than its header")
+              to: corrupt
+          init:
+            bind: _, err
+            eval: io.ReadFull(r, head[:])
+            to: io
+          when: err != nil
+      - opt:
+          do:
+            - return: corrupt("the snapshot is not one an SQL machine wrote")
+              to: corrupt
+          when: string(head[:len(sqlSnapshotMagic)]) != sqlSnapshotMagic
+      - opt:
+          do:
+            - return: unsupported("sql machine snapshot", v)
+              to: unsupported
+          init:
+            bind: v
+            eval: head[len(sqlSnapshotMagic)]
+          when: v != sqlSnapshotVersion
+      - lock:
+          mutex: m.mu
+      - bind: err
+        eval: |-
+          m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{}, func(ctx context.Context, ex coresql.Executor) error {
+          		if err := m.cfg.Truncate(ctx, ex); err != nil {
+          			return err
+          		}
+          		if err := m.cfg.Load(ctx, ex, r); err != nil {
+          			return err
+          		}
+          		return m.writePosition(ctx, ex, meta.Log, meta.Position)
+          	})
+        to: m.cfg.Transactor.Transact
+      - opt:
+          do:
+            - return: failed("restore", err)
+              to: failed
+          when: err != nil
+      - set: m.li, m.pos
+        value: meta.Log, meta.Position
+      - return: nil
+  - of: (*SQL).writePosition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).writePosition
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: res.RowsAffected
+        kind: value
+      - id: origin
+        kind: internal
+    steps:
+      - bind: res, err
+        eval: ex.ExecContext(ctx, m.upd, positionArgs(li, pos)...)
+        to: ex.ExecContext
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: n, err
+        eval: res.RowsAffected()
+        to: res.RowsAffected
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - return: origin(coreconsensus.StateMachineFailed, errs.String("why", "the position row is not there"), errs.Int64("rows", n))
+              to: origin
+          when: n != 1
+      - return: nil
+  - of: (*SQL).readPosition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).readPosition
+        kind: self
+      - id: ex.QueryRowContext(ctx, m.sel).Scan
+        kind: value
+      - id: clusterOf
+        kind: internal
+    steps:
+      - leaf: a var of several names, or of no type
+        stmt: var cluster, pred string
+      - var:
+          name: v
+          type: "[6]int64"
+      - set: err
+        to: ex.QueryRowContext(ctx, m.sel).Scan
+        value: ex.QueryRowContext(ctx, m.sel).Scan(&cluster, &v[0], &pred, &v[1], &v[2], &v[3], &v[4], &v[5])
+      - opt:
+          do:
+            - return: li, pos, false, nil
+          when: err == stdsql.ErrNoRows
+      - opt:
+          do:
+            - return: li, pos, false, err
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: li, pos, false, corrupt("the position row holds a negative number")
+                when: x < 0
+          key: _
+          range: v
+          value: x
+      - opt:
+          do:
+            - return: li, pos, false, err
+          init:
+            bind: li.Cluster, err
+            eval: clusterOf(cluster)
+            op: =
+            to: clusterOf
+          when: err != nil
+      - opt:
+          do:
+            - return: li, pos, false, err
+          init:
+            bind: li.Predecessor, err
+            eval: clusterOf(pred)
+            op: =
+            to: clusterOf
+          when: err != nil
+      - set: li.Epoch, li.PredecessorEpoch, li.KeptIndex, li.AdoptedFrom
+        value: uint64(v[0]), uint64(v[1]), uint64(v[2]), uint64(v[3])
+      - set: pos
+        value: "coreconsensus.PositionValue{Term: uint64(v[4]), Index: uint64(v[5])}"
+      - return: li, pos, true, nil
+  - of: clusterOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: clusterOf
+        kind: self
+      - id: hex
+        kind: stdlib
+    steps:
+      - var:
+          name: c
+          type: coreconsensus.ClusterID
+      - opt:
+          do:
+            - return: c, corrupt("the position row holds a cluster id that is not 32 hex digits")
+          init:
+            bind: n, err
+            eval: hex.Decode(c[:], []byte(strings.TrimSpace(s)))
+            to: hex
+          when: err != nil || n != len(c)
+      - return: c, nil
+  - of: (*SQL).Snapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).Snapshot
+        kind: self
+      - id: s.hold
+        kind: internal
+    steps:
+      - bind: s
+        eval: "&sqlSnapshot{m: m, write: make(chan *writeReq), release: make(chan struct{}), done: make(chan struct{})}"
+      - bind: ready
+        eval: make(chan error, 1)
+      - go: s.hold(ready)
+        to: s.hold
+      - opt:
+          do:
+            - eval: <-s.done
+            - return: nil, failed("snapshot", err)
+          init:
+            bind: err
+            eval: <-ready
+          when: err != nil
+      - return: s, nil
+  - of: (*sqlSnapshot).hold
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlSnapshot).hold
+        kind: self
+      - id: s.m.cfg.Transactor.Transact
+        kind: value
+    steps:
+      - defer: close(s.done)
+      - bind: opened
+        eval: "false"
+      - bind: opts
+        eval: "coresql.TxOptionsValue{Isolation: s.m.snapIso, ReadOnly: true}"
+      - bind: err
+        eval: |-
+          s.m.cfg.Transactor.Transact(context.Background(), opts, func(ctx context.Context, ex coresql.Executor) error {
+          		if _, _, _, err := s.m.readPosition(ctx, ex); err != nil {
+          			return err
+          		}
+          		opened = true
+          		ready <- nil
+          		for {
+          			select {
+          			case req := <-s.write:
+          				req.n, req.err = s.dump(ctx, ex, req.w)
+          				req.done <- struct{}{}
+          			case <-s.release:
+          				return nil
+          			}
+          		}
+          	})
+        to: s.m.cfg.Transactor.Transact
+      - opt:
+          do:
+            - send:
+                chan: ready
+                value: err
+          when: "!opened"
+  - of: (*sqlSnapshot).dump
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlSnapshot).dump
+        kind: self
+      - id: cw.Write
+        kind: internal
+    steps:
+      - bind: cw
+        eval: "&countingWriter{w: w}"
+      - opt:
+          do:
+            - return: cw.n, err
+          init:
+            bind: _, err
+            eval: cw.Write([]byte{sqlSnapshotMagic[0], sqlSnapshotMagic[1], sqlSnapshotMagic[2], sqlSnapshotMagic[3], sqlSnapshotVersion})
+            to: cw.Write
+          when: err != nil
+      - opt:
+          do:
+            - return: cw.n, failed("dump", err)
+          init:
+            bind: err
+            eval: s.m.cfg.Dump(ctx, ex, cw)
+          when: err != nil
+      - return: cw.n, nil
+  - of: (*sqlSnapshot).WriteTo
+    steps:
+      - bind: req
+        eval: "&writeReq{w: w, done: make(chan struct{}, 1)}"
+      - select:
+          cases:
+            - comm: s.write <- req
+            - comm: <-s.done
+              do:
+                - return: 0, origin(coreconsensus.StateMachineFailed, errs.String("why", "the snapshot was written after its release"))
+      - eval: <-req.done
+      - return: req.n, req.err
+  - of: (*sqlSnapshot).Release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlSnapshot).Release
+        kind: self
+      - id: s.once.Do
+        kind: value
+    steps:
+      - eval: s.once.Do(func() { close(s.release) })
+        to: s.once.Do
+      - eval: <-s.done
+  - of: (*countingWriter).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*countingWriter).Write
+        kind: self
+      - id: c.w.Write
+        kind: value
+    steps:
+      - bind: n, err
+        eval: c.w.Write(p)
+        to: c.w.Write
+      - op: +=
+        set: c.n
+        value: int64(n)
+      - return: n, err

@@ -255,6 +255,8 @@ sequences:
         eval: "&round{id: r.nextRound, sentAt: now, acks: map[core.NodeID]uint64{r.id: r.timing.Generation + 1}, conf: r.conf().Index}"
       - set: r.rounds
         value: append(r.rounds, rd)
+      - set: r.sentRounds[rd.id%rttRounds]
+        value: "sentRound{id: rd.id, at: now}"
       - opt:
           do:
             - set: r.rounds
@@ -271,7 +273,7 @@ sequences:
                   - set: commit
                     value: r.log.committed
                 when: r.mutated(mutHeartbeatUnclamped)
-            - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id})"
+            - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id, RejectHint: r.heartbeatLast()})"
               to: r.send
             - opt:
                 do:
@@ -604,7 +606,7 @@ sequences:
         set: pr.facts
         value: peerHeard
       - set: pr.facts
-        value: pr.facts&^(peerProtocol2|peerProtocol3) | announced(m.Flags)
+        value: pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4) | announced(m.Flags)
       - switch:
           cases:
             - case: core.MsgAppResp
@@ -617,7 +619,7 @@ sequences:
               do:
                 - eval: pr.noteSilence(m.Flags)
                   to: pr.noteSilence
-                - eval: r.handleHeartbeatResp(pr, m)
+                - eval: r.handleHeartbeatResp(now, pr, m)
                   to: r.handleHeartbeatResp
             - default: true
           "on": m.Kind
@@ -628,6 +630,8 @@ sequences:
       - id: (*Raft).handleHeartbeatResp
         kind: self
       - id: r.ackRounds
+        kind: internal
+      - id: r.measureRTT
         kind: internal
       - id: r.confirmRounds
         kind: internal
@@ -642,6 +646,8 @@ sequences:
     steps:
       - eval: r.ackRounds(m.From, m.Context, m.Contract)
         to: r.ackRounds
+      - eval: r.measureRTT(now, pr, m.Context)
+        to: r.measureRTT
       - eval: r.confirmRounds()
         to: r.confirmRounds
       - bind: silent
@@ -809,6 +815,16 @@ sequences:
         value: time.Time{}
       - eval: pr.becomeProbe()
         to: pr.becomeProbe
+  - of: (*Raft).measureRTT
+    steps:
+      - opt:
+          do:
+            - set: pr.rtt, pr.rttRound
+              value: now.Sub(s.at), round
+          init:
+            bind: s
+            eval: r.sentRounds[round%rttRounds]
+          when: round > pr.rttRound && s.id == round
   - of: (*Raft).handleAppResp
     participants:
       - id: caller
@@ -1027,8 +1043,12 @@ sequences:
     steps:
       - switch:
           cases:
-            - case: e.Kind == core.EntryCommand
+            - case: e.Kind == core.EntryCommand, e.Kind == core.EntrySessionCommand
               do:
+                - opt:
+                    do:
+                      - return: 0, core.CodePayloadVersionRefused
+                    when: e.Kind == core.EntrySessionCommand && !r.atProtocol4()
                 - opt:
                     do:
                       - return: 0, core.CodeNoSpace
@@ -1212,7 +1232,28 @@ sequences:
               set: f
               value: core.FlagProtocol3
           when: v >= Protocol3
+      - opt:
+          do:
+            - op: "|="
+              set: f
+              value: core.FlagProtocol4
+          when: v >= Protocol4
       - return: f
+  - of: (*Raft).heartbeatLast
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).heartbeatLast
+        kind: self
+      - id: r.log.lastIndex
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: r.speaks() < Protocol4
+      - return: r.log.lastIndex()
+        to: r.log.lastIndex
   - of: (*Raft).announces
     participants:
       - id: caller
@@ -1241,6 +1282,12 @@ sequences:
               set: f
               value: peerProtocol3
           when: flags&core.FlagProtocol3 != 0
+      - opt:
+          do:
+            - op: "|="
+              set: f
+              value: peerProtocol4
+          when: flags&core.FlagProtocol4 != 0
       - return: f
   - of: (*Raft).checkNoSpaceClear
     steps:
@@ -1854,7 +1901,7 @@ sequences:
       - eval: |-
           r.send(core.MessageValue{
           		Kind: resp, To: m.From, Context: m.Context,
-          		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm,
+          		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm, Commit: a.commit,
           	})
         to: r.send
   - of: (*Raft).answerForward
@@ -1867,7 +1914,11 @@ sequences:
         kind: internal
       - id: r.admitForward
         kind: internal
+      - id: r.answerSessionForward
+        kind: internal
       - id: r.propose
+        kind: internal
+      - id: r.noteForwarded
         kind: internal
     steps:
       - opt:
@@ -1883,10 +1934,12 @@ sequences:
           do:
             - return: "fwdAnswer{reject: true, code: core.CodeFrameInvalid}"
           when: wire.BodySum(e.Data) != e.BodySum
+      - bind: command
+        eval: e.Kind == core.EntryCommand || e.Kind == core.EntrySessionCommand
       - opt:
           do:
             - return: "fwdAnswer{reject: true, code: codeVersion}"
-          when: (m.Kind == core.MsgForward) != (e.Kind == core.EntryCommand)
+          when: (m.Kind == core.MsgForward) != command
       - opt:
           do:
             - opt:
@@ -1897,7 +1950,12 @@ sequences:
                   eval: r.admitForward(len(e.Data))
                   to: r.admitForward
                 when: code != 0
-          when: e.Kind == core.EntryCommand
+          when: command
+      - opt:
+          do:
+            - return: r.answerSessionForward(e, m.From)
+              to: r.answerSessionForward
+          when: e.Kind == core.EntrySessionCommand
       - bind: pos, code
         eval: r.propose(r.now, []core.EntryValue{e}, m.From)
         to: r.propose
@@ -1905,15 +1963,45 @@ sequences:
           do:
             - return: "fwdAnswer{reject: true, code: code, hint: uint64(r.lead)}"
           when: code != 0
+      - eval: r.noteForwarded(pos[0].Index, len(e.Data))
+        to: r.noteForwarded
+      - return: "fwdAnswer{index: pos[0].Index, logTerm: pos[0].Term}"
+  - of: (*Raft).answerSessionForward
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).answerSessionForward
+        kind: self
+      - id: r.log.lastIndex
+        kind: internal
+      - id: r.proposeSession
+        kind: internal
+      - id: r.noteForwarded
+        kind: internal
+    steps:
+      - bind: last
+        eval: r.log.lastIndex()
+        to: r.log.lastIndex
+      - bind: pos, code
+        eval: r.proposeSession(r.now, e, from)
+        to: r.proposeSession
       - opt:
           do:
-            - set: r.fwd
-              value: "append(r.fwd, fwdEntry{index: pos[0].Index, size: int64(len(e.Data))})"
-            - op: +=
-              set: r.fwdBytes
-              value: int64(len(e.Data))
-          when: e.Kind == core.EntryCommand
-      - return: "fwdAnswer{index: pos[0].Index, logTerm: pos[0].Term}"
+            - return: "fwdAnswer{reject: true, code: code, hint: uint64(r.lead)}"
+          when: code != 0
+      - opt:
+          do:
+            - eval: r.noteForwarded(pos.Index, len(e.Data))
+              to: r.noteForwarded
+          when: pos.Index > last
+      - return: "fwdAnswer{index: pos.Index, logTerm: pos.Term, commit: r.log.committed}"
+  - of: (*Raft).noteForwarded
+    steps:
+      - set: r.fwd
+        value: "append(r.fwd, fwdEntry{index: index, size: int64(size)})"
+      - op: +=
+        set: r.fwdBytes
+        value: int64(size)
   - of: (*Raft).admitForward
     steps:
       - opt:
@@ -2033,6 +2121,8 @@ sequences:
           when: r.mutated(mutReadNoRound)
       - eval: r.broadcastHeartbeat(r.now)
         to: r.broadcastHeartbeat
+      - op: ++
+        set: r.readRounds
       - bind: id
         eval: r.nextRound
       - loop:
@@ -2454,6 +2544,8 @@ sequences:
         kind: actor
       - id: (*Raft).installEngine
         kind: self
+      - id: NewSessionTable
+        kind: internal
       - id: r.resetEngines
         kind: internal
       - id: r.applyCommitEffects
@@ -2479,6 +2571,9 @@ sequences:
           when: meta.Timing.ElectionTimeoutMin > r.voteWindow
       - set: r.clusterVer, r.clusterGen, r.noSpace
         value: meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
+      - set: r.sessions
+        to: NewSessionTable
+        value: NewSessionTable(meta.Sessions)
       - eval: r.resetEngines()
         to: r.resetEngines
       - eval: r.applyCommitEffects(meta.Position.Index+1, r.log.committed)
@@ -3483,6 +3578,8 @@ sequences:
         kind: self
       - id: sm.Membership.Clone
         kind: value
+      - id: NewSessionTable
+        kind: internal
       - id: node.adoptClusterVersion
         kind: internal
       - id: node.engine
@@ -3536,6 +3633,9 @@ sequences:
             else: true
       - set: node.noSpace
         value: sm.NoSpace
+      - set: node.sessions
+        to: NewSessionTable
+        value: NewSessionTable(sm.Sessions)
       - eval: node.adoptClusterVersion(&sm)
         to: node.adoptClusterVersion
       - set: node.voteWindow
@@ -3561,6 +3661,8 @@ sequences:
         value: min(node.log.applied, node.log.committed)
       - eval: node.applyCommitEffects(node.log.snapIndex+1, node.log.committed)
         to: node.applyCommitEffects
+      - set: node.fiatFounding
+        value: node.log.snapIndex == 0 && node.log.lastIndex() == 1 && node.log.committed == 1 && node.log.matchTerm(1, 1)
       - set: node.hs
         value: "core.HardState{Term: node.term, Vote: node.vote, Commit: node.log.committed}"
       - set: node.role
@@ -3939,8 +4041,13 @@ sequences:
           		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
           		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
           		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
-          		Transfer: r.transferTo,
+          		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
           	}
+      - opt:
+          do:
+            - set: st.LeaderLast, st.Appended
+              value: r.heard.last, r.heard.appended
+          when: r.role != core.RoleLeader && r.heard.term == r.term && r.heard.from == r.lead
       - opt:
           do:
             - set: st.HandedBy
@@ -3956,6 +4063,9 @@ sequences:
             - return: 0, time.Time{}, false
           when: r.role != core.RoleLeader || pr == nil
       - return: pr.match, pr.lastHeard, true
+  - of: (*Raft).ReadRounds
+    steps:
+      - return: r.readRounds
   - of: (*Raft).LeaseValid
     steps:
       - opt:
@@ -4003,7 +4113,9 @@ sequences:
           		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.hasStateNotice()
   - of: (*ReadyValue).hasStateNotice
     steps:
-      - return: rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard
+      - return: |-
+          rd.SilenceEnded || rd.SilenceLowered != 0 || rd.Unsupported.Index != 0 || rd.LeaderUnheard ||
+          		rd.Diverged.Index != 0
   - of: (*Raft).Ready
     participants:
       - id: caller
@@ -4522,6 +4634,14 @@ sequences:
       - id: r.noteAppended
         kind: internal
     steps:
+      - opt:
+          do:
+            - set: r.fiatFounding
+              value: "false"
+          init:
+            bind: "n"
+            eval: len(es)
+          when: n > 0 && es[n-1].Position.Index > 1
       - loop:
           do:
             - set: r.log.ents
@@ -4541,6 +4661,8 @@ sequences:
         kind: actor
       - id: (*Raft).applyCommitEffect
         kind: self
+      - id: r.sessions.Apply
+        kind: internal
       - id: wire
         kind: package
       - id: r.applyAdmin
@@ -4548,6 +4670,15 @@ sequences:
       - id: r.noteEngine
         kind: internal
     steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: r.sessions.Apply(e)
+                    to: r.sessions.Apply
+                when: e.Data != nil
+            - return: "false"
+          when: e.Kind == core.EntrySessionCommand
       - opt:
           do:
             - return: "false"
@@ -4846,6 +4977,7 @@ sequences:
               value: |-
                 append(out, PeerStatValue{
                 			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
+                			RTT: pr.rtt, RTTRound: pr.rttRound,
                 			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
                 				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot) |
                 				statFlag(StatProtocol3, pr.facts&peerProtocol3 != 0),
@@ -4860,6 +4992,253 @@ sequences:
   - of: (*Raft).ChainRefusal
     steps:
       - return: r.refusedFrom, r.refusedAt, r.refusals
+  - of: NewSessionTable
+    steps:
+      - bind: t
+        eval: "&SessionTable{byID: make(map[core.SessionID]core.SessionValue, len(vs))}"
+      - loop:
+          do:
+            - set: t.byID[v.ID]
+              value: v
+          key: _
+          range: vs
+          value: v
+      - return: t
+  - of: (*SessionTable).Apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SessionTable).Apply
+        kind: self
+      - id: wire
+        kind: package
+      - id: t.evictFor
+        kind: internal
+      - id: recorded
+        kind: internal
+    steps:
+      - bind: s, seq, _, err
+        eval: wire.ParseSession(e.Data)
+        to: wire
+      - opt:
+          do:
+            - return: core.PositionValue{}, codeVersion
+          when: err != nil
+      - bind: idx
+        eval: e.Position.Index
+      - bind: v, ok
+        eval: t.byID[s]
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: v
+                    value: "core.SessionValue{ID: s, BodySum: e.BodySum, Position: e.Position}"
+                  - eval: t.evictFor()
+                    to: t.evictFor
+                when: "!ok"
+            - set: v.Last
+              value: idx
+            - set: t.byID[s]
+              value: v
+            - return: e.Position, 0
+          when: seq == sessionOpen
+      - bind: pos, code, known
+        eval: recorded(v, ok, seq, e.BodySum)
+        to: recorded
+      - switch:
+          cases:
+            - case: "!known"
+              do:
+                - set: v.Seq, v.BodySum, v.Position
+                  value: seq, e.BodySum, e.Position
+                - set: pos
+                  value: e.Position
+            - case: code != 0
+              do:
+                - return: pos, code
+      - set: v.Last
+        value: idx
+      - set: t.byID[s]
+        value: v
+      - return: pos, 0
+  - of: recorded
+    steps:
+      - switch:
+          cases:
+            - case: "!ok || seq < v.Seq || seq == sessionOpen"
+              do:
+                - return: core.PositionValue{}, core.CodeSessionExpired, true
+            - case: seq > v.Seq
+              do:
+                - return: core.PositionValue{}, 0, false
+            - case: sum != v.BodySum
+              do:
+                - return: core.PositionValue{}, core.CodeSessionDigestMismatch, true
+            - default: true
+              do:
+                - return: v.Position, 0, true
+  - of: (*SessionTable).Values
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SessionTable).Values
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(t.byID) == 0
+      - bind: out
+        eval: slices.AppendSeq(make([]core.SessionValue, 0, len(t.byID)), maps.Values(t.byID))
+        to: slices
+      - eval: slices.SortFunc(out, func(a, b core.SessionValue) int { return bytes.Compare(a.ID[:], b.ID[:]) })
+        to: slices
+      - return: out
+  - of: (*Raft).ProposeSession
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).ProposeSession
+        kind: self
+      - id: r.proposeSession
+        kind: internal
+    steps:
+      - return: r.proposeSession(now, e, r.id)
+        to: r.proposeSession
+  - of: (*Raft).proposeSession
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).proposeSession
+        kind: self
+      - id: wire
+        kind: package
+      - id: r.sessionKnown
+        kind: internal
+      - id: r.propose
+        kind: internal
+    steps:
+      - set: r.now
+        value: now
+      - opt:
+          do:
+            - return: core.PositionValue{}, codeNotLeader
+          when: r.role != core.RoleLeader || r.transferTo != 0
+      - opt:
+          do:
+            - return: core.PositionValue{}, codeVersion
+          when: e.Kind != core.EntrySessionCommand
+      - opt:
+          do:
+            - return: core.PositionValue{}, core.CodePayloadVersionRefused
+          when: "!r.atProtocol4()"
+      - bind: s, seq, _, err
+        eval: wire.ParseSession(e.Data)
+        to: wire
+      - opt:
+          do:
+            - return: core.PositionValue{}, codeVersion
+          when: err != nil
+      - opt:
+          do:
+            - return: pos, code
+          init:
+            bind: pos, code, known
+            eval: r.sessionKnown(s, seq, e.BodySum)
+            to: r.sessionKnown
+          when: known && !r.cfg.sessionUnchecked
+      - bind: pos, code
+        eval: r.propose(now, []core.EntryValue{e}, origin)
+        to: r.propose
+      - opt:
+          do:
+            - return: core.PositionValue{}, code
+          when: code != 0
+      - return: pos[0], 0
+  - of: (*Raft).sessionKnown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).sessionKnown
+        kind: self
+      - id: r.sessionPending
+        kind: internal
+      - id: recorded
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: pos, code, known
+          init:
+            bind: pos, code, known, found
+            eval: r.sessionPending(s, seq, sum)
+            to: r.sessionPending
+          when: found
+      - bind: v, ok
+        eval: r.sessions.byID[s]
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: v.Position, 0, true
+                when: ok
+            - return: core.PositionValue{}, 0, false
+          when: seq == sessionOpen
+      - return: recorded(v, ok, seq, sum)
+        to: recorded
+  - of: (*Raft).sessionPending
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).sessionPending
+        kind: self
+      - id: r.log.at
+        kind: internal
+      - id: wire
+        kind: package
+      - id: recorded
+        kind: internal
+    steps:
+      - loop:
+          cond: i > max(r.log.committed, r.log.snapIndex)
+          do:
+            - bind: e
+              eval: r.log.at(i)
+              to: r.log.at
+            - opt:
+                do:
+                  - continue: true
+                when: e.Kind != core.EntrySessionCommand
+            - bind: es, eseq, _, err
+              eval: wire.ParseSession(e.Data)
+              to: wire
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil || es != s
+            - opt:
+                do:
+                  - bind: v
+                    eval: "core.SessionValue{ID: s, Seq: eseq, BodySum: e.BodySum, Position: e.Position}"
+                  - set: pos, code, known
+                    to: recorded
+                    value: recorded(v, true, seq, sum)
+                  - return: pos, code, known, true
+                when: eseq != sessionOpen
+            - opt:
+                do:
+                  - return: e.Position, 0, true, true
+                when: seq == sessionOpen
+            - return: core.PositionValue{}, 0, false, true
+          init: i := r.log.lastIndex()
+          post: i--
+      - return: core.PositionValue{}, 0, false, false
+  - of: (*Raft).atProtocol4
+    steps:
+      - return: r.clusterVer >= Protocol4
   - of: (*Raft).Step
     participants:
       - id: caller
@@ -4953,6 +5332,12 @@ sequences:
             - case: m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat
               do:
                 - eval: r.becomeFollower(m.Term, m.From)
+                  to: r.becomeFollower
+            - case: m.Kind == core.MsgPreVoteResp && r.role == core.RolePreCandidate
+              do:
+                - op: ++
+                  set: r.preVotesLost
+                - eval: r.becomeFollower(m.Term, 0)
                   to: r.becomeFollower
             - default: true
               do:
@@ -5353,7 +5738,9 @@ sequences:
         kind: self
       - id: r.followWinner
         kind: internal
-      - id: r.tallyVotes
+      - id: r.tallyPreVoteResp
+        kind: internal
+      - id: r.tallyVoteResp
         kind: internal
       - id: r.send
         kind: internal
@@ -5366,31 +5753,63 @@ sequences:
                   to: r.followWinner
             - case: core.MsgPreVoteResp
               do:
-                - opt:
-                    do:
-                      - set: r.votes[m.From]
-                        value: "!m.Reject"
-                      - eval: r.tallyVotes()
-                        to: r.tallyVotes
-                    when: r.role == core.RolePreCandidate
+                - eval: r.tallyPreVoteResp(m)
+                  to: r.tallyPreVoteResp
             - case: core.MsgVoteResp
               do:
-                - opt:
-                    do:
-                      - set: r.votes[m.From]
-                        value: "!m.Reject"
-                      - opt:
-                          do:
-                            - eval: r.tallyVotes()
-                              to: r.tallyVotes
-                          when: r.facts&raftSelfVoteDurable != 0
-                    when: r.role == core.RoleCandidate
+                - eval: r.tallyVoteResp(m)
+                  to: r.tallyVoteResp
             - case: core.MsgReadIndex
               do:
                 - eval: "r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: m.From, Context: m.Context, Code: codeNotLeader})"
                   to: r.send
             - default: true
           "on": m.Kind
+  - of: (*Raft).tallyPreVoteResp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).tallyPreVoteResp
+        kind: self
+      - id: r.tallyVotes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.role != core.RolePreCandidate
+      - opt:
+          do:
+            - op: ++
+              set: r.preVotesLost
+          init:
+            bind: v, ok
+            eval: r.votes[m.From]
+          when: m.Reject && (!ok || v)
+      - set: r.votes[m.From]
+        value: "!m.Reject"
+      - eval: r.tallyVotes()
+        to: r.tallyVotes
+  - of: (*Raft).tallyVoteResp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).tallyVoteResp
+        kind: self
+      - id: r.tallyVotes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.role != core.RoleCandidate
+      - set: r.votes[m.From]
+        value: "!m.Reject"
+      - opt:
+          do:
+            - eval: r.tallyVotes()
+              to: r.tallyVotes
+          when: r.facts&raftSelfVoteDurable != 0
   - of: (*Raft).followWinner
     participants:
       - id: caller
@@ -5459,6 +5878,8 @@ sequences:
         kind: internal
       - id: r.resetElection
         kind: internal
+      - id: r.handleAppend
+        kind: internal
       - id: r.maybeEndSilence
         kind: internal
     steps:
@@ -5470,11 +5891,27 @@ sequences:
         to: r.extendHint
       - eval: r.resetElection(now)
         to: r.resetElection
+      - bind: ok
+        eval: r.handleAppend(m)
+        to: r.handleAppend
+      - opt:
+          do:
+            - set: r.hearLeader(m.From).appended
+              value: now
+          when: ok && len(m.Entries) > 0
       - opt:
           do:
             - eval: r.maybeEndSilence(m)
               to: r.maybeEndSilence
-          when: r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal)
+          when: ok || r.mutated(mutSilenceEndsOnARefusal)
+  - of: (*Raft).hearLeader
+    steps:
+      - opt:
+          do:
+            - set: r.heard
+              value: "leaderHeard{from: from, term: r.term}"
+          when: r.heard.from != from || r.heard.term != r.term
+      - return: "&r.heard"
   - of: (*Raft).followHeartbeat
     participants:
       - id: caller
@@ -5508,6 +5945,11 @@ sequences:
             bind: c
             eval: min(m.Commit, r.log.lastIndex())
           when: c > r.log.committed
+      - opt:
+          do:
+            - set: r.hearLeader(m.From).last
+              value: m.RejectHint
+          when: m.Flags&core.FlagProtocol4 != 0 && r.speaks() >= Protocol4
       - bind: resp
         eval: |-
           core.MessageValue{
@@ -5569,7 +6011,13 @@ sequences:
           do:
             - return: r.timing.Generation
           when: r.mutated(mutReportUnsyncedContract)
-      - return: r.EngineAt(min(r.log.committed, r.log.stable)).Timing.Generation
+      - bind: at
+        eval: min(r.log.committed, r.log.stable)
+      - opt:
+          do:
+            - return: "0"
+          when: at == 0 && r.log.snapIndex == 0
+      - return: r.EngineAt(at).Timing.Generation
   - of: (*Raft).followTimeoutNow
     participants:
       - id: caller
@@ -5619,6 +6067,12 @@ sequences:
           when: "!r.rebaseOnCommit(&m)"
       - opt:
           do:
+            - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: 0})"
+              to: r.send
+            - return: "false"
+          when: r.foundingUnproven(&m)
+      - opt:
+          do:
             - bind: hint
               eval: min(m.Index, r.log.lastIndex())
             - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: hint})"
@@ -5647,6 +6101,8 @@ sequences:
         kind: internal
       - id: r.send
         kind: internal
+      - id: r.committedDivergence
+        kind: internal
     steps:
       - opt:
           do:
@@ -5663,10 +6119,66 @@ sequences:
               to: r.send
             - return: "false"
           when: k >= len(m.Entries) || !ok || m.Entries[k].Position.Term != t
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: at
+            eval: r.committedDivergence(m, k)
+            to: r.committedDivergence
+          when: at != 0 && r.heldOnDivergence(m, at)
       - set: m.Entries
         value: m.Entries[k+1:]
       - set: m.Index, m.LogTerm
         value: r.log.committed, t
+      - return: "true"
+  - of: (*Raft).foundingDivergence
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).foundingDivergence
+        kind: self
+      - id: r.log.term
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: "!r.fiatFounding || len(m.Entries) == 0 || m.Index != 1 || r.log.committed < 1 || r.log.snapIndex >= 1"
+      - opt:
+          do:
+            - return: "0"
+          init:
+            bind: t, _
+            eval: r.log.term(1)
+            to: r.log.term
+          when: t != 1
+      - bind: e
+        eval: "&m.Entries[0]"
+      - opt:
+          do:
+            - return: "0"
+          when: wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(1), e) == e.ChainSum
+      - return: "1"
+  - of: (*Raft).heldOnDivergence
+    steps:
+      - opt:
+          do:
+            - set: r.rd.Diverged
+              value: "DivergenceValue{Index: at, Leader: m.From}"
+            - return: "true"
+          when: m.Commit > at
+      - opt:
+          do:
+            - set: r.divergedFrom, r.divergedTerm, r.divergedSince
+              value: m.From, r.term, r.now
+          when: r.divergedFrom != m.From || r.divergedTerm != r.term
+      - opt:
+          do:
+            - return: "false"
+          when: r.now.Sub(r.divergedSince) >= r.timing.ElectionTimeoutMax
+      - set: r.rd.ChainRefusedBy
+        value: append(r.rd.ChainRefusedBy, m.From)
       - return: "true"
   - of: (*Raft).firstNewEntry
     participants:
@@ -5690,35 +6202,172 @@ sequences:
                 do:
                   - return: "-1, prevChain, false"
                 when: e.Position.Index != m.Index+uint64(k)+1
+            - bind: t, held
+              eval: r.log.term(e.Position.Index)
+              to: r.log.term
             - opt:
                 do:
-                  - set: prevChain
-                    value: e.ChainSum
-                  - continue: true
-                init:
-                  bind: t, held
-                  eval: r.log.term(e.Position.Index)
-                  to: r.log.term
-                when: held && t == e.Position.Term
-            - return: k, prevChain, true
+                  - return: k, prevChain, true
+                when: "!held || t != e.Position.Term || r.replacesFounding(e)"
+            - opt:
+                do:
+                  - return: "-1, prevChain, false"
+                when: r.contradictsHeld(m, e)
+            - set: prevChain
+              to: r.log.chain
+              value: r.log.chain(e.Position.Index)
           key: k
           range: m.Entries
       - return: "-1, prevChain, true"
+  - of: (*Raft).contradictsHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).contradictsHeld
+        kind: self
+      - id: r.log.chain
+        kind: internal
+      - id: r.chainRefused
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: own
+            eval: r.log.chain(e.Position.Index)
+            to: r.log.chain
+          when: own == e.ChainSum || e.Position.Index <= r.log.committed
+      - opt:
+          do:
+            - return: "true"
+          when: r.foundingContradicted(e) && r.heldOnDivergence(m, 1)
+      - eval: r.chainRefused(*m, e.Position.Index)
+        to: r.chainRefused
+      - return: "true"
+  - of: (*Raft).foundingUnproven
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).foundingUnproven
+        kind: self
+      - id: founding
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: m.Index != 1 || m.LogTerm != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 || !r.log.matchTerm(1, 1)
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: _, ok
+            eval: founding(r.log.at(1))
+            to: founding
+          when: "!ok"
+      - opt:
+          do:
+            - return: "true"
+          when: len(m.Entries) == 0
+      - bind: e
+        eval: "&m.Entries[0]"
+      - return: wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(1), e) != e.ChainSum
+  - of: (*Raft).replacesFounding
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).replacesFounding
+        kind: self
+      - id: founding
+        kind: internal
+    steps:
+      - bind: i
+        eval: e.Position.Index
+      - opt:
+          do:
+            - return: "false"
+          when: |-
+            i != 1 || e.Position.Term != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 || r.log.chain(1) == e.ChainSum ||
+            		wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(0), e) != e.ChainSum
+      - bind: theirs, ok
+        eval: founding(e)
+        to: founding
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - bind: ours, ok
+        eval: founding(r.log.at(1))
+        to: founding
+      - return: ok && bytes.Equal(wire.AppendMembership(nil, &theirs.Membership), wire.AppendMembership(nil, &ours.Membership))
+  - of: (*Raft).foundingContradicted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).foundingContradicted
+        kind: self
+      - id: founding
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: |-
+            e.Position.Index != 1 || e.Position.Term != 1 || r.log.committed >= 1 || r.log.snapIndex >= 1 ||
+            		wire.BodySum(e.Data) != e.BodySum || wire.ChainSum(r.log.chain(0), e) != e.ChainSum
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: _, ok
+            eval: founding(e)
+            to: founding
+          when: "!ok"
+      - bind: _, ok
+        eval: founding(r.log.at(1))
+        to: founding
+      - return: ok
+  - of: founding
+    participants:
+      - id: caller
+        kind: actor
+      - id: founding
+        kind: self
+      - id: wire
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: wire.AdminValue{}, false
+          when: e.Kind != core.EntryMembership
+      - bind: a, err
+        eval: wire.ParseAdminAt(e.Version, e.Data)
+        to: wire
+      - return: a, err == nil && a.Change == wire.ChangeFounding
   - of: (*Raft).appendNew
     participants:
       - id: caller
         kind: actor
       - id: (*Raft).appendNew
         kind: self
+      - id: r.foundingDivergence
+        kind: internal
       - id: r.truncateFrom
         kind: internal
       - id: r.lowerSilence
         kind: internal
-      - id: ownCopy
-        kind: internal
       - id: r.appendEntries
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: at
+            eval: r.foundingDivergence(m)
+            to: r.foundingDivergence
+          when: start == 0 && at != 0 && r.heldOnDivergence(m, at)
       - opt:
           do:
             - return: "false"
@@ -5742,9 +6391,11 @@ sequences:
           do:
             - set: es[k]
               value: m.Entries[start+k]
-            - set: es[k].Data
-              to: ownCopy
-              value: ownCopy(es[k].Data)
+            - opt:
+                do:
+                  - set: es[k].Data
+                    value: nil
+                when: len(es[k].Data) == 0
           key: k
           range: es
       - eval: r.appendEntries(es)
@@ -5829,27 +6480,33 @@ sequences:
         kind: actor
       - id: (*Raft).chainRefused
         kind: self
+      - id: r.countRefusal
+        kind: internal
       - id: r.send
         kind: internal
+    steps:
+      - eval: r.countRefusal(m.From, at)
+        to: r.countRefusal
+      - set: r.rd.ChainRefusedBy
+        value: append(r.rd.ChainRefusedBy, m.From)
+      - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})"
+        to: r.send
+  - of: (*Raft).countRefusal
     steps:
       - alt:
           - do:
               - op: ++
                 set: r.refusals
-            when: r.refusedAt == at && r.refusedFrom == m.From
+            when: r.refusedAt == at && r.refusedFrom == from
           - do:
               - set: r.refusedAt, r.refusedFrom, r.refusals
-                value: at, m.From, 1
+                value: at, from, 1
             else: true
       - opt:
           do:
             - set: r.refusedLead, r.refusedTerm
-              value: m.From, r.term
+              value: from, r.term
           when: r.cfg.MaxChainRefusals > 0 && r.refusals >= r.cfg.MaxChainRefusals
-      - set: r.rd.ChainRefusedBy
-        value: append(r.rd.ChainRefusedBy, m.From)
-      - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})"
-        to: r.send
   - of: (*Raft).refuses
     steps:
       - return: r.refusedLead != 0 && r.refusedLead == from && r.refusedTerm == r.term && !r.mutated(mutRefusedLeadHeard)

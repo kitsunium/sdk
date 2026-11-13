@@ -154,7 +154,12 @@ func (s *SQLStore[T]) trash(ctx context.Context, ex coresql.Executor, key string
 		}
 	}
 	//: the trash's row: the document, and when it was trashed.
-	return s.insertVersionRows(ctx, ex, key, []versionRow{{at: new(s.clock.Now().UTC()), doc: raw, num: uint64(tombstoneNum)}})
+	if insertErr := s.insertVersionRows(ctx, ex, key, []versionRow{{at: new(s.clock.Now().UTC()), doc: raw, num: uint64(tombstoneNum)}}); insertErr != nil {
+		//: the trash rolls back.
+		return insertErr
+	}
+	//: its change record, in the same transaction.
+	return s.feedIn(ctx, ex, coredocstore.ChangeTrash, key, raw)
 }
 
 // restore is Restore's work, inside its transaction.
@@ -205,8 +210,8 @@ func (s *SQLStore[T]) restore(ctx context.Context, ex coresql.Executor, key stri
 		//: StatementFailed.
 		return s.failed("empty the trash", execErr)
 	}
-	//: restored.
-	return nil
+	//: restored, and its change record written in the same transaction.
+	return s.feedIn(ctx, ex, coredocstore.ChangeRestore, key, raw)
 }
 
 // purge is Purge's work, inside its transaction.
@@ -227,8 +232,8 @@ func (s *SQLStore[T]) purge(ctx context.Context, ex coresql.Executor, key string
 		//: StatementFailed.
 		return s.failed("purge the trash", execErr)
 	}
-	//: purged.
-	return nil
+	//: purged, and its change record written: the document is gone for good.
+	return s.feedIn(ctx, ex, coredocstore.ChangeDelete, key, nil)
 }
 
 // firstVersion reads the lowest version row of key, locked where the engine

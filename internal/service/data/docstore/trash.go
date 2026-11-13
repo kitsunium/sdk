@@ -63,6 +63,11 @@ func (s *Store[T]) Purge(key string) error {
 		//: DocumentNotTrashed, naming no key.
 		return notTrashed(s.path)
 	}
+	//: the change record first: a purge removes the document for good.
+	if feedErr := s.feed(coredocstore.ChangeDelete, key, nil, nil); feedErr != nil {
+		//: ChangeFeedFailed: nothing changed anywhere.
+		return feedErr
+	}
 	persistErr := s.persist(key, nil, true, nil)
 	//: the filesystem refused: nothing changed anywhere.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
@@ -150,6 +155,11 @@ func (s *Store[T]) trash(key string) (applied bool, err error) {
 		Former:  former,
 		Current: head,
 	}
+	//: the change record first.
+	if feedErr := s.feed(coredocstore.ChangeTrash, key, next.Trashed.Document, next); feedErr != nil {
+		//: ChangeFeedFailed: nothing changed anywhere.
+		return false, feedErr
+	}
 	persistErr := s.persist(key, nil, true, next)
 	//: the filesystem refused: nothing changed anywhere.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
@@ -202,6 +212,11 @@ func (s *Store[T]) restore(key string) (applied bool, err error) {
 		return false, kerrs.Wrap(coredocstore.UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", name))
 	}
 	next := &versionsRecord{Current: record.Current, Former: record.Former}
+	//: the change record first.
+	if feedErr := s.feed(coredocstore.ChangeRestore, key, raw, next); feedErr != nil {
+		//: ChangeFeedFailed: nothing changed anywhere.
+		return false, feedErr
+	}
 	persistErr := s.persist(key, raw, false, next)
 	//: the filesystem refused: nothing changed anywhere.
 	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {

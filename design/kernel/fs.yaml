@@ -335,6 +335,333 @@ packages:
                 component's own name does not say.
               name: Indirect
               type: bool
+  - codes:
+      - const:
+          - doc: CodeDamaged identifies a log whose segments hold damage that is not a torn tail.
+            name: CodeDamaged
+            note: "range: 0.1.8.0 - 0.1.8.255"
+            value: "0x00_01_08_01"
+          - doc: CodeVersionUnsupported identifies a record a newer layout wrote.
+            name: CodeVersionUnsupported
+            value: "0x00_01_08_02"
+          - doc: CodeOutOfSequence identifies an Append whose index is not the log's next.
+            name: CodeOutOfSequence
+            value: "0x00_01_08_03"
+          - doc: CodeDropped identifies a read below the log's first index.
+            name: CodeDropped
+            value: "0x00_01_08_04"
+          - doc: CodeOutOfRange identifies a read at or past the log's next index.
+            name: CodeOutOfRange
+            value: "0x00_01_08_05"
+          - doc: CodeFailed identifies a write, a sync or a read the filesystem refused.
+            name: CodeFailed
+            value: "0x00_01_08_06"
+          - doc: CodeClosed identifies a call on a closed log.
+            name: CodeClosed
+            value: "0x00_01_08_07"
+          - doc: CodeTooLarge identifies a payload larger than one record carries.
+            name: CodeTooLarge
+            value: "0x00_01_08_08"
+        type: errs.Code
+    constants:
+      - doc: |-
+          DefaultSegmentBytes is a segment's size when Open is given none: 64 MiB, the
+          consensus log's.
+        name: DefaultSegmentBytes
+        type: int64
+        value: 64 << 20
+    doc: |-
+      Package seglog is a durable, append-only log of records addressed by a
+      contiguous uint64 index, kept in a directory of fixed-size, zero-filled
+      segment files: the segmented log the consensus file log wrote for itself
+      (ADR 0152 D4), extracted without its vocabulary so that any engine needing
+      an ordered, crash-recovering sequence of byte payloads builds on it rather
+      than rewriting it (ADR 0159, ADR 0230).
+
+      # The record
+
+      Every record is 8-byte aligned and little-endian:
+
+      	length u32 | crc32c u32 | version u8 | kind u8 | end u8 | tag u8 |
+      	batch u64 | index u64 | payload | zero padding
+
+      length counts the bytes after the crc, padding excluded, and the crc is the
+      CRC-32C of those bytes. The tag is the caller's kind byte, stored and given
+      back, never read. Every segment opens with a checkpoint record — the index its
+      first entry takes, the log's first index and its batch sequence number — and
+      a full segment is closed by a seal record before the next one is published.
+
+      # One batch, two syncs
+
+      [Log.Append] only buffers. [Log.Sync] writes the pending batch, its last
+      record flagged end-of-batch, in two steps: every record but the last, made
+      durable, then the last one, made durable. A valid end record therefore proves
+      its whole batch was durable before it, and batch k+1 is written only once
+      batch k is, so a valid record of a later batch proves every earlier one. A
+      failed write or sync is final: the log refuses every later call with Failed,
+      because what a failed fsync left on the disk is not knowable.
+
+      # Recovery classifies before it repairs
+
+      [Open] reads every segment and classifies every hole BEFORE it changes a byte.
+      A hole in the last segment whose batch never completed — no valid end record,
+      no valid record of a later batch after it — is a torn tail: never synced, so
+      never acknowledged; it is zeroed and synced, and the log continues before it.
+      Any other hole is damage to synced data and Open refuses with Damaged, the
+      files left as they were; a record a newer layout wrote is refused with
+      VersionUnsupported, never skipped. What a damaged log means — quarantine,
+      repair, a rebuild from elsewhere — is the caller's decision.
+
+      # Dropping a prefix
+
+      [Log.DropBefore] records the log's new first index durably, then unlinks the
+      whole sealed segments that hold only entries below it and syncs the
+      directory. Nothing is rewritten: retention is by whole segments, and an entry
+      below the first index that still sits in a retained segment is unreadable.
+
+      # Rewriting a record
+
+      [Log.Rewrite] is the one call that changes a synced record: the caller's
+      edit gives some records below an index a new kind and payload — a compaction
+      replacing a superseded value by a marker of its own —, and each segment
+      holding one is written again whole into a .tmp, synced and renamed over the
+      old one. Indexes, batches and end flags never change, so recovery reads the
+      rewritten segment as it read the old one.
+
+      # What it is not
+
+      It holds one directory exclusively and takes no lock on it: a caller that may
+      be started twice over the same directory locks it first (flock). It knows
+      nothing of terms, votes, offsets in a partition or consumers; those are its
+      callers' (ADR 0230). One writer at a time, any number of readers: an appended
+      entry is readable before it is synced.
+    functions:
+      - doc: |-
+          Open opens, and recovers, the log kept in dir, creating the directory (mode
+          0700) and its first segment when there is none. segBytes is the size of a
+          segment, DefaultSegmentBytes when it is zero or negative; a batch larger
+          than a segment gets a segment of its own size. Open refuses with Damaged or
+          VersionUnsupported a log it cannot trust, having changed nothing, and with
+          Failed a directory the filesystem refuses; a torn tail it repairs. Before it
+          returns, every segment and the directory are synced, so nothing it reports
+          rests on pages a disk did not hold.
+        in:
+          - name: dir
+            type: string
+          - name: segBytes
+            type: int64
+        name: Open
+        out:
+          - type: "*Log"
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/kernel/fs/seglog
+    sentinels:
+      - var:
+          - code: CodeDamaged
+            doc: |-
+              Damaged is returned by Open for a log whose segments hold damage that is
+              not a torn tail — a hole before a valid record of a later batch, a bad
+              record inside a batch whose end record is valid, a hole in an earlier
+              segment, a checkpoint that does not continue the log — and by a read whose
+              record no longer matches what the log recorded. Its fields name the
+              segment, the offset and why; nothing was changed.
+            name: Damaged
+            private: "internal/kernel/fs/seglog: a hole or a record recovery cannot classify as a torn tail"
+            public: The log holds damage that is not a torn tail
+            reason: DAMAGED
+          - code: CodeVersionUnsupported
+            doc: |-
+              VersionUnsupported is returned by Open for a record whose crc holds but
+              whose version or kind this build does not read: a newer build wrote it,
+              synced it and may have acknowledged it, so it is never taken for a hole.
+            name: VersionUnsupported
+            private: "internal/kernel/fs/seglog: a sealed record of a version or kind this build does not read"
+            public: The log holds a record of a newer layout
+            reason: VERSION_UNSUPPORTED
+          - code: CodeOutOfSequence
+            doc: |-
+              OutOfSequence is returned by Append for an index that is not the log's next:
+              the log's indexes are contiguous.
+            name: OutOfSequence
+            private: "internal/kernel/fs/seglog: Append of an index other than the next"
+            public: The record's index does not follow the log's last
+            reason: OUT_OF_SEQUENCE
+          - code: CodeDropped
+            doc: Dropped is returned by Read, Range and Kind for an index below the log's first.
+            name: Dropped
+            private: "internal/kernel/fs/seglog: a read below the first index"
+            public: The record was dropped from the log
+            reason: DROPPED
+          - code: CodeOutOfRange
+            doc: OutOfRange is returned by Read, Range and Kind for an index at or past the log's next.
+            name: OutOfRange
+            private: "internal/kernel/fs/seglog: a read at or past the next index"
+            public: The record is past the end of the log
+            reason: OUT_OF_RANGE
+          - code: CodeFailed
+            doc: |-
+              Failed is returned when the filesystem refused a write, a sync, a read or a
+              directory operation; its fields name the operation and the cause. After a
+              failed write or sync the log refuses every later call with it.
+            name: Failed
+            private: "internal/kernel/fs/seglog: the filesystem refused an operation"
+            public: The log's storage failed
+            reason: FAILED
+          - code: CodeClosed
+            doc: Closed is returned by every call on a log after Close.
+            name: Closed
+            private: "internal/kernel/fs/seglog: a call after Close"
+            public: The log is closed
+            reason: CLOSED
+          - code: CodeTooLarge
+            doc: TooLarge is returned by Append for a payload above 1 GiB less a record's header.
+            name: TooLarge
+            private: "internal/kernel/fs/seglog: Append of a payload above the record bound"
+            public: The record is too large for the log
+            reason: TOO_LARGE
+    types:
+      - doc: |-
+          Log is a segmented log opened by Open. One writer at a time — Append, Sync,
+          DropBefore, Rewrite and Close serialise — and any number of readers, which never wait
+          for a sync's disk I/O. The zero value is NOT usable.
+        methods:
+          - doc: |-
+              Append adds a record to the pending batch: payload, copied, at index, with
+              the caller's kind byte. index must be the log's next (OutOfSequence
+              otherwise) and payload at most 1 GiB less a record's header (TooLarge). The
+              record is readable at once and durable only once Sync returns nil.
+            in:
+              - name: index
+                type: uint64
+              - name: kind
+                type: uint8
+              - name: payload
+                type: "[]byte"
+            name: Append
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Sync makes the pending batch durable: written after the log's last record,
+              every record but the last synced, then the last one, flagged end-of-batch,
+              synced. A full segment is sealed and the next one published between two
+              batches, never inside one. Whole segments a DropBefore left behind are then
+              unlinked. A failure is final: the log refuses every later call. With nothing
+              pending it returns at once.
+            name: Sync
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Read returns a copy of the payload at index: Dropped below the first index,
+              OutOfRange at or past the next, Damaged when the record on disk no longer
+              matches the one the log recorded.
+            in:
+              - name: index
+                type: uint64
+            name: Read
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - doc: |-
+              Range appends to dst the payloads at lo up to hi excluded, and returns it:
+              always the first, then as long as the payloads appended stay within
+              maxBytes. Contiguous records of one segment are read with one read. The
+              payloads are the caller's and may share one backing array. Errors are
+              Read's, for lo and hi; an empty range returns dst.
+            in:
+              - name: lo
+                type: uint64
+              - name: hi
+                type: uint64
+              - name: maxBytes
+                type: int
+              - name: dst
+                type: "[][]byte"
+            name: Range
+            out:
+              - type: "[][]byte"
+              - type: error
+            recv: pointer
+          - doc: |-
+              Kind returns the caller's kind byte of the record at index, from memory,
+              with Read's errors for an index outside the log.
+            in:
+              - name: index
+                type: uint64
+            name: Kind
+            out:
+              - type: uint8
+              - type: error
+            recv: pointer
+          - doc: |-
+              DropBefore makes index the log's first: the records below it become
+              unreadable at once, a drop record is added to the pending batch and the batch
+              is synced, as Sync syncs it, after which the sealed segments that hold only
+              records below index are unlinked and the directory synced. An index past
+              the next empties the log and makes it the next too, so the next Append
+              takes it. An index at or below the first changes nothing.
+            in:
+              - name: index
+                type: uint64
+            name: DropBefore
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Rewrite changes, durably and in place, records below index below: edit
+              is called for every retained record below it, in index order, with its
+              index, its kind byte and its payload — the caller's for the call only —
+              and returns the kind and payload the record takes and true, or false to
+              leave it as it is. A pending batch is synced first, as Sync syncs it.
+
+              Every segment holding a record edit changed is written again whole —
+              the same records at the same indexes, in the same batches with the same
+              end flags, only the changed ones' kind and payload different — into a
+              .tmp that is synced, renamed over the segment, and the directory synced:
+              a crash leaves the old segment or the new one, never a mix, and recovery
+              reads either. A segment edit changed nothing in is not touched. It
+              returns how many segments it rewrote.
+
+              A failure before a segment's rename leaves that segment as it was, and
+              the log usable, and is returned (Failed, or Damaged for a segment that
+              no longer parses); a failure from the rename on is final, as a failed
+              Sync is.
+            in:
+              - name: below
+                type: uint64
+              - name: edit
+                type: func(index uint64, kind uint8, payload []byte) (uint8, []byte, bool)
+            name: Rewrite
+            out:
+              - type: int
+              - type: error
+            recv: pointer
+          - doc: |-
+              Bounds returns the log's first index and its next: the records held are
+              first through next-1, none when they are equal. A fresh log holds none at
+              index 0.
+            name: Bounds
+            out:
+              - name: first
+                type: uint64
+              - name: next
+                type: uint64
+            recv: pointer
+          - doc: |-
+              Close closes every segment and reports the first failure; a batch still
+              pending is discarded, never written. Every later call returns Closed; a
+              second Close returns nil.
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Log
+        struct:
+          unexported: true
   - constants:
       - blockDoc: |-
           Access rights (winnt.h), in the vocabulary GrantsAnyone takes. Each carries

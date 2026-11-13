@@ -110,6 +110,12 @@ type App struct {
 	// not name: the queue subsystem applies it (plug.QueueConfig's Wrap). nil
 	// in every app a product builds.
 	wrapQueue any
+	// wrapStream, when a test sets it, stands in front of every stream the
+	// app opens for a streamed topic: how a test counts its appends. It is a
+	// func(stream.Stream) stream.Stream of the SDK's stream, which the core
+	// does not name: the stream subsystem applies it (plug.StreamConfig's
+	// Wrap). nil in every app a product builds.
+	wrapStream any
 	// streams ends every live event stream when the app starts draining: an
 	// open Studio must not hold the HTTP shutdown for its whole budget.
 	streams    context.Context
@@ -186,8 +192,8 @@ type routes struct {
 // componentGroups are the nodes of the app that are lifecycle components,
 // by kind — the scheduler's jobs apart.
 type componentGroups struct {
-	secrets, stores, workflows, mailers, subs, commands, loops, listeners []node
-	jobs                                                                  []*Job
+	secrets, stores, workflows, mailers, streams, subs, commands, loops, listeners []node
+	jobs                                                                           []*Job
 }
 
 // loopState is one loop of the daemon, as the Runtime view shows it.
@@ -833,7 +839,7 @@ func (a *App) addComponents() error {
 		// The OTLP export before anything whose spans it forwards, so that
 		// it stops after them (otlp_enable.go).
 		a.addOTLPComponent,
-		func() error { return a.startGroups(g.stores, g.workflows, g.mailers, g.subs, g.commands) },
+		func() error { return a.startGroups(g.stores, g.workflows, g.mailers, g.streams, g.subs, g.commands) },
 		// What a former release sealed under its references, sealed again
 		// under the present ones, once the stores are open (renamed_refs.go).
 		a.addRelabel,
@@ -945,18 +951,31 @@ func (a *App) addAnalysis() error {
 func (a *App) componentNodes() componentGroups {
 	var g componentGroups
 	for _, n := range a.mountedNodes() {
-		if job, ok := n.(*Job); ok {
-			g.jobs = append(g.jobs, job)
-			continue
-		}
-		if q, ok := n.(interface{ queued() bool }); ok && !q.queued() {
-			continue
-		}
-		if group := g.of(n.base().kind); group != nil {
-			*group = append(*group, n)
-		}
+		g.sort(n)
 	}
 	return g
+}
+
+// sort files n under its group, or drops it when it is no component.
+func (g *componentGroups) sort(n node) {
+	if job, ok := n.(*Job); ok {
+		g.jobs = append(g.jobs, job)
+		return
+	}
+	if q, ok := n.(interface{ queued() bool }); ok && !q.queued() {
+		return
+	}
+	if n.base().kind == model.KindTopic {
+		// A streamed topic opens its stream before its subscriptions read
+		// it, and closes it after them (topic_stream.go).
+		if s, ok := n.(streameder); ok && s.streamed() {
+			g.streams = append(g.streams, n)
+		}
+		return
+	}
+	if group := g.of(n.base().kind); group != nil {
+		*group = append(*group, n)
+	}
 }
 
 // of is the group of the nodes of kind, or nil for a kind that is no

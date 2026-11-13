@@ -306,3 +306,16 @@ func (n *Node) runJoinRefresh(j refreshJoiner) {
 		n.obs.info("consensus: no leader heard while joining; the JOIN sent again admits a new answer")
 	}
 }
+
+// ---- a member's read of the configuration (#763) ----
+
+// servedMembership is the configuration this node runs with, the one
+// Membership reads, for another member that asks it: that member's offline
+// TruncateAndStaySilent, whose log holds no change committed while it was
+// down, judges what it keeps on the answer (#763). ok is false once the loop
+// stopped, and a stopped node answers nothing.
+func (n *Node) servedMembership() (coreconsensus.MembershipValue, bool) {
+	var m coreconsensus.MembershipValue
+	ok := n.exec(func() { m = n.r.Status().Conf })
+	return m, ok
+}

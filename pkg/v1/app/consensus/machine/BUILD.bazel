@@ -1,0 +1,33 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "machine",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/app/consensus/machine",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/service/app/consensus/machine"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":machine",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "machine_test",
+    srcs = [
+        "gen_api_test.go",
+        "machine_external_test.go",
+    ],
+    deps = [
+        ":machine",
+        "//internal/service/app/consensus/machine",
+        "//pkg/v1/app/consensus",
+    ],
+)

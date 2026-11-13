@@ -22,6 +22,9 @@ const (
 	// peerProtocol3 is set while the peer's last message of the term
 	// carried FlagProtocol3.
 	peerProtocol3
+	// peerProtocol4 is set while the peer's last message of the term
+	// carried FlagProtocol4.
+	peerProtocol4
 	// peerSilent is set while the peer's last answer, to an append or a
 	// heartbeat, said it is silent (FlagTruncated, #636): it answers, but
 	// acknowledges no append, so it counts for no change that must commit
@@ -73,6 +76,10 @@ type progress struct {
 	// over which a restart of the peer raises its truncation point past
 	// that no-op (SnapshotDone, #795).
 	silentFed uint64
+	// rtt is the round trip of heartbeat round rttRound: from its broadcast
+	// to the peer's first answer covering it (ackRounds), 0 before one.
+	rtt      time.Duration
+	rttRound uint64
 }
 
 // noteSilence records whether the peer's answer says it is silent: a silent

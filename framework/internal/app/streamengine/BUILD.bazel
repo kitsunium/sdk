@@ -1,0 +1,43 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "streamengine",
+    srcs = [
+        "clock.go",
+        "doc.go",
+        "stream.go",
+        "streamengine.go",
+        "streamengine_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/app/streamengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/app/plug",
+        "//framework/internal/app/storeengine",
+        "//framework/model",
+        "//pkg/v1/clock",
+        "//pkg/v1/data/sql",
+        "//pkg/v1/data/stream",
+        "//pkg/v1/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":streamengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "streamengine_test",
+    srcs = ["gen_api_test.go"],
+    deps = [":streamengine"],
+)

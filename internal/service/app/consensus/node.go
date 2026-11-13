@@ -13,7 +13,9 @@ import (
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
+	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
@@ -67,6 +69,9 @@ const (
 	// submits a removal of the old leader again for that long, and a leader
 	// that took over by a transfer starts none of its own meanwhile (#676).
 	handOffWindow time.Duration = 2
+	// resultRing is how many Apply results a node keeps for its
+	// outstanding forwards; a uint64, as the entry index that picks a slot.
+	resultRing uint64 = 4096
 )
 
 // Node is one member of a consensus group: the event loop that owns the step
@@ -81,6 +86,10 @@ type Node struct {
 	// it for every token. Read it through lineage.
 	ident atomic.Pointer[coreconsensus.LogIdentityValue]
 	stamp coreconsensus.StampValue
+	// sessions are the client sessions as the entries applied left them
+	// (#918): the apply goroutine folds every session command before it
+	// decides what the machine is handed, and a cut records them.
+	sessions *raft.SessionTable
 
 	inCtrl chan coreconsensus.MessageValue
 	inData chan coreconsensus.MessageValue
@@ -92,18 +101,39 @@ type Node struct {
 	stopc  chan struct{}
 	hard   atomic.Bool
 
+	// readq holds the Barriers queued for the loop: one turn registers
+	// every read queued, so they share one heartbeat round (#1108).
+	readq *fifo[*readWait]
+	// readBatch is the loop's buffer for the reads one turn takes.
+	readBatch []*readWait
+
 	sq *fifo[storeReq]
 	aq *fifo[applyItem]
 
 	status atomic.Pointer[coreconsensus.StatusValue]
+	// conf is the configuration the last turn published, read by Membership
+	// without entering the loop (#915). The loop never changes a value it
+	// stored: a new configuration is a new pointer.
+	conf atomic.Pointer[coreconsensus.MembershipValue]
 
 	am          sync.Mutex
-	acond       *sync.Cond
 	applied     uint64
 	appliedTerm uint64
 	waiters     map[uint64]*proposal
-	results     map[uint64]applyResult
-	resultOrder []uint64
+	// appliedQ holds the Barrier and WaitApplied callers parked on an
+	// index not yet applied, lowest first: an applied entry releases only
+	// those it reaches, O(1) when none is due (#1109). nil until the first
+	// caller parks.
+	appliedQ *heap.IndexedHeap[*appliedWaiter]
+	// onRelease, nil but in tests, sees every parked caller applied1 or a
+	// restore releases, with the index applied then.
+	onRelease func(want, applied uint64)
+	// results is the ring of the last resultRing Apply results, kept
+	// while a forward is outstanding (keepResults > 0) for the forward
+	// answered after its index was applied: slot index % resultRing,
+	// carrying its index, so recording one is a store with no map and no
+	// reslice (#1109). nil until the first forward.
+	results     *[resultRing]applyResult
 	keepResults int
 
 	pendingBytes atomic.Int64
@@ -145,6 +175,13 @@ type Node struct {
 	// sendStop cancels the snapshot stream in flight to each peer: a
 	// leader that lost its leadership or its term stops streaming (#547).
 	sendStop map[coreconsensus.NodeID]context.CancelFunc
+	// streamWait are the peers in need of a snapshot beyond
+	// MaxSnapshotStreams, in the order they asked: each waits in raft's
+	// snapshot state and is served when a stream ends (#920).
+	streamWait []coreconsensus.NodeID
+	// pace paces every snapshot stream together; nil when
+	// SnapshotStreamBytesPerSecond is unlimited (#920).
+	pace *pacer
 	// pinScale is, per peer, how many times its pin bound doubled: a
 	// receiver still answering when its stream's pin fell due was slow to
 	// install, not stuck (#610).
@@ -160,17 +197,26 @@ type Node struct {
 	// MaxSnapshotBytes the newest snapshot is over: they are sent no
 	// entries (#613).
 	unfed map[coreconsensus.NodeID]bool
+	// bodies are the append bodies the current Ready shares among its
+	// followers, on the loop (#912).
+	bodies appendBodies
+	// batch is the transport's BatchSender, nil when it has none: asserted
+	// once in bindTransport, not on every Ready, whose type assertion may
+	// fill the runtime's cache on the loop (#912).
+	batch coreconsensus.BatchSender
 	// unreachableAt is when the transport last failed to reach a peer.
 	unreachableAt map[coreconsensus.NodeID]time.Time
 	lastTerm      uint64
 	lastLead      coreconsensus.NodeID
 	lastRole      coreconsensus.Role
-	canVote       bool
-	noTable       bool
-	snapState     snapState
-	contact       leaderContact
-	progress      applyProgress
-	watch         progressWatch
+	// traced is what the loop holds of D13's spans until a commit (#1115).
+	traced    traceState
+	canVote   bool
+	noTable   bool
+	snapState snapState
+	contact   leaderContact
+	progress  applyProgress
+	watch     progressWatch
 	// cuttingSince is when the apply goroutine started capturing and
 	// writing a snapshot itself, applying nothing meanwhile, in Unix
 	// nanoseconds of n.clk; 0 when it is not cutting (#593).
@@ -180,6 +226,8 @@ type Node struct {
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
+	// confWatchers are WatchMembership's channels, under watchMu (#915).
+	confWatchers map[chan coreconsensus.MembershipValue]struct{}
 
 	stopMu     sync.Mutex
 	stopReason *coreconsensus.StopReasonValue
@@ -207,6 +255,37 @@ type Node struct {
 	snapLimit snapLimitWatch
 	// crashAfterPublish is set by the package's own tests only.
 	crashAfterPublish atomic.Bool
+}
+
+// traceState is what the loop holds of D13's spans between the turn that
+// learns a position and the commit that covers it: the proposals of this
+// node whose span waits for its "committed" event, and on a leader the
+// spans of the forwards it handles, opened at the forward and ended at the
+// commit of the position it answered (#1115). It is touched only when a
+// span exists, so a node with no Tracer pays nothing for it.
+type traceState struct {
+	// commit is the highest commit index a Ready handed; every waiter at
+	// or below it was committed before the apply goroutine was handed it.
+	commit uint64
+	// waits are this node's proposals appended and not yet committed.
+	waits []*proposal
+	// answers are the forwards stepped and not yet answered, by sender
+	// and submission id; made at the first traced forward.
+	answers map[fwdTraceKey]coretrace.Span
+	// open are the answered forwards waiting for their commit.
+	open []fwdSpan
+}
+
+// fwdTraceKey names a forward as its answer does: its sender, its id.
+type fwdTraceKey struct {
+	from coreconsensus.NodeID
+	ctx  uint64
+}
+
+// fwdSpan is a leader's span of a forward whose position is known.
+type fwdSpan struct {
+	index uint64
+	span  coretrace.Span
 }
 
 // snapState tracks the cuts: at most one in flight, coalesced (D7).
@@ -240,9 +319,19 @@ type snapState struct {
 	positioning string
 }
 
+// applyResult is one kept Apply result: index names the slot's entry, zero
+// when the slot was never written.
 type applyResult struct {
-	term uint64
-	val  any
+	index uint64
+	term  uint64
+	val   any
+}
+
+// appliedWaiter is one caller parked until index is applied: ch, one slot,
+// receives its release.
+type appliedWaiter struct {
+	index uint64
+	ch    chan struct{}
 }
 
 type proposal struct {
@@ -259,6 +348,18 @@ type proposal struct {
 	sentAt time.Time
 	// gone is set by a caller that stopped waiting for a forward's answer.
 	gone atomic.Bool
+	// span is its caller's consensus.Propose span, nil with no Tracer;
+	// written before the loop has the proposal, read-only after (D13).
+	span coretrace.Span
+}
+
+// isSession reports whether p is a session command (#918): a position the
+// leader answers at or below its commit is the copy already committed, and
+// answered as applied. Its entry's kind says it, and is the only thing that
+// does: submitSession is the one path that builds a proposal of that kind,
+// and every other builds an EntryCommand or an admin kind.
+func (p *proposal) isSession() bool {
+	return p.entry.Kind == coreconsensus.EntrySessionCommand
 }
 
 type propResult struct {
@@ -342,13 +443,6 @@ func NewNode(cfg Config) (*Node, error) {
 		return n, err
 	}
 	return newRaft(cfg)
-}
-
-// dirHolder is the shipped log's hold on its data directory: a DataDir
-// refuses offline work and Close while a Node holds it (D11, R3-18).
-type dirHolder interface {
-	acquire() error
-	release()
 }
 
 // newRaft opens the node once NewNode holds the data directory: it checks
@@ -446,12 +540,11 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		cfg: *cfg, clk: cfg.Clock, stamp: *stamp,
 		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
-		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
-		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
-		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
+		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](), readq: newFifo[*readWait](),
+		waiters: map[uint64]*proposal{}, forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+		watchers: map[chan coreconsensus.StatusValue]struct{}{}, confWatchers: map[chan coreconsensus.MembershipValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
+		pace: newPacer(cfg.Clock, cfg.SnapshotStreamBytesPerSecond),
 	}
-	n.acond = sync.NewCond(&n.am)
 	ident := stamp.Log
 	n.ident.Store(&ident)
 	return n
@@ -523,43 +616,87 @@ func silenceOf(log coreconsensus.LogStore, o *obs) (term, index uint64, err erro
 
 // bindTransport hands the transport the node's callbacks. An unreachable
 // report is queued to the loop and dropped when the loop is saturated, as
-// it is advisory; the JOIN handler with reasons is bound when supported.
+// it is advisory; the JOIN handler with reasons, and the read of the
+// configuration a member asks (#763), are bound when supported. A transport
+// that is a BatchSender is kept as one, so that every Ready shares its
+// appends' bodies without asserting it again (#912).
 func (n *Node) bindTransport() error {
 	cfg := &n.cfg
-	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
-		ur.Unreachable(func(id coreconsensus.NodeID) {
-			select {
-			case n.execc <- func() {
-				n.unreachableAt[id] = n.clk.Now()
-				n.r.ReportUnreachable(id)
-			}:
-			default:
-			}
-		})
+	if bs, ok := cfg.Transport.(coreconsensus.BatchSender); ok {
+		n.batch = bs
 	}
+	// A transport that serves several groups takes the two hooks under the
+	// node's group; through the siblings that name none, the second node on
+	// it replaced the first's (#925).
+	gb, grouped := cfg.Transport.(groupBinder)
+	n.bindUnreachable(gb, grouped)
 	if err := cfg.Transport.Bind(cfg.Group, n.deliver, n.offer, n.install, n.join); err != nil {
 		return err
 	}
 	if jb, ok := cfg.Transport.(coreconsensus.JoinReasonBinder); ok {
 		jb.BindJoinReason(cfg.Group, n.joinReason)
 	}
-	if ub, ok := cfg.Transport.(undecodableBinder); ok {
+	n.bindServed(gb, grouped)
+	n.bindWarners()
+	return nil
+}
+
+// bindUnreachable hands the transport the unreachable report, under the
+// node's group when it serves several (gb, grouped).
+func (n *Node) bindUnreachable(gb groupBinder, grouped bool) {
+	unreachable := func(id coreconsensus.NodeID) {
+		select {
+		case n.execc <- func() {
+			n.unreachableAt[id] = n.clk.Now()
+			n.r.ReportUnreachable(id)
+		}:
+		default:
+		}
+	}
+	if ur, ok := n.cfg.Transport.(coreconsensus.UnreachableReporter); ok && !grouped {
+		ur.Unreachable(unreachable)
+	} else if grouped {
+		gb.unreachableFor(n.cfg.Group, unreachable)
+	}
+}
+
+// bindServed hands the transport the read of the configuration a member
+// asks (#763) and the offer it could not decode (#665), under the node's
+// group when it serves several (gb, grouped), else through the siblings
+// that name none when it supports them.
+func (n *Node) bindServed(gb groupBinder, grouped bool) {
+	if grouped {
+		gb.membershipFor(n.cfg.Group, n.servedMembership)
+		gb.undecodableFor(n.cfg.Group, n.undecodableOffer)
+		return
+	}
+	if ms, ok := n.cfg.Transport.(interface {
+		bindMembership(read func() (coreconsensus.MembershipValue, bool))
+	}); ok {
+		ms.bindMembership(n.servedMembership)
+	}
+	if ub, ok := n.cfg.Transport.(undecodableBinder); ok {
 		ub.bindUndecodable(n.undecodableOffer)
 	}
-	if wb, ok := cfg.Transport.(bindWarner); ok {
+}
+
+// bindWarners hands the transport and the log the node's Warn line, to
+// those that take it.
+func (n *Node) bindWarners() {
+	if wb, ok := n.cfg.Transport.(bindWarner); ok {
 		wb.bindWarn(n.obs.warn)
 	}
-	return nil
+	// The file log's line, when it zero-fills although fallocate was asked
+	// for (#922): the log has no logger of its own.
+	if wb, ok := n.cfg.Log.(bindWarner); ok {
+		wb.bindWarn(n.obs.warn)
+	}
 }
 
 // load restores the latest snapshot whose checksums pass and reads the log
 // after it.
 func (n *Node) load() (raft.StartState, error) {
-	metas, err := n.cfg.Snapshots.List()
-	if err != nil {
-		return raft.StartState{}, storageFailed("snapshots", err)
-	}
-	dur, err := n.durablePosition()
+	metas, dur, err := n.startPoint()
 	if err != nil {
 		return raft.StartState{}, err
 	}
@@ -596,20 +733,42 @@ func (n *Node) load() (raft.StartState, error) {
 		return raft.StartState{}, err
 	}
 	n.snapState.sinceBytes = resumedBytes
-	if n.noTable && len(base.Membership.Members) == 0 && !slices.ContainsFunc(ents, isMembershipEntry) {
-		// Nothing names the members: no snapshot is left, and the log
-		// begins past a compaction with no configuration entry after it.
-		// Started, the node would admit nobody, never be installed again
-		// and say nothing; it is refused, and says why (#526).
-		return raft.StartState{}, origin(coreconsensus.SnapshotCorrupt,
-			errs.String("why", "no snapshot is left and the log holds no configuration: WipeAndRejoin"))
+	if err := n.refuseMemberless(&base, ents); err != nil {
+		return raft.StartState{}, err
 	}
 	applied, err := n.startApplied(&base, dur)
 	if err != nil {
 		return raft.StartState{}, err
 	}
 	applied = stepApplied(applied, snapIdx, hs.Commit, dur)
+	n.sessions = sessionsAt(&base, ents, applied)
 	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Evicted: evicted, Applied: applied, Now: n.clk.Now()}, nil
+}
+
+// startPoint is what load starts from: the snapshots the store lists and
+// the position a durable machine resumes at.
+func (n *Node) startPoint() ([]coreconsensus.SnapshotMetaValue, coreconsensus.PositionValue, error) {
+	metas, err := n.cfg.Snapshots.List()
+	if err != nil {
+		return nil, coreconsensus.PositionValue{}, storageFailed("snapshots", err)
+	}
+	dur, err := n.durablePosition()
+	if err != nil {
+		return nil, coreconsensus.PositionValue{}, err
+	}
+	return metas, dur, nil
+}
+
+// refuseMemberless refuses a start that nothing names the members of: no
+// snapshot is left, and the log begins past a compaction with no
+// configuration entry after it. Started, the node would admit nobody, never
+// be installed again and say nothing; it is refused, and says why (#526).
+func (n *Node) refuseMemberless(base *coreconsensus.SnapshotMetaValue, ents []coreconsensus.EntryValue) error {
+	if n.noTable && len(base.Membership.Members) == 0 && !slices.ContainsFunc(ents, isMembershipEntry) {
+		return origin(coreconsensus.SnapshotCorrupt,
+			errs.String("why", "no snapshot is left and the log holds no configuration: WipeAndRejoin"))
+	}
+	return nil
 }
 
 // stepApplied is the applied index the step function starts from: the one
@@ -1018,7 +1177,9 @@ func baseTerm(logTerm, metaTerm uint64, matched bool, first uint64) (uint64, err
 // deliver is the transport's inbound callback: it parses a frame, drops it
 // when its From is not the authenticated peer (R7-05), and queues it on its
 // lane without ever blocking the transport; a full lane drops the frame,
-// which raft's retransmission absorbs.
+// which raft's retransmission absorbs. The frame is copied once, since the
+// transport reuses its read buffer, and that copy is the caller's gift Step
+// keeps: the entries' Data alias it, never copied again (#1110).
 func (n *Node) deliver(from coreconsensus.AuthenticatedPeerValue, frame []byte) {
 	if n.stopped.Load() {
 		return
@@ -1094,7 +1255,7 @@ func (n *Node) loop() {
 // The select stays whole: every case is one call into its handler, and the
 // runtime's uniform choice among the ready inputs is the loop's fairness.
 // Splitting it to lower its cyclomatic count would let the outer inputs
-// starve the inner ones (KTN-FUNC-CYCLO counts the dispatch as eight
+// starve the inner ones (KTN-FUNC-CYCLO counts the dispatch as nine
 // decisions: kodflow/ktn-linter#727).
 func (n *Node) turn(tick clock.Ticker, props *[]*proposal) (time.Time, bool) {
 	select {
@@ -1114,6 +1275,8 @@ func (n *Node) turn(tick clock.Ticker, props *[]*proposal) (time.Time, bool) {
 		return n.onExec(f, ok)
 	case f, ok := <-n.fetchc:
 		return n.onFetched(&f, ok)
+	case _, ok := <-n.readq.signal:
+		return n.onReads(ok)
 	}
 }
 
@@ -1154,6 +1317,7 @@ func (n *Node) onMessage(m *coreconsensus.MessageValue, ok bool) (time.Time, boo
 	turn := n.clk.Now()
 	n.r.SetOverloaded(n.applyOverloaded())
 	n.declineNoted(m)
+	n.traceForward(m)
 	n.r.Step(n.clk.Now(), *m)
 	return turn, true
 }
@@ -1187,6 +1351,30 @@ func (n *Node) onExec(f func(), ok bool) (time.Time, bool) {
 	}
 	turn := n.clk.Now()
 	f()
+	return turn, true
+}
+
+// onReads registers every Barrier queued since the last turn and asks raft
+// to confirm them all, then handles the Ready once: flushReads opens ONE
+// round for the whole batch, after every read of it is registered, so no
+// read rides a round opened before it was queued (D9, #1108). Under a valid
+// lease raft answers the batch at once, with no round.
+func (n *Node) onReads(ok bool) (time.Time, bool) {
+	if !ok {
+		return time.Time{}, false
+	}
+	turn := n.clk.Now()
+	noLease := n.cfg.Reads != ReadLease
+	n.readBatch = n.readq.take(n.readBatch)
+	for _, w := range n.readBatch {
+		ctx := n.nextID()
+		w.sentAt = n.clk.Now()
+		w.askedAt = w.sentAt
+		n.reads[ctx] = w
+		n.r.ReadIndex(w.sentAt, ctx, noLease)
+	}
+	clear(n.readBatch)
+	n.handleReady()
 	return turn, true
 }
 
@@ -1248,6 +1436,7 @@ func (n *Node) drainControl() {
 			return
 		}
 		n.declineNoted(&m)
+		n.traceForward(&m)
 		n.r.Step(n.clk.Now(), m)
 	}
 }
@@ -1292,9 +1481,16 @@ func (n *Node) checkTurn(turn time.Time) {
 // unanswered two maximum election timeouts after it was sent is answered
 // OUTCOME_UNKNOWN: the leader may have appended it, and a resend is only
 // deduplicated while the leader still remembers the first. What a caller
-// gave up on is dropped. Reads are swept by sweepReads.
+// gave up on is dropped. Reads are swept by sweepReads. The transport's
+// sender links get the same two maximum election timeouts as their bound
+// on read silence (#1116).
 func (n *Node) sweep() {
 	grace := 2 * n.r.Status().Timing.ElectionTimeoutMax
+	if s, ok := n.cfg.Transport.(silenceBounder); ok {
+		// A peer silent that long while written to is behind a stream
+		// that died quietly (#1116).
+		s.boundSilence(grace)
+	}
 	now := n.clk.Now()
 	for ctx, p := range n.forwards {
 		switch {
@@ -1381,13 +1577,14 @@ func (n *Node) handleReady() {
 	n.handedLag, n.handedReads = 0, 0
 	for n.r.HasReady() {
 		rd := new(n.r.Ready())
-		if n.stopOnUnsupported(rd) {
+		if n.stopOnUnsupported(rd) || n.stopOnDivergence(rd) {
 			return
 		}
 		n.handleOne(rd)
 	}
 	n.awaitApply(lag+n.handedLag, reading || n.handedReads > 0)
 	n.leadershipChanged()
+	n.obs.addTo(mReadRounds, &n.obs.seenRounds, int64(n.r.ReadRounds()))
 	n.publish()
 }
 
@@ -1445,7 +1642,7 @@ func (n *Node) wakeLoop() {
 func (n *Node) auditAppended(rd *raft.ReadyValue) {
 	for i := range rd.Entries {
 		e := &rd.Entries[i]
-		if e.Kind == coreconsensus.EntryCommand || e.Kind == coreconsensus.EntryNoOp || !e.Kind.Known() {
+		if e.Kind == coreconsensus.EntryCommand || e.Kind == coreconsensus.EntrySessionCommand || e.Kind == coreconsensus.EntryNoOp || !e.Kind.Known() {
 			continue
 		}
 		if n.r.Status().Role != coreconsensus.RoleLeader {
@@ -1513,9 +1710,43 @@ func (n *Node) stopOnUnsupported(rd *raft.ReadyValue) bool {
 	return true
 }
 
+// stopOnDivergence stops the node when a Ready names an append of a leader
+// that committed past an index this node holds committed and carried
+// another entry there (#698), and reports whether it did: no majority holds
+// this node's entry. It stops BOOTSTRAP_REFUSED at the founding entry, the
+// founders having passed different member lists (or, in a data directory
+// founded before Bootstrap left entry 1 uncommitted, different initial
+// timings), LOG_CORRUPT past it.
+// That Ready is then not carried out at all.
+func (n *Node) stopOnDivergence(rd *raft.ReadyValue) bool {
+	d := rd.Diverged
+	if d.Index == 0 {
+		return false
+	}
+	n.stop(divergedErr(d), false)
+	return true
+}
+
+// divergedErr is the error a node stops with when a majority holds another
+// committed entry at d.Index than its own.
+func divergedErr(d raft.DivergenceValue) error {
+	fields := []errs.FieldValue{errs.String("index", u64s(d.Index)), errs.String("leader", u64s(uint64(d.Leader)))}
+	if d.Index == 1 {
+		return origin(coreconsensus.BootstrapRefused, append(fields,
+			errs.String("why", "a majority founded the cluster with another entry 1: the founders passed Bootstrap different member lists, or different initial timings before entry 1 was left uncommitted"))...)
+	}
+	return origin(coreconsensus.LogCorrupt, append(fields, errs.String("why", "a majority holds another committed entry at this index"))...)
+}
+
 // sendMessages sends raft's messages, but no entries to a learner the
 // state outgrew (watchUnfed, #613).
 func (n *Node) sendMessages(ms []coreconsensus.MessageValue) {
+	if n.batch != nil {
+		// One encoding of an append's entries for every follower sent
+		// them (#912).
+		n.sendShared(n.batch, ms)
+		return
+	}
 	for i := range ms {
 		if len(ms[i].Entries) > 0 && n.unfed[ms[i].To] {
 			continue
@@ -1564,6 +1795,9 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 		}
 		n.sq.push(q)
 	}
+	// Before apply is handed anything: a "committed" event precedes its
+	// "applied" (D13).
+	n.traceReady(rd)
 	n.queueApply(rd)
 	for _, f := range rd.Fetch {
 		n.fetchq.push(f)
@@ -1722,13 +1956,6 @@ func (n *Node) setMembership(rd *raft.ReadyValue) {
 	n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
 }
 
-// joinReleaser is a transport that keeps a JOIN answer's members admitted
-// apart from the engine's configuration until the joiner is admitted
-// (#552).
-type joinReleaser interface {
-	releaseJoinAnswer()
-}
-
 // leadershipChanged answers what a change of leader or term made unknown.
 func (n *Node) leadershipChanged() {
 	st := n.r.Status()
@@ -1736,12 +1963,16 @@ func (n *Node) leadershipChanged() {
 		return
 	}
 	n.lastTerm, n.lastLead, n.lastRole = st.Term, st.Lead, st.Role
+	n.endForwardTraces(&st)
 	for _, stop := range n.sendStop {
 		// An offer of a past term is refused at its end anyway, and its
 		// abort could unlink the spool the new leader's install of the
 		// same snapshot writes to on the receiver (#547).
 		stop()
 	}
+	// A peer waiting for a stream waited for this term's leader: the next
+	// one asks again.
+	n.streamWait = n.streamWait[:0]
 	// A new leader is probed at the next tick: until it answers, this
 	// node does not know it hears it (#541).
 	n.contact.probeCtx, n.contact.probeAt = 0, time.Time{}
@@ -1753,6 +1984,21 @@ func (n *Node) leadershipChanged() {
 	// The preferred nodes are judged from the next tick: becomeLeader has
 	// just reset every match to 0 (#559). The pause starts over with the
 	// leadership, and so does the order (#662).
+	n.restartPrefer(&st)
+}
+
+// endForwardTraces ends the traces of the forwards this node served while
+// it led, once st says it no longer does: a forward answered with a
+// position may never commit now.
+func (n *Node) endForwardTraces(st *raft.StatusValue) {
+	if st.Role != coreconsensus.RoleLeader && (len(n.traced.answers) > 0 || len(n.traced.open) > 0) {
+		n.traceEnd(notLeader(st.Lead))
+	}
+}
+
+// restartPrefer starts the watch of the preferred nodes over with the
+// leadership st describes.
+func (n *Node) restartPrefer(st *raft.StatusValue) {
 	n.prefer = preferWatch{}
 	if st.Role == coreconsensus.RoleLeader && st.HandedBy != 0 {
 		// A leadership a transfer handed over starts with the watch paused
@@ -1906,6 +2152,7 @@ func (n *Node) publish() {
 		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
 	n.progress.noteApplied(s.Commit, s.Applied, n.clk.Now())
+	n.publishConf(&st.Conf)
 	old := n.status.Load()
 	if old != nil && *old == *s {
 		return
@@ -1924,6 +2171,36 @@ func (n *Node) publish() {
 		}
 	}
 	n.watchMu.Unlock()
+}
+
+// publishConf stores the configuration a turn ended with, when it differs
+// from the one last published, and wakes every membership watcher with a
+// copy of its own, replacing a value the watcher has not read yet (#915).
+// conf is the step function's clone, which nothing else holds.
+func (n *Node) publishConf(conf *coreconsensus.MembershipValue) {
+	if old := n.conf.Load(); old != nil && sameMembership(old, conf) {
+		return
+	}
+	c := *conf
+	n.conf.Store(&c)
+	n.watchMu.Lock()
+	for ch := range n.confWatchers {
+		select {
+		case <-ch:
+		default:
+		}
+		select {
+		case ch <- c.Clone():
+		default:
+		}
+	}
+	n.watchMu.Unlock()
+}
+
+// sameMembership reports whether a and b are the same configuration.
+func sameMembership(a, b *coreconsensus.MembershipValue) bool {
+	return a.Index == b.Index && slices.Equal(a.Members, b.Members) &&
+		slices.Equal(a.Retired, b.Retired) && slices.Equal(a.RetiredKeys, b.RetiredKeys)
 }
 
 type fetchDone struct {
@@ -1973,9 +2250,7 @@ func (n *Node) fetch(f raft.FetchSpec) bool {
 		n.stop(err, true)
 		return false
 	}
-	for i := range ents {
-		ents[i].Data = bytes.Clone(ents[i].Data)
-	}
+	// The entries own their Data (LogReader.Entries): no copy (#1110).
 	d.ents = ents
 	select {
 	case n.fetchc <- d:
@@ -2291,6 +2566,7 @@ func (n *Node) StopReason() (coreconsensus.StopReasonValue, bool) {
 // been appended with OUTCOME_UNKNOWN, since it may yet commit elsewhere.
 func (n *Node) failAllOnStop() {
 	err := n.stoppedErr()
+	n.traceEnd(err)
 	for ctx, p := range n.forwards {
 		n.dropForward(ctx)
 		if p.stage.Load() == stageUnsent {
@@ -2301,6 +2577,9 @@ func (n *Node) failAllOnStop() {
 	}
 	for ctx, w := range n.reads {
 		delete(n.reads, ctx)
+		w.done <- readResult{code: coreconsensus.CodeNodeStopped}
+	}
+	for _, w := range n.readq.take(nil) {
 		w.done <- readResult{code: coreconsensus.CodeNodeStopped}
 	}
 	for {
@@ -2315,7 +2594,6 @@ func (n *Node) failAllOnStop() {
 		delete(n.waiters, idx)
 		p.done <- propResult{err: outcomeUnknown("node stopped")}
 	}
-	n.acond.Broadcast()
 	n.am.Unlock()
 }
 
@@ -2340,9 +2618,6 @@ func (n *Node) Close(ctx context.Context) error {
 	n.stopped.Store(true)
 	n.closeOnce.Do(func() { close(n.stopc) })
 	n.wg.Wait()
-	n.am.Lock()
-	n.acond.Broadcast()
-	n.am.Unlock()
 	n.releaseDir()
 	return nil
 }
@@ -2429,9 +2704,6 @@ func (n *Node) HardClose() error {
 		// A goroutine stuck in fdatasync is abandoned, and the directory
 		// stays held until the process exits (R7-11).
 	}
-	n.am.Lock()
-	n.acond.Broadcast()
-	n.am.Unlock()
 	return nil
 }
 
@@ -2465,11 +2737,35 @@ func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue {
 	return ch
 }
 
-// Membership returns the configuration the node last appended.
+// Membership returns the configuration the node last appended, as its last
+// turn published it; it never waits for the event loop.
 func (n *Node) Membership() coreconsensus.MembershipValue {
-	var m coreconsensus.MembershipValue
-	if !n.exec(func() { m = n.r.Status().Conf }) {
-		return coreconsensus.MembershipValue{}
+	if m := n.conf.Load(); m != nil {
+		return m.Clone()
 	}
-	return m
+	return coreconsensus.MembershipValue{}
+}
+
+// WatchMembership implements MembershipWatcher. Each call launches one
+// goroutine that closes the returned channel and ends when ctx ends or the
+// node's event loop stops.
+func (n *Node) WatchMembership(ctx context.Context) <-chan coreconsensus.MembershipValue {
+	ch := make(chan coreconsensus.MembershipValue, 1)
+	n.watchMu.Lock()
+	// The first value is read under the lock publishConf wakes the watchers
+	// under: a configuration published meanwhile replaces it, never precedes it.
+	ch <- n.Membership()
+	n.confWatchers[ch] = struct{}{}
+	n.watchMu.Unlock()
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-n.loopDone:
+		}
+		n.watchMu.Lock()
+		delete(n.confWatchers, ch)
+		close(ch)
+		n.watchMu.Unlock()
+	}()
+	return ch
 }

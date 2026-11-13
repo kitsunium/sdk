@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -150,10 +152,13 @@ func ImportObserved(d DataDir, p *ImportParams, newCluster coreconsensus.Cluster
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
-	if err := replayObserved(p, opt); err != nil {
+	sessions, err := replayObserved(p, opt)
+	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
-	encoded, meta, err := encodeObserved(p, codec, opt.Expected)
+	exp := opt.Expected
+	exp.Sessions = sessions
+	encoded, meta, err := encodeObserved(p, codec, exp)
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
@@ -164,28 +169,48 @@ func ImportObserved(d DataDir, p *ImportParams, newCluster coreconsensus.Cluster
 
 // replayObserved restores p.Snapshot into p.Machine, reads the stream to its
 // digest whatever the machine left unread, then applies the tail's commands
-// with the tokens the snapshot's lineage gives them.
-func replayObserved(p *ImportParams, opt *RestoreOptions) error {
+// with the tokens the snapshot's lineage gives them. A session command is
+// folded into the snapshot's sessions and applied, as the command it
+// carries, only when the fold says so, as a node applies it (#918); the
+// sessions it returns are the ones the tail left.
+func replayObserved(p *ImportParams, opt *RestoreOptions) ([]coreconsensus.SessionValue, error) {
 	r, err := OpenSnapshot(p.Snapshot, opt)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	exp := opt.Expected
 	if err := p.Machine.Restore(r, exp); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := io.Copy(io.Discard, r); err != nil {
-		return err
+		return nil, err
 	}
+	sessions := raft.NewSessionTable(slices.Clone(exp.Sessions))
 	for i := range p.Tail {
 		e := p.Tail[i]
-		if e.Kind != coreconsensus.EntryCommand {
+		if !observedCommand(sessions, &e) {
 			continue
 		}
 		e.Token = coreconsensus.TokenValue{Cluster: exp.Log.Cluster, Epoch: exp.Log.Epoch, Term: e.Position.Term, Index: e.Position.Index}
 		p.Machine.Apply(e)
 	}
-	return nil
+	return sessions.Values(), nil
+}
+
+// observedCommand reports whether e, an entry of an observed tail, is a
+// command to apply: an EntryCommand, or a session command sessions folds in
+// and applies, which e is then made the command it carries of. Any other
+// entry is the engine's own and is not applied.
+func observedCommand(sessions *raft.SessionTable, e *coreconsensus.EntryValue) bool {
+	if e.Kind == coreconsensus.EntrySessionCommand {
+		answer, code := sessions.Apply(e)
+		_, seq, data, perr := wire.ParseSession(e.Data)
+		if code != 0 || perr != nil || answer != e.Position || seq == 0 {
+			return false
+		}
+		e.Kind, e.Data = coreconsensus.EntryCommand, data
+	}
+	return e.Kind == coreconsensus.EntryCommand
 }
 
 // encodeObserved encodes the state p.Machine reached as a snapshot stream,

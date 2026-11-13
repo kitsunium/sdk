@@ -51,7 +51,7 @@ func TestALoweredSilenceKeepsItsRecordsForm(t *testing.T) {
 	path := filepath.Join(dir, fileSilent)
 	write := func(b []byte) {
 		t.Helper()
-		if err := writeFileSync(path, b); err != nil {
+		if err := osDisk.writeFileSync(path, b); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -102,7 +102,7 @@ func TestALoweredSilenceKeepsItsRecordsForm(t *testing.T) {
 }
 
 // pendingTruncates reports whether the batch l is about to sync truncates
-// the log from index from. It runs inside duringSync, on the storage
+// the log from index from. It runs inside onBatchSync, on the storage
 // actor's goroutine, which owns the buffer.
 func pendingTruncates(l *fileLog, from uint64) bool {
 	for off := 0; off < len(l.pending); {
@@ -223,7 +223,7 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 	dd := silenceOpen(t, v.dir, run)
 	l := dd.d.log
 	l.mu.RLock()
-	s := l.slots[base+3-l.first]
+	s := l.locate(base + 3)
 	l.mu.RUnlock()
 	if err := dd.Close(); err != nil {
 		t.Fatal(err)
@@ -239,7 +239,7 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 	if _, err := NewNode(diskConfig(c, v)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("setup: damaged log: %v", err)
 	}
-	if err := ClearQuarantine(v.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+	if err := ClearQuarantineWith(context.Background(), v.dd, TruncateAndStaySilent, "op:silent", askingAnswer(lead.node.Membership())); err != nil {
 		t.Fatal(err)
 	}
 	silentTerm, point, ok := silenceRecordIn(v.dir)
@@ -254,7 +254,7 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 	var atTruncation atomic.Uint64
 	var cut atomic.Pointer[string]
 	copyErr := make(chan error, 4)
-	v.dd.d.log.duringSync = func() {
+	onBatchSync(v.dd, func() {
 		if !pendingTruncates(v.dd.d.log, base+1) {
 			return
 		}
@@ -269,7 +269,7 @@ func TestALoweredSilencePointIsOnDiskBeforeItsTruncation(t *testing.T) {
 			return
 		}
 		cut.Store(&dst)
-	}
+	})
 	start(v)
 	c.net.Isolate(v.id, false)
 	for deadline := time.Now().Add(10 * time.Second); ; {
@@ -347,16 +347,16 @@ func TestAnInterruptedInstallLowersTheSilencePointBeforeTheLog(t *testing.T) {
 			}
 			mustSync(t, dd.Log())
 			if tc.silent != 0 {
-				if err := writeFileSync(filepath.Join(dir, fileSilent), silenceRecord(2, tc.silent)); err != nil {
+				if err := osDisk.writeFileSync(filepath.Join(dir, fileSilent), silenceRecord(2, tc.silent)); err != nil {
 					t.Fatal(err)
 				}
 			}
 			// The point SILENT holds at each write the start syncs.
 			var seen []uint64
-			dd.d.log.duringSync = func() {
+			onBatchSync(dd, func() {
 				_, index, _ := silenceRecordIn(dir)
 				seen = append(seen, index)
-			}
+			})
 			n := &Node{cfg: Config{Log: dd.Log()}}
 			first, last := dd.Log().Bounds()
 			base := coreconsensus.SnapshotMetaValue{Position: coreconsensus.PositionValue{Term: tc.snapTerm, Index: tc.snapAt}}

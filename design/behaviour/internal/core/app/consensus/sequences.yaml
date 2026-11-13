@@ -3,7 +3,7 @@ apiVersion: design/behaviour/v1
 sequences:
   - of: EntryKind.Known
     steps:
-      - return: k >= EntryCommand && k <= EntryTransfer
+      - return: k >= EntryCommand && k <= EntrySessionCommand
   - of: NodeID.String
     participants:
       - id: caller

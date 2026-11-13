@@ -1,0 +1,607 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: cmdCost
+    steps:
+      - return: uvarintLen(uint64(len(cmd))) + len(cmd)
+  - of: uvarintLen
+    steps:
+      - bind: "n"
+        eval: "1"
+      - loop:
+          cond: v >= uvarintMore
+          do:
+            - op: ">>="
+              set: v
+              value: uvarintBits
+            - op: ++
+              set: "n"
+      - return: "n"
+  - of: appendBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBody
+        kind: self
+      - id: binary
+        kind: stdlib
+    steps:
+      - set: dst
+        value: append(dst, bodyVersion)
+      - set: dst
+        to: binary
+        value: binary.AppendUvarint(dst, uint64(len(cmds)))
+      - loop:
+          do:
+            - set: dst
+              to: binary
+              value: binary.AppendUvarint(dst, uint64(len(c)))
+            - set: dst
+              value: append(dst, c...)
+          key: _
+          range: cmds
+          value: c
+      - return: dst
+  - of: splitBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitBody
+        kind: self
+      - id: binary
+        kind: stdlib
+    steps:
+      - bind: b
+        eval: e.Data
+      - opt:
+          do:
+            - return: dst, malformed("version")
+          when: len(b) == 0 || b[0] != bodyVersion
+      - set: b
+        value: b[1:]
+      - bind: n, k
+        eval: binary.Uvarint(b)
+        to: binary
+      - opt:
+          do:
+            - return: dst, malformed("count")
+          when: k <= 0 || n > uint64(len(b)-k)
+      - set: b
+        value: b[k:]
+      - bind: start
+        eval: len(dst)
+      - loop:
+          do:
+            - bind: l, k
+              eval: binary.Uvarint(b)
+              to: binary
+            - opt:
+                do:
+                  - return: dst[:start], malformed("command length")
+                when: k <= 0 || l > uint64(len(b)-k)
+            - bind: cmd
+              eval: "b[k : k+int(l) : k+int(l)]"
+            - set: b
+              value: b[k+int(l):]
+            - bind: sub
+              eval: "*e"
+            - set: sub.Data, sub.BodySum, sub.ChainSum
+              value: cmd, sum(cmd), 0
+            - set: dst
+              value: append(dst, sub)
+          range: "n"
+      - opt:
+          do:
+            - return: dst[:start], malformed("trailing bytes")
+          when: len(b) != 0
+      - return: dst, nil
+  - of: malformed
+    participants:
+      - id: caller
+        kind: actor
+      - id: malformed
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - return: origin(coreconsensus.FrameInvalid, errs.String("body", what))
+        to: origin
+  - of: origin
+    participants:
+      - id: caller
+        kind: actor
+      - id: origin
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+        to: errs
+  - of: NewMachine
+    steps:
+      - return: "&Machine{Inner: inner}"
+  - of: (*Machine).Apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Machine).Apply
+        kind: self
+      - id: m.ApplyBatch
+        kind: internal
+    steps:
+      - bind: results
+        eval: make([]any, 1)
+      - eval: m.ApplyBatch([]coreconsensus.EntryValue{e}, results)
+        to: m.ApplyBatch
+      - return: results[0]
+  - of: (*Machine).ApplyBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Machine).ApplyBatch
+        kind: self
+      - id: splitBody
+        kind: internal
+      - id: m.Inner.ApplyBatch
+        kind: value
+    steps:
+      - set: m.subs, m.ends, m.bad
+        value: m.subs[:0], m.ends[:0], m.bad[:0]
+      - loop:
+          do:
+            - var:
+                name: err
+                type: error
+            - set: m.subs, err
+              to: splitBody
+              value: splitBody(m.subs, &es[i], wire.BodySum)
+            - opt:
+                do:
+                  - set: m.ends
+                    value: append(m.ends, -1)
+                  - set: m.bad
+                    value: append(m.bad, err)
+                  - continue: true
+                when: err != nil
+            - set: m.ends
+              value: append(m.ends, len(m.subs))
+          key: i
+          range: es
+      - bind: flat
+        eval: make([]any, len(m.subs))
+      - opt:
+          do:
+            - eval: m.Inner.ApplyBatch(m.subs, flat)
+              to: m.Inner.ApplyBatch
+          when: len(m.subs) > 0
+      - bind: start, bad
+        eval: 0, 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: results[i]
+                    value: m.bad[bad]
+                  - op: ++
+                    set: bad
+                  - continue: true
+                when: end < 0
+            - set: results[i]
+              value: flat[start:end:end]
+            - set: start
+              value: end
+          key: i
+          range: m.ends
+          value: end
+      - eval: clear(m.subs)
+      - eval: clear(m.bad)
+  - of: (*Machine).Snapshot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Machine).Snapshot
+        kind: self
+      - id: m.Inner.Snapshot
+        kind: value
+    steps:
+      - return: m.Inner.Snapshot()
+        to: m.Inner.Snapshot
+  - of: (*Machine).Restore
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Machine).Restore
+        kind: self
+      - id: m.Inner.Restore
+        kind: value
+    steps:
+      - return: m.Inner.Restore(r, meta)
+        to: m.Inner.Restore
+  - of: NewPacker
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewPacker
+        kind: self
+      - id: startPacker
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: cfg.MaxCommands
+              value: DefaultMaxCommands
+          when: cfg.MaxCommands <= 0
+      - opt:
+          do:
+            - set: cfg.MaxBytes
+              value: DefaultMaxBytes
+          when: cfg.MaxBytes <= 0
+      - opt:
+          do:
+            - set: cfg.MaxInFlight
+              value: DefaultMaxInFlight
+          when: cfg.MaxInFlight <= 0
+      - return: startPacker(r, cfg)
+        to: startPacker
+  - of: startPacker
+    participants:
+      - id: caller
+        kind: actor
+      - id: startPacker
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: p.loop
+        kind: internal
+    steps:
+      - bind: life, cancel
+        eval: context.WithCancel(context.Background())
+        to: context
+      - bind: p
+        eval: |-
+          &Packer{
+          		r: r, cfg: cfg,
+          		kick:  make(chan struct{}, 1),
+          		slots: make(chan struct{}, cfg.MaxInFlight),
+          		stop:  make(chan struct{}),
+          		done:  make(chan struct{}),
+          		life:  life, cancel: cancel,
+          	}
+      - go: p.loop()
+        to: p.loop
+      - return: p
+  - of: (*Packer).Propose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Packer).Propose
+        kind: self
+      - id: ctx.Err
+        kind: value
+      - id: p.mu.Lock
+        kind: value
+      - id: p.mu.Unlock
+        kind: value
+      - id: p.abandon
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ResultValue{}, origin(coreconsensus.EntryTooLarge, errs.Int("bytes", len(cmd)))
+          when: bodyHeaderMax+cmdCost(cmd) > p.cfg.MaxBytes
+      - opt:
+          do:
+            - return: ResultValue{}, err
+          init:
+            bind: err
+            eval: ctx.Err()
+            to: ctx.Err
+          when: err != nil
+      - bind: r
+        eval: "&request{cmd: cmd, done: make(chan outcome, 1)}"
+      - eval: p.mu.Lock()
+        to: p.mu.Lock
+      - opt:
+          do:
+            - eval: p.mu.Unlock()
+              to: p.mu.Unlock
+            - return: ResultValue{}, origin(coreconsensus.NodeStopped, errs.String("packer", "closed"))
+          when: p.closed
+      - set: p.queue
+        value: append(p.queue, r)
+      - eval: p.mu.Unlock()
+        to: p.mu.Unlock
+      - select:
+          cases:
+            - comm: p.kick <- struct{}{}
+            - default: true
+      - select:
+          cases:
+            - comm: o := <-r.done
+              do:
+                - return: o.res, o.err
+            - comm: <-ctx.Done()
+              do:
+                - return: p.abandon(ctx, r)
+                  to: p.abandon
+  - of: (*Packer).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Packer).abandon
+        kind: self
+      - id: p.mu.Lock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: p.mu.Unlock
+        kind: value
+    steps:
+      - eval: p.mu.Lock()
+        to: p.mu.Lock
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: p.queue
+                    to: slices
+                    value: slices.Delete(p.queue, i, i+1)
+                init:
+                  bind: i
+                  eval: slices.Index(p.queue, r)
+                  to: slices
+                when: i >= 0
+            - eval: p.mu.Unlock()
+              to: p.mu.Unlock
+            - return: ResultValue{}, ctx.Err()
+          when: "!r.taken"
+      - eval: p.mu.Unlock()
+        to: p.mu.Unlock
+      - return: ResultValue{}, errs.Wrap(ctx.Err(), coreconsensus.OutcomeUnknown.Params())
+  - of: (*Packer).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Packer).Close
+        kind: self
+      - id: p.mu.Lock
+        kind: value
+      - id: p.mu.Unlock
+        kind: value
+      - id: p.stopped.Do
+        kind: value
+      - id: errs
+        kind: package
+    steps:
+      - eval: p.mu.Lock()
+        to: p.mu.Lock
+      - set: p.closed
+        value: "true"
+      - eval: p.mu.Unlock()
+        to: p.mu.Unlock
+      - eval: p.stopped.Do(func() { close(p.stop) })
+        to: p.stopped.Do
+      - defer: p.cancel()
+      - select:
+          cases:
+            - comm: <-p.done
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+      - eval: p.cancel()
+      - eval: <-p.done
+      - return: errs.Wrap(ctx.Err(), coreconsensus.OutcomeUnknown.Params())
+        to: errs
+  - of: (*Packer).loop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Packer).loop
+        kind: self
+      - id: p.flight.Wait
+        kind: value
+      - id: p.failQueued
+        kind: internal
+      - id: p.take
+        kind: internal
+      - id: p.flight.Add
+        kind: value
+      - id: p.send
+        kind: internal
+    steps:
+      - defer: close(p.done)
+      - defer: p.flight.Wait()
+        to: p.flight.Wait
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-p.kick
+                  - comm: <-p.stop
+                    do:
+                      - eval: p.failQueued()
+                        to: p.failQueued
+                      - return: ""
+            - loop:
+                do:
+                  - select:
+                      cases:
+                        - comm: p.slots <- struct{}{}
+                        - comm: <-p.stop
+                          do:
+                            - eval: p.failQueued()
+                              to: p.failQueued
+                            - return: ""
+                  - bind: batch, body
+                    eval: p.take()
+                    to: p.take
+                  - opt:
+                      do:
+                        - eval: <-p.slots
+                        - break: true
+                      when: len(batch) == 0
+                  - eval: p.flight.Add(1)
+                    to: p.flight.Add
+                  - go: p.send(batch, body)
+                    to: p.send
+                forever: true
+          forever: true
+  - of: (*Packer).send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Packer).send
+        kind: self
+      - id: p.flight.Done
+        kind: value
+      - id: p.r.Propose
+        kind: value
+      - id: answer
+        kind: internal
+    steps:
+      - defer: p.flight.Done()
+        to: p.flight.Done
+      - bind: tok, val, err
+        eval: p.r.Propose(p.life, body)
+        to: p.r.Propose
+      - opt:
+          do:
+            - set: err
+              value: verr
+          init:
+            bind: verr, ok
+            eval: val.(error)
+          when: ok && err == nil
+      - bind: subs, _
+        eval: val.([]any)
+      - eval: answer(batch, tok, subs, err)
+        to: answer
+      - eval: <-p.slots
+  - of: (*Packer).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Packer).take
+        kind: self
+      - id: cmdCost
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - lock:
+          mutex: p.mu
+      - bind: n, size
+        eval: 0, bodyHeaderMax
+      - loop:
+          cond: n < len(p.queue) && n < p.cfg.MaxCommands
+          do:
+            - bind: c
+              eval: cmdCost(p.queue[n].cmd)
+              to: cmdCost
+            - opt:
+                do:
+                  - break: true
+                when: n > 0 && size+c > p.cfg.MaxBytes
+            - op: +=
+              set: size
+              value: c
+            - op: ++
+              set: "n"
+      - opt:
+          do:
+            - return: nil, nil
+          when: n == 0
+      - bind: batch
+        eval: slices.Clone(p.queue[:n])
+        to: slices
+      - set: p.queue
+        to: slices
+        value: slices.Delete(p.queue, 0, n)
+      - bind: cmds
+        eval: make([][]byte, n)
+      - loop:
+          do:
+            - set: r.taken
+              value: "true"
+            - set: cmds[i]
+              value: r.cmd
+          key: i
+          range: batch
+          value: r
+      - return: batch, appendBody(make([]byte, 0, size), cmds)
+  - of: answer
+    participants:
+      - id: caller
+        kind: actor
+      - id: answer
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - loop:
+                do:
+                  - send:
+                      chan: r.done
+                      value: "outcome{err: err}"
+                key: _
+                range: batch
+                value: r
+            - return: ""
+          when: err != nil
+      - opt:
+          do:
+            - bind: mismatch
+              eval: origin(coreconsensus.ResultTypeMismatch, errs.Int("commands", len(batch)))
+              to: origin
+            - loop:
+                do:
+                  - send:
+                      chan: r.done
+                      value: "outcome{res: ResultValue{Token: tok, Sub: i}, err: mismatch}"
+                key: i
+                range: batch
+                value: r
+            - return: ""
+          when: len(subs) != len(batch)
+      - loop:
+          do:
+            - send:
+                chan: r.done
+                value: "outcome{res: ResultValue{Token: tok, Sub: i, Value: subs[i]}}"
+          key: i
+          range: batch
+          value: r
+  - of: (*Packer).failQueued
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Packer).failQueued
+        kind: self
+      - id: p.mu.Lock
+        kind: value
+      - id: p.mu.Unlock
+        kind: value
+      - id: origin
+        kind: internal
+    steps:
+      - eval: p.mu.Lock()
+        to: p.mu.Lock
+      - bind: q
+        eval: p.queue
+      - set: p.queue
+        value: nil
+      - eval: p.mu.Unlock()
+        to: p.mu.Unlock
+      - bind: err
+        eval: origin(coreconsensus.NodeStopped, errs.String("packer", "closed"))
+        to: origin
+      - loop:
+          do:
+            - send:
+                chan: r.done
+                value: "outcome{err: err}"
+          key: _
+          range: q
+          value: r

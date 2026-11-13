@@ -1,0 +1,56 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "seglog",
+    srcs = [
+        "doc.go",
+        "errors.go",
+        "gen_codes.go",
+        "log.go",
+        "record.go",
+        "recover.go",
+        "rewrite.go",
+        "segment.go",
+        "sync_linux.go",
+        "sync_other.go",
+        "syncdir_other.go",
+        "syncdir_windows.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/fs/seglog",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":seglog",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "seglog_test",
+    srcs = [
+        "fuzz_internal_test.go",
+        "gen_api_test.go",
+        "log_external_test.go",
+        "rewrite_external_test.go",
+        "seglog_bench_test.go",
+        "tail_internal_test.go",
+    ],
+    embed = [":seglog"],
+    deps = ["//internal/kernel/errs"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

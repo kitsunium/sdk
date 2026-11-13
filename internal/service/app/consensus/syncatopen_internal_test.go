@@ -15,34 +15,26 @@ import (
 // descriptor that syncs the file.
 var errWriteBack = errors.New("input/output error")
 
-// failSyncAtOpen makes one sync at open of what match names fail, the one
-// after skip others of it, as a write-back that failed is reported to the
-// first descriptor that syncs: the next one, in the same boot, syncs clean
-// (errseq, Linux 4.13). Files go to the file sync, directories to the
-// directory sync; match sees the file's name or the directory's path.
-func failSyncAtOpen(t *testing.T, match func(path string) bool, skip int) {
-	t.Helper()
+// failSyncAtOpen is the fault seam of an open whose sync of what match
+// names fails, the one after skip others of it, as a write-back that failed
+// is reported to the first descriptor that syncs: the next one, in the same
+// boot, syncs clean (errseq, Linux 4.13). A file's fdatasync and a
+// directory's sync are judged; match sees the file's or the directory's
+// path.
+func failSyncAtOpen(match func(path string) bool, skip int) *diskFS {
+	s := newFaultFS()
 	seen := 0
-	fail := func(p string) bool {
-		if !match(p) {
-			return false
+	s.before = func(op *diskOp) error {
+		if (op.kind != "datasync" && op.kind != "syncdir") || !match(op.path) {
+			return nil
 		}
 		seen++
-		return seen == skip+1
-	}
-	syncFileAtOpen = func(f *os.File) error {
-		if fail(f.Name()) {
+		if seen == skip+1 {
 			return errWriteBack
 		}
-		return datasync(f)
+		return nil
 	}
-	syncDirAtOpen = func(dir string) error {
-		if fail(dir) {
-			return errWriteBack
-		}
-		return syncDir(dir)
-	}
-	t.Cleanup(func() { syncFileAtOpen, syncDirAtOpen = datasync, syncDir })
+	return s.disk()
 }
 
 // A sync that fails at open writes the STORAGE_FAILED markers before the
@@ -86,8 +78,8 @@ func TestASyncThatFailsAtOpenRefusesTheSameBootRestart(t *testing.T) {
 			if err := d.Close(); err != nil {
 				t.Fatal(err)
 			}
-			failSyncAtOpen(t, tc.match(dir), tc.skip)
-			if _, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 1 << 16, RuntimeDir: testRuntimeDir()}); !errors.Is(err, coreconsensus.StorageFailed) {
+			disk := failSyncAtOpen(tc.match(dir), tc.skip)
+			if _, err := newDataDirOn(dir, DataDirOptions{SegmentBytes: 1 << 16, RuntimeDir: testRuntimeDir()}, disk); !errors.Is(err, coreconsensus.StorageFailed) {
 				t.Fatalf("an open whose sync of %s fails: %v", tc.name, err)
 			}
 			// The same boot: the sync now passes over what the disk refused.
@@ -120,13 +112,16 @@ func TestAFailedRecoveryClosesTheSegmentsItOpened(t *testing.T) {
 	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
-	var opened []*os.File
-	syncFileAtOpen = func(f *os.File) error {
-		opened = append(opened, f)
+	var opened []segFile
+	s := newFaultFS()
+	s.before = func(op *diskOp) error {
+		if op.kind != "datasync" {
+			return nil
+		}
+		opened = append(opened, op.file)
 		return errWriteBack
 	}
-	t.Cleanup(func() { syncFileAtOpen = datasync })
-	if _, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 1 << 16, RuntimeDir: testRuntimeDir()}); !errors.Is(err, coreconsensus.StorageFailed) {
+	if _, err := newDataDirOn(dir, DataDirOptions{SegmentBytes: 1 << 16, RuntimeDir: testRuntimeDir()}, s.disk()); !errors.Is(err, coreconsensus.StorageFailed) {
 		t.Fatalf("an open whose sync fails: %v", err)
 	}
 	if len(opened) == 0 {
@@ -161,17 +156,16 @@ func TestADirectoryThatCannotBeOpenedToSyncWritesNoMarker(t *testing.T) {
 	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
-	syncDirAtOpen = func(p string) error {
-		if p == filepath.Join(dir, "log") {
-			return &fs.PathError{Op: "open", Path: p, Err: errDescriptors}
+	s := newFaultFS()
+	s.before = func(op *diskOp) error {
+		if op.kind == "syncdir" && op.path == filepath.Join(dir, "log") {
+			return &fs.PathError{Op: "open", Path: op.path, Err: errDescriptors}
 		}
-		return syncDir(p)
+		return nil
 	}
-	t.Cleanup(func() { syncDirAtOpen = syncDir })
-	if _, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 1 << 16, RuntimeDir: testRuntimeDir()}); !errors.Is(err, coreconsensus.StorageFailed) {
+	if _, err := newDataDirOn(dir, DataDirOptions{SegmentBytes: 1 << 16, RuntimeDir: testRuntimeDir()}, s.disk()); !errors.Is(err, coreconsensus.StorageFailed) {
 		t.Fatalf("an open that cannot open its log directory to sync it: %v", err)
 	}
-	syncDirAtOpen = syncDir
 	if ms, err := stopMarkers(dir); err != nil || len(ms) != 0 {
 		t.Fatalf("markers after a directory that could not be opened: %v %v", ms, err)
 	}

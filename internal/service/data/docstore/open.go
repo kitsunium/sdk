@@ -51,6 +51,7 @@ func newStore[T any](cfg Config[T], indexes []coredocstore.IndexSpec[T]) *Store[
 		versionsPath: cfg.Path + versionsSuffix,
 		foldAt:       cfg.FoldAt,
 		keep:         cfg.Versions,
+		changes:      changeFeed{stream: cfg.Changes, withDocument: cfg.ChangesWithDocument},
 	}
 	//: the system clock unless the caller brought one.
 	if store.clock == nil {

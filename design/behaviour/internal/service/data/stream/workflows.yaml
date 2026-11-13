@@ -1,0 +1,50 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: firstError
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+          key: _
+          range: errs
+          value: err
+      - return: nil
+  - of: planSQLCompaction
+    steps:
+      - bind: last
+        eval: make(map[string]int64, len(rows))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: last[row.key]
+                    value: row.offset
+                when: row.key != ""
+          key: _
+          range: rows
+          value: row
+      - var:
+          name: dropped
+          type: "[]int64"
+      - loop:
+          do:
+            - bind: record
+              eval: "corestream.RecordValue{Key: []byte(row.key)}"
+            - opt:
+                do:
+                  - set: record.Payload
+                    value: "[]byte{0}"
+                when: "!row.tomb"
+            - opt:
+                do:
+                  - set: dropped
+                    value: append(dropped, row.offset)
+                when: lines.drops(record, time.Unix(0, row.at), last[row.key] == row.offset)
+          key: _
+          range: rows
+          value: row
+      - return: dropped

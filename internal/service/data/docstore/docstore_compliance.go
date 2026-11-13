@@ -4,7 +4,8 @@ import coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 
 // Compile-time assertions that each engine still answers the ports
 // core/data/docstore declares for it: the file engine the context-free ports,
-// the SQL engine the ports with a context on every call, and both the hooks.
+// the SQL engine the ports with a context on every call, and both the hooks
+// and the change feed.
 //
 // They matter because nothing else would notice. Open and OpenSQL return the
 // ENGINES, not the ports, so a method renamed or re-typed on one engine would
@@ -24,6 +25,7 @@ var (
 	_ coredocstore.Ranged[struct{}]            = (*Store[struct{}])(nil)
 	_ coredocstore.BatchWriter[struct{}]       = (*batchWriter[struct{}])(nil)
 	_ coredocstore.Announcer                   = (*Store[struct{}])(nil)
+	_ coredocstore.ChangeFeeder                = (*Store[struct{}])(nil)
 	_ coredocstore.CollectionContext[struct{}] = (*SQLStore[struct{}])(nil)
 	_ coredocstore.VersionedContext[struct{}]  = (*SQLStore[struct{}])(nil)
 	_ coredocstore.TrashableContext            = (*SQLStore[struct{}])(nil)
@@ -37,4 +39,5 @@ var (
 	_ coredocstore.RangedContext[struct{}]     = (*SQLStore[struct{}])(nil)
 	_ coredocstore.BatchWriter[struct{}]       = (*sqlBatchWriter[struct{}])(nil)
 	_ coredocstore.Announcer                   = (*SQLStore[struct{}])(nil)
+	_ coredocstore.ChangeFeeder                = (*SQLStore[struct{}])(nil)
 )

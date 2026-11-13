@@ -207,6 +207,12 @@ type kvWorld struct {
 	// firstApplied is when a command was first applied on any node, by its
 	// payload: every write's payload is unique.
 	firstApplied map[string]int64
+	// snaps is each node's state at the snapshots it cut, by ID, so a
+	// restart or an install starts from the snapshot's state as the
+	// driver's machine does; sess, when set, runs the session clients of
+	// #918 (zsession_internal_test.go).
+	snaps map[string]map[string]string
+	sess  *sessClients
 }
 
 // pendingFwd is a forwarded write waiting for the leader's answer, from the
@@ -221,7 +227,7 @@ func newKVWorld() *kvWorld {
 }
 
 func (w *kvWorld) restart(n *simNode) {
-	w.state[n.id] = map[string]string{}
+	w.reload(n)
 	// Reads in flight on a node that crashed never returned: dropped.
 	delete(w.reads, n.id)
 	for i := range w.writes {
@@ -231,11 +237,39 @@ func (w *kvWorld) restart(n *simNode) {
 	}
 }
 
+// reload starts n's state from the snapshot it continues: empty for none,
+// the state it had when it cut that snapshot otherwise.
+func (w *kvWorld) reload(n *simNode) {
+	st := map[string]string{}
+	if sn, ok := w.snaps[n.base.ID]; ok {
+		maps.Copy(st, sn)
+	}
+	w.state[n.id] = st
+	if w.sess != nil {
+		w.sess.reload(n)
+	}
+}
+
+// cut keeps n's state at the snapshot it just cut, and records its
+// sessions in the snapshot, as the driver's cut does.
+func (w *kvWorld) cut(n *simNode) {
+	if w.snaps == nil {
+		w.snaps = map[string]map[string]string{}
+	}
+	w.snaps[n.base.ID] = maps.Clone(w.state[n.id])
+	if w.sess != nil {
+		n.base.Sessions = w.sess.tables[n.id].Values()
+	}
+}
+
 func (w *kvWorld) applied(s *sim, n *simNode, e *core.EntryValue) {
 	st := w.state[n.id]
 	if st == nil {
 		st = map[string]string{}
 		w.state[n.id] = st
+	}
+	if e.Kind == core.EntrySessionCommand && w.sess != nil {
+		w.sess.applied(w, s, n, e, st)
 	}
 	if e.Kind == core.EntryCommand {
 		k, v, _ := strings.Cut(string(e.Data), "=")
@@ -324,6 +358,9 @@ func (w *kvWorld) writeForwarded(s *sim, f *simNode, key, val string) {
 // is waited on like a local write's. A follower that restarted since never
 // learns the outcome.
 func (w *kvWorld) forwardAnswered(n *simNode, m core.MessageValue) {
+	if w.sess != nil && w.sess.forwardAnswered(n, m) {
+		return
+	}
 	k := [2]uint64{uint64(n.id), m.Context}
 	pf, ok := w.fwds[k]
 	if !ok {

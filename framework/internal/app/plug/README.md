@@ -166,6 +166,15 @@ The package imports the standard library and the framework's model only, so that
   - [func \(StoreEngine\) Update\(ctx context.Context, key string, fn func\(d \*DocumentValue\) error\) \(DocumentValue, error\)](<#StoreEngine.Update>)
   - [func \(StoreEngine\) Watch\(onWrite func\(key string\), onDelete func\(key string\)\)](<#StoreEngine.Watch>)
   - [func \(StoreEngine\) Write\(ctx context.Context, d DocumentValue, mode WriteMode\) error](<#StoreEngine.Write>)
+- [type Stream](<#Stream>)
+  - [func \(Stream\) Append\(ctx context.Context, key string, payload \[\]byte\) error](<#Stream.Append>)
+  - [func \(Stream\) Close\(\) error](<#Stream.Close>)
+  - [func \(Stream\) Join\(ctx context.Context, cfg StreamSubscribeConfig\) error](<#Stream.Join>)
+  - [func \(Stream\) Subscribe\(ctx context.Context, cfg StreamSubscribeConfig\) error](<#Stream.Subscribe>)
+- [type StreamConfig](<#StreamConfig>)
+- [type StreamDriverConfig](<#StreamDriverConfig>)
+- [type StreamRecordValue](<#StreamRecordValue>)
+- [type StreamSubscribeConfig](<#StreamSubscribeConfig>)
 - [type StudioDriverConfig](<#StudioDriverConfig>)
 - [type StudioEnvValue](<#StudioEnvValue>)
 - [type StudioHost](<#StudioHost>)
@@ -849,6 +858,13 @@ var Stores atomic.Pointer[StoreDriverConfig]
 ```
 
 Stores is the store subsystem: the engines the framework's stores run on, the framework's scope on a database and the migrations of the framework's tables; nil until framework/app/store is imported. A product that declares a store or a database without it is refused at the start (ADR 0179 §6).
+
+<a name="Streams"></a>
+```go
+var Streams atomic.Pointer[StreamDriverConfig]
+```
+
+Streams is the stream subsystem: the log a streamed topic appends to and the migration of its tables on a database; nil until framework/app/stream is imported. A product that declares a streamed topic without it is refused at the start (ADR 0179 §6).
 
 <a name="Studio"></a>
 ```go
@@ -3069,6 +3085,168 @@ func (StoreEngine) Write(ctx context.Context, d DocumentValue, mode WriteMode) e
 ```
 
 Write stores d as mode says. The document and its index keys are kept together, or neither.
+
+<a name="Stream"></a>
+## type [Stream](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream_interface.go>)
+
+Stream is one stream as the framework's core uses it: an append, and the consumer groups that read it.
+
+```go
+type Stream interface {
+	// Append puts payload in the stream under key, one record: in the
+	// transaction ctx carries for its database, when it lives on one.
+	Append(ctx context.Context, key string, payload []byte) error
+	// Close releases the stream: a file stream's directory, which one
+	// engine opens at a time.
+	Close() error
+	// Join places the consumer group cfg names where cfg starts it, on every
+	// partition the stream does not know it on yet; a group it knows keeps
+	// its offsets. The framework joins at the subscription's start, before
+	// anything is published, so that a group starting now misses nothing.
+	Join(ctx context.Context, cfg StreamSubscribeConfig) error
+	// Subscribe runs the consumer group cfg names over every partition
+	// until ctx ends or the stream's storage fails, joining it first.
+	Subscribe(ctx context.Context, cfg StreamSubscribeConfig) error
+}
+```
+
+<a name="Stream.Append"></a>
+### func \(Stream\) [Append](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream_interface.go>)
+
+```go
+func (Stream) Append(ctx context.Context, key string, payload []byte) error
+```
+
+Append puts payload in the stream under key, one record: in the transaction ctx carries for its database, when it lives on one.
+
+<a name="Stream.Close"></a>
+### func \(Stream\) [Close](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream_interface.go>)
+
+```go
+func (Stream) Close() error
+```
+
+Close releases the stream: a file stream's directory, which one engine opens at a time.
+
+<a name="Stream.Join"></a>
+### func \(Stream\) [Join](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream_interface.go>)
+
+```go
+func (Stream) Join(ctx context.Context, cfg StreamSubscribeConfig) error
+```
+
+Join places the consumer group cfg names where cfg starts it, on every partition the stream does not know it on yet; a group it knows keeps its offsets. The framework joins at the subscription's start, before anything is published, so that a group starting now misses nothing.
+
+<a name="Stream.Subscribe"></a>
+### func \(Stream\) [Subscribe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream_interface.go>)
+
+```go
+func (Stream) Subscribe(ctx context.Context, cfg StreamSubscribeConfig) error
+```
+
+Subscribe runs the consumer group cfg names over every partition until ctx ends or the stream's storage fails, joining it first.
+
+<a name="StreamConfig"></a>
+## type [StreamConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream.go>)
+
+StreamConfig is what the framework asks of one stream: where it lies, how many partitions it has, and the app's clock.
+
+```go
+type StreamConfig struct {
+	// Name names the stream's node in a refusal: the topic's node ID.
+	Name       string
+	// Dir is the directory a file stream lies in; with no Database and no
+	// Dir, the stream is in memory.
+	Dir        string
+	// Database keeps the stream, nil when Dir or memory does: a scope the
+	// store subsystem's Database opened, whose transaction an append in it
+	// joins.
+	Database   Database
+	// Table is the base name of the stream's tables on Database.
+	Table      string
+	// Partitions is how many partitions the stream has; it cannot change
+	// for the life of a stream.
+	Partitions int
+	// Clock is the app's clock, which the stream stamps and waits on.
+	Clock      Clock
+	// Wrap, when a test sets it, stands in front of the stream the
+	// subsystem opens: a func(stream.Stream) stream.Stream of the SDK's
+	// stream, which the framework's core does not name. Nil in every app a
+	// product builds.
+	Wrap       any
+}
+```
+
+<a name="StreamDriverConfig"></a>
+## type [StreamDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream.go>)
+
+StreamDriverConfig is what framework/app/stream plugs into kit: how a streamed topic's log opens, and the migration that makes its tables on a database.
+
+```go
+type StreamDriverConfig struct {
+	// Open opens one stream, as cfg places it: on a database, in a
+	// directory, or in memory.
+	Open           func(cfg StreamConfig) (Stream, error)
+	// TableMigration is the migration that makes a stream's tables on a
+	// database of the dialect named, at version: the SDK's SQL stream's
+	// three tables, named from table.
+	TableMigration func(dialect string, table string, version uint64) (MigrationValue, error)
+}
+```
+
+<a name="StreamRecordValue"></a>
+## type [StreamRecordValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream.go>)
+
+StreamRecordValue is one record of a stream, as a group reads it: where it lies, when it was appended, its key and its payload as the framework encoded it.
+
+```go
+type StreamRecordValue struct {
+	// AppendedAt is when the record was appended.
+	AppendedAt time.Time
+	// Key is the record's key, which chose its partition.
+	Key        string
+	// Payload is the message as the framework encoded it.
+	Payload    []byte
+	// Partition is the partition the record lies in.
+	Partition  int
+	// Offset is the record's offset in its partition.
+	Offset     int64
+}
+```
+
+<a name="StreamSubscribeConfig"></a>
+## type [StreamSubscribeConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/stream.go>)
+
+StreamSubscribeConfig is how one consumer group of a stream runs: its name, where a group the stream does not know yet starts, its handler, how many records it handles at once, and how it stops.
+
+```go
+type StreamSubscribeConfig struct {
+	// From, when FromBeginning is false and From is not zero, is the
+	// instant a new group starts at: the first record appended at or after
+	// it. Neither set, a new group starts after the last record appended.
+	From          time.Time
+	// Handler handles one record: nil commits the group's offset past it,
+	// an error hands it back, retried after a growing wait, and its
+	// partition waits for it. Every handler the framework runs tolerates a
+	// redelivery.
+	Handler       func(ctx context.Context, r StreamRecordValue) error
+	// Group names the consumer group whose offsets are read and committed.
+	Group         string
+	// PollInterval bounds an idle wait for what another process appended.
+	PollInterval  time.Duration
+	// DrainTimeout is how long the handler running when ctx ends may still
+	// run before its context is cancelled; no record starts once ctx ended.
+	DrainTimeout  time.Duration
+	// SettleTimeout bounds each commit sent once ctx ended.
+	SettleTimeout time.Duration
+	// Parallelism is how many records, of distinct partitions, are handled
+	// at once.
+	Parallelism   int
+	// FromBeginning makes a new group start at the first record the stream
+	// still keeps.
+	FromBeginning bool
+}
+```
 
 <a name="StudioDriverConfig"></a>
 ## type [StudioDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/studio.go>)
