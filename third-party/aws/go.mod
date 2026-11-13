@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.3
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.52.8
 	github.com/aws/smithy-go v1.28.7
-	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.30.0
 )
 
 require (
@@ -20,6 +20,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.31 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.38 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.39 // indirect
+	github.com/kitsunium/sdk v0.20.0
+	github.com/kitsunium/sdk/internal/core v0.18.0
+	github.com/kitsunium/sdk/internal/kernel v0.18.0
+	github.com/kitsunium/sdk/internal/service v0.18.0
 )
-
-replace github.com/kitsunium/sdk/internal => ../../internal
