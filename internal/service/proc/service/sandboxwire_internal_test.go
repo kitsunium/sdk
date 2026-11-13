@@ -4,6 +4,7 @@ package service
 
 import (
 	"errors"
+	"slices"
 	"syscall"
 	"testing"
 
@@ -160,6 +161,52 @@ func TestMainPIDRootExemptionLostWhenSandboxed(t *testing.T) {
 	}
 	if h.m.notifyRefused != 1 {
 		t.Errorf("refused %d, want 1", h.m.notifyRefused)
+	}
+}
+
+// TestMainPIDNamingTheEngineIsRefused reproduces #1360: on a Solaris guest
+// handing PIDs out in sequence, TestMainPIDRootExemptionLostWhenSandboxed's
+// unconfined half failed in 0.00s with no attach, then passed on its retry —
+// the test binary was PID 4242, the very PID the replay's MAINPID= names, and
+// the reducer rightly refuses the engine's own PID. The replay pins the
+// engine's PID (harnessSelfPID), and the refusal stays the engine's: the same
+// MAINPID= from root is taken while the engine is the pinned PID, refused once
+// the engine is 4242.
+func TestMainPIDNamingTheEngineIsRefused(t *testing.T) {
+	type tc struct {
+		name     string
+		engine   int
+		attaches []int
+		refused  uint64
+	}
+	runCase := func(t *testing.T, c tc) {
+		sandboxHere(t)
+		h := newHarness(t, Config{
+			Type: coresvc.TypeNotify, Notify: stubNotify{}, Attacher: stubAttacher{},
+			ExecStart: []coresvc.CommandValue{cmd(t, "/bin/main")},
+		})
+		//: the replay never takes the test binary's PID.
+		if h.m.s.selfPID != harnessSelfPID {
+			t.Fatalf("the replay's engine is PID %d, want the pinned %d", h.m.s.selfPID, harnessSelfPID)
+		}
+		h.m.s.selfPID = c.engine
+		h.start()
+		h.feed(event{kind: evNotify, msg: coresvc.NotifyValue{
+			Fields: map[string]string{"MAINPID": "4242"}, PID: h.m.mainPID, UID: 0, Verified: true,
+		}})
+		//: taken or refused, as the engine's PID decides.
+		if !slices.Equal(h.attaches, c.attaches) || h.m.notifyRefused != c.refused {
+			t.Fatalf("MAINPID=4242 with the engine at PID %d: attaches %v, refused %d; want %v, %d",
+				c.engine, h.attaches, h.m.notifyRefused, c.attaches, c.refused)
+		}
+	}
+	cases := []tc{
+		{name: "the pinned engine", engine: harnessSelfPID, attaches: []int{4242}},
+		{name: "the engine named", engine: 4242, refused: 1},
+	}
+	//: each case.
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
