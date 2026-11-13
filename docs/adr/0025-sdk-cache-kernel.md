@@ -1,6 +1,6 @@
 # ADR 0025 — Generic LRU+TTL cache as a kernel primitive (`cache`)
 
-- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock)
+- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node)
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0010 (recycler), ADR 0011 (snapshot), ADR 0006 (ring) — the kernel-primitive precedents; ADR 0024 (Phase-B wave)
@@ -111,3 +111,38 @@ The measured price on the paths that use none of it is in `BENCH.md`: hits
 unchanged within noise, a new key and an insert at capacity ~14 % and ~22 %
 dearer (the node carries its heap handle, weight and policy counter). #1038
 asked for 5 %; the gap is stated there, not hidden.
+
+## Amendment — 2026-11-13: a `sync.Mutex`, the core without its lock, and a 64-byte node ([#1038](https://github.com/kitsunium/sdk/issues/1038))
+
+The owner kept #1038's bound — `Set_NewKey`, `Fetch_Hit` and
+`Fetch_HitWithTTL` within 5 % of `ee1f48ba2` — rather than the 14 % the wave
+above stated. What the compiler made of the wave, read before any change
+(`-gcflags=-m=2` and the disassembly of `setTTL` and `Fetch` at both commits):
+the node had moved from the 64-byte size class to the 80-byte one
+(`mallocgcSmallScanNoHeaderSC6` → `SC7`), and a new key's `setTTL` called
+`admit`, `setDeadline` and `evictIfNeeded` where the base called
+`evictIfNeeded` alone; a hit called `touch` and then `moveFront`. Three
+decisions follow, none of which changes what a caller observes.
+
+- **§1's `sync.RWMutex` becomes a `sync.Mutex`.** Every `Fetch` and `Set`
+  takes the lock exclusively anyway; the read lock only let two `Len` or
+  `Stats` calls overlap, and its write lock costs four atomic operations
+  where a `Mutex` costs two, inlined.
+- **`UnlockedMap[K,V]`, the cache without its lock.** `Cache` is now a `Mutex`
+  around one; every mechanism — policy, deadlines, bounds, sweep, counters —
+  is the `UnlockedMap`'s. A caller that already serialises under its own lock
+  (the cache domain's stripes, #1059) uses it and pays one lock instead of
+  two. It is not safe for concurrent use, like `heap.IndexedHeap`; its
+  `OnEvict` runs at the end of the call, once the cache is consistent.
+- **The node is 64 bytes again.** A deadline is an `int64` of nanoseconds
+  since the cache's epoch, taken by `time.Time.Sub` — the monotonic readings
+  when both carry one, as `Before` compared them — and saturating past the
+  `int64` range; the expiry heap is the package's own, 4-ary, the deadline
+  inline in each cell and each entry's 32-bit slot its position, so a sift
+  compares two integers and calls nothing. `heap.IndexedHeap` stays for its
+  other users. The insertion and the hit call only what their configuration
+  needs, and an LRU hit relinks without rewriting the list's count and weight.
+
+Recycling the nodes stays deferred, for the reason given above. The verdict
+on the bound is the interleaved A/B of `bench-ab.yml` on the runner, the
+upper end of the 95 % interval against 1.05; the figures go to `BENCH.md`.

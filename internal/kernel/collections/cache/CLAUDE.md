@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-11-13T12:00:00Z -->
 # internal/kernel/collections/cache/
 
 ## Purpose
@@ -14,8 +14,10 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
 
 | File | Surface |
 |---|---|
-| `cache.go` | `Cache[K,V]` + `NewCache` + `Fetch`/`Set`/`SetTTL`/`Delete`/`Expire`/`Keys`/`Len`/`Purge`/`Stats`, the expiry heap and the eviction loop |
-| `entry.go` | `entry[K,V]` — intrusive list node, with its weight, its expiry handle and its S3-FIFO counter |
+| `cache.go` | `Cache[K,V]` + `NewCache` + `Fetch`/`Set`/`SetTTL`/`Delete`/`Expire`/`Keys`/`Len`/`Purge`/`Stats` — a `sync.Mutex` around an `UnlockedMap`, OnEvict drained after the unlock |
+| `unlocked.go` | `UnlockedMap[K,V]` + `NewUnlockedMap` — the cache without its lock (#1038, for #1059): the lookup, the write path, the deadlines, the sweep and the eviction loop every `Cache` call runs |
+| `deadline.go` | `deadlineHeap[K,V]` — the expiry heap: 4-ary, `int64` deadlines inline, each entry's slot its cell plus one |
+| `entry.go` | `entry[K,V]` — intrusive list node, with its deadline, its heap slot, its weight and its S3-FIFO counter: 64 bytes for a string key and a word-sized value |
 | `list.go` | `entryList[K,V]` — the intrusive doubly-linked list each queue is, with its count and summed weight |
 | `s3fifo.go` | admission, the hit record and the victim walk of both policies (`admit`, `touch`, `evictOne`, the S3-FIFO small/main walk) |
 | `ghost.go` | `ghostSet[K]` — S3-FIFO's ghost: a bounded FIFO of key hashes (`hash/maphash.Comparable`) |
@@ -30,12 +32,34 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
 - **`Fetch`, not `Get`**: a hit mutates state (LRU promotion or the S3-FIFO
   counter, plus the hit counter), so the read verb is `Fetch` — `Get` is
   reserved for pure accessors (KTN-GETTER-PURE).
-- **`sync.RWMutex`**: read-only `Len`/`Stats` take `RLock`; everything else `Lock`.
+- **`sync.Mutex`** (#1038, amending ADR 0025 §1): every call takes it,
+  `Len`/`Stats`/`Keys` included. The uncontended lock and unlock are one
+  atomic each and inlined; a `RWMutex`'s write lock cost four on every
+  `Fetch` and `Set`, to let two `Len`s read at once.
+- **`UnlockedMap` is the cache, `Cache` its lock** (#1038). `UnlockedMap[K,V]`
+  carries every mechanism and no lock, for a caller that already serialises
+  (the cache domain's stripes, #1059) — two locks on one path paid four
+  atomics for nothing. Not safe for concurrent use; `-race` sees a misuse.
+  Its OnEvict runs at the end of the call that evicted, once the cache is
+  consistent, so it may re-enter. `TestUnlockedMapBehavesAsCache` drives both
+  through the same seeded operations and compares every observable.
+  Named `UnlockedMap`, not the reviews' `Unlocked`: an exported struct names
+  its role by a suffix (KTN-STRUCT-ROLE), and `cache.UnlockedCache` stutters.
+- **The node is 64 bytes** (#1038). For a string key and a word-sized value
+  the entry is 58 bytes: the 64-byte size class, one cache line. A deadline
+  is an `int64` of nanoseconds since the cache's epoch — the clock's reading
+  at the first deadline — taken by `time.Time.Sub`, so on the monotonic
+  readings when both carry one, as `Before` compared them; a sum past the
+  `int64` range (a TTL of centuries) is held at its maximum. An entry has a
+  deadline when its heap slot is set, so a deadline of 0 is a deadline.
+  `Test_entry_size` holds the budget.
 - **Expiry: lazy, plus a sweep the CALLER drives** (#1038). An expired entry is
   reaped by the next `Fetch` of its key, by a capacity eviction, or by
   `Expire()`. Every entry carrying a deadline sits in an expiry heap
-  (`kernel/collections/heap.IndexedHeap`, #1036) keyed by `expireAt`: `SetTTL`
-  re-keys its node, `Delete` and every eviction remove it, so `Expire` pops
+  (`deadline.go`: 4-ary, the deadline inline beside the entry, so a sift
+  compares two `int64`s and calls nothing — `heap.IndexedHeap`, which the
+  cache used until #1038, compares through a function value): `SetTTL`
+  re-keys its cell, `Delete` and every eviction remove it, so `Expire` pops
   exactly the k entries due — O(k log n), the clock read once, nothing read for
   a cache with no deadline. The primitive starts no goroutine (ADR 0025 and
   ADR 0049 refused one inside it): the caller sweeps on its own cadence.
@@ -72,12 +96,17 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
   `Len`/`Stats`/`Expire`/`Purge`/`Keys` walk the stripes one lock at a time — never
   two locks at once.
 - **`Keys` yields a snapshot** (#816). The keys present and unexpired are
-  copied under the read lock and yielded after it is released — the rule
+  copied under the lock and yielded after it is released — the rule
   OnEvict keeps: no caller code runs under `mu` — so the loop's body may
   Set, Delete or Fetch. A walk is not a read: nothing is promoted, no counter
   moves. One slice per loop (`BenchmarkKeys_1024`: 1 alloc, ~34 µs).
 - **OnEvict** fires on capacity/expiry removal only — never on `Delete`/overwrite/`Purge`.
   It runs after the mutex is released, so the callback may call back into the cache.
+- **The hot paths make one call** (#1038). Under LRU, `Fetch` runs the
+  lookup and the relink in `UnlockedMap.fetch`, the relink inlined and writing no
+  count or weight; a new key's `Set` runs `UnlockedMap.set`, which pushes onto
+  the LRU list inline and calls the deadline, the policy's admission and the
+  eviction loop only when a TTL, S3-FIFO or a bound asks for them.
 - **Injectable clock**: `Config.Clock` (nil → `clock.System`) makes TTL
   deterministic in tests. A `clock.CoarseClock` (#814) makes a TTL'd hit's
   clock read an atomic load, at the price of expiry late by up to its

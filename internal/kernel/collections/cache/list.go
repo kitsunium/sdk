@@ -2,7 +2,7 @@ package cache
 
 // entryList is an intrusive doubly-linked list of entries with its count and
 // summed weight: head = most recently inserted or promoted, tail = the next
-// victim. Caller holds the cache's mu for every method.
+// victim. Caller holds the cache's lock for every method.
 type entryList[K comparable, V any] struct {
 	head   *entry[K, V]
 	tail   *entry[K, V]
@@ -56,14 +56,28 @@ func (l *entryList[K, V]) unlink(ent *entry[K, V]) {
 	l.weight -= int64(ent.weight)
 }
 
-// moveFront promotes ent to the head.
+// moveFront promotes ent, which sits in the list, to the head. It relinks
+// pointers only: the entry never leaves the list, so its count and summed
+// weight stay as they are, and a hit writes neither (#1038).
 func (l *entryList[K, V]) moveFront(ent *entry[K, V]) {
 	//: already the head — nothing to move.
 	if l.head == ent {
 		//: fast-path no-op.
 		return
 	}
-	//: detach then re-insert at the front.
-	l.unlink(ent)
-	l.pushFront(ent)
+	//: not the head, so ent has a previous node and the list a head.
+	prev, next := ent.prev, ent.next
+	prev.next = next
+	//: bridge the next node, or make the previous one the tail.
+	if next != nil {
+		//: next node skips ent.
+		next.prev = prev
+	} else {
+		//: ent was the tail — the previous node becomes tail.
+		l.tail = prev
+	}
+	ent.prev = nil
+	ent.next = l.head
+	l.head.prev = ent
+	l.head = ent
 }

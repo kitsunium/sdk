@@ -1,0 +1,32 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*UnlockedMap).keySnapshot
+    steps:
+      - bind: keys
+        eval: make([]K, 0, len(c.items))
+      - var:
+          name: now
+          type: int64
+      - bind: read
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: now, read
+                          value: c.sinceEpoch(), true
+                      when: "!read"
+                  - opt:
+                      do:
+                        - continue: true
+                      when: now >= ent.deadline
+                when: ent.slot != 0
+            - set: keys
+              value: append(keys, key)
+          key: key
+          range: c.items
+          value: ent
+      - return: keys

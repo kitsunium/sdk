@@ -10,8 +10,8 @@ Two facts here are worth more than the rest of the table.
 ## 1. A TTL more than doubles the cost of a hit — and the cache is not the cause
 
 `Fetch_Hit` is 59.89 ns; `Fetch_HitWithTTL` is 130.1 ns. The 70 ns difference is
-one `Clock.Now()` call, because `expired()` short-circuits on a zero `expireAt`
-and never touches the clock for an entry without an expiry.
+one `Clock.Now()` call, because the lookup short-circuits on an entry without a
+deadline and never touches the clock for it.
 
 The tempting conclusion is that the `clock.Clock` interface is the overhead and
 that de-virtualising it would win the 70 ns back. **That was measured, and it is
@@ -96,6 +96,37 @@ geomean                               147.6n         197.4n         +6.23%
   victim. `Stats` copies two more fields. These are the price of #1038, #1059,
   #839 and #834 on the paths that have no use for them — #1038 asked for
   `Set_NewKey` within 5 %, and it is not.
+
+### #1038 (2026-11-13): back to a 64-byte node, one lock, one call
+
+The owner kept #1038's bound — `Set_NewKey`, `Fetch_Hit` and
+`Fetch_HitWithTTL` within 5 % of `ee1f48b` — so the price stated above was
+taken back rather than accepted. What the compiler had made of the wave, read
+first (`-gcflags=-m=2` and `go tool objdump` of the `[string, int]` shapes at
+both commits):
+
+| | base `ee1f48b` | wave L6 | #1038 |
+|---|---|---|---|
+| node allocation (`string`/`int`) | `SC6`, 64 B | `SC7`, 80 B | `SC6`, 64 B |
+| calls in a new key's `setTTL` (LRU, no TTL, unbounded) | `evictIfNeeded` | `admit`, `setDeadline`, `evictIfNeeded` | `UnlockedMap.set`, which calls nothing more on that path |
+| calls in a hit's `Fetch` (LRU) | `moveFront` | `touch` → `moveFront` | `UnlockedMap.fetch`, the relink inlined |
+| lock | `RWMutex` | `RWMutex` | `Mutex`, inlined |
+
+The node lost its `time.Time` (an `int64` since the cache's epoch) and its
+heap handle (a 32-bit slot in the cache's own 4-ary expiry heap); an LRU hit
+relinks without rewriting the list's count and weight; `Cache` is a `Mutex`
+around an `UnlockedMap`.
+
+The verdict is the interleaved A/B of `bench-ab.yml` on the runner — the
+upper end of the 95 % interval of the per-round ratios against 1.05 — and its
+figures replace this paragraph. Indicative only, on the shared VM (go1.27.4,
+`-cpu=1`, six interleaved rounds of 300 000 iterations, means): `Set_NewKey`
+256 ns at the base, 289 ns at the wave, 250 ns now (170 B, as at the base);
+`Fetch_Hit` 59 → 59 → 49 ns; `Fetch_HitWithTTL` 135 → 131 → 125 ns.
+
+The scale rows (`scale_bench_test.go`: `Set_NewKey_10M`,
+`Set_NewKey_TTL_10M` with `gc-cycles/op`, `Fetch_HitWithTTL_1M`) run in the
+lane's scale mode; at about 1.5 GB they never run on a shared machine.
 
 ### Hit ratio — S3-FIFO against LRU (#834)
 
