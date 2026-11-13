@@ -15,7 +15,7 @@
 // on, each message a GSO send's datagrams, split as the read loop splits them
 // (P4a, ADR 0192).
 //
-// The measure is paired, as L1's and L2's (load_gate_linux_test.go, ADR 0190):
+// The measure is paired, as L1's and L2's (load_gate_test.go, ADR 0190):
 // one receiver reads both engines' sockets, each through its own source, and a
 // round sends to them in windows A, B, B, A, … at the one fixed rate. Every
 // window is metered the same way whichever engine it feeds (l3Round), so a

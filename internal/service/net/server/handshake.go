@@ -33,13 +33,17 @@ type handshakeHandler struct {
 	next corenet.ConnHandler
 	// timeouts carries the group's handshake bound.
 	timeouts corenet.TimeoutsValue
+	// log records a failed negotiation under the server's budget (#846); nil
+	// records nothing.
+	log *errorLogWriter
 }
 
 // ServeConn implements corenet.ConnHandler.
-func (h handshakeHandler) ServeConn(ctx context.Context, c corenet.Conn) error {
+func (h *handshakeHandler) ServeConn(ctx context.Context, c corenet.Conn) error {
 	//: a failed or stalled negotiation ends the connection here; the engine
 	//: closes it on the way out, exactly as it would any handler error.
 	if err := boundHandshake(ctx, c, h.timeouts); err != nil {
+		h.log.handshakeFailed(ctx, c.RemoteAddr(), err)
 		//: the peer never completed the negotiation.
 		return err
 	}

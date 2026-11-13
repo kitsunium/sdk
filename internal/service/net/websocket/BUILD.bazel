@@ -47,6 +47,7 @@ go_test(
         "frame_mask_external_test.go",
         "gen_api_test.go",
         "gen_perf_test.go",
+        "h2_bench_test.go",
         "h2_external_test.go",
         "loop_bench_test.go",
         "loop_engine_linux_test.go",

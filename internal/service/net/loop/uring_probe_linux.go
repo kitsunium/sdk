@@ -4,6 +4,7 @@ package loop
 
 import (
 	"bytes"
+	"slices"
 	"syscall"
 	"time"
 
@@ -33,7 +34,11 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 		//: named.
 		return false, false, probeError("self_test", syscall.EIO)
 	}
-	fds := ul.sw.disabled(corenet.CapabilityURingDirect) || unixListener(ul.lfds)
+	ul.peers.unix = unixListeners(ul.lfds)
+	unix := slices.Contains(ul.peers.unix, true)
+	// A Unix listener keeps the group on process descriptors unless the
+	// socket command can read its peers on direct ones (#974).
+	fds := ul.sw.disabled(corenet.CapabilityURingDirect) || (unix && !ul.sw.wants(corenet.CapabilityURingSockGetsockopt))
 	rg, err := selfTestRing(flags, !fds)
 	//: no ring, buffers or table.
 	if err != nil {
@@ -74,6 +79,17 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 	if fds {
 		//: process descriptors.
 		return false, false, nil
+	}
+	//: a Unix listener: its peers are read by the socket command, which the
+	//: payload's direct descriptor must answer, or the group runs on process
+	//: descriptors.
+	if unix {
+		ul.peers.cmd, ul.peers.why = ul.peerCommand(run)
+		//: absent: LoopPeer asks the process descriptor.
+		if !ul.peers.cmd {
+			//: process descriptors.
+			return false, false, nil
+		}
 	}
 	//: passed; closing the ring closes the direct descriptors.
 	direct, deferred = run.releases(port)
@@ -246,6 +262,9 @@ type selfTestRun struct {
 	// the ends of its recvs; closed is its close's.
 	done   int
 	closed bool
+	// peerDone is the socket command's completion, peerRes its result.
+	peerDone bool
+	peerRes  int32
 	// mode is how the self-test runs.
 	mode selfTestMode
 }
@@ -317,6 +336,9 @@ func (st *selfTestRun) onCQE(c *cqe) {
 		st.done++
 	case udClose:
 		st.closed = true
+	//: the socket command's read of the peer.
+	case udPeer:
+		st.peerRes, st.peerDone = c.res, true
 	//: bytes in a provided buffer.
 	case udRecv:
 		st.onRecv(c)
@@ -420,4 +442,45 @@ func loopbackListener() (fd, port int, err error) {
 	}
 	//: the port the kernel chose.
 	return fd, in4.Port, nil
+}
+
+// peerCommand is the socket command's probe (#974): SO_PEERCRED read by
+// SOCKET_URING_OP_GETSOCKOPT on the payload's direct descriptor, a TCP one,
+// for which the kernel answers the length of a struct ucred all the same.
+// It reports whether the command answered so, and the reason when it did
+// not. The structure the kernel writes is the loop's, never the stack's: a
+// goroutine's stack may move while the command is in flight.
+func (ul *uLoop) peerCommand(st *selfTestRun) (bool, string) {
+	//: injected: a kernel before 6.7.
+	if ul.hooks.failStage == "sock_getsockopt" {
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: " + syscall.EOPNOTSUPP.Error() + " (before 6.7)"
+	}
+	s := st.u.get()
+	//: no room on a fresh ring: not judged, so not used.
+	if s == nil {
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: no submission room"
+	}
+	prepPeerCred(s, uint32(st.index), &ul.peers.probe, udPack(udPeer, 0, 0))
+	st.pump(func() bool { return st.peerDone })
+	//: by what came back.
+	switch {
+	//: never completed.
+	case !st.peerDone:
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: no completion within 500 ms"
+	//: the length of a struct ucred.
+	case st.peerRes == ucredLen:
+		//: present.
+		return true, ""
+	//: refused: an errno, before 6.7 EOPNOTSUPP or EINVAL.
+	case st.peerRes < 0:
+		//: absent, named.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: " + syscall.Errno(-st.peerRes).Error() + " (before 6.7)"
+	//: another length.
+	default:
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: an unexpected length"
+	}
 }

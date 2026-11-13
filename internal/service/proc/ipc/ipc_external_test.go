@@ -227,6 +227,45 @@ func TestAConfigurationIsCheckedBeforeAnythingIsTouched(t *testing.T) {
 	}
 }
 
+// AllowSIDs is Windows's (#1349): off Windows a list that is not empty is
+// MISCONFIGURED at every entry point — the listener, the dialer, the dial —
+// before anything is created, the rule named, and an empty list is no list.
+func TestAllowSIDsAreRefusedOffWindows(t *testing.T) {
+	dir := socketDir(t)
+	cfg := ipc.Config{Path: filepath.Join(dir, "d.sock"), AllowSIDs: []string{"S-1-5-32-545"}}
+	_, listenErr := ipc.NewListener(&cfg)
+	_, dialerErr := ipc.NewDialer(&cfg)
+	_, dialErr := ipc.Dial(t.Context(), &cfg)
+	for side, err := range map[string]error{"NewListener": listenErr, "NewDialer": dialerErr, "Dial": dialErr} {
+		if !errs.HasCode(err, coreipc.CodeMisconfigured) {
+			t.Errorf("%s with AllowSIDs = %v, want MISCONFIGURED", side, err)
+			continue
+		}
+		if rule := ruleOf(err); !strings.Contains(rule, "AllowSIDs") {
+			t.Errorf("%s: rule %q does not name AllowSIDs", side, rule)
+		}
+	}
+	if _, err := os.Lstat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the directory exists after a refused configuration: %v", err)
+	}
+	cfg.AllowSIDs = []string{}
+	ln, err := ipc.NewListener(&cfg)
+	if err != nil {
+		t.Fatalf("an empty SID list: %v", err)
+	}
+	closeOrLog(t, ln)
+}
+
+// ruleOf is the rule field of err, empty when it carries none.
+func ruleOf(err error) string {
+	for _, f := range errs.FieldsOf(err) {
+		if f.Key() == "rule" {
+			return f.StringValue()
+		}
+	}
+	return ""
+}
+
 func TestADialToNothingSaysSo(t *testing.T) {
 	cfg := ipc.Config{Path: filepath.Join(socketDir(t), "none.sock")}
 	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o700); err != nil {

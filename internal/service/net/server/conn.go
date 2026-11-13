@@ -3,10 +3,17 @@ package server
 import (
 	"io"
 	stdnet "net"
+	"syscall"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
+
+// zeroCopyStep is how much of a bounded copy one write deadline covers when
+// the socket sends it by sendfile or splice: the bound stays one per step, as
+// it is one per write, and a step's set-up — the standard library's few
+// allocations of a sendfile — is paid once a mebibyte, not once 32 KiB.
+const zeroCopyStep int64 = 1 << 20
 
 // conn is the domain's view of one accepted connection.
 //
@@ -65,10 +72,13 @@ func (c *conn) Write(p []byte) (n int, err error) {
 
 // ReadFrom implements io.ReaderFrom: a copy into the connection reaches the
 // socket's own, so a plaintext TCP socket chooses sendfile or splice (#970). A
-// group with a write bound keeps it per write, as its contract says, so the copy
-// then goes one bounded write at a time: one deadline for the whole of it would
-// be the lifetime budget this type exists to refuse, and would end a long copy
-// to a healthy peer.
+// group with a write bound keeps it per step: one deadline for the whole copy
+// would be the lifetime budget this type exists to refuse, and would end a long
+// copy to a healthy peer. A source the socket copies from without user space —
+// a file or a socket, alone or under an io.LimitedReader, anything that is a
+// syscall.Conn — goes zeroCopyStep at a time through the socket's own copy,
+// the bound installed before each step; any other source one bounded write at
+// a time.
 func (c *conn) ReadFrom(r io.Reader) (n int64, err error) {
 	socket, zeroCopy := c.Conn.(io.ReaderFrom)
 	//: no bound to refresh, so the socket's own path takes the whole copy.
@@ -76,8 +86,45 @@ func (c *conn) ReadFrom(r io.Reader) (n int64, err error) {
 		//: the socket's own copy, with no deadline installed.
 		return socket.ReadFrom(r)
 	}
-	//: a socket with no copy of its own, or a bounded one: Write per chunk.
+	//: bounded, from a source the kernel can send itself.
+	if zeroCopy && kernelSource(r) {
+		//: a step at a time, each under its own deadline.
+		return c.boundedReadFrom(socket, r)
+	}
+	//: a socket with no copy of its own, or a source in user space: Write per chunk.
 	return io.Copy(connWriter{c: c}, r)
+}
+
+// boundedReadFrom copies r through the socket's own copy, zeroCopyStep at a
+// time, the write bound installed before each step. A step that comes back
+// short with no error reached the source's end.
+func (c *conn) boundedReadFrom(socket io.ReaderFrom, r io.Reader) (n int64, err error) {
+	step := &io.LimitedReader{R: r}
+	//: a step at a time.
+	for {
+		step.N = zeroCopyStep
+		c.boundWrite()
+		k, serr := socket.ReadFrom(step)
+		n += k
+		//: a failure, or the source's end.
+		if serr != nil || step.N > 0 {
+			//: the copy's outcome.
+			return n, serr
+		}
+	}
+}
+
+// kernelSource reports whether the socket's ReadFrom can send r without user
+// space: the standard library's sendfile and splice take a syscall.Conn — a
+// file, a socket — alone or under an io.LimitedReader.
+func kernelSource(r io.Reader) bool {
+	//: a limit the standard library looks under.
+	if lr, limited := r.(*io.LimitedReader); limited {
+		r = lr.R
+	}
+	_, ok := r.(syscall.Conn)
+	//: a descriptor the kernel copies from.
+	return ok
 }
 
 // WriteTo implements io.WriterTo, as ReadFrom does for the other direction: the

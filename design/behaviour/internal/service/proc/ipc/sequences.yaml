@@ -705,6 +705,8 @@ sequences:
         kind: self
       - id: errs
         kind: package
+      - id: checkSIDs
+        kind: internal
     steps:
       - switch:
           cases:
@@ -722,7 +724,8 @@ sequences:
               do:
                 - return: errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "a UID or GID is negative"))
                   to: errs
-      - return: nil
+      - return: checkSIDs(c.AllowSIDs)
+        to: checkSIDs
   - of: negative
     steps:
       - return: n < 0
@@ -766,7 +769,7 @@ sequences:
     steps:
       - loop:
           do:
-            - bind: c, p, groups, err
+            - bind: c, p, creds, err
               eval: l.ln.accept()
               to: l.ln.accept
             - opt:
@@ -796,7 +799,7 @@ sequences:
                   - continue: true
                 init:
                   bind: err
-                  eval: l.admits(p, groups)
+                  eval: l.admits(p, creds)
                   to: l.admits
                 when: err != nil
             - return: "&coreipc.Conn{Conn: c, Peer: p}, nil"
@@ -904,7 +907,11 @@ sequences:
             to: cfg.validate
           when: err != nil
       - bind: own
-        eval: "Config{Path: cfg.Path, AllowUIDs: slices.Clone(cfg.AllowUIDs), AllowGIDs: slices.Clone(cfg.AllowGIDs)}"
+        eval: |-
+          Config{
+          		Path: cfg.Path, AllowUIDs: slices.Clone(cfg.AllowUIDs), AllowGIDs: slices.Clone(cfg.AllowGIDs),
+          		AllowSIDs: slices.Clone(cfg.AllowSIDs),
+          	}
       - return: "&Dialer{cfg: own}, nil"
   - of: (*Dialer).Dial
     participants:
@@ -1123,6 +1130,23 @@ sequences:
           key: i
           range: need
       - return: groups, need
+  - of: checkSIDs
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkSIDs
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(sids) == 0
+      - return: |-
+          errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "AllowSIDs is Windows's: a SID names no account here"),
+          		errs.Int("sids", len(sids)))
+        to: errs
   - of: socketAcceptor.accept
     participants:
       - id: caller

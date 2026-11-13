@@ -166,7 +166,7 @@ only as the order of magnitude the gate starts from:
 | `LoadL2/engine=handwritten` | 6 403 |
 | `LoadL3/engine=recvmmsg` (loopback, 55.7 datagrams a receive, receiver's rusage) | 621 |
 
-L1h2 (#963, `load_gate_h2_linux_test.go`) is L1's request over h2c by prior
+L1h2 (#963, `load_gate_h2_test.go`) is L1's request over h2c by prior
 knowledge, 1 000 connections with eight streams in flight each, the client
 writing pre-encoded frames: `BenchmarkLoadL1h2/pair=goroutine-h2:loop-h2` (P9),
 `pair=loop-h2:loop-h2` (cal-L1h2) and `pair=loop:loop-h2` (h1-h2, reported). No
@@ -227,6 +227,75 @@ above, including the one that turned out not to help.
 - `AcquireRelease_ReadBuffer16K` above 0 allocs/op means the scratch buffer
   stopped coming from `kernel/concur/buffer`'s 16 KiB class — check that
   `acquire` still calls `buffer.GetSize(size)`.
+
+## Edition 2026-11-13 — the gate's new rows (#852, #977, #969, #982, #979, #976)
+
+**L3 on the runner, read back from net-kernel-gate's `net-bench-<sha>`
+artefacts** (GitHub-hosted, Linux 7.0.0-1019-azure, 4 CPUs, ten paired rounds
+each, judged by `tools/netgate -only uring-recvmsg,shards`): medians of each
+engine, then the interval of the rounds' ratios B/A.
+
+| Run (commit) | Pair | `cpu-ns/datagram` A → B | ratio interval (median) | `datagrams/syscall` B/A |
+|---|---|---|---|---|
+| 43178495012 (`30d507939`) | `recvmmsg:uring-recvmsg` | 3 152 → 1 045 | 0.321–0.347 (0.330) | 3.19 |
+| 43306975342 (`7d428ae2f`) | `recvmmsg:uring-recvmsg` | 2 873 → 738 | 0.251–0.280 (0.260) | 2.32 |
+| 43320386560 (`b302953a2`) | `recvmmsg:uring-recvmsg` | 2 806 → 752 | 0.250–0.299 (0.264) | 2.33 |
+| 43178495012 | `recvmmsg:recvmmsg+shards` | 3 120 → 3 219 | 1.014–1.070 (1.035) | 1.00 |
+| 43306975342 | `recvmmsg:recvmmsg+shards` | 2 768 → 2 834 | 0.987–1.050 (1.017) | 1.00 |
+| 43320386560 | `recvmmsg:recvmmsg+shards` | 2 773 → 2 805 | 0.960–1.039 (1.013) | 1.00 |
+
+The io_uring datagram lane holds P4a's 0.75 on every run, by a margin: its
+upper bound never passed 0.35, so its row, `uring-recvmsg`, is a required
+gate from this edition. Four shards at L3's fixed rate cost what one socket
+does, within 7 % at worst: the rate is one core's, and the 1.8× datagrams/s at
+saturation that would make `Shards(0)` the default is not what this load
+measures — its row stays reported. Each pair's `kernel-drops/op` and `lost/op`
+were 0 on every round.
+
+**L1big locally** (`load_big_linux_test.go`; AMD EPYC 7351P, 8 vCPU,
+`GOMAXPROCS=4`, Linux 6.12.101, go1.27.4, `RLIMIT_MEMLOCK` 8 MiB, ten rounds of
+`-test.benchtime=400000x`, judged by `netgate -only send-zc,files`):
+
+| Pair | `cpu-ns/req` A → B (medians) | ratio interval (median) | row's bound |
+|---|---|---|---|
+| `loop:loop-sendzc` | 88 686 → 94 406 | 1.033–1.114 (1.067) | ≤ 0.9, reported — not met |
+| `goroutine-static:loop-files` | 106 410 → 73 987 | 0.669–0.774 (0.694) | ≤ 0.70, reported — not met on the bound |
+
+The zero-copy send costs more than the copy here, on loopback, where the kernel
+copies a zero-copy skb into the receiver anyway, and with 1 000 connections of
+64 KiB in flight past the 8 MiB `RLIMIT_MEMLOCK` io_uring charges the pinned
+pages to: those flights are refused `ENOMEM` and leave plainly
+(`zeroCopyRefused`, `internal/service/net/loop`), each after a send that sent
+nothing. The runner's figures are the `bench` job's from this edition on.
+
+**`BenchmarkCopyFile`, the floor** (#970; the box above, `-benchmem
+-benchtime=20x -count=3`, every count including the file's open):
+
+| Benchmark | MB/s | B/op | allocs/op |
+|---|---|---|---|
+| `CopyFile/after_ReadFrom` (sendfile, no bound) | 4 468–4 600 | 272–374 | 7 |
+| `CopyFile/bounded_ReadFrom` (`WriteTimeout`, sendfile a MiB a deadline) | 4 845–4 992 | 5 928–5 930 | 264 |
+| `CopyFile/bare_TCPConn` (the standard library alone, no engine) | 4 737–5 020 | 192–204 | 4 |
+| `CopyFile/before_generic` (32 KiB loop) | 1 273–1 399 | 32 957–33 054 | 4 |
+
+`io.Copy(c, f)` allocates a constant of the call in Go 1.27, whoever `c` is:
+192 to 204 B and 4 allocations on a bare `*net.TCPConn`, the open's included.
+Through the engine's connection it is 80 to 170 B and 3 allocations more: the
+connection is not a `syscall.Conn`, so `os.File.WriteTo` takes its generic
+path, `io.Copy` into the connection's `ReadFrom` with the file wrapped, and the
+socket's sendfile asks the wrapped file for its `SyscallConn` (Go 1.27.4,
+`os/zero_copy_linux.go`, `net/sendfile.go`). "0 B/op" is not reachable through
+the standard library's copy. A bounded group now
+sends a file by sendfile too, one deadline a mebibyte: 64 steps, about four
+allocations each, and the 32 KiB buffer gone.
+
+**Rows that need the CI.** `BenchmarkLoadSparse/pair=loop:loop-busypoll` (#979)
+runs on the veth pair once `net-veth.sh gro` gave its far end a NAPI instance —
+loopback has none, so a local run measures nothing busy polling changes —, in
+the `bench` job's step after the other loads; `BenchmarkLoadL1` on macos-15
+(`goroutine:loop-kqueue`, `loop-kqueue:loop-kqueue`, #976) in its `bench-darwin`
+job. Their numbers are the first run of those jobs', not recorded here before
+they exist.
 
 ## Edition 2026-11-10 — the loop's counters (#975)
 

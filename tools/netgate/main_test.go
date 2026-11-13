@@ -218,7 +218,8 @@ func TestEvaluate_shippedTable(t *testing.T) {
 		t.Fatalf("calibrated run failed: %+v", rep)
 	}
 	for _, g := range rep.Gates {
-		active := (strings.HasPrefix(g.Step, "cal-") && g.Load != loadL1h2) || g.Step == "P2" || g.Step == "P4a" || g.Step == "P6"
+		active := (strings.HasPrefix(g.Step, "cal-") && g.Load != loadL1h2 && g.Step != "cal-L1-kqueue") ||
+			g.Step == "P2" || g.Step == "P4a" || g.Step == "P6" || g.Step == "uring-recvmsg"
 		if active != g.Active || (!active && (g.Verdict != verdictInactive || g.Pending == "")) || (active && g.Verdict != verdictPass) {
 			t.Errorf("%s: active=%t verdict=%s pending=%q", g.Step, g.Active, g.Verdict, g.Pending)
 		}
@@ -247,12 +248,15 @@ func TestEvaluate_shippedTable(t *testing.T) {
 	}
 }
 
-// p4aPassing is L3's rounds as a run that passes P4a's gate reports them:
-// five times the datagrams a receive, 40 % less CPU a datagram.
+// p4aPassing is L3's rounds as a run that passes P4a's gate and the io_uring
+// lane's reports them: five times the datagrams a receive, 40 % less CPU a
+// datagram.
 func p4aPassing() string {
-	//: both metrics, one pair.
+	//: both metrics, both pairs.
 	return pairLines("L3", "recvmmsg", "gro", "datagrams/syscall", scaled(tightRatios, 5)) +
-		pairLines("L3", "recvmmsg", "gro", "cpu-ns/datagram", scaled(tightRatios, 0.6))
+		pairLines("L3", "recvmmsg", "gro", "cpu-ns/datagram", scaled(tightRatios, 0.6)) +
+		pairLines("L3", "recvmmsg", "uring-recvmsg", "datagrams/syscall", scaled(tightRatios, 2.3)) +
+		pairLines("L3", "recvmmsg", "uring-recvmsg", "cpu-ns/datagram", scaled(tightRatios, 0.3))
 }
 
 // mustParse parses in or fails the test.
@@ -270,16 +274,23 @@ func mustParse(t *testing.T, in string) samplesEntity {
 // and only known loads, metrics and ops.
 func TestGates_table(t *testing.T) {
 	want := map[string]string{
-		"P2":       "L2 handwritten chain cpu-ns/req<=1.05r",
-		"P4a":      "L3 recvmmsg gro datagrams/syscall>=4r(reported) cpu-ns/datagram<=0.75r",
-		"P6":       "L1 goroutine loop cpu-ns/req<=0.7r",
-		"P5":       "L1 published loop cpu-ns/req<=1r",
-		"cal-L1":   "L1 loop loop cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
-		"cal-L2":   "L2 handwritten handwritten cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
-		"cal-L3":   "L3 recvmmsg recvmmsg cpu-ns/datagram<=1.25r cpu-ns/datagram>=0.8r datagrams/syscall<=1.25r datagrams/syscall>=0.8r",
-		"P9":       "L1h2 goroutine-h2 loop-h2 cpu-ns/req<=0.7r",
-		"cal-L1h2": "L1h2 loop-h2 loop-h2 cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
-		"h1-h2":    "L1h2 loop loop-h2 cpu-ns/req<=1r(reported)",
+		"P2":            "L2 handwritten chain cpu-ns/req<=1.05r",
+		"P4a":           "L3 recvmmsg gro datagrams/syscall>=4r(reported) cpu-ns/datagram<=0.75r",
+		"P6":            "L1 goroutine loop cpu-ns/req<=0.7r",
+		"P5":            "L1 published loop cpu-ns/req<=1r",
+		"cal-L1":        "L1 loop loop cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
+		"cal-L2":        "L2 handwritten handwritten cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
+		"cal-L3":        "L3 recvmmsg recvmmsg cpu-ns/datagram<=1.25r cpu-ns/datagram>=0.8r datagrams/syscall<=1.25r datagrams/syscall>=0.8r",
+		"P9":            "L1h2 goroutine-h2 loop-h2 cpu-ns/req<=0.7r",
+		"cal-L1h2":      "L1h2 loop-h2 loop-h2 cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
+		"h1-h2":         "L1h2 loop loop-h2 cpu-ns/req<=1r(reported)",
+		"uring-recvmsg": "L3 recvmmsg uring-recvmsg datagrams/syscall>=4r(reported) cpu-ns/datagram<=0.75r",
+		"shards":        "L3 recvmmsg recvmmsg+shards cpu-ns/datagram<=1.25r(reported)",
+		"send-zc":       "L1big loop loop-sendzc cpu-ns/req<=0.9r(reported)",
+		"files":         "L1big goroutine-static loop-files cpu-ns/req<=0.7r(reported)",
+		"busy-poll":     "Sparse loop loop-busypoll p99-ns<=1r(reported) cpu-ns/req<=1r(reported)",
+		"kqueue":        "L1 goroutine loop-kqueue cpu-ns/req<=0.7r",
+		"cal-L1-kqueue": "L1 loop-kqueue loop-kqueue cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
 	}
 	if len(gates) != len(want) {
 		t.Fatalf("%d gates, want %d", len(gates), len(want))
@@ -301,7 +312,7 @@ func TestGates_table(t *testing.T) {
 		if got != want[g.Step] {
 			t.Errorf("%s = %q, want %q", g.Step, got, want[g.Step])
 		}
-		if !slices.Contains([]string{loadL1, loadL2, loadL3, loadL1h2}, g.Load) {
+		if !slices.Contains([]string{loadL1, loadL2, loadL3, loadL1h2, loadL1big, loadSparse}, g.Load) {
 			t.Errorf("%s: unknown load %q", g.Step, g.Load)
 		}
 	}
@@ -389,6 +400,50 @@ func TestRun(t *testing.T) {
 	}
 	if code := run([]string{"-bogus"}, &out, &errb); code != exitUsage {
 		t.Fatalf("bad flag: %d", code)
+	}
+}
+
+// TestRun_only pins -only: the rows named are judged alone, so a lane that
+// measures kqueue's L1 only passes or fails on kqueue's rows, not on the
+// Linux loads it never runs; a name the table lacks is bad usage.
+func TestRun_only(t *testing.T) {
+	saved := gates
+	t.Cleanup(func() { gates = saved })
+	gates = activeTable()
+	dir := t.TempDir()
+	in := filepath.Join(dir, "bench.txt")
+	darwin := pairLines("L1", "goroutine", "loop-kqueue", "cpu-ns/req", scaled(tightRatios, 0.4)) +
+		pairLines("L1", "loop-kqueue", "loop-kqueue", "cpu-ns/req", tightRatios)
+	if err := os.WriteFile(in, []byte(darwin), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"-sha", "abc", "-in", in}, &out, &errb); code != exitGateFailed {
+		t.Fatalf("whole table on the darwin rows: %d, want the Linux rows missing", code)
+	}
+	report := filepath.Join(dir, "report.json")
+	out.Reset()
+	if code := run([]string{"-sha", "abc", "-in", in, "-only", "kqueue,cal-L1-kqueue", "-out", report}, &out, &errb); code != 0 {
+		t.Fatalf("-only kqueue: %d\n%s", code, out.String())
+	}
+	b, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep reportEntity
+	if err := json.Unmarshal(b, &rep); err != nil || len(rep.Gates) != 2 || rep.Gates[0].Step != "kqueue" || !rep.Passed {
+		t.Fatalf("report: %v %+v", err, rep)
+	}
+	slower := pairLines("L1", "goroutine", "loop-kqueue", "cpu-ns/req", scaled(tightRatios, 0.8)) +
+		pairLines("L1", "loop-kqueue", "loop-kqueue", "cpu-ns/req", tightRatios)
+	if err := os.WriteFile(in, []byte(slower), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"-sha", "abc", "-in", in, "-only", "kqueue"}, &out, &errb); code != exitGateFailed {
+		t.Fatalf("-only kqueue at -20 %%: %d, want failed", code)
+	}
+	if code := run([]string{"-sha", "abc", "-in", in, "-only", "kqueue,nope"}, &out, &errb); code != exitUsage || !strings.Contains(errb.String(), "-only") {
+		t.Fatalf("-only with an unknown step: %d %q", code, errb.String())
 	}
 }
 

@@ -166,3 +166,21 @@ the connection, so a failed handshake — a plaintext ClientHello on a TLS
 listener included — is never a net/http log line here. It reaches neither
 stderr nor the logger, and is not counted; whether the engine should record it
 under the same budget is open in kitsunium/sdk#846.
+
+## Amended 2026-11-13 — the engine's failed TLS handshakes (kitsunium/sdk#846)
+
+The question left open above is settled: the engine records a failed TLS
+negotiation under the same budget, with the same fields. Every TLS group's
+negotiation — the connection handler's (`handshakeHandler`, HTTP groups
+included) and the portable loop codec's (`handshake`) — writes, when it fails,
+one warn record through the writer net/http's lines use: net/http's own words
+on an HTTP group (`http: TLS handshake error from <addr>: <reason>`,
+`source=net/http`), the same without `http: ` on any other (`source=net/server`),
+the group in `group`. The reason is crypto/tls's error, which names no key, no
+certificate content and no byte the peer sent. A negotiation the engine gave up
+itself — its context cancelled by the drain or the stop — is not the peer's
+failure and is not recorded. Over the ten records a second, and with no logger,
+each failure is counted in `StateValue.SuppressedLogs` once. Proved on real
+handshakes: one plaintext request on each kind of TLS group gives one record
+and nothing on the standard logger; 10 000 within one second of the server's
+clock give the cap's ten records and 9 990 in `SuppressedLogs`.

@@ -19,6 +19,14 @@ name: Net kernel gate
 #     reach — then tools/netgate judges the plan's gates on the interval of
 #     the rounds' ratios, the calibration rows (one engine against itself)
 #     included, and writes a report naming the commit it measured.
+#     The Sparse load (#979, busy polling) runs after the others, its own
+#     ten rounds, once GRO is on on the veth pair's far end: L3 runs on the
+#     pair as `up` leaves it, and busy polling needs the NAPI instance GRO
+#     gives the veth's receive side.
+#   - `bench-darwin`: L1 on macos-15, the goroutine engine against the loop on
+#     kqueue and kqueue against itself (#976), ten rounds, judged by netgate
+#     on those two rows alone (-only); reported, never part of the verdict,
+#     and on pull requests only, not in the merge queue.
 #   - `net-kernel-gate`: the one status to require; it passes when the filter
 #     ran and either nothing relevant changed or the lanes and the bench both
 #     passed (scripts/ci/net-gate-verdict.sh).
@@ -84,18 +92,19 @@ jobs:
           # (7.0) is required by no leg until a kernel 7.x lane exists, and
           # stays class A-code until then; uring-pbuf-inc (6.12, ADR 0204)
           # by no leg until one runs a kernel from 6.12 — noble's 6.8 runs
-          # its fallback.
+          # its fallback. uring-sock-getsockopt (6.7, #974) by both legs, at
+          # 6.8 and above: on or available, the release check deciding.
           - leg: host
             kind: host
             requiredBackends: "iouring,epoll"
-            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds"
+            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds,uring-sock-getsockopt"
           # Ubuntu noble at its own kernel, 6.8, the one the loop engine's
           # io_uring is sized against (ADR 0186); the image e2e-cross.yml pins,
           # by URL and digest.
           - leg: noble-6.8
             kind: vm
             requiredBackends: "iouring,epoll"
-            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds"
+            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds,uring-sock-getsockopt"
             url: https://cloud-images.ubuntu.com/noble/20261017/noble-server-cloudimg-amd64.img
             algo: sha256
             sum: 04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
@@ -237,11 +246,35 @@ jobs:
             | sed 's/^/accounting: /' | tee -a "$RUNNER_TEMP/bench.txt" || echo "accounting: no kernel config readable" | tee -a "$RUNNER_TEMP/bench.txt"
           for round in $(seq 1 "$ROUNDS"); do
             echo "::group::round $round"
-            "$RUNNER_TEMP/server.test" -test.run='^$' -test.bench='^BenchmarkLoad' \
+            "$RUNNER_TEMP/server.test" -test.run='^$' -test.bench='^BenchmarkLoad(L1|L1big|L1h2|L2|L3)$' \
               -test.benchtime=400000x -test.count=1 -test.timeout=10m \
               2> >(grep -v '^net/loop:' >&2) | tee -a "$RUNNER_TEMP/bench.txt"
             echo "::endgroup::"
           done
+
+      - name: busy polling against the sleeping loop, GRO on on the veth pair's far end
+        working-directory: internal/service/net/server
+        run: |
+          set -euo pipefail
+          command -v ethtool >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ethtool; }
+          sudo bash "$GITHUB_WORKSPACE/scripts/ci/net-veth.sh" gro
+          # 4 000 requests a round at 1 000 a second, whatever -benchtime: the
+          # child's rows (busy-poll on, the NAPI id it polls) are in the log.
+          for round in $(seq 1 "$ROUNDS"); do
+            echo "::group::sparse round $round"
+            "$RUNNER_TEMP/server.test" -test.run='^$' -test.bench='^BenchmarkLoadSparse$' \
+              -test.benchtime=4000x -test.count=1 -test.timeout=10m \
+              2> >(grep -v '^net/loop:' >&2) | tee -a "$RUNNER_TEMP/bench.txt"
+            echo "::endgroup::"
+          done
+
+      - name: a peer that vanishes with output unsent (#971)
+        # Root and the veth pair: the client's socket lives in the pair's far
+        # namespace, whose leg the tests set down and up again. After the
+        # rounds, so the leg's flap never lands in a sample. The tests skip
+        # anywhere else; this step is their lane (root CLAUDE.md rule 12).
+        working-directory: internal/service/net/server
+        run: sudo -E "$RUNNER_TEMP/server.test" -test.run='^TestBlackhole_' -test.v -test.count=1 -test.timeout=5m
 
       - name: judge the gates
         working-directory: tools/netgate
@@ -260,6 +293,59 @@ jobs:
       - name: remove the veth pair
         if: always()
         run: sudo bash scripts/ci/net-veth.sh down
+
+  bench-darwin:
+    name: bench darwin
+    needs: changes
+    # Reported, not gated: on pull requests only, never in the queue, and no
+    # part of the verdict until kqueue's row holds there (#976).
+    if: needs.changes.outputs.relevant == 'true' && github.event_name == 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      GOWORK: "off"
+      CGO_ENABLED: "0"
+      ROUNDS: "10"
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: build the bench binary
+        working-directory: internal
+        run: go test -c -o "$RUNNER_TEMP/server.test" ./service/net/server
+
+      - name: the goroutine engine against the loop on kqueue, interleaved
+        working-directory: internal/service/net/server
+        run: |
+          set -euo pipefail
+          ulimit -n 65536 || ulimit -n "$(ulimit -Hn)"
+          echo "kernel: $(uname -sr), $(sysctl -n hw.ncpu) CPUs, commit $EVAL_SHA" | tee "$RUNNER_TEMP/bench-darwin.txt"
+          for round in $(seq 1 "$ROUNDS"); do
+            echo "::group::round $round"
+            "$RUNNER_TEMP/server.test" -test.run='^$' -test.bench='^BenchmarkLoadL1$' \
+              -test.benchtime=200000x -test.count=1 -test.timeout=10m \
+              2> >(grep -v '^net/loop:' >&2) | tee -a "$RUNNER_TEMP/bench-darwin.txt"
+            echo "::endgroup::"
+          done
+
+      - name: kqueue's rows
+        working-directory: tools/netgate
+        run: go run . -in "$RUNNER_TEMP/bench-darwin.txt" -sha "$EVAL_SHA" -only kqueue,cal-L1-kqueue -out "$RUNNER_TEMP/netgate-darwin-report.json"
+
+      - name: publish the samples and the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: net-bench-darwin-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/bench-darwin.txt
+            ${{ runner.temp }}/netgate-darwin-report.json
+          retention-days: 90
 
   net-kernel-gate:
     name: net-kernel-gate

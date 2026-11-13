@@ -232,6 +232,26 @@ group pays the process table for its TCP connections too; `net/server`'s
 `loopRefusal` and its false `tcp-nodelay` row on a Unix listener; the portable
 backend's `Peer`.
 
+## Amendment 2026-11-13 (kitsunium/sdk#974): uring-sock-getsockopt
+
+`uring-sock-getsockopt` joins class A-kernel: `IORING_OP_URING_CMD` (46) with
+`SOCKET_URING_OP_GETSOCKOPT` (2, Linux 6.7) reads `SO_PEERCRED` on a direct
+descriptor, so a group with a Unix listener keeps direct descriptors. The
+self-test proves it on its payload's direct descriptor — a TCP one, for which
+the kernel answers the length of a `struct ucred` all the same — before the
+release check; a refusal, or `KITSUNIUM_NET_DISABLE=uring-sock-getsockopt`, puts
+the group in the process table as before (`uring-direct` `unprobed`, the stage
+`self_test+fds`), and `Peer` asks the socket there. On direct descriptors a Unix
+connection is accepted, its credentials read by the command into a cell of the
+ring kept per direct-descriptor index — never on a stack, which may move while
+the command is in flight —, and only then opened: `OnOpen` and every byte come
+after the peer is known, a TCP connection of the same group opens at once and
+answers false. A command still in flight when the loop stops lets its slot go
+unopened, so no `OnClose` is called for a connection no `OnOpen` announced. The
+row reads `on`, `absent` with the kernel's errno, `available` when the release
+check chose process descriptors, `unprobed` without a Unix listener or with
+`uring-direct` switched off.
+
 ## Deferred
 
 - Each class B capability, with its ADR and its BENCH.md threshold.
@@ -414,3 +434,45 @@ built, since no host of the SDK's has run it.
   most a tenth of the plain loop's. Out of reach today: CI's veth (no queue API),
   Docker (no `CAP_NET_ADMIN`), the secondaries (no `DEFER_TASKRUN`), every kernel
   before 6.15 — this VM's 6.12 among them.
+
+## Amendment 2026-11-13 (#969, #979): a zero-copy send refused at send time; the two gates' loads
+
+**`uring-send-zc` refused by the socket or by the memory limit.** The probe
+sends a datagram zero-copy on a UDP socket of its own; a connection's socket can
+still refuse `IORING_OP_SEND_ZC`, and before this amendment its refusal failed
+the connection. Two refusals are now a fallback, not a failure: `EOPNOTSUPP`,
+from a socket whose kernel object lacks `SOCK_SUPPORT_ZC` — a Unix socket, and
+every socket accepted from an MPTCP listener, which Go's `net.Listen` opens by
+default on Linux since Go 1.24 (`net`'s `defaultMPTCPEnabledListen`) —, after
+which every ring of the loop — its listeners are theirs too — sends every later
+flight by `IORING_OP_SEND`; and `ENOMEM`, the
+pages a zero-copy send pins being charged to `RLIMIT_MEMLOCK` (io_uring's
+notification accounting), which a load of flights waiting for their peers' ACKs
+reaches — 1 000 connections of 64 KiB do past the usual 8 MiB —, after which
+only that flight does. Nothing of the refused send left: the flight is held
+until its notifications came, then its rest leaves by opcode 26; a flight whose
+pending notifications reach 255, the count's bound, is held the same way.
+`TestSendZC_refusedBySocket` (a Unix and an MPTCP listener) and
+`TestSendZC_refusedForMemory` (`RLIMIT_MEMLOCK` lowered to zero after Start) fail
+on the code before it, the peer reading EOF at byte 0. The row stays `on` after
+such a refusal: the probe's verdict is the kernel's, and a socket refusing is
+the socket's. A server group's own listener being MPTCP by default, a group
+that opts into `uring-send-zc` today sends zero-copy only where its listener
+was made plain TCP (`GODEBUG=multipathtcp=0`, or a listener adopted): whether
+the server should listen with plain TCP for such a group is the owner's to
+decide.
+
+**The gates' loads are built.** `BenchmarkLoadL1big/pair=loop:loop-sendzc`
+(`internal/service/net/server/load_big_linux_test.go`: 64 KiB bodies, the child
+listening with plain TCP) runs in net-kernel-gate's `bench` job and
+`tools/netgate`'s `send-zc` row reports it against 0.9; measured locally on
+loopback it costs 1.033–1.114 times the copy (edition 2026-11-13 of that
+package's BENCH.md), so the row stays class A-code. `failStage=send_zc` reads
+`missing`, a capability fault, as every refused opt-in does since the
+2026-11-11 amendment: #969's "absent with no fault" is this ADR's §D4 rule
+applied, not a defect. `BenchmarkLoadSparse/pair=loop:loop-busypoll`
+(`load_sparse_veth_linux_test.go`) pairs the sleeping loop with the busy-polling
+one over the veth pair, its far end given a NAPI instance by GRO
+(`scripts/ci/net-veth.sh gro`), each engine's CPU a request and 99th percentile
+reported; `tools/netgate`'s `busy-poll` row reports both against 1.0 until this
+row's threshold is set from them.

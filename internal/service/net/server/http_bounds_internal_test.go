@@ -1,8 +1,11 @@
 package server
 
 import (
+	"io"
 	stdnet "net"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,5 +133,32 @@ func Test_perReadBody(t *testing.T) {
 	}
 	if _, wrapped := perReadBody(next, time.Second).(readDeadlineHandler); !wrapped {
 		t.Error("a read budget did not wrap the handler")
+	}
+}
+
+// TestLimitBody_bodilessRequestKeepsNoBody pins #966's allocation criterion
+// at its cause: the body bound wraps a body in http.MaxBytesReader, one
+// allocation a request, and a request with no body — net/http's NoBody, a
+// GET's — reaches the handler unwrapped, so the adapter allocates per request
+// what net/http alone does (BenchmarkHTTP_Adapter against BenchmarkHTTP_Native:
+// 64 allocations each on Go 1.27.4). A body still gets its bound.
+func TestLimitBody_bodilessRequestKeepsNoBody(t *testing.T) {
+	t.Parallel()
+	var seen io.ReadCloser
+	h := limitBody(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen = r.Body }), 16)
+	bodiless := httptest.NewRequest(http.MethodGet, "/", nil)
+	bodiless.Body = http.NoBody
+	h.ServeHTTP(httptest.NewRecorder(), bodiless)
+	if seen != http.NoBody {
+		t.Fatalf("a bodiless request reached the handler with %T, want http.NoBody", seen)
+	}
+	withBody := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("x"))
+	withBody.ContentLength = -1
+	h.ServeHTTP(httptest.NewRecorder(), withBody)
+	if seen == nil || seen == http.NoBody {
+		t.Fatal("a body reached the handler without its bound")
+	}
+	if _, err := io.ReadAll(io.LimitReader(seen, 1)); err != nil {
+		t.Fatalf("the bounded body: %v", err)
 	}
 }

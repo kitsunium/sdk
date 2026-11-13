@@ -32,6 +32,9 @@ type StreamGroup struct {
 	// httpAdapter is set when the group serves an http.Handler, so the engine
 	// can shut the embedded http.Server down with the rest of the group.
 	httpAdapter *httpAdapter
+	// hsLog records the group's failed TLS negotiations, set at Start by the
+	// server (#846); nil for a plaintext group.
+	hsLog *errorLogWriter
 	// http holds the bounds only an HTTP group has: the header phase's own
 	// deadline and the header size cap. They live here rather than in
 	// core/net's Timeouts and Limits, which describe every protocol a group
@@ -250,5 +253,5 @@ func (g *StreamGroup) resolved() corenet.ConnHandler {
 	}
 	//: wrapped once per group, so bounding the handshake costs no allocation
 	//: per connection.
-	return handshakeHandler{next: chained, timeouts: g.timeouts}
+	return &handshakeHandler{next: chained, timeouts: g.timeouts, log: g.hsLog}
 }

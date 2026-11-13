@@ -193,6 +193,16 @@ func rebindDelay(attempt int) time.Duration {
 // server's predecessor still holds. ctx ends the wait early with the last
 // refusal.
 func bindRetrying[T any](ctx context.Context, attempts int, inUse func(error) bool, bind func() (T, error)) (T, time.Duration, error) {
+	//: on the published curve.
+	return bindRetryingAfter(ctx, attempts, rebindDelay, inUse, bind)
+}
+
+// bindRetryingAfter is bindRetrying waiting delay(attempt) after the
+// attempt-th refusal. A caller that gave up is never bound again: when its
+// ctx ended as the wait did, both ready at once on a guest that ran the
+// goroutine late, the select may take either (#1352), and the refusal stands
+// all the same.
+func bindRetryingAfter[T any](ctx context.Context, attempts int, delay func(int) time.Duration, inUse func(error) bool, bind func() (T, error)) (T, time.Duration, error) {
 	start := time.Now()
 	//: one call, then one per wait, bounded.
 	for attempt := 1; ; attempt++ {
@@ -207,15 +217,25 @@ func bindRetrying[T any](ctx context.Context, attempts int, inUse func(error) bo
 			//: the last outcome.
 			return v, wait, err
 		}
-		timer := time.NewTimer(rebindDelay(attempt))
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			timer.Stop()
-			//: the caller gave up: the refusal stands.
+		//: the caller gave up, whichever the select took: the refusal stands.
+		if !rebindWait(ctx, delay(attempt)) {
+			//: not bound again.
 			return v, time.Since(start), err
 		}
 	}
+}
+
+// rebindWait waits d or until ctx ends, and reports whether the caller still
+// wants the bind: false once ctx ended, even when d ran out with it.
+func rebindWait(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	//: the caller's word, read after the wait.
+	return ctx.Err() == nil
 }
 
 // listenerSocket is ln's descriptor, nil when it has none.

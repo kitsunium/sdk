@@ -61,6 +61,7 @@ go_library(
         "uring_fanwake_linux.go",
         "uring_loop_linux.go",
         "uring_none_linux.go",
+        "uring_peer_linux.go",
         "uring_probe_linux.go",
         "uring_ring_linux.go",
         "uring_sendzc_linux.go",

@@ -151,6 +151,8 @@ type portableGroup struct {
 	// handshake bounds a TLS connection's negotiation, which runs before the
 	// lane sees it; zero for a plaintext group (ADR 0198).
 	handshake time.Duration
+	// hsLog records a failed negotiation under the server's budget (#846).
+	hsLog *errorLogWriter
 	// turn is the lane the next accepted connection goes to, modulo the count.
 	turn     atomic.Uint64
 	drainReq atomic.Bool
@@ -247,6 +249,7 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 	//: a TLS codec group negotiates each connection first.
 	if group.tlsCodec() {
 		g.handshake = group.handshakeBound()
+		g.hsLog = group.hsLog
 	}
 	//: the lanes, built before any acceptor can hand one a connection.
 	for i := range loopLanes(v) {
@@ -452,7 +455,7 @@ func (g *portableGroup) dispatch(c stdnet.Conn) {
 func (pl *portableLoop) negotiate(c stdnet.Conn, d time.Duration) {
 	defer pl.negotiating.Add(-1)
 	//: given up: the lane never counted it.
-	if !handshake(c, d) {
+	if !handshake(c, d, pl.g.hsLog) {
 		pl.live.Add(-1)
 		//: closed.
 		return

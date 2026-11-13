@@ -60,6 +60,18 @@ func Test_bindRetrying(t *testing.T) {
 	if _, _, err := bindRetrying(ctx, 8, inUse, bind); !errors.Is(err, errTaken) || *calls != 1 {
 		t.Fatalf("cancelled: %v, %d calls", err, *calls)
 	}
+	//: the caller gave up as the wait ended, both ready at the select — a
+	//: guest that ran the goroutine late (#1352): never bound again. A zero
+	//: wait makes the race every time; the select took the timer half of
+	//: them before the fix.
+	done, stop := context.WithCancel(t.Context())
+	stop()
+	for range 64 {
+		bind, calls = binder(9, errTaken)
+		if _, _, err := bindRetryingAfter(done, 8, func(int) time.Duration { return 0 }, inUse, bind); !errors.Is(err, errTaken) || *calls != 1 {
+			t.Fatalf("cancelled as the wait ended: %v, %d calls", err, *calls)
+		}
+	}
 }
 
 // Test_exclusiveApplies pins which sockets take SO_EXCLUSIVEADDRUSE: a

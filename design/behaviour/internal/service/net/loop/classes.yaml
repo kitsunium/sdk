@@ -151,6 +151,10 @@ constants:
           stDead has called OnClose and waits for its backend to release the
           descriptor and every operation still in flight.
         name: stDead
+      - doc: |-
+          stPeer is a Unix connection accepted on an io_uring direct descriptor
+          whose peer the socket command is reading: not opened yet (#974).
+        name: stPeer
     name: stFree
   - doc: The flags of a connection slot.
     grouped: true
@@ -180,6 +184,20 @@ constants:
       - doc: fDrained is a connection whose handler the drain has told once.
         name: fDrained
     name: fPressure
+  - doc: "How a flight leaves on io_uring (connCtl.zc, #969)."
+    grouped: true
+    items:
+      - doc: "zcOff: by IORING_OP_SEND."
+        name: zcOff
+        type: uint8
+        value: iota
+      - doc: "zcOn: by IORING_OP_SEND_ZC, every send of it."
+        name: zcOn
+      - doc: |-
+          zcHold: no send for now; the last notification of the flight sends its
+          rest by IORING_OP_SEND.
+        name: zcHold
+    name: zcOff
   - doc: The bits of connCtl.fileBits, io_uring's file state.
     grouped: true
     items:
@@ -1297,6 +1315,10 @@ constants:
       - name: udFileIn
       - name: udFileOut
       - name: udFilePoll
+      - doc: |-
+          udPeer is the socket command that reads a Unix connection's peer
+          (#974).
+        name: udPeer
     name: udRecv
   - grouped: true
     items:
@@ -1450,6 +1472,29 @@ constants:
         type: int
         value: "8"
     name: acceptDepth
+  - doc: |-
+      The socket command a direct descriptor's peer is read with (#974), declared
+      in-tree for the same reason as the rest of the ABI (ADR 0018): Linux
+      include/uapi/linux/io_uring.h, 6.7.
+    grouped: true
+    items:
+      - doc: |-
+          opURingCmd is IORING_OP_URING_CMD (5.19): a command of the file's own
+          driver, a socket's since 6.7.
+        name: opURingCmd
+        type: uint8
+        value: "46"
+      - doc: |-
+          sockOpGetsockopt is SOCKET_URING_OP_GETSOCKOPT (6.7): getsockopt on the
+          command's socket, SOL_SOCKET only, its result the option's length.
+        name: sockOpGetsockopt
+        type: uint32
+        value: "2"
+      - doc: "ucredLen is sizeof(struct ucred): what a SO_PEERCRED read returns."
+        name: ucredLen
+        type: int32
+        value: int32(unsafe.Sizeof(syscall.Ucred{}))
+    name: opURingCmd
   - doc: |-
       peerPeekBytes is the release check's read buffer: any read will do, the
       check only waits for the end of the stream.
@@ -1685,6 +1730,7 @@ files:
   - decls:
       - stFree
       - fPressure
+      - zcOff
       - ffEOF
       - rNone
       - connCtl
@@ -2100,6 +2146,7 @@ files:
       - (*uLoop).reportSelfTest
       - (*uLoop).registerRing
       - probeReason
+      - (*uLoop).reportSockCmd
     name: uring_caps_linux.go
   - decls:
       - _#4
@@ -2250,6 +2297,19 @@ files:
       - (*uRing).pollOut
     name: uring_loop_linux.go
   - decls:
+      - opURingCmd
+      - peerReading
+      - peerCell
+      - prepPeerCred
+      - unixListeners
+      - (*uLoop).peerCmd
+      - (*uRing).askPeer
+      - (*uRing).onPeer
+      - (*uRing).directPeer
+      - (*uLoop).indexTables
+      - (*uRing).openAccepted
+    name: uring_peer_linux.go
+  - decls:
       - peerPeekBytes
       - selfTestPayload
       - (*uLoop).selfTest
@@ -2270,6 +2330,7 @@ files:
       - (*selfTestRun).onAccept
       - (*selfTestRun).verdict
       - loopbackListener
+      - (*uLoop).peerCommand
     name: uring_probe_linux.go
   - decls:
       - uringEntries
@@ -2339,6 +2400,9 @@ files:
       - sendZCRound
       - sendZCReap
       - (*uRing).zeroCopyDone
+      - (*uRing).zeroCopyHandled
+      - (*uRing).zeroCopyRefused
+      - (*uRing).sendPlainly
     name: uring_sendzc_linux.go
   - decls:
       - tickEvery
@@ -3110,6 +3174,20 @@ functions:
     name: listenerQueue
     params: fd int
     results: uint32
+  - doc: |-
+      prepPeerCred fills s as SOCKET_URING_OP_GETSOCKOPT of SO_PEERCRED on direct
+      descriptor index, written to cred. The command's fields share the SQE's
+      unions: cmd_op the low half of off, level and optname the two halves of
+      addr, optlen file_index and optval addr3 — little-endian on every
+      architecture this file builds on.
+    name: prepPeerCred
+    params: s *sqe, index uint32, cred *syscall.Ucred, ud uint64
+  - doc: |-
+      unixListeners reports, per descriptor of fds, whether it is a Unix
+      listener.
+    name: unixListeners
+    params: fds []int
+    results: "[]bool"
   - doc: peerSeesEnd reports whether fd reads end-of-stream within 200 ms.
     name: peerSeesEnd
     params: fd int
@@ -3487,11 +3565,13 @@ types:
         name: fileBits
         type: uint8
       - doc: |-
-          zcFlight marks a flight sent zero-copy, every send of it (#969);
-          zcPend counts its sends whose notification has not come: the flight's
-          chunk is the kernel's until it reaches zero.
-        name: zcFlight
-        type: bool
+          zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
+          send of it zero-copy, zcHold none for now — a zero-copy send of it was
+          refused, or zcPend is at its bound — until its notifications came, the
+          rest then sent plainly. zcPend counts its sends whose notification has
+          not come: the flight's chunk is the kernel's until it reaches zero.
+        name: zc
+        type: uint8
       - name: zcPend
         type: uint8
       - doc: fileErr is the errno a file operation failed with, zero when none.
@@ -5844,6 +5924,12 @@ types:
         name: slotOf
         type: "[]int32"
       - doc: |-
+          creds holds, per direct-descriptor index, the peer of the Unix
+          connection accepted on it (askPeer); nil when the loop accepts none on
+          direct descriptors (#974).
+        name: creds
+        type: "[]peerCell"
+      - doc: |-
           armed is how many single-shot accepts each listener has in flight;
           paused a
           ring that stopped accepting under its reserve.
@@ -6394,7 +6480,9 @@ types:
         results: bool
       - doc: |-
           peer implements peerer. A direct descriptor has no process descriptor to
-          ask, so it answers false; a process descriptor is asked, as epoll's is.
+          ask: it answers what the socket command read at accept (askPeer), false
+          for a TCP connection or where the command never ran; a process descriptor
+          is asked, as epoll's is.
         name: peer
         params: r *ring, slot int32
         recv: rr *uRing
@@ -6497,6 +6585,32 @@ types:
         params: slot int32
         recv: rr *uRing
       - doc: |-
+          askPeer reads the peer of the Unix connection just accepted on slot with
+          the socket command; the connection opens when the command completes
+          (onPeer), so OnOpen and every byte come after the peer is known. No room
+          for the command opens it at once, its peer unknown and counted.
+        name: askPeer
+        params: slot int32
+        recv: rr *uRing
+      - doc: |-
+          onPeer records the peer the command read and opens the connection, or,
+          when the loop is closing, lets the slot go without opening it.
+        name: onPeer
+        params: slot int32, gen uint32, c *cqe
+        recv: rr *uRing
+      - doc: directPeer is the peer askPeer read for slot's direct descriptor.
+        name: directPeer
+        params: r *ring, slot int32
+        recv: rr *uRing
+        results: corenet.LoopPeerValue, bool
+      - doc: |-
+          openAccepted opens the connection accepted on listener li into slot: a
+          Unix one on a direct descriptor once its peer is read, any other at once,
+          the index's last peer forgotten.
+        name: openAccepted
+        params: li int, index uint32, slot int32
+        recv: rr *uRing
+      - doc: |-
           zeroCopyDone handles what a zero-copy send's CQEs owe beyond a plain
           send's (#969). The notification — the flight's pages back — is one
           operation less and one pending send less; once the last came for a flight
@@ -6508,6 +6622,37 @@ types:
         params: slot int32, c *cqe
         recv: rr *uRing
         results: bool
+      - doc: |-
+          zeroCopyHandled handles what a CQE of a zero-copy flight owes beyond a
+          plain send's — its notification (zeroCopyDone), or a refusal
+          (zeroCopyRefused) — and reports whether nothing more is to be done with it.
+        name: zeroCopyHandled
+        params: slot int32, c *cqe
+        recv: rr *uRing
+        results: bool
+      - doc: |-
+          zeroCopyRefused handles a zero-copy send's CQE whose result res is a
+          refusal, nothing of the flight sent, and reports whether it was one:
+          EOPNOTSUPP from a socket whose kernel object lacks SOCK_SUPPORT_ZC — a
+          Unix socket, or one accepted from a listener that lacks it, as an MPTCP
+          listener does, which Go's net.Listen opens by default on Linux since Go
+          1.24 (net: defaultMPTCPEnabledListen) —, after which every ring of the loop
+          sends every later flight plainly, its listeners being the same; or ENOMEM,
+          the pages it would pin past RLIMIT_MEMLOCK, which io_uring charges them to
+          (io_uring/notif.c), a load's while its flights wait for their peers' ACKs,
+          after which only this flight does. Its rest leaves by IORING_OP_SEND once
+          its notifications came, or now when none is pending.
+        name: zeroCopyRefused
+        params: slot, res int32
+        recv: rr *uRing
+        results: bool
+      - doc: |-
+          sendPlainly sends the rest of slot's flight by IORING_OP_SEND, every send
+          of it: its zero-copy notifications all came. A dead slot sends nothing;
+          its flight is freed with it.
+        name: sendPlainly
+        params: slot int32, alive bool
+        recv: rr *uRing
     name: uRing
   - doc: |-
       closeWait is a slot whose close waits on its shutdown: its generation then,
@@ -6570,6 +6715,11 @@ types:
           tables (the probe's release check passed) or in the process table.
         name: direct
         type: bool
+      - doc: |-
+          peers is how a Unix connection's peer is read on direct descriptors
+          (#974).
+        name: peers
+        type: peerReading
       - doc: sw is what the group may use; rep what the probe found (ADR 0189).
         name: sw
         type: capSwitches
@@ -6751,6 +6901,14 @@ types:
           descriptor, which the report says.
         name: registerRing
         params: u *uring
+        recv: ul *uLoop
+      - doc: |-
+          reportSockCmd records the socket command's row (#974): unprobed without a
+          Unix listener or with uring-direct switched off, absent with the
+          self-test's reason, on while direct descriptors serve, available once the
+          release check put the group on process descriptors.
+        name: reportSockCmd
+        params: direct bool
         recv: ul *uLoop
       - doc: |-
           watchFan is #703's detector in service, on the loop's own rings: the
@@ -6951,6 +7109,22 @@ types:
         name: teardown
         recv: ul *uLoop
       - doc: |-
+          peerCmd reports whether a Unix connection accepted on listener li has its
+          peer read by the socket command: the group runs on direct descriptors and
+          the kernel has the command (uring-sock-getsockopt).
+        name: peerCmd
+        params: li int
+        recv: ul *uLoop
+        results: bool
+      - doc: |-
+          indexTables are a ring's tables by direct-descriptor index: slotOf, every
+          entry -1, and the peer cells, only where a Unix listener's peers are read
+          on direct descriptors.
+        name: indexTables
+        params: table uint32
+        recv: ul *uLoop
+        results: "[]int32, []peerCell"
+      - doc: |-
           selfTest is the probe's last stage: on a ring of its own, a multishot
           accept into a direct descriptor on a loopback listener, a connection, and
           a multishot recv that must deliver the payload through the buffer ring.
@@ -6964,6 +7138,17 @@ types:
         params: flags uint32
         recv: ul *uLoop
         results: direct, deferred bool, err error
+      - doc: |-
+          peerCommand is the socket command's probe (#974): SO_PEERCRED read by
+          SOCKET_URING_OP_GETSOCKOPT on the payload's direct descriptor, a TCP one,
+          for which the kernel answers the length of a struct ucred all the same.
+          It reports whether the command answered so, and the reason when it did
+          not. The structure the kernel writes is the loop's, never the stack's: a
+          goroutine's stack may move while the command is in flight.
+        name: peerCommand
+        params: st *selfTestRun
+        recv: ul *uLoop
+        results: bool, string
       - doc: |-
           probeSendZC decides whether a flight of at least sz.sendZCMin bytes leaves
           by IORING_OP_SEND_ZC (#969): the group opted into uring-send-zc (class
@@ -7019,7 +7204,8 @@ types:
         type: uint16
       - doc: |-
           sendZCMin is the smallest flight sent zero-copy, zero while
-          uring-send-zc is off (#969).
+          uring-send-zc is off (#969) and once a socket of the loop refused it
+          (zeroCopyRefused).
         name: sendZCMin
         type: int
     kind: struct
@@ -7056,6 +7242,37 @@ types:
         results: <-chan struct{}
     name: uringRunner
   - doc: |-
+      peerReading is a loop's way of reading a Unix connection's peer on direct
+      descriptors (#974): cmd whether the socket command does it
+      (uring-sock-getsockopt validated by the self-test), unix whether each
+      listener is a Unix one, closing set as closeAll starts — a peer read then
+      lets its slot go unopened —, why the command's absence as the self-test
+      found it, and probe what its probe read, on the heap where the kernel may
+      write.
+    fields:
+      - name: cmd
+        type: bool
+      - name: closing
+        type: bool
+      - name: unix
+        type: "[]bool"
+      - name: why
+        type: string
+      - name: probe
+        type: syscall.Ucred
+    kind: struct
+    name: peerReading
+  - doc: |-
+      peerCell is a direct descriptor's peer as the accept read it: the kernel
+      writes cred while the command runs, and ok says the read succeeded.
+    fields:
+      - name: cred
+        type: syscall.Ucred
+      - name: ok
+        type: bool
+    kind: struct
+    name: peerCell
+  - doc: |-
       selfTestRun is the self-test's exchange: the ring it runs on, the direct
       descriptor the accept returned, and the bytes the recv delivered.
     fields:
@@ -7078,6 +7295,11 @@ types:
         type: int
       - name: closed
         type: bool
+      - doc: peerDone is the socket command's completion, peerRes its result.
+        name: peerDone
+        type: bool
+      - name: peerRes
+        type: int32
       - doc: mode is how the self-test runs.
         name: mode
         type: selfTestMode
@@ -7757,6 +7979,7 @@ vars:
           		{corenet.CapabilityEpollExclusive, classKernel},
           		{corenet.CapabilityTCPKeepAlive, classKernel},
           		{corenet.CapabilityTCPUserTimeout, classKernel},
+          		{corenet.CapabilityURingSockGetsockopt, classKernel},
           		{corenet.CapabilityURingDeferTaskrun, classCode},
           		{corenet.CapabilityURingNoSQArray, classCode},
           		{corenet.CapabilityURingRingFDs, classCode},

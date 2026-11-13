@@ -34,98 +34,101 @@ const (
 // connection be reset: the grace serves what arrives after readiness turned
 // false, and the drain closes nothing before it read it.
 func TestDrain_graceUnderArrivals(t *testing.T) {
-	for _, b := range loopBackends() {
-		t.Run(b.String(), func(t *testing.T) {
-			srv := New(WithDrainGrace(drainGraceTest))
-			t.Cleanup(func() { swallowErr(srv.Close()) })
-			h := &laneEchoH{}
-			srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(corenet.LoopValue{Backend: b, Loops: corenet.LoopsAuto})).HandleLoop(h)
-			procs := runtime.GOMAXPROCS(0)
-			if err := srv.Start(t.Context()); err != nil {
-				t.Fatalf("Start: %v", err)
-			}
-			st := srv.State()
-			if ls := st.Loops[0]; ls.Loops != max(procs-1, 1) || ls.LoopsSource != "auto" {
-				t.Fatalf("LoopsAuto: loops %d (%q), want %d (%q)", ls.Loops, ls.LoopsSource, max(procs-1, 1), "auto")
-			}
-			addr := st.Listeners[0].Address
+	for _, p := range drainProtos() {
+		for _, b := range loopBackends() {
+			t.Run(p.name+"/"+b.String(), func(t *testing.T) { drainGraceUnderArrivals(t, p, b) })
+		}
+	}
+}
 
-			kept := make([]stdnet.Conn, 8)
-			for i := range kept {
-				kept[i] = loopDial(t, addr)
-				lineEcho(t, kept[i], "k\n")
-			}
+// drainGraceUnderArrivals is TestDrain_graceUnderArrivals on protocol p and
+// backend b.
+func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend) {
+	srv := New(WithDrainGrace(drainGraceTest))
+	t.Cleanup(func() { swallowErr(srv.Close()) })
+	counts := p.group(srv, b)
+	procs := runtime.GOMAXPROCS(0)
+	if err := srv.Start(t.Context()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	st := srv.State()
+	if ls := st.Loops[0]; ls.Loops != max(procs-1, 1) || ls.LoopsSource != "auto" {
+		t.Fatalf("LoopsAuto: loops %d (%q), want %d (%q)", ls.Loops, ls.LoopsSource, max(procs-1, 1), "auto")
+	}
+	addr := st.Listeners[0].Address
 
-			var stop, notReady atomic.Bool
-			var late atomic.Int64
-			errc := make(chan string, 64)
-			var wg sync.WaitGroup
-			for range 4 {
-				wg.Go(func() {
-					for !stop.Load() {
-						after := notReady.Load()
-						t0 := time.Now()
-						if msg := oneExchange(addr); msg != "" {
-							msg += " began " + t0.Format("15:04:05.000")
-							select {
-							case errc <- msg + ", ended " + time.Now().Format("15:04:05.000") + ", readiness false " + strconv.FormatBool(notReady.Load()):
-							default:
-							}
-							return
-						}
-						if after {
-							late.Add(1)
-						}
-						// Paced, so the clients' closed ports in TIME_WAIT never run
-						// the ephemeral range out.
-						time.Sleep(2 * time.Millisecond)
+	kept := make([]stdnet.Conn, 8)
+	for i := range kept {
+		kept[i] = p.keep(t, addr)
+	}
+
+	var stop, notReady atomic.Bool
+	var late atomic.Int64
+	errc := make(chan string, 64)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for !stop.Load() {
+				after := notReady.Load()
+				t0 := time.Now()
+				if _, msg := p.exchange(addr); msg != "" {
+					msg += " began " + t0.Format("15:04:05.000")
+					select {
+					case errc <- msg + ", ended " + time.Now().Format("15:04:05.000") + ", readiness false " + strconv.FormatBool(notReady.Load()):
+					default:
 					}
-				})
-			}
-			wg.Go(func() {
-				// The load balancer: it routes on readiness, with a lag.
-				for srv.readiness(context.Background()) == nil {
-					time.Sleep(5 * time.Millisecond)
+					return
 				}
-				notReady.Store(true)
-				time.Sleep(drainLagTest)
-				stop.Store(true)
-			})
-			for _, c := range kept {
-				wg.Go(func() {
-					rest, err := io.ReadAll(c)
-					if err != nil || len(rest) > 0 {
-						select {
-						case errc <- "kept: " + errString(err) + " " + string(rest):
-						default:
-						}
-					}
-				})
-			}
-
-			time.Sleep(100 * time.Millisecond)
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			began := time.Now()
-			if err := srv.Shutdown(ctx); err != nil {
-				t.Fatalf("Shutdown: %v", err)
-			}
-			took := time.Since(began)
-			wg.Wait()
-			close(errc)
-			for msg := range errc {
-				t.Errorf("cut short: %s; Shutdown began %s", msg, began.Format("15:04:05.000"))
-			}
-			if took < drainGraceTest {
-				t.Fatalf("Shutdown took %v, under the grace %v", took, drainGraceTest)
-			}
-			if late.Load() == 0 {
-				t.Fatal("no connection was served once readiness turned false: the grace served nothing")
-			}
-			if o, cl := h.opens.Load(), h.closes.Load(); o != cl {
-				t.Fatalf("%d opened, %d closed", o, cl)
+				if after {
+					late.Add(1)
+				}
+				// Paced, so the clients' closed ports in TIME_WAIT never run
+				// the ephemeral range out.
+				time.Sleep(2 * time.Millisecond)
 			}
 		})
+	}
+	wg.Go(func() {
+		// The load balancer: it routes on readiness, with a lag.
+		for srv.readiness(context.Background()) == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		notReady.Store(true)
+		time.Sleep(drainLagTest)
+		stop.Store(true)
+	})
+	for _, c := range kept {
+		wg.Go(func() {
+			if msg := p.end(c); msg != "" {
+				select {
+				case errc <- "kept: " + msg:
+				default:
+				}
+			}
+		})
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	began := time.Now()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	took := time.Since(began)
+	wg.Wait()
+	close(errc)
+	for msg := range errc {
+		t.Errorf("cut short: %s; Shutdown began %s", msg, began.Format("15:04:05.000"))
+	}
+	if took < drainGraceTest {
+		t.Fatalf("Shutdown took %v, under the grace %v", took, drainGraceTest)
+	}
+	if late.Load() == 0 {
+		t.Fatal("no connection was served once readiness turned false: the grace served nothing")
+	}
+	if o, cl := counts(); o != cl {
+		t.Fatalf("%d opened, %d closed", o, cl)
 	}
 }
 
@@ -144,82 +147,87 @@ const drainCloseWindow = 20 * time.Millisecond
 // Each backend takes its listen queue before it closes the listener, so
 // what waited there is served.
 func TestDrain_arrivalsAcrossTheDrain(t *testing.T) {
-	for _, b := range loopBackends() {
-		t.Run(b.String(), func(t *testing.T) {
-			if runtime.GOOS == "windows" {
-				// ADR 0196 §D3: a Windows listener cannot be duplicated into the
-				// portable backend's own, so its drain takes no queue and a close
-				// under arrivals resets what waits; the grace test above holds.
-				t.Skip("the portable backend takes no listen queue on Windows")
-			}
-			srv := New(WithDrainGrace(50 * time.Millisecond))
-			t.Cleanup(func() { swallowErr(srv.Close()) })
-			h := &laneEchoH{}
-			srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(corenet.LoopValue{Backend: b, Loops: corenet.LoopsAuto})).HandleLoop(h)
-			if err := srv.Start(t.Context()); err != nil {
-				t.Fatalf("Start: %v", err)
-			}
-			addr := srv.State().Listeners[0].Address
-			type cut struct {
-				at  time.Time
-				msg string
-			}
-			var draining atomic.Bool
-			var during atomic.Int64
-			var mu sync.Mutex
-			var cuts []cut
-			var refusedAt []time.Time
-			var wg sync.WaitGroup
-			for range 4 {
-				wg.Go(func() {
-					for {
-						began := draining.Load()
-						at := time.Now()
-						dialled, msg := exchange(addr)
-						mu.Lock()
-						switch {
-						case !dialled && !began && !draining.Load():
-							cuts = append(cuts, cut{at, "refused before the drain: " + msg})
-						case !dialled:
-							refusedAt = append(refusedAt, at)
-						case msg != "":
-							cuts = append(cuts, cut{at, msg})
-						case began:
-							during.Add(1)
-						}
-						mu.Unlock()
-						if !dialled {
-							return
-						}
-						time.Sleep(time.Millisecond)
-					}
-				})
-			}
-			time.Sleep(100 * time.Millisecond)
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			draining.Store(true)
-			if err := srv.Shutdown(ctx); err != nil {
-				t.Fatalf("Shutdown: %v", err)
-			}
-			wg.Wait()
-			if during.Load() == 0 || len(refusedAt) == 0 {
-				t.Fatalf("arrivals did not cross the drain: %d served during it, %d refused after", during.Load(), len(refusedAt))
-			}
-			closed := slices.MinFunc(refusedAt, func(a, b time.Time) int { return a.Compare(b) })
-			window := 0
-			for _, c := range cuts {
-				if c.at.After(closed.Add(-drainCloseWindow)) {
-					window++
-					continue
+	for _, p := range drainProtos() {
+		for _, b := range loopBackends() {
+			t.Run(p.name+"/"+b.String(), func(t *testing.T) { drainArrivalsAcross(t, p, b) })
+		}
+	}
+}
+
+// drainArrivalsAcross is TestDrain_arrivalsAcrossTheDrain on protocol p and
+// backend b.
+func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
+	if runtime.GOOS == "windows" {
+		// ADR 0196 §D3: a Windows listener cannot be duplicated into the
+		// portable backend's own, so its drain takes no queue and a close
+		// under arrivals resets what waits; the grace test above holds.
+		t.Skip("the portable backend takes no listen queue on Windows")
+	}
+	srv := New(WithDrainGrace(50 * time.Millisecond))
+	t.Cleanup(func() { swallowErr(srv.Close()) })
+	counts := p.group(srv, b)
+	if err := srv.Start(t.Context()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	addr := srv.State().Listeners[0].Address
+	type cut struct {
+		at  time.Time
+		msg string
+	}
+	var draining atomic.Bool
+	var during atomic.Int64
+	var mu sync.Mutex
+	var cuts []cut
+	var refusedAt []time.Time
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for {
+				began := draining.Load()
+				at := time.Now()
+				dialled, msg := p.exchange(addr)
+				mu.Lock()
+				switch {
+				case !dialled && !began && !draining.Load():
+					cuts = append(cuts, cut{at, "refused before the drain: " + msg})
+				case !dialled:
+					refusedAt = append(refusedAt, at)
+				case msg != "":
+					cuts = append(cuts, cut{at, msg})
+				case began:
+					during.Add(1)
 				}
-				t.Errorf("cut short %v before the listener closed: %s", closed.Sub(c.at), c.msg)
-			}
-			t.Logf("%d served during the drain; %d reset within %v of the close", during.Load(), window, drainCloseWindow)
-			if o, cl := h.opens.Load(), h.closes.Load(); o != cl {
-				t.Fatalf("%d opened, %d closed", o, cl)
+				mu.Unlock()
+				if !dialled {
+					return
+				}
+				time.Sleep(time.Millisecond)
 			}
 		})
+	}
+	time.Sleep(100 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	draining.Store(true)
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	wg.Wait()
+	if during.Load() == 0 || len(refusedAt) == 0 {
+		t.Fatalf("arrivals did not cross the drain: %d served during it, %d refused after", during.Load(), len(refusedAt))
+	}
+	closed := slices.MinFunc(refusedAt, func(a, b time.Time) int { return a.Compare(b) })
+	window := 0
+	for _, c := range cuts {
+		if c.at.After(closed.Add(-drainCloseWindow)) {
+			window++
+			continue
+		}
+		t.Errorf("cut short %v before the listener closed: %s", closed.Sub(c.at), c.msg)
+	}
+	t.Logf("%d served during the drain; %d reset within %v of the close", during.Load(), window, drainCloseWindow)
+	if o, cl := counts(); o != cl {
+		t.Fatalf("%d opened, %d closed", o, cl)
 	}
 }
 

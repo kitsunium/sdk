@@ -931,3 +931,36 @@ connection, a ping from each answered.
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---|---|---|
 | `WSLoopReceive4KiB` | 419 | 0 | 0 |
+
+## Over HTTP/2: RFC 8441 (#967)
+
+`BenchmarkXConnectLoopback` is `BenchmarkLoopback` over an extended CONNECT stream:
+one echo round trip of a masked binary message per iteration, on a TLS group with
+`Protocols("h2")`, the client framing HTTP/2 by hand as the tests do (Go 1.27's
+`http.Transport` refuses the `:protocol` field, `TestXConnectTransportRefusesProtocolField`).
+net/http reads `GODEBUG=http2xconnect=1` at its init, so the rows run only in a binary
+started with it:
+
+```
+cd internal/service && GOWORK=off GODEBUG=http2xconnect=1 SDK_WEBSOCKET_TEST_XCONNECT=1 \
+  go test -run='^$' -bench='Loopback' -benchmem -count=5 ./net/websocket/
+```
+
+Measured on 2026-11-13 with `BenchmarkLoopback` in the same binary, AMD EPYC 7351P
+(linux/amd64, 8 vCPU VM, `GOMAXPROCS=4`), go1.27.4, `-benchtime=1s -count=5`, medians.
+
+| Benchmark | ns/op (5 runs) | median | B/op | allocs/op |
+|---|---|---|---|---|
+| `Loopback/64` (HTTP/1.1, cleartext) | 17 174, 17 411, 17 444, 17 726, 17 432 | **17 432** | 80 | 3 |
+| `Loopback/4096` (HTTP/1.1, cleartext) | 25 175, 25 384, 26 365, 25 529, 26 398 | **25 529** | 4 112 | 3 |
+| `XConnectLoopback/64` (HTTP/2, TLS) | 104 927, 113 668, 115 402, 110 011, 116 737 | **113 668** | 178 | 5 |
+| `XConnectLoopback/4096` (HTTP/2, TLS) | 213 823, 199 065, 199 657, 204 646, 204 579 | **204 579** | 320 | 9 |
+
+A 4 KiB message costs eight times as much over HTTP/2 as over HTTP/1.1 here. The
+two rows differ by more than the framing: the HTTP/2 row carries TLS, net/http's
+stream machinery and its flow control, a `WINDOW_UPDATE` pair the client sends back
+for every `DATA` frame, and a flush per WebSocket frame; which of them dominates was
+not measured. The row first exposed a defect: the request-body bound (#845, 1 MiB by
+default) wrapped the CONNECT's body, which is the tunnel, and cut every WebSocket
+over HTTP/2 after 1 MiB of input — 255 messages of 4 KiB. A CONNECT is no longer
+bounded (`limitBody`, `TestXConnectBeyondTheBodyBound`).

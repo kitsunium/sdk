@@ -231,6 +231,20 @@ starts() { wc -l <"$WORK/qemu.starts" | tr -d ' '; }
   [[ "$output" == *"KITSUNIUM_NETGATE_L3_EXEC=sudo $WORK/bin/ip netns exec netgate-l3"* ]]
 }
 
+@test "veth: gro switches GRO on on the far end, inside the namespace, and fails when ethtool does" {
+  mkdir -p "$WORK/bin"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/ip.log"\nif [ "$1 $2" = "netns exec" ]; then shift 3; exec "$@"; fi\n' "$WORK" >"$WORK/bin/ip"
+  printf '#!/usr/bin/env bash\necho "$*" >>"%s/ethtool.log"\n' "$WORK" >"$WORK/bin/ethtool"
+  chmod +x "$WORK/bin/ip" "$WORK/bin/ethtool"
+  IP="$WORK/bin/ip" ETHTOOL="$WORK/bin/ethtool" run bash "$CI_DIR/net-veth.sh" gro
+  [ "$status" -eq 0 ]
+  grep -qx "netns exec netgate-l3 $WORK/bin/ethtool -K ng-b gro on" "$WORK/ip.log"
+  grep -qx -- '-K ng-b gro on' "$WORK/ethtool.log"
+  printf '#!/usr/bin/env bash\nexit 3\n' >"$WORK/bin/ethtool"
+  IP="$WORK/bin/ip" ETHTOOL="$WORK/bin/ethtool" run bash "$CI_DIR/net-veth.sh" gro
+  [ "$status" -ne 0 ]
+}
+
 @test "veth: up fails when ip fails; down succeeds with nothing to remove; bad usage is refused" {
   mkdir -p "$WORK/bin"
   printf '#!/usr/bin/env bash\nexit 2\n' >"$WORK/bin/ip"
@@ -274,7 +288,9 @@ starts() { wc -l <"$WORK/qemu.starts" | tr -d ' '; }
   grep -A1 -E '^permissions:$' "$WF" | grep -qx '  contents: read'
   [ -z "$(sed -n '/^permissions:/,/^[a-z]/p' "$WF" | grep -E 'write')" ]
   refute grep -qE '^\s+permissions:' "$WF"
-  [ -z "$(grep -E '^\s+runs-on:' "$WF" | grep -v 'runs-on: ubuntu-latest$')" ]
+  # Hosted only: ubuntu-latest, and macos-15 for the one darwin bench.
+  [ -z "$(grep -E '^\s+runs-on:' "$WF" | grep -vE 'runs-on: (ubuntu-latest|macos-15)$')" ]
+  [ "$(grep -cE '^\s+runs-on: macos-15$' "$WF")" -eq 1 ]
 }
 
 @test "workflow: every leg declares requiredBackends and requiredCaps, non-empty" {
@@ -304,5 +320,19 @@ starts() { wc -l <"$WORK/qemu.starts" | tr -d ' '; }
   while IFS= read -r m; do
     [ "$m" -le 45 ] || { echo "timeout-minutes $m"; false; }
   done < <(grep -oE 'timeout-minutes: [0-9]+' "$WF" | awk '{ print $2 }')
-  [ "$(grep -cE '^    timeout-minutes: ' "$WF")" -eq 4 ]
+  [ "$(grep -cE '^    timeout-minutes: ' "$WF")" -eq 5 ]
+}
+
+@test "workflow: the busy-poll load runs on the veth pair with GRO on, after the other loads, outside their pattern" {
+  grep -qF -- "-test.bench='^BenchmarkLoad(L1|L1big|L1h2|L2|L3)\$'" "$WF"
+  grep -qF 'sudo bash "$GITHUB_WORKSPACE/scripts/ci/net-veth.sh" gro' "$WF"
+  grep -qF -- "-test.bench='^BenchmarkLoadSparse\$'" "$WF"
+}
+
+@test "workflow: the darwin bench is judged on kqueue's rows alone and never gates the merge" {
+  grep -qE '^  bench-darwin:$' "$WF"
+  grep -qF -- '-only kqueue,cal-L1-kqueue' "$WF"
+  grep -qF -- "-test.bench='^BenchmarkLoadL1\$'" "$WF"
+  grep -qF 'name: net-bench-darwin-${{ github.sha }}' "$WF"
+  refute grep -qF 'needs: [changes, lanes, bench, bench-darwin]' "$WF"
 }

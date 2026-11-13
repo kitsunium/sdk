@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"io"
+	stdnet "net"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -94,3 +97,67 @@ func (d detailLogger) Log(_ context.Context, _ level.Level, _ string, attrs ...c
 func (d detailLogger) With(...corelogger.AttrValue) corelogger.Logger { return d }
 func (d detailLogger) WithGroup(string) corelogger.Logger             { return d }
 func (d detailLogger) Enabled(context.Context, level.Level) bool      { return true }
+
+// TestErrorLog_handshakeFlood holds #846's second criterion on real
+// handshakes: 10 000 plaintext connections to a TLS HTTP group within one
+// second of the server's clock — frozen, so the window holds them all
+// whatever the machine's pace — write the cap's records and count the
+// remainder in SuppressedLogs, each failure counted once.
+func TestErrorLog_handshakeFlood(t *testing.T) {
+	const flood, workers = 10000, 16
+	clk := clock.NewManualClock(time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC))
+	lg := &countingLogger{}
+	s := newServer(func(string) (string, bool) { return "", false }, WithLogger(lg))
+	s.clk = clk
+	s.Group("api", Listen("tcp", "127.0.0.1:0"), TLS(testIdentity(t))).
+		HandleHTTP(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	if err := s.Start(t.Context()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	addr := s.State().Listeners[0].Address
+	var wg sync.WaitGroup
+	next := make(chan struct{}, flood)
+	for range flood {
+		next <- struct{}{}
+	}
+	close(next)
+	for range workers {
+		wg.Go(func() {
+			for range next {
+				c, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
+				if err != nil {
+					t.Errorf("dial: %v", err)
+					return
+				}
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				_, _ = c.Write([]byte("GET / HTTP/1.1\r\n\r\n"))
+				_, _ = io.Copy(io.Discard, c)
+				_ = c.Close()
+			}
+		})
+	}
+	wg.Wait()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		lg.mu.Lock()
+		n := lg.n
+		lg.mu.Unlock()
+		if uint64(n)+s.State().SuppressedLogs >= flood || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	lg.mu.Lock()
+	n, last := lg.n, lg.last
+	lg.mu.Unlock()
+	if n != errorLogCap {
+		t.Fatalf("%d records written, want the cap %d", n, errorLogCap)
+	}
+	if got := s.State().SuppressedLogs; got != uint64(flood-errorLogCap) {
+		t.Fatalf("SuppressedLogs = %d, want the remainder %d", got, flood-errorLogCap)
+	}
+	if !strings.HasPrefix(last, "http: TLS handshake error from 127.0.0.1:") {
+		t.Fatalf("last record = %q, want a handshake failure", last)
+	}
+}

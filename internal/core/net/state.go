@@ -30,10 +30,10 @@ type StateValue struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs uint64 `json:"accept_backoffs"`
-	// SuppressedLogs counts the lines of net/http's own log the server did not
-	// write: over the cap of ten records a second, or with no logger to write
-	// them to (WithLogger). A count that rises is a port being probed, or a
-	// handler that panics.
+	// SuppressedLogs counts the lines of net/http's own log, and the failed TLS
+	// handshakes, the server did not write: over the cap of ten records a second,
+	// or with no logger to write them to (WithLogger). A count that rises is a
+	// port being probed, or a handler that panics.
 	SuppressedLogs uint64 `json:"suppressed_logs"`
 	// Datagrams counts what the batched datagram paths drop (ADR 0192).
 	Datagrams DatagramStateValue `json:"datagrams"`

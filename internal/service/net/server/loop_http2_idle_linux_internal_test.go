@@ -9,6 +9,7 @@ package server
 
 import (
 	"runtime"
+	"slices"
 	"syscall"
 	"testing"
 	"time"
@@ -27,17 +28,86 @@ const idleConnsH2 = 10000
 // B that loop/CLAUDE.md gives an idle connection is the loop's alone, before
 // any adapter state, so #961's bound is held by this comparison instead: an
 // idle h2c connection costs at most what the codec's Conn adds over HTTP/1.1.
+//
+// Each figure is the median of idleRounds readings taken in alternation, each
+// after the process settled (settle): a reading is the live heap's growth
+// over a window, and memory an earlier test of the binary releases inside
+// that window lowers it — #1354's HTTP/1.1 reading of 97 B on linux/386, a
+// third of what the same harness reads alone (TestIdleHeapPerConn_release).
 func TestLoopHTTP2_idleMemory(t *testing.T) {
 	hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
 	for _, b := range []corenet.LoopBackend{corenet.LoopBackendEpoll, corenet.LoopBackendAuto} {
 		t.Run(b.String(), func(t *testing.T) {
-			h1 := idleHeapPerConn(t, b, http1.HandleLoop(hello, http1.Parser{}), []byte("GET / HTTP/1.1\r\nX: "), false)
-			h2 := idleHeapPerConn(t, b, http2.HandleLoop(hello, http1.Parser{}), h2cOpening, true)
-			t.Logf("idle heap per connection: http/1.1 %.0f B, h2c %.0f B", h1, h2)
+			var h1s, h2s []float64
+			for range idleRounds {
+				h1s = append(h1s, idleHeapPerConn(t, b, http1.HandleLoop(hello, http1.Parser{}), []byte("GET / HTTP/1.1\r\nX: "), false, nil))
+				h2s = append(h2s, idleHeapPerConn(t, b, http2.HandleLoop(hello, http1.Parser{}), h2cOpening, true, nil))
+			}
+			h1, h2 := median(h1s), median(h2s)
+			t.Logf("idle heap per connection: http/1.1 %.0f B, h2c %.0f B (medians of %v and %v)", h1, h2, h1s, h2s)
 			if h2 > h1+h2cConnBudget {
 				t.Fatalf("an idle h2c connection costs %.0f B against %.0f B for HTTP/1.1, over the budget of %d B the codec's state may add", h2, h1, h2cConnBudget)
 			}
 		})
+	}
+}
+
+// TestIdleHeapPerConn_release reproduces #1354's cause and holds its remedy:
+// 2 MiB an earlier test kept, released inside a reading's window, lowers that
+// reading by about 200 B a connection — the HTTP/1.1 side falling, the
+// comparison failing with nothing wrong in the codec —, and the median of
+// three readings, one of them so disturbed, stays with the undisturbed one.
+func TestIdleHeapPerConn_release(t *testing.T) {
+	hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
+	h1 := func(during func()) float64 {
+		return idleHeapPerConn(t, corenet.LoopBackendEpoll, http1.HandleLoop(hello, http1.Parser{}), []byte("GET / HTTP/1.1\r\nX: "), false, during)
+	}
+	quiet := h1(nil)
+	release := func() {
+		held = nil
+	}
+	held = make([]byte, 2<<20)
+	disturbed := h1(release)
+	t.Logf("HTTP/1.1 reading: %.0f B quiet, %.0f B with 2 MiB released in the window", quiet, disturbed)
+	if disturbed > quiet-100 {
+		t.Fatalf("a release in the window moved the reading from %.0f B to %.0f B: the cause is not this", quiet, disturbed)
+	}
+	held = make([]byte, 2<<20)
+	rounds := []float64{h1(release), h1(nil), h1(nil)}
+	if m := median(rounds); m < quiet-60 || m > quiet+60 {
+		t.Fatalf("median of %v = %.0f B, want within 60 B of the quiet %.0f B", rounds, m, quiet)
+	}
+}
+
+// held is memory an earlier test kept, released by TestIdleHeapPerConn_release
+// inside a reading's window.
+var held []byte
+
+// idleRounds is how many readings of each kind a median is taken over.
+const idleRounds = 3
+
+// median is the middle of xs, sorted.
+func median(xs []float64) float64 {
+	s := slices.Clone(xs)
+	slices.Sort(s)
+	return s[len(s)/2]
+}
+
+// settleHeap waits until the process stops ending goroutines — an earlier test's
+// servers winding down — collecting as it goes, for at most two seconds.
+func settleHeap() {
+	deadline := time.Now().Add(2 * time.Second)
+	steady := 0
+	for n := runtime.NumGoroutine(); steady < 3 && time.Now().Before(deadline); {
+		heapNow()
+		time.Sleep(10 * time.Millisecond)
+		m := runtime.NumGoroutine()
+		if m == n {
+			steady++
+		} else {
+			steady = 0
+		}
+		n = m
 	}
 }
 
@@ -50,13 +120,18 @@ const h2cConnBudget = 200
 
 // idleHeapPerConn holds idleConnsH2 connections that sent opening and reports
 // the server's heap per connection. wantFrame reads the server's first frame,
-// so an HTTP/2 connection has been served by the loop.
-func idleHeapPerConn(t *testing.T, b corenet.LoopBackend, h corenet.LoopHandler, opening []byte, wantFrame bool) float64 {
+// so an HTTP/2 connection has been served by the loop. during, when not nil,
+// runs inside the window, once the baseline is read.
+func idleHeapPerConn(t *testing.T, b corenet.LoopBackend, h corenet.LoopHandler, opening []byte, wantFrame bool, during func()) float64 {
 	t.Helper()
 	srv, addr := startLoopServer(t, b, h, Plaintext(), Loop(corenet.LoopValue{Backend: b, Loops: 2}))
 	sa := socketAddr(t, addr)
 	fds := make([]int, 0, idleConnsH2)
+	settleHeap()
 	before := heapNow()
+	if during != nil {
+		during()
+	}
 	for range idleConnsH2 {
 		fds = append(fds, connectOpening(t, sa, opening, wantFrame))
 	}
