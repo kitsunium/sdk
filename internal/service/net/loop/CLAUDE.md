@@ -583,7 +583,12 @@ reading its echo and a clean end, the listener refusing after; 1 280 queued
 past epoll's batch; and `TestConformance_drainOutOfDescriptors`, a child
 under RLIMIT 64 whose take waits for the drain's closes. The stop's cost
 (`conformance_stop_linux_test.go`, ADR 0200): 20 000 idle connections, heard
-once, on three rings, drained and closed, every peer reading the end. On
+once, on three rings, drained and closed, every peer reading the end, then
+closed by reset (`resetClose`, as `TestConformance_idleNoWatchdog` and
+`TestConformance_noStarvationAtScale` close theirs): closed by FIN, the suite's
+connections held their conntrack entries two minutes, and with server's suite
+beside this one filled a runner's table, a datagram lane's send refused with
+EPERM (#1377). On
 io_uring the verdict is counted, not timed (`conformance_stop_uring_linux_test.go`):
 `loopHooks.taken` sees every SQE a ring hands the kernel, and the stop must
 issue one shutdown a connection, no cancel by descriptor and no hard link —

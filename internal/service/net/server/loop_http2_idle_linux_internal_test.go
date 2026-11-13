@@ -8,6 +8,7 @@
 package server
 
 import (
+	stdnet "net"
 	"runtime"
 	"slices"
 	"syscall"
@@ -23,32 +24,45 @@ import (
 const idleConnsH2 = 10000
 
 // TestLoopHTTP2_idleMemory measures an idle h2c connection against an idle
-// HTTP/1.1 connection of the same harness, on both native backends. The
-// second's cost is the http1 adapter's, the same order as the first's: the 256
-// B that loop/CLAUDE.md gives an idle connection is the loop's alone, before
-// any adapter state, so #961's bound is held by this comparison instead: an
-// idle h2c connection costs at most what the codec's Conn adds over HTTP/1.1.
+// HTTP/1.1 connection of the same harness, on epoll. The second's cost is the
+// http1 adapter's, the same order as the first's: the 256 B that
+// loop/CLAUDE.md gives an idle connection is the loop's alone, before any
+// adapter state, so #961's bound is held by this comparison instead: an idle
+// h2c connection costs at most what the codec's Conn adds over HTTP/1.1.
 //
 // Each figure is the median of idleRounds readings taken in alternation, each
 // after the process settled (settle): a reading is the live heap's growth
 // over a window, and memory an earlier test of the binary releases inside
 // that window lowers it — #1354's HTTP/1.1 reading of 97 B on linux/386, a
 // third of what the same harness reads alone (TestIdleHeapPerConn_release).
+//
+// The other native backend is TestLoopHTTP2_idleMemoryAuto's: one test held
+// both, 120 000 connections and twelve readings, the most expensive test of
+// server_test, and the shard Bazel gave it reached the 60 s of .bazelrc under
+// coverage (#1372); two tests are two shards.
 func TestLoopHTTP2_idleMemory(t *testing.T) {
+	idleMemoryOn(t, corenet.LoopBackendEpoll)
+}
+
+// TestLoopHTTP2_idleMemoryAuto is TestLoopHTTP2_idleMemory on the backend
+// Auto chooses: io_uring where the kernel has it.
+func TestLoopHTTP2_idleMemoryAuto(t *testing.T) {
+	idleMemoryOn(t, corenet.LoopBackendAuto)
+}
+
+// idleMemoryOn is TestLoopHTTP2_idleMemory's comparison on backend b.
+func idleMemoryOn(t *testing.T, b corenet.LoopBackend) {
+	t.Helper()
 	hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
-	for _, b := range []corenet.LoopBackend{corenet.LoopBackendEpoll, corenet.LoopBackendAuto} {
-		t.Run(b.String(), func(t *testing.T) {
-			var h1s, h2s []float64
-			for range idleRounds {
-				h1s = append(h1s, idleHeapPerConn(t, b, http1.HandleLoop(hello, http1.Parser{}), []byte("GET / HTTP/1.1\r\nX: "), false, nil))
-				h2s = append(h2s, idleHeapPerConn(t, b, http2.HandleLoop(hello, http1.Parser{}), h2cOpening, true, nil))
-			}
-			h1, h2 := median(h1s), median(h2s)
-			t.Logf("idle heap per connection: http/1.1 %.0f B, h2c %.0f B (medians of %v and %v)", h1, h2, h1s, h2s)
-			if h2 > h1+h2cConnBudget {
-				t.Fatalf("an idle h2c connection costs %.0f B against %.0f B for HTTP/1.1, over the budget of %d B the codec's state may add", h2, h1, h2cConnBudget)
-			}
-		})
+	var h1s, h2s []float64
+	for range idleRounds {
+		h1s = append(h1s, idleHeapPerConn(t, b, http1.HandleLoop(hello, http1.Parser{}), []byte("GET / HTTP/1.1\r\nX: "), false, nil))
+		h2s = append(h2s, idleHeapPerConn(t, b, http2.HandleLoop(hello, http1.Parser{}), h2cOpening, true, nil))
+	}
+	h1, h2 := median(h1s), median(h2s)
+	t.Logf("%s: idle heap per connection: http/1.1 %.0f B, h2c %.0f B (medians of %v and %v)", b, h1, h2, h1s, h2s)
+	if h2 > h1+h2cConnBudget {
+		t.Fatalf("%s: an idle h2c connection costs %.0f B against %.0f B for HTTP/1.1, over the budget of %d B the codec's state may add", b, h2, h1, h2cConnBudget)
 	}
 }
 
@@ -167,10 +181,81 @@ func idleHeapPerConn(t *testing.T, b corenet.LoopBackend, h corenet.LoopHandler,
 	}
 	after := heapNow()
 	for _, fd := range fds {
-		_ = syscall.Close(fd)
+		resetClose(fd)
 	}
 	swallowErr(srv.Close())
 	return (float64(after) - float64(before)) / idleConnsH2
+}
+
+// resetClose closes a client socket with a reset (SO_LINGER 0) rather than a
+// FIN: neither end keeps a TIME_WAIT socket, and the connection-tracking
+// entry a netfilter host keeps for the connection lives seconds (CLOSE)
+// rather than two minutes (TIME_WAIT). The two readings of this file open
+// 160 000 connections a run: closed by FIN, they held most of a runner's
+// 262 144 conntrack entries for two minutes, and the loop suite go test runs
+// beside this one, at its own heavy tests, filled the rest — every new
+// loopback flow refused, a datagram's send failing with EPERM (#1377).
+func resetClose(fd int) {
+	//: a socket that refuses the option is closed all the same.
+	_ = syscall.SetsockoptLinger(fd, syscall.SOL_SOCKET, syscall.SO_LINGER, &syscall.Linger{Onoff: 1, Linger: 0})
+	_ = syscall.Close(fd)
+}
+
+// TestResetClose_leavesNoTimeWait holds #1377's remedy where it shows
+// without privilege: a client closed by FIN leaves a TIME_WAIT socket — the
+// kernel's twin of the two-minute conntrack entry —, one closed by
+// resetClose leaves none, on either end.
+func TestResetClose_leavesNoTimeWait(t *testing.T) {
+	const n = 32
+	timeWaits := func(closeClient func(fd int), want func(int) bool) int {
+		ln, err := stdnet.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = ln.Close() }()
+		addr := ln.Addr().String()
+		sa := socketAddr(t, addr)
+		fds := make([]int, 0, n)
+		//: nothing sent: a socket closed over unread bytes resets, FIN or not.
+		for range n {
+			fds = append(fds, connectOpening(t, sa, nil, false))
+		}
+		accepted := make([]stdnet.Conn, 0, n)
+		for range n {
+			c, err := ln.Accept()
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted = append(accepted, c)
+		}
+		for _, fd := range fds {
+			closeClient(fd)
+		}
+		for _, c := range accepted {
+			_ = c.Close()
+		}
+		at := procHexAddrPort(t, addr)
+		got := 0
+		for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			got = 0
+			for _, s := range procSockets(t, "tcp") {
+				if s.state == "06" && (s.local == at || s.remote == at) {
+					got++
+				}
+			}
+			if want(got) || time.Now().After(deadline) {
+				return got
+			}
+		}
+	}
+	//: the control: closed by FIN, the client that closed first waits.
+	if fin := timeWaits(func(fd int) { _ = syscall.Close(fd) }, func(n int) bool { return n > 0 }); fin == 0 {
+		t.Fatalf("%d clients closed by FIN left no TIME_WAIT socket: the witness sees nothing", n)
+	}
+	//: the remedy, read once the closes are done.
+	if rst := timeWaits(resetClose, func(int) bool { return true }); rst != 0 {
+		t.Fatalf("%d clients closed by resetClose left %d TIME_WAIT sockets, want none", n, rst)
+	}
 }
 
 // loopBytesIn is the bytes every ring of srv's loop groups read.
