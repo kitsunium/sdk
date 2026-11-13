@@ -90,7 +90,7 @@ make profile-consensus WAVE=before && make profile-consensus WAVE=after
 make benchstat-diff BEFORE=before AFTER=after
 ```
 
-## Hand-run micro-benchmarks (#913, #922, #923, #1109)
+## Hand-run micro-benchmarks (#913, #922, #923, #1109, #1364)
 
 Not written by the generator above: refreshed by the commands each part names (`filelog_bench_test.go`: `cd internal && go test -run '^$' -bench BenchmarkFileLogEntries -benchmem -count=3 ./service/app/consensus/`).
 
@@ -169,18 +169,34 @@ included, against 67.1 MB of records. The lane's raw lines are in
 | ext4 | ZeroFill | 10 081 | 372 µs | 2.46 ms | 16.5 ms | 161 842 517 |
 | ext4 | Fallocate | 10 081 | 990 µs | 5.05 ms | 18.0 ms | 141 275 136 |
 | ext4 | ZeroFill | 10 081 | 636 µs | 6.16 ms | 26.9 ms | 161 839 786 |
-| xfs | both | — | not measured | | | |
 
 Taken 2026-11-12 at a9714f4b3 (#1110) plus this change, Docker Desktop's
 Linux VM on an Apple-silicon Mac (debian:stable-slim, LUKS2 aes-xts-plain64
 over a loop device on a tmpfs), under the load of seven other builds. The
 run stopped there: the host's disk filled, and xfs and the fourth row were
-not reached.
+not reached. Run again on 2026-11-13 on devbox (Debian 13, Linux 6.12.101
+amd64, 8 cores; a privileged debian:stable-slim container, LUKS2
+aes-xts-plain64 over a 4 GiB loop image on the host's ext4 disk), each mode
+twice, alternated (`testdata/dmcrypt/RESULTS.md`, "On Linux: ext4 and xfs"):
+
+| Filesystem | Mode | syncs | `Sync` p50 | p90 | p99 | device bytes per segment |
+|---|---|---|---|---|---|---|
+| ext4 | ZeroFill | 10 081 | 2.28 ms | 2.69 ms | 3.82 ms | 161 858 901 |
+| ext4 | Fallocate | 10 081 | 3.71 ms | 4.77 ms | 7.27 ms | 141 186 389 |
+| ext4 | ZeroFill | 10 081 | 2.35 ms | 2.85 ms | 5.69 ms | 161 850 709 |
+| ext4 | Fallocate | 10 081 | 4.28 ms | 8.65 ms | 13.26 ms | 141 190 485 |
+| xfs | ZeroFill | 10 081 | 2.46 ms | 3.35 ms | 9.19 ms | 161 819 306 |
+| xfs | Fallocate | 10 081 | 4.41 ms | 6.93 ms | 12.52 ms | 100 507 306 |
+| xfs | ZeroFill | 10 081 | 2.41 ms | 3.12 ms | 9.78 ms | 161 752 064 |
+| xfs | Fallocate | 10 081 | 4.42 ms | 9.10 ms | 14.06 ms | 100 498 602 |
 
 - **ext4**: `fallocate` writes 13 % fewer bytes, not the 64 MiB of zeros,
   since each `fdatasync` after a write into an unwritten extent journals its
   conversion, and the median `Sync` is 1.6 to 2.7 times the zero-filled
-  one's. Not adopted: ZeroFill stays the default (ADR 0152, Deferred).
+  one's.
+- **xfs**: `fallocate` writes 38 % fewer bytes, and its median `Sync` is
+  1.8 times the zero-filled one's.
+- Not adopted on either: ZeroFill stays the default (ADR 0152, Deferred).
 
 ### Sync path of a batch (G1, #923)
 
@@ -198,13 +214,18 @@ is >= 1.00 and its Sync p99 ratio's upper bound is <= 1.00.
 
 | Device | Filesystem | ratio entries/s | ratio Sync p99 | verdict |
 |---|---|---|---|---|
-| dm-crypt over a loop device | ext4 | not measured | not measured | Fdatasync stays the default |
-| dm-crypt over a loop device | xfs | not measured | not measured | Fdatasync stays the default |
+| dm-crypt over a loop device | ext4 | [0.958, 1.034] | [0.586, 2.162] | gate not met: Fdatasync stays the default |
+| dm-crypt over a loop device | xfs | [0.955, 1.064] | [0.470, 1.967] | gate not met: Fdatasync stays the default |
 | OVH VPS of D16 | — | not measured | not measured | Fdatasync stays the default |
 
-Not measured on 2026-11-12: the change was written on a macOS host whose
-Docker could not start and whose disk was full, so the lane did not run.
-`SyncFdatasync` stays the default everywhere until a row meets the gate.
+Ten rounds a filesystem on devbox on 2026-11-13 (Debian 13, Linux 6.12.101
+amd64, 8 cores; a privileged debian:stable-slim container, LUKS2
+aes-xts-plain64 over a 4 GiB loop image on the host's ext4 disk), the
+`SYNCPATH_GATE` lines of `testdata/dmcrypt/RESULTS.md`, "Sync path". Both
+intervals straddle 1.00 on both filesystems; the suite, its fuzz seeds and
+12 of 12 power cuts pass with every log writing `RWF_DSYNC`. The OVH VPS is
+not measured. `SyncFdatasync` stays the default everywhere until a row
+meets the gate.
 
 ### The apply side: applied1 (#1109)
 
@@ -251,3 +272,28 @@ BenchmarkApplied1WithAForwardOutstanding-10    	83174492	        17.58 ns/op	   
 - Before #1109 the same entry wrote the `results` map, appended to
   `resultOrder` and, past 4 096 entries, deleted the oldest and resliced its
   head, then broadcast to every parked caller.
+
+### A leader turn's bytes per follower (#912, #1364)
+
+From `sendshared_bench_test.go`; refresh with `cd internal && go test -run='^$' -bench=BenchmarkALeaderTurnPerFollower -benchmem -count=3 ./service/app/consensus/`.
+A leader turn of 64 entries of 256 B to N followers in replicate state,
+sent through a transport that keeps nothing: `B/op` is the batch's bytes,
+divided below by N. The "before" side is the same file copied onto `main`
+before lot L1 (a7eb89f0d), its node built without the `batch` field: the
+parent of #912's own commit does not build its tests (`stream.go`, an
+earlier commit of the lot), so the lot as a whole is the comparison.
+Taken 2026-11-13 on devbox (AMD EPYC 7351P, 8 cores, Linux 6.12.101 amd64,
+go1.27.4), `GOMAXPROCS=4`, three runs alike to the byte.
+
+| Followers | before: B/op | before: allocs/op | before: B per follower | after: B/op | after: allocs/op | after: B per follower |
+|---|---|---|---|---|---|---|
+| 2 | 169 456 | 36 | 84 728 | 19 296 | 2 | 9 648 |
+| 4 | 338 913 | 72 | 84 728 | 19 520 | 2 | 4 880 |
+
+- **Per follower the batch costs 1/N of one encoding** now: one body of
+  the 64 entries and one block of headers, whatever N; before, each
+  follower's frame was encoded from nil (18 allocations of a growing buffer
+  each).
+- The loop-turn p99 at 1 000 proposals/s (#1364's other half) is not in
+  this file: the generator that would read it (#911) does not exist before
+  lot L1, so no "before" can be taken by copying it.

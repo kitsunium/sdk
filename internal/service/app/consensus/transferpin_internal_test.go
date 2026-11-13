@@ -25,9 +25,20 @@ type holdTransport struct {
 	// streamed, when set, runs after a stream that succeeded, before
 	// Stream returns.
 	streamed atomic.Pointer[func()]
+	// inFlight counts the Stream calls not returned yet, and peak the
+	// most at once: what MaxSnapshotStreams bounds (#920).
+	inFlight atomic.Int32
+	peak     atomic.Int32
 }
 
 func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
+	for n := t.inFlight.Add(1); ; {
+		p := t.peak.Load()
+		if n <= p || t.peak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	defer t.inFlight.Add(-1)
 	if t.holding.Load() {
 		select {
 		case t.started <- offer:

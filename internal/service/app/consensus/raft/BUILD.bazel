@@ -98,6 +98,7 @@ go_test(
         "zreplicationlag_internal_test.go",
         "zseries_internal_test.go",
         "zsession_internal_test.go",
+        "ztermless_internal_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":raft"],

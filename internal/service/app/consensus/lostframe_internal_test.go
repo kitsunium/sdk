@@ -77,9 +77,17 @@ func TestALostReadIndexOrForwardIsAnsweredWithoutALeaderChange(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("a lost forward was not answered before its caller's own 3 s deadline")
 	}
-	time.Sleep(100 * time.Millisecond)
-	if reads, fwds := pendingOf(f); reads != 0 || fwds != 0 {
-		t.Errorf("after both were answered, the follower still holds %d read waiter(s) and %d forward(s); leader term %d -> %d", reads, fwds, termBefore, l.node.Status().Term)
+	// The caller is answered on the loop's turn that forgets the waiter
+	// or on the next: the check waits for the node to let both go, where
+	// a fixed 100 ms sleep was the synchronisation.
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		reads, fwds := pendingOf(f)
+		if reads == 0 && fwds == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("5 s after both were answered, the follower still holds %d read waiter(s) and %d forward(s); leader term %d -> %d", reads, fwds, termBefore, l.node.Status().Term)
+		}
 	}
 }
 

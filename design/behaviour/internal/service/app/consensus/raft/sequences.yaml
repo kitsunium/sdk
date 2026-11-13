@@ -5538,7 +5538,7 @@ sequences:
                 value: term
               - set: r.vote
                 value: "0"
-            when: term != r.term
+            when: term > r.term
           - do:
               - set: r.vote
                 value: "0"
