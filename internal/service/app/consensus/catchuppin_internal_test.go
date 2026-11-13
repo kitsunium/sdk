@@ -106,6 +106,13 @@ func valveRun(t *testing.T, id byte) (c *cluster, l, lag *testNode, v *valveTran
 	mu.Lock()
 	v = valves[l.id]
 	mu.Unlock()
+	// Shut once the stream's body is read, before the follower commits
+	// its install and answers it (#1441): shut once Stream returned, its
+	// answer reached the leader first, which replicated through the open
+	// valve. The valve is also shut before the stream is let go, below
+	// (#1459), which this second shut leaves as it is.
+	shut := func() { v.close(lag.id) }
+	v.drained.Store(&shut)
 	v.holding.Store(true)
 	t.Cleanup(func() {
 		v.holding.Store(false)

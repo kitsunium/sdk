@@ -105,9 +105,47 @@ read the same thousand records as `tail` does.)
 - **A Read is three allocations**: the payload slice and the run's one
   buffer (seglog's `Range`), and the entries; the entries alias that buffer,
   so nothing is copied twice.
-- **Linux is not measured here.** The figures are darwin's `F_FULLFSYNC`; a
-  Linux `fdatasync` is usually far cheaper, and the ratio between the rows is
-  what carries over.
+- **The figures above are darwin's `F_FULLFSYNC`**; Linux follows.
+
+### The file engine on Linux
+
+The same two benchmarks on a Linux host: AMD EPYC 7351P, 8 vCPU given to
+the VM and `GOMAXPROCS=4` (the `-4` suffix), 15 GiB, Debian 13, kernel
+6.12.101 amd64, ext4 on the VM's virtual disk, go1.27.4 linux/amd64,
+`fdatasync(2)`; `-benchtime=1s -count=3`, on `cba308310`, 2026-11-13. The
+machine was shared with other jobs, so a row's runs differ by up to 25 %.
+
+```
+BenchmarkAppendFile/1-4 	    1568	    699164 ns/op	   0.09 MB/s	    699164 ns/record	     937 B/op	       1 allocs/op
+BenchmarkAppendFile/1-4 	    1759	    708208 ns/op	   0.09 MB/s	    708208 ns/record	     847 B/op	       1 allocs/op
+BenchmarkAppendFile/1-4 	    1713	    677756 ns/op	   0.09 MB/s	    677756 ns/record	     867 B/op	       1 allocs/op
+BenchmarkAppendFile/16-4         	     877	   1348646 ns/op	   0.76 MB/s	     84290 ns/record	    3742 B/op	       2 allocs/op
+BenchmarkAppendFile/16-4         	     864	   1359798 ns/op	   0.75 MB/s	     84987 ns/record	    3794 B/op	       2 allocs/op
+BenchmarkAppendFile/16-4         	     854	   1393728 ns/op	   0.73 MB/s	     87108 ns/record	    3836 B/op	       2 allocs/op
+BenchmarkAppendFile/256-4        	     872	   1356275 ns/op	  12.08 MB/s	      5298 ns/record	   47996 B/op	       2 allocs/op
+BenchmarkAppendFile/256-4        	     789	   1406364 ns/op	  11.65 MB/s	      5494 ns/record	   48680 B/op	       2 allocs/op
+BenchmarkAppendFile/256-4        	     708	   1725979 ns/op	   9.49 MB/s	      6742 ns/record	   47310 B/op	       2 allocs/op
+BenchmarkReadFile/tail/backlog=1000-4         	  270746	      3877 ns/op	 264.13 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/tail/backlog=1000-4         	  323277	      3907 ns/op	 262.11 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/tail/backlog=1000-4         	  327040	      3840 ns/op	 266.66 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/spread/backlog=1000-4       	  319179	      3905 ns/op	 262.21 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/spread/backlog=1000-4       	  288666	      3840 ns/op	 266.64 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/spread/backlog=1000-4       	  321103	      3763 ns/op	 272.12 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/tail/backlog=1000000-4      	  296437	      3414 ns/op	 299.94 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/tail/backlog=1000000-4      	  336442	      3694 ns/op	 277.19 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/tail/backlog=1000000-4      	  317054	      3730 ns/op	 274.51 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/spread/backlog=1000000-4    	  235576	      4360 ns/op	 234.88 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/spread/backlog=1000000-4    	  277706	      4348 ns/op	 235.51 MB/s	    3712 B/op	       3 allocs/op
+BenchmarkReadFile/spread/backlog=1000000-4    	  247929	      4112 ns/op	 249.04 MB/s	    3711 B/op	       3 allocs/op
+```
+
+- **A batch shares its sync on Linux too.** One record costs about 0.7 ms,
+  a record of the 256 batch 5.3 to 6.7 µs: 1/104 to 1/131 of it, inside the
+  1/10 #821 asks.
+- **The backlog costs a read nothing.** Sixteen records read in 3.4 to 3.9 µs
+  within the newest thousand at either backlog, and 4.1 to 4.4 µs across a
+  million records (`spread`, warm), against 3.8 to 3.9 µs across a
+  thousand: inside the 2× #821 asks, cold pages aside.
 
 ## The subscriber (#823)
 
