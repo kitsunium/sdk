@@ -163,6 +163,31 @@ func TestMainPIDRootExemptionLostWhenSandboxed(t *testing.T) {
 	}
 }
 
+// TestMainPIDNamingTheEngineIsRefused reproduces #1360: on a Solaris guest
+// handing PIDs out in sequence, TestMainPIDRootExemptionLostWhenSandboxed's
+// unconfined half failed in 0.00s with no attach, then passed on its retry —
+// the test binary was PID 4242, the very PID the replay's MAINPID= names, and
+// the reducer rightly refuses the engine's own PID. The replay pins the
+// engine's PID (harnessSelfPID), and the refusal stays the engine's.
+func TestMainPIDNamingTheEngineIsRefused(t *testing.T) {
+	sandboxHere(t)
+	h := newHarness(t, Config{
+		Type: coresvc.TypeNotify, Notify: stubNotify{}, Attacher: stubAttacher{},
+		ExecStart: []coresvc.CommandValue{cmd(t, "/bin/main")},
+	})
+	if h.m.s.selfPID != harnessSelfPID {
+		t.Fatalf("the replay's engine is PID %d, want the pinned %d", h.m.s.selfPID, harnessSelfPID)
+	}
+	h.m.s.selfPID = 4242
+	h.start()
+	h.feed(event{kind: evNotify, msg: coresvc.NotifyValue{
+		Fields: map[string]string{"MAINPID": "4242"}, PID: h.m.mainPID, UID: 0, Verified: true,
+	}})
+	if len(h.attaches) != 0 || h.m.notifyRefused != 1 {
+		t.Fatalf("a MAINPID= naming the engine: attaches %v, refused %d", h.attaches, h.m.notifyRefused)
+	}
+}
+
 // sandboxError is the error proc/exec returns for a sandbox's failure.
 func sandboxError(code errs.Code) error {
 	if code == coreproc.CodeSandboxFailed {

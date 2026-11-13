@@ -52,7 +52,7 @@ func TestReadRecordReadsTheKernel(t *testing.T) {
 	if self.start <= now-int64(24*time.Hour/time.Microsecond) || self.start > now+int64(time.Minute/time.Microsecond) {
 		t.Errorf("record start %d µs, want within the last day of %d", self.start, now)
 	}
-	child := startOSSleeper(t)
+	child := startRunningSleeper(t)
 	got, err := readRecord(child.Pid)
 	if err != nil {
 		t.Fatalf("readRecord(child) = %v", err)
@@ -65,11 +65,46 @@ func TestReadRecordReadsTheKernel(t *testing.T) {
 	}
 }
 
+// startRunningSleeper starts /bin/sleep — one execve(2), no shell to exec
+// again — and returns once the kernel's record of it carries a start time,
+// that is once the child has left execve: os.StartProcess returns as soon as
+// execve has closed the child's close-on-exec descriptors, before execve is
+// done, and NetBSD answers the record of a process still inside execve with
+// no start (fill_kproc2 reads it as a zombie while execve holds p_reflock).
+// On NetBSD 10.1 a child signalled in that window was not ended (#1379): in
+// one attempt, TestReadRecordReadsTheKernel read its child with start 0 and
+// its cleanup's SIGKILL left the sleeper its whole 30 s, while
+// TestKnoteFiresAtExit's knote, registered and signalled in the same window,
+// never fired in 10 s.
+func startRunningSleeper(t *testing.T) *os.Process {
+	t.Helper()
+	p, err := os.StartProcess("/bin/sleep", []string{"sleep", "30"}, &os.ProcAttr{})
+	if err != nil {
+		t.Fatalf("starting the sleeper: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = p.Kill()
+		_, _ = p.Wait()
+	})
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		record, rErr := readRecord(p.Pid)
+		if rErr == nil && record.start != 0 {
+			return p
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the sleeper's record never carried a start in 10 s: %+v, %v", record, rErr)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestKnoteFiresAtExit pins the knote: silent while the process runs, fired
-// once it has exited — before its parent reaps it.
+// once it has exited — before its parent reaps it. The child has left its
+// execve before it is signalled (startRunningSleeper).
 func TestKnoteFiresAtExit(t *testing.T) {
 	t.Parallel()
-	child := startOSSleeper(t)
+	child := startRunningSleeper(t)
 	f, raw, err := openKnote(child.Pid)
 	if err != nil {
 		t.Fatalf("openKnote = %v", err)
