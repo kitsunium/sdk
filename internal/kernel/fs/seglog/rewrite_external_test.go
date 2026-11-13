@@ -151,3 +151,50 @@ func TestRewriteSyncsAPendingBatchFirst(t *testing.T) {
 	}
 	check(t, l, 0, 5)
 }
+
+// TestRewriteThatGrowsTheLastSegmentStillLeavesRoomForItsSeal: an edit may
+// give a record of the segment being written a longer payload. The rewritten
+// segment must still hold its records AND the seal a later rotation writes,
+// or the log seals nothing, publishes the next segment, and refuses to open
+// again with a sealed segment that has no seal.
+func TestRewriteThatGrowsTheLastSegmentStillLeavesRoomForItsSeal(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// grown is the payload the edit gives each of the segment's records.
+		grown int
+	}
+	cases := []tc{
+		{name: "payload=100", grown: 100},
+		{name: "payload=400", grown: 400},
+	}
+	runCase := func(t *testing.T, c tc) {
+		dir := t.TempDir()
+		l := open(t, dir, 1024)
+		appendRange(t, l, 0, 10)
+		long := bytes.Repeat([]byte{'g'}, c.grown)
+		if _, err := l.Rewrite(10, func(_ uint64, kind uint8, _ []byte) (uint8, []byte, bool) {
+			return kind, long, true
+		}); err != nil {
+			t.Fatalf("Rewrite = %v", err)
+		}
+		appendRange(t, l, 10, 40)
+		if err := l.Close(); err != nil {
+			t.Fatal(err)
+		}
+		l = open(t, dir, 1024)
+		defer func() { _ = l.Close() }()
+		for i := uint64(0); i < 10; i++ {
+			if got, err := l.Read(i); err != nil || !bytes.Equal(got, long) {
+				t.Fatalf("read %d = %d bytes, %v, want the rewrite", i, len(got), err)
+			}
+		}
+		check(t, l, 10, 40)
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

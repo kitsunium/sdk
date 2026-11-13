@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -179,10 +180,20 @@ func TestAnExLeaderResetsItsPeersSeries(t *testing.T) {
 		v, ok := gaugeAt(meters[l.id], mPeerUnreachable, f.id)
 		return ok && v == 1
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// The transfer is the means, not the subject: a try the transfer's
+	// own window (twice ElectionTimeoutMax) cut short on a loaded Bazel
+	// shard is tried again while this node still leads, and a leadership
+	// lost another way makes it an ex-leader as well.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := l.node.TransferLeadership(ctx, "op:test", g.id); err != nil {
-		t.Fatal(err)
+	for {
+		err := l.node.TransferLeadership(ctx, "op:test", g.id)
+		if err == nil || l.node.Status().Role != coreconsensus.RoleLeader {
+			break
+		}
+		if !errors.Is(err, coreconsensus.TransferFailed) || ctx.Err() != nil {
+			t.Fatal(err)
+		}
 	}
 	waitFor(t, "the ex-leader's series of the peer reset", func() bool {
 		v, ok := gaugeAt(meters[l.id], mPeerUnreachable, f.id)

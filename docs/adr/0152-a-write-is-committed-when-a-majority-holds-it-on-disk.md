@@ -7370,7 +7370,7 @@ after as many warm-up calls (ADR 0165), three runs alike:
 | D15 row | Budget (`fn`, fixture) | D15 | Measured | Bound |
 |---|---|---|---|---|
 | leader handling one `AppendEntries` response | `raft.(*Raft).Step`, `StepAppResp` | 0 | 1 | **1, revised** |
-| follower handling 64 entries, memory log | `raft.(*Raft).Step`, `StepApp64` | ≤ 1 amortized, 0 per entry | 65 | **65, revised** |
+| follower handling 64 entries, memory log | `raft.(*Raft).Step`, `StepApp64` | ≤ 1 amortized, 0 per entry | 65, then 1 once #1110 landed | **1** (65 until L1's audit, 2026-11-13) |
 | encode / decode of a frame | `wire.AppendMessage`, `wire.ParseMessage` | 0 | 0 | 0 |
 | encode / decode of a log record | `TestTheRecordCodecAllocatesNothing` (hand-written) | 0 | 0 | 0 |
 | `Propose` → applied, 3 nodes, memory doubles | `BENCH.md`, `MEM/propose` (#911) | ≤ 4 | 183 to 184 | **not a budget** (below) |

@@ -214,9 +214,12 @@ func (r *Raft) voteRestricted(pre bool, m core.MessageValue) bool {
 
 // becomeFollower moves to term, following lead (0 when unknown). The vote
 // is forgotten only with a new term, and a deposed leader refuses what it
-// still held for its clients.
+// still held for its clients. A term below this node's never lowers it: a
+// message that carries no term is handled at this node's own (stepTerm),
+// and a candidate that followed an append of term 0 wrote a HardState of
+// term 0 over its durable term (#1362).
 func (r *Raft) becomeFollower(term uint64, lead core.NodeID) {
-	if term != r.term {
+	if term > r.term {
 		r.term = term
 		r.vote = 0
 	} else if r.mutated(mutSameTermVoteClear) {

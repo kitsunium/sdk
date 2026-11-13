@@ -915,6 +915,11 @@ func TestGenerateBenchMD(t *testing.T) {
 		t.Log("consensus bench generator idle — run `make bench` (or -run TestGenerateBenchMD) to regenerate BENCH.md")
 		return
 	}
+	out := resolveConsensusBenchOutputPath()
+	before, err := benchBefore(os.ReadFile, out)
+	if err != nil {
+		t.Fatalf("consensus bench: %v: nothing measured, %s left as it is", err, out)
+	}
 	rep := &benchReport{devices: benchDevices()}
 	for _, dev := range rep.devices {
 		rep.logRows = append(rep.logRows, benchRow{
@@ -936,8 +941,7 @@ func TestGenerateBenchMD(t *testing.T) {
 	}
 	rep.propose = testing.Benchmark(BenchmarkThreeNodePropose)
 	rep.sim = benchSimulate(t, rep.simSync())
-	out := resolveConsensusBenchOutputPath()
-	if err := os.WriteFile(out, []byte(rep.render(collectBenchEnvelope())), 0o644); err != nil {
+	if err = os.WriteFile(out, []byte(keepHandRun(rep.render(collectBenchEnvelope()), before)), 0o644); err != nil {
 		panic(fmt.Sprintf("consensus bench: write %s: %v", out, err))
 	}
 	t.Logf("wrote %s", out)

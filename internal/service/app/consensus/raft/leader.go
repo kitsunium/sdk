@@ -1725,11 +1725,18 @@ func (r *Raft) roundAcks(rd *round) (int, time.Duration) {
 	return n, minWindow
 }
 
-// extendLease moves the lease start to a confirmed round sent later than
-// the current one, shortened by the drift budget; a dropped lease stays
-// dropped for the term.
+// extendLease rests the lease on the newest confirmed round: it starts at
+// that round's send instant and lasts that round's window, shortened by the
+// drift budget; a dropped lease stays dropped for the term. confirmRounds
+// forgets every round through the one it confirms, so the round given here
+// is newer than the one the lease rests on, and one sent at the same
+// instant sets the lease too, with its own window, never the longer of the
+// two. Moved only by a round sent strictly later, the lease kept the older
+// round's window: 0 when a follower holding nothing durably committed
+// confirmed it (#698), and a read a majority of generation 1 confirmed at
+// that instant left the leader with no lease (#1390).
 func (r *Raft) extendLease(sentAt time.Time, leaseLen time.Duration) {
-	if r.facts&raftLeaseDropped != 0 || !sentAt.After(r.leaseStart) {
+	if r.facts&raftLeaseDropped != 0 || sentAt.Before(r.leaseStart) {
 		return
 	}
 	r.leaseStart = sentAt
