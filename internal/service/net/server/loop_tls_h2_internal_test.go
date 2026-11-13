@@ -136,8 +136,10 @@ func TestLoopTLSH2_bothVersions(t *testing.T) {
 // h2 is served HTTP/2. A client offering http/1.1 alone completes the
 // handshake with no protocol — crypto/tls lets an http/1.1 client reach an
 // h2-only server so (Go issue 46310), as on an HTTP group — and its HTTP/1.1
-// request is answered 400 and closed. The http1 adapter still refuses
-// Protocols("h2") with ProtocolsRefused naming h2.
+// request is answered 400 and closed; a client offering nothing the group
+// serves, http/1.1 alone excepted, fails the handshake with
+// no_application_protocol. The http1 adapter still refuses Protocols("h2")
+// with ProtocolsRefused naming h2.
 func TestLoopTLSH2_protocols(t *testing.T) {
 	hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
 	srv, addr := startTLSH2(t, hello, Protocols("h2"))
@@ -165,6 +167,15 @@ func TestLoopTLSH2_protocols(t *testing.T) {
 	swallowErr(resp.Body.Close())
 	if resp.ProtoMajor != 2 {
 		t.Fatalf("served HTTP/%d, want 2", resp.ProtoMajor)
+	}
+	// The refusal itself, where crypto/tls makes no exception: a client
+	// offering only protocols the group does not serve fails the handshake
+	// with no_application_protocol (#964's amended criterion).
+	if c, err := tlsDial(t, addr, "spdy/3", "http/1.0"); err == nil || !strings.Contains(err.Error(), "no application protocol") {
+		if c != nil {
+			t.Fatalf("a client offering spdy/3 and http/1.0 negotiated %q", c.ConnectionState().NegotiatedProtocol)
+		}
+		t.Fatalf("a client offering spdy/3 and http/1.0: %v, want no_application_protocol", err)
 	}
 	refused := New()
 	t.Cleanup(func() { swallowErr(refused.Close()) })

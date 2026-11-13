@@ -137,3 +137,16 @@ kqueue in the change that lands the gate's numbers.
   and the FreeBSD, OpenBSD and NetBSD guests are its first run; DragonFly only
   compiles.
 - IOCP and illumos event ports stay rejected (ADR 0186 §D5).
+
+## Amendment 2026-11-13 — the conformance ran, the gate's lane is built (kitsunium/sdk#976)
+
+The suites of `internal/service/net/loop` ran on kqueue: e2e-cross on `main` at
+`a7eb89f0d` (run 43326746134) passed the package on macos-15 (arm64), FreeBSD,
+OpenBSD and NetBSD — the guests' logs show its groups starting on
+`backend=kqueue`, probe `kqueue-socket` —, race off everywhere, so
+`TestMemory_idleConnection` ran too. D6's
+gate now has its lane: net-kernel-gate's `bench-darwin` job runs `BenchmarkLoadL1`
+on macos-15, where its pairs are `goroutine:loop-kqueue` and
+`loop-kqueue:loop-kqueue` (`load_gate_hooks_darwin_test.go`), ten rounds, and
+`tools/netgate -only kqueue,cal-L1-kqueue` judges them, reported. `auto` stays on
+the portable backend until those rows hold, in the change that cites them.

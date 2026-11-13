@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 // The loads the network plan's merge gate measures (plan P8, tools/netgate):
 // L1 and L2 here, L3 in load_l3_linux_internal_test.go. Each is fixed in this
@@ -19,6 +19,7 @@ package server_test
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -63,6 +64,10 @@ var loadBody = bytes.Repeat([]byte("k"), loadBodySize)
 // loadChildEnv names the load and engine a re-run child serves: "L1:loop".
 const loadChildEnv = "KITSUNIUM_NETGATE_CHILD"
 
+// loadBindEnv is the address the child's groups listen on, loopback's
+// 127.0.0.1:0 when unset: Sparse's is the far end of the veth pair.
+const loadBindEnv = "KITSUNIUM_NETGATE_BIND"
+
 // TestLoadChild is the server half of BenchmarkLoadL1 and BenchmarkLoadL2, and
 // runs only in the child they start: "L2:handwritten,chain" serves load on
 // each engine named, one group each, side by side. It prints their addresses
@@ -74,14 +79,16 @@ func TestLoadChild(t *testing.T) {
 		t.Skip("the server half of BenchmarkLoadL1/L2: run by them, in a child")
 	}
 	load, engines, _ := strings.Cut(spec, ":")
+	bind := cmp.Or(os.Getenv(loadBindEnv), "127.0.0.1:0")
 	srv := server.New()
 	for i, engine := range strings.Split(engines, ",") {
-		g := srv.Group("netgate-"+strconv.Itoa(i), server.Listen("tcp", "127.0.0.1:0"), loadGroupOption(load, engine), server.Plaintext())
+		g := srv.Group("netgate-"+strconv.Itoa(i), server.Listen("tcp", bind), loadGroupOption(load, engine), server.Plaintext())
 		serveLoad(t, g, load, engine)
 	}
 	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	reportLoadRows(load, srv.State())
 	line := "addr"
 	for _, l := range srv.State().Listeners {
 		line += " " + l.Address
@@ -109,8 +116,13 @@ func serveLoad(t *testing.T, g *server.StreamGroup, load, engine string) {
 		g.HandleLoop(http1.HandleLoop(corenet.HTTP1HandlerFunc(handwrittenL2), http1.Parser{}))
 	case load == "L2" && engine == "chain":
 		g.HandleLoop(http1.HandleLoop(chainL2(t), http1.Parser{}))
+	case load == "L1" && engine == "loop-kqueue":
+		g.HandleLoop(http1.HandleLoop(corenet.HTTP1HandlerFunc(loadL1Handler), http1.Parser{}))
 	default:
-		t.Fatalf("no engine %q on load %q", engine, load)
+		//: a load of this platform's own (load_gate_hooks_*_test.go), or none.
+		if !serveLoadOS(t, g, load, engine) {
+			t.Fatalf("no engine %q on load %q", engine, load)
+		}
 	}
 }
 
@@ -125,12 +137,19 @@ func loadL1Handler(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
 // the engine as a program sizes it, not one loop against the whole runtime.
 // L2 keeps one loop, both of P2's engines on it.
 func loadGroupOption(load, engine string) server.GroupOption {
+	//: a load of this platform's own names its engines' options.
+	if opt, ok := loadGroupOptionOS(load, engine); ok {
+		return opt
+	}
 	switch engine {
 	case "goroutine":
 		return server.Plaintext()
 	case "goroutine-h2":
 		//: h2c by prior knowledge on net/http (#861).
 		return server.Protocols("h2")
+	case "loop-kqueue":
+		//: kqueue named, as auto does not choose it yet (#976).
+		return server.Loop(corenet.LoopValue{Backend: corenet.LoopBackendKqueue, Loops: corenet.LoopsAuto})
 	}
 	v := corenet.LoopValue{Backend: corenet.LoopBackendAuto}
 	if load == "L1" || load == "L1h2" {
@@ -256,12 +275,32 @@ func unsharded(env []string) []string {
 // engines, side by side.
 func startLoadChild(b testing.TB, load string, engines ...string) *loadChild {
 	b.Helper()
+	return startLoadChildIn(b, "", "", load, engines...)
+}
+
+// startLoadChildIn is startLoadChild with the child run under prefix — "sudo
+// ip netns exec netgate-l3" puts it on the far end of the veth pair — and
+// listening on bind, loopback's when empty.
+func startLoadChildIn(b testing.TB, prefix, bind, load string, engines ...string) *loadChild {
+	b.Helper()
 	spec := load + ":" + strings.Join(engines, ",")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestLoadChild$", "-test.count=1")
+	args := []string{os.Args[0], "-test.run=^TestLoadChild$", "-test.count=1"}
 	//: the role variable an enclosing child inherited is dropped before it is
 	//: set, so a child's spec is always the one this call names.
-	env := slices.DeleteFunc(unsharded(os.Environ()), func(kv string) bool { return strings.HasPrefix(kv, loadChildEnv+"=") })
-	cmd.Env = append(env, loadChildEnv+"="+spec)
+	env := slices.DeleteFunc(unsharded(os.Environ()), func(kv string) bool {
+		return strings.HasPrefix(kv, loadChildEnv+"=") || strings.HasPrefix(kv, loadBindEnv+"=")
+	})
+	env = append(env, loadChildEnv+"="+spec)
+	if bind != "" {
+		env = append(env, loadBindEnv+"="+bind)
+	}
+	env = loadChildEnvOS(load, env)
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = env
+	//: sudo and ip netns exec reset the environment: it goes through env.
+	if p := strings.Fields(prefix); len(p) > 0 {
+		cmd = exec.Command(p[0], append(append(append(p[1:], "env"), env...), args...)...)
+	}
 	cmd.Stderr = os.Stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -321,9 +360,10 @@ func (c *loadChild) stop() {
 
 // BenchmarkLoadL1 is L1 paired: the goroutine engine against the loop engine,
 // the P6 gate's A and B, and the loop engine against itself, the
-// calibration: the ratio two series of one engine give on this runner.
+// calibration: the ratio two series of one engine give on this runner. On
+// darwin the loop engine is kqueue, named (loadL1Pairs).
 func BenchmarkLoadL1(b *testing.B) {
-	for _, p := range [][2]string{{"goroutine", "loop"}, {"loop", "loop"}} {
+	for _, p := range loadL1Pairs {
 		b.Run("pair="+p[0]+":"+p[1], func(b *testing.B) { benchPairedLoad(b, "L1", p[0], p[1], loadL1Request) })
 	}
 }
@@ -354,12 +394,14 @@ type loadSide struct {
 	conns   []stdnet.Conn
 	readers []*bufio.Reader
 	req     []byte
+	// body is the Content-Length every answer must carry.
+	body int
 }
 
 // dialSide opens loadConns kept-alive connections to addr and serves one
 // round trip on each, so every one is accepted and served before a window.
-func dialSide(b *testing.B, addr string, req []byte) *loadSide {
-	s := &loadSide{req: req}
+func dialSide(b *testing.B, addr string, req []byte, body int) *loadSide {
+	s := &loadSide{req: req, body: body}
 	for i := range loadConns {
 		c, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
 		if err != nil {
@@ -374,7 +416,7 @@ func dialSide(b *testing.B, addr string, req []byte) *loadSide {
 		}
 	})
 	for i, c := range s.conns {
-		if err := loadRoundTrip(c, s.readers[i], req); err != nil {
+		if err := loadRoundTripN(c, s.readers[i], req, body); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -391,7 +433,7 @@ func (s *loadSide) window(b testing.TB, child *loadChild, n int) uint64 {
 	for i, c := range s.conns {
 		wg.Go(func() {
 			for next.Add(1) <= int64(n) {
-				if err := loadRoundTrip(c, s.readers[i], s.req); err != nil {
+				if err := loadRoundTripN(c, s.readers[i], s.req, s.body); err != nil {
 					errc <- err
 					return
 				}
@@ -414,9 +456,16 @@ func (s *loadSide) window(b testing.TB, child *loadChild, n int) uint64 {
 // counted. It reports each engine's CPU a request and their ratio, b over a:
 // the round's one paired sample.
 func benchPairedLoad(b *testing.B, load, engineA, engineB string, req []byte) {
+	benchPairedSized(b, load, engineA, engineB, req, loadBodySize, 1)
+}
+
+// benchPairedSized is benchPairedLoad for answers of body bytes, sending
+// b.N/scale requests: a load whose answer is larger keeps a round's bytes,
+// not its requests, within the bench job's time.
+func benchPairedSized(b *testing.B, load, engineA, engineB string, req []byte, body, scale int) {
 	child := startLoadChild(b, load, engineA, engineB)
-	sideA, sideB := dialPairSide(b, engineA, child.addrs[0], req), dialPairSide(b, engineB, child.addrs[1], req)
-	per := max(b.N/(2*pairedWindows), 1)
+	sideA, sideB := dialPairSide(b, engineA, child.addrs[0], req, body), dialPairSide(b, engineB, child.addrs[1], req, body)
+	per := max(b.N/(scale*2*pairedWindows), 1)
 	b.ResetTimer()
 	var cpuA, cpuB uint64
 	//: A, B, B, A, A, B, B, A, …: every window of B has one of A beside it.
@@ -441,16 +490,22 @@ func benchPairedLoad(b *testing.B, load, engineA, engineB string, req []byte) {
 
 // dialPairSide opens an engine's side: h2c for an engine served over
 // HTTP/2, kept-alive HTTP/1.1 otherwise.
-func dialPairSide(b *testing.B, engine, addr string, req []byte) pairSide {
+func dialPairSide(b *testing.B, engine, addr string, req []byte, body int) pairSide {
 	//: L1h2's engines speak HTTP/2.
 	if isH2Engine(engine) {
 		return dialH2Side(b, addr, loadConns)
 	}
-	return dialSide(b, addr, req)
+	return dialSide(b, addr, req, body)
 }
 
 // loadRoundTrip writes req on c and reads one 200 response with a 1 KiB body.
 func loadRoundTrip(c stdnet.Conn, br *bufio.Reader, req []byte) error {
+	return loadRoundTripN(c, br, req, loadBodySize)
+}
+
+// loadRoundTripN writes req on c and reads one 200 response whose body is
+// body bytes, Content-Length saying so.
+func loadRoundTripN(c stdnet.Conn, br *bufio.Reader, req []byte, body int) error {
 	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
 	if _, err := c.Write(req); err != nil {
 		return err
@@ -475,8 +530,8 @@ func loadRoundTrip(c stdnet.Conn, br *bufio.Reader, req []byte) error {
 			length, _ = strconv.Atoi(string(bytes.TrimSpace(v)))
 		}
 	}
-	if length != loadBodySize {
-		return fmt.Errorf("Content-Length %d, want %d", length, loadBodySize)
+	if length != body {
+		return fmt.Errorf("Content-Length %d, want %d", length, body)
 	}
 	_, err = br.Discard(length)
 	return err

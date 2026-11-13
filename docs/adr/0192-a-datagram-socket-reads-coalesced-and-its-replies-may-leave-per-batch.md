@@ -403,3 +403,15 @@ choice, and still leaves (`TestPacketLoop_replyToAnUnseenPeer`);
 destination and keep the kernel's. A handler's panic is still contained on the
 epoll lane only: the io_uring lane follows the rule of every loop thread, which
 does not contain it.
+
+## Amendment 2026-11-13 (#852, #977): the io_uring lane's gate is on, the shards' ratio read
+
+`recvmmsg:uring-recvmsg` held P4a's threshold on the three runs of the
+runner it had (net-kernel-gate 43178495012, 43306975342 and 43320386560, Linux
+7.0, ten paired rounds each): `cpu-ns/datagram` 0.25 to 0.35 of the batched
+reader's, upper bound at most 0.347. Its `tools/netgate` row, `uring-recvmsg`,
+is required from this amendment, P4a's criteria unchanged (`datagrams/syscall`,
+here a batch's datagrams, reported). `recvmmsg:recvmmsg+shards` on the same
+runs: 0.960 to 1.070, the median 1.013 to 1.035 — four sockets cost what one
+does at L3's fixed rate; the row is reported and `Shards(0)` stays opt-in, its
+1.8× gate being one of saturation, not of L3's rate.

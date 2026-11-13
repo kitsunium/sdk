@@ -72,6 +72,7 @@ var capabilityRegistry = [...]capabilityEntry{
 	{token: corenet.CapabilityURingRecvmsg, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityTCPKeepAlive, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityTCPUserTimeout, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingSockGetsockopt, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingDeferTaskrun, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingNoSQArray, rank: rankKernel, switchable: true, kernel: true},
 	{token: corenet.CapabilityURingRingFDs, rank: rankKernel, switchable: true, kernel: true},

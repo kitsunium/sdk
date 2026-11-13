@@ -961,6 +961,17 @@ packages:
         name: CapabilityTCPUserTimeout
         type: Capability
         value: "\"tcp-user-timeout\""
+      - blockDoc: The class A-kernel capabilities, on once probed, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityURingSockGetsockopt is io_uring's socket getsockopt command
+          (IORING_OP_URING_CMD with SOCKET_URING_OP_GETSOCKOPT, Linux 6.7), with which
+          the loop reads a Unix connection's SO_PEERCRED on its direct descriptor at
+          accept, so a group with a Unix listener keeps direct descriptors and LoopPeer
+          still answers. Switched off, or absent, a group with a Unix listener runs on
+          process descriptors, where LoopPeer asks the socket.
+        name: CapabilityURingSockGetsockopt
+        type: Capability
+        value: "\"uring-sock-getsockopt\""
       - blockDoc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
         doc: |-
           CapabilityURingDeferTaskrun is IORING_SETUP_DEFER_TASKRUN with SINGLE_ISSUER on
@@ -1749,9 +1760,13 @@ packages:
           The connection a server hands out also implements io.ReaderFrom and
           io.WriterTo, so io.Copy in either direction reaches the socket's own copy —
           sendfile and splice on a plaintext TCP socket — and [ConnUnwrapper]. A
-          direction the group bounds (WriteTimeout for ReaderFrom; ReadTimeout or
-          IdleTimeout for WriterTo) keeps its per-operation bound and goes by the
-          generic copy instead, one bounded read or write at a time.
+          direction the group bounds keeps a bound per operation. Into the
+          connection (WriteTimeout), a source the socket sends without user space
+          — a file or a socket, any syscall.Conn, alone or under an
+          io.LimitedReader — still goes by the socket's own copy, one mebibyte
+          under each write deadline; any other source goes by the generic copy,
+          one bounded write at a time. Out of it (ReadTimeout or IdleTimeout), the
+          generic copy, one bounded read at a time.
 
           IFACE-PLUGIN: the concrete type stays unexported in internal/service/net/server.
         embeds:
@@ -5653,10 +5668,10 @@ packages:
               tag: json:"accept_backoffs"
               type: uint64
             - doc: |-
-                SuppressedLogs counts the lines of net/http's own log the server did not
-                write: over the cap of ten records a second, or with no logger to write
-                them to (WithLogger). A count that rises is a port being probed, or a
-                handler that panics.
+                SuppressedLogs counts the lines of net/http's own log, and the failed TLS
+                handshakes, the server did not write: over the cap of ten records a second,
+                or with no logger to write them to (WithLogger). A count that rises is a
+                port being probed, or a handler that panics.
               name: SuppressedLogs
               tag: json:"suppressed_logs"
               type: uint64
@@ -7758,8 +7773,8 @@ packages:
       - blockDoc: |-
           The names of the instruments RegisterMetrics creates (#847): observables, each read once per collection from State, never per request.
         doc: |-
-          MetricSuppressedLogs names the lines of net/http's own log the server did not write:
-          State's SuppressedLogs.
+          MetricSuppressedLogs names the lines of net/http's own log, and the failed TLS
+          handshakes, the server did not write: State's SuppressedLogs.
         name: MetricSuppressedLogs
         type: string
         value: "\"net_server_suppressed_logs_total\""
@@ -8145,9 +8160,13 @@ packages:
           reach the process's standard logger: plain text on stderr, outside the
           structured stream (#846, ADR 0030). Each line becomes one warn record with
           source=net/http and the group's name, the lines after the first — a panic's
-          stack — in a detail attribute clipped at 2048 bytes.
+          stack — in a detail attribute clipped at 2048 bytes. The engine negotiates
+          TLS before net/http sees a connection, so a failed handshake is the
+          engine's to record, in net/http's words: one warn record naming the peer
+          and crypto/tls's reason, source=net/http on an HTTP group and
+          source=net/server on any other.
 
-          At most ten records a second are written, across the server's HTTP groups;
+          At most ten records a second are written, across the server's groups;
           State counts the rest in SuppressedLogs. Without a logger, or with a nil one,
           nothing is written, and every line is counted there the same way: net/http's
           own log is never stderr's.
@@ -12507,8 +12526,8 @@ packages:
             typed: true
             value: "\"net_server_datagram_reply_failures_total\""
           - doc: |-
-              MetricSuppressedLogs names the lines of net/http's own log the server did not write:
-              State's SuppressedLogs.
+              MetricSuppressedLogs names the lines of net/http's own log, and the failed TLS
+              handshakes, the server did not write: State's SuppressedLogs.
             name: MetricSuppressedLogs
             reexport: svcserver.MetricSuppressedLogs
             type: string
@@ -13021,8 +13040,9 @@ packages:
           doc: |-
             WithLogger gives the server the logger that carries what net/http reports
             through http.Server.ErrorLog — a recovered handler panic, an HTTP/2 stream
-            error, a superfluous WriteHeader, a failed accept — as warn records with
-            source=net/http, at most ten a second; State counts the rest in
+            error, a superfluous WriteHeader, a failed accept — and every failed TLS
+            handshake as warn records with source=net/http (net/server on a group
+            net/http does not serve), at most ten a second; State counts the rest in
             SuppressedLogs. Without a logger, or with a nil one, nothing is written to
             stderr or anywhere else, and every line is counted there.
           forward: svcserver.WithLogger

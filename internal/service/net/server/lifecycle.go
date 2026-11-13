@@ -402,6 +402,7 @@ func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
 		//: no accept loop, no goroutine per connection on a native backend.
 		return s.bindLoopGroup(ctx, group)
 	}
+	group.hsLog = s.handshakeLog(group)
 	handler := group.resolved()
 	//: net/http's own log goes to the server's logger, not to stderr.
 	if group.httpAdapter != nil {

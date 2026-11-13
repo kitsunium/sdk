@@ -198,6 +198,7 @@ go_test(
         "batch_internal_test.go",
         "batch_portable_internal_test.go",
         "batch_replies_external_test.go",
+        "blackhole_linux_internal_test.go",
         "buffers_internal_test.go",
         "buffers_linux_internal_test.go",
         "capability_internal_test.go",
@@ -209,8 +210,10 @@ go_test(
         "cors_external_test.go",
         "datagram_source_linux_internal_test.go",
         "drain_internal_test.go",
+        "drain_proto_internal_test.go",
         "engine_option_external_test.go",
         "error_log_external_test.go",
+        "error_log_handshake_external_test.go",
         "error_log_internal_test.go",
         "exclusive_internal_test.go",
         "exclusive_windows_internal_test.go",
@@ -231,11 +234,15 @@ go_test(
         "lifecycle_internal_test.go",
         "listen_internal_test.go",
         "listen_tracked_internal_test.go",
-        "load_gate_h2_linux_test.go",
-        "load_gate_linux_test.go",
+        "load_big_linux_test.go",
+        "load_gate_h2_test.go",
+        "load_gate_hooks_darwin_test.go",
+        "load_gate_hooks_linux_test.go",
+        "load_gate_test.go",
         "load_l3_linux_internal_test.go",
         "load_l3_uring_linux_internal_test.go",
         "load_sparse_linux_test.go",
+        "load_sparse_veth_linux_test.go",
         "loop_chain_conformance_internal_test.go",
         "loop_chain_internal_test.go",
         "loop_group_internal_test.go",
@@ -323,10 +330,13 @@ go_test(
     # the `requires-network` tag alone does not (measured, both ways).
     local = True,
     # The suite outgrew .bazelrc's 60 s on the hosted runner (TIMEOUT in 60.2 s,
-    # #1338 and #1345's first runs): four shards, each with its own budget, as
-    # loop_test. The children a test re-runs by name drop the shard variables
-    # (unsharded), or they would find their test in another shard's share.
-    shard_count = 4,
+    # #1338 and #1345's first runs): shards, each with its own budget, as
+    # loop_test. Four held until the L2 follow-up added the h2c drain suite,
+    # the 10 000-handshake flood and the backlog drains (one shard TIMEOUT in
+    # 62 s): eight. The children a test re-runs by name drop the shard
+    # variables (unsharded), or they would find their test in another shard's
+    # share.
+    shard_count = 8,
     deps = [
         "//internal/core/app/health",
         "//internal/core/net",
@@ -344,5 +354,13 @@ go_test(
         "//internal/service/net/http2",
         "//internal/service/net/loop",
         "//internal/service/observe/metrics",
-    ],
+    ] + select({
+        "@rules_go//go/platform:android": [
+            "//internal/service/net/static",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/service/net/static",
+        ],
+        "//conditions:default": [],
+    }),
 )

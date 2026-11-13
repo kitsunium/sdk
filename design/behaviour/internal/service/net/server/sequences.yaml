@@ -1329,6 +1329,8 @@ sequences:
         kind: self
       - id: socket.ReadFrom
         kind: value
+      - id: c.boundedReadFrom
+        kind: internal
       - id: io
         kind: stdlib
     steps:
@@ -1339,8 +1341,56 @@ sequences:
             - return: socket.ReadFrom(r)
               to: socket.ReadFrom
           when: zeroCopy && c.timeouts.Write.Duration() <= 0
+      - opt:
+          do:
+            - return: c.boundedReadFrom(socket, r)
+              to: c.boundedReadFrom
+          when: zeroCopy && kernelSource(r)
       - return: "io.Copy(connWriter{c: c}, r)"
         to: io
+  - of: (*conn).boundedReadFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conn).boundedReadFrom
+        kind: self
+      - id: c.boundWrite
+        kind: internal
+      - id: socket.ReadFrom
+        kind: value
+    steps:
+      - bind: step
+        eval: "&io.LimitedReader{R: r}"
+      - loop:
+          do:
+            - set: step.N
+              value: zeroCopyStep
+            - eval: c.boundWrite()
+              to: c.boundWrite
+            - bind: k, serr
+              eval: socket.ReadFrom(step)
+              to: socket.ReadFrom
+            - op: +=
+              set: "n"
+              value: k
+            - opt:
+                do:
+                  - return: n, serr
+                when: serr != nil || step.N > 0
+          forever: true
+  - of: kernelSource
+    steps:
+      - opt:
+          do:
+            - set: r
+              value: lr.R
+          init:
+            bind: lr, limited
+            eval: r.(*io.LimitedReader)
+          when: limited
+      - bind: _, ok
+        eval: r.(syscall.Conn)
+      - return: ok
   - of: (*conn).WriteTo
     participants:
       - id: caller
@@ -1909,6 +1959,18 @@ sequences:
         kind: actor
       - id: (*errorLogWriter).Write
         kind: self
+      - id: w.record
+        kind: internal
+    steps:
+      - eval: w.record(string(p))
+        to: w.record
+      - return: len(p), nil
+  - of: (*errorLogWriter).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*errorLogWriter).record
+        kind: self
       - id: w.budget.suppressed.Add
         kind: value
       - id: strings
@@ -1920,19 +1982,19 @@ sequences:
           do:
             - eval: w.budget.suppressed.Add(1)
               to: w.budget.suppressed.Add
-            - return: len(p), nil
+            - return: ""
           when: w.logger == nil
       - opt:
           do:
-            - return: len(p), nil
+            - return: ""
           when: "!w.budget.admit(w.clk.Now())"
       - bind: first, rest, _
-        eval: strings.Cut(strings.TrimRight(string(p), "\r\n"), "\n")
+        eval: strings.Cut(strings.TrimRight(line, "\r\n"), "\n")
         to: strings
       - bind: attrs
         eval: |-
           []corelogger.AttrValue{
-          		{Key: "source", Value: corelogger.StringValue(errorLogSource)},
+          		{Key: "source", Value: corelogger.StringValue(cmp.Or(w.source, errorLogSource))},
           		{Key: "group", Value: corelogger.StringValue(w.group)},
           	}
       - opt:
@@ -1942,7 +2004,6 @@ sequences:
           when: rest != ""
       - eval: w.logger.Log(context.Background(), level.Warn, first, attrs...)
         to: w.logger.Log
-      - return: len(p), nil
   - of: clip
     steps:
       - opt:
@@ -1961,6 +2022,63 @@ sequences:
     steps:
       - return: "log.New(&errorLogWriter{logger: s.logger, group: group, budget: &s.errBudget, clk: s.clk}, \"\", 0)"
         to: log
+  - of: (*Server).logWriter
+    steps:
+      - return: "&errorLogWriter{logger: s.logger, group: group, budget: &s.errBudget, clk: s.clk, source: source}"
+  - of: (*Server).handshakeLog
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).handshakeLog
+        kind: self
+      - id: s.logWriter
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: group.identity.IsZero()
+      - bind: source
+        eval: handshakeLogSource
+      - opt:
+          do:
+            - set: source
+              value: "\"\""
+          when: group.httpAdapter != nil
+      - return: s.logWriter(group.name, source)
+        to: s.logWriter
+  - of: (*errorLogWriter).handshakeFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*errorLogWriter).handshakeFailed
+        kind: self
+      - id: remote.String
+        kind: value
+      - id: w.record
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: w == nil || ctx.Err() != nil
+      - bind: addr
+        eval: "\"unknown\""
+      - opt:
+          do:
+            - set: addr
+              to: remote.String
+              value: remote.String()
+          when: remote != nil
+      - bind: prefix
+        eval: "\"TLS handshake error from \""
+      - opt:
+          do:
+            - set: prefix
+              value: "\"http: \" + prefix"
+          when: w.source == ""
+      - eval: "w.record(prefix + addr + \": \" + err.Error())"
+        to: w.record
   - of: exclusiveApplies
     participants:
       - id: caller
@@ -2166,10 +2284,19 @@ sequences:
         kind: actor
       - id: bindRetrying
         kind: self
+      - id: bindRetryingAfter
+        kind: internal
+    steps:
+      - return: bindRetryingAfter(ctx, attempts, rebindDelay, inUse, bind)
+        to: bindRetryingAfter
+  - of: bindRetryingAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: bindRetryingAfter
+        kind: self
       - id: time
         kind: stdlib
-      - id: timer.Stop
-        kind: value
     steps:
       - bind: start
         eval: time.Now()
@@ -2191,19 +2318,43 @@ sequences:
                       when: attempt > 1
                   - return: v, wait, err
                 when: err == nil || attempt >= attempts || !inUse(err)
-            - bind: timer
-              eval: time.NewTimer(rebindDelay(attempt))
-              to: time
-            - select:
-                cases:
-                  - comm: <-timer.C
-                  - comm: <-ctx.Done()
-                    do:
-                      - eval: timer.Stop()
-                        to: timer.Stop
-                      - return: v, time.Since(start), err
+            - opt:
+                do:
+                  - return: v, time.Since(start), err
+                when: "!rebindWait(ctx, delay(attempt))"
           init: attempt := 1
           post: attempt++
+  - of: rebindWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: rebindWait
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: timer.Stop
+        kind: value
+      - id: ctx.Deadline
+        kind: value
+    steps:
+      - bind: timer
+        eval: time.NewTimer(d)
+        to: time
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C
+            - comm: <-ctx.Done()
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: deadline, ok
+            eval: ctx.Deadline()
+            to: ctx.Deadline
+          when: ok && !time.Now().Before(deadline)
+      - return: ctx.Err() == nil
   - of: listenerSocket
     steps:
       - bind: sc, _
@@ -2251,13 +2402,15 @@ sequences:
   - of: platformLacks
     steps:
       - return: "false"
-  - of: handshakeHandler.ServeConn
+  - of: (*handshakeHandler).ServeConn
     participants:
       - id: caller
         kind: actor
-      - id: handshakeHandler.ServeConn
+      - id: (*handshakeHandler).ServeConn
         kind: self
       - id: boundHandshake
+        kind: internal
+      - id: h.log.handshakeFailed
         kind: internal
       - id: releaseAdmission
         kind: internal
@@ -2266,6 +2419,8 @@ sequences:
     steps:
       - opt:
           do:
+            - eval: h.log.handshakeFailed(ctx, c.RemoteAddr(), err)
+              to: h.log.handshakeFailed
             - return: err
           init:
             bind: err
@@ -2842,6 +2997,15 @@ sequences:
           when: n < 0
       - return: |-
           http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+          		//: a CONNECT's body is a tunnel — an RFC 8441 WebSocket's frames on
+          		//: HTTP/2 —, not a request body: bounding its total would cut the
+          		//: tunnel once that many bytes crossed it (#967). The tunnel's own
+          		//: protocol bounds what it reads.
+          		if r.Method == http.MethodConnect {
+          			next.ServeHTTP(w, r)
+          			//: unbounded by this layer.
+          			return
+          		}
           		//: the head already says the body is too large: nothing is read.
           		if r.ContentLength > n {
           			w.Header().Set("Connection", "close")
@@ -2855,8 +3019,12 @@ sequences:
           			//: the handler never runs.
           			return
           		}
-          		//: a body of unknown length ends in the standard library's own error.
-          		r.Body = http.MaxBytesReader(w, r.Body, n)
+          		//: a body of unknown length ends in the standard library's own error;
+          		//: a request with no body — net/http's NoBody — has nothing to bound,
+          		//: and is not given a reader to allocate (#966).
+          		if r.Body != nil && r.Body != http.NoBody {
+          			r.Body = http.MaxBytesReader(w, r.Body, n)
+          		}
           		next.ServeHTTP(w, r)
           	})
         to: http
@@ -3940,6 +4108,8 @@ sequences:
         kind: self
       - id: s.bindLoopGroup
         kind: internal
+      - id: s.handshakeLog
+        kind: internal
       - id: group.resolved
         kind: internal
       - id: s.errorLog
@@ -3956,6 +4126,9 @@ sequences:
             - return: s.bindLoopGroup(ctx, group)
               to: s.bindLoopGroup
           when: group.loopHandler != nil
+      - set: group.hsLog
+        to: s.handshakeLog
+        value: s.handshakeLog(group)
       - bind: handler
         eval: group.resolved()
         to: group.resolved
@@ -5638,6 +5811,8 @@ sequences:
         kind: internal
       - id: resolveLanes
         kind: internal
+      - id: s.handshakeLog
+        kind: internal
       - id: s.adoptStream
         kind: internal
       - id: s.registerLoopListeners
@@ -5676,6 +5851,9 @@ sequences:
         to: s.operator.plan
       - eval: resolveLanes(group)
         to: resolveLanes
+      - set: group.hsLog
+        to: s.handshakeLog
+        value: s.handshakeLog(group)
       - loop:
           do:
             - bind: adopted, err
@@ -6736,6 +6914,8 @@ sequences:
             - set: g.handshake
               to: group.handshakeBound
               value: group.handshakeBound()
+            - set: g.hsLog
+              value: group.hsLog
           when: group.tlsCodec()
       - loop:
           do:
@@ -7029,7 +7209,7 @@ sequences:
             - eval: pl.live.Add(-1)
               to: pl.live.Add
             - return: ""
-          when: "!handshake(c, d)"
+          when: "!handshake(c, d, pl.g.hsLog)"
       - select:
           cases:
             - comm: "pl.events <- portableEvent{kind: pevOpen, conn: c}"
@@ -8906,6 +9086,8 @@ sequences:
         kind: stdlib
       - id: tc.HandshakeContext
         kind: value
+      - id: log.handshakeFailed
+        kind: internal
       - id: swallowErr
         kind: internal
     steps:
@@ -8921,6 +9103,8 @@ sequences:
       - defer: cancel()
       - opt:
           do:
+            - eval: log.handshakeFailed(context.Background(), c.RemoteAddr(), err)
+              to: log.handshakeFailed
             - eval: swallowErr(c.Close())
               to: swallowErr
             - return: "false"
@@ -15396,7 +15580,7 @@ sequences:
           do:
             - return: chained
           when: g.identity.IsZero()
-      - return: "handshakeHandler{next: chained, timeouts: g.timeouts}"
+      - return: "&handshakeHandler{next: chained, timeouts: g.timeouts, log: g.hsLog}"
   - of: newConnLimiter
     steps:
       - opt:

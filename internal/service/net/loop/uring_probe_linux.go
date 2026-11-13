@@ -4,6 +4,8 @@ package loop
 
 import (
 	"bytes"
+	"slices"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -33,7 +35,11 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 		//: named.
 		return false, false, probeError("self_test", syscall.EIO)
 	}
-	fds := ul.sw.disabled(corenet.CapabilityURingDirect) || unixListener(ul.lfds)
+	ul.peers.unix = unixListeners(ul.lfds)
+	unix := slices.Contains(ul.peers.unix, true)
+	// A Unix listener keeps the group on process descriptors unless the
+	// socket command can read its peers on direct ones (#974).
+	fds := ul.sw.disabled(corenet.CapabilityURingDirect) || (unix && !ul.sw.wants(corenet.CapabilityURingSockGetsockopt))
 	rg, err := selfTestRing(flags, !fds)
 	//: no ring, buffers or table.
 	if err != nil {
@@ -74,6 +80,17 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 	if fds {
 		//: process descriptors.
 		return false, false, nil
+	}
+	//: a Unix listener: its peers are read by the socket command, which the
+	//: payload's direct descriptor must answer, or the group runs on process
+	//: descriptors.
+	if unix {
+		ul.peers.cmd, ul.peers.why = ul.peerCommand(run)
+		//: absent: LoopPeer asks the process descriptor.
+		if !ul.peers.cmd {
+			//: process descriptors.
+			return false, false, nil
+		}
 	}
 	//: passed; closing the ring closes the direct descriptors.
 	direct, deferred = run.releases(port)
@@ -246,8 +263,18 @@ type selfTestRun struct {
 	// the ends of its recvs; closed is its close's.
 	done   int
 	closed bool
+	// peer is the socket command's completion, install the install of the
+	// probe's socket.
+	peer, install cmdResult
 	// mode is how the self-test runs.
 	mode selfTestMode
+}
+
+// cmdResult is one self-test command's completion: whether it came, and its
+// result.
+type cmdResult struct {
+	done bool
+	res  int32
 }
 
 // selfTestMode is how the self-test runs, as the switches say.
@@ -317,6 +344,12 @@ func (st *selfTestRun) onCQE(c *cqe) {
 		st.done++
 	case udClose:
 		st.closed = true
+	//: the socket command's read of the peer.
+	case udPeer:
+		st.peer = cmdResult{done: true, res: c.res}
+	//: the install of the probe's Unix socket.
+	case udFilesUpdate:
+		st.install = cmdResult{done: true, res: c.res}
 	//: bytes in a provided buffer.
 	case udRecv:
 		st.onRecv(c)
@@ -420,4 +453,111 @@ func loopbackListener() (fd, port int, err error) {
 	}
 	//: the port the kernel chose.
 	return fd, in4.Port, nil
+}
+
+// peerCommand is the socket command's probe (#974): SO_PEERCRED read by
+// SOCKET_URING_OP_GETSOCKOPT on a Unix socket in the direct table — one end of
+// a pair, installed by IORING_OP_FILES_UPDATE —, as the loop reads an
+// accepted Unix connection's. A TCP socket is no witness: Fedora's 6.14
+// answered it the length of a struct ucred and left every Unix peer unknown
+// (#974's CI). It reports whether the command answered this process's own
+// credentials, and the reason when it did not. The structures the kernel
+// writes are the loop's, never the stack's: a goroutine's stack may move
+// while the command is in flight.
+func (ul *uLoop) peerCommand(st *selfTestRun) (bool, string) {
+	//: injected: a kernel before 6.7.
+	if ul.hooks.failStage == "sock_getsockopt" {
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: " + syscall.EOPNOTSUPP.Error() + " (before 6.7)"
+	}
+	pair, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
+	//: no Unix socket to read.
+	if err != nil {
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: no Unix socket pair to probe: " + err.Error()
+	}
+	defer closeFDs(pair[:])
+	index, why := ul.installProbe(st, pair[0])
+	//: not in the direct table.
+	if why != "" {
+		//: absent.
+		return false, why
+	}
+	defer st.closeDirect(index)
+	s := st.u.get()
+	//: no room on a fresh ring: not judged, so not used.
+	if s == nil {
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: no submission room"
+	}
+	ul.peers.probe = syscall.Ucred{}
+	prepPeerCred(s, index, &ul.peers.probe, udPack(udPeer, 0, 0))
+	st.pump(func() bool { return st.peer.done })
+	//: by what came back.
+	switch {
+	//: never completed.
+	case !st.peer.done:
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: no completion within 500 ms"
+	//: refused: an errno, before 6.7 EOPNOTSUPP or EINVAL.
+	case st.peer.res < 0:
+		//: absent, named.
+		return false, "SOCKET_URING_OP_GETSOCKOPT on a Unix socket: " + syscall.Errno(-st.peer.res).Error()
+	//: another length.
+	case st.peer.res != ucredLen:
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: an unexpected length"
+	//: not this process's credentials.
+	case ul.peers.probe.Pid != int32(syscall.Getpid()):
+		//: absent.
+		return false, "SOCKET_URING_OP_GETSOCKOPT: SO_PEERCRED named pid " + strconv.Itoa(int(ul.peers.probe.Pid)) + ", not this process"
+	}
+	//: present.
+	return true, ""
+}
+
+// installProbe installs fd into a free entry of the self-test's direct
+// table and returns that entry, or why it could not.
+func (ul *uLoop) installProbe(st *selfTestRun, fd int) (uint32, string) {
+	s := st.u.get()
+	//: no room on a fresh ring.
+	if s == nil {
+		//: not installed.
+		return 0, "IORING_OP_FILES_UPDATE: no submission room"
+	}
+	ul.peers.probeFD = int32(fd)
+	prepInstall(s, &ul.peers.probeFD, udPack(udFilesUpdate, 0, 0))
+	st.pump(func() bool { return st.install.done })
+	//: by what came back.
+	switch {
+	//: never completed.
+	case !st.install.done:
+		//: not installed.
+		return 0, "IORING_OP_FILES_UPDATE: no completion within 500 ms"
+	//: one descriptor installed, its entry written back.
+	case st.install.res == 1 && ul.peers.probeFD >= 0:
+		//: installed.
+		return uint32(ul.peers.probeFD), ""
+	//: refused.
+	case st.install.res < 0:
+		//: not installed, named.
+		return 0, "IORING_OP_FILES_UPDATE: " + syscall.Errno(-st.install.res).Error()
+	}
+	//: anything else.
+	return 0, "IORING_OP_FILES_UPDATE: installed " + strconv.Itoa(int(st.install.res)) + " descriptors"
+}
+
+// closeDirect closes the self-test's direct entry index and waits for it, so
+// the release check after it starts from its own counts.
+func (st *selfTestRun) closeDirect(index uint32) {
+	s := st.u.get()
+	//: no room: the ring's close takes it.
+	if s == nil {
+		//: left to the ring.
+		return
+	}
+	st.closed = false
+	prepCloseDirect(s, index, udPack(udClose, 0, 0))
+	st.pump(func() bool { return st.closed })
+	st.closed = false
 }

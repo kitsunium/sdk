@@ -13,6 +13,9 @@ const (
 	// stDead has called OnClose and waits for its backend to release the
 	// descriptor and every operation still in flight.
 	stDead
+	// stPeer is a Unix connection accepted on an io_uring direct descriptor
+	// whose peer the socket command is reading: not opened yet (#974).
+	stPeer
 )
 
 // The flags of a connection slot.
@@ -36,6 +39,17 @@ const (
 	fCompact
 	// fDrained is a connection whose handler the drain has told once.
 	fDrained
+)
+
+// How a flight leaves on io_uring (connCtl.zc, #969).
+const (
+	// zcOff: by IORING_OP_SEND.
+	zcOff uint8 = iota
+	// zcOn: by IORING_OP_SEND_ZC, every send of it.
+	zcOn
+	// zcHold: no send for now; the last notification of the flight sends its
+	// rest by IORING_OP_SEND.
+	zcHold
 )
 
 // The bits of connCtl.fileBits, io_uring's file state.
@@ -111,11 +125,13 @@ type connCtl struct {
 	fileOps uint8
 	// fileBits holds ffEOF, ffFull and ffPoll.
 	fileBits uint8
-	// zcFlight marks a flight sent zero-copy, every send of it (#969);
-	// zcPend counts its sends whose notification has not come: the flight's
-	// chunk is the kernel's until it reaches zero.
-	zcFlight bool
-	zcPend   uint8
+	// zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
+	// send of it zero-copy, zcHold none for now — a zero-copy send of it was
+	// refused, or zcPend is at its bound — until its notifications came, the
+	// rest then sent plainly. zcPend counts its sends whose notification has
+	// not come: the flight's chunk is the kernel's until it reaches zero.
+	zc     uint8
+	zcPend uint8
 	// fileErr is the errno a file operation failed with, zero when none.
 	fileErr int32
 	// fileOff is the next byte of the file to send, fileLeft how many are left.

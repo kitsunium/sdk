@@ -19,7 +19,7 @@ const (
 
 	// loadL1 is a plaintext GET with a 1 KiB body over 1000 keep-alive
 	// connections. The loads are fixed in the bench code of
-	// internal/service/net/server (load_gate_linux_test.go,
+	// internal/service/net/server (load_gate_test.go,
 	// load_l3_linux_internal_test.go): the gate names them, the bench defines
 	// them.
 	loadL1 string = "L1"
@@ -29,6 +29,16 @@ const (
 	// connections, eight streams in flight on each, the client writing
 	// pre-encoded frames (#963).
 	loadL1h2 string = "L1h2"
+	// loadL1big is L1's request answered with a 64 KiB body, its rounds an
+	// eighth of L1's requests (load_big_linux_test.go): the size a copy is
+	// worth avoiding, for the zero-copy send (#969) and the file tree on the
+	// loop (#982).
+	loadL1big string = "L1big"
+	// loadSparse is the sparse keep-alive load over the veth pair: requests
+	// at a fixed rate over connections kept open, each asked rarely, the
+	// wake each costs what busy polling removes (#979,
+	// load_sparse_veth_linux_test.go).
+	loadSparse string = "Sparse"
 	// loadL3 is UDP, 1200-byte datagrams from a GSO sender of 54 segments, 4
 	// flows at a fixed rate, over a veth pair.
 	loadL3 string = "L3"
@@ -47,6 +57,9 @@ const (
 	// metricDatagramsPerSyscall is how many datagrams one receive returned on
 	// average.
 	metricDatagramsPerSyscall string = "datagrams/syscall"
+	// metricP99 is the 99th percentile of a request's round trip, as the
+	// client times it.
+	metricP99 string = "p99-ns"
 
 	// minSamples is the plan's n: ten runs of each engine. Fewer is refused,
 	// never judged on a wider interval.
@@ -82,6 +95,14 @@ const (
 	h2CPUCeiling float64 = 1.0
 	// calibrationUDP is the same on L3: P4a's 25 %.
 	calibrationUDP float64 = 1.25
+	// sendZCCeiling is #969's: a zero-copy send at least 10 % cheaper a
+	// request than the copying one, before uring-send-zc may leave class
+	// A-code. Reported until then.
+	sendZCCeiling float64 = 0.9
+	// busyPollCeiling is #979's reported bound: busy polling no slower at
+	// the 99th percentile and no dearer a request; its ADR sets the
+	// threshold once the veth lane has measured it.
+	busyPollCeiling float64 = 1.0
 )
 
 var (
@@ -112,6 +133,26 @@ var (
 	calHTTPCriteria = []criterionEntity{
 		{Metric: metricCPUPerReq, Op: opAtMost, Threshold: calibrationHTTP, Ratio: true},
 		{Metric: metricCPUPerReq, Op: opAtLeast, Threshold: 1 / calibrationHTTP, Ratio: true},
+	}
+	// uringRecvmsgCriteria: P4a's on the io_uring datagram lane (#852):
+	// CPU a datagram gated at 0.75, datagrams a batch reported.
+	uringRecvmsgCriteria = []criterionEntity{
+		{Metric: metricDatagramsPerSyscall, Op: opAtLeast, Threshold: gsoDatagramsFloor, Ratio: true, Reported: true},
+		{Metric: metricCPUPerDatagram, Op: opAtMost, Threshold: gsoCPUCeiling, Ratio: true},
+	}
+	// shardsCriteria: four sockets of one port against one, CPU a datagram
+	// at L3's fixed rate within the calibration's 25 %, reported (#977).
+	shardsCriteria = []criterionEntity{{Metric: metricCPUPerDatagram, Op: opAtMost, Threshold: calibrationUDP, Ratio: true, Reported: true}}
+	// sendZCCriteria: the zero-copy send against the copying one, at 64 KiB.
+	sendZCCriteria = []criterionEntity{{Metric: metricCPUPerReq, Op: opAtMost, Threshold: sendZCCeiling, Ratio: true, Reported: true}}
+	// filesCriteria: the file tree on the loop against net/static on the
+	// goroutine engine, at P6's threshold, reported (#982).
+	filesCriteria = []criterionEntity{{Metric: metricCPUPerReq, Op: opAtMost, Threshold: loopsCPUCeiling, Ratio: true, Reported: true}}
+	// busyPollCriteria: the 99th percentile and the CPU a request, each
+	// against the loop that sleeps, reported (#979).
+	busyPollCriteria = []criterionEntity{
+		{Metric: metricP99, Op: opAtMost, Threshold: busyPollCeiling, Ratio: true, Reported: true},
+		{Metric: metricCPUPerReq, Op: opAtMost, Threshold: busyPollCeiling, Ratio: true, Reported: true},
 	}
 	// h1h2Criteria: the loop's HTTP/2 against its HTTP/1.1, reported, no
 	// threshold binding until measured on the runner.
@@ -159,6 +200,32 @@ var (
 		{
 			Step: "h1-h2", Load: loadL1h2, A: "loop", B: "loop-h2", Criteria: h1h2Criteria,
 			Pending: "reported only: HTTP/2 against HTTP/1.1 on the loop, no threshold until measured (#963)",
+		},
+		// #852: held on three runs before it was turned on, upper bound 0.31.
+		{Step: "uring-recvmsg", Load: loadL3, A: "recvmmsg", B: "uring-recvmsg", Criteria: uringRecvmsgCriteria, Active: true},
+		{
+			Step: "shards", Load: loadL3, A: "recvmmsg", B: "recvmmsg+shards", Criteria: shardsCriteria,
+			Pending: "reported: Shards(0) becomes the datagram default only once four shards serve 1.8 times one socket's datagrams at saturation, which L3's fixed rate does not measure (#977)",
+		},
+		{
+			Step: "send-zc", Load: loadL1big, A: "loop", B: "loop-sendzc", Criteria: sendZCCriteria,
+			Pending: "reported: uring-send-zc stays class A-code until the ratio holds, then leaves it only through a net:default-change pull request citing it (ADR 0189, #969)",
+		},
+		{
+			Step: "files", Load: loadL1big, A: "goroutine-static", B: "loop-files", Criteria: filesCriteria,
+			Pending: "reported: the file tree on the loop against net/static, no gate until measured on the runner (#982)",
+		},
+		{
+			Step: "busy-poll", Load: loadSparse, A: "loop", B: "loop-busypoll", Criteria: busyPollCriteria,
+			Pending: "reported: busy-poll stays class A-code; its ADR sets the p99 and CPU thresholds from the veth lane's rows (ADR 0189, #979)",
+		},
+		{
+			Step: "kqueue", Load: loadL1, A: "goroutine", B: "loop-kqueue", Criteria: p6Criteria,
+			Pending: "macos-15 lane (bench-darwin), judged alone with -only: auto prefers kqueue over portable only once P6's threshold holds there (#976)",
+		},
+		{
+			Step: "cal-L1-kqueue", Load: loadL1, A: "loop-kqueue", B: "loop-kqueue", Criteria: calHTTPCriteria,
+			Pending: "macos-15 lane: the darwin runner held within 1.05 of itself before kqueue's row can be judged (#976)",
 		},
 	}
 )

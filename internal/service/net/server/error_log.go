@@ -1,8 +1,10 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"log"
+	stdnet "net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,8 +16,8 @@ import (
 )
 
 const (
-	// errorLogCap is how many records of net/http's own log a server writes in
-	// one second. The rest are counted, never written: a scanner probing a port
+	// errorLogCap is how many records of net/http's own log, and of the TLS
+	// handshakes the engine saw fail, a server writes in one second. The rest are counted, never written: a scanner probing a port
 	// must not turn into one line per attempt.
 	errorLogCap int = 10
 	// errorLogWindow is the span the cap counts in.
@@ -23,8 +25,13 @@ const (
 	// errorLogDetailMax clips the lines after the first of one record — a
 	// recovered panic's stack — in the record's detail attribute.
 	errorLogDetailMax int = 2048
-	// errorLogSource is the value of the source attribute every record carries.
+	// errorLogSource is the value of the source attribute every record of an
+	// HTTP group carries: net/http's own lines, and the TLS handshake failures
+	// the engine negotiates in net/http's place.
 	errorLogSource string = "net/http"
+	// handshakeLogSource is the source of a TLS handshake failure on a group
+	// net/http does not serve: a connection handler's, or a loop codec's.
+	handshakeLogSource string = "net/server"
 )
 
 // errorLogBudget is the server's one budget of net/http log records, shared by
@@ -76,25 +83,36 @@ type errorLogWriter struct {
 	budget *errorLogBudget
 	// clk is the server's clock, the budget's window.
 	clk clock.Clock
+	// source is the source attribute of the records: empty for net/http, on
+	// an HTTP group, net/server for the handshake failures of any other.
+	source string
 }
 
 // Write implements io.Writer. It never fails: net/http has nobody to hand a
 // failed log to.
 func (w *errorLogWriter) Write(p []byte) (int, error) {
+	w.record(string(p))
+	//: the line was consumed.
+	return len(p), nil
+}
+
+// record writes line as one warn record under the budget, or counts it: with
+// no logger, or over the cap.
+func (w *errorLogWriter) record(line string) {
 	//: no logger: discarded, and counted so State says it happened.
 	if w.logger == nil {
 		w.budget.suppressed.Add(1)
-		//: the line was consumed.
-		return len(p), nil
+		//: counted.
+		return
 	}
 	//: over the cap: counted by the budget.
 	if !w.budget.admit(w.clk.Now()) {
-		//: the line was consumed.
-		return len(p), nil
+		//: counted.
+		return
 	}
-	first, rest, _ := strings.Cut(strings.TrimRight(string(p), "\r\n"), "\n")
+	first, rest, _ := strings.Cut(strings.TrimRight(line, "\r\n"), "\n")
 	attrs := []corelogger.AttrValue{
-		{Key: "source", Value: corelogger.StringValue(errorLogSource)},
+		{Key: "source", Value: corelogger.StringValue(cmp.Or(w.source, errorLogSource))},
 		{Key: "group", Value: corelogger.StringValue(w.group)},
 	}
 	//: a recovered panic's stack, or any further lines, clipped.
@@ -102,8 +120,6 @@ func (w *errorLogWriter) Write(p []byte) (int, error) {
 		attrs = append(attrs, corelogger.AttrValue{Key: "detail", Value: corelogger.StringValue(clip(rest, errorLogDetailMax))})
 	}
 	w.logger.Log(context.Background(), level.Warn, first, attrs...)
-	//: the line was consumed.
-	return len(p), nil
 }
 
 // clip bounds s to n bytes.
@@ -122,4 +138,58 @@ func clip(s string, n int) string {
 // record carries its own time.
 func (s *Server) errorLog(group string) *log.Logger {
 	return log.New(&errorLogWriter{logger: s.logger, group: group, budget: &s.errBudget, clk: s.clk}, "", 0)
+}
+
+// logWriter is the server's logger and budget for group's records, with
+// source as their source attribute.
+func (s *Server) logWriter(group, source string) *errorLogWriter {
+	//: the server's logger, budget and clock.
+	return &errorLogWriter{logger: s.logger, group: group, budget: &s.errBudget, clk: s.clk, source: source}
+}
+
+// handshakeLog is the writer a TLS group's handshake failures go to (#846):
+// the engine negotiates TLS itself, before net/http or a codec sees the
+// connection, so net/http's own "TLS handshake error" line is never written
+// and the engine writes it in its place — under the same budget, with the
+// same fields. An HTTP group's records say source=net/http, any other
+// group's source=net/server.
+func (s *Server) handshakeLog(group *StreamGroup) *errorLogWriter {
+	//: a group with no identity never negotiates.
+	if group.identity.IsZero() {
+		//: none.
+		return nil
+	}
+	source := handshakeLogSource
+	//: net/http serves the group: the line it would have written.
+	if group.httpAdapter != nil {
+		source = ""
+	}
+	//: the server's writer.
+	return s.logWriter(group.name, source)
+}
+
+// handshakeFailed records one TLS negotiation that failed with err from
+// remote, as net/http words it on an HTTP group — "http: TLS handshake error
+// from <addr>: <reason>" — and without its "http: " on any other, the reason crypto/tls's error, which names no key, certificate
+// content or byte the peer sent. A handshake the engine itself gave up — its
+// context cancelled by the drain or the stop — is not a failure of the peer,
+// and is not recorded. A nil writer records nothing.
+func (w *errorLogWriter) handshakeFailed(ctx context.Context, remote stdnet.Addr, err error) {
+	//: no writer, or the engine's own cancel.
+	if w == nil || ctx.Err() != nil {
+		//: nothing.
+		return
+	}
+	addr := "unknown"
+	//: the peer's address, when the socket has one.
+	if remote != nil {
+		addr = remote.String()
+	}
+	prefix := "TLS handshake error from "
+	//: net/http's own wording on its own groups.
+	if w.source == "" {
+		prefix = "http: " + prefix
+	}
+	//: through the budget, as net/http's own lines are.
+	w.record(prefix + addr + ": " + err.Error())
 }

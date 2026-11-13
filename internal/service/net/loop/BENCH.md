@@ -103,7 +103,7 @@ line each; "no row yet" means the report has no benchmark a promotion could read
 | `tcp-fastopen` | no row yet (#857): declared; its gate is a repeat-client connect benchmark on a host whose `net.ipv4.tcp_fastopen` has bit 2 |
 | `uring-min-timeout` | no row yet: ADR 0199 §D3 and ADR 0202 §D5 measured `min_wait_usec` on a 7.0 kernel, a measurement no benchmark of this package reproduces; `URingWait_ready` measures the wait when a completion is already there, not the minimum wait |
 
-`uring-send-zc` left this list for class A-code (#969, ADR 0189 amended 2026-11-11): opted into through `LoopValue.Capabilities`, a flight of `SendZCMin` bytes or more sent by `IORING_OP_SEND_ZC`. Its paired L1 row (`BenchmarkLoadL1/pair=loop:loop-sendzc`, 64 KiB bodies) and its `tools/netgate` line are not built, so no number for it is in this file.
+`uring-send-zc` left this list for class A-code (#969, ADR 0189 amended 2026-11-11): opted into through `LoopValue.Capabilities`, a flight of `SendZCMin` bytes or more sent by `IORING_OP_SEND_ZC`. Its paired row is `BenchmarkLoadL1big/pair=loop:loop-sendzc` (64 KiB bodies), reported by `tools/netgate`'s `send-zc` row; its numbers are in `internal/service/net/server/BENCH.md` (edition 2026-11-13), not in this file.
 
 `reuseport-cbpf` left this list for class A-code (#977): the datagram side's `Steer` opts into it and server reports its row; a loop group refuses it (#857).
 

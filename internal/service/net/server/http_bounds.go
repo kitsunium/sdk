@@ -122,8 +122,10 @@ func (g *StreamGroup) reportedBodyBound() int64 {
 // limitBody bounds the request body next reads to n bytes: a Content-Length
 // past n is answered 413 on the head, with Connection: close, before next
 // runs and before a body byte is read; a body of unknown length is wrapped in
-// http.MaxBytesReader, whose error next sees as *http.MaxBytesError. A bound
-// below zero leaves the handler as it is.
+// http.MaxBytesReader, whose error next sees as *http.MaxBytesError; a request
+// with no body is left as it is, at no allocation, and so is a CONNECT, whose
+// body is a tunnel's stream rather than a request body. A bound below zero
+// leaves the handler as it is.
 func limitBody(next http.Handler, n int64) http.Handler {
 	//: no bound, nothing to enforce.
 	if n < 0 {
@@ -132,6 +134,15 @@ func limitBody(next http.Handler, n int64) http.Handler {
 	}
 	//: every request is judged on its way to the handler.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//: a CONNECT's body is a tunnel — an RFC 8441 WebSocket's frames on
+		//: HTTP/2 —, not a request body: bounding its total would cut the
+		//: tunnel once that many bytes crossed it (#967). The tunnel's own
+		//: protocol bounds what it reads.
+		if r.Method == http.MethodConnect {
+			next.ServeHTTP(w, r)
+			//: unbounded by this layer.
+			return
+		}
 		//: the head already says the body is too large: nothing is read.
 		if r.ContentLength > n {
 			w.Header().Set("Connection", "close")
@@ -145,8 +156,12 @@ func limitBody(next http.Handler, n int64) http.Handler {
 			//: the handler never runs.
 			return
 		}
-		//: a body of unknown length ends in the standard library's own error.
-		r.Body = http.MaxBytesReader(w, r.Body, n)
+		//: a body of unknown length ends in the standard library's own error;
+		//: a request with no body — net/http's NoBody — has nothing to bound,
+		//: and is not given a reader to allocate (#966).
+		if r.Body != nil && r.Body != http.NoBody {
+			r.Body = http.MaxBytesReader(w, r.Body, n)
+		}
 		next.ServeHTTP(w, r)
 	})
 }
