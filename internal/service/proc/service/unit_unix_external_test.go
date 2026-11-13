@@ -35,9 +35,19 @@ func realUnit(t *testing.T, cfg service.Config) *service.Unit {
 }
 
 // TestRealSimpleStartStop: a long-running shell is up once spawned, and a stop
-// ends it with SIGTERM, a clean end for a daemon.
+// ends it with SIGTERM, a clean end for a daemon. The stop comes once the
+// shell has left its execve(2) — it has written its marker — and the shell
+// execs nothing more: it makes a FIFO through a child of its own, then waits
+// in the FIFO's open, which nobody writes. Start
+// returns as soon as execve has closed the child's close-on-exec descriptors
+// (os.StartProcess), before execve is done, and on NetBSD 10.1 a signal sent
+// in that window did not end the child: the stop's SIGTERM, sent right after
+// Start to a `sh -c "exec sleep 30"` — two execve, two windows —, left the
+// sleeper its whole 30 s (#1355, as #1379's SIGKILL in proc/exec).
 func TestRealSimpleStartStop(t *testing.T) {
-	u := realUnit(t, service.Config{ExecStart: []coresvc.CommandValue{command(t, "/bin/sh", "-c", "exec sleep 30")}})
+	dir := t.TempDir()
+	marker, fifo := filepath.Join(dir, "up"), filepath.Join(dir, "never")
+	u := realUnit(t, service.Config{ExecStart: []coresvc.CommandValue{command(t, "/bin/sh", "-c", `mkfifo "$1" && : > "$0" && read -r x < "$1"`, marker, fifo)}})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := u.Start(ctx); err != nil {
@@ -45,6 +55,14 @@ func TestRealSimpleStartStop(t *testing.T) {
 	}
 	if st := u.State(); st.State != coresvc.StateActive || st.MainPID <= 0 {
 		t.Fatalf("after Start: %+v", st)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the shell never ran its first command in 10 s: %+v", u.State())
+		}
 	}
 	if err := u.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
