@@ -76,11 +76,14 @@ judge() {
 
 @test "conf: every threshold is its issue's own, unamended" {
   # id kind metric op threshold issue — the acceptance of #1038, #1059, #808,
-  # #834, #811, #1016, #1035, #827, #840 and #1034 as their issues wrote it
-  # (the owner's reading of #808's denominator and #1059's Load_Hit included;
-  # #827's and #840's per-message bounds as sixteen messages' ns/op, 16 × 0.55
-  # and 16 × 0.40; #1035's "unchanged within noise" read as ±10 %, a reading
-  # to confirm with the owner).
+  # #834, #811, #1016, #1035, #827, #840, #1034, #1102, #910 and #892 as their
+  # issues wrote it (the owner's reading of #808's denominator and #1059's
+  # Load_Hit included; #827's and #840's per-message bounds as sixteen
+  # messages' ns/op, 16 × 0.55 and 16 × 0.40; #1035's "unchanged within noise"
+  # read as ±10 %, a reading to confirm with the owner; #1102's zero
+  # allocations and its 1.5 x B/op bound; #910's four allocations fewer, a
+  # delta of -4; #892's 10 % of the block form, a ratio of 1.10, and its two
+  # floor rows).
   expected="$(
     cat <<'EOF'
 1038-set-newkey ab ns/op <= 1.05 #1038
@@ -123,6 +126,54 @@ judge() {
 1034-tryread-allocs value allocs/op <= 0 #1034
 1034-spsc-1024 ab ns/op <= 0.60 #1034
 1034-floor-sc cross ns/op <= 0.50 #1034
+1102-sized-gzip-random-4k-allocs value allocs/op <= 0 #1102
+1102-sized-gzip-random-4k-bytes value B/op <= 0 #1102
+1102-sized-gzip-text-4k-allocs value allocs/op <= 0 #1102
+1102-sized-gzip-text-4k-bytes value B/op <= 0 #1102
+1102-sized-gzip-random-64k-allocs value allocs/op <= 0 #1102
+1102-sized-gzip-random-64k-bytes value B/op <= 0 #1102
+1102-sized-gzip-text-64k-allocs value allocs/op <= 0 #1102
+1102-sized-gzip-text-64k-bytes value B/op <= 0 #1102
+1102-sized-flate-random-4k-allocs value allocs/op <= 0 #1102
+1102-sized-flate-random-4k-bytes value B/op <= 0 #1102
+1102-sized-flate-text-4k-allocs value allocs/op <= 0 #1102
+1102-sized-flate-text-4k-bytes value B/op <= 0 #1102
+1102-sized-flate-random-64k-allocs value allocs/op <= 0 #1102
+1102-sized-flate-random-64k-bytes value B/op <= 0 #1102
+1102-sized-flate-text-64k-allocs value allocs/op <= 0 #1102
+1102-sized-flate-text-64k-bytes value B/op <= 0 #1102
+1102-sized-zlib-random-4k-allocs value allocs/op <= 0 #1102
+1102-sized-zlib-random-4k-bytes value B/op <= 0 #1102
+1102-sized-zlib-text-4k-allocs value allocs/op <= 0 #1102
+1102-sized-zlib-text-4k-bytes value B/op <= 0 #1102
+1102-sized-zlib-random-64k-allocs value allocs/op <= 0 #1102
+1102-sized-zlib-random-64k-bytes value B/op <= 0 #1102
+1102-sized-zlib-text-64k-allocs value allocs/op <= 0 #1102
+1102-sized-zlib-text-64k-bytes value B/op <= 0 #1102
+1102-nil-gzip-random-4k-bytes value B/op <= 6144 #1102
+1102-nil-gzip-text-4k-bytes value B/op <= 6144 #1102
+1102-nil-gzip-random-64k-bytes value B/op <= 98304 #1102
+1102-nil-gzip-text-64k-bytes value B/op <= 98304 #1102
+1102-nil-flate-random-4k-bytes value B/op <= 6144 #1102
+1102-nil-flate-text-4k-bytes value B/op <= 6144 #1102
+1102-nil-flate-random-64k-bytes value B/op <= 98304 #1102
+1102-nil-flate-text-64k-bytes value B/op <= 98304 #1102
+1102-nil-zlib-random-4k-bytes value B/op <= 6144 #1102
+1102-nil-zlib-text-4k-bytes value B/op <= 6144 #1102
+1102-nil-zlib-random-64k-bytes value B/op <= 98304 #1102
+1102-nil-zlib-text-64k-bytes value B/op <= 98304 #1102
+910-form-small-allocs delta allocs/op <= -4 #910
+910-form-record-allocs delta allocs/op <= -4 #910
+892-zstd-json-compress ratio ns/op <= 1.10 #892
+892-zstd-json-decompress ratio ns/op <= 1.10 #892
+892-zstd-random-compress ratio ns/op <= 1.10 #892
+892-zstd-random-decompress ratio ns/op <= 1.10 #892
+892-s2-json-compress ratio ns/op <= 1.10 #892
+892-s2-json-decompress ratio ns/op <= 1.10 #892
+892-s2-random-compress ratio ns/op <= 1.10 #892
+892-s2-random-decompress ratio ns/op <= 1.10 #892
+892-s2-random-floor ratio ns/op <= 1.10 #892
+892-s2-json-floor ratio ns/op <= 1.10 #892
 EOF
   )"
   actual="$(awk '$1 == "rule" { print $2, $4, $5, $8, $9, $10 }' "$CONF")"
@@ -149,6 +200,17 @@ EOF
   # #827 runs on vfs's changes too, #840 on the port's.
   grep -q '^suite queue-publish .* internal/service/data/queue/,internal/service/data/vfs/$' "$CONF"
   grep -q '^suite dcache-bulk .* internal/core/data/cache/,internal/kernel/collections/cache/,internal/service/data/cache/$' "$CONF"
+  # The three suites outside internal/service's and the kernel's: the domain's transform, the promoted codecs
+  # in pkg/v1 (the form codec's engine a path too), the vendor module's streams (the port's a path too).
+  grep -q '^suite transform normal internal/service/data/transform .*\^BenchmarkDecompress(Sized)?\$/\^(gzip|flate|zlib)\$/\^(random|text)\$/\^(4096|65536)\$ .* internal/service/data/transform/$' "$CONF"
+  grep -q '^suite codec-promote normal pkg/v1/data/codec .*\^BenchmarkMarshalPromoted\$ .* pkg/v1/data/codec/,internal/service/data/codec/form/$' "$CONF"
+  grep -q '^suite tstream normal third-party/transform .*\^Benchmark(Stream|StreamFloor)\$ .* third-party/transform/,internal/core/data/transform/$' "$CONF"
+  # #910 is read head minus base; #892's ten rows are head rows against head rows, the base having no stream.
+  grep -q '^rule 910-form-small-allocs  *codec-promote delta allocs/op BenchmarkMarshalPromoted/form/small-4 *- <= -4 #910 report$' "$CONF"
+  [ "$(awk '$1 == "rule" && $3 == "tstream" { print $4 }' "$CONF" | sort | uniq -c | tr -s ' ' | tr '\n' ' ')" = " 10 ratio " ]
+  [ "$(awk '$1 == "step0" { print $2, $3, $4 }' "$CONF" | grep '^tstream ')" = 'tstream cpu ^BenchmarkStream$/^random$/^s2$/^decompress$' ]
+  # Every rule of the lane is a report rule: no threshold gates before its pull request makes it hold.
+  [ "$(awk '$1 == "rule" { print $11 }' "$CONF" | sort -u)" = report ]
   # Every base is the commit the issues were audited at.
   [ "$(awk '$1 == "suite" { print $5 }' "$CONF" | sort -u)" = "ee1f48ba23cb193b13a91222a027326d91093811" ]
 }
@@ -175,7 +237,16 @@ EOF
     "suite t normal internal/y abc ^B 100x 4 1 ubuntu-latest - internal/y/" \
     "suite t normal internal/y $SHA0 ^B 100 4 1 ubuntu-latest - internal/y/" \
     "suite t scale internal/y $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/" \
-    "suite t normal pkg/y $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/"; do
+    "suite t normal pkg/y $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/" \
+    "suite t normal pkg/v1 $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/" \
+    "suite t normal pkg/v2/y $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/" \
+    "suite t normal third-party $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/" \
+    "suite t normal third-partyx/y $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/" \
+    "suite t normal e2e/y $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/" \
+    "suite t normal pkg/v1/y;z $SHA0 ^B 100x 4 1 ubuntu-latest - internal/y/" \
+    "rule a s delta ns/op BenchmarkA BenchmarkB <= -4 #1 gate" \
+    "rule a s delta ns/op BenchmarkA - <= x #1 gate" \
+    "rule a s deltas ns/op BenchmarkA - <= -4 #1 gate"; do
     fixture_conf "$bad"
     run bash "$CI_DIR/bench-ab-conf.sh" check
     [ "$status" -eq 2 ] || { echo "accepted: $bad"; return 1; }
@@ -189,6 +260,21 @@ EOF
   run bash "$CI_DIR/bench-ab-conf.sh" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"step0 of suite 's' declared twice"* ]]
+}
+
+@test "conf: a suite measures a package of internal/, of pkg/v1/ or of a vendor module under third-party/, and a delta rule reads one row" {
+  fixture_conf "suite k normal pkg/v1/data/codec $SHA0 ^B 100x 4 1 ubuntu-latest - pkg/v1/data/codec/" \
+    "suite v normal third-party/db/writer/redis $SHA0 ^B 100x 4 1 ubuntu-latest - third-party/db/writer/redis/,internal/core/x/" \
+    "rule d k delta allocs/op BenchmarkA-4 - <= -4 #910 report" \
+    "rule e v delta B/op BenchmarkA-4 - >= 0.5 #1 gate"
+  run bash "$CI_DIR/bench-ab-conf.sh" check
+  [ "$status" -eq 0 ]
+  run bash "$CI_DIR/bench-ab-conf.sh" suite v
+  [[ "$output" == *"SUITE_DIR=third-party/db/writer/redis"* ]]
+  run bash "$CI_DIR/bench-ab-conf.sh" rules k
+  [ "$output" = "$(printf 'd\tk\tdelta\tallocs/op\tBenchmarkA-4\t-\t<=\t-4\t#910\treport')" ]
+  run bash "$CI_DIR/bench-ab-conf.sh" paths
+  [ "$output" = "$(printf 'internal/core/x/\ninternal/x/\npkg/v1/data/codec/\nthird-party/db/writer/redis/')" ]
 }
 
 @test "conf: a cross rule reads two rows, and a step0 record names a suite and its profiles" {
@@ -242,20 +328,23 @@ EOF
   run bash "$CI_DIR/bench-ab-conf.sh" suite big
   [[ "$output" == *"SUITE_STEP0_PROFILES="$'\n'* ]]
   [[ "$output" == *"SUITE_STEP0_PATTERN="* ]]
-  # The shipped table asks for singleflight's profiles at both CPU counts, and nobody else's.
+  # The shipped table asks for singleflight's profiles at both CPU counts, and #892's CPU profile of the s2 stream, and nobody else's.
   unset BENCH_AB_CONF
   for suite in sflight sflight-8; do
     run bash "$CI_DIR/bench-ab-conf.sh" suite "$suite"
     [[ "$output" == *"SUITE_STEP0_PROFILES=mutex,block,cpu"* ]]
     [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkDo_DistinctKeysParallel(_OneShard)?$'* ]]
   done
-  [ "$(awk '$1 == "step0" { print $2 }' "$CONF" | tr '\n' ' ')" = "sflight sflight-8 " ]
+  [ "$(awk '$1 == "step0" { print $2 }' "$CONF" | tr '\n' ' ')" = "sflight sflight-8 tstream " ]
+  run bash "$CI_DIR/bench-ab-conf.sh" suite tstream
+  [[ "$output" == *"SUITE_STEP0_PROFILES=cpu"* ]]
+  [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkStream$/^random$/^s2$/^decompress$'* ]]
 }
 
 @test "plan: a dispatch takes the suites it names, by name or by package, in one mode" {
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal all
   [ "$status" -eq 0 ]
-  [ "${lines[1]}" = "count=14" ]
+  [ "${lines[1]}" = "count=17" ]
   refute grep -q scale <<<"${lines[0]}"
   run bash "$CI_DIR/bench-ab-conf.sh" plan scale all
   [ "${lines[1]}" = "count=3" ]
@@ -292,6 +381,18 @@ EOF
   printf '%s\n' internal/service/data/vfs/os_publish.go >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"queue-publish","runner":"ubuntu-latest"}]}' ]
+  # Outside internal/: the domain's transform, the promoted codecs and the form engine under them, the vendor module and the port it streams through.
+  for pair in internal/service/data/transform/gzip.go:transform pkg/v1/data/codec/codec.go:codec-promote \
+    internal/service/data/codec/form/form.go:codec-promote third-party/transform/stream.go:tstream \
+    internal/core/data/transform/port.go:tstream; do
+    printf '%s\n' "${pair%%:*}" >"$WORK/changed"
+    run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
+    [ "${lines[0]}" = "matrix={\"include\":[{\"suite\":\"${pair##*:}\",\"runner\":\"ubuntu-latest\"}]}" ] || { echo "${pair%%:*}: ${lines[0]}"; return 1; }
+  done
+  # A neighbour that is none of their paths runs nothing: pkg/v1's other codecs' families, another vendor module.
+  printf '%s\n' pkg/v1/data/transform/x.go pkg/v1/data/codecs/x.go third-party/transformer/x.go third-party/codec/yaml/x.go internal/service/data/codec/json/x.go >"$WORK/changed"
+  run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
+  [ "${lines[1]}" = "count=0" ]
   printf '%s\n' internal/service/observe/logger/encoder/json.go >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"logger","runner":"ubuntu-latest"}]}' ]
@@ -301,7 +402,7 @@ EOF
   [ "${lines[1]}" = "count=0" ]
   printf '%s\n' scripts/ci/bench-ab-run.sh >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
-  [ "${lines[1]}" = "count=14" ]
+  [ "${lines[1]}" = "count=17" ]
   run bash "$CI_DIR/bench-ab-conf.sh" plan scale changed "$WORK/changed"
   [ "$status" -eq 2 ]
 }
@@ -379,6 +480,40 @@ EOF
   [ "$(verdict_of allocs)" = pass ]
 }
 
+@test "verdict: a delta rule is the head's row minus the base's, round by round, on the interval's bound, in the metric's own unit" {
+  fixture_conf \
+    "rule fewer s delta allocs/op BenchmarkA-4 - <= -4 #910 gate" \
+    "rule short s delta allocs/op BenchmarkA-4 - <= -5 #910 report" \
+    "rule up s delta allocs/op BenchmarkA-4 - >= -6 #910 gate" \
+    "rule bytes s delta B/op BenchmarkB-4 - <= -300 #1 report"
+  for r in $(seq 1 20); do
+    # 14 allocs in the base, 8 to 10 in the head: the deltas are -6 .. -4; the head's own value is no delta.
+    put base "$r" BenchmarkA-4 100 14
+    put head "$r" BenchmarkA-4 100 $((8 + r % 3))
+    printf 'BenchmarkB-4\t100\t5 ns/op\t1000 B/op\t3 allocs/op\n' >>"$WORK/raw/base-$(printf '%03d' "$r").txt"
+    printf 'BenchmarkB-4\t100\t5 ns/op\t800 B/op\t3 allocs/op\n' >>"$WORK/raw/head-$(printf '%03d' "$r").txt"
+  done
+  judge s
+  [ "$status" -eq 0 ]
+  # The 15th of 20 values is the high bound: -4 holds -4, and fails -5; the low bound -6 holds -6.
+  [ "$(verdict_of fewer)" = pass ]
+  [ "$(column_of fewer 10)" = -6 ]
+  [ "$(column_of fewer 12)" = -4 ]
+  [ "$(column_of fewer 3)" = delta ]
+  [ "$(verdict_of short)" = fail ]
+  [ "$(verdict_of up)" = pass ]
+  [ "$(verdict_of bytes)" = fail ]
+  [ "$(column_of bytes 11)" = -200 ]
+  [[ "$output" == *"| fewer | #910 | allocs/op BenchmarkA-4 head-base | 20 | -6 | -5 | -4 | <= -4 | **pass** | gate |"* ]]
+  # A count that grew is a positive delta: it fails a bound of -4 on every round.
+  rm -rf "$WORK/raw"
+  for r in $(seq 1 20); do put base "$r" BenchmarkA-4 100 14; put head "$r" BenchmarkA-4 100 16; done
+  judge s
+  [ "$status" -eq 1 ]
+  [ "$(verdict_of fewer)" = fail ]
+  [ "$(column_of fewer 11)" = 2 ]
+}
+
 @test "verdict: a cross rule divides a head row by a row of the BASE, round by round, whatever the head says of that row" {
   fixture_conf \
     "rule within s cross ns/op BenchmarkOne-4 BenchmarkTwo-4 <= 0.80 #1035 gate" \
@@ -421,6 +556,8 @@ EOF
     "rule cross-gone-head s cross ns/op BenchmarkGone-4 BenchmarkA-4 <= 2 #1 gate" \
     "rule cross-gone-base s cross ns/op BenchmarkA-4 BenchmarkGone-4 <= 2 #1 gate" \
     "rule value-gone s value allocs/op BenchmarkGone-4 - <= 0 #1 gate" \
+    "rule delta-new s delta allocs/op BenchmarkNew-4 - <= -4 #910 gate" \
+    "rule delta-gone s delta allocs/op BenchmarkGone-4 - <= -4 #910 gate" \
     "rule exists s ratio ns/op BenchmarkNew-4 BenchmarkA-4 <= 2 #1 gate"
   for r in $(seq 1 20); do
     put head "$r" BenchmarkA-4 100
@@ -429,7 +566,8 @@ EOF
   done
   judge s
   [ "$status" -eq 1 ]
-  for id in ab-new cross-new-in-base ratio-gone diff-gone cross-gone-head cross-gone-base value-gone; do
+  # A delta over a row the base lacks (#910's, before its pull request lands) is missing, never a delta against zero.
+  for id in ab-new cross-new-in-base ratio-gone diff-gone cross-gone-head cross-gone-base value-gone delta-new delta-gone; do
     [ "$(verdict_of $id)" = missing ] || { echo "$id: $(verdict_of $id)"; return 1; }
     [ "$(column_of $id 9)" = 0 ]
   done
@@ -644,6 +782,35 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+@test "build: the module is the nearest go.mod above the package — the package's own (a vendor module), a family's, the root's" {
+  build_fixture
+  for t in base head; do
+    mkdir -p "$WORK/$t/third-party/transform" "$WORK/$t/third-party/db/writer/redis/sub" "$WORK/$t/pkg/v1/data/codec" "$WORK/$t/internal/service/x"
+    echo "module v" >"$WORK/$t/third-party/transform/go.mod"
+    echo "module r" >"$WORK/$t/third-party/db/writer/redis/go.mod"
+    echo "module d" >"$WORK/$t/pkg/v1/data/go.mod"
+    echo "module root" >"$WORK/$t/go.mod"
+    echo "$t" | tee "$WORK/$t/third-party/transform/a_bench_test.go" "$WORK/$t/third-party/db/writer/redis/sub/a_bench_test.go" \
+      "$WORK/$t/pkg/v1/data/codec/a_bench_test.go" "$WORK/$t/internal/service/x/a_bench_test.go" >/dev/null
+  done
+  # GOWORK=off in the module's directory, the package named relative to it.
+  for pair in "third-party/transform:third-party/transform:." "third-party/db/writer/redis/sub:third-party/db/writer/redis:./sub" \
+    "pkg/v1/data/codec:pkg/v1/data:./codec" "internal/service/x:.:./internal/service/x"; do
+    IFS=: read -r pkg mod rel <<<"$pair"
+    : >"$WORK/go.log"
+    run bash "$CI_DIR/bench-ab-build.sh" "$WORK/base" "$pkg" "$WORK/b.test" "$WORK/head"
+    [ "$status" -eq 0 ] || { echo "$pkg: $output"; return 1; }
+    [ "${lines[0]}" = "overlay=all" ]
+    dir="$WORK/base/$mod"
+    [ "$mod" != . ] || dir="$WORK/base"
+    grep -q "^$dir off test -c -o $WORK/b.test $rel\$" "$WORK/go.log" || { echo "$pkg: $(cat "$WORK/go.log")"; return 1; }
+  done
+  : >"$WORK/go.log"
+  run bash "$CI_DIR/bench-ab-build.sh" "$WORK/head" third-party/transform "$WORK/h.test"
+  [ "$status" -eq 0 ]
+  grep -q "^$WORK/head/third-party/transform off test -c -o $WORK/h.test \.\$" "$WORK/go.log"
+}
+
 # ── the trees ───────────────────────────────────────────────────────────────
 
 @test "tree: a base the shallow clone lacks is fetched one commit deep and checked out detached" {
@@ -819,6 +986,21 @@ EOF
       [[ "$line" =~ ^\ +timeout-minutes:\ \$\{\{\ inputs\.mode ]] ||
       { echo "spliced: $line"; return 1; }
   done < <(grep -F '${{ inputs.' "$WF")
+}
+
+@test "workflow: a pull request keeps one run a ref and cancels the one it replaces; a dispatch has a group of its own, suites and head in it, and is never cancelled" {
+  group="$(sed -n 's/^  group: //p' "$WF")"
+  [ "$(grep -c '^  group: ' "$WF")" -eq 1 ]
+  # The pull request's group is the one it always had: the workflow and the ref, nothing else.
+  [[ "$group" == '${{ github.workflow }}-${{ github.ref }}${{ github.event_name == '"'"'workflow_dispatch'"'"' && format('* ]]
+  [[ "$group" == *"|| '' }}" ]]
+  # The dispatch's adds what makes two dispatches two measurements.
+  for input in suites head mode base runner; do
+    [[ "$group" == *"inputs.$input"* ]] || { echo "the dispatch's group lacks inputs.$input: $group"; return 1; }
+  done
+  # An input in the group is a name, never a command: it sits in no `run:` and no `${{ }}` of its own.
+  refute grep -q 'group:.*\$\{\{ inputs\.' "$WF"
+  grep -q "cancel-in-progress: \${{ github.event_name == 'pull_request' }}" "$WF"
 }
 
 @test "workflow: the legs build, interleave, compare, attribute and judge through the lane's scripts, and publish whatever happened" {
