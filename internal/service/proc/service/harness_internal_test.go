@@ -124,7 +124,17 @@ func cmd(t *testing.T, words ...string) coresvc.CommandValue {
 	return c
 }
 
-// newHarness resolves cfg and starts the replay at an arbitrary instant.
+// harnessSelfPID is the engine's own PID in a replay. resolve reads
+// os.Getpid, and the reducer refuses a MAINPID= naming the engine: a replay
+// that named 4242 or 4711 as another process failed whenever the test binary
+// itself had that PID, as a Solaris guest handing PIDs out in sequence did
+// (#1360). Pinned, the replay never depends on the process running it: 2 is
+// above PID 1, below the harness's first spawned PID (101), and no test names
+// it as a process.
+const harnessSelfPID = 2
+
+// newHarness resolves cfg and starts the replay at an arbitrary instant, the
+// engine's PID pinned to harnessSelfPID.
 func newHarness(t *testing.T, cfg Config) *harness {
 	t.Helper()
 	if cfg.Name == "" {
@@ -134,6 +144,7 @@ func newHarness(t *testing.T, cfg Config) *harness {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
+	s.selfPID = harnessSelfPID
 	return &harness{
 		t: t, m: model{s: s}, now: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC),
 		replies: map[uint64]error{}, failSpawn: map[list]bool{}, nextPID: 100, mono: 1_000_000, attachOK: true,

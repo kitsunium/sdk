@@ -341,6 +341,15 @@ END observed, without a status it cannot read.
   signal: FreeBSD and OpenBSD add the boot time on every read, a stepped clock
   would make a live process read as another, and `Stop` would take that ESRCH
   for "already gone".
+- **A child still inside `execve(2)`.** `os.StartProcess` returns once execve
+  has closed the child's close-on-exec descriptors, before execve is done, and
+  NetBSD answers the record of a process still inside it with no start time
+  (`fill_kproc2` reads it as a zombie while execve holds `p_reflock`). On
+  NetBSD 10.1 a child signalled in that window was not ended: its knote never
+  fired in 10 s, and a `SIGKILL` left a `sleep 30` its whole 30 s (#1379). The
+  BSD tests that signal a child start it with `startRunningSleeper` — one
+  execve, `/bin/sleep`, returned once its record carries a start. The kernel
+  line that drops the signal is not identified.
 - **Their PID file walk** is the same `pidWalk` over `os.Root` directories
   (`pidfile_bsd.go`): `openat` `O_NOFOLLOW`, `fstatat`, `readlinkat`, a
   descent proven by device and inode; the file examined by `fstatat`, opened
