@@ -1142,6 +1142,7 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 		rr.closeBackstop()
 	}
 	lp.h.OnBatchEnd(lp)
+	lp.settleDrain()
 	lp.endBatch()
 	ul.submitLate()
 	//: buffers go back only now: OnBatchEnd has returned.
@@ -1640,8 +1641,9 @@ func (rr *uRing) recvBytes(slot int32, more bool) {
 			rr.r.deliver(slot, seg)
 		}
 	}
-	//: re-armed unless the connection is going.
-	if !more && rr.r.conns[slot].state == stOpen {
+	//: re-armed unless the connection is going: a drain's close reads on,
+	//: to linger (ring.lingers).
+	if c := &rr.r.conns[slot]; !more && (c.state == stOpen || (c.state == stClosing && c.reason == rDrain)) {
 		rr.armRecv(slot)
 	}
 }
@@ -1663,8 +1665,9 @@ func (rr *uRing) recvStarved(slot int32) {
 // batch, its output still leaving.
 func (rr *uRing) recvEOF(slot int32) {
 	cc := &rr.r.conns[slot]
-	//: an open connection settles at the end of the batch.
-	if cc.state == stOpen {
+	//: an open or closing connection settles at the end of the batch: a
+	//: lingering one closes then.
+	if cc.state == stOpen || cc.state == stClosing {
 		cc.flags |= fPeerDone
 		rr.r.markDirty(slot)
 	}
@@ -1687,8 +1690,9 @@ func (rr *uRing) onSend(slot int32, gen uint32, c *cqe) {
 		return
 	}
 	cc := &rr.r.conns[slot]
-	//: a zero-copy send's notification, or its refusal (#969).
-	if cc.zc != zcOff && rr.zeroCopyHandled(slot, c) {
+	//: a zero-copy send's notification, whatever the flight now is, or its
+	//: refusal (#969, #1396).
+	if (cc.zc != zcOff || c.flags&cqeFNotif != 0) && rr.zeroCopyHandled(slot, c) {
 		//: settled, held or sent again.
 		return
 	}
@@ -2047,8 +2051,10 @@ func (rr *uRing) flush(r *ring, slot int32) {
 	}
 	c.flight, c.out = c.out, chunkRef{idx: noChunk}
 	c.zc = zcOff
-	//: large enough, on a loop whose sockets took zero-copy so far.
-	if rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin {
+	//: large enough, on a loop whose sockets took zero-copy so far, and no
+	//: refused send's notification still owed: a refusal is at most one a
+	//: flight, so zcVoid stays at one and never wraps (#1396).
+	if rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin && c.zcVoid == 0 {
 		c.zc = zcOn
 	}
 	rr.sendFlight(slot)
@@ -2057,6 +2063,14 @@ func (rr *uRing) flush(r *ring, slot int32) {
 // sendFlight submits the unsent rest of slot's flight.
 func (rr *uRing) sendFlight(slot int32) {
 	c := &rr.r.conns[slot]
+	//: as many notifications pending as zcPend counts: none sent until they
+	//: came, the rest then plain; no SQE taken for it.
+	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
+		c.zc = zcHold
+		c.flags |= fSending
+		//: held.
+		return
+	}
 	s := rr.u.get()
 	//: no room: the connection fails rather than stalls silently.
 	if s == nil {
@@ -2066,14 +2080,6 @@ func (rr *uRing) sendFlight(slot int32) {
 		return
 	}
 	ud := udPack(udSend, c.gen, uint32(slot))
-	//: as many notifications pending as zcPend counts: none sent until they
-	//: came, the rest then plain.
-	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
-		c.zc = zcHold
-		c.flags |= fSending
-		//: held.
-		return
-	}
 	//: plain, or zero-copy: its notification is one more operation (#969).
 	if c.zc == zcOn {
 		prepSendZC(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
@@ -2117,6 +2123,20 @@ func (rr *uRing) sendFlight(slot int32) {
 func (rr *uRing) shutdown(r *ring, slot int32) {
 	c := &r.conns[slot]
 	rr.closing = append(rr.closing, closeWait{slot: slot, gen: c.gen, at: rr.ul.lp.tick + closeBackstopTicks})
+	//: a drain's close that lingered: its writing side already shut — its one
+	//: shutdown —, the recv still armed is cancelled by user data, and with
+	//: nothing in flight the descriptor closes.
+	if c.linger == lingerHalf {
+		//: nothing in flight: closed now; otherwise the recv cancelled, or
+		//: the backstop's.
+		if c.ops == 0 {
+			rr.maybeClose(slot)
+		} else {
+			rr.cancelOp(slot, udRecv)
+		}
+		//: on its way.
+		return
+	}
 	s := rr.u.get()
 	//: no room: the close waits for the operations to end by themselves, or
 	//: for the backstop.
@@ -2127,6 +2147,24 @@ func (rr *uRing) shutdown(r *ring, slot int32) {
 		return
 	}
 	prepShutdownFixed(s, uint32(c.fd), syscall.SHUT_RDWR, udPack(udShutdown, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
+	c.ops++
+}
+
+// halfClose implements driver: IORING_OP_SHUTDOWN of the writing side, the
+// FIN after the output; the recv stays armed, so the lingering slot reads to
+// its peer's end (ring.lingers). With no room in the SQ the slot lingers
+// without it, to drainLinger.
+func (rr *uRing) halfClose(r *ring, slot int32) {
+	c := &r.conns[slot]
+	s := rr.u.get()
+	//: no room: the bound ends it.
+	if s == nil {
+		r.st.retries++
+		//: later.
+		return
+	}
+	prepShutdownFixed(s, uint32(c.fd), syscall.SHUT_WR, udPack(udShutdown, c.gen, uint32(slot)))
 	rr.ul.onFD(s)
 	c.ops++
 }
@@ -2450,16 +2488,15 @@ func (ul *uLoop) control() {
 	if ul.drainReq.Load() && !lp.draining {
 		ul.startDrain()
 	}
-	//: while draining, a connection with no partial input closes once its
-	//: output left.
+	//: while draining, the queues are taken; the settled connections are
+	//: looked at after OnBatchEnd (settleDrain).
 	if !lp.draining {
 		//: nothing.
 		return
 	}
-	//: every ring, every open connection.
+	//: every ring.
 	for _, rr := range ul.rings {
 		rr.takeQueues()
-		lp.closeSettled(rr.r)
 	}
 }
 

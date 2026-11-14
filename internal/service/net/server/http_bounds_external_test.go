@@ -117,6 +117,59 @@ type bodyOutcome struct {
 	err error
 	// cancelled reports that the request's context was done when it answered.
 	cancelled bool
+	// reads dates each read of the body, in order.
+	reads []bodyRead
+}
+
+// bodyRead dates one read of a request body: the server's per-read deadline
+// is installed as the read starts, so start plus the bound is its deadline.
+type bodyRead struct {
+	// start is when the handler asked for the read.
+	start time.Time
+	// end is when the read returned.
+	end time.Time
+	// n is how many bytes it returned.
+	n int
+	// err is how it ended.
+	err error
+}
+
+// datedBody records the date of each read of the body it wraps.
+type datedBody struct {
+	// inner is the body the server handed the handler.
+	inner io.ReadCloser
+	// reads is the record, written by the handler's goroutine alone.
+	reads *[]bodyRead
+}
+
+// Read implements io.Reader.
+func (b datedBody) Read(p []byte) (int, error) {
+	start := time.Now()
+	n, err := b.inner.Read(p)
+	*b.reads = append(*b.reads, bodyRead{start: start, end: time.Now(), n: n, err: err})
+	return n, err
+}
+
+// Close implements io.Closer.
+func (b datedBody) Close() error {
+	return b.inner.Close()
+}
+
+// bodyDates renders the peer's writes and the handler's reads, each against
+// origin, with each read's deadline: a read that timed out while the peer's
+// next write left after its deadline met a late peer; one whose next write
+// left before it met a bound that did not hold.
+func bodyDates(origin time.Time, writes []time.Time, reads []bodyRead, bound time.Duration) string {
+	var b strings.Builder
+	at := func(d time.Time) time.Duration { return d.Sub(origin).Round(time.Millisecond) }
+	for i, w := range writes {
+		fmt.Fprintf(&b, "\n  write %d at %v", i, at(w))
+	}
+	for i, r := range reads {
+		fmt.Fprintf(&b, "\n  read %d at %v, deadline %v, returned at %v: %d bytes, err %v",
+			i, at(r.start), at(r.start.Add(bound)), at(r.end), r.n, r.err)
+	}
+	return b.String()
 }
 
 // startBodyServer serves an HTTP group bounded by read whose handler reads the
@@ -128,17 +181,19 @@ func startBodyServer(t *testing.T, read, pause time.Duration) (addr string, seen
 	srv := server.New()
 	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.ReadTimeout(read), server.Plaintext()).
 		HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var reads []bodyRead
+			body := datedBody{inner: r.Body, reads: &reads}
 			first := make([]byte, 1)
-			n, err := io.ReadFull(r.Body, first)
+			n, err := io.ReadFull(body, first)
 			if err == nil {
 				time.Sleep(pause)
 				var rest []byte
-				rest, err = io.ReadAll(r.Body)
+				rest, err = io.ReadAll(body)
 				n += len(rest)
 			}
 			//: the time after the body is the handler's too.
 			time.Sleep(pause)
-			outcomes <- bodyOutcome{read: n, err: err, cancelled: r.Context().Err() != nil}
+			outcomes <- bodyOutcome{read: n, err: err, cancelled: r.Context().Err() != nil, reads: reads}
 			w.WriteHeader(http.StatusOK)
 		}))
 	if err := srv.Start(t.Context()); err != nil {
@@ -157,8 +212,18 @@ func startBodyServer(t *testing.T, read, pause time.Duration) (addr string, seen
 // two reads, after the last — is never charged to the peer: once the body has
 // ended, the deadline is cleared, so net/http's watch for a vanished peer does
 // not cancel the request's context while the handler works.
+//
+// It is deliberately NOT parallel with the package's other tests: its peer
+// paces its writes with its own sleeps, a fifth of the bound apart, so the
+// test holds only while no write leaves more than the bound after the read
+// waiting for it. On illumos, run beside the package's parallel tests and
+// their thousands of connections, a read timed out after 12 and after 14
+// bytes (#1406): the deadline is installed afresh as each read starts, so a
+// write came the bound late, and the server cut off a late peer, rightly. Its
+// cases still run beside one another, and a failure dates every write and
+// every read's deadline, which tells a late peer from a bound that was not
+// renewed.
 func TestReadTimeoutBoundsEachReadOfAnHTTPBody(t *testing.T) {
-	t.Parallel()
 	const (
 		// read is the per-read bound.
 		read time.Duration = 500 * time.Millisecond
@@ -198,6 +263,7 @@ func TestReadTimeoutBoundsEachReadOfAnHTTPBody(t *testing.T) {
 		if err := conn.SetDeadline(time.Now().Add(boundsDeadline)); err != nil {
 			t.Fatalf("deadline: %v", err)
 		}
+		origin := time.Now()
 		if _, err := fmt.Fprintf(conn, "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n", size); err != nil {
 			t.Fatalf("write the header: %v", err)
 		}
@@ -205,11 +271,13 @@ func TestReadTimeoutBoundsEachReadOfAnHTTPBody(t *testing.T) {
 		if c.stallAfter > 0 {
 			limit = c.stallAfter
 		}
+		var writes []time.Time
 		for sent := 0; sent < limit; sent += c.chunk {
 			time.Sleep(c.gap)
 			if _, err := conn.Write([]byte(strings.Repeat("a", min(c.chunk, limit-sent)))); err != nil {
 				t.Fatalf("write the body: %v", err)
 			}
+			writes = append(writes, time.Now())
 		}
 
 		var got bodyOutcome
@@ -227,8 +295,8 @@ func TestReadTimeoutBoundsEachReadOfAnHTTPBody(t *testing.T) {
 			return
 		}
 		if got.err != nil || got.read != size {
-			t.Fatalf("the handler read %d bytes, err %v; want %d and nil — every read was inside the %v bound",
-				got.read, got.err, size, read)
+			t.Fatalf("the handler read %d bytes, err %v; want %d and nil — every read was inside the %v bound:%s",
+				got.read, got.err, size, read, bodyDates(origin, writes, got.reads, read))
 		}
 		if got.cancelled {
 			t.Fatal("the request's context was cancelled while the handler worked after the body")

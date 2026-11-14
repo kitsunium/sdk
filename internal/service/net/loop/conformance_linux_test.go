@@ -679,6 +679,29 @@ func TestConformance_deferTaskrun(t *testing.T) {
 	})
 }
 
+// resetClose closes conns with a reset (SO_LINGER 0) rather than a FIN:
+// neither end keeps a TIME_WAIT socket, and the connection-tracking entry a
+// netfilter host keeps for each lives seconds (CLOSE) rather than two
+// minutes (TIME_WAIT). The suite's tests of tens of thousands of
+// connections, closed by FIN, held a hundred thousand of a runner's 262 144
+// conntrack entries, and server's suite, which go test runs beside this one,
+// filled the rest: every new loopback flow was refused, a datagram lane's
+// send failing with EPERM (#1377). It lives here, not beside the stop tests,
+// because loop_memory_test compiles this file and not theirs.
+func resetClose(conns []stdnet.Conn) {
+	for _, c := range conns {
+		//: a slot a failed dial left empty.
+		if c == nil {
+			continue
+		}
+		//: a connection that is not TCP is closed as it is.
+		if tc, ok := c.(*stdnet.TCPConn); ok {
+			_ = tc.SetLinger(0)
+		}
+		_ = c.Close()
+	}
+}
+
 // TestConformance_idleNoWatchdog holds 10 000 idle connections for longer
 // than the watchdog's re-arms take: an armed recv on an empty socket is
 // healthy, so the watchdog fires zero times and nothing falls back.
@@ -698,11 +721,7 @@ func TestConformance_idleNoWatchdog(t *testing.T) {
 			}
 			conns = append(conns, c)
 		}
-		defer func() {
-			for _, c := range conns {
-				_ = c.Close()
-			}
-		}()
+		defer resetClose(conns)
 		waitFor(t, "every open", func() bool { return g.Live() == 10000 })
 		time.Sleep(time.Duration(watchdogFires+1) * time.Duration(watchdogTicks) * tickEvery)
 		st := g.State()

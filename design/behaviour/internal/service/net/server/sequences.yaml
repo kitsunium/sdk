@@ -7314,6 +7314,8 @@ sequences:
         kind: internal
       - id: pl.h.OnBatchEnd
         kind: value
+      - id: pl.closeSettled
+        kind: internal
       - id: pl.endBatch
         kind: internal
     steps:
@@ -7334,6 +7336,11 @@ sequences:
         to: pl.control
       - eval: pl.h.OnBatchEnd(pl)
         to: pl.h.OnBatchEnd
+      - opt:
+          do:
+            - eval: pl.closeSettled()
+              to: pl.closeSettled
+          when: pl.draining
       - eval: pl.endBatch()
         to: pl.endBatch
   - of: (*portableLoop).collect
@@ -7410,7 +7417,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: pc == nil || !pc.open || pc.lingering.Load()
+          when: pc == nil || !pc.open || pc.reasonSet || pc.lingering.Load()
       - eval: pl.deliver(ev.slot, pc, ev.data)
         to: pl.deliver
   - of: (*portableLoop).handleEnd
@@ -7986,22 +7993,12 @@ sequences:
               value: pc.deadline
           when: "!pc.deadline.IsZero() && pc.deadline.Before(pl.timersAt)"
   - of: (*portableLoop).control
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*portableLoop).control
-        kind: self
-      - id: pl.closeSettled
-        kind: internal
     steps:
       - opt:
           do:
-            - return: ""
-          when: "!pl.g.drainReq.Load()"
-      - set: pl.draining
-        value: "true"
-      - eval: pl.closeSettled()
-        to: pl.closeSettled
+            - set: pl.draining
+              value: "true"
+          when: pl.g.drainReq.Load()
   - of: (*portableLoop).closeSettled
     participants:
       - id: caller
@@ -8108,7 +8105,17 @@ sequences:
           cases:
             - comm: pc.kick <- struct{}{}
             - default: true
+  - of: lingersOnClose
+    steps:
+      - return: pc.reasonSet && (pc.closeErr == nil || errors.Is(pc.closeErr, corenet.ServerClosed)) && !pc.peerDone
   - of: markClosing
+    participants:
+      - id: caller
+        kind: actor
+      - id: markClosing
+        kind: self
+      - id: lingersOnClose
+        kind: internal
     steps:
       - lock:
           mutex: pc.mu
@@ -8119,7 +8126,8 @@ sequences:
             - set: pc.closing
               value: "true"
             - set: pc.linger
-              value: pc.reasonSet && pc.closeErr == nil && !pc.peerDone
+              to: lingersOnClose
+              value: lingersOnClose(pc)
           when: closing
       - return: closing && !pc.linger && len(pc.out) == 0 && pc.flight == 0
   - of: (*portableLoop).closeAll

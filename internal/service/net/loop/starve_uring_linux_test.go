@@ -71,11 +71,7 @@ func TestConformance_noStarvationAtScale(t *testing.T) {
 			ul := uringOf(g)
 			rr := ul.rings[0]
 			all := openScale(t, addr, n+1)
-			defer func() {
-				for _, c := range all {
-					_ = c.Close()
-				}
-			}()
+			defer resetClose(all)
 			holder, conns := all[n], all[:n]
 			for burst := range scaleBursts {
 				before := g.State().RingStates[0].BufferStarved

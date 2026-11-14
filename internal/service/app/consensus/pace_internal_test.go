@@ -10,6 +10,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"maps"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -175,6 +176,16 @@ func TestTheSnapshotStreamBoundsClampAndRefuse(t *testing.T) {
 // until the first stream ends, then is served. Both install, and the pin of
 // each holds compaction while the writes go on: neither needs a second
 // snapshot to catch up.
+//
+// The second learner's JOIN goes to the leader alone (#1412). Sent to the
+// first learner, which the memory transport tried first one time in four,
+// it was forwarded and committed at once, but answered only once that
+// learner applied it, after the snapshot the test holds: the JOIN waited
+// out its ten seconds, the held stream, still at its offer, fell due
+// (streamDue, 10 maximum election timeouts) and was cancelled, and the
+// waiting learner was offered its stream within the 500 ms the test looks.
+// The look now says whether the first stream was still in flight, and
+// requires it to be.
 func TestTwoLearnersAreStreamedOneAfterTheOther(t *testing.T) {
 	trs := map[coreconsensus.NodeID]*holdTransport{}
 	var mu sync.Mutex
@@ -210,13 +221,19 @@ func TestTwoLearnersAreStreamedOneAfterTheOther(t *testing.T) {
 	mu.Unlock()
 	lt.holding.Store(true)
 	a := c.join(t, "slot-a")
-	b := c.join(t, "slot-b")
+	b := c.joinThrough(t, "slot-b", l)
 	awaitOffer(t, lt, l)
+	first := streamsInFlight(l)
 	waiting := streamWaiter(t, l)
 	select {
 	case <-lt.started:
-		t.Fatal("a second stream started while the first was in flight")
+		t.Fatalf("a second stream started while the first, to %v, was held: in flight %v, %d held streams cancelled, the leader's status %+v",
+			first, streamsInFlight(l), lt.cancelled.Load(), l.node.Status())
 	case <-time.After(500 * time.Millisecond):
+	}
+	if now := streamsInFlight(l); len(first) != 1 || !slices.Equal(now, first) || lt.cancelled.Load() != 0 {
+		t.Fatalf("the first stream ended while the test held it: in flight %v at the offer, %v now, %d held streams cancelled, the leader's status %+v",
+			first, now, lt.cancelled.Load(), l.node.Status())
 	}
 	for i := range 45 {
 		propose(t, l.node, fmt.Sprintf("r0-%d=v", i))
@@ -263,6 +280,13 @@ func awaitOffer(t *testing.T, lt *holdTransport, l *testNode) {
 	case <-time.After(10 * time.Second):
 		t.Fatalf("no snapshot offered: leader %+v, streams %d", l.node.Status(), lt.streams.Load())
 	}
+}
+
+// streamsInFlight are the peers leader l streams a snapshot to.
+func streamsInFlight(l *testNode) []coreconsensus.NodeID {
+	var to []coreconsensus.NodeID
+	l.node.exec(func() { to = slices.Sorted(maps.Keys(l.node.sendStop)) })
+	return to
 }
 
 // streamWaiter waits until a peer waits for a stream on leader l, and

@@ -39,6 +39,9 @@ type driver interface {
 	// unread reports whether slot's socket holds bytes not yet received, so
 	// eviction never closes a connection mid-request.
 	unread(r *ring, slot int32) bool
+	// halfClose shuts slot's writing side once its output left, and keeps
+	// it reading: the drain's lingering close (#1385).
+	halfClose(r *ring, slot int32)
 }
 
 // shared is what every loop of one group shares: the connection bound and
@@ -538,10 +541,37 @@ func (r *ring) settle(slot int32) {
 		r.drv.flush(r, slot)
 		c = &r.conns[slot]
 	}
-	//: a close, or a peer that finished, waits only for the output and the file.
-	if (c.state == stClosing || c.flags&fPeerDone != 0) && !c.sending() && c.state != stDead {
+	//: a close, or a peer that finished, waits only for the output and the
+	//: file; a drain's close lingers first (lingers).
+	if (c.state == stClosing || c.flags&fPeerDone != 0) && !c.sending() && c.state != stDead && !r.lingers(slot) {
 		r.finish(slot, c.reason, c.errno)
 	}
+}
+
+// lingers reports whether slot, its output gone, still lingers before its
+// close. A close the drain decided on a connection whose peer still sends
+// would, with that input unread, send a reset, and the reset discards what
+// the kernel holds of the output not yet delivered: the answers the drain
+// waited for (#1385). So the drain shuts the writing side first — the peer
+// reads every answer, then the end — and the slot keeps reading, and
+// dropping, until the peer ends or drainLinger passed (closeSettled looks).
+func (r *ring) lingers(slot int32) bool {
+	c := &r.conns[slot]
+	//: not the drain's close, or a peer that already ended: no reset to fear.
+	if c.state != stClosing || c.reason != rDrain || c.flags&fPeerDone != 0 {
+		//: closed now.
+		return false
+	}
+	//: the first time its output is gone: the writing side shut.
+	if c.linger == lingerNone {
+		c.linger = lingerHalf
+		c.lastIO = r.lp.tick
+		r.drv.halfClose(r, slot)
+		//: lingering.
+		return true
+	}
+	//: until the bound.
+	return r.lp.tick-c.lastIO < drainLingerTicks
 }
 
 // sent records that some of slot's output was sent, and fires OnWritable when

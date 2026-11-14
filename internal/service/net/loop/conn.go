@@ -1,5 +1,7 @@
 package loop
 
+import "time"
+
 // The states of a connection slot. A slot returns to stFree only once its
 // backend released the descriptor and every operation still in flight, its
 // generation moved on.
@@ -39,6 +41,26 @@ const (
 	fCompact
 	// fDrained is a connection whose handler the drain has told once.
 	fDrained
+)
+
+// How far a drain's close went (connCtl.linger, #1385).
+const (
+	// lingerNone is a slot whose writing side is open.
+	lingerNone uint8 = iota
+	// lingerHalf is a slot whose writing side the drain shut: it reads until
+	// its peer ends or drainLinger passed, then closes.
+	lingerHalf
+)
+
+const (
+	// drainLinger bounds how long a connection the drain closed keeps
+	// reading, its writing side shut, before its close (ring.lingers): a
+	// close with input unread sends a reset, which discards the output the
+	// peer has not received yet. The portable backend's portableLinger, as
+	// long.
+	drainLinger time.Duration = 500 * time.Millisecond
+	// drainLingerTicks is drainLinger in ticks.
+	drainLingerTicks int64 = int64(drainLinger / tickEvery)
 )
 
 // How a flight leaves on io_uring (connCtl.zc, #969).
@@ -94,6 +116,11 @@ type connCtl struct {
 	flags uint8
 	// reason is why the connection closed; errno its errno when it is rErrno.
 	reason uint8
+	// linger is a drain's close half done (lingerHalf): the slot's output
+	// left, its writing side is shut, and it reads, and drops, what the peer
+	// still sends until the peer's end or drainLinger, so its output is never
+	// aborted by the reset a close with input unread sends (#1385).
+	linger uint8
 	errno  int32
 	// fd is the connection's descriptor: a process descriptor on epoll, a
 	// direct-descriptor index on io_uring.
@@ -126,12 +153,16 @@ type connCtl struct {
 	// fileBits holds ffEOF, ffFull and ffPoll.
 	fileBits uint8
 	// zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
-	// send of it zero-copy, zcHold none for now — a zero-copy send of it was
-	// refused, or zcPend is at its bound — until its notifications came, the
-	// rest then sent plainly. zcPend counts its sends whose notification has
-	// not come: the flight's chunk is the kernel's until it reaches zero.
+	// send of it zero-copy, zcHold none for now — zcPend is at its bound —
+	// until its notifications came, the rest then sent plainly. zcPend counts
+	// its sends whose notification has not come: the flight's chunk is the
+	// kernel's until it reaches zero. zcVoid counts the notifications still
+	// to come of sends the kernel refused, which pinned nothing (#1396): they
+	// hold the slot, never the flight. A flight starts zero-copy only once it
+	// is zero, and a flight is refused once at most, so it is never past one.
 	zc     uint8
 	zcPend uint8
+	zcVoid uint8
 	// fileErr is the errno a file operation failed with, zero when none.
 	fileErr int32
 	// fileOff is the next byte of the file to send, fileLeft how many are left.

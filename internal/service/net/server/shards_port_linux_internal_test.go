@@ -8,10 +8,14 @@
 package server
 
 import (
-	"bufio"
 	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io/fs"
 	stdnet "net"
 	"net/http"
+	"net/netip"
 	"os"
 	"runtime"
 	"strconv"
@@ -21,33 +25,97 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
-// kernelSocketsOn counts the sockets the kernel lists on port in state
-// (0A a listening TCP socket, 07 a bound UDP one) in /proc/net's tables of
-// both families: the count no view of the server's own can flatter.
-func kernelSocketsOn(t *testing.T, proto string, port int, state string) int {
+// procSocket is one row of /proc/net/{tcp,udp}{,6}: the local and remote
+// address as the kernel prints them (hex address, colon, hex port), the
+// state, and the socket's inode (0 for a socket no descriptor holds, a
+// TIME_WAIT entry).
+type procSocket struct {
+	local, remote, state, inode string
+}
+
+// procSockets is every row of the kernel's tables of proto, both families.
+// The tables are the network namespace's: they hold the sockets of every
+// process on the host — the suites go test runs beside this one (#1378) —,
+// so a count of this server's must say whose and where (kernelSocketsOn).
+// A table that cannot be read fails the test, so no count reads zero for
+// want of it; only the IPv6 table may be missing, on a kernel without IPv6.
+func procSockets(t *testing.T, proto string) []procSocket {
 	t.Helper()
-	want := strings.ToUpper(strconv.FormatInt(int64(port), 16))
-	for len(want) < 4 {
-		want = "0" + want
-	}
-	n := 0
+	var rows []procSocket
 	for _, table := range []string{"/proc/net/" + proto, "/proc/net/" + proto + "6"} {
-		f, err := os.Open(table)
-		if err != nil {
-			//: a kernel without IPv6 has no second table.
+		raw, err := os.ReadFile(table)
+		//: a kernel without IPv6 has no second table.
+		if err != nil && strings.HasSuffix(table, "6") && errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			fields := strings.Fields(sc.Text())
-			if len(fields) < 4 || fields[3] != state {
+		if err != nil {
+			t.Fatalf("%s: %v", table, err)
+		}
+		for line := range strings.Lines(string(raw)) {
+			fields := strings.Fields(line)
+			if len(fields) < 10 || fields[0] == "sl" {
 				continue
 			}
-			if _, p, ok := strings.Cut(fields[1], ":"); ok && p == want {
-				n++
-			}
+			rows = append(rows, procSocket{local: fields[1], remote: fields[2], state: fields[3], inode: fields[9]})
 		}
-		_ = f.Close()
+	}
+	return rows
+}
+
+// procHexPort is a port as /proc/net prints it.
+func procHexPort(port int) string {
+	return fmt.Sprintf("%04X", port)
+}
+
+// procHexAddrPort is addr ("host:port") as /proc/net prints it: each 32-bit
+// word of the address in the host's byte order, then the port.
+func procHexAddrPort(t *testing.T, addr string) string {
+	t.Helper()
+	ap, err := netip.ParseAddrPort(addr)
+	if err != nil {
+		t.Fatalf("%q: %v", addr, err)
+	}
+	ip := ap.Addr().AsSlice()
+	var b strings.Builder
+	for i := 0; i < len(ip); i += 4 {
+		fmt.Fprintf(&b, "%08X", binary.NativeEndian.Uint32(ip[i:i+4]))
+	}
+	return b.String() + ":" + procHexPort(int(ap.Port()))
+}
+
+// ownSocketInodes is the inodes of the sockets this process holds a
+// descriptor on, read from /proc/self/fd.
+func ownSocketInodes(t *testing.T) map[string]bool {
+	t.Helper()
+	ents, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatalf("/proc/self/fd: %v", err)
+	}
+	own := make(map[string]bool, len(ents))
+	for _, e := range ents {
+		//: a descriptor closed since the listing reads as an error, and is no socket of ours.
+		link, err := os.Readlink("/proc/self/fd/" + e.Name())
+		if inode, ok := strings.CutPrefix(link, "socket:["); err == nil && ok {
+			own[strings.TrimSuffix(inode, "]")] = true
+		}
+	}
+	return own
+}
+
+// kernelSocketsOn counts the sockets the kernel lists in state (0A a
+// listening TCP socket, 07 a bound UDP one) on addr, the address State
+// reports, held by this process: the count no view of the server's own can
+// flatter. The kernel's tables are the host's, so a socket of another suite
+// on the same port number — 127.0.0.1:P while the server is on [::1]:P,
+// both drawn by the kernel — is no shard of this server's (#1378).
+func kernelSocketsOn(t *testing.T, proto, addr, state string) int {
+	t.Helper()
+	want, own := procHexAddrPort(t, addr), ownSocketInodes(t)
+	n := 0
+	for _, s := range procSockets(t, proto) {
+		if s.state == state && s.local == want && own[s.inode] {
+			n++
+		}
 	}
 	return n
 }
@@ -169,11 +237,68 @@ func TestShards_portZeroIsOnePort(t *testing.T) {
 						t.Errorf("shard %d on %s, State reports %s", i, a, reported)
 					}
 				}
-				port := portOf(t, reported)
-				if n := kernelSocketsOn(t, p.proto, port, p.state); n != p.want {
-					t.Fatalf("the kernel lists %d sockets on port %d, want %d — every shard on the reported port", n, port, p.want)
+				if n := kernelSocketsOn(t, p.proto, reported, p.state); n != p.want {
+					t.Fatalf("the kernel lists %d sockets of this process on %s, want %d — every shard on the reported address", n, reported, p.want)
 				}
 			})
 		}
 	}
+}
+
+// TestKernelSocketsOn_countsThisServersOnly holds #1378's remedy: a socket
+// of another suite on the server's port number, at another address — the
+// fifth socket the host lane listed on port 36439 while the run's server
+// listened on [::1] — is in the kernel's tables, and no shard of this
+// server's. The stray is this process's own, on 127.0.0.2 (Linux routes
+// 127/8 to the loopback), so the address is what the count must tell apart.
+func TestKernelSocketsOn_countsThisServersOnly(t *testing.T) {
+	type tc struct {
+		name string
+		// shards is how many listeners the server binds on its address.
+		shards int
+		// strayHost is the address the stray listens on, at the server's
+		// port.
+		strayHost string
+	}
+	cases := []tc{{name: "four shards and a stray on 127.0.0.2", shards: 4, strayHost: "127.0.0.2"}}
+	runCase := func(t *testing.T, c tc) {
+		srv := New()
+		srv.Group("s", Listen("tcp", "127.0.0.1:0"), Plaintext(), Shards(c.shards)).
+			Handle(corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error { return nil }))
+		if err := srv.Start(t.Context()); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		t.Cleanup(func() { swallowErr(srv.Close()) })
+		reported := srv.State().Listeners[0].Address
+		port := portOf(t, reported)
+		stray, err := stdnet.Listen("tcp", stdnet.JoinHostPort(c.strayHost, strconv.Itoa(port)))
+		if err != nil {
+			t.Skipf("no listener on %s:%d beside the server: %v", c.strayHost, port, err)
+		}
+		defer func() { _ = stray.Close() }()
+		onPort := 0
+		for _, s := range procSockets(t, "tcp") {
+			if s.state == "0A" && strings.HasSuffix(s.local, ":"+procHexPort(port)) {
+				onPort++
+			}
+		}
+		//: the stray is in the kernel's table, on the port: what #1378's count read.
+		if onPort < c.shards+1 {
+			t.Fatalf("the kernel lists %d listening sockets on port %d, want the %d shards and the stray", onPort, port, c.shards)
+		}
+		if n := kernelSocketsOn(t, "tcp", reported, "0A"); n != c.shards {
+			t.Fatalf("kernelSocketsOn counts %d sockets on %s, want the %d shards alone", n, reported, c.shards)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// OwnListenersOn is kernelSocketsOn's count of this process's listening TCP
+// sockets on addr, for the external suite (TestServer_Close, #1386).
+func OwnListenersOn(t *testing.T, addr string) int {
+	t.Helper()
+	//: the state of a listening TCP socket.
+	return kernelSocketsOn(t, "tcp", addr, "0A")
 }

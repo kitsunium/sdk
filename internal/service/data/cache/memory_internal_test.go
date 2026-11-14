@@ -228,7 +228,11 @@ func TestTheCallersTagSliceIsNotRetained(t *testing.T) {
 
 // TestTheByteBoundHoldsAfterEverySet is #839's acceptance: a 1 MiB budget
 // under values of 1 KiB to 256 KiB never holds more than 1 MiB, read off the
-// stripes' primitives after every Set, at one stripe and at eight.
+// stripes' primitives after every Set, at one stripe and at eight. Each stripe
+// is held to its own share too (#1380): the total hid a stripe over its share
+// whenever the others were under theirs, so the S3-FIFO walk that left a
+// stripe over its bound failed this test about once in a hundred runs, as the
+// per-process hash seed spread the keys.
 func TestTheByteBoundHoldsAfterEverySet(t *testing.T) {
 	t.Parallel()
 	const budget = 1 << 20
@@ -250,8 +254,12 @@ func TestTheByteBoundHoldsAfterEverySet(t *testing.T) {
 				t.Fatalf("Set %d: %v", i, err)
 			}
 			var held int64
-			for _, stripe := range store.stripes {
-				held += stripe.lru.Stats().Weight
+			for at, stripe := range store.stripes {
+				weight := stripe.lru.Stats().Weight
+				if share := shareOf64(budget, len(store.stripes), at); weight > share {
+					t.Fatalf("after Set %d stripe %d holds %d bytes, over its share of %d", i, at, weight, share)
+				}
+				held += weight
 			}
 			if held > budget {
 				t.Fatalf("after Set %d the store holds %d bytes, over %d", i, held, budget)

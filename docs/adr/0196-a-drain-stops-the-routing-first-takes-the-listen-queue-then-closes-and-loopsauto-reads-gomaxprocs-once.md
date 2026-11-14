@@ -8,6 +8,7 @@
   is v0 ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
 - **Deciders**: SDK maintainers, owner
 - **Amended 2026-11-10** (#856): a loop group's `Shards(0)` binds one SO_REUSEPORT listener per loop; each is taken by its one loop's rings (§D3's taker is the loop that owns the shard), and a loop whose watchdog gave up closes its own shards. A partial drain of a reuseport group stays `tcp_migrate_req=1`'s (§D3).
+- **Amended 2026-11-14** (#1385): the drain looks at the established connections once `OnBatchEnd` has returned, a closing connection reads nothing more, and the drain's close lingers — the writing side shut after the output, the descriptor closed at the peer's end or after 500 ms — see the section "Amendment 2026-11-14 (#1385)" at the end; §D3 is unchanged.
 - **Amends**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   §D1 (the drain a loop group shares with the server) and §D5 (the loop
   count); [ADR 0187](0187-the-handler-type-chooses-the-engine.md) §D9
@@ -205,3 +206,46 @@ and their ratio is what P2 judges.
 - **A default grace.** The right value is the routing's, not the SDK's; a
   non-zero default would slow every test and every shutdown of a program that
   routes on nothing.
+
+## Amendment 2026-11-14 (#1385): the drain looks once the batch's answers are written
+
+§D3's rule 4 closes a connection with no partial input once it is heard or
+quiet. Where it looked was left unsaid, and every backend looked before
+`OnBatchEnd`. The HTTP adapters answer a batch's requests at `OnBatchEnd`: a
+connection whose request came in the batch was marked closing first and its
+answer refused, so it ended unanswered well inside the drain — on every
+backend, h2c on every run measured, HTTP/1.1 spared only because its
+`OnDrain` deferred the close a batch.
+
+- **The look comes after `OnBatchEnd`**, before the batch's flush
+  (`settleDrain` on io_uring, epoll and kqueue, the portable backend's
+  `closeSettled` after `OnBatchEnd`); the drain's queue take stays where it
+  was. Every answer the batch's requests asked for is written before a close
+  is marked, and a closing connection finishes only once its output has left.
+  A connection fed in every batch is judged at every look: it hears
+  `OnDrain` at one and closes at the next.
+- **A closing connection reads nothing more**, on every backend: an answer to
+  bytes read after the close was decided could not leave. The native
+  backends already dropped them; the portable backend now does.
+- **The drain's close lingers.** Once a closing connection's output has left
+  for the kernel, the drain shuts its writing side — the FIN follows the
+  output — and keeps reading, and dropping, what the peer still sends,
+  until the peer ends or `drainLinger` (500 ms, the portable backend's
+  `portableLinger`) passed; only then is the descriptor closed. A close with
+  input unread sends a reset, and the reset discards whatever of the output
+  the kernel has not delivered yet: a peer that keeps sending and reads
+  slower than the answers come lost them, on every backend
+  (`TestDrain_aConnectionFedThroughTheDrainGetsEveryAnswer/raw_handler,_a_slow_reader`),
+  and OpenBSD's kqueue lost the last answer of a connection fed through the
+  drain even at full speed. On io_uring the shut of the writing side is the
+  connection's one shutdown (ADR 0200): after the linger, the recv still
+  armed is cancelled by its user data and the direct descriptor closed.
+  A connection whose peer already ended closes at once.
+- **A first version deferred the look instead** for a connection the batch
+  fed. Unbounded, a connection fed in every batch never closed; bounded to
+  one batch, it was closed before its answer was written —
+  `TestDrain_aConnectionFedThroughTheDrainGetsEveryAnswer` lost answers over
+  three runs on HTTP/1.1 on every backend, on a raw handler answering at
+  `OnBatchEnd` on epoll and the portable backend, on h2c on epoll.
+- The HTTP/2 adapter's GOAWAY, run in a batch that fed a request, leaves the
+  connection to the batch's end, which writes its answers and then closes it.
