@@ -141,11 +141,9 @@ func TestConformance_buffersFollowDemand(t *testing.T) {
 			return n
 		}
 		conns := heard(t, addr, idle+burst)
-		defer func() {
-			for _, c := range conns {
-				_ = c.Close()
-			}
-		}()
+		// Closed by a reset: no TIME_WAIT left on the ephemeral range for
+		// the tests after it (resetClose).
+		defer resetClose(conns)
 		if n := provided(); n != bufsFirst {
 			t.Fatalf("%d connections heard one at a time: %d buffers provided, want %d", idle+burst, n, bufsFirst)
 		}

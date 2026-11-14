@@ -2294,6 +2294,7 @@ files:
       - (*uRing).recvCancelled
       - (*uRing).recvBytes
       - (*uRing).recvStarved
+      - reads
       - (*uRing).recvEOF
       - (*uRing).failLive
       - (*uRing).onSend
@@ -3194,6 +3195,14 @@ functions:
       still holds, says one will.
     name: takeWaits
     params: res int32, live int64
+    results: bool
+  - doc: |-
+      reads reports whether c's recv stays armed: an open connection, or one the
+      drain closes, which reads on to linger (ring.lingers) — on every path that
+      re-arms a recv, so a linger never stops reading on an ENOBUFS or a cancel
+      and closes with input unread.
+    name: reads
+    params: c *connCtl
     results: bool
   - doc: |-
       bufBudgetFor is the bytes of provided buffers one loop of sz may hand its
@@ -6377,7 +6386,14 @@ types:
         params: index uint32
         recv: rr *uRing
         results: bool
-      - doc: orphanClose closes a direct descriptor no slot owns.
+      - doc: |-
+          orphanClose closes a direct descriptor no slot owns, its peer told first:
+          a shutdown hard-linked ahead of the close. A direct descriptor's close
+          puts its file only once the requests issued before it ended, and the
+          multishot recvs of the ring's other connections last as long as they do
+          (uRing.shutdown): closed alone, a connection refused past MaxConns, or by a
+          stopping or drained ring, read no end, its peer waiting for its own
+          deadline.
         name: orphanClose
         params: index uint32
         recv: rr *uRing

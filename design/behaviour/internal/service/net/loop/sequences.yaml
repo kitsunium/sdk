@@ -9709,7 +9709,13 @@ sequences:
         kind: self
       - id: closeFDs
         kind: internal
+      - id: udPack
+        kind: internal
+      - id: rr.u.submit
+        kind: internal
       - id: rr.u.get
+        kind: internal
+      - id: prepShutdownFixed
         kind: internal
       - id: prepCloseDirect
         kind: internal
@@ -9720,6 +9726,28 @@ sequences:
               to: closeFDs
             - return: ""
           when: "!rr.ul.direct"
+      - bind: ud
+        eval: udPack(udOrphanClose, 0, index)
+        to: udPack
+      - opt:
+          do:
+            - eval: rr.u.submit()
+              to: rr.u.submit
+          when: "!rr.u.room(2)"
+      - opt:
+          do:
+            - bind: s
+              eval: rr.u.get()
+              to: rr.u.get
+            - eval: prepShutdownFixed(s, index, syscall.SHUT_RDWR, ud)
+              to: prepShutdownFixed
+            - op: "|="
+              set: s.flags
+              value: sqeIOHardlink
+            - eval: prepCloseDirect(rr.u.get(), index, ud)
+              to: prepCloseDirect
+            - return: ""
+          when: rr.u.room(2)
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
@@ -9729,7 +9757,7 @@ sequences:
               set: rr.r.st.retries
             - return: ""
           when: s == nil
-      - eval: prepCloseDirect(s, index, udPack(udOrphanClose, 0, index))
+      - eval: prepCloseDirect(s, index, ud)
         to: prepCloseDirect
   - of: (*uRing).armRecv
     participants:
@@ -9935,7 +9963,7 @@ sequences:
           do:
             - eval: rr.armRecv(slot)
               to: rr.armRecv
-          when: "!more && rr.r.conns[slot].state == stOpen"
+          when: "!more && reads(&rr.r.conns[slot])"
   - of: (*uRing).recvBytes
     participants:
       - id: caller
@@ -9963,10 +9991,7 @@ sequences:
           do:
             - eval: rr.armRecv(slot)
               to: rr.armRecv
-          init:
-            bind: c
-            eval: "&rr.r.conns[slot]"
-          when: "!more && (c.state == stOpen || (c.state == stClosing && c.reason == rDrain))"
+          when: "!more && reads(&rr.r.conns[slot])"
   - of: (*uRing).recvStarved
     participants:
       - id: caller
@@ -9978,17 +10003,21 @@ sequences:
     steps:
       - op: ++
         set: rr.r.st.starved
-      - bind: open
-        eval: rr.r.conns[slot].state == stOpen
-      - alt:
-          - do:
-              - set: rr.starved
-                value: append(rr.starved, slot)
-            when: open && len(rr.starved) < starvedCap
-          - do:
-              - eval: rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
-                to: rr.r.fail
-            when: open
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - switch:
+          cases:
+            - case: reads(c) && len(rr.starved) < starvedCap
+              do:
+                - set: rr.starved
+                  value: append(rr.starved, slot)
+            - case: c.state == stOpen
+              do:
+                - eval: rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
+                  to: rr.r.fail
+  - of: reads
+    steps:
+      - return: c.state == stOpen || (c.state == stClosing && c.reason == rDrain)
   - of: (*uRing).recvEOF
     participants:
       - id: caller
@@ -10541,7 +10570,7 @@ sequences:
                     set: left[g]
                   - op: "--"
                     set: room
-                when: rr.r.conns[slot].state == stOpen
+                when: reads(&rr.r.conns[slot])
       - set: rr.starved
         value: rr.starved[:copy(rr.starved, rr.starved[k:])]
   - of: (*uRing).flush

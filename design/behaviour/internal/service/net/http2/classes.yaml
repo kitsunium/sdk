@@ -2339,7 +2339,11 @@ types:
         recv: a *LoopHandler
       - doc: |-
           answerSlot writes a worker's answer on its stream, ends the connection when
-          it was the last of a closing one, and frees the slot.
+          it was the last of a closing one, and frees the slot. On a connection the
+          batch fed, the answer joins the batch's output and the batch's end writes
+          and closes it (flush, closeIfDone): written and closed here, it went out
+          ahead of the SETTINGS and the GOAWAY the batch had queued, and the close
+          refused them (#1385).
         name: answerSlot
         params: io corenet.LoopIO, st *laneState, e *connEntry, slot *workSlot, idx uint32
         recv: a *LoopHandler

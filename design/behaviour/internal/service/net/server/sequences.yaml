@@ -7447,7 +7447,7 @@ sequences:
             - eval: pl.markDirty(ev.slot)
               to: pl.markDirty
             - return: ""
-          when: errors.Is(ev.err, io.EOF) && !pc.reasonSet
+          when: errors.Is(ev.err, io.EOF) && !pc.lingering.Load()
       - eval: pl.finish(ev.slot, pc, ev.err)
         to: pl.finish
   - of: (*portableLoop).handleSent

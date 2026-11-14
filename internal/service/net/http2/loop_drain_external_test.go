@@ -112,3 +112,84 @@ func TestLoopHandler_drainAnnouncedMidBatchKeepsTheBatchsAnswers(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
+
+// workerH answers every request pending, its answer filled by the lane's
+// worker.
+type workerH struct{}
+
+func (workerH) ServeHTTP1(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+	res.Pending, res.Job = true, 7
+}
+
+func (workerH) WorkHTTP1(_ int, _ uint64, res *corenet.HTTP1ResponseValue) {
+	res.Body = []byte("ok")
+}
+
+// sentJobs is a lane's outbound that keeps the jobs sent to it.
+type sentJobs struct{ jobs []corenet.LoopJobValue }
+
+func (o *sentJobs) Send(_ corenet.LoopIO, job corenet.LoopJobValue) error {
+	o.jobs = append(o.jobs, job)
+	return nil
+}
+
+// TestLoopHandler_aWorkersAnswerInTheDrainingBatchFollowsItsOutput pins
+// #1385 on a worker's answer: in the batch that fed a request and queued the
+// drain's GOAWAY behind the connection's SETTINGS, the worker's answer comes
+// back. Written and closed at once, it went out ahead of the SETTINGS and the
+// GOAWAY, and its close refused them at the batch's end; it now joins the
+// batch's output, and the batch's end writes it in order — SETTINGS first —,
+// then closes.
+func TestLoopHandler_aWorkersAnswerInTheDrainingBatchFollowsItsOutput(t *testing.T) {
+	type tc struct {
+		name string
+		// draining announces the drain in the batch.
+		draining bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		a := http2.HandleLoop(workerH{}, http1.Parser{})
+		a.OnStart(1)
+		out := &sentJobs{}
+		a.OnOutbound(corenet.LoopOutboundValue{Lanes: []corenet.LoopOutbound{out}, OutputCap: 1 << 20})
+		io := &postIO{batchIO: newBatchIO()}
+		ref := corenet.LoopConnRef{Slot: 1, Gen: 1}
+		a.OnOpen(io, ref)
+		req := h2Request()
+		if c.draining {
+			a.Draining()
+		}
+		// The batch: the request fed and offloaded, the drain's announcement,
+		// the worker's answer back, then the batch's end.
+		if n := a.OnData(io, ref, req); n != len(req) {
+			t.Fatalf("OnData consumed %d of %d", n, len(req))
+		}
+		io.runPosts()
+		if len(out.jobs) != 1 {
+			t.Fatalf("%d jobs sent to the worker, want 1", len(out.jobs))
+		}
+		a.Worker().Work(0, out.jobs[0])
+		a.OnDone(io, out.jobs[0])
+		a.OnBatchEnd(io)
+		order := frameTypes(io.out[ref])
+		if len(order) == 0 || order[0] != corehttp2.FrameSettings {
+			t.Fatalf("the connection's frames %v, want SETTINGS first", order)
+		}
+		if !hasFrame(io.out[ref], corehttp2.FrameHeaders, 1) || !hasFrame(io.out[ref], corehttp2.FrameData, 1) {
+			t.Fatalf("the worker's answer on stream 1 was not written: %v", order)
+		}
+		if !c.draining {
+			return
+		}
+		// The GOAWAY, announced before the answer came back, names stream 1
+		// as taken: the answer may follow it.
+		if !hasFrame(io.out[ref], corehttp2.FrameGoAway, 0) {
+			t.Fatalf("the connection's frames %v, want a GOAWAY", order)
+		}
+		if !io.closed[ref] {
+			t.Fatal("the drained connection, its stream answered, was left open")
+		}
+	}
+	for _, c := range []tc{{name: "draining", draining: true}, {name: "serving"}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}

@@ -37,7 +37,7 @@ responses are `internal/core/net`'s `HTTP1RequestValue` and
 | `loop_serve.go` | `Feed` and the stream events: decode, map, serve, answer, buffer or stream the body, `Abort`/`ResetStream`, `OnBatchEnd` |
 | `loop_request.go` | RFC 9113 §8.3.1's mapping onto `HTTP1RequestValue`, a split Cookie joined, the §8.2.2 fields malformed, the canonical target from `http1.Canonical` (#962) |
 | `loop_batch_external_test.go` | one `EndBatch` for a batch serving both versions on a lane, none for an empty one |
-| `loop_drain_external_test.go` | the drain's GOAWAY run in the batch that fed a request leaves the connection to `OnBatchEnd`, which writes the answer, then closes it; an idle one closes at once (#1385) |
+| `loop_drain_external_test.go` | the drain's GOAWAY run in the batch that fed a request leaves the connection to `OnBatchEnd`, which writes the answer, then closes it; an idle one closes at once; the frames' order, SETTINGS first and the GOAWAY behind the answer; a worker's answer returned in a batch that fed its connection joins the batch's output, SETTINGS first, whether the drain runs or not (#1385) |
 | `loop_pending.go` | the worker path (`Worker`, `OnDone`, a slot per Pending stream, an RST_STREAM cancelling), the drain's GOAWAY (`Draining`, `InFlight`), `Pending` |
 | `frame.go` | `ParseFrameHeader`, `AppendFrameHeader`, `AppendSettings`, `AppendSettingsAck`, `AppendWindowUpdate`, `AppendRSTStream`, `AppendGoAway`, `AppendPing` |
 | `hpack_table.go` | `Decoder` and the dynamic table: a byte ring of entries and a ring of offsets, in memory the caller hands to `Decode` (`TableMem`) |
@@ -149,7 +149,11 @@ responses are `internal/core/net`'s `HTTP1RequestValue` and
   connection the batch fed is left to `OnBatchEnd`, which writes the answers
   the batch gave it, then closes it (`closeIfDone`): closed by the
   announcement, its answered streams no longer in flight, those answers were
-  refused (#1385).
+  refused (#1385). On such a connection the GOAWAY joins the batch's output
+  (`writeGoAway`), and so does a worker's answer that comes back in the
+  batch (`answerSlot`): written at once, either went out ahead of the
+  SETTINGS the batch queued — RFC 9113 §3.4 makes SETTINGS the first frame —
+  and the answer's close refused the rest.
 - **`Honours` Protocols; `SetHTTP` carries it, and the `http2-loop` switch**,
   before `OnStart` — and `CheckSpill` refuses a group whose spill cannot hold
   one frame or field block.

@@ -314,7 +314,7 @@ func drainProbe(addr string, deadline time.Time) drainDate {
 		//: the listener was still there when the SYN came.
 		case err == nil:
 			d.accepted = start
-			swallowErr(c.Close())
+			resetConn(c)
 		//: no listener left on the port.
 		case errors.Is(err, syscall.ECONNREFUSED):
 			d.began, d.refused = start, end
@@ -411,7 +411,7 @@ func exchange(addr string) (time.Time, string, error) {
 	if err != nil {
 		return connected, "dial: " + err.Error(), err
 	}
-	defer func() { swallowErr(c.Close()) }()
+	defer resetConn(c)
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := c.Write([]byte("a\n")); err != nil {
 		return connected, "write: " + err.Error(), nil
@@ -421,6 +421,21 @@ func exchange(addr string) (time.Time, string, error) {
 		return connected, "echo " + string(got) + ": " + errString(err), nil
 	}
 	return connected, "", nil
+}
+
+// resetConn closes c with a reset (SO_LINGER 0) rather than a FIN, once the
+// exchange on it is over: neither end keeps a TIME_WAIT socket. A TCP close
+// leaves one on the side that closed first — the client after its answer, the
+// server after a drain or a refused handshake —, and on macOS, its 16 384
+// ephemeral ports each held 30 s, the arrivals across the drain, dialled back
+// to back since #1430, and the handshake flood's 10 000 ran the range out:
+// "can't assign requested address" (#1430's macOS run).
+func resetConn(c stdnet.Conn) {
+	//: a TCP connection: its close a reset.
+	if tc, ok := c.(*stdnet.TCPConn); ok {
+		swallowErr(tc.SetLinger(0))
+	}
+	swallowErr(c.Close())
 }
 
 // lineEcho writes line on c and requires it back.

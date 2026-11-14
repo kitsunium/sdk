@@ -50,36 +50,48 @@ func realUnit(t *testing.T, cfg service.Config) *service.Unit {
 // catches SIGTERM itself, to unwind, and ends on an exit status, which the
 // unit reads as exit-code (#1355).
 func TestRealSimpleStartStop(t *testing.T) {
-	fifo := filepath.Join(t.TempDir(), "never")
-	u := realUnit(t, service.Config{ExecStart: []coresvc.CommandValue{command(t, "/bin/sh", "-c", `mkfifo "$0" && exec cat "$0"`, fifo)}})
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if err := u.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	type tc struct {
+		name string
+		// script is the shell's, run with the FIFO's path as $0: it makes
+		// the FIFO and execs the reader the stop must end.
+		script string
 	}
-	if st := u.State(); st.State != coresvc.StateActive || st.MainPID <= 0 {
-		t.Fatalf("after Start: %+v", st)
-	}
-	// A write end opened without blocking: refused (ENXIO) while no reader
-	// holds the FIFO, so cat has left its execve. Held open until the stop
-	// ended cat, so cat reads no end of file.
-	var w *os.File
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
-		f, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0)
-		if err == nil {
-			w = f
-			break
+	cases := []tc{{name: "cat on a FIFO", script: `mkfifo "$0" && exec cat "$0"`}}
+	runCase := func(t *testing.T, c tc) {
+		fifo := filepath.Join(t.TempDir(), "never")
+		u := realUnit(t, service.Config{ExecStart: []coresvc.CommandValue{command(t, "/bin/sh", "-c", c.script, fifo)}})
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := u.Start(ctx); err != nil {
+			t.Fatalf("Start: %v", err)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("cat never opened the FIFO in 10 s: %v, %+v", err, u.State())
+		if st := u.State(); st.State != coresvc.StateActive || st.MainPID <= 0 {
+			t.Fatalf("after Start: %+v", st)
+		}
+		// A write end opened without blocking: refused (ENXIO) while no reader
+		// holds the FIFO, so cat has left its execve. Held open until the stop
+		// ended cat, so cat reads no end of file.
+		var w *os.File
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
+			f, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+			if err == nil {
+				w = f
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("cat never opened the FIFO in 10 s: %v, %+v", err, u.State())
+			}
+		}
+		defer func() { _ = w.Close() }()
+		if err := u.Stop(ctx); err != nil {
+			t.Fatalf("Stop: %v", err)
+		}
+		if st := u.State(); st.State != coresvc.StateInactive || st.Result != coresvc.ResultSuccess {
+			t.Fatalf("after Stop: %s %s", st.State, st.Result)
 		}
 	}
-	defer func() { _ = w.Close() }()
-	if err := u.Stop(ctx); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-	if st := u.State(); st.State != coresvc.StateInactive || st.Result != coresvc.ResultSuccess {
-		t.Fatalf("after Stop: %s %s", st.State, st.Result)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

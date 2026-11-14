@@ -115,7 +115,7 @@ func h2cExchange(addr string) (time.Time, string, error) {
 	if err != nil {
 		return connected, "dial: " + err.Error(), err
 	}
-	defer func() { swallowErr(c.Close()) }()
+	defer resetConn(c)
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 	return connected, h2cRequest(c, bufio.NewReader(c)), nil
 }
