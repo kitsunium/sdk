@@ -29,10 +29,10 @@ type drainProto struct {
 	// group declares the group on srv and returns its open and close counts,
 	// read once the server stopped.
 	group func(srv *Server, b corenet.LoopBackend) func() (opens, closes int64)
-	// exchange dials addr, makes one exchange and closes, saying whether the
-	// dial succeeded, when it returned, and what went wrong, empty when
-	// nothing did.
-	exchange func(addr string) (bool, time.Time, string)
+	// exchange dials addr, makes one exchange and closes, saying when the dial
+	// returned, what went wrong, empty when nothing did, and how the dial
+	// failed, nil when it succeeded.
+	exchange func(addr string) (time.Time, string, error)
 	// keep dials addr and makes one exchange, keeping the connection open.
 	keep func(t *testing.T, addr string) stdnet.Conn
 	// end reads a kept connection to its end and says what went wrong: empty
@@ -109,15 +109,15 @@ func ringCounts(srv *Server) (opens, closes int64) {
 // h2cExchange is exchange on h2c: the preface, SETTINGS and one GET on
 // stream 1, answered "ok"; a reset, a GOAWAY with an error or an end before
 // the answer is what went wrong.
-func h2cExchange(addr string) (bool, time.Time, string) {
+func h2cExchange(addr string) (time.Time, string, error) {
 	c, err := stdnet.DialTimeout("tcp", addr, 2*time.Second)
 	connected := time.Now()
 	if err != nil {
-		return false, connected, "dial: " + err.Error()
+		return connected, "dial: " + err.Error(), err
 	}
 	defer func() { swallowErr(c.Close()) }()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-	return true, connected, h2cRequest(c, bufio.NewReader(c))
+	return connected, h2cRequest(c, bufio.NewReader(c)), nil
 }
 
 // h2cRequest opens h2c on c and makes one GET on stream 1, reading its

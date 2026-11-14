@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -34,10 +35,23 @@ func realUnit(t *testing.T, cfg service.Config) *service.Unit {
 	return u
 }
 
-// TestRealSimpleStartStop: a long-running shell is up once spawned, and a stop
-// ends it with SIGTERM, a clean end for a daemon.
+// TestRealSimpleStartStop: a long-running process is up once spawned, and a
+// stop ends it with SIGTERM, a clean end for a daemon. The shell makes a FIFO
+// and execs cat on it; the stop comes only once the test's write end opened,
+// which no open can do before cat holds the FIFO for reading, so after its
+// execve(2) returned. Start returns as soon as execve has closed the child's
+// close-on-exec descriptors (os.StartProcess), before execve is done, and on
+// NetBSD 10.1 a signal sent in that window did not end the child: the stop's
+// SIGTERM, sent right after Start to a `sh -c "exec sleep 30"` — two execve,
+// two windows —, left the sleeper its whole 30 s (#1355, as #1379's SIGKILL
+// in proc/exec). The process the SIGTERM reaches is cat, blocked reading a
+// FIFO whose writer stays open: it takes the signal's default action on
+// every system. A shell waiting there instead does not: OpenBSD's ksh
+// catches SIGTERM itself, to unwind, and ends on an exit status, which the
+// unit reads as exit-code (#1355).
 func TestRealSimpleStartStop(t *testing.T) {
-	u := realUnit(t, service.Config{ExecStart: []coresvc.CommandValue{command(t, "/bin/sh", "-c", "exec sleep 30")}})
+	fifo := filepath.Join(t.TempDir(), "never")
+	u := realUnit(t, service.Config{ExecStart: []coresvc.CommandValue{command(t, "/bin/sh", "-c", `mkfifo "$0" && exec cat "$0"`, fifo)}})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := u.Start(ctx); err != nil {
@@ -46,6 +60,21 @@ func TestRealSimpleStartStop(t *testing.T) {
 	if st := u.State(); st.State != coresvc.StateActive || st.MainPID <= 0 {
 		t.Fatalf("after Start: %+v", st)
 	}
+	// A write end opened without blocking: refused (ENXIO) while no reader
+	// holds the FIFO, so cat has left its execve. Held open until the stop
+	// ended cat, so cat reads no end of file.
+	var w *os.File
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
+		f, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			w = f
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cat never opened the FIFO in 10 s: %v, %+v", err, u.State())
+		}
+	}
+	defer func() { _ = w.Close() }()
 	if err := u.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}

@@ -795,7 +795,7 @@ sequences:
           do:
             - return: c.evictSmall(fresh, pending) || c.evictMain(fresh, pending)
           when: c.small.count > 0 && (c.main.count == 0 || c.smallIsLarge())
-      - return: c.evictMain(fresh, pending) || c.evictSmall(fresh, pending)
+      - return: c.evictMain(fresh, pending) || c.evictSmall(fresh, pending) || c.evictMain(fresh, pending)
   - of: (*Cache).smallIsLarge
     steps:
       - opt:
@@ -819,8 +819,16 @@ sequences:
         kind: internal
     steps:
       - loop:
-          cond: victim != nil && victim != fresh
+          cond: victim != nil
           do:
+            - bind: newer
+              eval: victim.prev
+            - opt:
+                do:
+                  - set: victim
+                    value: newer
+                  - continue: true
+                when: victim == fresh
             - opt:
                 do:
                   - eval: c.small.unlink(victim)
@@ -831,6 +839,8 @@ sequences:
                     value: queueMain
                   - eval: c.main.pushFront(victim)
                     to: c.main.pushFront
+                  - set: victim
+                    value: newer
                   - continue: true
                 when: victim.freq > 0
             - eval: c.ghost.add(victim.key, c.ghostBound())
@@ -839,7 +849,6 @@ sequences:
               to: c.removeEvict
             - return: "true"
           init: victim := c.small.tail
-          post: victim = c.small.tail
       - return: "false"
   - of: (*Cache).evictMain
     participants:
@@ -866,7 +875,7 @@ sequences:
                   - opt:
                       do:
                         - return: "false"
-                      when: c.main.count == 1
+                      when: victim == fresh && c.main.count == 1
                   - opt:
                       do:
                         - op: "--"

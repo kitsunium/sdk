@@ -69,6 +69,7 @@ go_test(
         "hpack_rfc_internal_test.go",
         "http2_bench_test.go",
         "loop_batch_external_test.go",
+        "loop_drain_external_test.go",
         "loop_request_internal_test.go",
         "perf_fixtures_test.go",
     ],

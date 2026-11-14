@@ -33,6 +33,12 @@ the zeroized subkey, as before. A scheme not registered at construction leaves
 `sealer` nil and the first `Write` reports `UNKNOWN_ALGORITHM` wrapped in
 `ENC_WRITE_SEAL_FAILED`, as it always has.
 
+The fixture leaves 8 threads idle before kit's window opens (`perfSpare`,
+#1391): on Solaris and illumos each nonce is a `getrandom(2)` through libc,
+which hands the window's one P to another thread at every call, and a thread
+the scheduler had to start inside the window counted as 7 allocations there
+(6 on Linux, measured) — the runtime's, not the record's. The budget stays 0.
+
 ## Framing
 
 `[4-byte big-endian uint32 = len(box)][sealed box]` where the sealed box is

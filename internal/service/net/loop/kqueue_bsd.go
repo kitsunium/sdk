@@ -452,6 +452,7 @@ func (kl *kqueueLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 		lp.shrinkSlab()
 		kl.pace()
 		lp.h.OnBatchEnd(lp)
+		lp.settleDrain()
 		lp.endBatch()
 		kl.off = 0
 		lp.yield()
@@ -874,11 +875,10 @@ func (kl *kqueueLoop) control() {
 		r.draining = true
 		kl.disarmListeners()
 	}
-	//: while draining, the queues are taken, batch after batch, and a
-	//: connection with no partial input closes once its output left.
+	//: while draining, the queues are taken, batch after batch; the
+	//: settled connections are looked at after OnBatchEnd (settleDrain).
 	if lp.draining {
 		kl.takeQueues()
-		lp.closeSettled(r)
 	}
 }
 

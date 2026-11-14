@@ -2059,6 +2059,26 @@ sequences:
   - of: (*ring).drainable
     steps:
       - return: c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.lp.tick-c.lastIO >= drainQuietTicks)
+  - of: (*loop).settleDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).settleDrain
+        kind: self
+      - id: lp.closeSettled
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!lp.draining"
+      - loop:
+          do:
+            - eval: lp.closeSettled(r)
+              to: lp.closeSettled
+          key: _
+          range: lp.rings
+          value: r
   - of: (*loop).closeSettled
     participants:
       - id: caller
@@ -2547,6 +2567,8 @@ sequences:
         kind: internal
       - id: lp.h.OnBatchEnd
         kind: value
+      - id: lp.settleDrain
+        kind: internal
       - id: lp.endBatch
         kind: internal
       - id: lp.yield
@@ -2603,6 +2625,8 @@ sequences:
               to: el.pace
             - eval: lp.h.OnBatchEnd(lp)
               to: lp.h.OnBatchEnd
+            - eval: lp.settleDrain()
+              to: lp.settleDrain
             - eval: lp.endBatch()
               to: lp.endBatch
             - set: el.off
@@ -3320,8 +3344,6 @@ sequences:
         kind: internal
       - id: el.takeQueues
         kind: internal
-      - id: lp.closeSettled
-        kind: internal
     steps:
       - bind: lp, r
         eval: el.lp, el.r
@@ -3338,8 +3360,6 @@ sequences:
           do:
             - eval: el.takeQueues()
               to: el.takeQueues
-            - eval: lp.closeSettled(r)
-              to: lp.closeSettled
           when: lp.draining
   - of: (*epollLoop).takeQueues
     participants:
@@ -9113,6 +9133,8 @@ sequences:
         kind: internal
       - id: lp.h.OnBatchEnd
         kind: value
+      - id: lp.settleDrain
+        kind: internal
       - id: lp.endBatch
         kind: internal
       - id: ul.submitLate
@@ -9163,6 +9185,8 @@ sequences:
           value: rr
       - eval: lp.h.OnBatchEnd(lp)
         to: lp.h.OnBatchEnd
+      - eval: lp.settleDrain()
+        to: lp.settleDrain
       - eval: lp.endBatch()
         to: lp.endBatch
       - eval: ul.submitLate()
@@ -9920,7 +9944,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: cc.zc != zcOff && rr.zeroCopyHandled(slot, c)
+          when: (cc.zc != zcOff || c.flags&cqeFNotif != 0) && rr.zeroCopyHandled(slot, c)
       - op: "--"
         set: cc.ops
       - switch:
@@ -10452,7 +10476,7 @@ sequences:
           do:
             - set: c.zc
               value: zcOn
-          when: rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin
+          when: rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin && c.zcVoid == 0
       - eval: rr.sendFlight(slot)
         to: rr.sendFlight
   - of: (*uRing).sendFlight
@@ -10476,6 +10500,15 @@ sequences:
     steps:
       - bind: c
         eval: "&rr.r.conns[slot]"
+      - opt:
+          do:
+            - set: c.zc
+              value: zcHold
+            - op: "|="
+              set: c.flags
+              value: fSending
+            - return: ""
+          when: c.zc == zcOn && c.zcPend == math.MaxUint8
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
@@ -10490,15 +10523,6 @@ sequences:
       - bind: ud
         eval: udPack(udSend, c.gen, uint32(slot))
         to: udPack
-      - opt:
-          do:
-            - set: c.zc
-              value: zcHold
-            - op: "|="
-              set: c.flags
-              value: fSending
-            - return: ""
-          when: c.zc == zcOn && c.zcPend == math.MaxUint8
       - alt:
           - do:
               - eval: prepSendZC(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
@@ -10887,8 +10911,6 @@ sequences:
         kind: internal
       - id: rr.takeQueues
         kind: internal
-      - id: lp.closeSettled
-        kind: internal
     steps:
       - bind: lp
         eval: ul.lp
@@ -10905,8 +10927,6 @@ sequences:
           do:
             - eval: rr.takeQueues()
               to: rr.takeQueues
-            - eval: lp.closeSettled(rr.r)
-              to: lp.closeSettled
           key: _
           range: ul.rings
           value: rr
@@ -13745,30 +13765,70 @@ sequences:
         kind: actor
       - id: (*uRing).zeroCopyDone
         kind: self
-      - id: rr.releaseFlight
+      - id: rr.notified
         kind: internal
-      - id: rr.sendPlainly
+    steps:
+      - opt:
+          do:
+            - eval: rr.notified(slot)
+              to: rr.notified
+            - return: "true"
+          when: c.flags&cqeFNotif != 0
+      - bind: cc
+        eval: "&rr.r.conns[slot]"
+      - opt:
+          do:
+            - op: "--"
+              set: cc.ops
+            - op: "--"
+              set: cc.zcPend
+          when: c.flags&cqeFMore == 0 && cc.zcPend > 0
+      - return: "false"
+  - of: (*uRing).notified
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).notified
+        kind: self
+      - id: rr.pagesBack
         kind: internal
       - id: rr.maybeClose
         kind: internal
     steps:
       - bind: cc
         eval: "&rr.r.conns[slot]"
-      - opt:
-          do:
-            - opt:
-                do:
-                  - op: "--"
-                    set: cc.ops
-                  - op: "--"
-                    set: cc.zcPend
-                when: c.flags&cqeFMore == 0
-            - return: "false"
-          when: c.flags&cqeFNotif == 0
+      - switch:
+          cases:
+            - case: cc.zcVoid > 0
+              do:
+                - op: "--"
+                  set: cc.zcVoid
+            - case: cc.zcPend > 0
+              do:
+                - op: "--"
+                  set: cc.zcPend
+                - eval: rr.pagesBack(slot)
+                  to: rr.pagesBack
+            - default: true
+              do:
+                - return: ""
       - op: "--"
         set: cc.ops
-      - op: "--"
-        set: cc.zcPend
+      - eval: rr.maybeClose(slot)
+        to: rr.maybeClose
+  - of: (*uRing).pagesBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).pagesBack
+        kind: self
+      - id: rr.releaseFlight
+        kind: internal
+      - id: rr.sendPlainly
+        kind: internal
+    steps:
+      - bind: cc
+        eval: "&rr.r.conns[slot]"
       - bind: alive
         eval: cc.state == stOpen || cc.state == stClosing
       - switch:
@@ -13782,12 +13842,9 @@ sequences:
               do:
                 - eval: rr.sendPlainly(slot, alive)
                   to: rr.sendPlainly
-      - eval: rr.maybeClose(slot)
-        to: rr.maybeClose
-      - return: "true"
   - of: (*uRing).zeroCopyHandled
     steps:
-      - return: rr.zeroCopyDone(slot, c) || (rr.r.conns[slot].zc == zcOn && rr.zeroCopyRefused(slot, c.res))
+      - return: rr.zeroCopyDone(slot, c) || (rr.r.conns[slot].zc == zcOn && rr.zeroCopyRefused(slot, c))
   - of: (*uRing).zeroCopyRefused
     participants:
       - id: caller
@@ -13809,17 +13866,18 @@ sequences:
             - default: true
               do:
                 - return: "false"
-          "on": syscall.Errno(-res)
+          "on": syscall.Errno(-c.res)
       - bind: cc
         eval: "&rr.r.conns[slot]"
       - op: "--"
         set: cc.ops
       - opt:
           do:
-            - set: cc.zc
-              value: zcHold
-            - return: "true"
-          when: cc.zcPend > 0
+            - op: "--"
+              set: cc.zcPend
+            - op: ++
+              set: cc.zcVoid
+          when: c.flags&cqeFMore != 0 && cc.zcPend > 0
       - eval: rr.sendPlainly(slot, cc.state == stOpen || cc.state == stClosing)
         to: rr.sendPlainly
       - eval: rr.maybeClose(slot)

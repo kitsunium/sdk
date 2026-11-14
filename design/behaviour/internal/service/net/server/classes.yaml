@@ -5802,12 +5802,19 @@ types:
         name: timer
         params: slot int32, pc *portableConn, now time.Time
         recv: pl *portableLoop
-      - doc: control applies the drain.
+      - doc: |-
+          control applies the drain: from the batch it is asked in, the lane drains,
+          its connections looked at once OnBatchEnd has returned (batch).
         name: control
         recv: pl *portableLoop
       - doc: |-
           closeSettled marks for closing, as the drain does, every open connection
-          the drain may close now (drainable).
+          the drain may close now (drainable). It runs once OnBatchEnd has returned
+          and before endBatch flushes: whatever the batch's requests asked for is
+          written by then, the handlers answering at OnBatchEnd included, so the
+          close leaves after it — a closing connection finishes only once its output
+          has left (settle) — and no answer is refused (#1385). A connection fed in
+          every batch is judged at every look: OnDrain at one, its close at the next.
         name: closeSettled
         recv: pl *portableLoop
       - doc: |-
