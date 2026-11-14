@@ -91,6 +91,73 @@ geomean                       2.888µ        2.920µ         -2.93%             
   that loses the insert to another (a race the old lock made impossible)
   built a candidate it then discards — the price of building it unlocked.
 
+## One acquisition, a publication off the lock (#1035, reopened)
+
+The first pass at #1035 (above) left step 1 alone at 87 % of the base, for a
+bound of 80 %: a leading call took the group's lock three times — a first
+look, the insert, the publication. The owner kept the bound (2026-11-13), and
+this pass takes the lock once:
+
+- **One blocking acquisition a call.** A caller builds its candidate, the call
+  record and its context, with the lock released; `insertOrJoin` inserts it or
+  joins the call in flight, in one acquisition.
+- **A publication that never waits for the lock.** `retired` is an atomic a
+  newcomer reads as the key's absence; the map entry goes at once under
+  `TryLock`, or is queued for the holder, which removes it before releasing.
+- **A hot key's followers build nothing.** A shard keeps the hash of the
+  latest key whose call gained a follower; a caller of that key looks first
+  and joins with no allocation.
+
+Two rows are new. **`Do_DistinctKeysParallel_OneShard`** (an internal
+benchmark, `shard_bench_internal_test.go`) drives ONE shard through `join` and
+`await`, with the hash `Do` computes: step 1 alone, judged against the base's
+`Do_DistinctKeysParallel`. **`Do_DistinctKeysParallelOwnCtx`** gives each
+goroutine its own context: every other row shares one, whose `Done` channel
+each waiting call queues on and leaves under that channel's lock — a second
+lock all goroutines contend on, worth 35 to 40 % of the row once the shards
+are in place. It judges nothing.
+
+**Indications only**, measured 2026-11-14 on the shared 8-vCPU AMD EPYC 7351P
+VM, four CPUs pinned by `taskset`, `-cpu=4`, 200 000 calls a row, ten rounds
+alternating the base (`ee1f48b`), the first pass (`6492b44`) and this one,
+benchstat. The VM measures its scheduler as much as the code; the verdict is
+the A/B lane's on the runner (`bench-ab.yml`), whose figures replace these.
+
+```
+                                   │   base.txt   │               main.txt               │              final.txt              │
+                                   │    sec/op    │    sec/op     vs base                │   sec/op     vs base                │
+Do_Uncontended-4                     2.137µ ±  3%   2.157µ ±  6%        ~ (p=0.853 n=10)   2.251µ ± 2%   +5.33% (p=0.000 n=10)
+Do_SharedKeyParallel-4               2.321µ ±  8%   2.302µ ±  8%        ~ (p=0.739 n=10)   2.494µ ± 6%        ~ (p=0.052 n=10)
+Do_DistinctKeysParallel-4            2.730µ ± 16%   1.957µ ± 17%  -28.32% (p=0.000 n=10)   2.002µ ± 7%  -26.68% (p=0.000 n=10)
+Do_DistinctKeysParallelOwnCtx-4      2.637µ ±  7%   1.204µ ± 21%  -54.36% (p=0.000 n=10)   1.247µ ± 7%  -52.71% (p=0.000 n=10)
+Do_DistinctKeysParallel_OneShard-4                                                         2.245µ ± 7%
+
+                                   │  base.txt   │              main.txt               │              final.txt              │
+                                   │  allocs/op  │  allocs/op   vs base                │  allocs/op   vs base                │
+Do_Uncontended-4                     6.000 ±  0%   5.000 ±  0%  -16.67% (p=0.000 n=10)   5.000 ±  0%  -16.67% (p=0.000 n=10)
+Do_SharedKeyParallel-4               5.000 ± 20%   4.000 ± 25%  -20.00% (p=0.002 n=10)   4.000 ± 25%  -20.00% (p=0.000 n=10)
+Do_DistinctKeysParallel-4            7.000 ±  0%   5.000 ±  0%  -28.57% (p=0.000 n=10)   5.000 ±  0%  -28.57% (p=0.000 n=10)
+
+                       │   base.txt   │            main.txt            │              final.txt              │
+                       │  fn-runs/op  │  fn-runs/op   vs base          │  fn-runs/op   vs base               │
+Do_SharedKeyParallel-4   777.4m ± 23%   725.1m ± 21%  ~ (p=0.353 n=10)   701.8m ± 12%  -9.72% (p=0.035 n=10)
+```
+
+- **Step 1 alone**, `Do_DistinctKeysParallel_OneShard` over the base's
+  `Do_DistinctKeysParallel`, read 0.70 and 0.82 in the two runs of this
+  design that day (0.82 in the one above): the bound is 0.80, so the VM
+  cannot say; the runner will.
+- **Step 2**, `Do_DistinctKeysParallel` 2.00 µs against `Do_Uncontended`'s
+  2.25 µs, holds here as it did.
+- **`Do_Uncontended`** keeps its 5 allocations (the budget's), and reads
+  +5 % in every run that day, about 100 ns of a 2.2 µs hand-off that a CPU
+  profile of the row, dominated by the scheduler, does not attribute: to
+  confirm on the runner.
+- **`fn-runs/op` without the hot-key hint rose 7 to 14 %** in every run
+  (0.76 against 0.67 to 0.70): each follower built and discarded a candidate
+  before reaching the lock, and arrived after the call it would have joined.
+  With the hint it is the base's within noise.
+
 ## The shared context's root in the call record (#813)
 
 Measured 2026-11-07, go1.27.3, branch `wip/sdk-lot-4-kernel`, 8-vCPU AMD EPYC
@@ -163,10 +230,10 @@ Do_SharedKeyParallel-4   629.4m ± 1%   634.7m ± 5%  +0.84% (p=0.024 n=15)
   call** across runs, so a third to a half of the calls were served by someone
   else's work. With a real (slow) `fn` that ratio is the saving; here it merely
   proves deduplication happens under contention. Allocations fall below the
-  leader's 5/op for the same reason — a follower allocates nothing at all, so
-  the average falls as the shared fraction rises (3 to 4/op since #813: a
-  leader that loses the insert to another also built a candidate it discards,
-  see above). The
+  leader's 5/op for the same reason — a follower of a hot key allocates
+  nothing at all, so the average falls as the shared fraction rises (3 to
+  4/op since #813: a caller that loses the insert to another also built a
+  candidate it discards, see above). The
   ratio is workload-dependent: it rises with `fn`'s duration (a longer call
   collects more followers) and falls as `fn` approaches zero.
 - **`BenchmarkDo_DistinctKeysParallel`** — nothing is ever shared, so every

@@ -71,6 +71,29 @@ func BenchmarkDo_DistinctKeysParallel(b *testing.B) {
 	})
 }
 
+// BenchmarkDo_DistinctKeysParallelOwnCtx is DistinctKeysParallel with a
+// context of each goroutine's own, the shape of a real miss storm, where every
+// request carries its own. Every other row shares one context, whose Done
+// channel each waiting call queues on and leaves under that channel's lock:
+// one more lock all goroutines contend on, the Group's or not. This row tells
+// the two apart (#1035), and judges nothing.
+func BenchmarkDo_DistinctKeysParallelOwnCtx(b *testing.B) {
+	var group singleflight.Group[string, int]
+	var next atomic.Int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		ctx, cancel := context.WithCancel(b.Context())
+		defer cancel()
+		for pb.Next() {
+			key := strconv.FormatInt(next.Add(1), 10)
+			if _, _, err := group.Do(ctx, key, func(context.Context) (int, error) { return 1, nil }); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
 // BenchmarkBaseline_DirectCall calls fn with no Group at all. Every number
 // above is only meaningful against it: a Group is worth its overhead exactly
 // when fn costs more than this difference AND callers collide.

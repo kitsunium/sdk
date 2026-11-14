@@ -4,19 +4,22 @@ import (
 	"context"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // call is one execution of fn, shared by every caller that named its key while
 // it was running.
 //
-// Every field except base, done and cancel is written by exactly one
-// goroutine — the one running fn — and read by the waiters only AFTER
+// Every field except base, done, cancel, key and next is written by exactly
+// one goroutine — the one running fn — and read by the waiters only AFTER
 // close(done), which is the happens-before edge that makes the reads
-// race-free without a second mutex. refs and retired are the exception: they
-// are group bookkeeping and are read and written under the mutex of the shard
-// holding the call.
-type call[V any] struct {
+// race-free without a second mutex. refs, retired and next are the
+// exception: they are group bookkeeping, refs read and written under the
+// mutex of the shard holding the call, retired an atomic so publish can set
+// it without that mutex, next written before the call is queued and read by
+// the shard's lock holder that drains the queue (#1035).
+type call[K comparable, V any] struct {
 	// base is the shared context's root: the leader's values, none of its
 	// deadline or cancellation (#813). Written once, before the call is
 	// published to any other goroutine, and read-only after.
@@ -24,32 +27,41 @@ type call[V any] struct {
 	// done is closed once val/err/panicked are final. Closing rather than
 	// sending is what lets N waiters observe one result.
 	done chan struct{}
+	// cancel stops the shared context. It is fired when the last caller
+	// abandons the call, and again (harmlessly) when fn returns.
+	cancel context.CancelFunc
+	// next links the call into its shard's queue of retired calls whose map
+	// entry is still to be removed: publish queues it when another goroutine
+	// holds the shard's mutex, and the holder removes it (#1035).
+	next *call[K, V]
+	// panicked is non-nil when fn panicked; every waiter re-raises it.
+	panicked *PanicValue
+	// refs counts the callers still waiting. Guarded by the shard's mutex.
+	refs int
 	// publishOnce guards close(done). Only run's defer chain reaches it today,
 	// but a second close panics and a panicking publish is the one failure
 	// that leaves every waiter parked on a channel forever — so the guard is
 	// on the type rather than on a maintainer remembering the invariant.
 	publishOnce sync.Once
-	// cancel stops the shared context. It is fired when the last caller
-	// abandons the call, and again (harmlessly) when fn returns.
-	cancel context.CancelFunc
-	// refs counts the callers still waiting. Guarded by the shard's mutex.
-	refs int
-	// retired records that the call has left the Group's map, so a late
-	// abandonment cannot delete a key that now belongs to a different call.
-	// Guarded by the shard's mutex.
-	retired bool
+	// retired records that the call is over for the Group: a caller finding
+	// it in the map treats the key as absent and starts a new call, and a
+	// late abandonment cannot delete a key that now belongs to a different
+	// call. Set once, by whichever of publish and the last abandonment comes
+	// first, without the shard's mutex for publish (#1035).
+	retired atomic.Bool
+	// key is the key the call runs for, read by whoever removes its map
+	// entry once it is retired.
+	key K
 
 	// val and err are fn's outcome.
 	val V
 	err error
-	// panicked is non-nil when fn panicked; every waiter re-raises it.
-	panicked *PanicValue
 }
 
 // capturePanic is deferred INSIDE the goroutine running fn: recover() only
 // reports a panic when called directly by a deferred function of the panicking
 // frame, so this cannot be folded into run's own defer chain body.
-func (c *call[V]) capturePanic() {
+func (c *call[K, V]) capturePanic() {
 	//: recover returns nil on the normal path, which is the overwhelming case.
 	if raised := recover(); raised != nil {
 		//: capture the value AND the stack — the stack is the only thing that
@@ -61,7 +73,7 @@ func (c *call[V]) capturePanic() {
 
 // repanic re-raises fn's panic in the calling goroutine. Called only after
 // done is closed.
-func (c *call[V]) repanic() {
+func (c *call[K, V]) repanic() {
 	//: the normal path — fn returned.
 	if c.panicked == nil {
 		//: nothing to re-raise.

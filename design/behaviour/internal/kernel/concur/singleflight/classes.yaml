@@ -29,19 +29,37 @@ constants:
         value: "64"
     name: cacheLine
   - doc: |-
-      shardHeld is what a shard holds before its padding: a mutex and a map
-      pointer, 16 bytes.
+      shardHeld is what a shard's first cache line holds before its padding: a
+      mutex, a map pointer and the head of its queue of retired calls, 24 bytes.
     items:
       - name: shardHeld
         type: int
-        value: "16"
+        value: "24"
     name: shardHeld
-  - doc: shardPad fills a shard to cacheLine, derived from cacheLine and shardHeld.
+  - doc: |-
+      shardPad fills a shard's first cache line, derived from cacheLine and
+      shardHeld.
     items:
       - name: shardPad
         type: int
         value: cacheLine - shardHeld
     name: shardPad
+  - doc: |-
+      hintHeld is what a shard's second cache line holds: the hot key's hash, 8
+      bytes.
+    items:
+      - name: hintHeld
+        type: int
+        value: "8"
+    name: hintHeld
+  - doc: |-
+      hintPad fills a shard's second cache line, derived from cacheLine and
+      hintHeld.
+    items:
+      - name: hintPad
+        type: int
+        value: cacheLine - hintHeld
+    name: hintPad
 files:
   - decls:
       - call
@@ -68,18 +86,30 @@ files:
       - cacheLine
       - shardHeld
       - shardPad
+      - hintHeld
+      - hintPad
       - shardSeed
       - shard
       - Group
+      - hashOf
+      - (*Group).shardAt
       - (*Group).shardOf
       - (*Group).Do
       - (*Group).Forget
       - (*Group).InFlight
+      - (*shard).live
       - (*shard).join
       - (*shard).joinExisting
+      - (*shard).follow
+      - newCandidate
+      - (*shard).settle
       - (*shard).insertOrJoin
+      - (*shard).unlock
+      - (*shard).drainRetired
+      - (*shard).remove
       - (*shard).run
       - (*shard).publish
+      - (*shard).release
       - (*shard).await
       - (*shard).abandon
     name: singleflight.go
@@ -96,7 +126,22 @@ functions:
     name: renderRaised
     params: raised any
     results: string
+  - doc: |-
+      hashOf returns key's seeded hash: its low bits pick its shard, and the
+      whole of it is compared with the shard's hot key.
+    name: hashOf
+    params: key K
+    results: uint64
+    typeParams: K comparable
+  - doc: |-
+      newCandidate builds, with no lock held, the call a caller of key leads if
+      no call for key is in flight, and the context its fn would run under.
+    name: newCandidate
+    params: ctx context.Context, key K
+    results: candidate *call[K, V], callCtx context.Context
+    typeParams: K comparable, V any
 imports:
+  atomic: sync/atomic
   context: context
   debug: runtime/debug
   maphash: hash/maphash
@@ -114,12 +159,14 @@ types:
       call is one execution of fn, shared by every caller that named its key while
       it was running.
 
-      Every field except base, done and cancel is written by exactly one
-      goroutine — the one running fn — and read by the waiters only AFTER
+      Every field except base, done, cancel, key and next is written by exactly
+      one goroutine — the one running fn — and read by the waiters only AFTER
       close(done), which is the happens-before edge that makes the reads
-      race-free without a second mutex. refs and retired are the exception: they
-      are group bookkeeping and are read and written under the mutex of the shard
-      holding the call.
+      race-free without a second mutex. refs, retired and next are the
+      exception: they are group bookkeeping, refs read and written under the
+      mutex of the shard holding the call, retired an atomic so publish can set
+      it without that mutex, next written before the call is queued and read by
+      the shard's lock holder that drains the queue (#1035).
     fields:
       - doc: |-
           base is the shared context's root: the leader's values, none of its
@@ -133,6 +180,23 @@ types:
         name: done
         type: chan struct{}
       - doc: |-
+          cancel stops the shared context. It is fired when the last caller
+          abandons the call, and again (harmlessly) when fn returns.
+        name: cancel
+        type: context.CancelFunc
+      - doc: |-
+          next links the call into its shard's queue of retired calls whose map
+          entry is still to be removed: publish queues it when another goroutine
+          holds the shard's mutex, and the holder removes it (#1035).
+        name: next
+        type: "*call[K, V]"
+      - doc: panicked is non-nil when fn panicked; every waiter re-raises it.
+        name: panicked
+        type: "*PanicValue"
+      - doc: refs counts the callers still waiting. Guarded by the shard's mutex.
+        name: refs
+        type: int
+      - doc: |-
           publishOnce guards close(done). Only run's defer chain reaches it today,
           but a second close panics and a panicking publish is the one failure
           that leaves every waiter parked on a channel forever — so the guard is
@@ -140,27 +204,23 @@ types:
         name: publishOnce
         type: sync.Once
       - doc: |-
-          cancel stops the shared context. It is fired when the last caller
-          abandons the call, and again (harmlessly) when fn returns.
-        name: cancel
-        type: context.CancelFunc
-      - doc: refs counts the callers still waiting. Guarded by the shard's mutex.
-        name: refs
-        type: int
-      - doc: |-
-          retired records that the call has left the Group's map, so a late
-          abandonment cannot delete a key that now belongs to a different call.
-          Guarded by the shard's mutex.
+          retired records that the call is over for the Group: a caller finding
+          it in the map treats the key as absent and starts a new call, and a
+          late abandonment cannot delete a key that now belongs to a different
+          call. Set once, by whichever of publish and the last abandonment comes
+          first, without the shard's mutex for publish (#1035).
         name: retired
-        type: bool
+        type: atomic.Bool
+      - doc: |-
+          key is the key the call runs for, read by whoever removes its map
+          entry once it is retired.
+        name: key
+        type: K
       - doc: val and err are fn's outcome.
         name: val
         type: V
       - name: err
         type: error
-      - doc: panicked is non-nil when fn panicked; every waiter re-raises it.
-        name: panicked
-        type: "*PanicValue"
     kind: struct
     methods:
       - doc: |-
@@ -168,14 +228,14 @@ types:
           reports a panic when called directly by a deferred function of the panicking
           frame, so this cannot be folded into run's own defer chain body.
         name: capturePanic
-        recv: c *call[V]
+        recv: c *call[K, V]
       - doc: |-
           repanic re-raises fn's panic in the calling goroutine. Called only after
           done is closed.
         name: repanic
-        recv: c *call[V]
+        recv: c *call[K, V]
     name: call
-    typeParams: V any
+    typeParams: K comparable, V any
   - doc: |-
       detached is the root of a shared call's context: the leader's values and
       none of its deadline or cancellation — what context.WithoutCancel(leader)
@@ -241,57 +301,136 @@ types:
     name: PanicValue
   - doc: |-
       shard is one of a Group's maps and the mutex guarding it, with every call's
-      refs and retired.
+      refs, and the queue of retired calls whose entry is still in the map.
     fields:
       - name: mu
         type: sync.Mutex
       - name: calls
-        type: map[K]*call[V]
+        type: map[K]*call[K, V]
+      - doc: |-
+          : the calls publish retired while another goroutine held mu, linked by
+          : their next field: whoever holds mu removes their entries before
+          : releasing it (see unlock), so publish never waits for the lock.
+        name: retired
+        type: atomic.Pointer[call[K, V]]
       - name: _
         type: "[shardPad]byte"
+      - doc: |-
+          : the hash of the latest key whose call gained a follower: read without
+          : the lock, it tells a caller whether a first look may find its key in
+          : flight. A number, so it keeps no call alive; on a line of its own,
+          : written only when the hot key changes, so the callers of keys nobody
+          : shares read it from their own cache rather than from the line the
+          : mutex moves between them.
+        name: hotHash
+        type: atomic.Uint64
+      - name: _
+        type: "[hintPad]byte"
     kind: struct
     methods:
+      - doc: |-
+          live counts the shard's calls a new Do would join: its entries, less the
+          retired ones still waiting for their removal.
+        name: live
+        recv: s *shard[K, V]
+        results: int
       - doc: |-
           join registers this goroutine as a waiter on key's call, starting one if
           none is in flight. joined reports whether the call was already running.
 
-          The critical section holds the map and nothing else (#1035): a follower
-          finds the call and counts itself in one acquisition; a leader looks, builds
-          its call record and context with the lock released, and takes it again to
-          insert — and a candidate that lost the key to another leader in between
-          cancels the context it built and joins the winner instead.
+          The critical section holds the map and nothing else (#1035). A caller whose
+          key hashes as the shard's hot key — the latest whose call gained a follower
+          — looks first and joins the call in flight in that one acquisition,
+          building nothing. Every other caller builds a candidate, the call record
+          and its context, with the lock released, and one acquisition either
+          inserts it or counts the caller in the call that got there first. Only the
+          leader of a hot key, whose first look found nothing, takes the lock twice.
+          hash is key's hashOf.
         name: join
-        params: ctx context.Context, key K, fn func(ctx context.Context) (V, error)
+        params: ctx context.Context, key K, hash uint64, fn func(ctx context.Context) (V, error)
         recv: s *shard[K, V]
-        results: entry *call[V], joined bool
+        results: entry *call[K, V], joined bool
       - doc: |-
           joinExisting counts the caller in key's in-flight call and returns it, or
           returns nil when none is in flight.
         name: joinExisting
-        params: key K
+        params: key K, hash uint64
         recv: s *shard[K, V]
-        results: "*call[V]"
+        results: "*call[K, V]"
+      - doc: |-
+          follow counts one more waiter in entry, with s.mu held, and makes its key,
+          of hash hash, the shard's hot key: a key whose call gained a follower is
+          likely to gain more, and the next ones then look before building anything.
+        name: follow
+        params: entry *call[K, V], hash uint64
+        recv: s *shard[K, V]
+      - doc: |-
+          settle inserts candidate under its key and starts its fn under callCtx, or
+          joins the call already in flight for that key — one acquisition decides. A
+          candidate that lost the key cancels the context it built and joins the
+          winner: its fn never runs. hash is the key's hashOf.
+
+          Goroutine lifecycle: a winning candidate's fn runs on a goroutine started
+          here, with no lock held, and that goroutine ends when fn returns or panics,
+          once run has published the outcome and cancelled callCtx.
+        name: settle
+        params: callCtx context.Context, candidate *call[K, V], hash uint64, fn func(ctx context.Context) (V, error)
+        recv: s *shard[K, V]
+        results: entry *call[K, V], joined bool
       - doc: |-
           insertOrJoin registers candidate under key and reports true, or — when a
           call for key is already in flight — counts the caller in that call and
-          returns it with false. One acquisition decides both.
+          returns it with false. One acquisition decides both. A retired call still
+          in the map is not in flight: the candidate takes its place, so a newcomer
+          starts a new call rather than joining a finished one.
         name: insertOrJoin
-        params: key K, candidate *call[V]
+        params: candidate *call[K, V], hash uint64
         recv: s *shard[K, V]
-        results: winner *call[V], inserted bool
+        results: winner *call[K, V], inserted bool
       - doc: |-
-          run executes fn, publishes its outcome on entry, and retires key. It runs on
-          its own goroutine: that is what makes a caller's departure a departure
-          rather than a kill.
+          unlock releases s.mu, first removing the entries of the calls publish
+          queued while it was held. A publish that queued its call after the drain
+          found the lock taken, so the call is drained by whoever releases the lock
+          after it — this goroutine, which looks once more once it has released it,
+          or the goroutine that took the lock in between.
+        name: unlock
+        recv: s *shard[K, V]
+      - doc: |-
+          drainRetired removes, with s.mu held, the map entry of every call queued
+          on s.retired whose key it still holds.
+        name: drainRetired
+        recv: s *shard[K, V]
+      - doc: |-
+          remove deletes entry's map entry, with s.mu held, unless its key now
+          belongs to another call — Forget, an abandoned predecessor's successor or a
+          newcomer that found it retired may have replaced it.
+        name: remove
+        params: entry *call[K, V]
+        recv: s *shard[K, V]
+      - doc: |-
+          run executes fn, publishes its outcome on entry, and retires its key. It
+          runs on its own goroutine: that is what makes a caller's departure a
+          departure rather than a kill.
         name: run
-        params: ctx context.Context, key K, entry *call[V], fn func(ctx context.Context) (V, error)
+        params: ctx context.Context, entry *call[K, V], fn func(ctx context.Context) (V, error)
         recv: s *shard[K, V]
       - doc: |-
-          publish retires key (so the next Do starts fresh) and wakes every waiter.
-          The map entry is dropped BEFORE done is closed so a goroutine arriving in
-          between starts a new call instead of joining a finished one.
+          publish retires the call (so the next Do on its key starts fresh) and wakes
+          every waiter. The call is retired BEFORE done is closed so a goroutine
+          arriving in between starts a new call instead of joining a finished one.
+
+          It never waits for the shard's mutex (#1035): retired is an atomic, which a
+          newcomer reads as the key's absence, and the map entry is removed now when
+          the lock is free, or by the goroutine holding it otherwise.
         name: publish
-        params: key K, entry *call[V]
+        params: entry *call[K, V]
+        recv: s *shard[K, V]
+      - doc: |-
+          release removes a retired call's map entry without waiting for s.mu: at
+          once when the lock is free, else by queueing the call for the goroutine
+          holding it.
+        name: release
+        params: entry *call[K, V]
         recv: s *shard[K, V]
       - doc: |-
           await blocks until the result lands or ctx is done.
@@ -302,7 +441,7 @@ types:
           the bookkeeping keeps the deduplicated path at one mutex acquisition per
           caller (the join) instead of two.
         name: await
-        params: ctx context.Context, key K, entry *call[V], shared bool
+        params: ctx context.Context, entry *call[K, V], shared bool
         recv: s *shard[K, V]
         results: value V, isShared bool, err error
       - doc: |-
@@ -310,7 +449,7 @@ types:
           leaves, the key is retired and the shared context is cancelled: a call whose
           every caller has gone is computing a result nobody will read.
         name: abandon
-        params: key K, entry *call[V]
+        params: entry *call[K, V]
         recv: s *shard[K, V]
     name: shard
     typeParams: K comparable, V any
@@ -322,6 +461,11 @@ types:
         type: "[shardCount]shard[K, V]"
     kind: struct
     methods:
+      - doc: shardAt returns the shard a key of hash lives in.
+        name: shardAt
+        params: hash uint64
+        recv: g *Group[K, V]
+        results: "*shard[K, V]"
       - doc: shardOf returns the shard key lives in.
         name: shardOf
         params: key K

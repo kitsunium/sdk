@@ -34,6 +34,7 @@ go_test(
         "gen_perf_test.go",
         "identity_internal_test.go",
         "perf_fixtures_test.go",
+        "shard_bench_internal_test.go",
         "singleflight_bench_test.go",
         "singleflight_external_test.go",
         "singleflight_internal_test.go",
