@@ -439,6 +439,35 @@ constants:
         value: 30 * time.Second
     name: joinRefreshTimeout
   - doc: |-
+      joinApplyLag is how far, in entries, a voter's apply may trail its commit
+      index, and its log the leader's last index as its last heartbeat carried
+      it, for the voter still to forward a JOIN: at D16's 10 000 entries a
+      second, about a tenth of a second before it applies the AddLearner it
+      forwards (#1422).
+    items:
+      - name: joinApplyLag
+        type: uint64
+        value: "1024"
+    name: joinApplyLag
+  - doc: |-
+      joinNotLeader opens the reason of a JOIN refused NOT_LEADER that names
+      the leader: its id, then " at " and its address when this node knows it
+      (#1422). The JOIN_REFUSED frame carries a code and a reason alone, so the
+      joiner reads the leader back from the reason (leaderOfJoinRefusal).
+    items:
+      - name: joinNotLeader
+        value: "\"not the leader; leader \""
+    name: joinNotLeader
+  - doc: |-
+      joinFollows bounds how many leaders one JOIN follows past its configured
+      targets: a learner names the leader once, and a leadership that moved
+      while the JOIN went round names one more (#1422).
+    items:
+      - name: joinFollows
+        type: int
+        value: "2"
+    name: joinFollows
+  - doc: |-
       memQueueFrames is the depth of each per-lane queue of the memory double:
       deep enough that a test's burst is not dropped by accident, finite so a
       stalled receiver still loses frames the way a real lane does (D2).
@@ -1650,6 +1679,24 @@ files:
       - (*Node).servedMembership
     name: join.go
   - decls:
+      - joinApplyLag
+      - joinNotLeader
+      - (*Node).joinElsewhere
+      - (*Node).joinServes
+      - (*Node).joinVoter
+      - (*Node).joinLevel
+      - notLeaderJoinReason
+      - leaderOfJoinRefusal
+      - leaderOfJoinReason
+    name: join_elsewhere.go
+  - decls:
+      - joinFollows
+      - joinQueue
+      - newJoinQueue
+      - (*joinQueue).next
+      - (*joinQueue).follow
+    name: join_queue.go
+  - decls:
       - MemoryLog
       - NewMemoryLog
       - compacted
@@ -1711,6 +1758,8 @@ files:
       - (*MemoryTransport).Join
       - (*MemoryTransport).refreshJoin
       - (*MemoryTransport).joinVia
+      - (*MemoryTransport).installAnswer
+      - (*MemoryTransport).joinOne
       - (*MemoryNetwork).othersThan
       - memSPKI
       - MemorySPKI
@@ -2909,7 +2958,10 @@ functions:
   - name: JoinRefusalReason
     params: err error
     results: string, bool
-  - doc: joinRefused builds the joiner's JOIN_REFUSED, its reason in a field.
+  - doc: |-
+      joinRefused builds the joiner's JOIN_REFUSED, its reason in a field. A
+      NOT_LEADER whose reason names the leader also carries it in the field
+      LeaderHint reads, as a proposal's NOT_LEADER does (#1422).
     name: joinRefused
     params: code errs.Code, reason string
     results: error
@@ -3286,6 +3338,29 @@ functions:
     name: sameAnswer
     params: a, b []coreconsensus.MemberValue
     results: bool
+  - doc: |-
+      notLeaderJoinReason is the reason of a JOIN refused NOT_LEADER by a node
+      that cannot answer it promptly: the leader's id and, when known and the
+      reason's bound holds it, its address; with no leader known, it says so.
+    name: notLeaderJoinReason
+    params: lead coreconsensus.NodeID, addr string
+    results: string
+  - doc: |-
+      leaderOfJoinRefusal reads the leader a JOIN refused NOT_LEADER names in
+      its reason (notLeaderJoinReason): its id and, when named, its address.
+      ok is false for any other refusal, and for a reason that names none.
+    name: leaderOfJoinRefusal
+    params: err error
+    results: lead coreconsensus.NodeID, addr string, ok bool
+  - doc: leaderOfJoinReason parses notLeaderJoinReason's text.
+    name: leaderOfJoinReason
+    params: why string
+    results: lead coreconsensus.NodeID, addr string, ok bool
+  - doc: newJoinQueue is a queue over targets, in their order.
+    name: newJoinQueue
+    params: targets []K
+    results: "*joinQueue[K]"
+    typeParams: K comparable
   - name: NewMemoryLog
     results: "*MemoryLog"
   - doc: |-
@@ -7476,6 +7551,31 @@ types:
       interface {
       	refreshJoin(ctx context.Context) (changed bool, err error)
       }
+  - doc: |-
+      joinQueue is the targets a joiner sends its JOIN to, in turn: the ones it
+      was configured with, and the leader a member that refused it NOT_LEADER
+      names, tried next (#1422). Each target is tried once.
+    fields:
+      - name: todo
+        type: "[]K"
+      - name: tried
+        type: map[K]bool
+      - name: follows
+        type: int
+    kind: struct
+    methods:
+      - doc: next is the next target not tried yet; ok is false once none is left.
+        name: next
+        recv: q *joinQueue[K]
+        results: k K, ok bool
+      - doc: |-
+          follow puts leader first among the targets left, unless it was tried or
+          the queue followed joinFollows leaders already.
+        name: follow
+        params: leader K
+        recv: q *joinQueue[K]
+    name: joinQueue
+    typeParams: K comparable
   - fields:
       - name: mu
         type: sync.RWMutex
@@ -7823,11 +7923,29 @@ types:
         results: bool, error
       - doc: |-
           joinVia sends the JOIN of cfg to every other transport of the network in
-          turn, and installs the answer in the hold's generation gen.
+          turn, the leader a member refusing it NOT_LEADER names next (#1422), and
+          installs the answer in the hold's generation gen.
         name: joinVia
         params: ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64
         recv: t *MemoryTransport
         results: coreconsensus.PositionValue, error
+      - doc: |-
+          installAnswer installs, in the hold's generation gen, the answer of x to
+          a JOIN whose AddLearner is at index at: the JOIN answer carries the
+          members the target admits, the target included, and the joiner admits
+          them apart from its engine's configuration until it is admitted itself
+          (#552), as of the AddLearner it answers (#742).
+        name: installAnswer
+        params: gen uint64, x *MemoryTransport, at uint64
+        recv: t *MemoryTransport
+      - doc: |-
+          joinOne sends req to x, under the slot and key the memory transport
+          authenticates this node with. asked is false when x serves no JOIN or the
+          link to it is cut.
+        name: joinOne
+        params: ctx context.Context, x *MemoryTransport, req *coreconsensus.JoinRequestValue
+        recv: t *MemoryTransport
+        results: pos coreconsensus.PositionValue, code errs.Code, reason string, asked bool
       - name: Close
         recv: t *MemoryTransport
         results: error
@@ -8615,6 +8733,45 @@ types:
         name: servedMembership
         recv: n *Node
         results: coreconsensus.MembershipValue, bool
+      - doc: |-
+          joinElsewhere reports whether this node cannot answer a JOIN promptly,
+          with the NOT_LEADER reason that names the leader it knows (#1422). A node
+          that does not lead forwards the AddLearner and answers once it applied
+          that entry itself: a learner still waiting for its snapshot, which applies
+          nothing, held the JOIN for its whole deadline and answered
+          OUTCOME_UNKNOWN although the leader had committed the admission. Only
+          the leader and a voter level with it (joinServes) answer; every other
+          node refuses before it proposes anything. A stopped node is left to the
+          path that answers its stop.
+        name: joinElsewhere
+        recv: n *Node
+        results: string, bool
+      - doc: |-
+          joinServes reports whether a node that does not lead, whose step function
+          reads st, answers a JOIN it forwards promptly: it follows a known leader
+          as a voter that holds its state (joinVoter), and its apply and its log are
+          level with the leader's (joinLevel) (#1422). A learner, a joiner, a node
+          with no table, a candidate and a lagging voter do not.
+        name: joinServes
+        params: st *raft.StatusValue
+        recv: n *Node
+        results: bool
+      - doc: |-
+          joinVoter reports whether this node follows a leader other than itself as
+          a voter of its configuration that may vote and holds a table: a learner,
+          a joiner and a node with no table may wait for a snapshot.
+        name: joinVoter
+        params: st *raft.StatusValue
+        recv: n *Node
+        results: bool
+      - doc: |-
+          joinLevel reports whether this node's apply is not held back, and its
+          applied index and its log are within joinApplyLag entries of its commit
+          index and of the leader's last index as its last heartbeat carried it.
+        name: joinLevel
+        params: st *raft.StatusValue
+        recv: n *Node
+        results: bool
       - doc: lineage is the node's log identity as it stands.
         name: lineage
         recv: n *Node
@@ -12591,8 +12748,9 @@ types:
         recv: t *TCPTransport
         results: bool, error
       - doc: |-
-          joinVia sends the JOIN of cfg to each address in turn, and installs the
-          answer in the hold's generation gen.
+          joinVia sends the JOIN of cfg to each address in turn, the leader's
+          address a member refusing it NOT_LEADER names next (#1422), and installs
+          the answer in the hold's generation gen.
         name: joinVia
         params: ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64
         recv: t *TCPTransport

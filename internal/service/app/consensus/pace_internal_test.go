@@ -177,15 +177,16 @@ func TestTheSnapshotStreamBoundsClampAndRefuse(t *testing.T) {
 // each holds compaction while the writes go on: neither needs a second
 // snapshot to catch up.
 //
-// The second learner's JOIN goes to the leader alone (#1412). Sent to the
-// first learner, which the memory transport tried first one time in four,
-// it was forwarded and committed at once, but answered only once that
-// learner applied it, after the snapshot the test holds: the JOIN waited
-// out its ten seconds, the held stream, still at its offer, fell due
-// (streamDue, 10 maximum election timeouts) and was cancelled, and the
-// waiting learner was offered its stream within the 500 ms the test looks.
-// The look now says whether the first stream was still in flight, and
-// requires it to be.
+// The second learner's JOIN goes to the first learner and the leader alone,
+// in the memory transport's random order (#1412, #1422). The first learner,
+// which waits for the snapshot the test holds, used to forward it, commit
+// it at once and answer only once it applied it: the JOIN waited out its
+// ten seconds, the held stream, still at its offer, fell due (streamDue, 10
+// maximum election timeouts) and was cancelled, and the waiting learner was
+// offered its stream within the 500 ms the test looks. It now refuses
+// NOT_LEADER at once, naming the leader, which the joiner tries next. The
+// look says whether the first stream was still in flight, and requires it
+// to be.
 func TestTwoLearnersAreStreamedOneAfterTheOther(t *testing.T) {
 	trs := map[coreconsensus.NodeID]*holdTransport{}
 	var mu sync.Mutex
@@ -221,7 +222,7 @@ func TestTwoLearnersAreStreamedOneAfterTheOther(t *testing.T) {
 	mu.Unlock()
 	lt.holding.Store(true)
 	a := c.join(t, "slot-a")
-	b := c.joinThrough(t, "slot-b", l)
+	b := c.joinThrough(t, "slot-b", a, l)
 	awaitOffer(t, lt, l)
 	first := streamsInFlight(l)
 	waiting := streamWaiter(t, l)

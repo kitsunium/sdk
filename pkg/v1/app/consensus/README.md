@@ -4700,7 +4700,7 @@ Cluster returns the cluster the certificate names.
 func (*TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error)
 ```
 
-Join implements Joiner: the JOIN goes to each address in turn until one member answers JOIN\_ACK with the position its AddLearner was appended at.
+Join implements Joiner: the JOIN goes to each address in turn until one member answers JOIN\_ACK with the position its AddLearner was appended at. A member that cannot answer at once refuses NOT\_LEADER naming the leader's address, which is tried next.
 
 <a name="TCPTransport.PeerCertExpiry"></a>
 ### func \(TCPTransport\) [PeerCertExpiry](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)

@@ -2180,6 +2180,8 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 
 // Join implements Joiner: the JOIN goes to each address in turn until one
 // member answers JOIN_ACK with the position its AddLearner was appended at.
+// A member that cannot answer at once refuses NOT_LEADER naming the leader's
+// address, which is tried next.
 func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
 	gen := t.hold.begin()
 	pos, err := t.joinVia(ctx, &cfg, gen)
@@ -2216,8 +2218,9 @@ type joinTry struct {
 	gen  uint64
 }
 
-// joinVia sends the JOIN of cfg to each address in turn, and installs the
-// answer in the hold's generation gen.
+// joinVia sends the JOIN of cfg to each address in turn, the leader's
+// address a member refusing it NOT_LEADER names next (#1422), and installs
+// the answer in the hold's generation gen.
 func (t *TCPTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64) (coreconsensus.PositionValue, error) {
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
@@ -2234,7 +2237,8 @@ func (t *TCPTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfi
 	}
 	last := origin(coreconsensus.JoinRefused, errs.String("why", "no address answered"))
 	var refused error
-	for _, addr := range cfg.Addresses {
+	q := newJoinQueue(cfg.Addresses)
+	for addr, ok := q.next(); ok; addr, ok = q.next() {
 		pos, answered, err := t.joinOne(ctx, addr, &joinTry{req: req, pins: cfg.Pins, gen: gen})
 		switch {
 		case err == nil:
@@ -2242,6 +2246,12 @@ func (t *TCPTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfi
 		case answered:
 			// A refusal beats an unreachable address: it says why.
 			refused = err
+			if _, at, named := leaderOfJoinRefusal(err); named && at != "" {
+				// A member that could not answer at once named the
+				// leader's address: it is tried next, its answer taken
+				// only from a pinned key as any other's (#1422).
+				q.follow(at)
+			}
 		default:
 			last = err
 		}

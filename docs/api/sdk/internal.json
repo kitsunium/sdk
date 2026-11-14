@@ -71088,7 +71088,7 @@
       "recv": "TCPTransport",
       "spelled": "func(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error)",
       "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/internal/core/app/consensus.JoinConfig) (github.com/kitsunium/sdk/internal/core/app/consensus.PositionValue, error)",
-      "doc": "Join implements Joiner: the JOIN goes to each address in turn until one\nmember answers JOIN_ACK with the position its AddLearner was appended at.\n",
+      "doc": "Join implements Joiner: the JOIN goes to each address in turn until one\nmember answers JOIN_ACK with the position its AddLearner was appended at.\nA member that cannot answer at once refuses NOT_LEADER naming the leader's\naddress, which is tried next.\n",
       "file": "service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"
