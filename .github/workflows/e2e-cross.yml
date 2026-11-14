@@ -35,6 +35,16 @@ name: Cross-platform runtime tests (real kernels)
 #
 # fail-fast: false everywhere — the point is to see ALL platforms' real behaviour
 # in one run, not stop at the first divergence.
+#
+# Scoped on a branch (ADR 0250): a push to any branch but main and the merge
+# queue's tests what the branch changed since it left main and what depends on
+# it — the `scope` job's plan, scripts/ci/scope.sh, `go list` deciding with
+# each lane's GOOS — and a lane nothing reaches is skipped, its guest never
+# booted. A push to main, a merge queue branch, a tag, the nightly run and a
+# manual run test everything, and so does any doubt: a path no rule accounts
+# for, a change to the build's definition, to this workflow or to scripts/ci/,
+# a plan that failed. Every lane's `if:` skips only on the plan's explicit
+# `skip`, and `scope-summary` says what each lane did.
 
 on:
   # Every branch and every tag but `pin/**`: a pin tag marks a commit for a
@@ -45,12 +55,17 @@ on:
     branches: ['**']
     tags-ignore: ['pin/**']
   workflow_dispatch:
+  # The whole bar on main's tip every night, whatever merged (ADR 0250).
+  schedule:
+    - cron: '47 2 * * *'
 
 permissions:
   contents: read
 
+# The nightly run has a group of its own, or it would cancel main's push run
+# or be cancelled by it.
 concurrency:
-  group: e2e-cross-${{ github.ref }}
+  group: e2e-cross-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -148,9 +163,98 @@ env:
   LOOP_GOFLAGS: "-tags=loopdebug '-ldflags=-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=iouring,epoll -X=github.com/kitsunium/sdk/internal/service/net/loop.requiredCaps=none'"
 
 jobs:
+  # ── What this run tests (ADR 0250) ─────────────────────────────────────────
+  # scripts/ci/scope.sh plans the run: everything on main, the merge queue, a
+  # tag, the nightly and a manual run; on another branch, the Go packages it
+  # changed since it left main (in scope with every package depending on
+  # them) and those whose tests alone it changed — or everything, when a path
+  # no rule accounts for changed, or the build's definition, this workflow or
+  # scripts/ci/. Then, per lane, whether a package it tests is reached, `go
+  # list` deciding with that lane's GOOS: Linux with the loop's tags for the
+  # kernel-sensitive list and the conformance program, darwin and windows,
+  # the three BSDs, illumos and Solaris. Never a gate: a lane skips only on
+  # an explicit `skip`, so a plan that failed runs everything.
+  scope:
+    name: scope — what this run tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      reason: ${{ steps.plan.outputs.reason }}
+      touched: ${{ steps.plan.outputs.touched }}
+      tests: ${{ steps.plan.outputs.tests }}
+      native: ${{ steps.lanes.outputs.native }}
+      linux_init: ${{ steps.lanes.outputs.linux_init }}
+      bsd: ${{ steps.lanes.outputs.bsd }}
+      solarish: ${{ steps.lanes.outputs.solarish }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # `go list` reads every module's requirements: setup-go's module cache,
+      # keyed on every go.sum as the bazel-ci.yml jobs key theirs.
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: '**/go.sum'
+
+      # A branch is compared with where it left main: its merge base with
+      # origin/main, which the full clone holds.
+      - name: plan — scoped on a branch, whole otherwise
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          EVAL_SHA: ${{ github.sha }}
+        run: |
+          printf '### The plan\n\n```\n' >>"$GITHUB_STEP_SUMMARY"
+          SCOPE_REPORT="$GITHUB_STEP_SUMMARY" bash scripts/ci/scope.sh plan "$EVENT" "$REF" "" "$EVAL_SHA" \
+            '^\.github/workflows/e2e-cross\.yml$' '^scripts/ci/' >>"$GITHUB_OUTPUT"
+          printf '```\n' >>"$GITHUB_STEP_SUMMARY"
+
+      - name: lanes — what each lane of this workflow reaches
+        id: lanes
+        env:
+          SCOPE_MODE: ${{ steps.plan.outputs.mode }}
+          SCOPE_TOUCHED: ${{ steps.plan.outputs.touched }}
+          SCOPE_TESTS: ${{ steps.plan.outputs.tests }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          sdk=github.com/kitsunium/sdk
+          # The kernel-sensitive list, as import paths: what the Linux legs run.
+          list=""
+          # shellcheck disable=SC2086 # the lists are words: one package each
+          {
+            for p in $KERNEL_PKGS; do list="$list $sdk/internal/kernel/${p#./}"; done
+            for p in $CORE_PKGS; do list="$list $sdk/internal/core/${p#./}"; done
+            for p in $SERVICE_PKGS $SERVICE_FILE_PKGS; do list="$list $sdk/internal/service/${p#./}"; done
+            for p in $FRAMEWORK_PKGS; do list="$list $sdk/framework/${p#./}"; done
+          }
+          linux="GOOS=linux,GOARCH=amd64,GOFLAGS=-tags=loopdebug"
+          # shellcheck disable=SC2086 # one import path per word
+          {
+            bash scripts/ci/scope.sh lane native_linux "$linux" -- $list "$sdk/e2e"
+            bash scripts/ci/scope.sh lane native_other GOOS=darwin,GOARCH=arm64 GOOS=windows,GOARCH=amd64
+            bash scripts/ci/scope.sh lane linux_init "$linux" -- $list "$sdk/pkg/v1/proc" "$sdk/third-party/ebpf/cgroup" "$sdk/e2e"
+            bash scripts/ci/scope.sh lane bsd GOOS=freebsd,GOARCH=amd64 GOOS=openbsd,GOARCH=amd64 GOOS=netbsd,GOARCH=amd64
+            bash scripts/ci/scope.sh lane solarish GOOS=illumos,GOARCH=amd64 GOOS=solaris,GOARCH=amd64
+          } | tee "$RUNNER_TEMP/lanes.txt" >>"$GITHUB_OUTPUT"
+          # The native matrix runs when either of its halves is reached.
+          if grep -qxE 'native_(linux|other)=run' "$RUNNER_TEMP/lanes.txt"; then
+            echo "native=run" >>"$GITHUB_OUTPUT"
+          else
+            echo "native=skip" >>"$GITHUB_OUTPUT"
+          fi
+
   # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
   native:
     name: ${{ matrix.name }}${{ matrix.shard && format(' ({0})', matrix.shard) || '' }}
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.native != 'skip' }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 30
     strategy:
@@ -208,6 +312,32 @@ jobs:
             go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-${{ hashFiles('**/go.sum') }}-
             go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-
 
+      # The packages this leg's platform reaches from the plan (ADR 0250),
+      # in $RUNNER_TEMP/affected.txt, and `scoped=true`; a full plan, or a
+      # computation that fails, leaves `scoped=false` and every step below
+      # runs whole. GOFLAGS carries the Linux leg's tags.
+      - name: Scope — the packages this leg reaches
+        id: scope
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+          GOFLAGS: ${{ matrix.name == 'linux' && '-tags=loopdebug' || '' }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE_TOUCHED: ${{ needs.scope.outputs.touched }}
+          SCOPE_TESTS: ${{ needs.scope.outputs.tests }}
+        run: |
+          if [ "$SCOPE_MODE" = scoped ]; then
+            if bash scripts/ci/scope.sh affected >"$RUNNER_TEMP/affected.txt"; then
+              echo "scoped=true" >>"$GITHUB_OUTPUT"
+              echo "$(wc -l <"$RUNNER_TEMP/affected.txt" | tr -d ' ') package(s) in scope on ${{ matrix.name }}:"
+              cut -f2 "$RUNNER_TEMP/affected.txt"
+              exit 0
+            fi
+            echo "::warning::the packages in scope could not be computed on ${{ matrix.name }}: every package runs"
+          fi
+          echo "scoped=false" >>"$GITHUB_OUTPUT"
+
       # Linux only: Bazel runs every package on Linux (bazel-ci.yml), so this
       # leg runs the kernel-sensitive list — the same packages linux-init runs
       # as root — and the conformance program below.
@@ -218,21 +348,38 @@ jobs:
           GOWORK: "off"
           CGO_ENABLED: "0"
           GOFLAGS: ${{ env.LOOP_GOFLAGS }}
+          SCOPED: ${{ steps.scope.outputs.scoped }}
         run: |
           set -uo pipefail
           fail=0
-          echo "::group::internal/kernel $KERNEL_PKGS"
-          (cd internal/kernel  && go test -count=1 $KERNEL_PKGS)  || fail=1
-          echo "::endgroup::"
-          echo "::group::internal/core $CORE_PKGS"
-          (cd internal/core    && go test -count=1 $CORE_PKGS)    || fail=1
-          echo "::endgroup::"
-          echo "::group::internal/service $SERVICE_PKGS $SERVICE_FILE_PKGS"
-          (cd internal/service && go test -count=1 $SERVICE_PKGS $SERVICE_FILE_PKGS) || fail=1
-          echo "::endgroup::"
-          echo "::group::framework $FRAMEWORK_PKGS"
-          (cd framework && go test -count=1 $FRAMEWORK_PKGS) || fail=1
-          echo "::endgroup::"
+          # pick DIR PKG... — the packages of a list in scope (all, unscoped).
+          pick() {
+            local dir="$1"
+            shift
+            if [ "$SCOPED" = true ]; then
+              bash scripts/ci/scope.sh keep "$RUNNER_TEMP/affected.txt" "$dir" "$@" | tr '\n' ' '
+            else
+              echo "$@"
+            fi
+          }
+          run() { # DIR PKG...
+            local dir="$1" pkgs
+            shift
+            pkgs="$(pick "$dir" "$@")"
+            echo "::group::$dir ${pkgs:-(nothing in scope)}"
+            if [ -n "${pkgs// /}" ]; then
+              # shellcheck disable=SC2086 # one package pattern per word
+              (cd "$dir" && go test -count=1 $pkgs) || fail=1
+            fi
+            echo "::endgroup::"
+          }
+          # shellcheck disable=SC2086 # the lists are words: one package each
+          {
+            run internal/kernel $KERNEL_PKGS
+            run internal/core $CORE_PKGS
+            run internal/service $SERVICE_PKGS $SERVICE_FILE_PKGS
+            run framework $FRAMEWORK_PKGS
+          }
           exit $fail
 
       # Every package, not only the kernel-sensitive ones. ADR 0018 kept the
@@ -258,6 +405,11 @@ jobs:
       # suites ran up to four times slower (TestRecoverFinishesAnInterrupted
       # Install 29.9 s against 6.4 s), and the whole package took 420 s
       # against 315 s.
+      #
+      # Scoped (ADR 0250), each module of the shard tests the packages in
+      # scope on this platform, a hundred import paths a `go test` (Windows'
+      # command line holds no more), and the consensus package's split runs
+      # when that package is in scope.
       - name: Unit tests — every package on ${{ matrix.name }}
         if: matrix.name != 'linux'
         # A test that hangs on a kernel it never ran on must not eat the job.
@@ -269,6 +421,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
           SPLIT_PKG: github.com/kitsunium/sdk/internal/service/app/consensus
           SPLIT_PARTS: "4"
+          SCOPED: ${{ steps.scope.outputs.scoped }}
         run: |
           set -uo pipefail
           fail=0
@@ -282,9 +435,18 @@ jobs:
             rest) modules="$(printf '%s\n' "$census" | grep -vx -e internal -e '[.]')" ;;
             *) echo "::error::unknown shard '$SHARD'"; exit 1 ;;
           esac
+          split=1
           for mod in $modules; do
             echo "::group::$mod"
-            if [ "$mod" = internal ]; then
+            if [ "$SCOPED" = true ]; then
+              # The module's packages in scope, SPLIT_PKG apart (below).
+              pkgs="$(bash scripts/ci/scope.sh pkgs "$RUNNER_TEMP/affected.txt" "$mod" | { grep -vx "$SPLIT_PKG" || true; })"
+              if [ -z "$pkgs" ]; then
+                echo "nothing in scope in $mod on ${{ matrix.name }}"
+              else
+                (cd "$mod" && printf '%s\n' "$pkgs" | xargs -n 100 go test -count=1) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
+              fi
+            elif [ "$mod" = internal ]; then
               # Every package of the module but SPLIT_PKG, which runs below.
               pkgs="$(cd "$mod" && go list ./...)" || { echo "::error::go list failed in $mod"; exit 1; }
               # One import path per word, none with a space or a glob.
@@ -295,7 +457,13 @@ jobs:
             fi
             echo "::endgroup::"
           done
-          if [ "$SHARD" = internal ]; then
+          if [ "$SCOPED" = true ] && ! cut -f2 "$RUNNER_TEMP/affected.txt" | grep -qx "$SPLIT_PKG"; then
+            split=0
+            if [ "$SHARD" = internal ]; then
+              echo "$SPLIT_PKG is not in scope on ${{ matrix.name }}"
+            fi
+          fi
+          if [ "$SHARD" = internal ] && [ "$split" -eq 1 ]; then
             # A package that lists no test, or does not build, fails here:
             # a split never runs nothing in silence.
             names="$(cd internal && go test -list '.*' "$SPLIT_PKG" | grep -E '^(Test|Example|Fuzz)')" || { echo "::error::$SPLIT_PKG lists no test on ${{ matrix.name }}"; exit 1; }
@@ -315,13 +483,19 @@ jobs:
           fi
           exit $fail
 
+      # Scoped, when the conformance program is in scope on this platform.
       - name: E2E conformance — whole public API on ${{ matrix.name }}
         if: ${{ !cancelled() && (matrix.shard == '' || matrix.shard == 'rest') }}
         shell: bash
         env:
           GOWORK: "off"
+          SCOPED: ${{ steps.scope.outputs.scoped }}
         run: |
           set -uo pipefail
+          if [ "$SCOPED" = true ] && ! cut -f3 "$RUNNER_TEMP/affected.txt" | grep -qx e2e; then
+            echo "skipped by scope: the conformance program is out of scope on ${{ matrix.name }}"
+            exit 0
+          fi
           cd e2e && go run .
 
       # Saved by a push to main only, and only when this week's entry does
@@ -357,8 +531,15 @@ jobs:
   #                      cloud-init, the binaries run over ssh as root. The
   #                      guest runs the distro's OWN kernel with its own init
   #                      as PID 1 from power-on.
+  #
+  # Scoped on a branch (ADR 0250): the job runs when the plan reaches the
+  # kernel-sensitive list, pkg/v1/proc, the cgroup BPF backend or the
+  # conformance program on linux; each leg compiles those in scope, and boots
+  # nothing when none is.
   linux-init:
     name: ${{ matrix.name }}
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.linux_init != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -420,6 +601,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Cross-compile test binaries + conformance for linux/amd64
+        id: bins
         shell: bash
         env:
           GOOS: linux
@@ -427,13 +609,37 @@ jobs:
           GOWORK: "off"
           CGO_ENABLED: "0"
           GOFLAGS: ${{ env.LOOP_GOFLAGS }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE_TOUCHED: ${{ needs.scope.outputs.touched }}
+          SCOPE_TESTS: ${{ needs.scope.outputs.tests }}
         run: |
           set -euo pipefail
           mkdir -p bins
+          # The packages in scope on linux (ADR 0250); unscoped, or when the
+          # computation fails, every package of the lists.
+          scoped=false
+          if [ "$SCOPE_MODE" = scoped ]; then
+            if bash scripts/ci/scope.sh affected >"$RUNNER_TEMP/affected.txt"; then
+              scoped=true
+            else
+              echo "::warning::the packages in scope could not be computed: every package runs"
+            fi
+          fi
+          pick() { # dir pkg... — the packages of a list in scope
+            local dir="$1"
+            shift
+            if [ "$scoped" = true ]; then
+              bash scripts/ci/scope.sh keep "$RUNNER_TEMP/affected.txt" "$dir" "$@" | tr '\n' ' '
+            else
+              echo "$@"
+            fi
+          }
           compile() { # dir  pkg-list
-            local mod="$1"; shift
-            for pkg in $@; do
-              local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test"
+            local mod="$1" out; shift
+            # shellcheck disable=SC2046 # one package pattern per word
+            set -- $(pick "$mod" "$@")
+            for pkg in "$@"; do
+              out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test"
               if (cd "$mod" && go test -c -o "$GITHUB_WORKSPACE/$out" "$pkg") 2>/tmp/c.log; then
                 [ -f "$out" ] && echo "built $out" || echo "no tests in $mod/$pkg (skip)"
               else
@@ -441,16 +647,23 @@ jobs:
               fi
             done
           }
-          compile internal/kernel  $KERNEL_PKGS
-          compile internal/core    $CORE_PKGS
-          compile internal/service $SERVICE_PKGS
-          compile internal/service $SERVICE_FILE_PKGS
-          compile framework        $FRAMEWORK_PKGS
+          # shellcheck disable=SC2086 # the lists are words: one package each
+          {
+            compile internal/kernel  $KERNEL_PKGS
+            compile internal/core    $CORE_PKGS
+            compile internal/service $SERVICE_PKGS
+            compile internal/service $SERVICE_FILE_PKGS
+            compile framework        $FRAMEWORK_PKGS
+          }
           compile pkg/v1/proc      ./
           # The cgroup BPF backend's live suite (ADR 0215, #731): as root, in a
           # group it creates under its own delegated one, never elsewhere.
           compile third-party/ebpf ./cgroup
-          (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
+          if [ "$scoped" = false ] || [ -n "$(pick e2e .)" ]; then
+            (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
+          else
+            echo "skipped by scope: the conformance program is out of scope"
+          fi
           # What runs inside the guest: POSIX sh, the same for all four legs.
           # A test binary run directly has no timeout of its own, so each gets
           # -test.timeout (a hang panics with every stack, and the next suite
@@ -482,18 +695,28 @@ jobs:
             return 1
           }
           fail=0
-          echo "== conformance =="
-          attempts conformance ./bins/conformance.run || fail=1
+          if [ -f bins/conformance.run ]; then
+            echo "== conformance =="
+            attempts conformance ./bins/conformance.run || fail=1
+          fi
           for b in bins/*.test; do
+            [ -e "$b" ] || continue
             echo "== $b =="
             attempts "$b" ./"$b" -test.v -test.timeout=5m || fail=1
           done
           exit $fail
           SH
           ls -la bins/
+          # Nothing in scope here: the guest is not booted.
+          if ls bins/*.test bins/conformance.run >/dev/null 2>&1; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "skipped by scope: nothing this leg runs is in scope"
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
 
       - name: Run under the runner's own systemd, as root, cgroup delegated
-        if: matrix.kind == 'host'
+        if: steps.bins.outputs.run == 'true' && matrix.kind == 'host'
         run: |
           set -uo pipefail
           ls -l /dev/kvm 2>&1 || true
@@ -502,7 +725,7 @@ jobs:
             sh bins/run.sh
 
       - name: Build the ${{ matrix.name }} image
-        if: matrix.kind == 'systemd' || matrix.kind == 'openrc'
+        if: steps.bins.outputs.run == 'true' && (matrix.kind == 'systemd' || matrix.kind == 'openrc')
         env:
           IMAGE: ${{ matrix.image }}
         run: |
@@ -530,7 +753,7 @@ jobs:
           DOCKERFILE
 
       - name: Boot ${{ matrix.name }} with its own init as PID 1
-        if: matrix.kind == 'systemd' || matrix.kind == 'openrc'
+        if: steps.bins.outputs.run == 'true' && (matrix.kind == 'systemd' || matrix.kind == 'openrc')
         env:
           KIND: ${{ matrix.kind }}
         run: |
@@ -550,7 +773,7 @@ jobs:
           echo "::error::init never came up"; docker logs init | tail -50; exit 1
 
       - name: Run inside ${{ matrix.name }}
-        if: matrix.kind == 'systemd' || matrix.kind == 'openrc'
+        if: steps.bins.outputs.run == 'true' && (matrix.kind == 'systemd' || matrix.kind == 'openrc')
         env:
           KIND: ${{ matrix.kind }}
         run: |
@@ -574,7 +797,7 @@ jobs:
 
       # ── The distro's own kernel: its cloud image under QEMU/KVM ───────────────
       - name: Fetch the ${{ matrix.name }} image and verify its digest
-        if: matrix.kind == 'vm'
+        if: steps.bins.outputs.run == 'true' && matrix.kind == 'vm'
         env:
           URL: ${{ matrix.url }}
           ALGO: ${{ matrix.algo }}
@@ -590,7 +813,7 @@ jobs:
           sudo chmod 666 /dev/kvm
 
       - name: Boot ${{ matrix.name }} (cloud-init seed, ssh key)
-        if: matrix.kind == 'vm'
+        if: steps.bins.outputs.run == 'true' && matrix.kind == 'vm'
         env:
           GUEST_USER: ${{ matrix.user }}
         run: |
@@ -633,7 +856,7 @@ jobs:
           tail -60 console.log; exit 1
 
       - name: Run inside ${{ matrix.name }} on the guest's own kernel
-        if: matrix.kind == 'vm'
+        if: steps.bins.outputs.run == 'true' && matrix.kind == 'vm'
         env:
           INIT: ${{ matrix.init }}
           GUEST_USER: ${{ matrix.user }}
@@ -648,6 +871,7 @@ jobs:
           # The whole checkout, as the containers mount it: some suites audit the
           # sources above the working directory (they look for go.work).
           tar -C .. --exclude=./.git --exclude=./vm -cf - . | $s "rm -rf '$W' && mkdir '$W' && tar -C '$W' -xf -"
+          # shellcheck disable=SC2086 # $s is a command line, $PRE one word or none
           if [ "$INIT" = systemd ]; then
             $s $PRE systemd-run --quiet --wait --pipe --collect -p Delegate=yes -p WorkingDirectory="$W" sh bins/run.sh
           else
@@ -673,6 +897,10 @@ jobs:
   # ── BSD via cross-platform-actions: cross-compile on host, run in the VM ────
   bsd:
     name: ${{ matrix.os }}
+    # Scoped on a branch (ADR 0250): run when the plan reaches a package on
+    # one of the three; a leg with nothing in scope boots no guest.
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.bsd != 'skip' }}
     runs-on: ubuntu-latest
     # Two caps, because the job now does two different things. The tests of
     # every package take what they take, and are capped by their own step
@@ -803,16 +1031,39 @@ jobs:
       # the "platform-sensitive" list this lane compiled left 300 of 333 test
       # packages unexecuted on the BSDs.
       - name: Cross-compile every test binary + conformance for ${{ matrix.os }}
+        id: bins
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: amd64
           GOWORK: "off"
           CGO_ENABLED: "0"
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE_TOUCHED: ${{ needs.scope.outputs.touched }}
+          SCOPE_TESTS: ${{ needs.scope.outputs.tests }}
         run: |
           set -euo pipefail
+          # The packages in scope on this GOOS (ADR 0250); unscoped, or when
+          # the computation fails, every package.
+          if [ "$SCOPE_MODE" = scoped ]; then
+            if bash scripts/ci/scope.sh affected >"$RUNNER_TEMP/affected.txt"; then
+              cut -f3 "$RUNNER_TEMP/affected.txt" >"$RUNNER_TEMP/only.txt"
+              export TEST_BINARIES_ONLY="$RUNNER_TEMP/only.txt"
+            else
+              echo "::warning::the packages in scope could not be computed: every package runs"
+            fi
+          fi
           bash scripts/ci/test-binaries.sh bins
           # Conformance is a real program (not a -c suite): build it normally.
-          (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
+          if [ -z "${TEST_BINARIES_ONLY:-}" ] || grep -qx e2e "$TEST_BINARIES_ONLY"; then
+            (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
+          fi
+          # Nothing in scope here: the guest is not booted.
+          if [ -s bins/manifest ] || [ -f bins/conformance.run ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "skipped by scope: nothing in scope has tests on ${{ matrix.os }}"
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
 
       - name: Save the Go build cache
         if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true' }}
@@ -852,6 +1103,7 @@ jobs:
       # ~9% on netbsd, so no single green run can confirm it. What the next
       # weeks measure is whether overruns stop, not whether one run passed.
       - name: Boot the real ${{ matrix.os }} kernel
+        if: steps.bins.outputs.run == 'true'
         timeout-minutes: 8
         uses: cross-platform-actions/action@e0b9770014ba65d5e0815f15b74031c3a635f641 # v1.6.0
         with:
@@ -872,6 +1124,7 @@ jobs:
       # NetBSD's `git` is a meta-package that pulls perl and 28 others (29 MB,
       # 138 s); `git-base` is the git binary alone.
       - name: git in the ${{ matrix.os }} guest
+        if: steps.bins.outputs.run == 'true'
         timeout-minutes: 5
         shell: cpa.sh {0} --sync-files none
         run: |
@@ -886,25 +1139,30 @@ jobs:
           git --version
 
       - name: Every test on the real ${{ matrix.os }} kernel
+        if: steps.bins.outputs.run == 'true'
         timeout-minutes: 25
         shell: cpa.sh {0} --sync-files none
         run: |
           set -u
           fail=0
-          echo "== conformance on ${{ matrix.os }} =="
-          # Tried again only to name a failure: a pass on a retry is a flake,
-          # and fails the job (run-test-binaries.sh's rule).
-          ok=0
-          for i in 1 2 3; do
-            ./bins/conformance.run && { ok=$i; break; }
-            echo "  (attempt $i of conformance failed)"
-          done
-          case "$ok" in
-            1) ;;
-            0) echo "::error::conformance fails on $(uname -sr)"; fail=1 ;;
-            *) echo "::error::conformance is flaky on $(uname -sr): it failed, then passed on attempt $ok"; fail=1 ;;
-          esac
-          sh scripts/ci/run-test-binaries.sh bins || fail=1
+          if [ -f bins/conformance.run ]; then
+            echo "== conformance on ${{ matrix.os }} =="
+            # Tried again only to name a failure: a pass on a retry is a flake,
+            # and fails the job (run-test-binaries.sh's rule).
+            ok=0
+            for i in 1 2 3; do
+              ./bins/conformance.run && { ok=$i; break; }
+              echo "  (attempt $i of conformance failed)"
+            done
+            case "$ok" in
+              1) ;;
+              0) echo "::error::conformance fails on $(uname -sr)"; fail=1 ;;
+              *) echo "::error::conformance is flaky on $(uname -sr): it failed, then passed on attempt $ok"; fail=1 ;;
+            esac
+          fi
+          if [ -s bins/manifest ]; then
+            sh scripts/ci/run-test-binaries.sh bins || fail=1
+          fi
           exit $fail
 
   # ── illumos / Solaris via vmactions: cross-compile on host, run in the guest ─
@@ -926,6 +1184,9 @@ jobs:
   # suite's cases wait 30s for a collection before failing, three attempts each.
   solarish:
     name: ${{ matrix.name }}
+    # Scoped on a branch (ADR 0250), as the BSDs are.
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.solarish != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -969,15 +1230,35 @@ jobs:
       # pkg/v1/proc module's root suite among them, which asserts the
       # capability matrix for the GOOS it runs on.
       - name: Cross-compile every test binary + conformance for ${{ matrix.goos }}
+        id: bins
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: amd64
           GOWORK: "off"
           CGO_ENABLED: "0"
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE_TOUCHED: ${{ needs.scope.outputs.touched }}
+          SCOPE_TESTS: ${{ needs.scope.outputs.tests }}
         run: |
           set -euo pipefail
+          if [ "$SCOPE_MODE" = scoped ]; then
+            if bash scripts/ci/scope.sh affected >"$RUNNER_TEMP/affected.txt"; then
+              cut -f3 "$RUNNER_TEMP/affected.txt" >"$RUNNER_TEMP/only.txt"
+              export TEST_BINARIES_ONLY="$RUNNER_TEMP/only.txt"
+            else
+              echo "::warning::the packages in scope could not be computed: every package runs"
+            fi
+          fi
           bash scripts/ci/test-binaries.sh bins
-          (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
+          if [ -z "${TEST_BINARIES_ONLY:-}" ] || grep -qx e2e "$TEST_BINARIES_ONLY"; then
+            (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
+          fi
+          if [ -s bins/manifest ] || [ -f bins/conformance.run ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "skipped by scope: nothing in scope has tests on ${{ matrix.goos }}"
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
 
       - name: Save the Go build cache
         if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true' }}
@@ -993,7 +1274,7 @@ jobs:
       # disable-cache: the image is downloaded rather than kept in the
       # repository's Actions cache, where it took 3 GB per branch.
       - name: Boot the OmniOS guest
-        if: matrix.guest == 'omnios'
+        if: steps.bins.outputs.run == 'true' && matrix.guest == 'omnios'
         timeout-minutes: 8
         uses: vmactions/omnios-vm@9576f0b6d15e7696548409baa533bc0a339caf42 # v1.3.7
         with:
@@ -1004,7 +1285,7 @@ jobs:
           custom-shell-name: guest
 
       - name: Boot the Oracle Solaris guest
-        if: matrix.guest == 'solaris'
+        if: steps.bins.outputs.run == 'true' && matrix.guest == 'solaris'
         timeout-minutes: 8
         uses: vmactions/solaris-vm@87d3c436511cef802cd1637f86f73b1a97715c8c # v1.4.1
         with:
@@ -1018,6 +1299,7 @@ jobs:
       # (see the bsd job). OmniOS ships it in its own publisher; Solaris 11.4
       # in Oracle's, with OpenCSW's as the fallback the action documents.
       - name: git in the ${{ matrix.name }} guest
+        if: steps.bins.outputs.run == 'true'
         timeout-minutes: 5
         shell: guest {0}
         run: |
@@ -1028,6 +1310,7 @@ jobs:
           PATH="$PATH:/opt/csw/bin" git --version
 
       - name: Every test on the ${{ matrix.name }} kernel
+        if: steps.bins.outputs.run == 'true'
         timeout-minutes: 25
         shell: guest {0}
         run: |
@@ -1035,18 +1318,52 @@ jobs:
           PATH="$PATH:/opt/csw/bin"
           export PATH
           fail=0
-          echo "== conformance on $(uname -sv) =="
-          # Tried again only to name a failure: a pass on a retry is a flake,
-          # and fails the job (run-test-binaries.sh's rule).
-          ok=0
-          for i in 1 2 3; do
-            ./bins/conformance.run && { ok=$i; break; }
-            echo "  (attempt $i of conformance failed)"
-          done
-          case "$ok" in
-            1) ;;
-            0) echo "::error::conformance fails on $(uname -sr)"; fail=1 ;;
-            *) echo "::error::conformance is flaky on $(uname -sr): it failed, then passed on attempt $ok"; fail=1 ;;
-          esac
-          sh scripts/ci/run-test-binaries.sh bins || fail=1
+          if [ -f bins/conformance.run ]; then
+            echo "== conformance on $(uname -sv) =="
+            # Tried again only to name a failure: a pass on a retry is a flake,
+            # and fails the job (run-test-binaries.sh's rule).
+            ok=0
+            for i in 1 2 3; do
+              ./bins/conformance.run && { ok=$i; break; }
+              echo "  (attempt $i of conformance failed)"
+            done
+            case "$ok" in
+              1) ;;
+              0) echo "::error::conformance fails on $(uname -sr)"; fail=1 ;;
+              *) echo "::error::conformance is flaky on $(uname -sr): it failed, then passed on attempt $ok"; fail=1 ;;
+            esac
+          fi
+          if [ -s bins/manifest ]; then
+            sh scripts/ci/run-test-binaries.sh bins || fail=1
+          fi
           exit $fail
+
+  # The run against its plan (ADR 0250), as the job summary: for every lane,
+  # ran in full, fallback to full, ran scoped, or skipped by scope with the
+  # packages judged out of its reach. It fails when a lane that had to run was
+  # skipped; the lanes' `if:` is the guarantee (scripts/ci/scope.bats), this
+  # says it on every run.
+  scope-summary:
+    name: scope — what each lane tested
+    needs: [scope, native, linux-init, bsd, solarish]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: the lanes against the plan
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE_REASON: ${{ needs.scope.outputs.reason }}
+          SCOPE_TOUCHED: ${{ needs.scope.outputs.touched }}
+          SCOPE_TESTS: ${{ needs.scope.outputs.tests }}
+          SCOPE_LANES: |
+            native|${{ needs.scope.outputs.native }}|${{ needs.native.result }}|each leg tests the packages in scope on its platform
+            linux-init|${{ needs.scope.outputs.linux_init }}|${{ needs.linux-init.result }}|a leg with nothing in scope boots nothing
+            bsd|${{ needs.scope.outputs.bsd }}|${{ needs.bsd.result }}|a leg with nothing in scope boots nothing
+            solarish|${{ needs.scope.outputs.solarish }}|${{ needs.solarish.result }}|a leg with nothing in scope boots nothing
+        run: bash scripts/ci/scope.sh summary >>"$GITHUB_STEP_SUMMARY"
