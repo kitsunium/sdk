@@ -178,12 +178,15 @@ type uRing struct {
 	fill uint8
 	// queueDone is, per listener, that the ring took its share of the
 	// listener's queue as the group drains and handed it back (plan P6);
-	// queueCancel that a cancel of its accepts is in flight. take is
-	// takeOff for a ring that takes nothing more: the watchdog drained it
-	// before the group did, or an accept failed during the take.
-	queueDone   []bool
-	queueCancel []bool
-	take        uint8
+	// queueCancel that a cancel of its accepts is in flight; queueEmptied
+	// that the queue read empty right after a round of its accepts ran, which
+	// ends the ring's take once they came back (#1385). take is takeOff for a
+	// ring that takes nothing more: the watchdog drained it before the group
+	// did, or an accept failed during the take.
+	queueDone    []bool
+	queueCancel  []bool
+	queueEmptied []bool
+	take         uint8
 	// taken is, per listener, how many accepts the drain's take armed:
 	// bounded by queueTakeMax, past which the arrivals outpace the drain.
 	taken []int
@@ -601,7 +604,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	lp := ul.lp
 	rr := &uRing{
 		ul: ul, u: u, armed: make([]int, len(ul.lfds)),
-		queueDone: doneOutside(ul.owners, lp.index), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
+		queueDone: doneOutside(ul.owners, lp.index), queueCancel: make([]bool, len(ul.lfds)), queueEmptied: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
 	}
 	rr.r = newRing(lp, i, rr)
 	//: stage 4: provided buffers and the sparse table.
@@ -935,11 +938,22 @@ func (rr *uRing) cancelAccept(i int) bool {
 // takeQueues takes the ring's share of every listener's queue as the group
 // drains (plan P6). Once the cancels of its accepts came back — an accept
 // that completed as its cancel crossed it is served like any other —, it
-// arms as many single-shot accepts as the queue holds (TCP_INFO), within the
-// room above the reserve, and hands the listener back to the group's set
-// once the queue is empty and none is in flight; the last ring closes it. An
-// accept left waiting on an empty queue, because another ring took the
-// connection, is cancelled again.
+// arms as many single-shot accepts as the queue holds (TCP_INFO), up to
+// queueTakeBatch a batch as epoll and kqueue take, within the room above the
+// reserve, submits them, and reads the queue again once they ran: empty
+// there, the ring's take is over, as epoll's is at its first EAGAIN. It
+// hands the listener back to the group's set once the queue read empty and
+// none of its accepts is in flight; the last ring closes it. An accept left
+// waiting on an empty queue, because another ring took the connection, is
+// cancelled again.
+//
+// Read a batch after the round instead, the queue was never empty under
+// arrivals once a batch outlasted the gap between two of them, and
+// acceptDepth a round fell behind a single dialer: the take ran to its
+// budget with the queue at its backlog, and the close reset connections
+// queued half a second before it (#1385). acceptDepth bounds the accepts a
+// serving ring keeps waiting, never what the take arms for a queue it
+// counted.
 func (rr *uRing) takeQueues() {
 	//: each listener not handed back yet.
 	for i, fd := range rr.ul.lfds {
@@ -952,12 +966,7 @@ func (rr *uRing) takeQueues() {
 
 // takeQueue is takeQueues' step on listener i, fd.
 func (rr *uRing) takeQueue(i, fd int) {
-	q := 0
-	//: a ring the watchdog drained, whose accept failed, or past its budget
-	//: takes nothing.
-	if rr.take == takeOn && rr.taken[i] < queueTakeMax {
-		q = queued(fd)
-	}
+	q := rr.waiting(i, fd)
 	//: accepts in flight: the drain's cancels, or this take's own.
 	if rr.armed[i] > 0 {
 		//: one waits on an empty queue: cancelled, once.
@@ -975,7 +984,7 @@ func (rr *uRing) takeQueue(i, fd int) {
 		//: taken.
 		return
 	}
-	n := min(q, acceptDepth, rr.acceptRoom(), queueTakeMax-rr.taken[i])
+	n := min(q, queueTakeBatch, rr.acceptRoom(), queueTakeMax-rr.taken[i])
 	//: queued, but no entry free, or process descriptors out until the
 	//: backoff ends: the drain's closes make room, and the take waits.
 	if n == 0 || (rr.paused && rr.ul.lp.tick < rr.resumeAt) {
@@ -983,6 +992,31 @@ func (rr *uRing) takeQueue(i, fd int) {
 		return
 	}
 	rr.taken[i] += rr.armTake(i, fd, n)
+	rr.queueEmptied[i] = rr.tookAll(fd)
+}
+
+// waiting is how many connections listener i, fd, holds for the ring's
+// take: none for a ring the watchdog drained, whose accept failed, past its
+// budget, or whose queue read empty after its last round — it takes nothing
+// more.
+func (rr *uRing) waiting(i, fd int) int {
+	//: its take of the listener is over.
+	if rr.take != takeOn || rr.taken[i] >= queueTakeMax || rr.queueEmptied[i] {
+		//: none.
+		return 0
+	}
+	//: what the queue holds.
+	return queued(fd)
+}
+
+// tookAll submits the take's round and reports whether listener fd's queue
+// reads empty once it ran: a single-shot accept on a queue that holds a
+// connection completes as it is submitted, so what the queue holds then
+// arrived during the submission, or was left to an accept still in flight.
+func (rr *uRing) tookAll(fd int) bool {
+	rr.u.submit()
+	//: nothing left behind the round.
+	return queued(fd) == 0
 }
 
 // armTake arms n single-shot accepts on listener i, fd, for the drain's take,
@@ -1142,6 +1176,7 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 		rr.closeBackstop()
 	}
 	lp.h.OnBatchEnd(lp)
+	lp.settleDrain()
 	lp.endBatch()
 	ul.submitLate()
 	//: buffers go back only now: OnBatchEnd has returned.
@@ -1640,8 +1675,9 @@ func (rr *uRing) recvBytes(slot int32, more bool) {
 			rr.r.deliver(slot, seg)
 		}
 	}
-	//: re-armed unless the connection is going.
-	if !more && rr.r.conns[slot].state == stOpen {
+	//: re-armed unless the connection is going: a drain's close reads on,
+	//: to linger (ring.lingers).
+	if c := &rr.r.conns[slot]; !more && (c.state == stOpen || (c.state == stClosing && c.reason == rDrain)) {
 		rr.armRecv(slot)
 	}
 }
@@ -1663,8 +1699,9 @@ func (rr *uRing) recvStarved(slot int32) {
 // batch, its output still leaving.
 func (rr *uRing) recvEOF(slot int32) {
 	cc := &rr.r.conns[slot]
-	//: an open connection settles at the end of the batch.
-	if cc.state == stOpen {
+	//: an open or closing connection settles at the end of the batch: a
+	//: lingering one closes then.
+	if cc.state == stOpen || cc.state == stClosing {
 		cc.flags |= fPeerDone
 		rr.r.markDirty(slot)
 	}
@@ -1687,8 +1724,9 @@ func (rr *uRing) onSend(slot int32, gen uint32, c *cqe) {
 		return
 	}
 	cc := &rr.r.conns[slot]
-	//: a zero-copy send's notification, or its refusal (#969).
-	if cc.zc != zcOff && rr.zeroCopyHandled(slot, c) {
+	//: a zero-copy send's notification, whatever the flight now is, or its
+	//: refusal (#969, #1396).
+	if (cc.zc != zcOff || c.flags&cqeFNotif != 0) && rr.zeroCopyHandled(slot, c) {
 		//: settled, held or sent again.
 		return
 	}
@@ -2047,8 +2085,10 @@ func (rr *uRing) flush(r *ring, slot int32) {
 	}
 	c.flight, c.out = c.out, chunkRef{idx: noChunk}
 	c.zc = zcOff
-	//: large enough, on a loop whose sockets took zero-copy so far.
-	if rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin {
+	//: large enough, on a loop whose sockets took zero-copy so far, and no
+	//: refused send's notification still owed: a refusal is at most one a
+	//: flight, so zcVoid stays at one and never wraps (#1396).
+	if rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin && c.zcVoid == 0 {
 		c.zc = zcOn
 	}
 	rr.sendFlight(slot)
@@ -2057,6 +2097,14 @@ func (rr *uRing) flush(r *ring, slot int32) {
 // sendFlight submits the unsent rest of slot's flight.
 func (rr *uRing) sendFlight(slot int32) {
 	c := &rr.r.conns[slot]
+	//: as many notifications pending as zcPend counts: none sent until they
+	//: came, the rest then plain; no SQE taken for it.
+	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
+		c.zc = zcHold
+		c.flags |= fSending
+		//: held.
+		return
+	}
 	s := rr.u.get()
 	//: no room: the connection fails rather than stalls silently.
 	if s == nil {
@@ -2066,14 +2114,6 @@ func (rr *uRing) sendFlight(slot int32) {
 		return
 	}
 	ud := udPack(udSend, c.gen, uint32(slot))
-	//: as many notifications pending as zcPend counts: none sent until they
-	//: came, the rest then plain.
-	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
-		c.zc = zcHold
-		c.flags |= fSending
-		//: held.
-		return
-	}
 	//: plain, or zero-copy: its notification is one more operation (#969).
 	if c.zc == zcOn {
 		prepSendZC(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
@@ -2117,6 +2157,20 @@ func (rr *uRing) sendFlight(slot int32) {
 func (rr *uRing) shutdown(r *ring, slot int32) {
 	c := &r.conns[slot]
 	rr.closing = append(rr.closing, closeWait{slot: slot, gen: c.gen, at: rr.ul.lp.tick + closeBackstopTicks})
+	//: a drain's close that lingered: its writing side already shut — its one
+	//: shutdown —, the recv still armed is cancelled by user data, and with
+	//: nothing in flight the descriptor closes.
+	if c.linger == lingerHalf {
+		//: nothing in flight: closed now; otherwise the recv cancelled, or
+		//: the backstop's.
+		if c.ops == 0 {
+			rr.maybeClose(slot)
+		} else {
+			rr.cancelOp(slot, udRecv)
+		}
+		//: on its way.
+		return
+	}
 	s := rr.u.get()
 	//: no room: the close waits for the operations to end by themselves, or
 	//: for the backstop.
@@ -2127,6 +2181,24 @@ func (rr *uRing) shutdown(r *ring, slot int32) {
 		return
 	}
 	prepShutdownFixed(s, uint32(c.fd), syscall.SHUT_RDWR, udPack(udShutdown, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
+	c.ops++
+}
+
+// halfClose implements driver: IORING_OP_SHUTDOWN of the writing side, the
+// FIN after the output; the recv stays armed, so the lingering slot reads to
+// its peer's end (ring.lingers). With no room in the SQ the slot lingers
+// without it, to drainLinger.
+func (rr *uRing) halfClose(r *ring, slot int32) {
+	c := &r.conns[slot]
+	s := rr.u.get()
+	//: no room: the bound ends it.
+	if s == nil {
+		r.st.retries++
+		//: later.
+		return
+	}
+	prepShutdownFixed(s, uint32(c.fd), syscall.SHUT_WR, udPack(udShutdown, c.gen, uint32(slot)))
 	rr.ul.onFD(s)
 	c.ops++
 }
@@ -2450,16 +2522,15 @@ func (ul *uLoop) control() {
 	if ul.drainReq.Load() && !lp.draining {
 		ul.startDrain()
 	}
-	//: while draining, a connection with no partial input closes once its
-	//: output left.
+	//: while draining, the queues are taken; the settled connections are
+	//: looked at after OnBatchEnd (settleDrain).
 	if !lp.draining {
 		//: nothing.
 		return
 	}
-	//: every ring, every open connection.
+	//: every ring.
 	for _, rr := range ul.rings {
 		rr.takeQueues()
-		lp.closeSettled(rr.r)
 	}
 }
 

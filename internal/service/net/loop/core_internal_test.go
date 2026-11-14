@@ -18,6 +18,11 @@ type fakeDriver struct {
 	sent   map[int32]*bytes.Buffer
 	limit  int
 	closed []int32
+	// halfClosed lists the slots the drain's lingering close shut the
+	// writing side of; sentAtHalf is how many bytes the last one had sent
+	// then.
+	halfClosed []int32
+	sentAtHalf int
 }
 
 func (d *fakeDriver) flush(r *ring, slot int32) {
@@ -45,6 +50,13 @@ func (d *fakeDriver) shutdown(r *ring, slot int32) {
 }
 
 func (d *fakeDriver) unread(*ring, int32) bool { return false }
+
+func (d *fakeDriver) halfClose(r *ring, slot int32) {
+	d.halfClosed = append(d.halfClosed, slot)
+	if d.sent[slot] != nil {
+		d.sentAtHalf = d.sent[slot].Len()
+	}
+}
 
 // scriptH is a handler whose OnData consumes what consume says and records
 // every buffer it saw and every close.

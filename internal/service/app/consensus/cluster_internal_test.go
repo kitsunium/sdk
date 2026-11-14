@@ -1124,11 +1124,18 @@ func (b batchKV) ApplyBatch(es []coreconsensus.EntryValue, results []any) {
 // #507: a node refuses a snapshot offer of another history, LINEAGE_MISMATCH,
 // before a byte is spooled: the entries after it would be applied under an
 // identity it does not continue.
+//
+// The offers come from l at the term f follows it in. Read as soon as l
+// had committed with the other follower, f's status could still be the
+// term before, with no leader, on a loaded runner: every offer was then
+// refused NOT_LEADER, since an offer is judged from its leader before its
+// lineage (raft's CheckOffer, then screenOffer), and the test asserted a
+// state f was not in (#1417).
 func TestAnOfferOfAnotherLineageIsRefused(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	l := c.settledLeader(5 * time.Second)
 	f := c.otherThan(l)
-	st := f.node.Status()
+	st := followingStatus(t, f, l)
 	offerOf := func(log coreconsensus.LogIdentityValue) coreconsensus.InstallAcceptValue {
 		id := fmt.Sprintf("%020d-%020d", st.Commit+100, st.Term)
 		return f.node.offer(coreconsensus.AuthenticatedPeerValue{ID: l.id}, coreconsensus.InstallOfferValue{
@@ -1162,6 +1169,21 @@ func TestAnOfferOfAnotherLineageIsRefused(t *testing.T) {
 		{name: "own lineage", log: own},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// followingStatus waits until f follows l at l's term, and returns f's
+// status then.
+func followingStatus(t *testing.T, f, l *testNode) coreconsensus.StatusValue {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		st := f.node.Status()
+		if st.Leader == l.id && st.Term == l.node.Status().Term {
+			return st
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d never followed %d at its term: %+v, the leader %+v", f.id, l.id, st, l.node.Status())
+		}
 	}
 }
 

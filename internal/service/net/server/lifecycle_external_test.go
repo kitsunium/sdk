@@ -407,8 +407,14 @@ func TestServer_Shutdown_ReportsAnExpiredBudget(t *testing.T) {
 // TestServer_Close pins that Close actually RELEASES the port, so a restart on
 // the same address is possible — and that it is immediate rather than a drain
 // with no budget.
+//
+// It does not run in parallel with the suite's other tests (#1386): a test
+// that starts a child — TestAdopt_ServesTheInheritedSocket — forks a copy of
+// this process's descriptor table, which keeps the server's socket bound
+// until the child's exec, whatever Close did; beside it the rebind failed in
+// 34 of 100 runs, alone in none. Its cases still run in parallel with one
+// another: none starts a process.
 func TestServer_Close(t *testing.T) {
-	t.Parallel()
 	type tc struct {
 		// name describes the case.
 		name string
@@ -446,14 +452,10 @@ func TestServer_Close(t *testing.T) {
 			t.Fatalf("phase = %v, want stopped", phase)
 		}
 		//: the port is genuinely free, which is what makes a restart on the same
-		//: address possible: it binds again at once. Dialling the freed port
+		//: address possible (releasedAfterClose). Dialling the freed port
 		//: proves nothing — another test's listener on 127.0.0.1:0 may just
 		//: have been given it, and would answer.
-		again, err := stdnet.Listen("tcp", addr)
-		if err != nil {
-			t.Fatalf("%s is still held after Close: %v", addr, err)
-		}
-		closeOrFail(t, again)
+		releasedAfterClose(t, addr)
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {

@@ -4666,7 +4666,7 @@ sequences:
         kind: actor
       - id: (*laneState).announceConn
         kind: self
-      - id: st.lane.GoAway
+      - id: st.writeGoAway
         kind: internal
       - id: swallowErr
         kind: internal
@@ -4676,17 +4676,43 @@ sequences:
             - op: "|="
               set: e.flags
               value: entryGoAway
-            - set: st.jobOut
-              to: st.lane.GoAway
-              value: st.lane.GoAway(&e.conn, corehttp2.ErrCodeNoError, st.jobOut[:0])
-            - eval: swallowErr(io.Write(ref, st.jobOut))
-              to: swallowErr
+            - eval: st.writeGoAway(io, ref, e)
+              to: st.writeGoAway
           when: e.flags&entryGoAway == 0
       - opt:
           do:
             - eval: swallowErr(io.Close(ref))
               to: swallowErr
-          when: st.lane.Done(&e.conn)
+          when: st.lane.Done(&e.conn) && e.activeAt != st.lane.epoch
+  - of: (*laneState).writeGoAway
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneState).writeGoAway
+        kind: self
+      - id: st.lane.GoAway
+        kind: internal
+      - id: st.pushWrite
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: "off"
+              eval: len(st.out)
+            - set: st.out
+              to: st.lane.GoAway
+              value: st.lane.GoAway(&e.conn, corehttp2.ErrCodeNoError, st.out)
+            - eval: st.pushWrite(ref, off, e)
+              to: st.pushWrite
+            - return: ""
+          when: e.activeAt == st.lane.epoch
+      - set: st.jobOut
+        to: st.lane.GoAway
+        value: st.lane.GoAway(&e.conn, corehttp2.ErrCodeNoError, st.jobOut[:0])
+      - eval: swallowErr(io.Write(ref, st.jobOut))
+        to: swallowErr
   - of: (*LoopHandler).InFlight
     participants:
       - id: caller

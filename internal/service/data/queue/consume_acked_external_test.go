@@ -131,41 +131,93 @@ func countRole(log []string, role string) int {
 // lease lapsed while its handler ran — the acknowledgement refused — comes
 // back, and with a window it is acknowledged without a second run; without
 // one the handler runs again.
+//
+// The engine runs until the broker accepted an acknowledgement, the
+// redelivery's, and the queue is counted once it has stopped (issue #1369).
+// An empty Stats taken while the engine ran was not an end: the file broker
+// counts its queued directory, then its in-flight one, and the lapsed lease
+// the next Receive renames from flight back into the queue between the two
+// readings is in neither — a snapshot that races the queue, as Counter says
+// —, so the run stopped before the redelivery and counted one run, not two.
 func TestTheAckedWindowAcknowledgesARedeliveryWithoutRunningTheHandler(t *testing.T) {
 	t.Parallel()
-	for _, factory := range everyBroker() {
-		for _, window := range []int{0, 8} {
-			t.Run(factory.name+"/"+map[int]string{0: "none", 8: "eight"}[window], func(t *testing.T) {
-				t.Parallel()
-				clk := clock.NewManualClock(epoch)
-				broker := factory.make(t, clk, defaultPolicy())
-				publish(t, broker, "slow")
-				var runs atomic.Int64
-				runEngine(t, broker, svcqueue.ConsumerConfig{
-					Handler: func(context.Context, corequeue.DeliveryValue) error {
-						//: the first run outlives its lease: the work is done,
-						//: its acknowledgement will be refused.
-						if runs.Add(1) == 1 {
-							clk.Advance(testVisibility + time.Second)
-						}
-						return nil
-					},
-					HandlerIsIdempotent: true, PollInterval: fastPoll, Clock: clk, AckedWindow: window,
-				}, func() bool {
-					stats := statsOf(t, broker)
-					return stats.Queued == 0 && stats.Leased == 0 && runs.Load() >= 1
-				})
-				want := int64(2)
-				if window > 0 {
-					want = 1
+	type tc struct {
+		factory brokerFactory
+		window  int
+		want    int64
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		clk := clock.NewManualClock(epoch)
+		broker := &ackSpy{Broker: c.factory.make(t, clk, defaultPolicy())}
+		publish(t, broker, "slow")
+		var runs atomic.Int64
+		runEngine(t, broker, svcqueue.ConsumerConfig{
+			Handler: func(context.Context, corequeue.DeliveryValue) error {
+				//: the first run outlives its lease: the work is done,
+				//: its acknowledgement will be refused.
+				if runs.Add(1) == 1 {
+					clk.Advance(testVisibility + time.Second)
 				}
-				if got := runs.Load(); got != want {
-					t.Fatalf("with AckedWindow %d the handler ran %d times, want %d", window, got, want)
-				}
-				if dead := deadLetters(t, broker, 10); len(dead) != 0 {
-					t.Fatalf("the redelivery was dead-lettered: %+v", dead)
-				}
-			})
+				return nil
+			},
+			HandlerIsIdempotent: true, PollInterval: fastPoll, Clock: clk, AckedWindow: c.window,
+		}, func() bool { return broker.acks.Load() == 1 })
+		if got := runs.Load(); got != c.want {
+			t.Fatalf("with AckedWindow %d the handler ran %d times, want %d", c.window, got, c.want)
+		}
+		if stats := statsOf(t, broker.Broker); stats.Queued != 0 || stats.Leased != 0 {
+			t.Fatalf("Stats() = %+v once acknowledged, want an empty queue", stats)
+		}
+		if dead := deadLetters(t, broker.Broker, 10); len(dead) != 0 {
+			t.Fatalf("the redelivery was dead-lettered: %+v", dead)
 		}
 	}
+	var cases []tc
+	for _, factory := range everyBroker() {
+		cases = append(cases, tc{factory: factory, window: 0, want: 2}, tc{factory: factory, window: 8, want: 1})
+	}
+	for _, c := range cases {
+		t.Run(c.factory.name+"/"+map[int]string{0: "none", 8: "eight"}[c.window], func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// ackSpy counts the acknowledgements its broker accepted, and forwards every
+// sibling the engine asks a broker for, so the engine runs as on the broker
+// itself.
+type ackSpy struct {
+	corequeue.Broker
+	acks atomic.Int64
+}
+
+// Ack delegates, and counts an acknowledgement the broker accepted.
+func (s *ackSpy) Ack(ctx context.Context, receipt corequeue.ReceiptValue) error {
+	err := s.Broker.Ack(ctx, receipt)
+	if err == nil {
+		s.acks.Add(1)
+	}
+	return err
+}
+
+// Wake is the broker's.
+func (s *ackSpy) Wake() corequeue.WakeValue {
+	return s.Broker.(corequeue.Waker).Wake()
+}
+
+// Release is the broker's.
+func (s *ackSpy) Release(ctx context.Context, receipt corequeue.ReceiptValue) error {
+	return s.Broker.(corequeue.Releaser).Release(ctx, receipt)
+}
+
+// Reject is the broker's.
+func (s *ackSpy) Reject(ctx context.Context, receipt corequeue.ReceiptValue, cause error) error {
+	return s.Broker.(corequeue.Rejecter).Reject(ctx, receipt, cause)
+}
+
+// NackAfter is the broker's.
+func (s *ackSpy) NackAfter(ctx context.Context, receipt corequeue.ReceiptValue, cause error, delay time.Duration) (corequeue.NackValue, error) {
+	return s.Broker.(corequeue.DelayedNacker).NackAfter(ctx, receipt, cause, delay)
 }

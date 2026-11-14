@@ -67,15 +67,18 @@ func (c *Cache[K, V]) evictOne(fresh *entry[K, V], pending *[]evictionValue[K, V
 
 // evictS3FIFO evicts from the small queue while it holds its share or main is
 // empty, from main otherwise, and falls back to the other queue when the
-// first has nothing it may evict. Caller holds mu.
+// first has nothing it may evict. A walk of probation that evicts nothing may
+// still promote its hit entries into main, which then holds victims it did
+// not have: main is asked again rather than the bound given up (#1380).
+// Caller holds mu.
 func (c *Cache[K, V]) evictS3FIFO(fresh *entry[K, V], pending *[]evictionValue[K, V]) bool {
 	//: probation first while it is over its tenth, or when main is empty.
 	if c.small.count > 0 && (c.main.count == 0 || c.smallIsLarge()) {
-		//: small, then main.
+		//: small, then main, which holds what small promoted.
 		return c.evictSmall(fresh, pending) || c.evictMain(fresh, pending)
 	}
-	//: main, then small.
-	return c.evictMain(fresh, pending) || c.evictSmall(fresh, pending)
+	//: main, then small, then main again with what small promoted.
+	return c.evictMain(fresh, pending) || c.evictSmall(fresh, pending) || c.evictMain(fresh, pending)
 }
 
 // smallIsLarge reports whether the small queue holds its tenth of the bound
@@ -92,18 +95,29 @@ func (c *Cache[K, V]) smallIsLarge() bool {
 
 // evictSmall walks the small queue from its tail: an entry hit since its
 // admission moves to main with its counter cleared, the first one never hit
-// is evicted and its key remembered by the ghost. Caller holds mu.
+// is evicted and its key remembered by the ghost. The entry the current Set
+// wrote is stepped over, never stopped at: a new one is the head, so the walk
+// ends with it, but an overwrite leaves the entry where it sits (S3-FIFO moves
+// nothing on a write), and the newer entries ahead of it are victims too
+// (#1380). Caller holds mu.
 func (c *Cache[K, V]) evictSmall(fresh *entry[K, V], pending *[]evictionValue[K, V]) bool {
-	//: stop at the entry just written: it is the newest, so everything past
-	//: it was examined.
-	for victim := c.small.tail; victim != nil && victim != fresh; victim = c.small.tail {
+	//: from the tail to the head; prev is read before a promotion unlinks.
+	for victim := c.small.tail; victim != nil; {
+		newer := victim.prev
+		//: the entry just written stays: the walk goes on past it.
+		if victim == fresh {
+			victim = newer
+			//: examine the next newer entry.
+			continue
+		}
 		//: hit during probation: promoted, its counter starting over.
 		if victim.freq > 0 {
 			c.small.unlink(victim)
 			victim.freq = 0
 			victim.queue = queueMain
 			c.main.pushFront(victim)
-			//: examine the next tail.
+			victim = newer
+			//: examine the next newer entry.
 			continue
 		}
 		c.ghost.add(victim.key, c.ghostBound())
@@ -116,8 +130,10 @@ func (c *Cache[K, V]) evictSmall(fresh *entry[K, V], pending *[]evictionValue[K,
 }
 
 // evictMain is main's clock hand: the tail with hits left is re-inserted at
-// the head with one hit fewer, the first without any is evicted. Caller holds
-// mu.
+// the head with one hit fewer, the first without any is evicted. Only the
+// entry just written, alone in main, leaves it without a victim: an entry
+// alone there with hits left spends them and goes, as it would among others
+// (#1380). Caller holds mu.
 func (c *Cache[K, V]) evictMain(fresh *entry[K, V], pending *[]evictionValue[K, V]) bool {
 	//: every pass takes one hit away, so the walk ends within the queue's
 	//: length times the counter's cap; the bound makes that explicit.
@@ -130,8 +146,8 @@ func (c *Cache[K, V]) evictMain(fresh *entry[K, V], pending *[]evictionValue[K, 
 		}
 		//: a hit left, or the entry just written: a second chance at the head.
 		if victim.freq > 0 || victim == fresh {
-			//: alone in main, it cannot make way for anything.
-			if c.main.count == 1 {
+			//: the entry just written, alone in main, cannot make way for itself.
+			if victim == fresh && c.main.count == 1 {
 				//: no victim.
 				return false
 			}

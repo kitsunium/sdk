@@ -157,27 +157,44 @@ func TestAStreamOverANodeIsReadInOrderOnAFollowerAfterApply(t *testing.T) {
 	}
 }
 
+// The follower's First is read once its compaction is done: read while
+// its cut at 40 was in flight, First was 17, the cut's compaction to 27
+// landed before the Read, and Read(First) was OFFSET_TRIMMED, which is what
+// a read below the log's start answers (#1418).
 func TestAStreamReadBelowTheSnapshotIsOffsetTrimmed(t *testing.T) {
-	c := newCluster(t, 3, 10)
-	l := c.settledLeader(5 * time.Second)
-	var last corestream.Offset
-	for i := range 40 {
-		last = appendOnLeader(t, c, nil, corestream.RecordValue{Payload: fmt.Appendf(nil, "r%d", i)}).Last
+	type tc struct {
+		name string
+		// records is how many records the leader appends before the
+		// compaction.
+		records int
 	}
-	c.waitApplied(uint64(last), 5*time.Second)
-	compactedPast(t, c, 5)
-	f := c.otherThan(l)
-	s := mustStream(t, f.node, nil)
-	b, err := s.Bounds(t.Context(), 0)
-	if err != nil || b.First <= 5 {
-		t.Fatalf("Bounds = %+v, %v; want First past 5", b, err)
+	cases := []tc{{name: "40 records, compacted past 5", records: 40}}
+	runCase := func(t *testing.T, tt tc) {
+		c := newCluster(t, 3, 10)
+		l := c.settledLeader(5 * time.Second)
+		var last corestream.Offset
+		for i := range tt.records {
+			last = appendOnLeader(t, c, nil, corestream.RecordValue{Payload: fmt.Appendf(nil, "r%d", i)}).Last
+		}
+		c.waitApplied(uint64(last), 5*time.Second)
+		compactedPast(t, c, 5)
+		f := c.otherThan(l)
+		compactionSettled(t, f)
+		s := mustStream(t, f.node, nil)
+		b, err := s.Bounds(t.Context(), 0)
+		if err != nil || b.First <= 5 {
+			t.Fatalf("Bounds = %+v, %v; want First past 5", b, err)
+		}
+		if _, err := s.Read(t.Context(), 0, 1, 10); !errs.HasCode(err, corestream.CodeOffsetTrimmed) {
+			t.Fatalf("Read(1) below the snapshot = %v, want OFFSET_TRIMMED", err)
+		}
+		page, err := s.Read(t.Context(), 0, b.First, 100)
+		if err != nil || len(page) == 0 || page[len(page)-1].Offset != last {
+			t.Fatalf("Read(First) = %d entries, %v; want the retained records up to %d", len(page), err, last)
+		}
 	}
-	if _, err := s.Read(t.Context(), 0, 1, 10); !errs.HasCode(err, corestream.CodeOffsetTrimmed) {
-		t.Fatalf("Read(1) below the snapshot = %v, want OFFSET_TRIMMED", err)
-	}
-	page, err := s.Read(t.Context(), 0, b.First, 100)
-	if err != nil || len(page) == 0 || page[len(page)-1].Offset != last {
-		t.Fatalf("Read(First) = %d entries, %v; want the retained records up to %d", len(page), err, last)
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }
 
@@ -285,5 +302,35 @@ func TestAStreamWakesOnTheNextApply(t *testing.T) {
 	case <-wake:
 	case <-time.After(5 * time.Second):
 		t.Fatal("no wake after a record was applied on the follower")
+	}
+}
+
+// compactionSettled waits until tn has no cut in flight nor coalesced and
+// its log starts at or past the older of the two snapshots it keeps, less
+// SnapshotTrailing, five checks in a row: the compaction of its last cut,
+// staged after the cut and written by the storage actor, is in the log.
+func compactionSettled(t *testing.T, tn *testNode) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for quiet := 0; quiet < 5; time.Sleep(10 * time.Millisecond) {
+		ss := &tn.node.snapState
+		ss.mu.Lock()
+		busy := ss.inFlight || ss.pending
+		ss.mu.Unlock()
+		metas, err := tn.snaps.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, _ := tn.log.Bounds()
+		if len(metas) > 1 && first+tn.node.cfg.SnapshotTrailing <= metas[1].Position.Index {
+			busy = true
+		}
+		quiet++
+		if busy {
+			quiet = 0
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the compaction of %d never settled: its log starts at %d, snapshots %d", tn.id, first, len(metas))
+		}
 	}
 }

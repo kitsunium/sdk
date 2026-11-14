@@ -212,8 +212,13 @@ go_test(
         "copy_bench_test.go",
         "cors_external_test.go",
         "datagram_source_linux_internal_test.go",
+        "drain_closed_linux_internal_test.go",
+        "drain_closed_other_internal_test.go",
+        "drain_fed_internal_test.go",
+        "drain_heard_internal_test.go",
         "drain_internal_test.go",
         "drain_proto_internal_test.go",
+        "drain_settle_portable_internal_test.go",
         "engine_option_external_test.go",
         "error_log_external_test.go",
         "error_log_handshake_external_test.go",
@@ -298,6 +303,8 @@ go_test(
         "proxy_bench_test.go",
         "proxy_internal_test.go",
         "ratelimit_external_test.go",
+        "release_linux_external_test.go",
+        "release_other_external_test.go",
         "reply_queue_internal_test.go",
         "reuseport_linux_internal_test.go",
         "server_bench_test.go",
@@ -339,10 +346,19 @@ go_test(
     # #1338 and #1345's first runs): shards, each with its own budget, as
     # loop_test. Four held until the L2 follow-up added the h2c drain suite,
     # the 10 000-handshake flood and the backlog drains (one shard TIMEOUT in
-    # 62 s): eight. The children a test re-runs by name drop the shard
-    # variables (unsharded), or they would find their test in another shard's
-    # share.
-    shard_count = 8,
+    # 62 s): eight. Eight still timed out under coverage (#1372): rules_go
+    # deals the tests out round-robin in source order, and one shard held
+    # TestLoopHTTP2_idleMemory (120 000 connections, 19 s under -race -cover
+    # on a 4-CPU VM), another TestBacklog_drainThroughASmallQueue (17 s of
+    # retransmission timers) beside TestShards_deliversExactlyOnce (9.5 s),
+    # 37 s with the rest, which the hosted runner under coverage takes twice.
+    # The idle reading is two tests now, one a backend, and sixteen shards
+    # put every test over 5 s in a shard of its own: the costliest shard
+    # measured 21.5 s (`go test -race -cover -json`, mapped onto the
+    # round-robin), the 17 s drain and a few short tests. The children a test
+    # re-runs by name drop the shard variables (unsharded), or they would find
+    # their test in another shard's share.
+    shard_count = 16,
     deps = [
         "//internal/core/app/health",
         "//internal/core/net",
