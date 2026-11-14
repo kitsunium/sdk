@@ -536,6 +536,8 @@ sequences:
         kind: self
       - id: stdjson
         kind: stdlib
+      - id: formcodec
+        kind: package
       - id: wrapForFormat
         kind: internal
       - id: c.Marshal
@@ -548,6 +550,11 @@ sequences:
           do:
             - return: nil, promoteJSONFailed(f, jerr, "encoding/json refused the value")
           when: jerr != nil
+      - opt:
+          do:
+            - return: formcodec.AppendPair(nil, formPromotionKey, inner), nil
+              to: formcodec
+          when: f == Form
       - bind: container, werr
         eval: wrapForFormat(f, inner)
         to: wrapForFormat

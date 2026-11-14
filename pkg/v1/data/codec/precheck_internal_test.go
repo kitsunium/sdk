@@ -96,6 +96,67 @@ func TestRefusesShapeMirrorsTheCodec(t *testing.T) {
 	}
 }
 
+// TestPromotedFormIsTheContainersBody holds the append path to its oracle: the
+// body Marshal(Form, v) writes is, byte for byte, what the codec writes for the
+// url.Values container wrapForFormat builds around the JSON of v — over values
+// whose JSON carries every byte the escaper meets (each ASCII character, the
+// multi-byte runes, a string the JSON encoder rewrites). The promotion appends
+// the pair itself; this is what lets it (#910).
+func TestPromotedFormIsTheContainersBody(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		v    any
+	}
+	var every []byte
+	for b := range 256 {
+		every = append(every, byte(b))
+	}
+	tests := []tc{
+		{"struct", precheckRecord{1, "a"}},
+		{"pointer to struct", &precheckRecord{1, "a b&c=d"}},
+		{"every byte value", precheckRecord{1, string(every)}},
+		{"multi-byte runes", precheckRecord{1, "héllo 日本語 \u2028 <>&"}},
+		{"int", 7},
+		{"nil", nil},
+		{"map[string]any", map[string]any{"a": 1, "b": []string{"x", "y"}}},
+	}
+	c, ok := corecodec.Lookup(Form)
+	if !ok {
+		t.Fatalf("%s: not registered", Form)
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		inner, err := stdjson.Marshal(tc.v)
+		if err != nil {
+			t.Fatalf("%s: encoding/json: %v", tc.name, err)
+		}
+		container, err := wrapForFormat(Form, inner)
+		if err != nil {
+			t.Fatalf("%s: wrapForFormat: %v", tc.name, err)
+		}
+		want, err := c.Marshal(container)
+		if err != nil {
+			t.Fatalf("%s: codec: %v", tc.name, err)
+		}
+		got, err := Marshal(Form, tc.v)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Errorf("%s: Marshal = %q, %v; the container's body = %q", tc.name, got, err, want)
+		}
+		//: and the body reads back as what was promoted.
+		var back any
+		if err := Unmarshal(Form, got, &back); err != nil {
+			t.Errorf("%s: Unmarshal of %q: %v", tc.name, got, err)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // TestRefusesShapeLeavesTheRestToTheCodec: flatbuffers, tlv and the formats
 // that take any value are never pre-judged, and the native shapes of the four
 // pre-checked ones go to their codec.

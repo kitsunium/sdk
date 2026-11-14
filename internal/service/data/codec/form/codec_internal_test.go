@@ -85,6 +85,46 @@ func TestAppendQueryEscapeMatchesStdlib(t *testing.T) {
 	}
 }
 
+// TestAppendPairMatchesMarshal pins AppendPair to what the codec writes: for
+// every string of the escape corpus — each byte value alone, then the
+// mixtures — as the value, and as the key, the bytes are those of Marshal of
+// a url.Values holding that one pair, and of net/url's own Encode. It appends
+// onto a non-empty prefix, so the buffer the caller owns is not clobbered, and
+// a value given as bytes reads the same as the string it spells (#910).
+func TestAppendPairMatchesMarshal(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		key   string
+		value string
+	}
+	var tests []tc
+	for _, s := range escapeCorpus() {
+		tests = append(tests, tc{name: "value " + strconvQuote(s), key: "_json", value: s})
+		tests = append(tests, tc{name: "key " + strconvQuote(s), key: s, value: "v"})
+	}
+	c := New()
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		const prefix = "PREFIX"
+		got := string(AppendPair([]byte(prefix), tc.key, []byte(tc.value)))
+		values := url.Values{tc.key: {tc.value}}
+		viaCodec, err := c.Marshal(values)
+		if err != nil {
+			t.Fatalf("%s: Marshal: %v", tc.name, err)
+		}
+		if got != prefix+values.Encode() || got != prefix+string(viaCodec) {
+			t.Errorf("%s: AppendPair=%q, Encode=%q, Marshal=%q", tc.name, got, values.Encode(), viaCodec)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
 // TestEscapedLenIsExact pins the pre-sizing arithmetic: encodeInto grows its
 // buffer exactly once, which is only correct if escapedLen predicts the
 // output width to the byte. An under-estimate would silently reintroduce the

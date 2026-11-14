@@ -32,6 +32,7 @@ targets=(
 	"./internal/service/data/codec/csv FuzzAppendRecordsIsEncodingCSV"
 	"./internal/service/data/codec/csv FuzzUnmarshalRoundTrip"
 	"./internal/service/data/codec/flatbuffers FuzzUnmarshal"
+	"./internal/service/data/codec/form FuzzAppendPair"
 	"./internal/service/data/codec/form FuzzRoundTrip"
 	"./internal/service/data/codec/json FuzzUnmarshal"
 	"./internal/service/data/codec/jsonpatch FuzzDiffApply"

@@ -13,6 +13,10 @@ import (
 // allocSink defeats dead-code elimination in the AllocsPerRun probes.
 var allocSink any
 
+// bytesSink keeps a []byte result alive without boxing it into an interface,
+// which would add an allocation to the probe.
+var bytesSink []byte
+
 // TestAllocBudget pins form's per-call allocation ceilings for Marshal,
 // Unmarshal, and Append over a small fixed body. Carries //go:build !race
 // (testing.AllocsPerRun is +1 under -race) and no t.Parallel (AllocsPerRun
@@ -40,6 +44,8 @@ func TestAllocBudget(t *testing.T) {
 	//: reused caller buffer for the Append case — pre-sized so Append never
 	//: grows it inside the probe (we measure Append's own allocs, not dst).
 	appendDst := make([]byte, 0, 256)
+	//: the JSON the facade's promotion hands AppendPair (#910).
+	payload := []byte(`{"id":7,"name":"ada"}`)
 	type tc struct {
 		name string
 		ceil float64
@@ -66,6 +72,14 @@ func TestAllocBudget(t *testing.T) {
 				t.Fatalf("Unmarshal: %v", uerr)
 			}
 			allocSink = dst
+		}},
+		//: one exactly-sized buffer: AppendPair's own allocation, nothing else.
+		{"append-pair", 1, func() {
+			bytesSink = form.AppendPair(nil, "_json", payload)
+		}},
+		//: a caller buffer with room for the pair: no allocation at all.
+		{"append-pair-into", 0, func() {
+			bytesSink = form.AppendPair(appendDst[:0], "_json", payload)
 		}},
 		{"append", 3, func() {
 			out, aerr := appender.Append(appendDst[:0], values)

@@ -10,6 +10,7 @@ import (
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	fbcodec "github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers"
+	formcodec "github.com/kitsunium/sdk/internal/service/data/codec/form"
 )
 
 // flatBuffersHeaderBytes is the synthetic 4-byte root-offset header
@@ -46,7 +47,9 @@ const pemPromotionBlockType string = "JSON"
 // serialising v with encoding/json and wrapping the JSON bytes in the
 // codec's native shape, then re-calling Marshal. Switching on Format
 // keeps every per-codec wrap step inline so the data flow is read
-// top-down without per-format helper indirection.
+// top-down without per-format helper indirection. Form is the one format
+// that does not go through wrapForFormat and c.Marshal: its body is one
+// pair, written straight into its exact length.
 func promoteMarshal(f Format, c Codec, v any) (encoded []byte, err error) {
 	//: serialise v to a JSON intermediate.
 	inner, jerr := stdjson.Marshal(v)
@@ -54,6 +57,12 @@ func promoteMarshal(f Format, c Codec, v any) (encoded []byte, err error) {
 	if jerr != nil {
 		//: typed PROMOTE_FAILED, the json error kept as its cause (rule 2).
 		return nil, promoteJSONFailed(f, jerr, "encoding/json refused the value")
+	}
+	//: a form body is one pair: the codec's own escaper writes it into one
+	//: exactly-sized buffer, with no container, no string and no sort (#910).
+	if f == Form {
+		//: the bytes c.Marshal(wrapForFormat(Form, inner)) writes, held to by a test.
+		return formcodec.AppendPair(nil, formPromotionKey, inner), nil
 	}
 	//: build the codec-native container for the JSON bytes.
 	container, werr := wrapForFormat(f, inner)
@@ -119,7 +128,9 @@ func wrapForFormat(f Format, inner []byte) (container any, err error) {
 	case CSV:
 		//: 2-row table; body's first column carries the json string.
 		return [][]string{{csvPromotionHeader}, {innerStr}}, nil
-	//: form requires url.Values; a single pair carries the json string.
+	//: form requires url.Values; a single pair carries the json string. Marshal
+	//: no longer builds it (promoteMarshal appends the pair directly); it stays
+	//: as the reference the append is held to byte for byte.
 	case Form:
 		//: one-key, one-value body — percent-escaping is transparent.
 		return url.Values{formPromotionKey: []string{innerStr}}, nil

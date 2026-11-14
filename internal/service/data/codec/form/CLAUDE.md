@@ -19,6 +19,7 @@ buffer.
 | Constructor      | `New() codec.Codec` |
 | Streaming        | not implemented — the format has no record framing; a body is one unit |
 | Appender         | yes (`Append(dst, v) ([]byte, error)`) — dst is returned untouched on rejection |
+| `AppendPair`     | `AppendPair(dst, key, value []byte-or-string)` — one pair, escaped as `Marshal` escapes it, grown once to its exact length; the facade's promotion of a value to Form writes its JSON through it (#910) |
 
 Accepted shapes, both directions:
 
@@ -142,6 +143,7 @@ being retried through the JSON bridge and re-labelled `PROMOTE_FAILED`.
   over **all 256 byte values** plus mixtures, and
   `TestEncodeIntoMatchesStdlibEncode` compares the whole encoder against
   `url.Values.Encode()`. The moment they disagree this is a different format.
+- **`AppendPair` is the same escaper on one pair whose value is already bytes.** The escape helpers take a string or a byte slice, so a JSON payload is escaped without a string copy. `TestAppendPairMatchesMarshal` and `FuzzAppendPair` (`scripts/ci/codec-fuzz.sh`) hold it to `Marshal` and `url.Values.Encode()` over every byte value; `TestAllocBudget` holds it to one allocation, none into a buffer with room.
 - **The output buffer is grown exactly once.** `encodedLen` predicts the byte
   count to the byte; `TestEncodedLenIsExact` / `TestEscapedLenIsExact` keep the
   prediction honest, since an under-estimate would silently restore the
