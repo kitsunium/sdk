@@ -139,26 +139,57 @@ func sendZCReap(u *uring) (sent, notified bool, sendRes int32) {
 }
 
 // zeroCopyDone handles what a zero-copy send's CQEs owe beyond a plain
-// send's (#969). The notification — the flight's pages back — is one
-// operation less and one pending send less; once the last came for a flight
-// sent whole, the flight is released and the connection flushed again; it is
-// reported true. A send's own CQE without F_MORE, whose notification will
-// never come, takes that count back and is reported false: it is handled as
-// a plain send's.
+// send's (#969, #1396): a notification (notified), reported true; a send's
+// own CQE without F_MORE, whose notification will never come, takes its
+// count back, if one is left to take, and is reported false: it is handled as
+// a plain send's, as is every other CQE of the send.
 func (rr *uRing) zeroCopyDone(slot int32, c *cqe) bool {
+	//: a notification.
+	if c.flags&cqeFNotif != 0 {
+		rr.notified(slot)
+		//: settled.
+		return true
+	}
 	cc := &rr.r.conns[slot]
-	//: the send's own CQE.
-	if c.flags&cqeFNotif == 0 {
-		//: no notification to wait for.
-		if c.flags&cqeFMore == 0 {
-			cc.ops--
-			cc.zcPend--
-		}
-		//: handled as a send's.
-		return false
+	//: no notification to wait for, and one counted for it.
+	if c.flags&cqeFMore == 0 && cc.zcPend > 0 {
+		cc.ops--
+		cc.zcPend--
+	}
+	//: handled as a send's.
+	return false
+}
+
+// notified takes one notification of slot's back, one operation less: a
+// refused send's first (zcVoid), whose send pinned nothing, then a pending
+// one's (zcPend), whose pages are back (pagesBack). A notification nothing
+// counts — the kernel posting one for a send whose CQE promised none — is
+// dropped.
+func (rr *uRing) notified(slot int32) {
+	cc := &rr.r.conns[slot]
+	//: by whose notification it is.
+	switch {
+	//: a refused send's: the flight never waited for it.
+	case cc.zcVoid > 0:
+		cc.zcVoid--
+	//: a taken send's: its pages are back.
+	case cc.zcPend > 0:
+		cc.zcPend--
+		rr.pagesBack(slot)
+	//: nothing counted: no operation of the slot's.
+	default:
+		//: dropped.
+		return
 	}
 	cc.ops--
-	cc.zcPend--
+	rr.maybeClose(slot)
+}
+
+// pagesBack settles slot's flight once a pending notification came: the last
+// one for a flight sent whole releases it and flushes the connection again;
+// for one held at zcPend's bound, its rest leaves plainly.
+func (rr *uRing) pagesBack(slot int32) {
+	cc := &rr.r.conns[slot]
 	alive := cc.state == stOpen || cc.state == stClosing
 	//: by what the flight waited for.
 	switch {
@@ -167,24 +198,21 @@ func (rr *uRing) zeroCopyDone(slot int32, c *cqe) bool {
 	//: the flight was sent whole and held for this.
 	case cc.flight.off >= cc.flight.len:
 		rr.releaseFlight(slot, alive)
-	//: held after a refusal: its rest leaves plainly.
+	//: held at zcPend's bound: its rest leaves plainly.
 	case cc.zc == zcHold:
 		rr.sendPlainly(slot, alive)
 	}
-	rr.maybeClose(slot)
-	//: settled.
-	return true
 }
 
 // zeroCopyHandled handles what a CQE of a zero-copy flight owes beyond a
-// plain send's — its notification (zeroCopyDone), or a refusal
+// plain send's — a notification (zeroCopyDone), or a refusal
 // (zeroCopyRefused) — and reports whether nothing more is to be done with it.
 func (rr *uRing) zeroCopyHandled(slot int32, c *cqe) bool {
-	//: a notification settles it, a refusal holds or resends the flight.
-	return rr.zeroCopyDone(slot, c) || (rr.r.conns[slot].zc == zcOn && rr.zeroCopyRefused(slot, c.res))
+	//: a notification settles it, a refusal resends the flight plainly.
+	return rr.zeroCopyDone(slot, c) || (rr.r.conns[slot].zc == zcOn && rr.zeroCopyRefused(slot, c))
 }
 
-// zeroCopyRefused handles a zero-copy send's CQE whose result res is a
+// zeroCopyRefused handles a zero-copy send's CQE c whose result is a
 // refusal, nothing of the flight sent, and reports whether it was one:
 // EOPNOTSUPP from a socket whose kernel object lacks SOCK_SUPPORT_ZC — a
 // Unix socket, or one accepted from a listener that lacks it, as an MPTCP
@@ -192,14 +220,17 @@ func (rr *uRing) zeroCopyHandled(slot int32, c *cqe) bool {
 // 1.24 (net: defaultMPTCPEnabledListen) and server binds plain TCP instead
 // for a group that opts in (#969), so here an adopted one —, after which
 // every ring of the loop sends every later flight plainly, its listeners
-// being the same; or ENOMEM,
-// the pages it would pin past RLIMIT_MEMLOCK, which io_uring charges them to
-// (io_uring/notif.c), a load's while its flights wait for their peers' ACKs,
-// after which only this flight does. Its rest leaves by IORING_OP_SEND once
-// its notifications came, or now when none is pending.
-func (rr *uRing) zeroCopyRefused(slot, res int32) bool {
+// being the same; or ENOMEM, the pages it would pin past RLIMIT_MEMLOCK,
+// which io_uring charges them to (io_uring/notif.c), a load's while its
+// flights wait for their peers' ACKs, after which only this flight does. Its
+// rest leaves by IORING_OP_SEND at once, whatever notification is pending
+// (#1396): the refused send pinned nothing, so its own notification, which
+// F_MORE promises, is counted apart (zcVoid) — the slot waits for it, the
+// flight does not —, and only a send of it the kernel took (zcPend) holds the
+// chunk.
+func (rr *uRing) zeroCopyRefused(slot int32, c *cqe) bool {
 	//: by the kernel's answer.
-	switch syscall.Errno(-res) {
+	switch syscall.Errno(-c.res) {
 	//: the socket: never again on this loop.
 	case syscall.EOPNOTSUPP:
 		rr.ul.uses.sendZCMin = 0
@@ -212,11 +243,10 @@ func (rr *uRing) zeroCopyRefused(slot, res int32) bool {
 	}
 	cc := &rr.r.conns[slot]
 	cc.ops--
-	//: the refused send's notification, or an earlier one's, is to come.
-	if cc.zcPend > 0 {
-		cc.zc = zcHold
-		//: held: zeroCopyDone sends the rest.
-		return true
+	//: its notification is to come: it holds the slot, not the flight.
+	if c.flags&cqeFMore != 0 && cc.zcPend > 0 {
+		cc.zcPend--
+		cc.zcVoid++
 	}
 	rr.sendPlainly(slot, cc.state == stOpen || cc.state == stClosing)
 	rr.maybeClose(slot)
@@ -225,8 +255,7 @@ func (rr *uRing) zeroCopyRefused(slot, res int32) bool {
 }
 
 // sendPlainly sends the rest of slot's flight by IORING_OP_SEND, every send
-// of it: its zero-copy notifications all came. A dead slot sends nothing;
-// its flight is freed with it.
+// of it. A dead slot sends nothing; its flight is freed with it.
 func (rr *uRing) sendPlainly(slot int32, alive bool) {
 	cc := &rr.r.conns[slot]
 	cc.zc = zcOff

@@ -452,6 +452,7 @@ func (kl *kqueueLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 		lp.shrinkSlab()
 		kl.pace()
 		lp.h.OnBatchEnd(lp)
+		lp.settleDrain()
 		lp.endBatch()
 		kl.off = 0
 		lp.yield()
@@ -681,8 +682,8 @@ func (kl *kqueueLoop) conn(slot int32, filter int, flags uint16, fflags int32) {
 // does.
 func (kl *kqueueLoop) readEvent(slot int32, flags uint16, fflags int32) {
 	c := &kl.r.conns[slot]
-	//: reading.
-	if c.state == stOpen && c.flags&fPeerDone == 0 {
+	//: reading: open, or lingering after the drain's close.
+	if (c.state == stOpen || c.linger == lingerHalf) && c.flags&fPeerDone == 0 {
 		kl.read(slot)
 		//: read.
 		return
@@ -706,6 +707,7 @@ func (kl *kqueueLoop) writable(slot int32) {
 	if c.state != stDead && c.flags&fSending == 0 {
 		swallowErr(kevChange(kl.kq, int(c.fd), syscall.EVFILT_WRITE, syscall.EV_DISABLE))
 	}
+	r.settleAfterWrite(slot)
 }
 
 // waitWritable asks for slot's socket to report room: its write filter is
@@ -851,6 +853,13 @@ func (kl *kqueueLoop) shutdown(r *ring, slot int32) {
 	}
 }
 
+// halfClose implements driver: the writing side shut, the FIN after the
+// output; the read filter stays on, so the lingering slot reads to its
+// peer's end (ring.lingers).
+func (kl *kqueueLoop) halfClose(r *ring, slot int32) {
+	swallowErr(syscall.Shutdown(int(r.conns[slot].fd), syscall.SHUT_WR))
+}
+
 // unread implements driver: a one-byte MSG_PEEK on the non-blocking socket
 // says whether it holds bytes not yet received — package syscall has no
 // FIONREAD on darwin and the BSDs, and OpenBSD takes a raw ioctl only through
@@ -874,11 +883,10 @@ func (kl *kqueueLoop) control() {
 		r.draining = true
 		kl.disarmListeners()
 	}
-	//: while draining, the queues are taken, batch after batch, and a
-	//: connection with no partial input closes once its output left.
+	//: while draining, the queues are taken, batch after batch; the
+	//: settled connections are looked at after OnBatchEnd (settleDrain).
 	if lp.draining {
 		kl.takeQueues()
-		lp.closeSettled(r)
 	}
 }
 

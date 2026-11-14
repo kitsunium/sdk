@@ -184,6 +184,34 @@ constants:
       - doc: fDrained is a connection whose handler the drain has told once.
         name: fDrained
     name: fPressure
+  - doc: "How far a drain's close went (connCtl.linger, #1385)."
+    grouped: true
+    items:
+      - doc: lingerNone is a slot whose writing side is open.
+        name: lingerNone
+        type: uint8
+        value: iota
+      - doc: |-
+          lingerHalf is a slot whose writing side the drain shut: it reads until
+          its peer ends or drainLinger passed, then closes.
+        name: lingerHalf
+    name: lingerNone
+  - grouped: true
+    items:
+      - doc: |-
+          drainLinger bounds how long a connection the drain closed keeps
+          reading, its writing side shut, before its close (ring.lingers): a
+          close with input unread sends a reset, which discards the output the
+          peer has not received yet. The portable backend's portableLinger, as
+          long.
+        name: drainLinger
+        type: time.Duration
+        value: 500 * time.Millisecond
+      - doc: drainLingerTicks is drainLinger in ticks.
+        name: drainLingerTicks
+        type: int64
+        value: int64(drainLinger / tickEvery)
+    name: drainLinger
   - doc: "How a flight leaves on io_uring (connCtl.zc, #969)."
     grouped: true
     items:
@@ -294,8 +322,10 @@ constants:
         type: int
         value: "128"
       - doc: |-
-          queueTakeBatch bounds what the drain of epoll or kqueue takes from one
-          listener in one batch, so the loop serves between two takes.
+          queueTakeBatch bounds what the drain takes from one listener in one
+          batch — a loop on epoll or kqueue, a ring on io_uring, which arms that
+          many accepts at most for what TCP_INFO counts —, so the loop serves
+          between two takes.
         name: queueTakeBatch
         type: int
         value: 8 * acceptBurst
@@ -1741,6 +1771,8 @@ files:
   - decls:
       - stFree
       - fPressure
+      - lingerNone
+      - drainLinger
       - zcOff
       - ffEOF
       - rNone
@@ -1779,6 +1811,8 @@ files:
       - (*ring).markDirty
       - (*ring).flushDirty
       - (*ring).settle
+      - (*ring).settleAfterWrite
+      - (*ring).lingers
       - (*ring).sent
       - (*ring).fail
       - (*ring).finish
@@ -1840,6 +1874,8 @@ files:
       - doneOutside
       - (*ring).full
       - (*ring).drainable
+      - (*loop).settleDrain
+      - (*ring).lingered
       - (*loop).closeSettled
     name: drain_native.go
   - decls:
@@ -1886,6 +1922,7 @@ files:
       - (*epollLoop).beginFile
       - (*epollLoop).endFile
       - (*epollLoop).shutdown
+      - (*epollLoop).halfClose
       - (*epollLoop).peer
       - (*epollLoop).unread
       - (*epollLoop).control
@@ -2221,6 +2258,8 @@ files:
       - (*uRing).cancelAccept
       - (*uRing).takeQueues
       - (*uRing).takeQueue
+      - (*uRing).waiting
+      - (*uRing).tookAll
       - (*uRing).armTake
       - (*uLoop).queuesTaken
       - (*uRing).used
@@ -2277,6 +2316,7 @@ files:
       - (*uRing).flush
       - (*uRing).sendFlight
       - (*uRing).shutdown
+      - (*uRing).halfClose
       - (*uRing).closeBackstop
       - (*uRing).compactClosing
       - (*uRing).backstop
@@ -2416,6 +2456,8 @@ files:
       - sendZCRound
       - sendZCReap
       - (*uRing).zeroCopyDone
+      - (*uRing).notified
+      - (*uRing).pagesBack
       - (*uRing).zeroCopyHandled
       - (*uRing).zeroCopyRefused
       - (*uRing).sendPlainly
@@ -3530,6 +3572,13 @@ types:
       - doc: reason is why the connection closed; errno its errno when it is rErrno.
         name: reason
         type: uint8
+      - doc: |-
+          linger is a drain's close half done (lingerHalf): the slot's output
+          left, its writing side is shut, and it reads, and drops, what the peer
+          still sends until the peer's end or drainLinger, so its output is never
+          aborted by the reset a close with input unread sends (#1385).
+        name: linger
+        type: uint8
       - name: errno
         type: int32
       - doc: |-
@@ -3588,13 +3637,18 @@ types:
         type: uint8
       - doc: |-
           zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
-          send of it zero-copy, zcHold none for now — a zero-copy send of it was
-          refused, or zcPend is at its bound — until its notifications came, the
-          rest then sent plainly. zcPend counts its sends whose notification has
-          not come: the flight's chunk is the kernel's until it reaches zero.
+          send of it zero-copy, zcHold none for now — zcPend is at its bound —
+          until its notifications came, the rest then sent plainly. zcPend counts
+          its sends whose notification has not come: the flight's chunk is the
+          kernel's until it reaches zero. zcVoid counts the notifications still
+          to come of sends the kernel refused, which pinned nothing (#1396): they
+          hold the slot, never the flight. A flight starts zero-copy only once it
+          is zero, and a flight is refused once at most, so it is never past one.
         name: zc
         type: uint8
       - name: zcPend
+        type: uint8
+      - name: zcVoid
         type: uint8
       - doc: fileErr is the errno a file operation failed with, zero when none.
         name: fileErr
@@ -3632,6 +3686,9 @@ types:
       	// unread reports whether slot's socket holds bytes not yet received, so
       	// eviction never closes a connection mid-request.
       	unread(r *ring, slot int32) bool
+      	// halfClose shuts slot's writing side once its output left, and keeps
+      	// it reading: the drain's lingering close (#1385).
+      	halfClose(r *ring, slot int32)
       }
   - doc: |-
       shared is what every loop of one group shares: the connection bound and
@@ -3806,6 +3863,29 @@ types:
         params: slot int32
         recv: r *ring
       - doc: |-
+          settleAfterWrite lists slot to settle at the batch's end once a write the
+          socket had refused for room has taken the last of its output: a close, or
+          a peer that ended, waits only for that output (settle), and no other path
+          looks at the slot again — the drain's look and the timers pass over a
+          closing slot. Without it a closing connection whose output left through
+          the writable path, a small send buffer's and a slow reader's, stayed
+          open, and the drain waited for its deadline (FreeBSD and NetBSD, #1385).
+        name: settleAfterWrite
+        params: slot int32
+        recv: r *ring
+      - doc: |-
+          lingers reports whether slot, its output gone, still lingers before its
+          close. A close the drain decided on a connection whose peer still sends
+          would, with that input unread, send a reset, and the reset discards what
+          the kernel holds of the output not yet delivered: the answers the drain
+          waited for (#1385). So the drain shuts the writing side first — the peer
+          reads every answer, then the end — and the slot keeps reading, and
+          dropping, until the peer ends or drainLinger passed (closeSettled looks).
+        name: lingers
+        params: slot int32
+        recv: r *ring
+        results: bool
+      - doc: |-
           sent records that some of slot's output was sent, and fires OnWritable when
           a producer waits and the output fell under the low-water mark. The byte
           count is the driver's to pass; the pending total already reflects it.
@@ -3906,6 +3986,13 @@ types:
           partial input, and either it has sent something — its request was read —
           or it stayed silent for drainQuiet.
         name: drainable
+        params: c *connCtl
+        recv: r *ring
+        results: bool
+      - doc: |-
+          lingered reports whether c, a drain's lingering close, is done lingering:
+          its peer ended, or drainLinger passed.
+        name: lingered
         params: c *connCtl
         recv: r *ring
         results: bool
@@ -4254,10 +4341,20 @@ types:
         recv: lp *loop
         results: error
       - doc: |-
+          settleDrain is the drain's look at the open connections, once
+          OnBatchEnd has returned and before endBatch flushes: whatever the batch's
+          requests asked for is written by then, the handlers answering at
+          OnBatchEnd included, so a close the look marks leaves after it — a
+          closing slot finishes only once its output has left (settle) — and no
+          answer is refused (#1385). A connection fed in every batch is judged at
+          every look, so it hears OnDrain at one and closes at the next.
+        name: settleDrain
+        recv: lp *loop
+      - doc: |-
           closeSettled starts the drain's close of every connection of r the drain
           may close (drainable) that has no answer out with a worker (R3): each
           closes once its output has left; mid-request ones, and ones waiting on a
-          worker, finish first.
+          worker, finish first. It runs after OnBatchEnd (settleDrain).
         name: closeSettled
         params: r *ring
         recv: lp *loop
@@ -4587,6 +4684,13 @@ types:
           shutdown implements driver: the descriptor leaves the set and closes, and
           the slot is free at once, since epoll holds nothing in flight.
         name: shutdown
+        params: r *ring, slot int32
+        recv: el *epollLoop
+      - doc: |-
+          halfClose implements driver: the writing side shut, the FIN after the
+          output, and the reading events back on, so the lingering slot reads to its
+          peer's end (ring.lingers).
+        name: halfClose
         params: r *ring, slot int32
         recv: el *epollLoop
       - doc: |-
@@ -5970,12 +6074,16 @@ types:
       - doc: |-
           queueDone is, per listener, that the ring took its share of the
           listener's queue as the group drains and handed it back (plan P6);
-          queueCancel that a cancel of its accepts is in flight. take is
-          takeOff for a ring that takes nothing more: the watchdog drained it
-          before the group did, or an accept failed during the take.
+          queueCancel that a cancel of its accepts is in flight; queueEmptied
+          that the queue read empty right after a round of its accepts ran, which
+          ends the ring's take once they came back (#1385). take is takeOff for a
+          ring that takes nothing more: the watchdog drained it before the group
+          did, or an accept failed during the take.
         name: queueDone
         type: "[]bool"
       - name: queueCancel
+        type: "[]bool"
+      - name: queueEmptied
         type: "[]bool"
       - name: take
         type: uint8
@@ -6159,17 +6267,46 @@ types:
           takeQueues takes the ring's share of every listener's queue as the group
           drains (plan P6). Once the cancels of its accepts came back — an accept
           that completed as its cancel crossed it is served like any other —, it
-          arms as many single-shot accepts as the queue holds (TCP_INFO), within the
-          room above the reserve, and hands the listener back to the group's set
-          once the queue is empty and none is in flight; the last ring closes it. An
-          accept left waiting on an empty queue, because another ring took the
-          connection, is cancelled again.
+          arms as many single-shot accepts as the queue holds (TCP_INFO), up to
+          queueTakeBatch a batch as epoll and kqueue take, within the room above the
+          reserve, submits them, and reads the queue again once they ran: empty
+          there, the ring's take is over, as epoll's is at its first EAGAIN. It
+          hands the listener back to the group's set once the queue read empty and
+          none of its accepts is in flight; the last ring closes it. An accept left
+          waiting on an empty queue, because another ring took the connection, is
+          cancelled again.
+
+          Read a batch after the round instead, the queue was never empty under
+          arrivals once a batch outlasted the gap between two of them, and
+          acceptDepth a round fell behind a single dialer: the take ran to its
+          budget with the queue at its backlog, and the close reset connections
+          queued half a second before it (#1385). acceptDepth bounds the accepts a
+          serving ring keeps waiting, never what the take arms for a queue it
+          counted.
         name: takeQueues
         recv: rr *uRing
       - doc: takeQueue is takeQueues' step on listener i, fd.
         name: takeQueue
         params: i, fd int
         recv: rr *uRing
+      - doc: |-
+          waiting is how many connections listener i, fd, holds for the ring's
+          take: none for a ring the watchdog drained, whose accept failed, past its
+          budget, or whose queue read empty after its last round — it takes nothing
+          more.
+        name: waiting
+        params: i, fd int
+        recv: rr *uRing
+        results: int
+      - doc: |-
+          tookAll submits the take's round and reports whether listener fd's queue
+          reads empty once it ran: a single-shot accept on a queue that holds a
+          connection completes as it is submitted, so what the queue holds then
+          arrived during the submission, or was left to an accept still in flight.
+        name: tookAll
+        params: fd int
+        recv: rr *uRing
+        results: bool
       - doc: |-
           armTake arms n single-shot accepts on listener i, fd, for the drain's take,
           and says how many the SQ had room for.
@@ -6435,6 +6572,14 @@ types:
         params: r *ring, slot int32
         recv: rr *uRing
       - doc: |-
+          halfClose implements driver: IORING_OP_SHUTDOWN of the writing side, the
+          FIN after the output; the recv stays armed, so the lingering slot reads to
+          its peer's end (ring.lingers). With no room in the SQ the slot lingers
+          without it, to drainLinger.
+        name: halfClose
+        params: r *ring, slot int32
+        recv: rr *uRing
+      - doc: |-
           closeBackstop cancels, by user_data, the recv and the send of every slot
           whose shutdown was issued closeBackstopTicks ago and that still waits on
           an operation: the shutdown ends them (uRing.shutdown), so this only bounds
@@ -6635,26 +6780,40 @@ types:
         recv: rr *uRing
       - doc: |-
           zeroCopyDone handles what a zero-copy send's CQEs owe beyond a plain
-          send's (#969). The notification — the flight's pages back — is one
-          operation less and one pending send less; once the last came for a flight
-          sent whole, the flight is released and the connection flushed again; it is
-          reported true. A send's own CQE without F_MORE, whose notification will
-          never come, takes that count back and is reported false: it is handled as
-          a plain send's.
+          send's (#969, #1396): a notification (notified), reported true; a send's
+          own CQE without F_MORE, whose notification will never come, takes its
+          count back, if one is left to take, and is reported false: it is handled as
+          a plain send's, as is every other CQE of the send.
         name: zeroCopyDone
         params: slot int32, c *cqe
         recv: rr *uRing
         results: bool
       - doc: |-
+          notified takes one notification of slot's back, one operation less: a
+          refused send's first (zcVoid), whose send pinned nothing, then a pending
+          one's (zcPend), whose pages are back (pagesBack). A notification nothing
+          counts — the kernel posting one for a send whose CQE promised none — is
+          dropped.
+        name: notified
+        params: slot int32
+        recv: rr *uRing
+      - doc: |-
+          pagesBack settles slot's flight once a pending notification came: the last
+          one for a flight sent whole releases it and flushes the connection again;
+          for one held at zcPend's bound, its rest leaves plainly.
+        name: pagesBack
+        params: slot int32
+        recv: rr *uRing
+      - doc: |-
           zeroCopyHandled handles what a CQE of a zero-copy flight owes beyond a
-          plain send's — its notification (zeroCopyDone), or a refusal
+          plain send's — a notification (zeroCopyDone), or a refusal
           (zeroCopyRefused) — and reports whether nothing more is to be done with it.
         name: zeroCopyHandled
         params: slot int32, c *cqe
         recv: rr *uRing
         results: bool
       - doc: |-
-          zeroCopyRefused handles a zero-copy send's CQE whose result res is a
+          zeroCopyRefused handles a zero-copy send's CQE c whose result is a
           refusal, nothing of the flight sent, and reports whether it was one:
           EOPNOTSUPP from a socket whose kernel object lacks SOCK_SUPPORT_ZC — a
           Unix socket, or one accepted from a listener that lacks it, as an MPTCP
@@ -6662,19 +6821,21 @@ types:
           1.24 (net: defaultMPTCPEnabledListen) and server binds plain TCP instead
           for a group that opts in (#969), so here an adopted one —, after which
           every ring of the loop sends every later flight plainly, its listeners
-          being the same; or ENOMEM,
-          the pages it would pin past RLIMIT_MEMLOCK, which io_uring charges them to
-          (io_uring/notif.c), a load's while its flights wait for their peers' ACKs,
-          after which only this flight does. Its rest leaves by IORING_OP_SEND once
-          its notifications came, or now when none is pending.
+          being the same; or ENOMEM, the pages it would pin past RLIMIT_MEMLOCK,
+          which io_uring charges them to (io_uring/notif.c), a load's while its
+          flights wait for their peers' ACKs, after which only this flight does. Its
+          rest leaves by IORING_OP_SEND at once, whatever notification is pending
+          (#1396): the refused send pinned nothing, so its own notification, which
+          F_MORE promises, is counted apart (zcVoid) — the slot waits for it, the
+          flight does not —, and only a send of it the kernel took (zcPend) holds the
+          chunk.
         name: zeroCopyRefused
-        params: slot, res int32
+        params: slot int32, c *cqe
         recv: rr *uRing
         results: bool
       - doc: |-
           sendPlainly sends the rest of slot's flight by IORING_OP_SEND, every send
-          of it: its zero-copy notifications all came. A dead slot sends nothing;
-          its flight is freed with it.
+          of it. A dead slot sends nothing; its flight is freed with it.
         name: sendPlainly
         params: slot int32, alive bool
         recv: rr *uRing

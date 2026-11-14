@@ -8,6 +8,7 @@
   is v0 ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
 - **Deciders**: SDK maintainers, owner
 - **Amended 2026-11-10** (#856): a loop group's `Shards(0)` binds one SO_REUSEPORT listener per loop; each is taken by its one loop's rings (§D3's taker is the loop that owns the shard), and a loop whose watchdog gave up closes its own shards. A partial drain of a reuseport group stays `tcp_migrate_req=1`'s (§D3).
+- **Amended 2026-11-14** (#1385), in two sections at the end: the drain looks at the established connections once `OnBatchEnd` has returned, a closing connection reads nothing more, its output is settled whichever path it left by, and the drain's close lingers — the writing side shut after the output, the descriptor closed at the peer's end or after 500 ms —; and io_uring's take arms a round of up to 1 024 accepts and reads the queue again at once, its take over at the first empty read. §D3 is unchanged.
 - **Amends**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   §D1 (the drain a loop group shares with the server) and §D5 (the loop
   count); [ADR 0187](0187-the-handler-type-chooses-the-engine.md) §D9
@@ -205,3 +206,102 @@ and their ratio is what P2 judges.
 - **A default grace.** The right value is the routing's, not the SDK's; a
   non-zero default would slow every test and every shutdown of a program that
   routes on nothing.
+
+## Amendment 2026-11-14 (#1385): the drain looks once the batch's answers are written
+
+§D3's rule 4 closes a connection with no partial input once it is heard or
+quiet. Where it looked was left unsaid, and every backend looked before
+`OnBatchEnd`. The HTTP adapters answer a batch's requests at `OnBatchEnd`: a
+connection whose request came in the batch was marked closing first and its
+answer refused, so it ended unanswered well inside the drain — on every
+backend, h2c on every run measured, HTTP/1.1 spared only because its
+`OnDrain` deferred the close a batch.
+
+- **The look comes after `OnBatchEnd`**, before the batch's flush
+  (`settleDrain` on io_uring, epoll and kqueue, the portable backend's
+  `closeSettled` after `OnBatchEnd`); the drain's queue take stays where it
+  was. Every answer the batch's requests asked for is written before a close
+  is marked, and a closing connection finishes only once its output has left.
+  A connection fed in every batch is judged at every look: it hears
+  `OnDrain` at one and closes at the next.
+- **A closing connection reads nothing more**, on every backend: an answer to
+  bytes read after the close was decided could not leave. The native
+  backends already dropped them; the portable backend now does.
+- **The drain's close lingers.** Once a closing connection's output has left
+  for the kernel, the drain shuts its writing side — the FIN follows the
+  output — and keeps reading, and dropping, what the peer still sends,
+  until the peer ends or `drainLinger` (500 ms, the portable backend's
+  `portableLinger`) passed; only then is the descriptor closed. A close with
+  input unread sends a reset, and the reset discards whatever of the output
+  the kernel has not delivered yet: a peer that keeps sending and reads
+  slower than the answers come lost them, on every backend
+  (`TestDrain_aConnectionFedThroughTheDrainGetsEveryAnswer/raw_handler,_a_slow_reader`),
+  and OpenBSD's kqueue lost the last answer of a connection fed through the
+  drain even at full speed. On io_uring the shut of the writing side is the
+  connection's one shutdown (ADR 0200): after the linger, the recv still
+  armed is cancelled by its user data and the direct descriptor closed.
+  A connection whose peer already ended closes at once.
+- **A closing connection whose output left through the writable path is
+  settled.** On epoll and kqueue a write the socket refused for room resumes
+  on the writable event; once it took the last of a closing connection's
+  output, nothing looked at the slot again, so its close — the linger
+  first — never began, and the drain waited for its deadline (FreeBSD and
+  NetBSD, a slow reader on their small send buffers; on Linux with
+  `SendBuffer(8 KiB)`). The slot is now settled at the batch's end, as
+  io_uring's send completion already did.
+- **A first version deferred the look instead** for a connection the batch
+  fed. Unbounded, a connection fed in every batch never closed; bounded to
+  one batch, it was closed before its answer was written —
+  `TestDrain_aConnectionFedThroughTheDrainGetsEveryAnswer` lost answers over
+  three runs on HTTP/1.1 on every backend, on a raw handler answering at
+  `OnBatchEnd` on epoll and the portable backend, on h2c on epoll.
+- The HTTP/2 adapter's GOAWAY, run in a batch that fed a request, leaves the
+  connection to the batch's end, which writes its answers and then closes it.
+
+## Amendment 2026-11-14 (#1385): io_uring's take reads the queue once its accepts ran
+
+§D3's rule 2 arms "as many accepts as the listener's queue holds". The code
+held a round to `acceptDepth` (32) and read the queue again only a batch
+later, once the round's completions had come back. Under arrivals that do not
+stop — a client that keeps dialling, as `TestDrain_arrivalsAcrossTheDrain`'s
+probe does — the queue was never empty at that read once a batch outlasted the
+gap between two dials, and 32 a batch fell behind a single dialer. On the
+`bazel` job (`h2c/auto`, three loops of one ring, the race detector, a loaded
+runner) the take ran some six seconds into its 65 536 budget with the listen
+queue at its backlog, and the close reset everything queued: two connections
+whose dial had returned 475 ms before it. Two of the three rings had read the
+queue empty at the drain's start and handed the listener back, so one ring
+carried the take. Reproduced on Linux 6.12 with three loops of one ring and
+the drain's batches a millisecond longer: under eight dialers the last ring
+handed the listener back at `taken=65536` with 4 069 connections queued, and
+the close reset connections dialled up to 490 ms before it, seven seconds
+into the drain; under one, the take did not end within `Shutdown`'s ten
+seconds, and the stop reset connections dialled 100 to 190 ms before it.
+epoll, whose take reads `EAGAIN` right after its accepts, ended at once.
+
+- A round arms up to `queueTakeBatch` (1 024, epoll's and kqueue's bound a
+  batch) for what `TCP_INFO` counts, within the room above the reserve and
+  the budget. A Unix listener, whose poll says only that one waits, keeps
+  `acceptDepth` a round.
+- The round is submitted at once and the queue read again: a single-shot
+  accept on a queue that holds a connection completes as it is submitted, so
+  an empty read there is the take's `EAGAIN`, as on epoll and kqueue. The
+  ring's take of that listener is then over: its accepts still waiting —
+  another ring took their connection — are cancelled, and the listener is
+  handed back once they came back. A kernel that completes the accepts later
+  leaves the queue non-empty at that read, and the take goes on at the next
+  batch as before.
+- What arrives between that read and the close meets the close: D4's window,
+  on io_uring now the rest of the batch and the next one's reap, where under
+  arrivals it was the whole budget.
+- The budget stays: past it the arrivals outpace a take that empties the
+  queue at every batch.
+- The issue's hypothesis — a loop's own `SO_REUSEPORT` listener left
+  untaken — does not apply to the run: without `Shards(0)` the loops share one
+  listener and one queue, and the connections reset were in it.
+- Test: `TestConformance_drainTakesWhatTheQueueHolds` — three loops of one
+  ring share one TCP listener, each held at every batch end; the drain is
+  asked for, 1 200 connections complete their handshake into the queue
+  (96 on darwin and the BSDs), and every loop runs four batches: every one
+  must be open by then, then served and ended cleanly. On the code before,
+  io_uring had opened 385 of 1 201; epoll and kqueue are unchanged.

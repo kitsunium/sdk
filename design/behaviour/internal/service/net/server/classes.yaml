@@ -1519,6 +1519,7 @@ files:
       - (*portableLoop).drainable
       - (*portableLoop).endBatch
       - (*portableLoop).settle
+      - lingersOnClose
       - markClosing
       - (*portableLoop).compactListed
       - (*portableLoop).closeAll
@@ -2883,9 +2884,16 @@ functions:
     params: pc *portableConn
     results: error
   - doc: |-
+      lingersOnClose reports whether pc's close lingers: the handler's own or the
+      drain's, the peer still sending — never a failure's.
+    name: lingersOnClose
+    params: pc *portableConn
+    results: bool
+  - doc: |-
       markClosing records, under the writer's lock, whether pc closes and
-      whether its writer lingers (lingerClose), and reports whether it finishes
-      now: closing, nothing left to send, and no linger.
+      whether its writer lingers (lingerClose) — the handler's close and the
+      drain's, never a failure's —, and reports whether it finishes now:
+      closing, nothing left to send, and no linger.
     name: markClosing
     params: pc *portableConn
     results: bool
@@ -5363,8 +5371,10 @@ types:
         name: failed
         type: error
       - doc: |-
-          linger says the close is the handler's own, the peer still sending:
-          the writer shuts its side and lets the reader end it (lingerClose).
+          linger says the close is the handler's own or the drain's, the peer
+          still sending: the writer shuts its side and lets the reader end it
+          (lingerClose) — a close with input unread resets the peer, and the
+          reset discards the answers it has not received yet (#844, #1385).
         name: linger
         type: bool
       - doc: |-
@@ -5802,12 +5812,19 @@ types:
         name: timer
         params: slot int32, pc *portableConn, now time.Time
         recv: pl *portableLoop
-      - doc: control applies the drain.
+      - doc: |-
+          control applies the drain: from the batch it is asked in, the lane drains,
+          its connections looked at once OnBatchEnd has returned (batch).
         name: control
         recv: pl *portableLoop
       - doc: |-
           closeSettled marks for closing, as the drain does, every open connection
-          the drain may close now (drainable).
+          the drain may close now (drainable). It runs once OnBatchEnd has returned
+          and before endBatch flushes: whatever the batch's requests asked for is
+          written by then, the handlers answering at OnBatchEnd included, so the
+          close leaves after it — a closing connection finishes only once its output
+          has left (settle) — and no answer is refused (#1385). A connection fed in
+          every batch is judged at every look: OnDrain at one, its close at the next.
         name: closeSettled
         recv: pl *portableLoop
       - doc: |-

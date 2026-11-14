@@ -163,6 +163,156 @@ func drainTakesQueue(t *testing.T, b backendCase, network string, loops, rings, 
 	}
 }
 
+// What TestConformance_drainTakesWhatTheQueueHolds queues: drainLoops loops
+// share one listener, and drainArrivals connections arrive once the drain is
+// asked for — more than io_uring took a ring a batch before #1385 (32, its
+// acceptDepth) times the loops, within the listen backlog every platform
+// grants. drainTakeBatches is how many batches the take may need: one to see
+// the drain and cancel the accepts in flight, one for the cancels to come
+// back, one to arm the take, one to reap it.
+const (
+	drainLoops       int = 3
+	drainArrivals    int = min(1200, drainQueueCap)
+	drainTakeBatches int = 4
+)
+
+// TestConformance_drainTakesWhatTheQueueHolds pins that the drain's take
+// takes, at each batch, what the listen queue holds, up to queueTakeBatch a
+// taker (ADR 0196 §D3, amended 2026-11-14): drainLoops loops of one ring share
+// one TCP listener, each held at every batch end; the drain is asked for,
+// drainArrivals connections complete their handshake into the queue, each
+// with its line; then every loop runs drainTakeBatches batches. Every queued
+// connection must be open by then, then served and ended cleanly.
+//
+// io_uring took acceptDepth a ring a batch: a dialer faster than that — one
+// is enough on a loaded runner, its batches a millisecond longer — filled the
+// listen queue to its backlog while the take fell behind, the take ran into
+// its budget, and the close reset everything queued, connections that had
+// waited half a second among them (#1385,
+// TestDrain_arrivalsAcrossTheDrain/h2c/auto with three loops).
+func TestConformance_drainTakesWhatTheQueueHolds(t *testing.T) {
+	eachBackend(t, func(t *testing.T, b backendCase) { drainTakesWhatItHolds(t, b) })
+}
+
+// drainTakesWhatItHolds is TestConformance_drainTakesWhatTheQueueHolds on b.
+func drainTakesWhatItHolds(t *testing.T, b backendCase) {
+	var gating atomic.Bool
+	steps := make([]chan struct{}, drainLoops)
+	for i := range steps {
+		steps[i] = make(chan struct{}, 1)
+	}
+	held := make(chan int, drainLoops)
+	h := &lineH{}
+	h.batchEnd = func(lio corenet.LoopIO) {
+		// Once gated, each loop holds at every batch end until stepped.
+		lp, ok := lio.(*loop)
+		if !ok || !gating.Load() {
+			return
+		}
+		held <- lp.index
+		<-steps[lp.index]
+	}
+	g, addr := serveOn(t, b, h, "tcp", drainLoops, 1)
+	release := func() {
+		gating.Store(false)
+		for _, s := range steps {
+			select {
+			case s <- struct{}{}:
+			default:
+			}
+		}
+	}
+	t.Cleanup(release)
+	c0, err := stdnet.DialTimeout("tcp", addr, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c0.SetDeadline(time.Now().Add(20 * time.Second))
+	t.Cleanup(func() { _ = c0.Close() })
+	echo(t, c0, "warm\n")
+
+	// park waits until want loops hold at a batch end; a loop that returned —
+	// its listener handed back, its connections gone — holds no more.
+	parked := map[int]bool{}
+	park := func(want int) {
+		deadline := time.After(2 * time.Second)
+		for len(parked) < want {
+			select {
+			case i := <-held:
+				parked[i] = true
+			case <-deadline:
+				return
+			}
+		}
+	}
+	gating.Store(true)
+	for _, lp := range g.loops {
+		if err := lp.Post(func(corenet.LoopIO, uintptr) {}, 0); err != nil {
+			t.Fatalf("Post: %v", err)
+		}
+	}
+	park(drainLoops)
+	if len(parked) != drainLoops {
+		t.Fatalf("%d of %d loops reached their batch end", len(parked), drainLoops)
+	}
+	g.ctl.drain()
+
+	conns := make([]stdnet.Conn, 0, drainArrivals)
+	for range drainArrivals {
+		c, err := stdnet.DialTimeout("tcp", addr, 3*time.Second)
+		if err != nil {
+			t.Fatalf("dial into the queue: %v", err)
+		}
+		_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+		t.Cleanup(func() { _ = c.Close() })
+		_, _ = c.Write([]byte("q\n"))
+		conns = append(conns, c)
+	}
+	// Each step lets every parked loop run one batch, then waits for them to
+	// hold again.
+	for range drainTakeBatches {
+		n := len(parked)
+		for i := range parked {
+			steps[i] <- struct{}{}
+		}
+		clear(parked)
+		park(n)
+	}
+	opened, _ := h.counts()
+	if want := 1 + len(conns); opened < want {
+		t.Errorf("%d of %d connections open after %d batches of the drain: the take left %d in the listen queue", opened, want, drainTakeBatches, want-opened)
+	}
+	release()
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		done <- g.Shutdown(ctx)
+	}()
+	var wg sync.WaitGroup
+	failures := make(chan string, len(conns))
+	for i, c := range conns {
+		wg.Go(func() {
+			if msg := echoThenEnd(c, "q\n"); msg != "" {
+				failures <- msg + " (queued #" + strconv.Itoa(i) + ")"
+			}
+		})
+	}
+	wg.Wait()
+	close(failures)
+	var all []string
+	for f := range failures {
+		all = append(all, f)
+	}
+	if len(all) > 0 {
+		t.Fatalf("%d of %d connections cut short: %v", len(all), len(conns), all[:min(len(all), 8)])
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
 // serveOn starts a group of loops loops of rings rings on b with h,
 // listening on loopback TCP or on a Unix socket in a temporary directory, and
 // returns its address.

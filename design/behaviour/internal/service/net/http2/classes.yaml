@@ -918,6 +918,7 @@ files:
       - runDrainGoAway
       - (*laneState).announceDrain
       - (*laneState).announceConn
+      - (*laneState).writeGoAway
       - (*LoopHandler).InFlight
       - (*LoopHandler).Pending
       - (*laneState).peek
@@ -2705,8 +2706,20 @@ types:
         recv: st *laneState
       - doc: |-
           announceConn writes GOAWAY(NO_ERROR) on one connection and closes it when
-          nothing is in flight.
+          nothing is in flight. A connection the batch fed is left to the batch's
+          end: the answers it was given wait in the batch's output, written at
+          OnBatchEnd, which then closes it (closeIfDone); a close here would refuse
+          them, and its streams, answered already, no longer count as in flight
+          (#1385). Its GOAWAY joins that output, behind it: the batch's output may
+          open with the server's SETTINGS, which RFC 9113 §3.4 makes the
+          connection's first frame, and written at once the GOAWAY came first.
         name: announceConn
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry
+        recv: st *laneState
+      - doc: |-
+          writeGoAway writes e's GOAWAY(NO_ERROR): behind the batch's output when
+          the batch fed the connection, at once otherwise.
+        name: writeGoAway
         params: io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry
         recv: st *laneState
       - doc: |-

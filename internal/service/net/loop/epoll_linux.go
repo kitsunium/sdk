@@ -367,6 +367,7 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 		lp.shrinkSlab()
 		el.pace()
 		lp.h.OnBatchEnd(lp)
+		lp.settleDrain()
 		lp.endBatch()
 		el.off = 0
 		lp.yield()
@@ -566,6 +567,7 @@ func (el *epollLoop) writable(slot int32) {
 	if c.state != stDead && c.flags&fSending == 0 {
 		swallowErr(el.ctl(syscall.EPOLL_CTL_MOD, int(c.fd), el.outEvents(c), slot, c.gen))
 	}
+	r.settleAfterWrite(slot)
 }
 
 // readable serves slot's input and hang-up events.
@@ -573,7 +575,7 @@ func (el *epollLoop) readable(slot int32, events uint32) {
 	r := el.r
 	c := &r.conns[slot]
 	//: readable, or hung up: read until the kernel says why.
-	if events&(syscall.EPOLLIN|syscall.EPOLLRDHUP|syscall.EPOLLHUP|syscall.EPOLLERR) != 0 && c.state == stOpen && c.flags&fPeerDone == 0 {
+	if events&(syscall.EPOLLIN|syscall.EPOLLRDHUP|syscall.EPOLLHUP|syscall.EPOLLERR) != 0 && (c.state == stOpen || c.linger == lingerHalf) && c.flags&fPeerDone == 0 {
 		el.read(slot)
 		//: read.
 		return
@@ -655,8 +657,9 @@ func (el *epollLoop) received(slot int32, data []byte, inSpill bool) {
 // writing while output waits on the socket.
 func (el *epollLoop) outEvents(c *connCtl) uint32 {
 	var ev uint32
-	//: still reading: open, and its peer not done.
-	if c.state == stOpen && c.flags&fPeerDone == 0 {
+	//: still reading: open, or lingering after the drain's close, and its
+	//: peer not done.
+	if (c.state == stOpen || c.linger == lingerHalf) && c.flags&fPeerDone == 0 {
 		ev |= connEvents
 	}
 	//: waiting for room in the socket.
@@ -805,6 +808,15 @@ func (el *epollLoop) shutdown(r *ring, slot int32) {
 	}
 }
 
+// halfClose implements driver: the writing side shut, the FIN after the
+// output, and the reading events back on, so the lingering slot reads to its
+// peer's end (ring.lingers).
+func (el *epollLoop) halfClose(r *ring, slot int32) {
+	c := &r.conns[slot]
+	swallowErr(syscall.Shutdown(int(c.fd), syscall.SHUT_WR))
+	swallowErr(el.ctl(syscall.EPOLL_CTL_MOD, int(c.fd), el.outEvents(c), slot, c.gen))
+}
+
 // peer implements peerer: epoll's connections are process descriptors, so the
 // socket is asked for its SO_PEERCRED.
 func (el *epollLoop) peer(r *ring, slot int32) (corenet.LoopPeerValue, bool) {
@@ -831,11 +843,10 @@ func (el *epollLoop) control() {
 		r.draining = true
 		el.disarmListeners()
 	}
-	//: while draining, the queues are taken, batch after batch, and a
-	//: connection with no partial input closes once its output left.
+	//: while draining, the queues are taken, batch after batch; the
+	//: settled connections are looked at after OnBatchEnd (settleDrain).
 	if lp.draining {
 		el.takeQueues()
-		lp.closeSettled(r)
 	}
 }
 

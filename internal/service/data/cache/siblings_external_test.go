@@ -45,13 +45,21 @@ func TestEveryStoreImplementsTheNewSiblings(t *testing.T) {
 // TestExpireRemovesEveryDueEntry is #1059's acceptance on the memory store:
 // after the clock passes N deadlines, Expire returns N and the entries are
 // gone, with no Fetch of theirs.
+//
+// A stripe holds MaxEntries / Stripes entries and a key's stripe follows the
+// store's own random hash seed, so each stripe is sized to hold every key the
+// test sets: at sixteen a stripe, about one store in a thousand drew a seed
+// that sent seventeen of the thirty keys to one stripe, which evicted an
+// undated entry before the sweep (#1405) — the test then measured the seed,
+// not Expire.
 func TestExpireRemovesEveryDueEntry(t *testing.T) {
 	t.Parallel()
+	const keys, stripes = 30, 4
 	forEachPolicy(t, func(t *testing.T) {
 		manual := clock.NewManualClock(time.Unix(0, 0))
-		store := newStore(t, svccache.MemoryConfig{MaxEntries: 64, Stripes: 4, Clock: manual})
+		store := newStore(t, svccache.MemoryConfig{MaxEntries: keys * stripes, Stripes: stripes, Clock: manual})
 		ctx := t.Context()
-		for i := range 30 {
+		for i := range keys {
 			ttl := time.Second
 			if i%3 == 0 {
 				ttl = corecache.NoExpiry

@@ -24,8 +24,10 @@ const (
 	// acceptBurst is the most connections one listener readiness accepts, on
 	// epoll and on kqueue, before the loop serves the events already in hand.
 	acceptBurst int = 128
-	// queueTakeBatch bounds what the drain of epoll or kqueue takes from one
-	// listener in one batch, so the loop serves between two takes.
+	// queueTakeBatch bounds what the drain takes from one listener in one
+	// batch — a loop on epoll or kqueue, a ring on io_uring, which arms that
+	// many accepts at most for what TCP_INFO counts —, so the loop serves
+	// between two takes.
 	queueTakeBatch int = 8 * acceptBurst
 )
 
@@ -175,15 +177,47 @@ func (r *ring) drainable(c *connCtl) bool {
 	return c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.lp.tick-c.lastIO >= drainQuietTicks)
 }
 
+// settleDrain is the drain's look at the open connections, once
+// OnBatchEnd has returned and before endBatch flushes: whatever the batch's
+// requests asked for is written by then, the handlers answering at
+// OnBatchEnd included, so a close the look marks leaves after it — a
+// closing slot finishes only once its output has left (settle) — and no
+// answer is refused (#1385). A connection fed in every batch is judged at
+// every look, so it hears OnDrain at one and closes at the next.
+func (lp *loop) settleDrain() {
+	//: not draining: nothing to look at.
+	if !lp.draining {
+		//: serving.
+		return
+	}
+	//: every ring.
+	for _, r := range lp.rings {
+		lp.closeSettled(r)
+	}
+}
+
+// lingered reports whether c, a drain's lingering close, is done lingering:
+// its peer ended, or drainLinger passed.
+func (r *ring) lingered(c *connCtl) bool {
+	//: lingering, and its peer ended or the bound passed.
+	return c.linger == lingerHalf && (c.flags&fPeerDone != 0 || r.lp.tick-c.lastIO >= drainLingerTicks)
+}
+
 // closeSettled starts the drain's close of every connection of r the drain
 // may close (drainable) that has no answer out with a worker (R3): each
 // closes once its output has left; mid-request ones, and ones waiting on a
-// worker, finish first.
+// worker, finish first. It runs after OnBatchEnd (settleDrain).
 func (lp *loop) closeSettled(r *ring) {
 	//: every open connection is looked at.
 	for s := r.lruHead; s != noLink; {
 		c := &r.conns[s]
 		nxt := c.lruNext
+		//: lingering past its bound, or its peer ended: settled again, closed.
+		if r.lingered(c) {
+			r.markDirty(s)
+			s = nxt
+			continue
+		}
 		//: settled, heard or quiet, and waiting on nobody.
 		if r.drainable(c) && !lp.waits(r, s) {
 			//: the handler's last word, once; the connection closes next batch.
