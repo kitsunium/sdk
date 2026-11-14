@@ -31,55 +31,115 @@ func pendingOf(f *testNode) (reads, fwds int) {
 // stayed in the node until the next leader change (#590). The read is now
 // resent and answered, the forward answered OUTCOME_UNKNOWN once its grace
 // ends, and neither is kept.
+//
+// The read is resent once, a maximum election timeout after it was sent,
+// and answered LEADERSHIP_UNCONFIRMED at two (sweepReads): a read lost
+// twice is refused, never held for an election. The test lifted the cut
+// from its own goroutine, after polling for the two waiters, and a run
+// whose goroutines were late by a maximum election timeout lost the resend
+// too, and saw that refusal where it wanted the resend answered (#1381;
+// held 250 ms before the lift, the test fails 5 runs of 5 so). The cut is
+// now lifted on the follower's loop, the loop that resends, and only while
+// the read has not been resent: an attempt whose resend already went out on
+// the cut link is held to the refusal, and the next attempt asks again.
 func TestALostReadIndexOrForwardIsAnsweredWithoutALeaderChange(t *testing.T) {
-	c := newCluster(t, 3, 1000)
-	l := c.settledLeader(5 * time.Second)
-	f := followerOf(c, l)
-	// One read and one forward leave while the follower's link to the
-	// leader drops frames, then the link comes back at once.
-	c.net.Cut(f.id, l.id, true)
-	readErr := make(chan error, 1)
-	propErr := make(chan error, 1)
-	go func() {
-		_, err := f.node.Barrier(context.Background())
-		readErr <- err
-	}()
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_, _, err := f.node.Propose(ctx, []byte("lost=1"))
-		propErr <- err
-	}()
-	// Both are registered when the loop sends them, and the memory
-	// network drops a frame on a cut link at the send: once both are
-	// held, both were lost.
-	waitFor(t, "the read and the forward sent on the cut link", func() bool {
-		reads, fwds := pendingOf(f)
-		return reads == 1 && fwds == 1
-	})
-	c.net.Cut(f.id, l.id, false)
-	termBefore := l.node.Status().Term
-	// The cluster is healthy: a write through the follower succeeds.
-	propose(t, f.node, "after=1")
-	select {
-	case err := <-readErr:
-		if err != nil {
-			t.Errorf("Barrier after one lost MsgReadIndex, the leader unchanged: %v, want its resend answered", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatalf("Barrier(context.Background()) on a follower still blocked 3 s after one lost MsgReadIndex, leader term %d unchanged: %v", termBefore, l.node.Status().Term == termBefore)
+	type tc struct {
+		name string
+		// attempts bounds the attempts whose lift must come before the
+		// read's resend.
+		attempts int
 	}
-	select {
-	case err := <-propErr:
-		if !errors.Is(err, coreconsensus.OutcomeUnknown) {
-			t.Errorf("a lost forward was answered %v, want OUTCOME_UNKNOWN", err)
+	cases := []tc{{name: "a read and a forward lost once", attempts: 5}}
+	runCase := func(t *testing.T, tt tc) {
+		c := newCluster(t, 3, 1000)
+		l := c.settledLeader(5 * time.Second)
+		f := followerOf(c, l)
+		termBefore := l.node.Status().Term
+		// lostOnce sends one read and one forward from f while its link to
+		// l drops frames, lifts the cut on f's loop if the read was not
+		// resent yet, and checks their answers. It reports whether the lift
+		// came before the resend: when it did not, the read was lost twice,
+		// and its answer is held to LEADERSHIP_UNCONFIRMED instead.
+		lostOnce := func() bool {
+			// One read and one forward leave while the follower's link to the
+			// leader drops frames.
+			c.net.Cut(f.id, l.id, true)
+			readErr := make(chan error, 1)
+			propErr := make(chan error, 1)
+			go func() {
+				_, err := f.node.Barrier(context.Background())
+				readErr <- err
+			}()
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_, _, err := f.node.Propose(ctx, []byte("lost=1"))
+				propErr <- err
+			}()
+			// Both are registered when the loop sends them, and the memory
+			// network drops a frame on a cut link at the send: once both are
+			// held, both were lost.
+			waitFor(t, "the read and the forward sent on the cut link", func() bool {
+				reads, fwds := pendingOf(f)
+				return reads == 1 && fwds == 1
+			})
+			// On the loop, between two of its turns: the resend cannot run
+			// while the cut is lifted, so it leaves after the lift or it
+			// already left.
+			resent := true
+			f.node.exec(func() {
+				for _, w := range f.node.reads {
+					resent = !w.askedAt.Equal(w.sentAt)
+				}
+				if !resent {
+					c.net.Cut(f.id, l.id, false)
+				}
+			})
+			c.net.Cut(f.id, l.id, false)
+			termNow := l.node.Status().Term
+			// The cluster is healthy: a write through the follower succeeds.
+			propose(t, f.node, "after=1")
+			select {
+			case err := <-readErr:
+				switch {
+				case !resent && err != nil:
+					t.Errorf("Barrier after one lost MsgReadIndex, the leader unchanged: %v, want its resend answered", err)
+				case resent && !errors.Is(err, coreconsensus.LeadershipUnconfirmed):
+					t.Errorf("Barrier after a MsgReadIndex and its resend lost: %v, want LEADERSHIP_UNCONFIRMED", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatalf("Barrier(context.Background()) on a follower still blocked 3 s after one lost MsgReadIndex, leader term %d unchanged: %v", termNow, l.node.Status().Term == termNow)
+			}
+			select {
+			case err := <-propErr:
+				if !errors.Is(err, coreconsensus.OutcomeUnknown) {
+					t.Errorf("a lost forward was answered %v, want OUTCOME_UNKNOWN", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("a lost forward was not answered before its caller's own 3 s deadline")
+			}
+			return !resent
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("a lost forward was not answered before its caller's own 3 s deadline")
+		for attempt := 1; !lostOnce(); attempt++ {
+			if attempt == tt.attempts {
+				t.Fatalf("in %d attempts the follower's loop never ran the lift before the read's resend; leader term %d -> %d", tt.attempts, termBefore, l.node.Status().Term)
+			}
+		}
+		// The caller is answered on the loop's turn that forgets the waiter
+		// or on the next: the check waits for the node to let both go, where
+		// a fixed 100 ms sleep was the synchronisation.
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			reads, fwds := pendingOf(f)
+			if reads == 0 && fwds == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("5 s after both were answered, the follower still holds %d read waiter(s) and %d forward(s); leader term %d -> %d", reads, fwds, termBefore, l.node.Status().Term)
+			}
+		}
 	}
-	time.Sleep(100 * time.Millisecond)
-	if reads, fwds := pendingOf(f); reads != 0 || fwds != 0 {
-		t.Errorf("after both were answered, the follower still holds %d read waiter(s) and %d forward(s); leader term %d -> %d", reads, fwds, termBefore, l.node.Status().Term)
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }
 

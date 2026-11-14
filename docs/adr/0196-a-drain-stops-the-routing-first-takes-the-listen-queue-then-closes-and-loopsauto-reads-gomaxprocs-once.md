@@ -8,6 +8,7 @@
   is v0 ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
 - **Deciders**: SDK maintainers, owner
 - **Amended 2026-11-10** (#856): a loop group's `Shards(0)` binds one SO_REUSEPORT listener per loop; each is taken by its one loop's rings (§D3's taker is the loop that owns the shard), and a loop whose watchdog gave up closes its own shards. A partial drain of a reuseport group stays `tcp_migrate_req=1`'s (§D3).
+- **Amended 2026-11-13** (#1385, revised 2026-11-14): §D3's rule 4 looks at the established connections once `OnBatchEnd` has returned. The HTTP adapters answer a batch's requests at `OnBatchEnd`, which ran after the drain's look: a connection whose request came in that batch was marked closing first and its answer refused, so it ended unanswered well inside the drain — on every backend, h2c on every run measured, HTTP/1.1 spared only because its `OnDrain` deferred the close a batch. The look now comes after `OnBatchEnd` and before the batch's flush: every answer the batch's requests asked for is written, and a close the look marks leaves after it, a closing connection finishing only once its output has left. A connection fed in every batch is judged at every look, so it hears `OnDrain` at one and closes at the next. A first version of this amendment deferred the look for a connection the batch fed instead: unbounded, a connection fed in every batch never closed; bounded to one batch, it was closed before its answer was written, which `TestDrain_aConnectionFedThroughTheDrainGetsEveryAnswer` shows: over three runs, answers lost on HTTP/1.1 on every backend, on a raw handler answering at `OnBatchEnd` on epoll and the portable backend, on h2c on epoll. The HTTP/2 adapter's GOAWAY, run in a batch that fed a request, leaves the connection to the batch's end, which writes its answers and then closes it.
 - **Amends**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   §D1 (the drain a loop group shares with the server) and §D5 (the loop
   count); [ADR 0187](0187-the-handler-type-chooses-the-engine.md) §D9
@@ -106,7 +107,12 @@ The drain of a loop group, per backend:
 4. The established connections drain as before, one rule added: a connection
    that has sent nothing yet closes only once it has, or once it stayed silent
    for a second (`drainQuiet`). A connection accepted by the take has its
-   request on the way; closing it unread would reset it.
+   request on the way; closing it unread would reset it. The drain looks at
+   the connections once `OnBatchEnd` has returned (amended 2026-11-13,
+   #1385, revised 2026-11-14): a handler may answer a batch's requests at
+   `OnBatchEnd`, and a close marked before it would refuse that answer. A
+   close the look marks leaves after the batch's output, and a connection
+   fed in every batch hears `OnDrain` at one look and closes at the next.
 
 The loop does not stop until its connections are gone **and** its listeners
 handed back.

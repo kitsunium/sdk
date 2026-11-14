@@ -124,6 +124,7 @@ go_test(
         "conformance_uring_linux_test.go",
         "core_internal_test.go",
         "counters_linux_test.go",
+        "drain_settle_native_internal_test.go",
         "drain_shape_linux_test.go",
         "drain_take_linux_test.go",
         "drain_take_uring_linux_test.go",

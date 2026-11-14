@@ -2705,7 +2705,11 @@ types:
         recv: st *laneState
       - doc: |-
           announceConn writes GOAWAY(NO_ERROR) on one connection and closes it when
-          nothing is in flight.
+          nothing is in flight. A connection the batch fed is left to the batch's
+          end: the answers it was given wait in the batch's output, written at
+          OnBatchEnd, which then closes it (closeIfDone); a close here would refuse
+          them, and its streams, answered already, no longer count as in flight
+          (#1385).
         name: announceConn
         params: io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry
         recv: st *laneState

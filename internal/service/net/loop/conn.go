@@ -126,12 +126,16 @@ type connCtl struct {
 	// fileBits holds ffEOF, ffFull and ffPoll.
 	fileBits uint8
 	// zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
-	// send of it zero-copy, zcHold none for now — a zero-copy send of it was
-	// refused, or zcPend is at its bound — until its notifications came, the
-	// rest then sent plainly. zcPend counts its sends whose notification has
-	// not come: the flight's chunk is the kernel's until it reaches zero.
+	// send of it zero-copy, zcHold none for now — zcPend is at its bound —
+	// until its notifications came, the rest then sent plainly. zcPend counts
+	// its sends whose notification has not come: the flight's chunk is the
+	// kernel's until it reaches zero. zcVoid counts the notifications still
+	// to come of sends the kernel refused, which pinned nothing (#1396): they
+	// hold the slot, never the flight. A flight starts zero-copy only once it
+	// is zero, and a flight is refused once at most, so it is never past one.
 	zc     uint8
 	zcPend uint8
+	zcVoid uint8
 	// fileErr is the errno a file operation failed with, zero when none.
 	fileErr int32
 	// fileOff is the next byte of the file to send, fileLeft how many are left.

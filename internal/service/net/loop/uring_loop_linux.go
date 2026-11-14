@@ -1142,6 +1142,7 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 		rr.closeBackstop()
 	}
 	lp.h.OnBatchEnd(lp)
+	lp.settleDrain()
 	lp.endBatch()
 	ul.submitLate()
 	//: buffers go back only now: OnBatchEnd has returned.
@@ -1687,8 +1688,9 @@ func (rr *uRing) onSend(slot int32, gen uint32, c *cqe) {
 		return
 	}
 	cc := &rr.r.conns[slot]
-	//: a zero-copy send's notification, or its refusal (#969).
-	if cc.zc != zcOff && rr.zeroCopyHandled(slot, c) {
+	//: a zero-copy send's notification, whatever the flight now is, or its
+	//: refusal (#969, #1396).
+	if (cc.zc != zcOff || c.flags&cqeFNotif != 0) && rr.zeroCopyHandled(slot, c) {
 		//: settled, held or sent again.
 		return
 	}
@@ -2047,8 +2049,10 @@ func (rr *uRing) flush(r *ring, slot int32) {
 	}
 	c.flight, c.out = c.out, chunkRef{idx: noChunk}
 	c.zc = zcOff
-	//: large enough, on a loop whose sockets took zero-copy so far.
-	if rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin {
+	//: large enough, on a loop whose sockets took zero-copy so far, and no
+	//: refused send's notification still owed: a refusal is at most one a
+	//: flight, so zcVoid stays at one and never wraps (#1396).
+	if rr.ul.uses.sendZCMin > 0 && int(c.flight.len-c.flight.off) >= rr.ul.uses.sendZCMin && c.zcVoid == 0 {
 		c.zc = zcOn
 	}
 	rr.sendFlight(slot)
@@ -2057,6 +2061,14 @@ func (rr *uRing) flush(r *ring, slot int32) {
 // sendFlight submits the unsent rest of slot's flight.
 func (rr *uRing) sendFlight(slot int32) {
 	c := &rr.r.conns[slot]
+	//: as many notifications pending as zcPend counts: none sent until they
+	//: came, the rest then plain; no SQE taken for it.
+	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
+		c.zc = zcHold
+		c.flags |= fSending
+		//: held.
+		return
+	}
 	s := rr.u.get()
 	//: no room: the connection fails rather than stalls silently.
 	if s == nil {
@@ -2066,14 +2078,6 @@ func (rr *uRing) sendFlight(slot int32) {
 		return
 	}
 	ud := udPack(udSend, c.gen, uint32(slot))
-	//: as many notifications pending as zcPend counts: none sent until they
-	//: came, the rest then plain.
-	if c.zc == zcOn && c.zcPend == math.MaxUint8 {
-		c.zc = zcHold
-		c.flags |= fSending
-		//: held.
-		return
-	}
 	//: plain, or zero-copy: its notification is one more operation (#969).
 	if c.zc == zcOn {
 		prepSendZC(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), ud)
@@ -2450,16 +2454,15 @@ func (ul *uLoop) control() {
 	if ul.drainReq.Load() && !lp.draining {
 		ul.startDrain()
 	}
-	//: while draining, a connection with no partial input closes once its
-	//: output left.
+	//: while draining, the queues are taken; the settled connections are
+	//: looked at after OnBatchEnd (settleDrain).
 	if !lp.draining {
 		//: nothing.
 		return
 	}
-	//: every ring, every open connection.
+	//: every ring.
 	for _, rr := range ul.rings {
 		rr.takeQueues()
-		lp.closeSettled(rr.r)
 	}
 }
 

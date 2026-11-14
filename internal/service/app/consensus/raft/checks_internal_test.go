@@ -3,8 +3,10 @@ package raft
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -653,16 +655,24 @@ func TestMutationsAreCaught(t *testing.T) {
 		"limit of zero":                    mutLimitZero,
 		"limit unchanged":                  mutLimitUnchanged,
 	}
+	// The constructed checks in a fixed order, and the simulated
+	// linearizability after them, for the one mutation it may catch. Drawn
+	// from the map, the order was the runtime's: in two draws out of five
+	// "read without a round" ran the simulation first, 8 s of one thread
+	// under -race and coverage that does not catch it, before the
+	// constructed check that does, in a Bazel shard of 60 s (#1413). The
+	// simulated safety is TestSimulatorCatchesAckBeforeSync's.
+	constructed := slices.DeleteFunc(slices.Sorted(maps.Keys(checks)), func(c string) bool {
+		return strings.HasPrefix(c, "simulated ")
+	})
 	for name, m := range muts {
 		caught := ""
-		for cname, c := range checks {
-			if cname == "simulated safety" {
-				continue
-			}
-			if cname == "simulated linearizability" && m != mutReadNoRound {
-				continue
-			}
-			if err := c(m); err != nil {
+		order := constructed
+		if m == mutReadNoRound {
+			order = append(slices.Clip(constructed), "simulated linearizability")
+		}
+		for _, cname := range order {
+			if err := checks[cname](m); err != nil {
 				caught = cname + ": " + err.Error()
 				break
 			}

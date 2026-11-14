@@ -135,37 +135,68 @@ func TestApplyReadiness(t *testing.T) {
 // that held the follower's apply that long had it not ready by the rule,
 // once in 34 samples on linux/386 (#654); steadyTiming's 500 ms leaves the
 // lag the test is about.
+//
+// A follower whose apply fell past maxReadyLag is not ready, and caught up
+// no longer until it is again (applyReady): the samples that follow, at a
+// lag back within the bound before it caught up, answer not ready by that
+// rule. On a loaded linux/386 runner the follower's apply fell 66 to 159
+// entries behind for one sample, and the next one, at a lag of 45, was
+// counted as a flap (#1419). Those samples are not flaps; the follower must
+// be ready again once the writes end.
 func TestAFollowerUnderLoadStaysReady(t *testing.T) {
-	c := newClusterWith(t, &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 3}, size: 3, timing: steadyTiming()})
-	l := c.settledLeader(5 * time.Second)
-	f := c.otherThan(l)
-	if h, ok := waitHealth(f, true, true, 5*time.Second); !ok {
-		t.Fatalf("setup: the follower never became ready: %+v", h.Status)
+	type tc struct {
+		name string
+		// writes is how many writes the leader takes while the follower is
+		// sampled.
+		writes int
 	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for i := range 400 {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, _, _ = l.node.Propose(ctx, []byte(fmt.Sprintf("w%d=v", i)))
-			cancel()
+	cases := []tc{{name: "400 writes", writes: 400}}
+	runCase := func(t *testing.T, tt tc) {
+		c := newClusterWith(t, &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 3}, size: 3, timing: steadyTiming()})
+		l := c.settledLeader(5 * time.Second)
+		f := c.otherThan(l)
+		if h, ok := waitHealth(f, true, true, 5*time.Second); !ok {
+			t.Fatalf("setup: the follower never became ready: %+v", h.Status)
 		}
-	}()
-	flaps, samples := 0, 0
-	for {
-		select {
-		case <-done:
-			if flaps > 0 {
-				t.Fatalf("a caught-up follower under load answered not ready %d times in %d samples with a lag within %d entries", flaps, samples, maxReadyLag)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i := range tt.writes {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, _, _ = l.node.Propose(ctx, []byte(fmt.Sprintf("w%d=v", i)))
+				cancel()
 			}
-			return
-		default:
+		}()
+		flaps, samples, past := 0, 0, 0
+		fell := false
+		for {
+			select {
+			case <-done:
+				if flaps > 0 {
+					t.Fatalf("a caught-up follower under load answered not ready %d times in %d samples with a lag within %d entries", flaps, samples, maxReadyLag)
+				}
+				if h, ok := waitHealth(f, true, true, 5*time.Second); !ok {
+					t.Fatalf("the follower, past the bound in %d of %d samples, was not ready again once the writes ended: %+v", past, samples, h.Status)
+				}
+				return
+			default:
+			}
+			h := f.node.Health()
+			samples++
+			ready := h.Flags.Has(HealthReady)
+			switch {
+			case ready || h.ApplyLagEntries == 0:
+				fell = false
+			case h.ApplyLagEntries > maxReadyLag:
+				fell = true
+				past++
+			case h.Flags.Has(HealthHasLeader) && !fell:
+				flaps++
+			}
+			time.Sleep(time.Millisecond)
 		}
-		h := f.node.Health()
-		samples++
-		if !h.Flags.Has(HealthReady) && h.Flags.Has(HealthHasLeader) && h.ApplyLagEntries > 0 && h.ApplyLagEntries <= maxReadyLag {
-			flaps++
-		}
-		time.Sleep(time.Millisecond)
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }

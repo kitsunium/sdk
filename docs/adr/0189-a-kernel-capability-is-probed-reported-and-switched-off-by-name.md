@@ -517,3 +517,53 @@ control, Go's default listener, reproduces the code before: one refused
 `SEND_ZC`, then plain sends only. `BenchmarkLoadL1big` keeps its child's
 `GODEBUG=multipathtcp=0`, now for the pair's other engine, `loop`, so the two
 differ by the send alone.
+
+## Amendment 2026-11-13 (#1396): a refused zero-copy send never waits for a notification
+
+On the kernel gate's host lane (Linux 7.0, run as the runner's user, the four
+net suites side by side) `TestSendZC_goListener/go-default` read nothing in
+20 s, twice on changes that did not touch the network; on Linux 6.12 it passes
+every time, sixty times in a row and under the lane's four suites at once.
+Linux 6.12 and 7.0 answer the same way on paper — `io_send_zc` refuses a socket
+without `SOCK_SUPPORT_ZC` with `EOPNOTSUPP`, `io_sendrecv_fail` sets F_MORE on
+the failed request, and `io_send_zc_cleanup` posts the notification after it
+(io_uring/net.c, opdef.c, notif.c, both releases) —, yet the amendment above
+made the delivery of a refused flight depend on that notification: the flight
+was held (`zcHold`) until every notification pending came, and a notification
+that came late, came first or never came left the peer with nothing. The engine
+now delivers whatever the kernel answers:
+
+- **A refused flight leaves at once.** On `EOPNOTSUPP` or `ENOMEM` its rest is
+  sent by opcode 26 straight away. The refused send pinned nothing, so the
+  notification its F_MORE promises is counted apart (`connCtl.zcVoid`): it
+  holds the slot — one operation, so the descriptor and the generation still
+  wait for it, as #969 requires — and never the flight; only a send of the
+  flight the kernel took (`zcPend`) holds the chunk. A notification is
+  credited to a refused send first, so a chunk is never released while a
+  taken send's pages may still be the kernel's, in whatever order they come.
+- **Every notification is a notification.** A CQE flagged `IORING_CQE_F_NOTIF`
+  goes to the zero-copy accounting whatever the flight has become; one nothing
+  counts is dropped, where it was read as a send that failed with errno 0.
+- **No count wraps.** A send's CQE without F_MORE gives its count back only
+  if one is left to give (its notification came first); `zcPend` no longer
+  wraps to 255 and holds the flight for good. Nor does `zcVoid` (amended
+  2026-11-14): a flight starts zero-copy only once no refused send's
+  notification is owed, and a flight is refused once at most, so `zcVoid`
+  never passes one — unbounded, 256 refusals owed would have wrapped it to
+  zero, and their notifications, dropped as nobody's, would have held the
+  slot for good (`TestSendZC_noZeroCopyWhileARefusalIsOwed`).
+- **The bound takes no SQE.** A flight held because 255 notifications are
+  pending no longer takes an SQE it leaves empty.
+
+`TestSendZC_everyAnswerDelivers` plays every answer to a 4096-byte flight on a
+live ring, on the loop's thread — `EOPNOTSUPP` or `ENOMEM`, or taken, its own
+CQE with F_MORE or without, a notification after it, before it or none, and a
+refusal behind a send that still pins the flight —: nine of its cases stall or
+fail on the code before it, `eopnotsupp/more-no-notif` with the gate's very
+symptom (`read tcp …: i/o timeout`, 0 bytes). What made the notification
+miss on the 7.0 host was not seen here: `zcTransfer` now names, when its peer
+reads nothing, each ring's accepts, bytes, watchdog fires and pauses and each
+slot's flight — how it leaves, its notifications pending and owed, its
+operations —, so a recurrence says whether the connection was accepted, read
+and answered. The test's listener descriptors are the group's to close
+(`Listener`), and no longer closed a second time by the test.

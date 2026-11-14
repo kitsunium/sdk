@@ -528,6 +528,10 @@ func (pl *portableLoop) batch() {
 	}
 	pl.control()
 	pl.h.OnBatchEnd(pl)
+	//: the drain looks once the batch's answers are written (#1385).
+	if pl.draining {
+		pl.closeSettled()
+	}
 	pl.endBatch()
 }
 
@@ -569,8 +573,11 @@ func (pl *portableLoop) handle(ev *portableEvent) {
 func (pl *portableLoop) handleData(ev *portableEvent) {
 	pc := pl.lookupSlot(ev.slot, ev.gen)
 	pl.batchAcks = append(pl.batchAcks, pl.conns[ev.slot].ack)
-	//: a connection closed since, or lingering after its handler's close.
-	if pc == nil || !pc.open || pc.lingering.Load() {
+	//: a connection closed since, closing — a close decided reads nothing
+	//: more, as on the native backends: what the handler would answer it
+	//: could no longer leave (#1385) —, or lingering after its handler's
+	//: close.
+	if pc == nil || !pc.open || pc.reasonSet || pc.lingering.Load() {
 		//: dropped.
 		return
 	}
@@ -952,19 +959,22 @@ func (pl *portableLoop) timer(slot int32, pc *portableConn, now time.Time) {
 	}
 }
 
-// control applies the drain.
+// control applies the drain: from the batch it is asked in, the lane drains,
+// its connections looked at once OnBatchEnd has returned (batch).
 func (pl *portableLoop) control() {
-	//: the drain closes every connection with no partial input.
-	if !pl.g.drainReq.Load() {
-		//: not draining.
-		return
+	//: asked, or already draining.
+	if pl.g.drainReq.Load() {
+		pl.draining = true
 	}
-	pl.draining = true
-	pl.closeSettled()
 }
 
 // closeSettled marks for closing, as the drain does, every open connection
-// the drain may close now (drainable).
+// the drain may close now (drainable). It runs once OnBatchEnd has returned
+// and before endBatch flushes: whatever the batch's requests asked for is
+// written by then, the handlers answering at OnBatchEnd included, so the
+// close leaves after it — a closing connection finishes only once its output
+// has left (settle) — and no answer is refused (#1385). A connection fed in
+// every batch is judged at every look: OnDrain at one, its close at the next.
 func (pl *portableLoop) closeSettled() {
 	now := time.Now()
 	//: each open one the drain may close.

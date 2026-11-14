@@ -4686,7 +4686,7 @@ sequences:
           do:
             - eval: swallowErr(io.Close(ref))
               to: swallowErr
-          when: st.lane.Done(&e.conn)
+          when: st.lane.Done(&e.conn) && e.activeAt != st.lane.epoch
   - of: (*LoopHandler).InFlight
     participants:
       - id: caller

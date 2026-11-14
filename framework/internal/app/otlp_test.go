@@ -249,7 +249,7 @@ func (c *collected) holds(path string, words ...string) bool {
 // when something waits, as otlpengine's harness does.
 type drivenClock struct {
 	*clock.ManualClock
-	armed chan time.Duration
+	armed chan armedWait
 	// horizon is the instant drive never advances the clock past: its
 	// start plus driveHorizon.
 	horizon time.Time
@@ -257,26 +257,35 @@ type drivenClock struct {
 
 // driveHorizon is how far drive ever moves a drivenClock from its start.
 // The batch sink re-arms its five-second delay each time it fires, so a
-// drive without a horizon advanced the clock five seconds per turn of its
-// loop for as long as a send took on the wall clock — thousands of turns a
-// second —, past an attempt's bound (10h here) and a batch's age (24h)
-// within one slow loopback round trip: the batches were counted expired and
-// the readiness said degraded, as a Windows runner showed (issue #598). An
-// hour holds every wait a case needs — the sink's delay, the metrics'
-// interval, a hundred backoffs of the default curve — and stays far below
-// every bound a case does not test.
+// drive that advanced every wait without a horizon moved the clock five
+// seconds per turn of its loop for as long as a send took on the wall clock
+// — thousands of turns a second —, past an attempt's bound (10h here) and a
+// batch's age (24h) within one slow loopback round trip: the batches were
+// counted expired and the readiness said degraded, as a Windows runner
+// showed (issue #598). drive no longer advances that echo (issue #1408); the
+// horizon stays the bound of what it may advance. An hour holds every wait a
+// case needs — the sink's delay, the metrics' interval, a hundred backoffs
+// of the default curve — and stays far below every bound a case does not
+// test.
 const driveHorizon = time.Hour
+
+// armedWait is one wait armed on a drivenClock: the timer that armed it —
+// nil for a ticker or an After — and its duration.
+type armedWait struct {
+	timer *drivenTimer
+	d     time.Duration
+}
 
 // newDrivenClock is a drivenClock at a fixed instant.
 func newDrivenClock() *drivenClock {
 	start := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
-	return &drivenClock{ManualClock: clock.NewManualClock(start), armed: make(chan time.Duration, 1<<16), horizon: start.Add(driveHorizon)}
+	return &drivenClock{ManualClock: clock.NewManualClock(start), armed: make(chan armedWait, 1<<16), horizon: start.Add(driveHorizon)}
 }
 
-// report says a wait of d was armed.
-func (c *drivenClock) report(d time.Duration) {
+// report says timer — nil for a ticker or an After — armed a wait of d.
+func (c *drivenClock) report(timer *drivenTimer, d time.Duration) {
 	select {
-	case c.armed <- d:
+	case c.armed <- armedWait{timer: timer, d: d}:
 	default:
 	}
 }
@@ -284,21 +293,21 @@ func (c *drivenClock) report(d time.Duration) {
 // NewTimer arms a timer and reports it; its Reset reports too.
 func (c *drivenClock) NewTimer(d time.Duration) clock.Timer {
 	timer := &drivenTimer{Timer: c.ManualClock.NewTimer(d), c: c}
-	c.report(d)
+	c.report(timer, d)
 	return timer
 }
 
 // NewTicker arms a ticker and reports its period.
 func (c *drivenClock) NewTicker(d time.Duration) clock.Ticker {
 	ticker := c.ManualClock.NewTicker(d)
-	c.report(d)
+	c.report(nil, d)
 	return ticker
 }
 
 // After arms a wait and reports it.
 func (c *drivenClock) After(d time.Duration) <-chan time.Time {
 	ch := c.ManualClock.After(d)
-	c.report(d)
+	c.report(nil, d)
 	return ch
 }
 
@@ -311,7 +320,7 @@ type drivenTimer struct {
 // Reset re-arms the timer and reports it.
 func (t *drivenTimer) Reset(d time.Duration) bool {
 	active := t.Timer.Reset(d)
-	t.c.report(d)
+	t.c.report(t, d)
 	return active
 }
 
@@ -324,17 +333,31 @@ func (t *drivenTimer) Reset(d time.Duration) bool {
 // bound — and with it the batch sink's hand-over of a batch to its queue —,
 // ten hours in these cases, and a batch's age are never reached, however
 // long a send takes on the wall clock.
+//
+// Nor is a timer re-armed with no other wait armed since its last arming:
+// the batch sink re-arms its delay each time it fires, so advancing that
+// echo fired it again, at once, and drive moved the clock five seconds per
+// turn of its loop while a send took its time on the wall clock — toward the
+// horizon, past which the forwarder's next backoff is never advanced (issue
+// #1408). The clock moves when the work arms a wait — a send's bound, a
+// backoff, a ticker —, not for the sink's loop alone. A retry refused at
+// once is work all the same: a case whose sender refuses a batch it does not
+// look at moves the clock a backoff per turn, and keeps its sender to the
+// batches it reads.
 func (c *drivenClock) drive(t *testing.T, what string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
+	var last *drivenTimer
 	for !done() {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s: not reached (the clock at %s, its horizon at %s)", what, c.Now().Format(time.TimeOnly), c.horizon.Format(time.TimeOnly))
 		}
 		select {
-		case d := <-c.armed:
-			if d >= time.Second && d < 10*time.Minute && !c.Now().Add(d).After(c.horizon) {
-				c.Advance(d)
+		case w := <-c.armed:
+			echo := w.timer != nil && w.timer == last
+			last = w.timer
+			if !echo && w.d >= time.Second && w.d < 10*time.Minute && !c.Now().Add(w.d).After(c.horizon) {
+				c.Advance(w.d)
 			}
 		default:
 			runtime.Gosched()

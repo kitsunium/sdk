@@ -367,6 +367,7 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 		lp.shrinkSlab()
 		el.pace()
 		lp.h.OnBatchEnd(lp)
+		lp.settleDrain()
 		lp.endBatch()
 		el.off = 0
 		lp.yield()
@@ -831,11 +832,10 @@ func (el *epollLoop) control() {
 		r.draining = true
 		el.disarmListeners()
 	}
-	//: while draining, the queues are taken, batch after batch, and a
-	//: connection with no partial input closes once its output left.
+	//: while draining, the queues are taken, batch after batch; the
+	//: settled connections are looked at after OnBatchEnd (settleDrain).
 	if lp.draining {
 		el.takeQueues()
-		lp.closeSettled(r)
 	}
 }
 

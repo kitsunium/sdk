@@ -1,7 +1,7 @@
 package raft
 
 import (
-	"bytes"
+	"encoding/binary"
 	"fmt"
 	"maps"
 	"math"
@@ -50,6 +50,15 @@ func linearizable(ops []kvOp) (bool, string) {
 // linearizableKey searches one key's history. Unknown-outcome writes may be
 // placed anywhere after their call, or left out; reads with no return were
 // never recorded.
+//
+// The memo's key is the set of operations placed, a bit each, sixty-four
+// to a word, and the state. Written a byte per operation, the key took most
+// of the search: under -race every byte written is checked, and seed 6 of
+// the unmutated workload, whose history is long, was searched in 25 s of
+// one thread under coverage, 6 s now. It held the coverage shard that runs
+// it, //internal/service/app/consensus/raft:raft_test shard 5 of 27, past
+// its 60 s on the CI runner (#1413). The search, and what it memoizes, are
+// unchanged.
 func linearizableKey(ops []kvOp) bool {
 	slices.SortFunc(ops, func(a, b kvOp) int {
 		switch {
@@ -61,7 +70,9 @@ func linearizableKey(ops []kvOp) bool {
 		return 0
 	})
 	n := len(ops)
-	done := make([]bool, n)
+	done := make([]uint64, (n+63)/64)
+	placed := func(i int) bool { return done[i/64]&(1<<(i%64)) != 0 }
+	key := make([]byte, 0, 8*len(done)+16)
 	required := 0
 	for _, o := range ops {
 		if o.ret != math.MaxInt64 {
@@ -74,16 +85,12 @@ func linearizableKey(ops []kvOp) bool {
 		if left == 0 {
 			return true
 		}
-		var key bytes.Buffer
-		for _, d := range done {
-			if d {
-				key.WriteByte('1')
-			} else {
-				key.WriteByte('0')
-			}
+		key = key[:0]
+		for _, w := range done {
+			key = binary.LittleEndian.AppendUint64(key, w)
 		}
-		key.WriteString("|" + state)
-		k := key.String()
+		key = append(append(key, '|'), state...)
+		k := string(key)
 		if v, ok := memo[k]; ok {
 			return v
 		}
@@ -91,12 +98,12 @@ func linearizableKey(ops []kvOp) bool {
 		// called after it can come first.
 		minRet := int64(math.MaxInt64)
 		for i, o := range ops {
-			if !done[i] && o.ret < minRet {
+			if !placed(i) && o.ret < minRet {
 				minRet = o.ret
 			}
 		}
 		for i, o := range ops {
-			if done[i] || o.call > minRet {
+			if placed(i) || o.call > minRet {
 				continue
 			}
 			next := state
@@ -105,13 +112,13 @@ func linearizableKey(ops []kvOp) bool {
 			} else if o.val != state {
 				continue
 			}
-			done[i] = true
+			done[i/64] |= 1 << (i % 64)
 			l := left
 			if o.ret != math.MaxInt64 {
 				l--
 			}
 			ok := search(next, l)
-			done[i] = false
+			done[i/64] &^= 1 << (i % 64)
 			if ok {
 				memo[k] = true
 				return true
