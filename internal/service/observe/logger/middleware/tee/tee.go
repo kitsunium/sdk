@@ -47,6 +47,17 @@ func (t *TeeSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte)
 	return 0, t.handleAllFailed(ctx, r, p, errors.Join(causes...))
 }
 
+// WantsAttrs answers corelogger.AttrsRequester: true when a primary or the
+// spill sink reads RecordEvent.Attrs, since each receives the record.
+func (t *TeeSink) WantsAttrs() bool {
+	//: the spill sink receives the record a primary refused.
+	if t.spill != nil && corelogger.SinkWantsAttrs(t.spill) {
+		return true
+	}
+	//: one reading primary is enough.
+	return slices.ContainsFunc(t.primaries, corelogger.SinkWantsAttrs)
+}
+
 // fanOut delivers the record to every primary, returning the first accepted
 // byte count, whether any primary accepted it, and the collected causes.
 func (t *TeeSink) fanOut(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, accepted bool, causes []error) {

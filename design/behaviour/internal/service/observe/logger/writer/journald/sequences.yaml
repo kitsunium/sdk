@@ -244,6 +244,9 @@ sequences:
             - return: 0, wrapWrite(werr, accepted)
           when: werr != nil
       - return: accepted, nil
+  - of: (*journaldSink).WantsAttrs
+    steps:
+      - return: "false"
   - of: (*journaldSink).Flush
     participants:
       - id: caller

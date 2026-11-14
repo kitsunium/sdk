@@ -81,6 +81,9 @@ sequences:
                 		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
           when: werr != nil
       - return: written, nil
+  - of: (*fileSink).WantsAttrs
+    steps:
+      - return: "false"
   - of: (*fileSink).WriteBatch
     participants:
       - id: caller

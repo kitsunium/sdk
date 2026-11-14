@@ -98,7 +98,7 @@ sequences:
           when: sink == nil
       - bind: penc, _
         eval: enc.(corelogger.PrefixEncoder)
-      - return: "&genericHandler{enc: enc, penc: penc, sink: sink, floor: floorOrInfo(floor), clk: clock.System}, nil"
+      - return: "&genericHandler{enc: enc, penc: penc, sink: sink, sinkAttrs: corelogger.SinkWantsAttrs(sink), floor: floorOrInfo(floor), clk: clock.System}, nil"
   - of: floorOrInfo
     participants:
       - id: caller
@@ -177,25 +177,67 @@ sequences:
         kind: actor
       - id: (*genericHandler).encode
         kind: self
-      - id: mergeAttrs
+      - id: h.merge
         kind: internal
+      - id: h.enc.Append
+        kind: value
+      - id: h.render
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: attrs
+              to: h.merge
+              value: h.merge(r.Attrs)
+            - set: r.Attrs
+              value: attrs
+            - return: h.enc.Append(dst, h.groups, r), attrs
+              to: h.enc.Append
+          when: h.prefix == nil && len(h.attrs) > 0
+      - set: line
+        to: h.render
+        value: h.render(dst, r)
+      - opt:
+          do:
+            - return: line, r.Attrs
+          when: "!h.sinkAttrs"
+      - return: line, h.merge(r.Attrs)
+  - of: (*genericHandler).render
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*genericHandler).render
+        kind: self
       - id: h.enc.Append
         kind: value
       - id: h.penc.AppendWithPrefix
         kind: value
     steps:
-      - set: merged
-        to: mergeAttrs
-        value: mergeAttrs(h.attrs, r.Attrs)
       - opt:
           do:
-            - set: r.Attrs
-              value: merged
-            - return: h.enc.Append(dst, h.groups, r), merged
+            - return: h.enc.Append(dst, h.groups, r)
               to: h.enc.Append
           when: h.prefix == nil
-      - return: h.penc.AppendWithPrefix(dst, h.groups, h.prefix, r), merged
+      - return: h.penc.AppendWithPrefix(dst, h.groups, h.prefix, r)
         to: h.penc.AppendWithPrefix
+  - of: (*genericHandler).merge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*genericHandler).merge
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: mergeAttrs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: slices.Clip(h.attrs)
+              to: slices
+          when: len(own) == 0
+      - return: mergeAttrs(h.attrs, own)
+        to: mergeAttrs
   - of: (*genericHandler).derive
     participants:
       - id: caller
@@ -206,7 +248,7 @@ sequences:
         kind: value
     steps:
       - bind: child
-        eval: "&genericHandler{enc: h.enc, penc: h.penc, sink: h.sink, attrs: attrs, groups: groups, floor: h.floor, clk: h.clk}"
+        eval: "&genericHandler{enc: h.enc, penc: h.penc, sink: h.sink, sinkAttrs: h.sinkAttrs, attrs: attrs, groups: groups, floor: h.floor, clk: h.clk}"
       - opt:
           do:
             - set: child.prefix

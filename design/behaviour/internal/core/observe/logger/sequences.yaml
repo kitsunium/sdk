@@ -8,6 +8,11 @@ sequences:
             - return: unknownKindLabel
           when: k < 0 || int(k) >= len(kindLabels)
       - return: kindLabels[k]
+  - of: SinkWantsAttrs
+    steps:
+      - bind: ar, ok
+        eval: s.(AttrsRequester)
+      - return: "!ok || ar.WantsAttrs()"
   - of: TraceContextValue.IsValid
     steps:
       - var:

@@ -101,6 +101,17 @@ sequences:
           	}()
       - return: s.downstream.Write(ctx, rec, p)
         to: s.downstream.Write
+  - of: (*recoverSink).WantsAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*recoverSink).WantsAttrs
+        kind: self
+      - id: corelogger
+        kind: package
+    steps:
+      - return: corelogger.SinkWantsAttrs(s.downstream)
+        to: corelogger
   - of: (*recoverSink).Flush
     participants:
       - id: caller

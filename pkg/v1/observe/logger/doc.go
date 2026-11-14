@@ -1,7 +1,7 @@
 // Package logger — re-exports the chainable Builder API and the
 // slice-overload LogAttrs entry point. Both are routed through the
 // internal service implementation, which owns the recycler that holds
-// the steady-state hot-path at one allocation per emit.
+// the steady-state hot-path at one allocation per emit at most.
 //
 // Package logger — adds the opt-in caller annotation surface. WithCaller
 // derives a Logger whose records carry a structured "source" attribute
@@ -57,7 +57,9 @@
 //     builder and its attrs scratchpad, but the handler clones that
 //     scratchpad on every Send — so steady-state cost is exactly 1
 //     heap allocation per emit, not 0. The variadic Info/Warn/... path
-//     costs the same 1 (its variadic slice). Prefer Build for
+//     costs the same 1 (its variadic slice). An emit with no attribute
+//     of its own allocates nothing, and neither does one to a Sink that
+//     reads only the bytes (AttrsRequester). Prefer Build for
 //     ergonomics; it is not an allocation-free guarantee. Measured in
 //     BENCH.md and pinned by its design contract (allocsMin: 1 on
 //     Build, ADR 0165).
@@ -158,7 +160,8 @@
 // [Build] returns a chainable, sync.Pool-backed [Builder] whose
 // steady-state per-call cost is one heap allocation per emit: the pool
 // recycles the Builder and its attrs scratchpad, but the handler clones
-// that scratchpad on every [Builder].Send, so one slice escapes.
+// that scratchpad on every [Builder].Send, so one slice escapes — unless
+// the Sink reads only the bytes ([AttrsRequester]).
 // Callers MUST NOT use a Builder after [Builder].Send — it returns to
 // the recycler.
 //
@@ -205,8 +208,9 @@
 //     Context declares invalid. Most lines a service logs are outside
 //     a request, and an unjoinable trace_id on all of them would make
 //     the field useless as a filter.
-//   - It costs no extra allocation: the hot path stays at exactly one
-//     heap allocation per emit, with a span and without. The
+//   - It costs no extra allocation: an emit allocates as much with a
+//     span as without — one, the attrs copy, for a record with
+//     attributes of its own, none otherwise. The
 //     identifiers are hex-encoded straight into the encoder's buffer
 //     and never become a Go string. Measured in BENCH.md.
 //

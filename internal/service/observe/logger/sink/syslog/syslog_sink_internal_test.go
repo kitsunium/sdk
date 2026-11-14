@@ -294,3 +294,13 @@ func isClosedNetErr(err error) (closed bool) {
 	//: net.ErrClosed surfaces on closed PacketConn/Conn since Go 1.16.
 	return errors.Is(err, net.ErrClosed)
 }
+
+// TestSyslogSinkReadsOnlyTheBytes (#1016): the sink answers false to
+// corelogger.AttrsRequester — it frames the line alone — so a handler spares it the merged
+// attributes.
+func TestSyslogSinkReadsOnlyTheBytes(t *testing.T) {
+	t.Parallel()
+	if corelogger.SinkWantsAttrs(&syslogSink{}) {
+		t.Fatal("the sink asks for RecordEvent.Attrs, want false: it frames the line alone")
+	}
+}

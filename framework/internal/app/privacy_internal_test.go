@@ -44,6 +44,65 @@ func TestTheTerminalIsRedacted(t *testing.T) {
 	}
 }
 
+// The terminal's encoder renders the bound attributes once, redacted when
+// they are bound (kitsunium/sdk#1016): over each of the SDK's encoders it is
+// a PrefixEncoder whose line is byte for byte the line the whole-record path
+// writes — bound secrets, a URL's credentials and a value logged whole
+// redacted under the groups in force — and a logger bound to them leaks none.
+func TestTheTerminalRedactsBoundAttributesOnce(t *testing.T) {
+	type tc struct {
+		name   string
+		enc    logger.Encoder
+		groups []string
+	}
+	tests := []tc{
+		{name: "json", enc: logger.NewJSONEncoder()},
+		{name: "text", enc: logger.NewTextEncoder()},
+		{name: "text under groups", enc: logger.NewTextEncoder(), groups: []string{"db", "pool"}},
+	}
+	at := time.Date(2026, 11, 13, 9, 30, 0, 0, time.UTC)
+	bound := []logger.Attr{
+		logger.String("password", "hunter2"),
+		logger.String("dsn", "postgres://ann:pw@db/x"),
+		logger.Any("who", redactedByClass{Name: "n1", Health: "h1", Category: "c1"}),
+		logger.Int("count", 3),
+	}
+	own := []logger.Attr{logger.String("token", "t0k3n"), logger.String("route", "/orders")}
+	runCase := func(t *testing.T, c tc) {
+		enc, ok := redacting(c.enc).(redactingPrefixEncoder)
+		if !ok {
+			t.Fatalf("redacting(%s) is %T, want a redactingPrefixEncoder", c.name, redacting(c.enc))
+		}
+		whole := redactingEncoder{c.enc}.Append(nil, c.groups, logger.Record{
+			Time: at, Level: logger.LevelInfo, Message: "dial postgres://bob:pw2@db/y", Attrs: append(slices.Clone(bound), own...),
+		})
+		spliced := enc.AppendWithPrefix(nil, c.groups, enc.AppendAttrs(nil, c.groups, bound), logger.Record{
+			Time: at, Level: logger.LevelInfo, Message: "dial postgres://bob:pw2@db/y", Attrs: own,
+		})
+		if string(spliced) != string(whole) {
+			t.Fatalf("spliced line:\n%s\nwhole-record line:\n%s", spliced, whole)
+		}
+		var out bytes.Buffer
+		sink, err := logger.NewWriterSink(&out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink, Encoder: redacting(c.enc)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		logger.Info(t.Context(), lg.With(bound...), "dial postgres://bob:pw2@db/y", own...)
+		for _, leaked := range []string{"hunter2", "ann:pw", "bob:pw2", "n1", "h1", "t0k3n"} {
+			if strings.Contains(out.String(), leaked) {
+				t.Errorf("%s leaked: %s", leaked, out.String())
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
 // secretThread is a recursive type with a secret at every depth.
 type secretThread struct {
 	Token   string                  `json:"token" app:"secret"`

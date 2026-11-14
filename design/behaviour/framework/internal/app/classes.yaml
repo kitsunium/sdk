@@ -3382,11 +3382,18 @@ files:
       - terminalText
       - logLevels
       - redactingEncoder
+      - prefixEncoder
+      - redactingPrefixEncoder
+      - redacting
       - logRing
       - logFilter
       - (*App).productLog
       - (*App).productLogger
       - redactingEncoder.Append
+      - redactingPrefixEncoder.AppendAttrs
+      - redactingPrefixEncoder.AppendWithPrefix
+      - redactRecord
+      - redactAttrs
       - redactAttr
       - (*logRing).Write
       - nodeAttr
@@ -3400,6 +3407,9 @@ files:
       - (*App).studioLogs
       - rankOf
     name: logs.go
+  - decls:
+      - _#4
+    name: logs_compliance.go
   - decls:
       - loopBackoffFirst
       - loopBackoff
@@ -3997,7 +4007,7 @@ files:
       - judged
     name: policy.go
   - decls:
-      - _#4
+      - _#5
     name: policy_compliance.go
   - decls:
       - policyGuard
@@ -4143,7 +4153,7 @@ files:
       - knobIn
     name: port_policy.go
   - decls:
-      - _#5
+      - _#6
     name: port_policy_compliance.go
   - decls:
       - PortPolicyConfigurer
@@ -5537,7 +5547,7 @@ files:
       - (*loopState).givenUp
     name: supervision.go
   - decls:
-      - _#6
+      - _#7
     name: supervision_compliance.go
   - decls:
       - SupervisionConfigurer
@@ -7526,6 +7536,24 @@ functions:
   - name: NewListener
     params: contract string, handler ListenHandler
     results: "*Listener"
+  - doc: |-
+      redacting wraps enc for the terminal: as a PrefixEncoder when enc is one,
+      so the SDK's handler keeps rendering the bound attributes once.
+    name: redacting
+    params: enc logger.Encoder
+    results: logger.Encoder
+  - doc: |-
+      redactRecord is r with its message and attributes as the terminal may
+      write them.
+    name: redactRecord
+    params: groups []string, r logger.Record
+    results: logger.Record
+  - doc: |-
+      redactAttrs is attrs as the terminal may write them under groups, in a
+      new slice.
+    name: redactAttrs
+    params: groups []string, attrs []logger.Attr
+    results: "[]logger.Attr"
   - doc: |-
       redactAttr is one attribute as the terminal may write it. A name is judged
       under its groups, "db.password", as the ring judges it; a string loses the
@@ -18480,6 +18508,47 @@ types:
         recv: e redactingEncoder
         results: "[]byte"
     name: redactingEncoder
+  - doc: |-
+      prefixEncoder is the SDK's PrefixEncoder sibling, which both its encoders
+      implement: the bound attributes rendered once, when they are bound, and
+      spliced into every line (kitsunium/sdk#1016).
+    kind: named
+    name: prefixEncoder
+    underlying: |-
+      interface {
+      	AppendAttrs(dst []byte, groups []string, attrs []logger.Attr) []byte
+      	AppendWithPrefix(dst []byte, groups []string, prefix []byte, r logger.Record) []byte
+      }
+  - doc: |-
+      redactingPrefixEncoder is redactingEncoder over an encoder that renders
+      the bound attributes once: it redacts them once, when they are bound, and
+      the message and the record's own attributes on every line — so the
+      product's logger, bound to "app" and whatever product code binds, does not
+      render its bound set again on every line. Its lines are byte for byte
+      redactingEncoder's.
+    fields:
+      - name: ""
+        role: embedded
+        type: redactingEncoder
+      - name: prefix
+        type: prefixEncoder
+    kind: struct
+    methods:
+      - doc: |-
+          AppendAttrs renders attrs, redacted under groups, through the wrapped
+          encoder, for the handler to splice into every line.
+        name: AppendAttrs
+        params: dst []byte, groups []string, attrs []logger.Attr
+        recv: e redactingPrefixEncoder
+        results: "[]byte"
+      - doc: |-
+          AppendWithPrefix writes r, redacted, after prefix — bound attributes
+          AppendAttrs already redacted — through the wrapped encoder.
+        name: AppendWithPrefix
+        params: dst []byte, groups []string, prefix []byte, r logger.Record
+        recv: e redactingPrefixEncoder
+        results: "[]byte"
+    name: redactingPrefixEncoder
   - doc: logRing is the sink that hands records to the hub.
     fields:
       - name: hub
@@ -30168,6 +30237,14 @@ vars:
       - name: logLevels
         value: rankOf([]string{"debug", "info", "warn", "error"})
     name: logLevels
+  - doc: |-
+      redactingPrefixEncoder keeps the SDK's PrefixEncoder sibling over an
+      encoder that has it (kitsunium/sdk#1016).
+    items:
+      - name: _
+        type: prefixEncoder
+        value: redactingPrefixEncoder{}
+    name: _#4
   - doc: loopBackoff is the SDK's exponential backoff at kit's bounds.
     items:
       - name: loopBackoff
@@ -30295,7 +30372,7 @@ vars:
       - name: _
         type: BulkheadConfigurer
         value: (*waitOption)(nil)
-    name: _#4
+    name: _#5
   - doc: |-
       : Asserts at compile time that a port's breaker is what its start, its
       readiness, its marks and its command reach, and that Timeout's option
@@ -30323,7 +30400,7 @@ vars:
       - name: _
         type: PortPolicyConfigurer
         value: (*timeoutOption)(nil)
-    name: _#5
+    name: _#6
   - doc: |-
       Privacy is the framework's own service: the data keys, the legal holds and the
       privacy journal of an app that keeps personal data or seals what it
@@ -30814,7 +30891,7 @@ vars:
       - name: _
         type: RoutineConfigurer
         value: (*giveUpOption)(nil)
-    name: _#6
+    name: _#7
   - doc: |-
       errTransactionPanicked ends a level whose function panicked: its writes
       are undone as an error's are, and the panic continues.

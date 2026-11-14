@@ -37,6 +37,7 @@ go_test(
     name = "logger_test",
     size = "small",
     srcs = [
+        "attrs_requester_external_test.go",
         "batch_bench_test.go",
         "bound_bench_test.go",
         "builder_bench_test.go",

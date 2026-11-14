@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Logger v2 — one allocation per emit, multi-sink, decorator-friendly. Realises the
+Logger v2 — at most one allocation per emit, multi-sink, decorator-friendly. Realises the
 `core/observe/logger.Handler` + `core/observe/logger.Logger` ports declared in
 `internal/core/observe/logger`. Consumers import `pkg/v1/observe/logger` rather than this
 package; the public facade stamps `framework_version` onto every record and
@@ -54,8 +54,9 @@ Logger ── Handler (genericHandler / TextHandler)
   returned by `Build(lg, lv)`. Per-call cost in steady state: **one** heap
   allocation per emit once `recordPool` is warm — the pool recycles the
   `*chainBuilder` and its attrs scratchpad, but the handler clones that
-  scratchpad (`mergeAttrs` / `slices.Clone`) on every `Send`, so one slice
-  escapes. Measured in `pkg/v1/observe/logger/BENCH.md`; pinned by the
+  scratchpad (`mergeAttrs` / `slices.Clone`) on every `Send` for a sink that
+  reads the attributes, so one slice escapes (none for a sink answering false
+  to `corelogger.AttrsRequester`, #1016). Measured in `pkg/v1/observe/logger/BENCH.md`; pinned by the
   design contract on `logger.Build` (`allocsMin: 1`, ADR 0165), which kit
   gen writes as `TestPerfAllocsBuildSend` — run only in the race-off alloc
   lane, see root `CLAUDE.md` rule 12.
@@ -67,7 +68,7 @@ Logger ── Handler (genericHandler / TextHandler)
 | `logger.go`       | `loggerImpl` + `New` / `NewWithTraceContext` + `Build`/`LogAttrs` package entries |
 | `owning.go`       | `Owning` + `loggerImpl.Close` — a Logger that owns the writers a constructor opened for it, and releases them once |
 | `builder.go`      | `Builder` interface + `chainBuilder` impl (recycled via `recordPool`) |
-| `handler.go`      | `genericHandler` (Encoder × Sink composition) + `NewHandler` / `NewHandlerLeveled` (a live `level.Leveler` floor, #1015) + `floorOrInfo`; `encode` / `derive` / `withGroup` — the bound attributes rendered once into `prefix` when the encoder is a `corelogger.PrefixEncoder` (#1016) |
+| `handler.go`      | `genericHandler` (Encoder × Sink composition) + `NewHandler` / `NewHandlerLeveled` (a live `level.Leveler` floor, #1015) + `floorOrInfo`; `encode` / `render` / `merge` / `derive` / `withGroup` — the bound attributes rendered once into `prefix` when the encoder is a `corelogger.PrefixEncoder`, shared with the sink when the record has none of its own, and not merged for a sink that answers false to `corelogger.AttrsRequester` (#1016) |
 | `text_handler.go` | `TextHandler` legacy fused handler (`NewTextHandler` / `NewTextHandlerLeveled`) |
 | `source.go`       | `WithCaller` + `sourceHandler` — an opt-in Handler decorator appending a `source` attribute (`SourceFieldKey`, `file:line:function`) resolved from the captured `RecordEvent.PC`; the derived Logger keeps the receiver's trace source, as `With` and `WithGroup` do (it used to rebuild with none, and every record after it lost `trace_id`/`span_id` — `trace_rebuild_external_test.go` holds every rebuilder to it); a foreign `Logger` (not a `*loggerImpl`) comes back unchanged |
 | `pool.go`         | `recordPool` — `recycler.Pool[*chainBuilder]` with pre-sized attrs |
@@ -100,10 +101,24 @@ Logger ── Handler (genericHandler / TextHandler)
   `WithGroup` render the bound set under the current group stack into
   `prefix` — again on `WithGroup`, because the stack prefixes every key, bound
   ones included — and `Handle` passes it to `AppendWithPrefix` with the
-  record's own attributes. The record handed to the sink still carries the
-  merged attributes (`mergeAttrs`, the one allocation), since route predicates
-  and the memory sink read them; that copy is what is left of a bound
-  attribute's cost (BENCH.md §6). A foreign encoder takes the old path.
+  record's own attributes. A foreign encoder takes the old path.
+- **The sink is handed what it reads, and no copy it does not need (#1016).**
+  The record a sink receives carries the bound attributes then its own,
+  since route predicates and the memory sink read them. A record with none of
+  its own carries `h.attrs[:n:n]` itself — immutable once bound, and capped so
+  a sink's `append` reallocates instead of writing into the array every later
+  record carries (`TestASinkAppendingToTheSharedBoundAttrsLeavesThemIntact`,
+  race on). A record with its own is merged (`mergeAttrs`, the one
+  allocation) — unless the sink answered false to `corelogger.AttrsRequester`,
+  asked once at construction (`sinkAttrs`) like `SourceRequester`: then it is
+  handed the record's own attributes as they came, unmerged and uncopied. The
+  byte sinks (console, file, syslog, journald, nettransport, rotfile) answer
+  false, the decorators (levelgate, sample, async, recover, encwrite) forward
+  their sink's answer, the fan-outs (multi, failover, tee) OR their branches',
+  and any sink that does not implement the port — memory, route, the keyed
+  sampler, otlpjson, dbsink, a consumer's — is merged for, as before. An
+  encoder that is no `PrefixEncoder` needs the merged set to render it, and
+  the sink is then handed that.
 - **A live floor (#1015).** `genericHandler` and `TextHandler` hold a
   `level.Leveler` and `Enabled` reads it per record: `NewHandler` /
   `NewTextHandler` wrap their `level.Level` in `level.Fixed`, the `…Leveled`

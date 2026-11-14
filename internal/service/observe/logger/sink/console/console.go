@@ -74,6 +74,13 @@ func (s *consoleSink) Write(ctx context.Context, r corelogger.RecordEvent, p []b
 	return written, nil
 }
 
+// WantsAttrs answers false to corelogger.AttrsRequester: it writes the encoder's bytes to its stream and reads nothing else of the record but its level, so the
+// handler spares it the merged attributes (#1016).
+func (s *consoleSink) WantsAttrs() bool {
+	//: the bytes are the whole record to this sink.
+	return false
+}
+
 // Flush is a no-op for the console sink (writes are already synchronous).
 func (s *consoleSink) Flush(ctx context.Context) error {
 	//: honour cancellation even though there is nothing buffered to flush.

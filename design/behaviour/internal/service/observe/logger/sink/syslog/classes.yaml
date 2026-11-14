@@ -119,6 +119,7 @@ files:
       - NewWithConfig
       - swallowDialClose
       - (*syslogSink).Write
+      - (*syslogSink).WantsAttrs
       - (*syslogSink).Flush
       - (*syslogSink).Close
       - makeFrame
@@ -195,6 +196,12 @@ types:
         params: ctx context.Context, rec corelogger.RecordEvent, p []byte
         recv: s *syslogSink
         results: n int, err error
+      - doc: |-
+          WantsAttrs answers false to corelogger.AttrsRequester: it frames the encoder's bytes and reads nothing else of the record but its level, so the
+          handler spares it the merged attributes (#1016).
+        name: WantsAttrs
+        recv: s *syslogSink
+        results: bool
       - doc: |-
           Flush is a no-op for the syslog sink (UDP datagrams settle on send;
           TCP delegates to the kernel buffer).

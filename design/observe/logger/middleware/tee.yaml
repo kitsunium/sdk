@@ -152,6 +152,13 @@ packages:
             out:
               - type: error
             recv: pointer
+          - doc: |-
+              WantsAttrs answers corelogger.AttrsRequester: true when a primary or the
+              spill sink reads RecordEvent.Attrs, since each receives the record.
+            name: WantsAttrs
+            out:
+              - type: bool
+            recv: pointer
         name: TeeSink
         struct:
           unexported: true

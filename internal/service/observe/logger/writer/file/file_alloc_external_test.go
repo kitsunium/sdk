@@ -75,8 +75,14 @@ const allocRuns int = 500
 const allocRuntimeWarmup int = 30000
 
 // allocNoopSink is the control transport: it accepts the bytes and does
-// nothing, so an emit through it costs the handler and the encoder alone.
-type allocNoopSink struct{}
+// nothing, so an emit through it costs the handler and the encoder alone. It
+// asks for RecordEvent.Attrs what the writer under test asks
+// (corelogger.AttrsRequester, #1016), so the two arms differ by the transport
+// and nothing else: a writer that reads only the bytes is spared the attrs
+// copy, and its control with it.
+type allocNoopSink struct{ wants bool }
+
+func (s allocNoopSink) WantsAttrs() bool { return s.wants }
 
 func (allocNoopSink) Write(_ context.Context, _ corelogger.RecordEvent, p []byte) (int, error) {
 	//: accept the whole payload with no work.
@@ -102,7 +108,7 @@ func warmRuntimeCaches(t *testing.T) {
 	//: the emit path both arms walk, over each of their transports, through
 	//: handlers no window measures.
 	rec := corelogger.RecordEvent{Level: level.Info, Message: "warm"}
-	for _, sink := range []corelogger.Sink{allocNoopSink{}, allocSink(t, "runtime-warmup-emit.log")} {
+	for _, sink := range []corelogger.Sink{allocNoopSink{}, allocNoopSink{wants: true}, allocSink(t, "runtime-warmup-emit.log")} {
 		h, err := servicelogger.NewHandler(encoder.NewText(clock.System), sink, level.Info)
 		if err != nil {
 			t.Fatalf("building the warm-up handler: %v", err)
@@ -183,8 +189,9 @@ func TestFileWriterAddsNoAllocationToAnEmit(t *testing.T) {
 	}
 
 	//: the same emit twice: once with no transport, once with this writer.
-	bare := emitCost(t, allocNoopSink{})
-	through := emitCost(t, allocSink(t, "emit.log"))
+	writerSink := allocSink(t, "emit.log")
+	bare := emitCost(t, allocNoopSink{wants: corelogger.SinkWantsAttrs(writerSink)})
+	through := emitCost(t, writerSink)
 	reportWindow(t, "emits with no transport", bare)
 	reportWindow(t, "emits through the file writer", through)
 	if through.own != bare.own {

@@ -123,6 +123,9 @@ sequences:
                 		}, errs.Int("bytes", len(frame)), errs.Int("level", int(rec.Level)))
           when: werr != nil
       - return: written, nil
+  - of: (*syslogSink).WantsAttrs
+    steps:
+      - return: "false"
   - of: (*syslogSink).Flush
     participants:
       - id: caller
