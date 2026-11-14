@@ -108,7 +108,11 @@ func (a *LoopHandler) OnDone(io corenet.LoopIO, job corenet.LoopJobValue) {
 }
 
 // answerSlot writes a worker's answer on its stream, ends the connection when
-// it was the last of a closing one, and frees the slot.
+// it was the last of a closing one, and frees the slot. On a connection the
+// batch fed, the answer joins the batch's output and the batch's end writes
+// and closes it (flush, closeIfDone): written and closed here, it went out
+// ahead of the SETTINGS and the GOAWAY the batch had queued, and the close
+// refused them (#1385).
 func (a *LoopHandler) answerSlot(io corenet.LoopIO, st *laneState, e *connEntry, slot *workSlot, idx uint32) {
 	c := h2Call{a: a, io: io, ref: slot.ref, st: st, e: e}
 	off := len(st.out)
@@ -118,12 +122,18 @@ func (a *LoopHandler) answerSlot(io corenet.LoopIO, st *laneState, e *connEntry,
 		c.goAway()
 	}
 	st.finishSlot(e, slot.stream)
+	defer st.freeSlot(idx)
+	//: fed in this batch: in the batch's output, behind what it queued.
+	if e.activeAt == st.lane.epoch {
+		st.pushWrite(slot.ref, off, e)
+		//: the batch's end writes it.
+		return
+	}
 	st.out = st.lane.AppendCredits(&e.conn, st.out)
 	out := st.out[off:]
 	//: written from the lane's thread, the connection's order kept by the loop.
 	a.writeClose(io, slot.ref, out, st.lane.Closing(&e.conn) || st.lane.Done(&e.conn))
 	st.out = st.out[:off]
-	st.freeSlot(idx)
 }
 
 // finishSlot drops stream's record, its answer having left.

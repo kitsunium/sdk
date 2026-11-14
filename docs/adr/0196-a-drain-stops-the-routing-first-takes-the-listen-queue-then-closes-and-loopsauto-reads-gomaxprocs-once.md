@@ -305,3 +305,30 @@ epoll, whose take reads `EAGAIN` right after its accepts, ended at once.
   (96 on darwin and the BSDs), and every loop runs four batches: every one
   must be open by then, then served and ended cleanly. On the code before,
   io_uring had opened 385 of 1 201; epoll and kqueue are unchanged.
+
+## Amendment 2026-11-15 (#1435, #1436, #1437): the drain's close keeps its answers on every backend
+
+Three paths the amendment above left out, each found on #1430 and each red
+on `main` before this change (the tests name them):
+
+- **A lingering close keeps reading whichever way its recv ended** (#1437).
+  On io_uring a recv that ran out of buffers is queued and re-armed, and a
+  cancelled one re-armed, for a lingering slot as for an open one (`reads`);
+  taken for closed, the slot stopped reading and closed at the bound with
+  input unread — the reset that loses answers the linger exists to keep.
+  Past the starved queue's bound a lingering slot stops reading and
+  `drainLinger` ends it, the bound the linger already has.
+  `TestURing_lingerReadsOnAfterStarveOrCancel`.
+- **The peer's end waits for the output** (#1436). On the portable backend,
+  the end of a closing connection's input goes through the settlement that
+  sends its queued output, then closes; it finished the connection at once,
+  the rest of an answer dropped. Only a lingering close, its writing side
+  already shut, ends at the peer's end.
+  `TestPortableEnd_aClosingConnectionsOutputLeavesFirst`.
+- **An HTTP/2 answer a worker returns in a batch that fed its connection
+  joins the batch's output** (#1435), behind the SETTINGS and the drain's
+  GOAWAY the batch queued, and the batch's end writes it and closes the
+  connection. Written and closed at once, it went out first — ahead of the
+  SETTINGS RFC 9113 §3.4 makes the first frame, drain or no drain — and its
+  close refused the rest at the batch's `flush`.
+  `TestLoopHandler_aWorkersAnswerInTheDrainingBatchFollowsItsOutput`.
