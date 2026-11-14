@@ -171,6 +171,29 @@ Measured 2026-11-03 on the same box, `-benchtime=300ms -count=4`, before
   process in the same tick would then be missed.
 - `RoundTrip/file` is the publication's two flushes, unchanged.
 
+## Since issue #811, 2026-11-14: a Receive walks an index
+
+`ReceiveBacklog/file/depth1000` stayed at 7× `depth10` above because a
+backlog in motion relists `ready/` on every `Receive`, and the issue holds
+it to 2× in ns/op AND in allocs/op, with `ReceiveBatch/file/batch1` at 200
+allocations at most (the owner kept the bound, 2026-11-13). A `Receive` now
+walks an index of `ready/` and `inflight/` — a heap per level, O(log n) a
+lease — kept by inotify on Linux over a local filesystem, and read again
+under the rule above everywhere else, a read being a mark and a sweep with
+no sort (`file_index.go`, CLAUDE.md §A Receive walks an index).
+
+The figures of record are the bench A/B lane's, on the CI runner, never this
+VM's: `.github/workflows/bench-ab.yml`, suite `queue` (the rows above at
+`-benchtime=2000x`, base `ee1f48ba2`, the issue's audit, interleaved rounds,
+the 95 % interval of each ratio held to its threshold — rules
+`811-depth-ns`, `811-depth-allocs`, `811-batch1-allocs`) and suite
+`queue-scale` (depths 10 000 to 1 000 000, a backlog written by
+`FillReadyForTest`). They are recorded here from that run's artefact; none
+is written before it. What the lane cannot show is the unwatched mode's
+cost on macOS and the BSDs, where the bound is not claimed (ADR 0054,
+amended 2026-11-14, point 3): the macOS figures of the same rows are to be
+published beside them.
+
 ## Since issue #827: a batch shares the directory flush
 
 The file broker's `PublishMany` hands its batch to vfs's

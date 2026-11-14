@@ -117,6 +117,29 @@ const (
 	ListingMaxAgeForTest time.Duration = listingMaxAge
 )
 
+// UnwatchForTest keeps a file broker's ready/ and inflight/ from being
+// watched, as on a platform with no inotify: its index is read again under
+// the listings' rule (file_index.go, issue #811). Called before the broker's
+// first Receive, or after it, which drops the watch.
+func UnwatchForTest(broker corequeue.Broker) {
+	//: the durable broker's own index; a close of nothing cannot fail.
+	_ = broker.(*fileBroker).index.unwatch("unwatched by the test")
+}
+
+// WatchStateForTest reports whether a file broker's directories are watched
+// — known once a Receive has looked —, and why they are not.
+func WatchStateForTest(broker corequeue.Broker) (watched bool, why string) {
+	index := &broker.(*fileBroker).index
+	index.mu.Lock()
+	defer index.mu.Unlock()
+	//: the state after the first look.
+	return index.watch != nil, index.why
+}
+
+// WatchedRelistAgeForTest is how long a watched index goes without a full
+// read.
+const WatchedRelistAgeForTest time.Duration = watchedRelistAge
+
 // WrapPublisherForTest replaces a file broker's atomic publisher with what
 // wrap makes of it, so a case can count or fail the publications a call
 // makes (issue #827).

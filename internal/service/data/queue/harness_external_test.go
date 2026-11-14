@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"context"
+	"io"
 	"runtime"
 	"testing"
 	"time"
@@ -49,6 +50,7 @@ func everyBroker() []brokerFactory {
 	return []brokerFactory{
 		{name: "memory", make: makeMemory},
 		{name: "file", make: makeFile},
+		{name: "file/unwatched", make: makeFileUnwatched},
 		{name: "sql/postgres", make: makeSQL(coresql.DialectPostgres)},
 		{name: "sql/mysql", make: makeSQL(coresql.DialectMySQL)},
 		{name: "sql/sqlite", make: makeSQL(coresql.DialectSQLite)},
@@ -110,6 +112,17 @@ func makeFile(t *testing.T, clk clock.Clock, policy corequeue.PolicyValue) coreq
 	return requireFileBroker(t, svcqueue.FileConfig{Dir: t.TempDir(), Policy: policy, Clock: clk})
 }
 
+// makeFileUnwatched builds the durable broker with its directories read
+// again under the listings' rule rather than watched (issue #811): the broker
+// every platform without inotify runs, so the whole suite holds it on Linux
+// too.
+func makeFileUnwatched(t *testing.T, clk clock.Clock, policy corequeue.PolicyValue) corequeue.Broker {
+	t.Helper()
+	broker := makeFile(t, clk, policy)
+	svcqueue.UnwatchForTest(broker)
+	return broker
+}
+
 // requireFileBroker builds a durable broker and fails the test when it cannot —
 // except where the refusal IS the contract.
 //
@@ -132,6 +145,14 @@ func requireFileBroker(t *testing.T, cfg svcqueue.FileConfig) corequeue.Broker {
 	if err != nil {
 		t.Fatalf("NewFile() = %v, want nil", err)
 	}
+	//: its descriptors and its watch released with the case, so a suite of
+	//: hundreds does not hold an inotify instance per broker until a
+	//: collection; a broker the case closed itself closes again harmlessly.
+	t.Cleanup(func() {
+		if closer, ok := broker.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	})
 	return broker
 }
 

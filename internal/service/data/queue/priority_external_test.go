@@ -27,6 +27,7 @@ func everyPriorityBroker() []brokerFactory {
 	return []brokerFactory{
 		{name: "memory", make: makeMemory},
 		{name: "file", make: makeFile},
+		{name: "file/unwatched", make: makeFileUnwatched},
 		{name: "sql/postgres", make: makePrioritySQL(coresql.DialectPostgres)},
 		{name: "sql/mysql", make: makePrioritySQL(coresql.DialectMySQL)},
 		{name: "sql/sqlite", make: makePrioritySQL(coresql.DialectSQLite)},

@@ -35,25 +35,34 @@ const racyMargin time.Duration = 3 * time.Second
 // a step of the wall clock does not stretch it.
 const listingMaxAge time.Duration = 10 * time.Second
 
-// stateListing is one state directory's names as one read found them, and the
-// two instants that decide whether the next look may reuse them.
-type stateListing struct {
+// listingStamp is the two instants that decide whether a read of one state
+// directory may stand for the next look at it: the listing's here, the file
+// broker's index of ready/ and inflight/ where no kernel names their changes
+// (file_index.go).
+type listingStamp struct {
 	// listedAt is the real clock's reading BEFORE the directory was read:
 	// every change the read could have missed happened after it.
 	listedAt time.Time
 	// modTime is the directory's mtime as stat read it before the listing.
 	modTime time.Time
+}
+
+// stateListing is one state directory's names as one read found them, and the
+// two instants that decide whether the next look may reuse them.
+type stateListing struct {
 	// names is the directory's entries in the state's order. It is never
 	// written once the listing is stored: every caller only reads it.
 	names []string
+	// stamp is when the names were read, and the directory's mtime then.
+	stamp listingStamp
 }
 
-// reusable reports whether this listing still names what the directory
-// holds: the directory's mtime is the one the listing recorded, that mtime
-// is older than the listing by racyMargin — a change in the listing's own
-// tick could not have left it unchanged —, and the listing is younger than
+// reusable reports whether the read this stamp records still names what the
+// directory holds: the directory's mtime is the one the read recorded, that
+// mtime is older than the read by racyMargin — a change in the read's own
+// tick could not have left it unchanged —, and the read is younger than
 // listingMaxAge.
-func (l *stateListing) reusable(modTime, now time.Time) bool {
+func (l listingStamp) reusable(modTime, now time.Time) bool {
 	//: three conditions, each necessary.
 	return modTime.Equal(l.modTime) &&
 		modTime.Before(l.listedAt.Add(-racyMargin)) &&
@@ -119,7 +128,7 @@ func (b *fileBroker) namesOf(state string) (names []string, err error) {
 		return nil, backendFailed("stat", state, statErr)
 	}
 	//: nothing changed since a listing old enough to trust.
-	if cached := slot.Load(); cached != nil && cached.reusable(info.ModTime(), listedAt) {
+	if cached := slot.Load(); cached != nil && cached.stamp.reusable(info.ModTime(), listedAt) {
 		//: the names as they were, and still are.
 		return cached.names, nil
 	}
@@ -131,7 +140,7 @@ func (b *fileBroker) namesOf(state string) (names []string, err error) {
 	}
 	//: the mtime is the stat's, taken BEFORE the read: a change between the two
 	//: is in the names and moves the mtime, so it only costs one read more.
-	slot.Store(&stateListing{listedAt: listedAt, modTime: info.ModTime(), names: read})
+	slot.Store(&stateListing{names: read, stamp: listingStamp{listedAt: listedAt, modTime: info.ModTime()}})
 	//: what the directory holds.
 	return read, nil
 }

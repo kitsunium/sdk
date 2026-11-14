@@ -68,20 +68,22 @@ func (b *fileBroker) Receive(
 // amended 2026-11-03). It also returns the instant, in Unix nanoseconds, at
 // which the next queued message becomes visible — now itself when it stopped
 // on a full batch with more behind it, zero when nothing else is queued.
+//
+// The walk reads the broker's index of ready/, brought up to the directory
+// first (file_index.go): a heap a level, so a Receive costs the same over ten
+// queued messages as over a million (issue #811).
 func (b *fileBroker) leaseVisible(
 	now int64, max int,
 ) (batch []corequeue.DeliveryValue, next int64, err error) {
-	entries, listErr := b.namesOf(dirReady)
-	//: the medium refused.
-	if listErr != nil {
+	//: the queued changes applied, or the directory read again.
+	if syncErr := b.index.sync(b, dirReady); syncErr != nil {
 		//: QueueBackendFailed.
-		return nil, 0, listErr
+		return nil, 0, syncErr
 	}
 	walk := leaseWalk{now: now, max: max}
-	//: by level, then in visibility order, because the listing sorts so and
-	//: the name opens with its level and a zero-padded instant.
-	for _, base := range entries {
-		full, stepErr := b.leaseStep(&walk, base)
+	//: by level, highest first: the order of the digits.
+	for level := range readyLevels {
+		full, stepErr := b.leaseLevel(&walk, level)
 		//: the medium refused.
 		if stepErr != nil {
 			//: QueueBackendFailed.
@@ -111,44 +113,59 @@ type leaseWalk struct {
 	later int64
 	// max bounds the batch.
 	max int
-	// skipping is the digit of the level being skipped — none at first,
-	// since no digit is a zero byte.
-	skipping byte
 }
 
-// leaseStep leases the queued message base names into walk's batch when it is
-// visible, buries it when it is past its MaxAge, and skips the rest of a level
-// whose first message is not yet visible. It reports full when the batch is
-// full and base is visible.
-func (b *fileBroker) leaseStep(walk *leaseWalk, base string) (full bool, err error) {
-	name, ok := parseReady(base)
-	digit, _ := nameStem(base)
-	//: anything that is not one of our messages — notably the `.vfs-*.tmp`
-	//: temporary a concurrent atomic publication is still writing, which
-	//: MUST NOT be delivered as a half-written message —, and the rest of
-	//: a level whose walk ended.
-	if !ok || digit == walk.skipping {
-		//: skipped.
-		return false, nil
+// leaseLevel walks one level of the index of ready/ in visibility order: it
+// leases each visible message into walk's batch, buries each past its MaxAge,
+// and stops at the level's first message not yet visible, whose instant is
+// when the next one of the level will be. It reports full when the batch is
+// full and a visible message is left.
+func (b *fileBroker) leaseLevel(walk *leaseWalk, level int) (full bool, err error) {
+	ready := &b.index.ready
+	//: until the level is empty, held back, or the batch full.
+	for {
+		base, found := b.index.head(ready, level)
+		//: nothing left at this level.
+		if !found {
+			//: the next level.
+			return false, nil
+		}
+		name, _ := parseReady(base)
+		//: the first one of its level that is not yet visible means none of
+		//: the rest of the level are. The next level is walked all the same.
+		if name.At > walk.now {
+			walk.later = earliest(walk.later, name.At)
+			//: the level ends here.
+			return false, nil
+		}
+		expired := messageExpired(b.policy, name.EnqueuedAt, walk.now)
+		//: the batch is full and this message is visible.
+		if !expired && len(walk.out) == walk.max {
+			//: full.
+			return true, nil
+		}
+		//: another goroutine of this broker took it between the two looks.
+		if !b.index.take(ready, level, base) {
+			continue
+		}
+		//: what the name decides; the index is read whole again when an
+		//: operation fails after taking it, since the name may still be there.
+		if stepErr := b.leaseOne(walk, name, base, expired); stepErr != nil {
+			b.index.invalidate(ready)
+			//: QueueBackendFailed.
+			return false, stepErr
+		}
 	}
-	//: the first one of its level that is not yet visible means none of
-	//: the rest of the level are — and its instant is when the next one
-	//: of the level will be. The next level is walked all the same.
-	if name.At > walk.now {
-		walk.later, walk.skipping = earliest(walk.later, name.At), digit
-		//: the level ends here.
-		return false, nil
-	}
+}
+
+// leaseOne leases the queued message base names into walk's batch, or buries
+// it when it is past its MaxAge.
+func (b *fileBroker) leaseOne(walk *leaseWalk, name nameValue, base string, expired bool) error {
 	//: a visible message past its MaxAge is never delivered: buried, as a
-	//: lease with no attempt left is, and the scan moves on.
-	if messageExpired(b.policy, name.EnqueuedAt, walk.now) {
+	//: lease with no attempt left is, and the walk moves on.
+	if expired {
 		//: QueueBackendFailed when the medium refuses.
-		return false, b.expireReady(name, base, walk.now)
-	}
-	//: the batch is full and this message is visible.
-	if len(walk.out) == walk.max {
-		//: full.
-		return true, nil
+		return b.expireReady(name, base, walk.now)
 	}
 	delivery, leased, leaseErr := b.takeLease(name, base, walk.now)
 	//: another consumer won the rename; that is not a failure, it is the
@@ -158,7 +175,7 @@ func (b *fileBroker) leaseStep(walk *leaseWalk, base string) (full bool, err err
 	}
 	//: QueueBackendFailed when the medium refused for a reason that is not
 	//: "somebody beat us".
-	return false, leaseErr
+	return leaseErr
 }
 
 // takeLease moves one queued message into flight and reads it back.
@@ -245,35 +262,40 @@ func (b *fileBroker) readLeased(
 // message that killed the process would be redelivered forever, killing every
 // consumer that touched it.
 func (b *fileBroker) reclaim(now int64) (next int64, err error) {
-	entries, listErr := b.namesOf(dirInflight)
-	//: the medium refused.
-	if listErr != nil {
+	inflight := &b.index.inflight
+	//: the queued changes applied, or the directory read again.
+	if syncErr := b.index.sync(b, dirInflight); syncErr != nil {
 		//: QueueBackendFailed.
-		return 0, listErr
+		return 0, syncErr
 	}
-	//: in lease-deadline order, for the same reason the ready scan is in
+	//: in lease-deadline order, for the same reason the ready walk is in
 	//: visibility order.
-	for _, base := range entries {
-		name, ok := parseInflight(base)
-		//: not one of ours.
-		if !ok {
-			continue
+	for {
+		base, found := b.index.head(inflight, 0)
+		//: no lease held.
+		if !found {
+			//: every lapsed lease is now queued again or abandoned.
+			return 0, nil
 		}
+		name, _ := parseInflight(base)
 		//: the first lease that is still held means every remaining one is,
 		//: and it is the next one that can lapse.
 		if name.At > now {
 			//: nothing else to reclaim.
 			return name.At, nil
 		}
+		//: another goroutine of this broker took it between the two looks.
+		if !b.index.take(inflight, 0, base) {
+			continue
+		}
 		//: whichever consumer gets here first wins the rename; the others get
 		//: ENOENT and move on.
 		if recoverErr := b.recoverOne(name, base, now); recoverErr != nil {
+			b.index.invalidate(inflight)
 			//: QueueBackendFailed.
 			return 0, recoverErr
 		}
 	}
-	//: every lapsed lease is now queued again or abandoned, and none is held.
-	return 0, nil
 }
 
 // recoverOne decides what becomes of one lapsed lease.

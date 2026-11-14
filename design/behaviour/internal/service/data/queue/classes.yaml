@@ -160,6 +160,105 @@ constants:
         value: "120"
     name: publicMaxRunes
   - doc: |-
+      watchedRelistAge is how long the index of a watched state directory goes
+      without a full read (issue #811). The kernel names every change of a local
+      directory, so the read is a net under a defect of this code, never what
+      keeps a publication visible: a minute keeps it out of a busy Receive's way
+      at any depth.
+    items:
+      - name: watchedRelistAge
+        type: time.Duration
+        value: time.Minute
+    name: watchedRelistAge
+  - doc: |-
+      readyLevels is how many levels the queued names sort into: one heap each,
+      walked highest first, as the digit that opens a leveled name sorts.
+    items:
+      - name: readyLevels
+        type: int
+        value: int(corequeue.PriorityHighest-corequeue.PriorityLowest) + 1
+    name: readyLevels
+  - doc: |-
+      direntBufferBytes is the buffer one read of a state directory fills —
+      os.ReadDir's own block size. It is allocated once a broker.
+    items:
+      - name: direntBufferBytes
+        type: int
+        value: 8 << 10
+    name: direntBufferBytes
+  - doc: |-
+      watchMask is what a state directory's watch asks the kernel for: an entry
+      added (a publication's rename, a link, a creation) or gone (a rename away,
+      an unlink), and the directory itself moving or vanishing. The directory
+      must be one: a path that resolves to anything else is refused.
+    items:
+      - name: watchMask
+        type: uint32
+        value: |-
+          syscall.IN_CREATE | syscall.IN_MOVED_TO | syscall.IN_DELETE | syscall.IN_MOVED_FROM |
+          	syscall.IN_DELETE_SELF | syscall.IN_MOVE_SELF | syscall.IN_ONLYDIR
+    name: watchMask
+  - doc: |-
+      lostMask is the events that end a watch's answer for its directory: the
+      directory moved, was removed, or its filesystem unmounted, and the watch
+      was taken off.
+    items:
+      - name: lostMask
+        type: uint32
+        value: syscall.IN_DELETE_SELF | syscall.IN_MOVE_SELF | syscall.IN_IGNORED | syscall.IN_UNMOUNT
+    name: lostMask
+  - doc: addedMask and removedMask are the events that add or remove one entry.
+    grouped: true
+    items:
+      - name: addedMask
+        type: uint32
+        value: syscall.IN_CREATE | syscall.IN_MOVED_TO
+      - name: removedMask
+        type: uint32
+        value: syscall.IN_DELETE | syscall.IN_MOVED_FROM
+    name: addedMask
+  - doc: |-
+      maxDrainReads bounds the reads one look makes of the instance: a writer
+      that outpaces the drain would otherwise keep a Receive reading. Past it the
+      queue is left as it is and both directories are read whole, which finds
+      every change the reads left behind — as an overflow does.
+    items:
+      - name: maxDrainReads
+        type: int
+        value: "64"
+    name: maxDrainReads
+  - doc: |-
+      watchBufferBytes is the buffer one read of the instance fills: a hundred
+      and more events of the names this broker writes, and room for the longest
+      name the kernel can queue, which a smaller buffer would refuse.
+    items:
+      - name: watchBufferBytes
+        type: int
+        value: 16 << 10
+    name: watchBufferBytes
+  - doc: |-
+      The layout of the kernel's records, fixed by its ABI on every architecture:
+      struct inotify_event, and struct linux_dirent64 as getdents64 writes it —
+      the system call syscall.ReadDirent makes on every Linux.
+    grouped: true
+    items:
+      - name: eventMaskAt
+        type: int
+        value: "4"
+      - name: eventLenAt
+        type: int
+        value: "12"
+      - name: direntReclen
+        type: int
+        value: "16"
+      - name: direntNameAt
+        type: int
+        value: "19"
+      - name: inotifyHeader
+        type: int
+        value: syscall.SizeofInotifyEvent
+    name: eventMaskAt
+  - doc: |-
       racyMargin is how much older than the listing that read it a directory's
       modification instant must be for the listing to be reused (issue #811).
 
@@ -848,10 +947,67 @@ files:
       - intField
     name: file_dead.go
   - decls:
+      - watchedRelistAge
+      - readyLevels
+      - direntBufferBytes
+      - indexItem
+      - compareItems
+      - indexSlot
+      - dirIndex
+      - (*dirIndex).init
+      - (*dirIndex).insert
+      - (*dirIndex).mark
+      - (*dirIndex).lookup
+      - (*dirIndex).see
+      - (*dirIndex).seeBytes
+      - (*dirIndex).drop
+      - (*dirIndex).sweep
+      - suffixMessageBytes
+      - dirOpener
+      - fileIndex
+      - (*fileIndex).of
+      - (*fileIndex).start
+      - (*fileIndex).sync
+      - (*fileIndex).syncUnwatched
+      - (*fileIndex).relist
+      - (*fileIndex).drain
+      - (*fileIndex).added
+      - (*fileIndex).removed
+      - (*fileIndex).overflowed
+      - (*fileIndex).head
+      - (*fileIndex).take
+      - (*fileIndex).invalidate
+      - (*fileIndex).unwatch
+    name: file_index.go
+  - decls:
+      - watchMask
+      - lostMask
+      - addedMask
+      - maxDrainReads
+      - watchBufferBytes
+      - eventMaskAt
+      - remoteMagics
+      - stateWatch
+      - watchStates
+      - closedWhy
+      - watchState
+      - watchOpened
+      - remoteFilesystem
+      - (*stateWatch).readOnce
+      - (*stateWatch).drain
+      - (*stateWatch).apply
+      - (*stateWatch).applyOne
+      - (*stateWatch).stateOf
+      - (*stateWatch).close
+      - readEntries
+      - seeDirents
+    name: file_index_linux.go
+  - decls:
       - racyMargin
       - listingMaxAge
+      - listingStamp
       - stateListing
-      - (*stateListing).reusable
+      - listingStamp.reusable
       - listings
       - (*listings).slot
       - (*fileBroker).namesOf
@@ -925,7 +1081,8 @@ files:
       - (*fileBroker).Receive
       - (*fileBroker).leaseVisible
       - leaseWalk
-      - (*fileBroker).leaseStep
+      - (*fileBroker).leaseLevel
+      - (*fileBroker).leaseOne
       - (*fileBroker).takeLease
       - (*fileBroker).readLeased
       - (*fileBroker).reclaim
@@ -1567,6 +1724,56 @@ functions:
     name: intField
     params: value string
     results: int
+  - doc: |-
+      compareItems orders one heap's names as the directory's sorted listing did:
+      by their instant, then by the rest of the name — whatever their level,
+      since a level has a heap of its own (compareStem).
+    name: compareItems
+    params: first, second indexItem
+    results: int
+  - doc: |-
+      watchStates watches root's ready/ and inflight/, and returns why it could
+      not instead: no instance left (EMFILE past max_user_instances), no /proc to
+      name an opened directory by, a remote or FUSE filesystem.
+    name: watchStates
+    params: root dirOpener
+    results: watch *stateWatch, why string
+  - doc: |-
+      closedWhy closes held and returns why, with the close's refusal after it
+      when there was one.
+    name: closedWhy
+    params: held io.Closer, why string
+    results: string
+  - doc: |-
+      watchState adds a watch on root's state directory to the instance
+      descriptor. The directory is the one root opens — named through
+      /proc/self/fd, never by a path resolved again —, and its filesystem must be
+      one whose every change this kernel makes.
+    name: watchState
+    params: root dirOpener, descriptor int, state string
+    results: wd int32, why string
+  - doc: |-
+      watchOpened adds a watch on the opened state directory dir to the instance
+      descriptor, unless dir's filesystem is one another host changes.
+    name: watchOpened
+    params: dir *os.File, descriptor int, state string
+    results: wd int32, why string
+  - doc: |-
+      remoteFilesystem reports whether magic is the f_type of a filesystem
+      another host or a user-space server changes behind this kernel.
+    name: remoteFilesystem
+    params: magic uint32
+    results: bool
+  - doc: |-
+      readEntries reads dir whole into index through getdents64, from buf: a name
+      already indexed is looked up in place and costs no allocation, and only a
+      name the index lacks is copied out.
+    name: readEntries
+    params: dir *os.File, buf []byte, index *dirIndex
+    results: error
+  - doc: seeDirents hands every name of one getdents64 read to index.
+    name: seeDirents
+    params: entries []byte, index *dirIndex
   - doc: |-
       sortState sorts one state directory's names in the order its readers walk
       them: queued names by level, then visibility (compareReady); in-flight and
@@ -2234,6 +2441,7 @@ functions:
     results: string
 imports:
   atomic: sync/atomic
+  binary: encoding/binary
   bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   cmp: cmp
@@ -2268,6 +2476,7 @@ imports:
   svcsql: github.com/kitsunium/sdk/internal/service/data/sql
   svcvfs: github.com/kitsunium/sdk/internal/service/data/vfs
   sync: sync
+  syscall: syscall
   time: time
   utf8: unicode/utf8
   weak: weak
@@ -2909,6 +3118,12 @@ types:
           directory's mtime says nothing changed (file_listing.go, issue #811).
         name: listed
         type: listings
+      - doc: |-
+          index is what a Receive walks: ready/ and inflight/ in their orders,
+          kept by the kernel's change queue where it names the changes
+          (file_index.go, issue #811).
+        name: index
+        type: fileIndex
     kind: struct
     methods:
       - doc: |-
@@ -2926,8 +3141,8 @@ types:
         recv: b *fileBroker
         results: corequeue.WakeValue
       - doc: |-
-          Close releases the broker's directory descriptors: its own root, and the
-          one its atomic publisher holds.
+          Close releases the broker's descriptors: its own root, the one its atomic
+          publisher holds, and the instance that watches its directories.
 
           It satisfies io.Closer, reached by type assertion (ADR 0039) exactly as the
           session file store's Close is, so the frozen Broker port grows no method.
@@ -3411,6 +3626,10 @@ types:
           amended 2026-11-03). It also returns the instant, in Unix nanoseconds, at
           which the next queued message becomes visible — now itself when it stopped
           on a full batch with more behind it, zero when nothing else is queued.
+
+          The walk reads the broker's index of ready/, brought up to the directory
+          first (file_index.go): a heap a level, so a Receive costs the same over ten
+          queued messages as over a million (issue #811).
         name: leaseVisible
         params: |2
 
@@ -3418,14 +3637,22 @@ types:
         recv: b *fileBroker
         results: batch []corequeue.DeliveryValue, next int64, err error
       - doc: |-
-          leaseStep leases the queued message base names into walk's batch when it is
-          visible, buries it when it is past its MaxAge, and skips the rest of a level
-          whose first message is not yet visible. It reports full when the batch is
-          full and base is visible.
-        name: leaseStep
-        params: walk *leaseWalk, base string
+          leaseLevel walks one level of the index of ready/ in visibility order: it
+          leases each visible message into walk's batch, buries each past its MaxAge,
+          and stops at the level's first message not yet visible, whose instant is
+          when the next one of the level will be. It reports full when the batch is
+          full and a visible message is left.
+        name: leaseLevel
+        params: walk *leaseWalk, level int
         recv: b *fileBroker
         results: full bool, err error
+      - doc: |-
+          leaseOne leases the queued message base names into walk's batch, or buries
+          it when it is past its MaxAge.
+        name: leaseOne
+        params: walk *leaseWalk, name nameValue, base string, expired bool
+        recv: b *fileBroker
+        results: error
       - doc: |-
           takeLease moves one queued message into flight and reads it back.
 
@@ -3658,8 +3885,341 @@ types:
     kind: struct
     name: FileConfig
   - doc: |-
-      stateListing is one state directory's names as one read found them, and the
-      two instants that decide whether the next look may reuse them.
+      indexItem is one name in its heap: its instant, read once, ahead of the
+      name it was read from.
+    fields:
+      - doc: name is the entry's name in its directory.
+        name: name
+        type: string
+      - doc: "at is the instant the name sorts on: a visibility, a lease's deadline."
+        name: at
+        type: int64
+    kind: struct
+    name: indexItem
+  - doc: indexSlot is where one indexed name sits.
+    fields:
+      - doc: |-
+          name is the map's key again, so a mark rewrites the entry without
+          building the key anew.
+        name: name
+        type: string
+      - doc: handle names the item in its heap.
+        name: handle
+        type: heap.Handle
+      - doc: seen is the generation of the last full read that met the name.
+        name: seen
+        type: uint32
+      - doc: |-
+          bucket is the heap the item is in: its level's for ready/, the one heap
+          for inflight/.
+        name: bucket
+        type: uint8
+    kind: struct
+    name: indexSlot
+  - doc: |-
+      dirIndex is the broker's knowledge of one state directory's messages: every
+      name its grammar reads, in a heap per level, and a map from name to place.
+      It is a hint and never the truth: the rename that takes a message is still
+      the arbiter, a name in excess costs one ENOENT, and a name missing is read
+      at the next full read (file_index.go's fileIndex).
+    fields:
+      - doc: slots maps every indexed name to its heap and handle.
+        name: slots
+        type: map[string]indexSlot
+      - doc: "parse is the state's grammar: parseReady or parseInflight."
+        name: parse
+        type: func(string) (nameValue, bool)
+      - doc: |-
+          relistedAt is when the directory was last read whole, on the listings'
+          real clock.
+        name: relistedAt
+        type: time.Time
+      - doc: |-
+          stamp is the last full read's, for the rule that decides, where no
+          kernel names the changes, whether the directory must be read again;
+          zero before the first.
+        name: stamp
+        type: listingStamp
+      - doc: "state is the directory: dirReady or dirInflight."
+        name: state
+        type: string
+      - doc: |-
+          heaps holds one heap per level for ready/, walked level by level, and
+          one for inflight/.
+        name: heaps
+        type: "[]*heap.IndexedHeap[indexItem]"
+      - doc: gen counts the full reads; a name a read did not meet is dropped.
+        name: gen
+        type: uint32
+      - doc: |-
+          stale asks the next look for a full read: never read, an overflow of the
+          kernel's queue, an operation that failed after taking a name.
+        name: stale
+        type: bool
+    kind: struct
+    methods:
+      - doc: init readies an empty index of state, parsed by parse, with levels heaps.
+        name: init
+        params: state string, parse func(string) (nameValue, bool), levels int
+        recv: d *dirIndex
+      - doc: |-
+          insert indexes name when its state's grammar reads it, at the current
+          generation.
+        name: insert
+        params: name string
+        recv: d *dirIndex
+      - doc: mark records that the current full read met an indexed name.
+        name: mark
+        params: slot indexSlot
+        recv: d *dirIndex
+      - doc: |-
+          lookup finds the name raw holds without copying it out: a map read keyed
+          by a conversion allocates nothing.
+        name: lookup
+        params: raw []byte
+        recv: d *dirIndex
+        results: slot indexSlot, ok bool
+      - doc: "see is a full read meeting name: kept when indexed, indexed otherwise."
+        name: see
+        params: name string
+        recv: d *dirIndex
+      - doc: |-
+          seeBytes is see for a name still in a read's buffer: a name already indexed
+          costs no allocation, and only one of the grammar's suffix is copied out.
+        name: seeBytes
+        params: raw []byte
+        recv: d *dirIndex
+      - doc: drop removes raw from the index, when it is there.
+        name: drop
+        params: raw []byte
+        recv: d *dirIndex
+      - doc: sweep drops every name the full read of generation gen did not meet.
+        name: sweep
+        recv: d *dirIndex
+    name: dirIndex
+  - doc: |-
+      dirOpener opens a state directory by its name under the queue's root: the
+      broker's os.Root, the one thing a watch needs of it.
+    kind: named
+    name: dirOpener
+    underlying: |-
+      interface {
+      	Open(name string) (*os.File, error)
+      }
+  - doc: |-
+      fileIndex is what a file broker knows of its ready/ and inflight/
+      directories between two reads of them (issue #811).
+
+      Where the kernel names a directory's changes — inotify, on Linux, over a
+      local filesystem — both directories are watched from the first Receive on:
+      read whole once, then kept by the changes the kernel queued, which every
+      look applies before it reads the index. A rename or an unlink is queued
+      INSIDE the system call that makes it, before it returns, so a change
+      another process finished before a Receive is in the queue that Receive
+      drains: the first Receive after a publication sees it, without a margin.
+      Everywhere else — another platform, a network or FUSE filesystem, no
+      instance left, a watch lost — the index is read again under the listings'
+      "racily clean" rule (file_listing.go), and a read is a mark and a sweep:
+      no sort, no copy of a name already indexed where the platform's reader
+      hands out its buffer (Linux).
+
+      One mutex guards both indexes and the watch. A Receive takes a name out
+      under it and renames outside it, so two goroutines of one broker never try
+      the same message, and the rename still settles a race with any other.
+    fields:
+      - doc: |-
+          watch is the kernel's change queue, nil while the directories are not
+          watched.
+        name: watch
+        type: "*stateWatch"
+      - doc: buf is the buffer a full read fills.
+        name: buf
+        type: "*[direntBufferBytes]byte"
+      - doc: why says why the directories are not watched, empty while they are.
+        name: why
+        type: string
+      - doc: ready and inflight are the two directories' indexes.
+        name: ready
+        type: dirIndex
+      - name: inflight
+        type: dirIndex
+      - name: mu
+        type: sync.Mutex
+      - doc: started is set by the first look, which tries to watch.
+        name: started
+        type: bool
+      - doc: |-
+          unwatched keeps the directories from being watched: set by a test, to
+          run the platforms that have no watch, and by Close.
+        name: unwatched
+        type: bool
+    kind: struct
+    methods:
+      - doc: "of returns the index of state: ready/'s or inflight/'s."
+        name: of
+        params: state string
+        recv: x *fileIndex
+        results: "*dirIndex"
+      - doc: |-
+          start readies both indexes and tries to watch their directories. The
+          caller holds the mutex.
+        name: start
+        params: b *fileBroker
+        recv: x *fileIndex
+      - doc: |-
+          sync brings the index of state up to what its directory holds — the
+          queued changes applied where it is watched, a full read when the rule asks
+          for one where it is not.
+        name: sync
+        params: b *fileBroker, state string
+        recv: x *fileIndex
+        results: error
+      - doc: |-
+          syncUnwatched reads index's directory again unless the listings' rule
+          says the last read still stands: its mtime unchanged and older than the
+          read by racyMargin, the read younger than listingMaxAge.
+        name: syncUnwatched
+        params: b *fileBroker, index *dirIndex
+        recv: x *fileIndex
+        results: error
+      - doc: |-
+          relist reads index's directory whole into it: each name met kept or
+          indexed, each name not met dropped.
+        name: relist
+        params: b *fileBroker, index *dirIndex
+        recv: x *fileIndex
+        results: error
+      - doc: |-
+          drain applies what the kernel queued; a watch that can no longer be read,
+          or whose directory moved or vanished, is dropped, and both indexes are read
+          under the listings' rule from then on. The caller holds the mutex.
+        name: drain
+        recv: x *fileIndex
+      - doc: |-
+          added is the kernel naming name as added to state. The caller holds the
+          mutex.
+        name: added
+        params: state string, name []byte
+        recv: x *fileIndex
+      - doc: |-
+          removed is the kernel naming name as gone from state. The caller holds the
+          mutex.
+        name: removed
+        params: state string, name []byte
+        recv: x *fileIndex
+      - doc: |-
+          overflowed is the kernel saying its queue overflowed: changes were lost, so
+          both directories are read whole at their next look. The caller holds the
+          mutex.
+        name: overflowed
+        recv: x *fileIndex
+      - doc: |-
+          head returns the first name of index's heap bucket, in the order a sorted
+          listing walked it, without taking it.
+        name: head
+        params: index *dirIndex, bucket int
+        recv: x *fileIndex
+        results: name string, ok bool
+      - doc: |-
+          take removes name from index's heap bucket when it is still that heap's
+          first, and reports whether it did: false means another goroutine of this
+          broker took it between head and here.
+        name: take
+        params: index *dirIndex, bucket int, name string
+        recv: x *fileIndex
+        results: bool
+      - doc: |-
+          invalidate asks the next look at index for a full read: an operation that
+          failed after taking a name may have left it in the directory.
+        name: invalidate
+        params: index *dirIndex
+        recv: x *fileIndex
+      - doc: |-
+          unwatch drops the watch, if any, and keeps the directories from being
+          watched again.
+        name: unwatch
+        params: why string
+        recv: x *fileIndex
+        results: error
+    name: fileIndex
+  - doc: |-
+      stateWatch is one inotify instance watching a broker's ready/ and
+      inflight/, read without blocking.
+    fields:
+      - doc: |-
+          file owns the instance's descriptor: it closes it, and closes it once
+          garbage collected when a broker was never closed.
+        name: file
+        type: "*os.File"
+      - doc: |-
+          raw reads the descriptor through file, without the runtime's poller
+          waiting on it.
+        name: raw
+        type: syscall.RawConn
+      - doc: readErr is the last read's refusal.
+        name: readErr
+        type: error
+      - doc: read is readOnce, bound once so a look allocates no closure.
+        name: read
+        type: func(uintptr) bool
+      - doc: buf is what a read fills.
+        name: buf
+        type: "[watchBufferBytes]byte"
+      - doc: filled is how much the last read filled.
+        name: filled
+        type: int
+      - doc: wds is each watched directory's watch descriptor, in states' order.
+        name: wds
+        type: "[2]int32"
+      - doc: states is the two watched directories.
+        name: states
+        type: "[2]string"
+    kind: struct
+    methods:
+      - doc: |-
+          readOnce reads the instance once, never waiting: it is the function raw
+          runs, and it always reports done.
+        name: readOnce
+        params: descriptor uintptr
+        recv: w *stateWatch
+        results: bool
+      - doc: |-
+          drain applies to index every event the kernel queued, until the instance
+          is empty. It reports lost when a watched directory moved or vanished, and
+          the error of an instance that can no longer be read.
+        name: drain
+        params: index *fileIndex
+        recv: w *stateWatch
+        results: lost bool, err error
+      - doc: |-
+          apply hands each event of one read to index, in order, and reports
+          whether one of them ended a watch's answer, which stops it.
+        name: apply
+        params: index *fileIndex, events []byte
+        recv: w *stateWatch
+        results: bool
+      - doc: |-
+          applyOne hands one event to index — its name still padded with NULs — and
+          reports whether it ended a watch's answer.
+        name: applyOne
+        params: index *fileIndex, wd int32, mask uint32, name []byte
+        recv: w *stateWatch
+        results: bool
+      - doc: stateOf returns the state directory wd watches.
+        name: stateOf
+        params: wd int32
+        recv: w *stateWatch
+        results: string
+      - doc: close releases the instance, and every watch with it.
+        name: close
+        recv: w *stateWatch
+        results: error
+    name: stateWatch
+  - doc: |-
+      listingStamp is the two instants that decide whether a read of one state
+      directory may stand for the next look at it: the listing's here, the file
+      broker's index of ready/ and inflight/ where no kernel names their changes
+      (file_index.go).
     fields:
       - doc: |-
           listedAt is the real clock's reading BEFORE the directory was read:
@@ -3669,23 +4229,32 @@ types:
       - doc: modTime is the directory's mtime as stat read it before the listing.
         name: modTime
         type: time.Time
+    kind: struct
+    methods:
+      - doc: |-
+          reusable reports whether the read this stamp records still names what the
+          directory holds: the directory's mtime is the one the read recorded, that
+          mtime is older than the read by racyMargin — a change in the read's own
+          tick could not have left it unchanged —, and the read is younger than
+          listingMaxAge.
+        name: reusable
+        params: modTime, now time.Time
+        recv: l listingStamp
+        results: bool
+    name: listingStamp
+  - doc: |-
+      stateListing is one state directory's names as one read found them, and the
+      two instants that decide whether the next look may reuse them.
+    fields:
       - doc: |-
           names is the directory's entries in the state's order. It is never
           written once the listing is stored: every caller only reads it.
         name: names
         type: "[]string"
+      - doc: stamp is when the names were read, and the directory's mtime then.
+        name: stamp
+        type: listingStamp
     kind: struct
-    methods:
-      - doc: |-
-          reusable reports whether this listing still names what the directory
-          holds: the directory's mtime is the one the listing recorded, that mtime
-          is older than the listing by racyMargin — a change in the listing's own
-          tick could not have left it unchanged —, and the listing is younger than
-          listingMaxAge.
-        name: reusable
-        params: modTime, now time.Time
-        recv: l *stateListing
-        results: bool
     name: stateListing
   - doc: |-
       listings holds the last listing of each state a Receive, a listing or a
@@ -3818,11 +4387,6 @@ types:
       - doc: max bounds the batch.
         name: max
         type: int
-      - doc: |-
-          skipping is the digit of the level being skipped — none at first,
-          since no digit is a zero byte.
-        name: skipping
-        type: byte
     kind: struct
     name: leaseWalk
   - doc: |-
@@ -5672,6 +6236,38 @@ types:
     name: wakeTable
     typeParams: K comparable
 vars:
+  - doc: suffixMessageBytes is suffixMessage as the bytes a read's buffer holds.
+    items:
+      - name: suffixMessageBytes
+        value: "[]byte(suffixMessage)"
+    name: suffixMessageBytes
+  - doc: |-
+      remoteMagics is the filesystems a watch cannot vouch for: another host
+      changes them, and inotify sees only what this kernel did. Each is its
+      f_type, as statfs(2) reports it.
+    items:
+      - name: remoteMagics
+        value: |-
+          [...]uint32{
+          	0x6969,     // NFS
+          	0x517b,     // SMB
+          	0xff534d42, // CIFS
+          	0xfe534d42, // SMB2
+          	0x65735546, // FUSE: sshfs, s3fs, rclone, gcsfuse…
+          	0x00c36400, // Ceph
+          	0x73757245, // Coda
+          	0x5346414f, // AFS
+          	0x6b414653, // kAFS
+          	0x01021997, // 9P
+          	0x564c,     // NCP
+          	0x01161970, // GFS2
+          	0x7461636f, // OCFS2
+          	0x0bd00bd0, // Lustre
+          	0x786f4256, // VirtualBox shared folders
+          	0x7c7c6673, // Parallels shared folders
+          	0x6a656a63, // virtiofs
+          }
+    name: remoteMagics
   - doc: |-
       stateDirs is the three state directories and the reservations', hoisted so
       preparing a queue directory does not allocate a slice literal every time.
