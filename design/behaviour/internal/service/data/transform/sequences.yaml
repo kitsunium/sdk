@@ -1028,26 +1028,6 @@ sequences:
     steps:
       - eval: flateReaderPool.Put(box)
         to: flateReaderPool.Put
-  - of: takeZlibReader
-    participants:
-      - id: caller
-        kind: actor
-      - id: takeZlibReader
-        kind: self
-      - id: zlibReaderPool.Get
-        kind: value
-      - id: held.in.Reset
-        kind: value
-      - id: fillZlibBox
-        kind: internal
-    steps:
-      - bind: held
-        eval: zlibReaderPool.Get()
-        to: zlibReaderPool.Get
-      - eval: held.in.Reset(src)
-        to: held.in.Reset
-      - return: fillZlibBox(held, &held.in)
-        to: fillZlibBox
   - of: takeZlibStream
     participants:
       - id: caller
@@ -1426,24 +1406,35 @@ sequences:
         kind: actor
       - id: zlibDecompressCore
         kind: self
-      - id: takeZlibReader
+      - id: zlibBody
         kind: internal
-      - id: releaseZlibReader
+      - id: takeFlateReader
+        kind: internal
+      - id: releaseFlateReader
         kind: internal
       - id: appendAllBounded
         kind: internal
       - id: box.rc.Close
         kind: value
+      - id: zlibCheckTrailer
+        kind: internal
     steps:
+      - bind: body, herr
+        eval: zlibBody(src)
+        to: zlibBody
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(herr, zlibWrap)
+          when: herr != nil
       - bind: box, rerr
-        eval: takeZlibReader(src)
-        to: takeZlibReader
+        eval: takeFlateReader(body)
+        to: takeFlateReader
       - opt:
           do:
             - return: dst, false, errs.Wrap(rerr, zlibWrap)
           when: rerr != nil
-      - defer: releaseZlibReader(box)
-        to: releaseZlibReader
+      - defer: releaseFlateReader(box)
+        to: releaseFlateReader
       - bind: out, overflow, derr
         eval: appendAllBounded(dst, box.rc, max)
         to: appendAllBounded
@@ -1464,4 +1455,50 @@ sequences:
           do:
             - return: dst, true, nil
           when: overflow
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(terr, zlibWrap)
+          init:
+            bind: terr
+            eval: zlibCheckTrailer(body[len(body)-box.in.Len():], out[len(dst):])
+            to: zlibCheckTrailer
+          when: terr != nil
       - return: out, false, nil
+  - of: zlibBody
+    steps:
+      - opt:
+          do:
+            - return: nil, io.ErrUnexpectedEOF
+          when: len(src) < zlibHeaderLen
+      - bind: cmf, flg
+        eval: src[0], src[1]
+      - opt:
+          do:
+            - return: nil, zlib.ErrHeader
+          when: cmf&0x0f != zlibMethodDeflate || cmf>>4 > zlibMaxWindow || (uint16(cmf)<<8|uint16(flg))%31 != 0
+      - set: body
+        value: src[zlibHeaderLen:]
+      - opt:
+          do:
+            - return: body, nil
+          when: flg&zlibFlagDict == 0
+      - opt:
+          do:
+            - return: nil, io.ErrUnexpectedEOF
+          when: len(body) < zlibDictIDLen
+      - opt:
+          do:
+            - return: nil, zlib.ErrDictionary
+          when: binary.BigEndian.Uint32(body) != zlibEmptyDictID
+      - return: body[zlibDictIDLen:], nil
+  - of: zlibCheckTrailer
+    steps:
+      - opt:
+          do:
+            - return: io.ErrUnexpectedEOF
+          when: len(tail) < zlibTrailerLen
+      - opt:
+          do:
+            - return: zlib.ErrChecksum
+          when: binary.BigEndian.Uint32(tail) != adler32.Checksum(plain)
+      - return: nil

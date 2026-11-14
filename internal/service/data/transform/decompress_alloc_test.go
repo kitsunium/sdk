@@ -37,15 +37,13 @@ var decompressAllocSizes = []int{4 << 10, 64 << 10}
 var decompressAllocSchemes = []struct {
 	name string
 	comp coretransform.Compressor
-	// sized is how many allocations a call into a sized dst may make: zero,
-	// except zlib's one — compress/zlib's Reset builds a fresh Adler-32
-	// digest (adler32.New) on every stream, a cost of the standard library's
-	// that no caller-side buffer can shed.
-	sized uint64
 }{
-	{"gzip", GzipCompressor, 0},
-	{"flate", FlateCompressor, 0},
-	{"zlib", ZlibCompressor, 1},
+	{"gzip", GzipCompressor},
+	{"flate", FlateCompressor},
+	//: zlib allocates nothing either: it reads the RFC 1950 envelope itself, so
+	//: compress/zlib's Reset, which builds an Adler-32 digest per stream, is
+	//: not on the block path.
+	{"zlib", ZlibCompressor},
 }
 
 // decompressWarmed records the payloads warmDecompress already ran, so the
@@ -106,9 +104,9 @@ func TestDecompressIntoASizedDstAllocatesNothing(t *testing.T) {
 					t.Fatalf("Decompress: err=%v, %d bytes, want the %d-byte payload", derr, len(out), size)
 				}
 				reportWindow(t, sc.name, got)
-				if want := sc.sized * uint64(decompressAllocRuns); got.own > want {
-					t.Fatalf("%d decompressions into a %d-byte dst made %d allocations, want at most %d (%d a call)",
-						decompressAllocRuns, size, got.own, want, sc.sized)
+				if got.own != 0 {
+					t.Fatalf("%d decompressions into a %d-byte dst made %d allocations, want none",
+						decompressAllocRuns, size, got.own)
 				}
 			})
 		}
@@ -138,10 +136,10 @@ func TestDecompressIntoANilDstAllocatesThePayloadOnce(t *testing.T) {
 					t.Fatalf("Decompress: err=%v, %d bytes, want the %d-byte payload", derr, len(out), size)
 				}
 				reportWindow(t, sc.name, got)
-				//: one allocation for the result, plus zlib's digest.
-				if want := (1 + sc.sized) * uint64(decompressAllocRuns); got.own > want {
-					t.Fatalf("%d decompressions into a nil dst made %d allocations, want at most %d (%d a call)",
-						decompressAllocRuns, got.own, want, 1+sc.sized)
+				//: one allocation for the result.
+				if want := uint64(decompressAllocRuns); got.own > want {
+					t.Fatalf("%d decompressions into a nil dst made %d allocations, want at most %d (1 a call)",
+						decompressAllocRuns, got.own, want)
 				}
 				//: and that one allocation is the payload's size, not a guess.
 				if cap(out) > size+size/2 {

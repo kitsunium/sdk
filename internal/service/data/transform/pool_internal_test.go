@@ -135,7 +135,7 @@ func drainReader(rc io.ReadCloser) (plain []byte, err error) {
 
 // drainFresh decodes wire through the scheme's own cold-path constructor with
 // no pool involved. This is the miss-path reference: takeGzipReader's miss
-// branch IS gzip.NewReader, takeZlibReader's IS zlib.NewReader, and
+// branch IS gzip.NewReader, takeZlibStream's IS zlib.NewReader, and
 // takeFlateReader's IS flate.NewReader — so comparing against it compares the
 // reuse path against the construction path and against nothing else.
 func drainFresh(sc readerSchemeCase, wire []byte) (plain []byte, err error) {
@@ -295,10 +295,17 @@ func zlibReaderCase(tb testing.TB) readerSchemeCase {
 	tb.Helper()
 	return readerSchemeCase{
 		name: "zlib", tag: schemeZlib,
-		take: takeZlibReader, release: releaseZlibReader,
-		rawGet: func() *readerBox { return zlibReaderPool.Get() },
-		fresh:  zlib.NewReader,
-		good:   poolFrame(tb, "zlib", zlibCompressor{level: zlib.DefaultCompression}.Compress),
+		//: the block decode no longer takes a zlib decoder (it reads the envelope
+		//: over the flate pool's), so the row exercises the stream take, which
+		//: is the one that does, over the same bytes.
+		take: func(src []byte) (*readerBox, error) {
+			//: a reader over the fixture; the stream take binds it to the decoder.
+			return takeZlibStream(bytes.NewReader(src))
+		},
+		release: releaseZlibReader,
+		rawGet:  func() *readerBox { return zlibReaderPool.Get() },
+		fresh:   zlib.NewReader,
+		good:    poolFrame(tb, "zlib", zlibCompressor{level: zlib.DefaultCompression}.Compress),
 		//: the refusal fixture is a RAW DEFLATE frame, which is the sharpest
 		//: one available and the reason it is used rather than random bytes:
 		//: measured, zlib.NewReader refuses it "zlib: invalid header" while a

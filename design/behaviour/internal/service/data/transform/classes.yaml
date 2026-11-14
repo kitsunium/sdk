@@ -45,9 +45,54 @@ constants:
         name: schemeGzip
       - doc: schemeFlate tags a box filled by takeFlateReader.
         name: schemeFlate
-      - doc: schemeZlib tags a box filled by takeZlibReader.
+      - doc: schemeZlib tags a box filled by takeZlibStream.
         name: schemeZlib
     name: schemeNone
+  - doc: "zlibHeaderLen is the RFC 1950 §2.2 header: CMF and FLG."
+    items:
+      - name: zlibHeaderLen
+        type: int
+        value: "2"
+    name: zlibHeaderLen
+  - doc: zlibDictIDLen is the DICTID field an FDICT header adds (RFC 1950 §2.2).
+    items:
+      - name: zlibDictIDLen
+        type: int
+        value: "4"
+    name: zlibDictIDLen
+  - doc: zlibTrailerLen is the Adler-32 trailer (RFC 1950 §2.2).
+    items:
+      - name: zlibTrailerLen
+        type: int
+        value: "4"
+    name: zlibTrailerLen
+  - doc: zlibMethodDeflate is CM, the only compression method RFC 1950 defines.
+    items:
+      - name: zlibMethodDeflate
+        type: byte
+        value: "8"
+    name: zlibMethodDeflate
+  - doc: "zlibMaxWindow is the largest CINFO RFC 1950 allows: a 32 KiB window."
+    items:
+      - name: zlibMaxWindow
+        type: byte
+        value: "7"
+    name: zlibMaxWindow
+  - doc: "zlibFlagDict is FLG's FDICT bit: a preset dictionary is named."
+    items:
+      - name: zlibFlagDict
+        type: byte
+        value: "0x20"
+    name: zlibFlagDict
+  - doc: |-
+      zlibEmptyDictID is the Adler-32 of no bytes, the DICTID compress/zlib accepts
+      from a reader built without a dictionary, and so the only one this package
+      accepts: it never writes a dictionary, so it never reads one.
+    items:
+      - name: zlibEmptyDictID
+        type: uint32
+        value: "1"
+    name: zlibEmptyDictID
 files:
   - decls:
       - maxDecompressedBytes
@@ -119,7 +164,6 @@ files:
       - takeFlateStream
       - fillFlateBox
       - releaseFlateReader
-      - takeZlibReader
       - takeZlibStream
       - fillZlibBox
       - releaseZlibReader
@@ -150,6 +194,15 @@ files:
       - zlibCompressor.Decompress
       - zlibDecompress
       - zlibDecompressCore
+      - zlibHeaderLen
+      - zlibDictIDLen
+      - zlibTrailerLen
+      - zlibMethodDeflate
+      - zlibMaxWindow
+      - zlibFlagDict
+      - zlibEmptyDictID
+      - zlibBody
+      - zlibCheckTrailer
     name: zlib.go
 functions:
   - doc: |-
@@ -403,13 +456,6 @@ functions:
     name: releaseFlateReader
     params: box *readerBox
   - doc: |-
-      takeZlibReader borrows a zlib decoder already reading src, through the box's
-      own reader. Both paths parse the RFC 1950 header, so a bad envelope is
-      rejected identically either way.
-    name: takeZlibReader
-    params: src []byte
-    results: box *readerBox, err error
-  - doc: |-
       takeZlibStream borrows a zlib decoder already reading the caller's stream r,
       for a StreamingCompressor reader (ADR 0213).
     name: takeZlibStream
@@ -457,10 +503,42 @@ functions:
       zlibDecompressCore is the shared body behind both the layer backstop and the
       caller-supplied ceiling. It reports an over-cap stream as tooLarge rather
       than choosing a sentinel, so each caller can name the fact in its own terms.
+
+      It reads the RFC 1950 envelope itself — the two-byte header and the four-byte
+      Adler-32 trailer — over the pooled raw-DEFLATE decoder, because compress/zlib
+      builds a fresh digest (adler32.New) on every Reset and so allocates once per
+      call, however large the caller's dst (kitsunium/sdk#1102). The body is still
+      decoded by compress/flate and the sum is hash/adler32's; only the thirty
+      lines of envelope are this package's, and every refusal is the stdlib's own
+      sentinel (zlib.ErrHeader, zlib.ErrDictionary, zlib.ErrChecksum,
+      io.ErrUnexpectedEOF) so errors.Is reads what it always read. The stream
+      readers (NewReader) keep compress/zlib.
     name: zlibDecompressCore
     params: dst, src []byte, max int64
     results: decoded []byte, tooLarge bool, err error
+  - doc: |-
+      zlibBody validates src's RFC 1950 header and returns what follows it, the
+      DEFLATE stream and its trailer. Its refusals are compress/zlib's, in the
+      order compress/zlib makes them: a stream too short for the header, or for the
+      DICTID an FDICT header promises, is io.ErrUnexpectedEOF, a header that is not
+      CM 8 with a window of at most 32 KiB and a multiple of 31 is zlib.ErrHeader,
+      and a DICTID other than the empty dictionary's is zlib.ErrDictionary.
+    name: zlibBody
+    params: src []byte
+    results: body []byte, err error
+  - doc: |-
+      zlibCheckTrailer judges tail, what the DEFLATE stream left of the input,
+      against plain, what it decoded: a tail shorter than four bytes is
+      io.ErrUnexpectedEOF, a big-endian Adler-32 that is not plain's is
+      zlib.ErrChecksum. Bytes past the four are ignored, as compress/zlib ignores
+      them. The sum is one pass of hash/adler32 over the plaintext already on the
+      caller's dst, so it allocates nothing.
+    name: zlibCheckTrailer
+    params: tail, plain []byte
+    results: error
 imports:
+  adler32: hash/adler32
+  binary: encoding/binary
   bytes: bytes
   coretransform: github.com/kitsunium/sdk/internal/core/data/transform
   errs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -901,8 +979,12 @@ vars:
         name: flateReaderPool
         value: recycler.NewPool(func() *readerBox { return &readerBox{} })
       - doc: |-
-          zlibReaderPool recycles the RFC 1950 decoder, unexported for the same
-          reason and boxed the same way, so the three schemes read identically.
+          zlibReaderPool recycles the RFC 1950 decoder of the stream reader
+          (NewReader), unexported for the same reason and boxed the same way, so
+          the three schemes read identically. A block Decompress does not take
+          from it: it reads the envelope itself over flateReaderPool's decoder,
+          because compress/zlib's Reset allocates a digest on every call
+          (kitsunium/sdk#1102).
         name: zlibReaderPool
         value: recycler.NewPool(func() *readerBox { return &readerBox{} })
     name: gzipWriterPools

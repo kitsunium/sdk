@@ -163,8 +163,10 @@ func benchStealFlate() {
 func benchStealZlib() {
 	//: the singleton is built at DefaultCompression, so that is the pool to empty.
 	benchSinkZlibWriter = zlibWriterPoolFor(zlib.DefaultCompression).Get()
-	//: the box the next Decompress would have reused.
-	benchSinkBox = zlibReaderPool.Get()
+	//: the box the next Decompress would have reused: a block decode reads the
+	//: zlib envelope itself over the raw-DEFLATE decoder (kitsunium/sdk#1102),
+	//: so it is the flate pool's.
+	benchSinkBox = flateReaderPool.Get()
 }
 
 // benchReadAllBounded is the decompression tail this package shipped before
@@ -288,6 +290,21 @@ func BenchmarkCompress(b *testing.B) {
 	})
 }
 
+// benchPrimeDecoder runs one decode before the timer starts, so the decoder
+// pool holds a box when the loop begins. The harness forces a collection before
+// every benchmark, two collections between two uses empty a sync.Pool, and the
+// first timed call then rebuilds a decoder of about 43 KB that the loop is
+// charged for: 43 KB over 20 000 iterations is 2 B/op that no call makes
+// (kitsunium/sdk#1102). A process pays that rebuild once per P per two
+// collections, not per call; BENCH.md §12 publishes the rows both ways.
+func benchPrimeDecoder(b *testing.B, comp coretransform.Compressor, dst, encoded []byte) {
+	b.Helper()
+	//: the result is discarded; only the pool's state matters.
+	if _, err := comp.Decompress(dst, encoded); err != nil {
+		b.Fatalf("Decompress: %v", err)
+	}
+}
+
 // BenchmarkDecompress measures one-way decoding across the full matrix. The
 // compressed input is built outside the timer, so this row is the reader plus
 // the bounded drain and nothing else.
@@ -298,6 +315,7 @@ func BenchmarkDecompress(b *testing.B) {
 			b.Fatalf("Compress: %v", err)
 		}
 		var out []byte
+		benchPrimeDecoder(b, comp, nil, encoded)
 		b.ResetTimer()
 		for range b.N {
 			out, err = comp.Decompress(nil, encoded)
@@ -322,6 +340,7 @@ func BenchmarkDecompressSized(b *testing.B) {
 		}
 		dst := make([]byte, 0, len(payload))
 		var out []byte
+		benchPrimeDecoder(b, comp, dst, encoded)
 		b.ResetTimer()
 		for range b.N {
 			out, err = comp.Decompress(dst, encoded)

@@ -21,7 +21,7 @@ const (
 	schemeGzip
 	// schemeFlate tags a box filled by takeFlateReader.
 	schemeFlate
-	// schemeZlib tags a box filled by takeZlibReader.
+	// schemeZlib tags a box filled by takeZlibStream.
 	schemeZlib
 )
 
@@ -49,8 +49,12 @@ var (
 	// stdlib does not export — the box is what makes a miss representable.
 	flateReaderPool = recycler.NewPool(func() *readerBox { return &readerBox{} })
 
-	// zlibReaderPool recycles the RFC 1950 decoder, unexported for the same
-	// reason and boxed the same way, so the three schemes read identically.
+	// zlibReaderPool recycles the RFC 1950 decoder of the stream reader
+	// (NewReader), unexported for the same reason and boxed the same way, so
+	// the three schemes read identically. A block Decompress does not take
+	// from it: it reads the envelope itself over flateReaderPool's decoder,
+	// because compress/zlib's Reset allocates a digest on every call
+	// (kitsunium/sdk#1102).
 	zlibReaderPool = recycler.NewPool(func() *readerBox { return &readerBox{} })
 )
 
@@ -530,17 +534,6 @@ func fillFlateBox(pool readerBoxPool, held *readerBox, src io.Reader) (box *read
 func releaseFlateReader(box *readerBox) {
 	//: hand the decoder back for the next Decompress on this P.
 	flateReaderPool.Put(box)
-}
-
-// takeZlibReader borrows a zlib decoder already reading src, through the box's
-// own reader. Both paths parse the RFC 1950 header, so a bad envelope is
-// rejected identically either way.
-func takeZlibReader(src []byte) (box *readerBox, err error) {
-	held := zlibReaderPool.Get()
-	//: rebind the box's reader to this call's input; no allocation.
-	held.in.Reset(src)
-	//: the decoder reads the box's own reader.
-	return fillZlibBox(held, &held.in)
 }
 
 // takeZlibStream borrows a zlib decoder already reading the caller's stream r,

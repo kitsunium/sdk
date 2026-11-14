@@ -50,6 +50,7 @@ go_test(
         "pool_internal_test.go",
         "registry_external_test.go",
         "transform_bench_test.go",
+        "zlib_envelope_internal_test.go",
         "zlib_external_test.go",
         "zlib_internal_test.go",
     ],

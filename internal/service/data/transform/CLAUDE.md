@@ -54,7 +54,7 @@ refactor that quietly turned one into the other would fail rather than ship.
 |---|---|
 | `gzip.go`    | `GzipCompressor` singleton + `NewGzipCompressor(level)` + `gzipCompressor` (Algorithm "gzip"); `storedLevel` / `writeLevel`, the level field's zero-is-default representation gzip and flate share (#900) |
 | `flate.go`   | `FlateCompressor` singleton + `NewFlateCompressor(level)` + `flateCompressor` (Algorithm "flate") |
-| `zlib.go`    | `ZlibCompressor` singleton + `NewZlibCompressor(level)` + `zlibCompressor` (Algorithm "zlib"); `usableLevel`, the one clamp of the three knobs |
+| `zlib.go`    | `ZlibCompressor` singleton + `NewZlibCompressor(level)` + `zlibCompressor` (Algorithm "zlib"); `usableLevel`, the one clamp of the three knobs; the block decode's own RFC 1950 envelope — `zlibBody` (header, FDICT id) and `zlibCheckTrailer` (Adler-32) — over the pooled flate decoder, errors the stdlib's own sentinels (#1102) |
 | `pool.go`    | the recycled stdlib codecs — `take*`/`release*` per scheme, the per-level writer pools of all three schemes (`newLevelPools`, `levelPool`, #900), and `readerBox` with `boundedStream`, the stream reader built on it (a pooled decoder read under the caller's ceiling — the probe byte at the ceiling is `appendAllBounded`'s detector in stream form); `takeFlateReaderFrom` takes the pool as a `readerBoxPool` so the Reset-fault gate runs on a pool whose Get returns what Put stored — a `sync.Pool` guarantees no such thing (P migration, a collection), and a fixture it missed once poisoned a later flate decode under `bazel coverage` |
 | `bounded.go` | `appendAllBounded` — the shared layer-local decompression bound and tail: `dst`'s spare capacity first, then pooled 32 KiB spill chunks (`spillPool`, at most 32 handed back per call) and one growth of `dst` to its final length (#1102) |
 | `stream.go`  | the stream form of the three schemes (ADR 0213): `NewReader` / `NewWriter` on each, and `poolStream` (a pooled per-level encoder until `Close`, over the `resetter` the three stdlib writers share); the reader, `boundedStream`, is `pool.go`'s, beside the `readerBox` it reads through |
@@ -66,7 +66,9 @@ Each scheme implements `core/data/transform.StreamingCompressor`: `NewReader(r,
 max)` and `NewWriter(w)`, reached from `pkg/v1/data/transform.NewReader` /
 `NewWriter`. The stream codecs are the whole-buffer path's pooled ones —
 `takeGzipStream` / `takeFlateStream` / `takeZlibStream` share `fill*Box` with
-the block takes, the writer a level's pool — and `Close` hands them back once;
+the block takes (gzip's and flate's; zlib's block decode reads its own envelope
+over the flate pool's decoder, so `zlibReaderPool` is the stream's alone), the
+writer a level's pool — and `Close` hands them back once;
 a read or a write after it is the scheme's code over `io.ErrClosedPipe`. The
 reader hands over at most `max` bytes and then asks the decoder for one more: a
 byte is `DecompressedTooLarge` (sticky), the end is `io.EOF`, after the trailer
@@ -186,9 +188,11 @@ neither.
 plaintext is read into `dst`'s spare capacity first, in place; what does not fit
 goes into pooled 32 KiB chunks and `dst` grows once, to its final length. A
 `dst` whose capacity holds the payload costs **zero allocations** for gzip and
-flate (alloc lane: `TestDecompressIntoASizedDstAllocatesNothing`), and **one of
-4 bytes for zlib** — `compress/zlib`'s `Reset` builds a fresh Adler-32 digest
-per stream; a nil `dst` costs one allocation of the payload's size
+flate **and zlib** (alloc lane: `TestDecompressIntoASizedDstAllocatesNothing`):
+zlib's block decode reads the RFC 1950 envelope itself (`zlibBody`,
+`zlibCheckTrailer`, `adler32.Checksum` over the plaintext) over the pooled flate
+decoder, because `compress/zlib`'s `Reset` builds an Adler-32 digest per stream
+(#1102, `BENCH.md` §12.1); a nil `dst` costs one allocation of the payload's size
 (`TestDecompressIntoANilDstAllocatesThePayloadOnce`), where `io.ReadAll`'s
 doubling chain and the copy after it cost 3.5× the plaintext. The compressed
 input is read through a `bytes.Reader` held in the pooled decoder's box
@@ -273,7 +277,10 @@ of ADR 0213. The one per-engine fact, its refusal code, is `engineCodes`, and
 requires the two ceiling rows — and only those — to fail. The layer backstop
 under a lowered cap is `Test_decompressBackstop`, one row per engine, white-box
 because the cores are unexported. What differs between engines stays in their
-files: zlib's envelope (`TestZlibIsNotFlate`, `TestZlibEnvelopeWrapsFlateBody`).
+files: zlib's envelope (`TestZlibIsNotFlate`, `TestZlibEnvelopeWrapsFlateBody`, and
+`zlib_envelope_internal_test.go` — `TestZlibEnvelopeAgreesWithTheStandardLibrary`
+holds the package's own RFC 1950 reading to `compress/zlib` on eighteen frames,
+`TestZlibEnvelopeHoldsTheCeilingAtItsEdge` the bound's edges).
 zstd and s2 are held to the same rows by `third-party/transform`'s own
 `conformance_external_test.go`: this test cannot import that module (a module
 cycle, and the layer firewall), so the vendor module carries the rows that
@@ -290,4 +297,4 @@ cd internal/service && GOWORK=off go test -race -cover ./data/transform/...
 
 ## Fuzz (#897)
 
-`fuzz_external_test.go` — `FuzzDecompressBounded`: for gzip, flate and zlib: `DecompressBounded` never panics nor returns more than its ceiling, agrees with `Decompress` on what it accepts, and `Compress` then `DecompressBounded` gives the input back. The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.
+`fuzz_external_test.go` — `FuzzDecompressBounded`: for gzip, flate and zlib: `DecompressBounded` never panics nor returns more than its ceiling, agrees with `Decompress` on what it accepts, and `Compress` then `DecompressBounded` gives the input back; zlib's engine is also held, on every input, to `compress/zlib` (`fuzzZlibAgrees`: same bytes on what both accept, the standard library's error on what both refuse), the guard on the envelope read in this package (#1102). The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.
