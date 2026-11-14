@@ -55,6 +55,9 @@ sequences:
                 		}, errs.Int("bytes", len(p)), errs.Int("level", int(r.Level)))
           when: werr != nil
       - return: written, nil
+  - of: (*consoleSink).WantsAttrs
+    steps:
+      - return: "false"
   - of: (*consoleSink).Flush
     participants:
       - id: caller

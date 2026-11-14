@@ -52,6 +52,7 @@ files:
       - sampleSink
       - New
       - (*sampleSink).Write
+      - (*sampleSink).WantsAttrs
       - (*sampleSink).Flush
       - (*sampleSink).Close
     name: sample_sink.go
@@ -241,6 +242,10 @@ types:
         params: ctx context.Context, rec corelogger.RecordEvent, p []byte
         recv: s *sampleSink
         results: n int, err error
+      - doc: WantsAttrs answers corelogger.AttrsRequester for the downstream sink, which receives a kept record unchanged; the sampling reads only a counter (#1016).
+        name: WantsAttrs
+        recv: s *sampleSink
+        results: bool
       - doc: Flush forwards to the downstream sink so its own buffers settle.
         name: Flush
         params: ctx context.Context

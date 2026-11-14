@@ -126,6 +126,7 @@ files:
       - netSink
       - newNetSink
       - (*netSink).Write
+      - (*netSink).WantsAttrs
       - (*netSink).WriteBatch
       - (*netSink).sendAll
       - (*netSink).Flush
@@ -487,6 +488,12 @@ types:
         recv: s *netSink
         results: n int, err error
       - doc: |-
+          WantsAttrs answers false to corelogger.AttrsRequester: it sends the encoder's bytes and reads nothing else of the record, so the
+          handler spares it the merged attributes (#1016).
+        name: WantsAttrs
+        recv: s *netSink
+        results: bool
+      - doc: |-
           WriteBatch ships the backlog in one transport call when the seam has one —
           one writev(2) on a tcp connection — and record by record otherwise, under
           the mutex either way. It reports how many records landed whole; the first
@@ -560,10 +567,15 @@ types:
         results: sink corelogger.Sink, err error
     name: netFactory
 vars:
-  - doc: netSink takes a backlog from the async drainer (#807).
+  - grouped: true
     items:
-      - name: _
+      - doc: netSink takes a backlog from the async drainer (#807).
+        name: _
         type: corelogger.BatchSink
+        value: (*netSink)(nil)
+      - doc: netSink says whether it reads RecordEvent.Attrs (#1016).
+        name: _
+        type: corelogger.AttrsRequester
         value: (*netSink)(nil)
     name: _
   - doc: |-

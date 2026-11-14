@@ -7,6 +7,7 @@ files:
       - NewStderr
       - NewStdout
       - (*consoleSink).Write
+      - (*consoleSink).WantsAttrs
       - (*consoleSink).Flush
       - (*consoleSink).Close
     name: console.go
@@ -49,6 +50,12 @@ types:
         params: ctx context.Context, r corelogger.RecordEvent, p []byte
         recv: s *consoleSink
         results: n int, err error
+      - doc: |-
+          WantsAttrs answers false to corelogger.AttrsRequester: it writes the encoder's bytes to its stream and reads nothing else of the record but its level, so the
+          handler spares it the merged attributes (#1016).
+        name: WantsAttrs
+        recv: s *consoleSink
+        results: bool
       - doc: Flush is a no-op for the console sink (writes are already synchronous).
         name: Flush
         params: ctx context.Context

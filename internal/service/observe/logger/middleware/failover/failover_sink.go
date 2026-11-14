@@ -3,6 +3,7 @@ package failover
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -117,6 +118,14 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 	}
 	//: every branch failed — wrap the joined chain in the documented sentinel.
 	return 0, exhausted(collected, len(s.chain), rec)
+}
+
+// WantsAttrs answers corelogger.AttrsRequester: true when any sink of the
+// chain reads RecordEvent.Attrs, since any of them may receive the record
+// (#1016).
+func (s *failoverSink) WantsAttrs() bool {
+	//: one reader in the chain is enough.
+	return slices.ContainsFunc(s.chain, corelogger.SinkWantsAttrs)
 }
 
 // exhausted wraps every branch's failure in the documented sentinel.

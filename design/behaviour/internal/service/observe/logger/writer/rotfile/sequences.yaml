@@ -963,6 +963,9 @@ sequences:
           mutex: s.mu
       - return: s.writeLocked(p, errs.Int("level", int(r.Level)))
         to: s.writeLocked
+  - of: (*rotatingSink).WantsAttrs
+    steps:
+      - return: "false"
   - of: (*rotatingSink).WriteBatch
     participants:
       - id: caller

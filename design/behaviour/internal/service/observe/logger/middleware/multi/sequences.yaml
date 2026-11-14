@@ -40,6 +40,17 @@ sequences:
                 		}, errs.Int("failed", len(errs2)), errs.Int("level", int(r.Level)))
           when: len(errs2) > 0
       - return: n, nil
+  - of: (*fanoutSink).WantsAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fanoutSink).WantsAttrs
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.ContainsFunc(s.branches, corelogger.SinkWantsAttrs)
+        to: slices
   - of: (*fanoutSink).Flush
     participants:
       - id: caller

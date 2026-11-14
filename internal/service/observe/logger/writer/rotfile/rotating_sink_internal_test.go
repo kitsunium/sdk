@@ -666,3 +666,13 @@ func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
 		})
 	}
 }
+
+// TestRotatingSinkReadsOnlyTheBytes (#1016): the sink answers false to
+// corelogger.AttrsRequester — it writes the line alone — so a handler spares it the merged
+// attributes.
+func TestRotatingSinkReadsOnlyTheBytes(t *testing.T) {
+	t.Parallel()
+	if corelogger.SinkWantsAttrs(&rotatingSink{}) {
+		t.Fatal("the sink asks for RecordEvent.Attrs, want false: it writes the line alone")
+	}
+}

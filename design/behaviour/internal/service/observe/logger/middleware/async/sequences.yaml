@@ -200,6 +200,17 @@ sequences:
       - eval: s.wakeDrainer()
         to: s.wakeDrainer
       - return: n, err
+  - of: (*asyncSink).WantsAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).WantsAttrs
+        kind: self
+      - id: corelogger
+        kind: package
+    steps:
+      - return: corelogger.SinkWantsAttrs(s.downstream)
+        to: corelogger
   - of: (*asyncSink).blockForSpace
     participants:
       - id: caller

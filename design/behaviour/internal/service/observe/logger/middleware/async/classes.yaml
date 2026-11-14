@@ -74,6 +74,7 @@ files:
       - noopOnError
       - noopOnDrop
       - (*asyncSink).Write
+      - (*asyncSink).WantsAttrs
       - (*asyncSink).blockForSpace
       - doneOf
       - (*asyncSink).abandon
@@ -356,6 +357,10 @@ types:
         params: ctx context.Context, rec corelogger.RecordEvent, payload []byte
         recv: s *asyncSink
         results: n int, err error
+      - doc: WantsAttrs answers corelogger.AttrsRequester for the downstream sink, which receives the record unchanged on the drainer (#1016).
+        name: WantsAttrs
+        recv: s *asyncSink
+        results: bool
       - doc: |-
           blockForSpace is the Block policy: it waits for the drainer to free a slot,
           at most maxBlock on clk, and stops early when ctx ends or Close begins. The

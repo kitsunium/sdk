@@ -73,6 +73,13 @@ func (s *netSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte)
 	return len(p), nil
 }
 
+// WantsAttrs answers false to corelogger.AttrsRequester: it sends the encoder's bytes and reads nothing else of the record, so the
+// handler spares it the merged attributes (#1016).
+func (s *netSink) WantsAttrs() bool {
+	//: the bytes are the whole record to this sink.
+	return false
+}
+
 // WriteBatch ships the backlog in one transport call when the seam has one —
 // one writev(2) on a tcp connection — and record by record otherwise, under
 // the mutex either way. It reports how many records landed whole; the first

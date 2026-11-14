@@ -215,6 +215,17 @@ sequences:
               to: s.downstream.Write
           when: count%s.rate == 0
       - return: 0, nil
+  - of: (*sampleSink).WantsAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sampleSink).WantsAttrs
+        kind: self
+      - id: corelogger
+        kind: package
+    steps:
+      - return: corelogger.SinkWantsAttrs(s.downstream)
+        to: corelogger
   - of: (*sampleSink).Flush
     participants:
       - id: caller

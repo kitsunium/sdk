@@ -71,6 +71,7 @@ files:
       - (*journaldSink).WriteBatch
       - (*journaldSink).frameAll
       - (*journaldSink).Write
+      - (*journaldSink).WantsAttrs
       - (*journaldSink).Flush
       - (*journaldSink).Close
     name: journald_sink.go
@@ -256,6 +257,12 @@ types:
         recv: s *journaldSink
         results: n int, err error
       - doc: |-
+          WantsAttrs answers false to corelogger.AttrsRequester: it sends the encoder's bytes as MESSAGE and reads nothing else of the record, so the
+          handler spares it the merged attributes (#1016).
+        name: WantsAttrs
+        recv: s *journaldSink
+        results: bool
+      - doc: |-
           Flush is a no-op: each record is sent synchronously as its own datagram, so
           nothing is buffered on this side. It still honours cancellation.
         name: Flush
@@ -277,9 +284,14 @@ vars:
       - name: Writer
         value: writer.Register(&journaldFactory{})
     name: Writer
-  - doc: journaldSink takes a backlog from the async drainer (#807).
+  - grouped: true
     items:
-      - name: _
+      - doc: journaldSink takes a backlog from the async drainer (#807).
+        name: _
         type: corelogger.BatchSink
+        value: (*journaldSink)(nil)
+      - doc: journaldSink says whether it reads RecordEvent.Attrs (#1016).
+        name: _
+        type: corelogger.AttrsRequester
         value: (*journaldSink)(nil)
     name: _

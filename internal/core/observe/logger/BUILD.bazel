@@ -10,6 +10,7 @@ go_library(
         "gen_ports.go",
         "kind.go",
         "record.go",
+        "sink_attrs.go",
         "trace_context.go",
         "value.go",
     ],

@@ -89,8 +89,14 @@ func allocSink(t *testing.T) corelogger.Sink {
 }
 
 // allocNoopSink is the control transport: it accepts the bytes and does
-// nothing, so an emit through it costs the handler and the encoder alone.
-type allocNoopSink struct{}
+// nothing, so an emit through it costs the handler and the encoder alone. It
+// asks for RecordEvent.Attrs what the writer under test asks
+// (corelogger.AttrsRequester, #1016), so the two arms differ by the transport
+// and nothing else: a writer that reads only the bytes is spared the attrs
+// copy, and its control with it.
+type allocNoopSink struct{ wants bool }
+
+func (s allocNoopSink) WantsAttrs() bool { return s.wants }
 
 func (allocNoopSink) Write(_ context.Context, _ corelogger.RecordEvent, p []byte) (int, error) {
 	//: accept the whole payload with no work.
@@ -150,7 +156,7 @@ func TestConsoleWriterAddsNoAllocationToAnEmit(t *testing.T) {
 	}
 
 	//: the same emit twice: once with no transport, once with this writer.
-	bare := emitCost(t, allocNoopSink{})
+	bare := emitCost(t, allocNoopSink{wants: corelogger.SinkWantsAttrs(sink)})
 	through := emitCost(t, sink)
 	reportWindow(t, "emits with no transport", bare)
 	reportWindow(t, "emits through the console writer", through)
@@ -170,7 +176,7 @@ func warmRuntimeCaches(t *testing.T) {
 	//: warmed — over each transport the two arms use, since a type switch's
 	//: cache is built per type it meets, and through handlers no window
 	//: measures.
-	for _, sink := range []corelogger.Sink{allocNoopSink{}, allocSink(t)} {
+	for _, sink := range []corelogger.Sink{allocNoopSink{}, allocNoopSink{wants: true}, allocSink(t)} {
 		h, err := servicelogger.NewHandler(encoder.NewText(clock.System), sink, level.Info)
 		if err != nil {
 			t.Fatalf("building the warm-up handler: %v", err)

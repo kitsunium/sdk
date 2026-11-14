@@ -144,6 +144,13 @@ func (s *EncWriter) Write(ctx context.Context, r corelogger.RecordEvent, p []byt
 	return s.downstream.Write(ctx, r, framed)
 }
 
+// WantsAttrs answers corelogger.AttrsRequester for the downstream sink,
+// which receives the record unchanged.
+func (s *EncWriter) WantsAttrs() bool {
+	//: the record reaches the wrapped sink as it came.
+	return corelogger.SinkWantsAttrs(s.downstream)
+}
+
 // sealFramed appends to dst the 4-byte length prefix and the box of p sealed
 // under the per-sink subkey (nonce hidden in the box), then writes the box's
 // length into the prefix.

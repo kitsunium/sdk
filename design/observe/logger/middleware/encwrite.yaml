@@ -147,6 +147,13 @@ packages:
             out:
               - type: error
             recv: pointer
+          - doc: |-
+              WantsAttrs answers corelogger.AttrsRequester for the downstream sink,
+              which receives the record unchanged.
+            name: WantsAttrs
+            out:
+              - type: bool
+            recv: pointer
         name: EncWriter
         struct:
           unexported: true
