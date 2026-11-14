@@ -12,12 +12,21 @@ on:
   # sdk-release.yml waits for (see .github/workflows/CLAUDE.md §Merge queue).
   merge_group:
     types: [checks_requested]
+  # A pull request tests what it touches and what depends on it; the queue, a
+  # push to main and these two run everything (ADR 0250). The nightly run is
+  # the whole suite on main's tip whatever merged, and a manual run is the
+  # whole suite on demand — on a branch, a pull request's full run.
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
 
 # Cancel in-progress runs when a newer commit on the same ref arrives so
 # rapid re-pushes do not spawn parallel builds that corrupt bazel caches
-# or upload duplicate artifacts.
+# or upload duplicate artifacts. The nightly run has a group of its own: on
+# main's ref it would cancel the push run sdk-release.yml waits for, or be
+# cancelled by it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -46,8 +55,17 @@ jobs:
     # exports ACTIONS_ID_TOKEN_REQUEST_URL to every process, and the
     # entitlement suites `make test-framework` runs here read exactly that
     # variable to decide they are on CI (#300's first run).
-    needs: [shell-gates, lint-ktn, models]
+    #
+    # `scope` is needed for its plan, not as a gate (ADR 0250): a plan that
+    # failed or never came runs this job whole, so its result is read by the
+    # scope step below and never fails the job.
+    needs: [shell-gates, lint-ktn, models, scope]
     if: ${{ !cancelled() }}
+    outputs:
+      scope: ${{ steps.bscope.outputs.mode }}
+      targets: ${{ steps.bscope.outputs.targets }}
+      tests: ${{ steps.bscope.outputs.tests }}
+      remote-cache: ${{ steps.rcache.outputs.remote-cache }}
     steps:
       - name: shell-gates, lint-ktn and models succeeded
         env:
@@ -102,6 +120,64 @@ jobs:
           cache: true
           cache-dependency-path: '**/go.sum'
 
+      # The optional remote cache (ADR 0250): off without
+      # BAZEL_REMOTE_CACHE_URL, read-only on a pull request, written only by
+      # the runs that test what lands. The write credential is handed to this
+      # step on those events alone, so a pull request's job never holds it; a
+      # fork's receives no secret at all, and the server refuses its writes.
+      - name: remote cache — optional, read-only on a pull request
+        id: rcache
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BAZEL_REMOTE_CACHE_URL: ${{ vars.BAZEL_REMOTE_CACHE_URL || secrets.BAZEL_REMOTE_CACHE_URL }}
+          BAZEL_REMOTE_CACHE_READ: ${{ vars.BAZEL_REMOTE_CACHE_READ }}
+          BAZEL_REMOTE_CACHE_READ_HEADER: ${{ secrets.BAZEL_REMOTE_CACHE_READ_HEADER }}
+          BAZEL_REMOTE_CACHE_CA: ${{ secrets.BAZEL_REMOTE_CACHE_CA }}
+          BAZEL_REMOTE_CACHE_WRITE_HEADER: ${{ (github.event_name == 'merge_group' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && secrets.BAZEL_REMOTE_CACHE_WRITE_HEADER || '' }}
+          BAZEL_REMOTE_CACHE_CLIENT_CERT: ${{ (github.event_name == 'merge_group' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && secrets.BAZEL_REMOTE_CACHE_CLIENT_CERT || '' }}
+          BAZEL_REMOTE_CACHE_CLIENT_KEY: ${{ (github.event_name == 'merge_group' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && secrets.BAZEL_REMOTE_CACHE_CLIENT_KEY || '' }}
+        run: |
+          bash scripts/ci/bazel-remote-cache.sh "$EVENT" "$REF" "$HOME/.bazelrc" >>"$GITHUB_OUTPUT" || {
+            echo "::warning::the remote cache could not be configured: the run goes without it"
+            echo "remote-cache=off" >>"$GITHUB_OUTPUT"
+          }
+
+      # What this job builds and tests (ADR 0250). On a pull request whose
+      # plan is scoped, target-determinator — pinned by version and SHA-256 —
+      # lists the targets whose configured inputs differ between the base and
+      # the merge commit, manual ones left out as `//...` leaves them out;
+      # `tests` and `alloc` are the tests among them. Anything else — the
+      # queue, main, the nightly run, a plan that failed, a fallback, a tool
+      # that failed — is mode full or fallback, and every step below runs
+      # `//...` as it always did. The guards, the lint gate and the scans
+      # below are never scoped: they are fast and they read the whole tree.
+      - name: scope — the Bazel targets this run builds and tests
+        id: bscope
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE_REASON: ${{ needs.scope.outputs.reason }}
+          SCOPE_BASE: ${{ github.event.pull_request.base.sha }}
+          TD_VERSION: v0.34.0
+          TD_SHA256: 115e1c63d39e2cd0d0b011c9fadc80f059f021176a4ae0de2232cdd83b1f8011
+        # A scope that fails runs everything; a checkout that is no longer
+        # the commit under test (exit 2) fails the job, as nothing it would
+        # run could be trusted.
+        run: |
+          set +e
+          bash scripts/ci/scope.sh bazel "$RUNNER_TEMP/scope" >"$RUNNER_TEMP/bscope.out"
+          rc=$?
+          set -e
+          case "$rc" in
+            0) cat "$RUNNER_TEMP/bscope.out" >>"$GITHUB_OUTPUT" ;;
+            2) echo "::error::the checkout is no longer the commit under test"; exit 1 ;;
+            *)
+              echo "::warning::the Bazel scope failed (exit $rc): everything runs"
+              echo "mode=fallback" >>"$GITHUB_OUTPUT"
+              ;;
+          esac
+
       - name: drift check — bazel mod tidy + gazelle
         run: |
           bazel mod tidy
@@ -128,19 +204,53 @@ jobs:
       - name: drift check — README.md regenerated
         run: bash scripts/pre-commit/check-readme-drift.sh
 
+      # Scoped (mode=scoped): the affected targets, or nothing when no Bazel
+      # target changed. Any other mode: //..., as always.
       - name: build
-        run: bazel build --config=ci //...
+        env:
+          MODE: ${{ steps.bscope.outputs.mode }}
+          SCOPE_DIR: ${{ runner.temp }}/scope
+        run: |
+          if [ "$MODE" != scoped ]; then
+            bazel build --config=ci //...
+          elif [ -s "$SCOPE_DIR/targets.txt" ]; then
+            bazel build --config=ci --target_pattern_file="$SCOPE_DIR/targets.txt"
+          else
+            echo "skipped by scope: no Bazel target differs from the base"
+          fi
 
       - name: test
-        run: bazel test --config=ci //...
+        env:
+          MODE: ${{ steps.bscope.outputs.mode }}
+          SCOPE_DIR: ${{ runner.temp }}/scope
+        run: |
+          if [ "$MODE" != scoped ]; then
+            bazel test --config=ci //...
+          elif [ -s "$SCOPE_DIR/tests.txt" ]; then
+            bazel test --config=ci --target_pattern_file="$SCOPE_DIR/tests.txt"
+          else
+            echo "skipped by scope: no test target differs from the base"
+          fi
 
       # The framework's own suite reads its sources and asserts positions
       # relative to its module root, which a Bazel sandbox does not lay out:
       # //framework/internal/app:app_test is `manual` and this is its gate (rule 12,
       # ADR 0147). The framework's packages in the SDK module and its four
-      # connector modules, `go test -race`, GOWORK=off.
+      # connector modules, `go test -race`, GOWORK=off. Scoped, the packages
+      # among them the change reaches (`go list`, ADR 0250); a computation
+      # that fails runs them all.
       - name: framework suites (go test -race)
-        run: make test-framework
+        env:
+          MODE: ${{ steps.bscope.outputs.mode }}
+          SCOPE_DIR: ${{ runner.temp }}/scope
+          SCOPE_TOUCHED: ${{ needs.scope.outputs.touched }}
+          SCOPE_TESTS: ${{ needs.scope.outputs.tests }}
+        run: |
+          if [ "$MODE" = scoped ] && bash scripts/ci/scope.sh affected >"$SCOPE_DIR/go.txt"; then
+            make test-framework SCOPE="$SCOPE_DIR/go.txt"
+          else
+            make test-framework
+          fi
 
       # Every target below carries at least one //go:build !race test
       # (testing.AllocsPerRun / testing.Benchmark report a spurious +1 under
@@ -148,11 +258,22 @@ jobs:
       # is their ONLY gate — a `!race` test in a package missing from the list
       # runs nowhere at all. The list is shared with `make test-alloc` and with
       # check-alloc-lane-coverage.sh, which fails the build on an orphan.
+      # Scoped, the tests of the list among the affected targets.
       - name: alloc + zero-alloc gates (race off)
+        env:
+          MODE: ${{ steps.bscope.outputs.mode }}
+          SCOPE_DIR: ${{ runner.temp }}/scope
         run: |
-          targets=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' tools/alloc-lane-targets.txt | tr '\n' ' ')
-          echo "alloc lane targets: $targets"
-          bazel test --config=alloc $targets
+          if [ "$MODE" != scoped ]; then
+            read -r -a targets <<<"$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' tools/alloc-lane-targets.txt | tr '\n' ' ')"
+            echo "alloc lane targets: ${targets[*]}"
+            bazel test --config=alloc "${targets[@]}"
+          elif [ -s "$SCOPE_DIR/alloc.txt" ]; then
+            echo "alloc lane targets in scope: $(tr '\n' ' ' <"$SCOPE_DIR/alloc.txt")"
+            bazel test --config=alloc --target_pattern_file="$SCOPE_DIR/alloc.txt"
+          else
+            echo "skipped by scope: no allocation gate differs from the base"
+          fi
 
       # Guards the invariant the step above depends on: no //go:build !race
       # test may exist outside the alloc lane's target list.
@@ -258,12 +379,25 @@ jobs:
       - name: vulnerability gate — govulncheck over every module
         run: make vuln-check
 
+      # Scoped, the coverage of the tests in scope: a report of what this run
+      # tested, not of the tree.
       - name: coverage
+        env:
+          MODE: ${{ steps.bscope.outputs.mode }}
+          SCOPE_DIR: ${{ runner.temp }}/scope
         run: |
-          bazel coverage --combined_report=lcov //...
+          if [ "$MODE" != scoped ]; then
+            bazel coverage --combined_report=lcov //...
+          elif [ -s "$SCOPE_DIR/tests.txt" ]; then
+            bazel coverage --combined_report=lcov --target_pattern_file="$SCOPE_DIR/tests.txt"
+          else
+            echo "skipped by scope: no test target differs from the base"
+            exit 0
+          fi
           cp "$(bazel info output_path)/_coverage/_coverage_report.dat" coverage.lcov
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ hashFiles('coverage.lcov') != '' }}
         with:
           # Unique per-run artifact name so concurrent runs never silently
           # deduplicate coverage reports (finding #28).
@@ -525,8 +659,15 @@ jobs:
   # emulation. It runs WITHOUT -race, which has no 386 support at all, and that
   # is also what makes it the second lane to run the `//go:build !race` files
   # (rule 12's alloc lane is the first).
+  #
+  # Scoped on a pull request (ADR 0250): skipped when no package reaches 386,
+  # else the packages the change reaches, `go list` deciding on linux/386.
+  # The `if:` runs it whenever the plan did not say skip — a plan that failed
+  # says nothing, and the job runs whole.
   test-386:
     name: test linux/386
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.test386 != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -558,8 +699,18 @@ jobs:
           # find compiled in (ADR 0186); epoll is every Linux architecture's.
           # Its capabilities fail closed the same way: none required here.
           GOFLAGS: "'-ldflags=-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=epoll -X=github.com/kitsunium/sdk/internal/service/net/loop.requiredCaps=none'"
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE_TOUCHED: ${{ needs.scope.outputs.touched }}
+          SCOPE_TESTS: ${{ needs.scope.outputs.tests }}
         run: |
           set -euo pipefail
+          if [ "$SCOPE_MODE" = scoped ]; then
+            if bash scripts/ci/scope.sh affected >"$RUNNER_TEMP/affected.txt"; then
+              bash scripts/ci/scope.sh go-test "$RUNNER_TEMP/affected.txt" ""
+              exit 0
+            fi
+            echo "::warning::the packages in scope could not be computed: every module runs"
+          fi
           fail=0
           modules="$(bash scripts/ci/go-modules.sh)"
           for mod in $modules; do
@@ -583,9 +734,12 @@ jobs:
   # closed on a runner without AVX2: a pass that exercised only the SWAR forms
   # would say nothing about the others, and TestVectorFormsRunHere logs which.
   # The submission itself builds WITHOUT the experiment; this is the one lane
-  # that does.
+  # that does. On a pull request it runs when the change reaches
+  # internal/kernel/swar with the experiment on (ADR 0250).
   test-simd:
     name: test internal/kernel/swar with GOEXPERIMENT=simd
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.simd != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -618,8 +772,12 @@ jobs:
   # opt-in by KITSUNIUM_GARBLE everywhere else (rule 12), because garble
   # refuses a Go other than the one that built it, and this lane names it with
   # a garble built here, by the Go of go.mod. The grep fails a run that skipped.
+  # On a pull request it runs when the change reaches third-party/ebpf/cgroup
+  # — its smoke program under testdata/ included (ADR 0250).
   garble-tiny:
     name: garble -tiny — third-party/ebpf links its backend and answers typed
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.garble != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -737,3 +895,105 @@ jobs:
       - name: the models are what the code derives
         if: steps.kit.outputs.ready == 'true'
         run: make models-check
+
+  # What this run tests (ADR 0250). On a pull request, scripts/ci/scope.sh
+  # compares the base with the merge commit and names the Go packages whose
+  # code changed (in scope with every package that depends on them) and those
+  # whose tests alone did (a test file, testdata, a file a test reads); then,
+  # for each Go lane of this workflow, whether any package it tests is
+  # reached, `go list` deciding with that lane's GOOS, GOARCH and experiment.
+  # A path no rule accounts for, a change to the build's definition (Bazel's
+  # module, flags or version, a go.mod, go.work, tools/, the root BUILD) or to
+  # this workflow, the Makefile or scripts/ci/ falls back to everything. The
+  # queue, a push to main, the nightly run and a manual run plan everything.
+  #
+  # Never a gate: every job reading the plan runs whole when it failed — the
+  # lanes' `if:` skips only on an explicit `skip`, and the `bazel` job reads
+  # this job's result before its outputs.
+  scope:
+    name: scope — what this run tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      reason: ${{ steps.plan.outputs.reason }}
+      touched: ${{ steps.plan.outputs.touched }}
+      tests: ${{ steps.plan.outputs.tests }}
+      test386: ${{ steps.lanes.outputs.test386 }}
+      simd: ${{ steps.lanes.outputs.simd }}
+      garble: ${{ steps.lanes.outputs.garble }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: '**/go.sum'
+
+      - name: plan — scoped on a pull request, whole otherwise
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVAL_SHA: ${{ github.sha }}
+        run: |
+          printf '### The plan\n\n```\n' >>"$GITHUB_STEP_SUMMARY"
+          SCOPE_REPORT="$GITHUB_STEP_SUMMARY" bash scripts/ci/scope.sh plan "$EVENT" "$REF" "$BASE_SHA" "$EVAL_SHA" \
+            '^\.github/workflows/bazel-ci\.yml$' '^scripts/ci/' '^Makefile$' >>"$GITHUB_OUTPUT"
+          printf '```\n' >>"$GITHUB_STEP_SUMMARY"
+
+      - name: lanes — what each Go lane of this workflow reaches
+        id: lanes
+        env:
+          SCOPE_MODE: ${{ steps.plan.outputs.mode }}
+          SCOPE_TOUCHED: ${{ steps.plan.outputs.touched }}
+          SCOPE_TESTS: ${{ steps.plan.outputs.tests }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          {
+            bash scripts/ci/scope.sh lane test386 GOOS=linux,GOARCH=386
+            bash scripts/ci/scope.sh lane simd GOOS=linux,GOARCH=amd64,GOEXPERIMENT=simd -- github.com/kitsunium/sdk/internal/kernel/swar
+            bash scripts/ci/scope.sh lane garble GOOS=linux,GOARCH=amd64 -- github.com/kitsunium/sdk/third-party/ebpf/cgroup
+          } >>"$GITHUB_OUTPUT"
+
+  # The run against its plan (ADR 0250), as the job summary: for every lane,
+  # ran in full, fallback to full, ran scoped, or skipped by scope with the
+  # packages judged out of its reach. It FAILS when a lane that had to run
+  # was skipped — a plan that failed, a full run or a fallback leave nothing
+  # to skip. Not required: the guarantee is the lanes' `if:` (asserted by
+  # scripts/ci/scope.bats); this says it out loud on every run.
+  scope-summary:
+    name: scope — what each lane tested
+    needs: [scope, bazel, shell-gates, lint-ktn, models, cross-build, test-386, test-simd, garble-tiny, docs-site]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: the lanes against the plan
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_MODE: ${{ needs.scope.outputs.mode }}
+          SCOPE_REASON: ${{ needs.scope.outputs.reason }}
+          SCOPE_TOUCHED: ${{ needs.scope.outputs.touched }}
+          SCOPE_TESTS: ${{ needs.scope.outputs.tests }}
+          SCOPE_LANES: |
+            bazel|run|${{ needs.bazel.result }}|Bazel ${{ needs.bazel.outputs.scope }}: ${{ needs.bazel.outputs.targets }} target(s), ${{ needs.bazel.outputs.tests }} test(s) in scope; remote cache ${{ needs.bazel.outputs.remote-cache }}
+            test-386|${{ needs.scope.outputs.test386 }}|${{ needs.test-386.result }}|
+            test-simd|${{ needs.scope.outputs.simd }}|${{ needs.test-simd.result }}|
+            garble-tiny|${{ needs.scope.outputs.garble }}|${{ needs.garble-tiny.result }}|
+            cross-build|full|${{ needs.cross-build.result }}|the build bar, never scoped
+            shell-gates|full|${{ needs.shell-gates.result }}|a gate, never scoped
+            lint-ktn|full|${{ needs.lint-ktn.result }}|a gate, never scoped
+            models|full|${{ needs.models.result }}|a gate, never scoped
+            docs-site|full|${{ needs.docs-site.result }}|never scoped
+        run: bash scripts/ci/scope.sh summary >>"$GITHUB_STEP_SUMMARY"

@@ -14,7 +14,7 @@ here is a Go package.
 |---|---|
 | `pre-commit/` | the guards `make lint` and `bazel-ci.yml` run (ADR 0153), each an executable `check-*.sh` that finds the repository root from its own path (eight also take the workspace path as their first argument); `test-pre-commit-guards.bats` pins them, and keeps them runnable on a Mac as shipped |
 | `release/` | `compute-bumps.sh` (WHICH modules release, each since its own tag — ADR 0171), `cut-tags.sh` (HOW BIG each is, from the `release:*` labels of the merges that touched it — ADR 0135 —, and the tags and manifest), `release-notes.sh`, `check-pr-size.sh`, their BATS suites (`test-*.bats` over `test-helpers.bash`, run by `release-scripts-test.sh`) and `lib/` (`tag-format.sh`, `release-scope.sh`, `release-size.sh`, `release-modules.sh`); also `test-sync-versions.mjs.test.js`, a Node test of `docs/site/scripts/lib/tag-format.mjs` that no lane runs — `docs/site`'s `npm test` globs `scripts/lib/*.test.mjs` only |
-| `ci/` | `go-modules.sh`, the module census every module-looping lane reads (ADR 0137); `platforms.sh`, the twelve GOOS/GOARCH cells as one table; and `vuln-check.sh`, the govulncheck gate over the census (ADR 0136) |
+| `ci/` | `go-modules.sh`, the module census every module-looping lane reads (ADR 0137); `platforms.sh`, the twelve GOOS/GOARCH cells as one table; `vuln-check.sh`, the govulncheck gate over the census (ADR 0136); `scope.sh`, what a run tests, and `bazel-remote-cache.sh`, the optional remote cache (ADR 0250) |
 | `check-layer-deps.sh` | the layer firewall on the build graph: seven `bazel query` expressions that must be empty (ADR 0068; the last three are the framework's, ADR 0147) |
 | `ci-gates-check.sh` | a listed gate must have a `make` target, be `.PHONY`, and be invoked by `bazel-ci.yml` — by a step of its own, or by the recipe of a listed gate CI runs (`lint-check` runs `api-check`); a listed guard (`GUARDS`: the `bash` checks `make lint` runs) must exist, be a `run:` step of the `bazel` job and a line of the `lint` recipe (ADR 0088); and every gate and guard must run in a job whose failure fails the required `bazel` check — `bazel` itself, or a job it `needs:`, whose result it checks and which cannot skip it (`!cancelled()`), else `NOT BLOCKING` unless listed in `ADVISORY` with its reason (#236); its BATS cases are in `ci/test-ci-scripts.bats` |
 | `ci-scripts-test.sh`, `pre-commit-test.sh` | run the BATS suites of `ci/` and `pre-commit/` |
@@ -126,6 +126,10 @@ Superseded by ADR 0154 (the charter); ADR 0137 stays as the incident's record, a
 - **A lane that must skip a module names it where it loops**, with the lane
   that covers it instead (rule 12); none does today — the root is the SDK
   module since ADR 0162, no longer the empty anchor every loop skipped.
+- **A pull request's lanes test what its change reaches, and say what they
+  skipped** (ADR 0250): each module and package a scoped lane leaves out is
+  named in its workflow's `scope-summary`, and the merge queue, `main`, the
+  nightly run and a dispatch run the whole census.
 - **The census and its use are tested**: `ci/test-ci-scripts.bats`
   (`make ci-scripts-check`) pins it and asserts `cross-build` and `test-386`
   read it, and that no census loop skips the root.

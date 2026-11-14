@@ -440,7 +440,8 @@ drop_line() {
 # GitHub counts as passing. Each test removes one of the three pieces.
 @test "gates: the gates of shell-gates block through the required bazel job" {
   body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
-  [[ "$body" == *"    needs: [shell-gates, lint-ktn, models]"* ]]
+  # `scope` is needed for its plan, never as a gate (ADR 0250).
+  [[ "$body" == *"    needs: [shell-gates, lint-ktn, models, scope]"* ]]
   [[ "$body" == *'    if: ${{ !cancelled() }}'* ]]
   [[ "$body" == *'needs.shell-gates.result'* ]]
   [[ "$body" == *'needs.lint-ktn.result'* ]]
@@ -449,7 +450,7 @@ drop_line() {
 
 @test "gates: a gate in a job the required job does not need is NOT BLOCKING" {
   gates_fixture
-  sed -e 's/^    needs: \[shell-gates, lint-ktn, models\]$/    needs: [lint-ktn, models]/' .github/workflows/bazel-ci.yml >wf.tmp
+  sed -e 's/^    needs: \[shell-gates, lint-ktn, models, scope\]$/    needs: [lint-ktn, models, scope]/' .github/workflows/bazel-ci.yml >wf.tmp
   mv wf.tmp .github/workflows/bazel-ci.yml
 
   run bash scripts/ci-gates-check.sh

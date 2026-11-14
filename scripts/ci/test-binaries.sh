@@ -20,6 +20,11 @@
 # reads (runtime.Caller and stack traces use pclntab, which stays): it halves
 # what is synchronised into the guest.
 #
+# With TEST_BINARIES_ONLY naming a file of package directories relative to
+# the root — the packages a pull request reaches, from scripts/ci/scope.sh
+# (ADR 0250) — only those are compiled; none of them having tests here writes
+# an empty manifest and exits 0, the one case an empty set is an answer.
+#
 # Exit 1, naming each package, when one does not compile — a package that
 # cannot be built for a GOOS is a failure of that GOOS, never a skip.
 
@@ -54,6 +59,20 @@ done
 if [ ! -s "$pkgs" ]; then
   echo "test-binaries.sh: no package with tests for $(go env GOOS)/$(go env GOARCH) — refusing an empty set" >&2
   exit 1
+fi
+if [ -n "${TEST_BINARIES_ONLY:-}" ]; then
+  if [ ! -f "$TEST_BINARIES_ONLY" ]; then
+    echo "test-binaries.sh: TEST_BINARIES_ONLY names no file: $TEST_BINARIES_ONLY" >&2
+    exit 1
+  fi
+  awk 'FNR == NR { keep[$0] = 1; next } ($0 in keep)' "$TEST_BINARIES_ONLY" "$pkgs" >"$pkgs.only"
+  mv "$pkgs.only" "$pkgs"
+  if [ ! -s "$pkgs" ]; then
+    : >"$out/manifest"
+    rm -f "$pkgs"
+    echo "test-binaries.sh: no package in scope has tests for $(go env GOOS)/$(go env GOARCH): an empty manifest"
+    exit 0
+  fi
 fi
 
 # name <dir> — the binary's file name: the directory with / spelled __.
