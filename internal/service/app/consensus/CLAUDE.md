@@ -1418,6 +1418,17 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   it for a follower that stopped or fell further behind: slower than the
   writes, it would hold the log growing until the log is tight
   (`TestARenewedStreamedPinEndsOnceItsFollowerNoLongerCatchesUp`).
+- Shut a test's valve on the frames to a follower once its snapshot's
+  stream ended: the follower answers the leader's next heartbeat as soon as
+  its install took effect, before the transport's Stream returns, and raft
+  rightly moves it out of the transfer and sends it appends (`ackMoved`).
+  Shut from the stream's end, the valve let a frame through in about one
+  run of three, and on a macOS guest whose stream returned late the
+  follower caught up entirely before the stream's end left its pin, which
+  `watchPins` dropped as caught up: the wait for the pin timed out. The
+  valve shuts before the held stream is released, and `lateEnd` returns
+  every stream late (#1459, `valveRun`,
+  `TestAStreamedPinOutlastsItsBoundWhileItsFollowerCatchesUp`).
 - Stream a snapshot to every peer in need at once, or as fast as the link
   allows: two learners joining together streamed two snapshots over the
   NIC and the TLS CPU of the data lane, one goroutine each, unbounded.
@@ -1548,6 +1559,15 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   until the leader it asks heard D in its term, lately, at its commit, and
   asks again of the leader then after either refusal (`promoteWhenHeard`,
   `TestAPromotionAskedOfANewLeaderWaitsUntilItHeardTheLearner`).
+- Send a test's membership change, a JOIN included, to the leader
+  `tcpLeader` returns: it returns a node the moment it reports itself
+  leader, and raft admits a change only once the term's no-op committed
+  (`checkMembership`). On NetBSD a JOIN reached that leader first and was
+  refused MEMBERSHIP_CHANGE_PENDING, rightly: the refusal proposes nothing
+  and is TEMPFAIL, a refusal its caller sends again. `tcpSettledLeader`
+  returns the leader once it committed an entry of its own term (#1458,
+  `TestATCPJoinSentToTheSettledLeaderIsAdmitted`, the no-ops held;
+  `TestATCPJoinerFollowsTheLeaderANotLeaderRefusalNames`).
 - Lift a test's cut from the test's goroutine and want a lost read's
   resend answered. `sweepReads` resends a follower's read once, a maximum
   election timeout after it was sent, and answers LEADERSHIP_UNCONFIRMED

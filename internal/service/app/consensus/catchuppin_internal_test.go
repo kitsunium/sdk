@@ -65,6 +65,17 @@ func catchUpEntry(prefix string, i int) string {
 // stream end with the valve shut on the leader's frames to it: the follower
 // sits at the snapshot, 60 entries behind, its pin streamed. It returns once
 // that pin is set, the snapshot's index with it.
+//
+// The valve shuts before the stream is let go, never once it ended. The
+// follower answers the leader's next heartbeat as soon as its install took
+// effect, which comes before the transport's Stream returns, and raft
+// rightly moves a peer whose answer covers its snapshot out of the transfer
+// and sends it appends (ackMoved): shut from the stream's end, the valve let
+// a frame through in about one run of three on linux, and on a macOS guest
+// whose stream returned late the follower caught up entirely before the
+// stream's end left its pin, which watchPins then dropped as caught up, and
+// the wait for it timed out (#1459). lateEnd makes that late return happen
+// on every run.
 func valveRun(t *testing.T, id byte) (c *cluster, l, lag *testNode, v *valveTransport, index uint64) {
 	t.Helper()
 	valves := map[coreconsensus.NodeID]*valveTransport{}
@@ -95,8 +106,6 @@ func valveRun(t *testing.T, id byte) (c *cluster, l, lag *testNode, v *valveTran
 	mu.Lock()
 	v = valves[l.id]
 	mu.Unlock()
-	shut := func() { v.close(lag.id) }
-	v.streamed.Store(&shut)
 	v.holding.Store(true)
 	t.Cleanup(func() {
 		v.holding.Store(false)
@@ -109,11 +118,14 @@ func valveRun(t *testing.T, id byte) (c *cluster, l, lag *testNode, v *valveTran
 	case <-time.After(10 * time.Second):
 		t.Fatal("no snapshot offered to the lagging node")
 	}
+	late := func() { lateEnd(l, lag) }
+	v.streamed.Store(&late)
 	// Three cuts' worth of entries while the snapshot streams: the lag its
 	// install leaves it with.
 	for i := range 60 {
 		propose(t, l.node, catchUpEntry("b", i))
 	}
+	v.close(lag.id)
 	releaseHeld(t, v.holdTransport, l)
 	var pin sendPin
 	waitFor(t, "the streamed snapshot's pin", func() bool {
@@ -122,6 +134,26 @@ func valveRun(t *testing.T, id byte) (c *cluster, l, lag *testNode, v *valveTran
 	})
 	return c, l, lag, v, pin.index
 }
+
+// lateEnd holds the end of a stream that succeeded until its follower,
+// installed, caught up with the leader's last index, for at most
+// lateEndBound: the transport's Stream returning late, as on a guest that
+// schedules the stream's goroutine after the follower's whole catch-up
+// (#1459). A shut valve holds every append back, so the wait runs to its
+// bound.
+func lateEnd(l, lag *testNode) {
+	for deadline := time.Now().Add(lateEndBound); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		var match, last uint64
+		l.node.exec(func() { match, _, _ = l.node.r.Progress(lag.id); last = l.node.r.Status().Last })
+		if match >= last {
+			return
+		}
+	}
+}
+
+// lateEndBound bounds lateEnd: twenty heartbeats of steadyTiming, more
+// than a catch-up of 60 entries takes with the valve open.
+const lateEndBound = 200 * time.Millisecond
 
 // stepPast lets through the leader's frames to the follower, a queue at a
 // time, until its match passes past, and returns that match.

@@ -220,6 +220,7 @@ go_test(
         "savesnapshotstall_internal_test.go",
         "sendshared_alloc_internal_test.go",
         "sendshared_internal_test.go",
+        "settledleader_internal_test.go",
         "silencedurable_internal_test.go",
         "silencelowered_internal_test.go",
         "silentload_internal_test.go",
