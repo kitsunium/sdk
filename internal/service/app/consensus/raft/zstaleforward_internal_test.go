@@ -17,18 +17,23 @@ import (
 // on the leader it had acknowledged missed a write the new leader
 // committed (D9 (b), R1-18). The mutation type is full, so each test takes
 // its mutation as an argument: the answer re-stamped, in flight, with its
-// sender's term, which is what the step function sent before the fix.
+// sender's term, which is what the step function sent before the fix, read
+// by a node run as a release before #1472 (termFromAnswers), which takes
+// the term an answer carries: read by this release, a re-stamped answer
+// is dropped (stepLaterAnswer), and nothing is left to catch.
 
 // checkForwardAnswerRaisesNoTerm plays the mechanism on two step functions.
 // F (node 2) forwarded a command at term 2, then followed G (node 1) at
 // term 3 and has just heard it; X (node 3), at term 4, answers the forward;
 // then X's vote request of term 4 reaches F. restamp gives the answer X's
-// term. It returns an error when F grants the vote, moves past term 3, or
-// is answered at another term than its forward's.
+// term, and runs F as a previous release. It returns an error when F grants
+// the vote, moves past term 3, or is answered at another term than its
+// forward's.
 func checkForwardAnswerRaisesNoTerm(restamp bool) error {
 	now := t0.Add(5 * time.Second)
 	ents := chainEntries(0, 1, 1)
 	f := newTest(2, testState{term: 2, commit: 1, ents: ents}, 0, false)
+	f.cfg.termFromAnswers = restamp
 	hb := msg(core.MsgHeartbeat, 1, 2, 3)
 	hb.Commit = 1
 	f.Step(now, hb)
@@ -208,17 +213,40 @@ func (n *lateNet) deliver(ms ...core.MessageValue) {
 	n.pump()
 }
 
+// newLateNet starts G, F and X under seed, each node before names run as a
+// release before #1472 (termFromAnswers).
+func newLateNet(t *testing.T, seed uint64, before ...core.NodeID) *lateNet {
+	n := &lateNet{t: t, nodes: map[core.NodeID]*Raft{}, ids: []core.NodeID{lateG, lateF, lateX}, now: t0}
+	for _, id := range n.ids {
+		n.nodes[id] = lateNode(id, seed)
+	}
+	for _, id := range before {
+		n.nodes[id].cfg.termFromAnswers = true
+	}
+	return n
+}
+
 // lateForwardSchedule plays one schedule of the review of #1457 (D1) and
 // reports whether seed reached it, and the lease violation it found, if
 // any. X leads term 2 and F forwards it a command whose frame is delayed;
 // G wins term 3 with F; G's next round renews its lease on F's
 // acknowledgement while X, a candidate of term 4, finally answers the
-// forward; then X's delayed vote request of term 4 reaches F.
-func lateForwardSchedule(t *testing.T, seed uint64, restamp bool) (bool, string) {
-	n := &lateNet{t: t, nodes: map[core.NodeID]*Raft{}, ids: []core.NodeID{lateG, lateF, lateX}, now: t0, restamp: restamp}
-	for _, id := range n.ids {
-		n.nodes[id] = lateNode(id, seed)
+// forward; then X's delayed vote request of term 4 reaches F. before names
+// the nodes run as a release before #1472.
+func lateForwardSchedule(t *testing.T, seed uint64, restamp bool, before ...core.NodeID) (bool, string) {
+	n := newLateNet(t, seed, before...)
+	n.restamp = restamp
+	c, ok := lateForwardSetup(n, seed)
+	if !ok {
+		return false, ""
 	}
+	return lateRace(n, c)
+}
+
+// lateForwardSetup plays steps 1 to 3 of the forward's schedule and returns
+// F's forward of term 2, held in the network, and whether seed reached G's
+// leadership of term 3.
+func lateForwardSetup(n *lateNet, seed uint64) (core.MessageValue, bool) {
 	g, f, x := n.nodes[lateG], n.nodes[lateF], n.nodes[lateX]
 
 	// 1. X wins term 2: the PreVotes of G and F are lost.
@@ -232,7 +260,7 @@ func lateForwardSchedule(t *testing.T, seed uint64, restamp bool) (bool, string)
 		st := x.Status()
 		return st.Role == core.RoleLeader && st.Term == 2 && st.Commit >= 2 && f.Status().Lead == lateX
 	}) {
-		return false, ""
+		return core.MessageValue{}, false
 	}
 	n.tick(200*time.Millisecond, nil)
 
@@ -244,7 +272,7 @@ func lateForwardSchedule(t *testing.T, seed uint64, restamp bool) (bool, string)
 		Entries: []core.EntryValue{{Kind: core.EntryCommand, BodySum: wire.BodySum(data), Data: data}},
 	}
 	if c.Term != 2 {
-		t.Fatalf("seed %d: setup: F at term %d", seed, c.Term)
+		n.t.Fatalf("seed %d: setup: F at term %d", seed, c.Term)
 	}
 
 	// 3. X is cut off; G wins term 3 with F.
@@ -254,12 +282,20 @@ func lateForwardSchedule(t *testing.T, seed uint64, restamp bool) (bool, string)
 		}
 		return lateDeliver
 	}
-	if !n.tick(10*time.Second, func() bool {
+	return c, n.tick(10*time.Second, func() bool {
 		st := g.Status()
 		return st.Role == core.RoleLeader && st.Term == 3 && st.Commit >= 3 && f.Status().Lead == lateG
-	}) {
-		return false, ""
-	}
+	})
+}
+
+// lateRace plays steps 4 to 8 of the review's schedules, after G won term 3
+// with F while X, which led term 2, was cut off: X catches up; G's lease is
+// renewed on F's acknowledgement while X campaigns for term 4; c, the
+// message of term 2 held since step 2, reaches its receiver; then X's
+// delayed vote request of term 4 reaches F. It reports whether the
+// schedule was reached and the lease violation it found, if any.
+func lateRace(n *lateNet, c core.MessageValue) (bool, string) {
+	g, f, x := n.nodes[lateG], n.nodes[lateF], n.nodes[lateX]
 
 	// 4. X hears G again (F and X still cut from each other) and catches up.
 	n.policy = func(m core.MessageValue) lateVerdict {
@@ -352,7 +388,7 @@ func lateForwardSchedule(t *testing.T, seed uint64, restamp bool) (bool, string)
 		return false, ""
 	}
 
-	// 7. The delayed forward of term 2 reaches X, candidate of term 4.
+	// 7. The delayed message of term 2 reaches its receiver.
 	n.deliver(c)
 	fTerm := f.Status().Term
 
@@ -370,20 +406,20 @@ func lateForwardSchedule(t *testing.T, seed uint64, restamp bool) (bool, string)
 	gs, xs := g.Status(), x.Status()
 	if gs.Role == core.RoleLeader && g.LeaseValid(n.now) && xs.Commit >= pos[0].Index && gs.Commit < pos[0].Index {
 		return true, fmt.Sprintf(
-			"F followed live leader G (term 3, last contact %v before), adopted term %d from X's answer to its delayed term-2 forward, "+
+			"F followed live leader G (term 3, last contact %v before), adopted term %d from X's answer to its delayed term-2 message (kind %#x), "+
 				"and granted X's term-4 vote; X leads term 4 and committed W at %+v, while G still leads term 3 with a valid lease "+
 				"(renewed %v, now %v) at commit %d: a lease read on G misses W (D9 (b))",
-			n.now.Sub(f.lastLeaderContact), fTerm, pos[0], renewed.Sub(t0), n.now.Sub(t0), gs.Commit)
+			n.now.Sub(f.lastLeaderContact), fTerm, uint8(c.Kind), pos[0], renewed.Sub(t0), n.now.Sub(t0), gs.Commit)
 	}
 	return true, ""
 }
 
 // lateForwardSeeds plays seeds 1 to 64 and returns how many reached the
 // schedule, how many of those violated the lease, and the first violation.
-func lateForwardSeeds(t *testing.T, restamp bool) (int, int, string) {
+func lateForwardSeeds(t *testing.T, restamp bool, before ...core.NodeID) (int, int, string) {
 	reached, violated, first := 0, 0, ""
 	for seed := uint64(1); seed <= 64; seed++ {
-		ok, violation := lateForwardSchedule(t, seed, restamp)
+		ok, violation := lateForwardSchedule(t, seed, restamp, before...)
 		if !ok {
 			continue
 		}
@@ -400,8 +436,10 @@ func lateForwardSeeds(t *testing.T, restamp bool) (int, int, string) {
 
 // TestALeaseHoldsAcrossALateForwardAnswer is D9 (b) on the review's
 // schedule of #1457 (D1): every seed that reaches it keeps the lease, the
-// answer kept at its forward's term. With the answer re-stamped at its
-// sender's term, the step function's answer before the fix, every such seed
+// answer kept at its forward's term, and so does every seed when the answer
+// is re-stamped at its sender's term but read by this release, which never
+// takes an answer's later term (#1472). Re-stamped and read by a release
+// before #1472, the step function before both fixes, every such seed
 // violates it: the schedule is the one that catches it.
 func TestALeaseHoldsAcrossALateForwardAnswer(t *testing.T) {
 	reached, violated, first := lateForwardSeeds(t, false)
@@ -411,9 +449,14 @@ func TestALeaseHoldsAcrossALateForwardAnswer(t *testing.T) {
 	if violated > 0 {
 		t.Fatalf("%d of %d seeds that reached the schedule violated the lease; first: %s", violated, reached, first)
 	}
-	reachedRe, violatedRe, firstRe := lateForwardSeeds(t, true)
-	if violatedRe == 0 {
-		t.Fatalf("the answer re-stamped with its sender's term violated no lease over %d seeds that reached the schedule: it catches nothing (is the late forward still answered?)", reachedRe)
+	reachedRd, violatedRd, firstRd := lateForwardSeeds(t, true)
+	if violatedRd > 0 {
+		t.Fatalf("re-stamped and read by this release, %d of %d seeds violated the lease; first: %s", violatedRd, reachedRd, firstRd)
 	}
-	t.Logf("%d seeds reached the schedule, no violation; re-stamped, %d of %d violated it, first: %s", reached, violatedRe, reachedRe, firstRe)
+	reachedRe, violatedRe, firstRe := lateForwardSeeds(t, true, lateG, lateF, lateX)
+	if violatedRe == 0 {
+		t.Fatalf("the answer re-stamped with its sender's term, read by a release before #1472, violated no lease over %d seeds that reached the schedule: it catches nothing (is the late forward still answered?)", reachedRe)
+	}
+	t.Logf("%d seeds reached the schedule, no violation; re-stamped, none of %d read by this release, %d of %d read by a previous release violated it, first: %s",
+		reached, reachedRd, violatedRe, reachedRe, firstRe)
 }

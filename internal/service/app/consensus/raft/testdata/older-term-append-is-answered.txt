@@ -1,6 +1,6 @@
-# R1-18: an append or a heartbeat of an older term is refused with this
-# node's term, so its stale leader steps down; a vote of an older term is
-# dropped unanswered.
+# R1-18: an append or a heartbeat of an older term is refused at that term,
+# NOT_LEADER, so its stale leader steps down at its own term and never takes
+# this node's (#1472); a vote of an older term is dropped unanswered.
 add-nodes 1 voters=1,2,3 term=3
 ----
 ok
@@ -22,8 +22,8 @@ process-ready 1
 > 1 handling Ready
   seq=1
   AfterSync:
-    1->2 MsgAppResp term=3 reject
-    1->2 MsgAppResp term=3 reject
+    1->2 MsgAppResp term=2 reject code=0.2.57.2
+    1->2 MsgAppResp term=2 reject code=0.2.57.2
   Membership 1@0 2@0 3@0
 
 raft-state

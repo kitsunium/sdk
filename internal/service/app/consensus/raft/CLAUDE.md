@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-12T12:00:00Z -->
+<!-- updated: 2026-11-15T16:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -15,7 +15,14 @@ and `TestMutationsAreCaught` (one mutation per cited bug, behind the
 unexported `Config.mut`), and the linearizability checker with its negative
 control (`lincheck_internal_test.go`). `simOptions.speaks` runs a node of a
 previous release in a mixed cluster, read at each start so a restart
-upgrades it (`TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`).
+upgrades it (`TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`). Such a node also
+runs as every release before #1472 (`Config.termFromAnswers`, set by the
+package's tests alone): it answers older-term traffic at its own term,
+takes the later term an answer carries and reads a refusal of its own term
+as one of its log. The checks of #1472 take that switch as their mutation,
+the type being full (`ztermanswer_internal_test.go`), and
+`TestLeaseReadsAreLinearizableUnderFaultsInAMixedCluster` serves reads under
+the lease in clusters of both releases.
 `simOptions.applyLag` bounds apply by `MaxApplyLagBytes` and makes it
 asynchronous, the entries handed by index read back from the disk model
 and a restart loading the committed commands past `recent` without their
@@ -620,6 +627,36 @@ under coverage before touching `shard_count`.
   `TestAForwardAnswerNeverRaisesTheForwardersTerm`,
   `TestALeaseHoldsAcrossALateForwardAnswer`; no mutation, the type is
   full: each test takes its mutation as an argument, the answer re-stamped
-  in flight with its sender's term, and requires it caught). The same
-  class through an older append's or heartbeat's answer (`answerOlderTerm`,
-  R1-18) predates this and is #1472.
+  in flight with its sender's term and read by a node run as a release
+  before #1472, and requires it caught; re-stamped but read by this
+  release, the answer is dropped, and no lease breaks).
+- Answer an append, a heartbeat or a PreVote of an older term at this
+  node's term, or take the later term an answer carries (`answerOlderTerm`,
+  `answerKind`, `stepLaterAnswer`, #1472). R1-18's refusal carried the
+  refuser's term: read by a node that had led the older term and since
+  followed a live leader, it raised that node's term with no vote and no
+  leader, past D5's live-leader refusal, and the node granted the next vote
+  of the term while the leader it had just acknowledged served lease reads
+  (D9 (b); D0 of the safety review of #1457, 48 schedules of 48 on `main`).
+  The refusal stays at the request's term, `NOT_LEADER` at index 0; a
+  PreVote of an older term is refused at the term it asks for, and a
+  deposed leader refuses its reads at the term they were asked at
+  (`readReq.term`). A leader that reads the refusal at its own term steps
+  down there, never at the refuser's, and does not count it as contact
+  (`refusedForLaterTerm`, R1-18 kept: it falls within a heartbeat interval
+  and a round trip, and a PreVote round a term brings the cluster to the
+  stuck member's, k rounds for a member k terms ahead). An answer of a
+  later term, a previous release's, is never taken: a granted PreVote's
+  moves nothing, a refused one ends the campaign that asked at the term it
+  asked for and is dropped by any other role, a refused append or heartbeat
+  steps a leader down at its own term, and any other is dropped
+  (`TestAnAnswerNeverRaisesItsReceiversTerm`,
+  `TestAnOlderTermIsAnsweredAtItsTerm`,
+  `TestAStaleLeaderStepsDownAtItsOwnTerm`,
+  `TestAStuckMemberIsReadmittedAfterItsLeaderStepsDown`,
+  `TestALeaseHoldsAcrossALateAppendAnswer`; no mutation, the type is full:
+  each check runs its nodes as a release before #1472 too
+  (`termFromAnswers`) and requires it caught). A leader of a previous
+  release reads this release's refusal as one of its log: it keeps leading,
+  the stuck member waits for its upgrade, and the refusal confirms no round,
+  extends no lease and commits nothing.

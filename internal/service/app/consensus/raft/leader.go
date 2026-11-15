@@ -321,11 +321,16 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr := r.prs[m.From]
 	switch m.Kind {
 	case core.MsgReadIndex:
-		r.pendingReads = append(r.pendingReads, readReq{ctx: m.Context, from: m.From})
+		r.pendingReads = append(r.pendingReads, readReq{ctx: m.Context, from: m.From, term: m.Term})
 		r.serveLeaseRead(m.Flags&core.FlagNoLease == 0)
 		return
 	case core.MsgVoteResp, core.MsgPreVoteResp:
 		return
+	case core.MsgAppResp:
+		if r.refusedForLaterTerm(m) {
+			r.becomeFollower(r.term, 0)
+			return
+		}
 	default:
 		// Every other kind is from a member: its progress is read below.
 	}
@@ -348,6 +353,17 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 		// Nothing else carries news for a leader of this term: the
 		// contact above is all it records.
 	}
+}
+
+// refusedForLaterTerm reports whether m is a member's refusal of this
+// leader's append or heartbeat for a later term it holds, which it answers
+// at this leader's term (answerOlderTerm, #1472): the leader then steps down
+// at its own term, never the member's, and a PreVote round decides
+// (R1-18). It is not contact: taken as one, the refusals of the members it
+// no longer leads kept the leader past CheckQuorum. A node run as a
+// previous release reads it as a refusal of its log (termFromAnswers).
+func (r *Raft) refusedForLaterTerm(m core.MessageValue) bool {
+	return m.Reject && m.Code == codeNotLeader && !r.cfg.termFromAnswers
 }
 
 // handleHeartbeatResp acknowledges every round up to the one answered,
@@ -1774,12 +1790,21 @@ func (r *Raft) dropRoundsThrough(confirmed uint64) {
 
 // answerRead answers a read at index, or refuses it with code: locally in
 // Ready.ReadStates, or with a message to the follower that forwarded it.
+//
+// The answer is at the term the read was asked at (#1472), which is this
+// leader's but for the refusals a deposed leader sends from the term it
+// moved to: stamped with that later term, they raised the asker's past D5's
+// live-leader refusal.
 func (r *Raft) answerRead(q readReq, index uint64, code errs.Code) {
 	if q.from == 0 || q.from == r.id {
 		r.rd.ReadStates = append(r.rd.ReadStates, ReadState{Context: q.ctx, Index: index, Code: code})
 		return
 	}
-	r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})
+	term := q.term
+	if r.cfg.termFromAnswers {
+		term = r.term
+	}
+	r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code, Term: term})
 }
 
 // ---- leadership transfer ----

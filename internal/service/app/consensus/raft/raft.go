@@ -148,6 +148,14 @@ type Config struct {
 	// shown to be the safety on its own (#918); the mutations' type is
 	// full.
 	sessionUnchecked bool
+	// termFromAnswers, set by the package's own tests alone, runs this node
+	// as every release before #1472: it answers older-term traffic, and a
+	// deposed leadership's reads, at its own term, takes the later term an
+	// answer carries, and reads a refusal of its own term as a refusal of
+	// its log. It is the mutation the checks of that rule take as an
+	// argument, the mutations' type being full, and a node of a previous
+	// release in the simulator.
+	termFromAnswers bool
 }
 
 // fwdEntry is one forwarded command a leader appended.
@@ -378,6 +386,7 @@ type readReq struct {
 	index uint64
 	from  core.NodeID // 0 for local
 	round uint64
+	term  uint64 // the term a follower asked it at, its answer's (#1472)
 }
 
 // leaderHeard is what a node that does not lead last heard of the leader

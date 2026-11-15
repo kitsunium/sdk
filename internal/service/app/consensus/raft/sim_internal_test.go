@@ -151,8 +151,10 @@ type simOptions struct {
 	// keeping its log and starting with no table.
 	snapLoss float64
 	// speaks, per node, is the protocol version it runs in place of
-	// ProtocolMax: a node of a previous release in a mixed cluster. Read at
-	// each start, so a restart after a change upgrades the node.
+	// ProtocolMax: a node of a previous release in a mixed cluster, which
+	// also answers older-term traffic and reads a later term's answers as
+	// every release before #1472 (termFromAnswers). Read at each start, so
+	// a restart after a change upgrades the node.
 	speaks map[core.NodeID]uint32
 	// applyLag, when not 0, is every node's MaxApplyLagBytes: apply is then
 	// asynchronous, an item every few milliseconds, the entries handed by
@@ -266,6 +268,7 @@ func (s *sim) cfg(id core.NodeID) Config {
 		MaxInflight: 16, MaxInflightBytes: 1 << 20, MaxBatchBytes: 64 << 10, MinVoters: 1,
 		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent,
 		MaxApplyLagBytes: s.opt.applyLag, speaks: s.opt.speaks[id], sessionUnchecked: s.opt.sessionUnchecked,
+		termFromAnswers: s.opt.speaks[id] != 0,
 	}
 }
 

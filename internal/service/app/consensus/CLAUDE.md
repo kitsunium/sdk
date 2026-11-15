@@ -709,7 +709,16 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   the forwarder then granted a vote of that term, and a lease read on the
   leader it had just acknowledged could miss a committed write (the safety
   review of #1457; raft's `TestAForwardAnswerNeverRaisesTheForwardersTerm`,
-  `TestALeaseHoldsAcrossALateForwardAnswer`).
+  `TestALeaseHoldsAcrossALateForwardAnswer`). The class is closed in raft
+  at its source (#1472): every answer stays at its request's term, R1-18's
+  refusal of an older append or heartbeat and a deposed leader's read
+  refusal included, and no node takes a later term from an answer; a
+  leader refused for a later term steps down at its own term, within a
+  heartbeat interval, and a PreVote round a term readmits the stuck member
+  (raft's `answerOlderTerm`, `stepLaterAnswer`,
+  `TestALeaseHoldsAcrossALateAppendAnswer`,
+  `TestAStuckMemberIsReadmittedAfterItsLeaderStepsDown`). The driver
+  filters no term before `Step` and needs nothing more.
 - Forward a JOIN from a node that would answer it only once it applied the
   `AddLearner` itself: a learner still waiting for its snapshot held it for
   its whole deadline and answered OUTCOME_UNKNOWN although the leader had

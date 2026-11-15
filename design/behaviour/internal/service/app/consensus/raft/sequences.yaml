@@ -573,6 +573,8 @@ sequences:
         kind: self
       - id: r.serveLeaseRead
         kind: internal
+      - id: r.becomeFollower
+        kind: internal
       - id: pr.noteSilence
         kind: internal
       - id: r.handleAppResp
@@ -587,13 +589,21 @@ sequences:
             - case: core.MsgReadIndex
               do:
                 - set: r.pendingReads
-                  value: "append(r.pendingReads, readReq{ctx: m.Context, from: m.From})"
+                  value: "append(r.pendingReads, readReq{ctx: m.Context, from: m.From, term: m.Term})"
                 - eval: r.serveLeaseRead(m.Flags&core.FlagNoLease == 0)
                   to: r.serveLeaseRead
                 - return: ""
             - case: core.MsgVoteResp, core.MsgPreVoteResp
               do:
                 - return: ""
+            - case: core.MsgAppResp
+              do:
+                - opt:
+                    do:
+                      - eval: r.becomeFollower(r.term, 0)
+                        to: r.becomeFollower
+                      - return: ""
+                    when: r.refusedForLaterTerm(m)
             - default: true
           "on": m.Kind
       - opt:
@@ -623,6 +633,9 @@ sequences:
                   to: r.handleHeartbeatResp
             - default: true
           "on": m.Kind
+  - of: (*Raft).refusedForLaterTerm
+    steps:
+      - return: m.Reject && m.Code == codeNotLeader && !r.cfg.termFromAnswers
   - of: (*Raft).handleHeartbeatResp
     participants:
       - id: caller
@@ -2342,7 +2355,14 @@ sequences:
               value: "append(r.rd.ReadStates, ReadState{Context: q.ctx, Index: index, Code: code})"
             - return: ""
           when: q.from == 0 || q.from == r.id
-      - eval: "r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})"
+      - bind: term
+        eval: q.term
+      - opt:
+          do:
+            - set: term
+              value: r.term
+          when: r.cfg.termFromAnswers
+      - eval: "r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code, Term: term})"
         to: r.send
   - of: (*Raft).TransferLeadership
     participants:
@@ -5304,6 +5324,8 @@ sequences:
         kind: actor
       - id: (*Raft).stepHigherTerm
         kind: self
+      - id: r.stepLaterAnswer
+        kind: internal
       - id: r.adoptTerm
         kind: internal
     steps:
@@ -5313,9 +5335,51 @@ sequences:
           when: |-
             (m.Kind == core.MsgTimeoutNow && !r.mutated(mutTimeoutNowAnyTerm)) ||
             		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && r.refuseForLiveLeader(now, m))
+      - opt:
+          do:
+            - return: r.stepLaterAnswer(m)
+              to: r.stepLaterAnswer
+          when: answerKind(m.Kind) && !r.cfg.termFromAnswers
       - eval: r.adoptTerm(m)
         to: r.adoptTerm
       - return: "true"
+  - of: answerKind
+    steps:
+      - switch:
+          cases:
+            - case: core.MsgPreVoteResp, core.MsgVoteResp, core.MsgHeartbeatResp, core.MsgReadIndexResp, core.MsgForwardAdminResp, core.MsgAppResp, core.MsgForwardResp
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": k
+  - of: (*Raft).stepLaterAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepLaterAnswer
+        kind: self
+      - id: r.becomeFollower
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: m.Kind == core.MsgPreVoteResp && !m.Reject
+              do:
+                - return: "true"
+            - case: m.Kind == core.MsgPreVoteResp && r.role == core.RolePreCandidate
+              do:
+                - op: ++
+                  set: r.preVotesLost
+                - eval: r.becomeFollower(r.term+1, 0)
+                  to: r.becomeFollower
+            - case: m.Kind == core.MsgAppResp && r.role == core.RoleLeader
+              do:
+                - eval: r.becomeFollower(r.term, 0)
+                  to: r.becomeFollower
+            - default: true
+      - return: "false"
   - of: forwardKind
     steps:
       - switch:
@@ -5359,6 +5423,35 @@ sequences:
       - id: caller
         kind: actor
       - id: (*Raft).answerOlderTerm
+        kind: self
+      - id: r.answerOlderTermAsBefore
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: r.answerOlderTermAsBefore(m)
+              to: r.answerOlderTermAsBefore
+            - return: ""
+          when: r.cfg.termFromAnswers
+      - switch:
+          cases:
+            - case: core.MsgApp, core.MsgHeartbeat
+              do:
+                - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Term: m.Term, Reject: true, Code: codeNotLeader})"
+                  to: r.send
+            - case: core.MsgPreVote
+              do:
+                - eval: "r.send(core.MessageValue{Kind: core.MsgPreVoteResp, To: m.From, Term: m.Term, Reject: true})"
+                  to: r.send
+            - default: true
+          "on": m.Kind
+  - of: (*Raft).answerOlderTermAsBefore
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).answerOlderTermAsBefore
         kind: self
       - id: r.send
         kind: internal

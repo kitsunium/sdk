@@ -7554,6 +7554,96 @@ tests carry theirs).
   at its sender's term, which they must catch: red on #1457's step
   function (the vote granted; 47 of 47 schedules violate the lease).
 
+## Amendment — an answer stays at the term of the request it answers, and no node takes a later term from one (2026-11-15, #1472)
+
+**Status: the principle is the owner's decision of 2026-11-15 on
+[#1472](https://github.com/kitsunium/sdk/issues/1472) (its fix direction 2:
+a node does not adopt a higher term carried by an answer to older-term
+traffic, the answer staying at the sender's term, closing the class at its
+source, consistent with R1-18). This text awaits the owner's validation.**
+No frame changes, no protocol raise, no raft mutation (the type is full:
+the tests carry theirs). The Decision is unchanged; R1-18 of D5 reads as
+amended below.
+
+- **The defect (D0 of the safety review of #1457).** R1-18 answered an
+  append or a heartbeat of an older term with a refusal stamped with the
+  refuser's term, so that the stale leader would learn of it. The node
+  that reads the refusal may no longer be that leader. A node that led
+  term 2, its heartbeat to X delayed, followed G at term 3 and had just
+  acknowledged G's round when X, a candidate of term 4, refused that
+  heartbeat: it took term 4 from the refusal with no vote and no leader,
+  through no live-leader check, then granted X's vote request of term 4,
+  delayed on the control lane while the refusal crossed the data lane,
+  which keep no order between them. X led term 4 and committed a write
+  while G still served lease reads that missed it: D5's refusal and the
+  lease's condition (b) of D9 broken. Three step functions over a network
+  that only delays, drops and reorders lanes (D15's fault model): 48
+  schedules of 48 violated the lease on `main`, on #1457 and with its fix
+  of the forward's answer. ReadIndex, the default, was not affected. A
+  deposed leader's refusal of the reads it held, sent from the term it
+  moved to, and a PreVote's refusal read after its campaign ended, were
+  the same class.
+- **The rule.** An answer is at the term of the request it answers, and
+  its receiver never takes a later term from an answer.
+  - A node refuses an append or a heartbeat of an older term at that term,
+    `Reject` with `Code` `NOT_LEADER` at index 0; a PreVote of an older term
+    at the term it asks for. A deposed leader refuses the reads it held at
+    the term they were asked at. A forward's answer keeps the forward's term
+    (the amendment of 2026-11-15, #1447).
+  - An answer of a later term than its receiver's, which only a release
+    before this one sends, is never adopted. A granted PreVote's
+    prospective term moves nothing, as before. A refused PreVote ends the
+    campaign that asked, lost at the term it asked for, never a later one,
+    and is dropped by any other role, whose campaign is over. A refused
+    append or heartbeat steps a leader down at its own term. Any other
+    answer is dropped.
+- **R1-18, amended.** Its first rule, a refusal never moves a term, now
+  holds for the refused leader too. Its second reads: a node stuck at a
+  higher term answers an AppendEntries of a lower term at that term,
+  `NOT_LEADER`; the leader steps down at its own term, never the stuck
+  node's, and a PreVote round decides. The leader falls on the refusal of
+  its next append or heartbeat to the stuck node, within a heartbeat
+  interval and a round trip (at most 100 ms after the heal with the
+  default timing, over 16 seeds), and does not count the refusal as
+  contact for CheckQuorum. It no longer takes the stuck node's term, and a
+  PreVote of an older term is refused at the term it asks for, so the
+  cluster reaches the stuck node's term one PreVote round at a time: a
+  node one term ahead is followed as before (1.88 s at most), a node three
+  terms ahead after three rounds (about 4.5 s at most, against 1.88 s
+  before). Under PreVote a node gets ahead only by campaigns it lost.
+- **Mixed clusters.** The frame is unchanged: `Code` is a field every
+  release parses, and none reads it on an append's answer. A node of a
+  previous release drops this release's refusal when it reads it at an
+  older term; a node of this release never takes the later term of a
+  previous release's refusal: the class is closed wherever one of the two
+  nodes runs this release, and stays open only between two nodes of
+  previous releases. A leader of a previous release reads this release's
+  refusal at its own term as a refusal of its log: it does not step down,
+  so the stuck node waits for that leader's upgrade or deposition; it
+  counts the refusal as contact, finds nothing outstanding at index 0 and
+  resends nothing; the refusal acknowledges no round, so it extends no
+  lease, confirms no read and commits nothing.
+- **Tests.** Raft's `TestALeaseHoldsAcrossALateAppendAnswer` (the
+  review's schedule, 64 seeds: 48 reach it and none violates the lease,
+  with X or F alone run as a previous release too; every node run as a
+  previous release, 48 of 48 violate it, as on the base),
+  `TestAnAnswerNeverRaisesItsReceiversTerm` (each kind of answer at a
+  later term leaves a follower of a live leader at its term and refusing
+  the next vote; a refused pre-candidate takes the term it asked for),
+  `TestAnOlderTermIsAnsweredAtItsTerm`,
+  `TestAStaleLeaderStepsDownAtItsOwnTerm` (a refusal of this release or of
+  a previous one), `TestAStuckMemberIsReadmittedAfterItsLeaderStepsDown`
+  (R1-18 end to end on three step functions, the step-down within a
+  heartbeat interval, the stuck node following a leader with the cluster's
+  log), `TestLeaseReadsAreLinearizableUnderFaultsInAMixedCluster` (reads
+  under the lease, partitions, drops and crashes, one or two nodes of a
+  previous release). Each check is also run with its nodes as a release
+  before this one (`termFromAnswers`), which it must catch, and the
+  simulator runs every node of `simOptions.speaks` so.
+  `TestALeaseHoldsAcrossALateForwardAnswer` now reads its re-stamped
+  answers on a previous release, which catches them, and on this one,
+  which drops them.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7611,6 +7701,7 @@ tests carry theirs).
 | #911 | bench lane, 2026-11-11 | `make bench` runs the consensus lane (`consensus_bench_test`, race off, `manual`) and writes `internal/service/app/consensus/BENCH.md`; D16's commit target is revised to 2 × the nearest RTT + 4 × the fsync p99, its throughput and failover targets confirmed, each on the `BENCH.md` row it rests on |
 | #1422 | the owner's decision, 2026-11-14 | a node that cannot answer a JOIN at once — any but the leader and a voter level with it — refuses it `NOT_LEADER`, the leader's id and address in the reason, before the slot's rate and the authorizer, and the shipped joiners try the named leader next; no format change, no protocol raise, no raft mutation (amendment of 2026-11-14, #1422) |
 | #1447, #1440 | Raft lot L1, 2026-11-15 | a voter that does not know its leader's last index refuses a JOIN `NOT_LEADER`, the leader's address named only when known; a forward and its answer of an older term are handled at the receiver's term, so a forward that crossed a change of term is answered and no longer left to `OUTCOME_UNKNOWN`, the answer carrying the forward's term and never the receiver's later one, which raised the forwarder's past D5's live-leader refusal and broke D9 (b)'s lease (the safety review of #1457); no format change, no protocol raise, no raft mutation (amendment of 2026-11-15, #1447, #1440) |
+| #1472 | the owner's decision, 2026-11-15; text awaiting the owner's validation | an answer stays at the term of the request it answers, R1-18's refusal of an older append or heartbeat at that term with `NOT_LEADER`, a PreVote's at the term it asks for, a deposed leader's read refusals at the term they were asked at, and no node takes a later term from an answer; the refused leader steps down at its own term and a PreVote round a term readmits the stuck node; no format change, no protocol raise, no raft mutation (amendment of 2026-11-15, #1472) |
 
 ## raft-sql-poc (owner's prior Raft)
 

@@ -30,8 +30,9 @@ func (r *Raft) Step(now time.Time, m core.MessageValue) {
 
 // stepTerm reconciles m's term with this node's before anything else reads
 // m: a higher term makes it a follower, unless the message is one a higher
-// term must not impose; an older term is answered so its sender steps down,
-// but for a forward and its answer, which go on at this node's term.
+// term must not impose, an answer above all (#1472); an older term is
+// answered so its sender steps down, but for a forward and its answer,
+// which go on at this node's term.
 // It reports whether m goes on to be handled at this node's term.
 func (r *Raft) stepTerm(now time.Time, m core.MessageValue) bool {
 	switch {
@@ -64,8 +65,52 @@ func (r *Raft) stepHigherTerm(now time.Time, m core.MessageValue) bool {
 		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && r.refuseForLiveLeader(now, m)) {
 		return false
 	}
+	if answerKind(m.Kind) && !r.cfg.termFromAnswers {
+		return r.stepLaterAnswer(m)
+	}
 	r.adoptTerm(m)
 	return true
+}
+
+// answerKind reports whether k answers a message its receiver sent. An
+// answer is at the term of the request it answers (#1472), and that
+// request was at its receiver's term at most, or, a PreVote, at the term it
+// asked for: an answer past that term answers older-term traffic.
+func answerKind(k core.MessageKind) bool {
+	switch k {
+	case core.MsgPreVoteResp, core.MsgVoteResp, core.MsgHeartbeatResp, core.MsgReadIndexResp,
+		core.MsgForwardAdminResp, core.MsgAppResp, core.MsgForwardResp:
+		return true
+	default:
+		return false
+	}
+}
+
+// stepLaterAnswer reads an answer of a later term than this node's, whose
+// term it never takes (#1472): a node of a previous release answers
+// older-term traffic at its own term. Taken, that term came with no vote
+// and no leader, past D5's live-leader refusal: a follower that had just
+// heard its live leader granted the next vote of the term, and a lease
+// read on that leader missed a write the new leader committed (D9 (b)).
+// A granted PreVote's prospective term moves nothing; a refused one ends
+// the campaign that asked, lost (D13) at the term it asked for, never a
+// later one, and is dropped by any other role, whose campaign is over; a
+// refused append or heartbeat steps a leader down at its own term
+// (R1-18). Any other is dropped. It reports whether m goes on.
+func (r *Raft) stepLaterAnswer(m core.MessageValue) bool {
+	switch {
+	case m.Kind == core.MsgPreVoteResp && !m.Reject:
+		return true
+	case m.Kind == core.MsgPreVoteResp && r.role == core.RolePreCandidate:
+		r.preVotesLost++
+		r.becomeFollower(r.term+1, 0)
+	case m.Kind == core.MsgAppResp && r.role == core.RoleLeader:
+		r.becomeFollower(r.term, 0)
+	default:
+		// An answer to a campaign or a leadership this node no longer
+		// runs, or of a kind no release answers past its request's term.
+	}
+	return false
 }
 
 // forwardKind reports whether k is a forwarded proposal or the answer to
@@ -81,7 +126,9 @@ func forwardKind(k core.MessageKind) bool {
 
 // adoptTerm makes this node a follower at m's higher term, following its
 // sender when m comes from a leader. A PreVote, and the granted answer to
-// one, carry a prospective term and move nothing.
+// one, carry a prospective term and move nothing. An answer reaches it only
+// on a node run as a previous release (termFromAnswers); stepLaterAnswer
+// reads it otherwise.
 func (r *Raft) adoptTerm(m core.MessageValue) {
 	switch {
 	case m.Kind == core.MsgPreVote:
@@ -101,13 +148,40 @@ func (r *Raft) adoptTerm(m core.MessageValue) {
 }
 
 // answerOlderTerm tells the sender of an older term's append, heartbeat or
-// PreVote of the current term; anything else of an older term is dropped
-// unanswered.
+// PreVote that this node is past that term; anything else of an older term
+// is dropped unanswered. The refusal stays at the request's term, never
+// this node's later one (#1472): stamped with it, it raised the term of
+// whoever read it, the leader that sent the request or the follower it had
+// become since, with no vote and no leader, and that node then granted the
+// next vote of the term past D5's live-leader refusal (D9 (b); R1-18, a
+// refusal never moves a term).
 func (r *Raft) answerOlderTerm(m core.MessageValue) {
+	if r.cfg.termFromAnswers {
+		r.answerOlderTermAsBefore(m)
+		return
+	}
 	switch m.Kind {
 	case core.MsgApp, core.MsgHeartbeat:
-		// A leader of an older term learns of ours, so that it steps
-		// down and a PreVote round decides (R1-18).
+		// The leader of that term steps down at its own term, so that a
+		// PreVote round decides (R1-18, stepLeader). NOT_LEADER says the
+		// refusal is of the term, not of the log; at index 0 it answers
+		// no append in flight but a probe of the log's first entry, so a
+		// leader of a previous release, which reads it as a refusal of
+		// its log, resends nothing (R2-07).
+		r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Term: m.Term, Reject: true, Code: codeNotLeader})
+	case core.MsgPreVote:
+		r.send(core.MessageValue{Kind: core.MsgPreVoteResp, To: m.From, Term: m.Term, Reject: true})
+	default:
+		// Nothing else of an older term needs an answer.
+	}
+}
+
+// answerOlderTermAsBefore is answerOlderTerm as every release before #1472
+// answered, at this node's term, for a node the package's own tests run as
+// one (termFromAnswers).
+func (r *Raft) answerOlderTermAsBefore(m core.MessageValue) {
+	switch m.Kind {
+	case core.MsgApp, core.MsgHeartbeat:
 		r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Reject: true, Index: m.Index})
 	case core.MsgPreVote:
 		r.send(core.MessageValue{Kind: core.MsgPreVoteResp, To: m.From, Term: r.term, Reject: true})

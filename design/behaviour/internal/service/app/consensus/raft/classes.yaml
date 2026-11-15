@@ -587,6 +587,7 @@ files:
       - (*Raft).sendEntries
       - (*Raft).maybeCommit
       - (*Raft).stepLeader
+      - (*Raft).refusedForLaterTerm
       - (*Raft).handleHeartbeatResp
       - (*Raft).feedSilence
       - (*Raft).watchWindow
@@ -877,9 +878,12 @@ files:
       - (*Raft).Step
       - (*Raft).stepTerm
       - (*Raft).stepHigherTerm
+      - answerKind
+      - (*Raft).stepLaterAnswer
       - forwardKind
       - (*Raft).adoptTerm
       - (*Raft).answerOlderTerm
+      - (*Raft).answerOlderTermAsBefore
       - (*Raft).stepAnyRole
       - (*Raft).refuseForLiveLeader
       - (*Raft).validTransferFlag
@@ -1091,6 +1095,14 @@ functions:
     name: recorded
     params: v core.SessionValue, ok bool, seq uint64, sum uint32
     results: core.PositionValue, errs.Code, bool
+  - doc: |-
+      answerKind reports whether k answers a message its receiver sent. An
+      answer is at the term of the request it answers (#1472), and that
+      request was at its receiver's term at most, or, a PreVote, at the term it
+      asked for: an answer past that term answers older-term traffic.
+    name: answerKind
+    params: k core.MessageKind
+    results: bool
   - doc: |-
       forwardKind reports whether k is a forwarded proposal or the answer to
       one, both of which a submission id correlates (#1440).
@@ -1577,6 +1589,16 @@ types:
           full.
         name: sessionUnchecked
         type: bool
+      - doc: |-
+          termFromAnswers, set by the package's own tests alone, runs this node
+          as every release before #1472: it answers older-term traffic, and a
+          deposed leadership's reads, at its own term, takes the later term an
+          answer carries, and reads a refusal of its own term as a refusal of
+          its log. It is the mutation the checks of that rule take as an
+          argument, the mutations' type being full, and a node of a previous
+          release in the simulator.
+        name: termFromAnswers
+        type: bool
     kind: struct
     name: Config
   - doc: fwdEntry is one forwarded command a leader appended.
@@ -1828,6 +1850,8 @@ types:
       - name: from
         type: core.NodeID
       - name: round
+        type: uint64
+      - name: term
         type: uint64
     kind: struct
     name: readReq
@@ -2220,6 +2244,18 @@ types:
         name: stepLeader
         params: now time.Time, m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          refusedForLaterTerm reports whether m is a member's refusal of this
+          leader's append or heartbeat for a later term it holds, which it answers
+          at this leader's term (answerOlderTerm, #1472): the leader then steps down
+          at its own term, never the member's, and a PreVote round decides
+          (R1-18). It is not contact: taken as one, the refusals of the members it
+          no longer leads kept the leader past CheckQuorum. A node run as a
+          previous release reads it as a refusal of its log (termFromAnswers).
+        name: refusedForLaterTerm
+        params: m core.MessageValue
+        recv: r *Raft
+        results: bool
       - doc: |-
           handleHeartbeatResp acknowledges every round up to the one answered,
           recording the contract generation the peer applied, follows a silent
@@ -2880,6 +2916,11 @@ types:
       - doc: |-
           answerRead answers a read at index, or refuses it with code: locally in
           Ready.ReadStates, or with a message to the follower that forwarded it.
+
+          The answer is at the term the read was asked at (#1472), which is this
+          leader's but for the refusals a deposed leader sends from the term it
+          moved to: stamped with that later term, they raised the asker's past D5's
+          live-leader refusal.
         name: answerRead
         params: q readReq, index uint64, code errs.Code
         recv: r *Raft
@@ -3688,8 +3729,9 @@ types:
       - doc: |-
           stepTerm reconciles m's term with this node's before anything else reads
           m: a higher term makes it a follower, unless the message is one a higher
-          term must not impose; an older term is answered so its sender steps down,
-          but for a forward and its answer, which go on at this node's term.
+          term must not impose, an answer above all (#1472); an older term is
+          answered so its sender steps down, but for a forward and its answer,
+          which go on at this node's term.
           It reports whether m goes on to be handled at this node's term.
         name: stepTerm
         params: now time.Time, m core.MessageValue
@@ -3703,17 +3745,47 @@ types:
         recv: r *Raft
         results: bool
       - doc: |-
+          stepLaterAnswer reads an answer of a later term than this node's, whose
+          term it never takes (#1472): a node of a previous release answers
+          older-term traffic at its own term. Taken, that term came with no vote
+          and no leader, past D5's live-leader refusal: a follower that had just
+          heard its live leader granted the next vote of the term, and a lease
+          read on that leader missed a write the new leader committed (D9 (b)).
+          A granted PreVote's prospective term moves nothing; a refused one ends
+          the campaign that asked, lost (D13) at the term it asked for, never a
+          later one, and is dropped by any other role, whose campaign is over; a
+          refused append or heartbeat steps a leader down at its own term
+          (R1-18). Any other is dropped. It reports whether m goes on.
+        name: stepLaterAnswer
+        params: m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
           adoptTerm makes this node a follower at m's higher term, following its
           sender when m comes from a leader. A PreVote, and the granted answer to
-          one, carry a prospective term and move nothing.
+          one, carry a prospective term and move nothing. An answer reaches it only
+          on a node run as a previous release (termFromAnswers); stepLaterAnswer
+          reads it otherwise.
         name: adoptTerm
         params: m core.MessageValue
         recv: r *Raft
       - doc: |-
           answerOlderTerm tells the sender of an older term's append, heartbeat or
-          PreVote of the current term; anything else of an older term is dropped
-          unanswered.
+          PreVote that this node is past that term; anything else of an older term
+          is dropped unanswered. The refusal stays at the request's term, never
+          this node's later one (#1472): stamped with it, it raised the term of
+          whoever read it, the leader that sent the request or the follower it had
+          become since, with no vote and no leader, and that node then granted the
+          next vote of the term past D5's live-leader refusal (D9 (b); R1-18, a
+          refusal never moves a term).
         name: answerOlderTerm
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          answerOlderTermAsBefore is answerOlderTerm as every release before #1472
+          answered, at this node's term, for a node the package's own tests run as
+          one (termFromAnswers).
+        name: answerOlderTermAsBefore
         params: m core.MessageValue
         recv: r *Raft
       - doc: |-

@@ -99,6 +99,7 @@ go_test(
         "zseries_internal_test.go",
         "zsession_internal_test.go",
         "zstaleforward_internal_test.go",
+        "ztermanswer_internal_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":raft"],
