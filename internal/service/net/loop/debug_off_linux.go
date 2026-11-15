@@ -11,3 +11,6 @@ func threadCheck(_ int) func() bool {
 	//: no check.
 	return nil
 }
+
+// atWritableEdge compiles no hook without the loopdebug build tag.
+func atWritableEdge(_ int32) {}

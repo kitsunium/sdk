@@ -34561,7 +34561,7 @@
       "spelled": "LoopBackend",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopBackend",
       "value": "0",
-      "doc": "LoopBackendAuto takes the best backend the platform's probe reaches:\nio_uring, then epoll on Linux, kqueue on darwin, the portable backend\nelsewhere — a native backend the probe refuses falls back to it. On\nFreeBSD, OpenBSD, NetBSD and DragonFly it stays portable while no\npaired row was measured there: kqueue runs there when named,\nLoopBackendKqueue (ADR 0222).\n",
+      "doc": "LoopBackendAuto takes the best backend the platform's probe reaches:\nio_uring, then epoll on Linux, kqueue on darwin, FreeBSD, OpenBSD,\nNetBSD and DragonFly, the portable backend elsewhere — a native\nbackend the probe refuses falls back to it (ADR 0222).\n",
       "file": "core/net/loop_value.go",
       "layer": "core",
       "family": "net"
@@ -34600,7 +34600,7 @@
       "spelled": "LoopBackend",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopBackend",
       "value": "4",
-      "doc": "LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and\nDragonFly, after a staged probe (ADR 0222). LoopBackendAuto takes it on\ndarwin, where its paired gate held on macos-15; on the BSDs it runs\nonly when named.\n",
+      "doc": "LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and\nDragonFly, after a staged probe (ADR 0222). LoopBackendAuto takes it on\neach of them, its paired gate having held on macos-15; named, it never\nfalls back.\n",
       "file": "core/net/loop_value.go",
       "layer": "core",
       "family": "net"

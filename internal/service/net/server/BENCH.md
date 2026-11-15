@@ -232,6 +232,44 @@ above, including the one that turned out not to help.
   stopped coming from `kernel/concur/buffer`'s 16 KiB class — check that
   `acquire` still calls `buffer.GetSize(size)`.
 
+## Edition 2026-11-15 (second) — an idle h2c connection within 256 B (#961), Shards(1) on the L3 run (#977), kqueue for auto on the BSDs (#976)
+
+**An idle h2c connection's Go heap** (`TestLoopHTTP2_idleMemory` and its auto twin:
+two loops, 10 000 raw clients that sent the preface and an empty SETTINGS, the
+median of three settled readings; AMD EPYC 7351P, 8 vCPU, `GOMAXPROCS=4`, Linux
+6.12.101, go1.27.4). #961's original bound, the loop's documented 256 B, is held:
+
+| Backend | before (base `ff2af942a`) | after | HTTP/1.1, same harness, after |
+|---|---|---|---|
+| epoll | 344 B | 218 B | 330 B |
+| io_uring (`auto`) | 365 B | 240 B | 341 B |
+| epoll, linux/386 | — | 217 B | 245 B |
+
+The heap profile of the base split an idle h2c connection into the loop's slot
+table (a 144-byte `connCtl` and its growth, 148–177 B), its timer link (16–18 B),
+io_uring's sweep epochs and receive bookkeeping (17 B; the sweep exists before
+Linux 6.13 only) and the adapter's entry (152 bytes, 159–178 B with its growth).
+A file body's state moved out of the slot into the ring's file table (`connCtl`
+104 bytes), and the HPACK decoder, the open requests and two narrowed counters out
+of the adapter's entry (80 bytes): taken when a connection uses them. The loop
+alone (`TestMemory_idleConnection`) reads 137 B on epoll and 148 B on io_uring,
+178 B and 191 B before. The HTTP/1.1 column is the http1 adapter's state for a
+request begun, logged, not bounded by #961.
+
+**Shards(1) against the base on the L3 run** (`TestShardsL3_oneSocketIsTheBase`):
+L3's load, every datagram stamped, to a datagram group with `Shards(1)` and to one
+without the option, both served in the receiver's namespace; each binds one socket
+without `SO_REUSEPORT`, reports one shard and reads all 400 000 once, byte for byte.
+Its lane is net-kernel-gate's bench job, after the L3 rounds (veth, root): that
+run judges it. Over loopback here, with the same sender and 400 032 datagrams a
+group: 400 032 read exact on each, none differing, none twice.
+
+**kqueue for auto on FreeBSD, OpenBSD, NetBSD and DragonFly** (ADR 0222 amended
+2026-11-15): no new number. The gate auto's choice waits on is the macos-15 row of
+the 2026-11-13 edition (`kqueue`, 0.3313–0.3995 against P6's 0.7); the backend is
+one driver on darwin and the BSDs, whose loop and server suites pass on the
+FreeBSD, OpenBSD and NetBSD guests (e2e-cross run 43668177804).
+
 ## Edition 2026-11-15 — a file's copy at 0 B/op (#970), the adapter's cost and HTTP/2's counts (#966)
 
 The box of the 2026-11-13 edition below (AMD EPYC 7351P, 8 vCPU, `GOMAXPROCS=4`,

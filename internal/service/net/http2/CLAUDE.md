@@ -55,7 +55,7 @@ responses are `internal/core/net`'s `HTTP1RequestValue` and
 | `fuzz_internal_test.go` | `FuzzDecode`, `FuzzParseFrameHeader`, `FuzzEncoderDecoderRoundTrip` |
 | `conn_external_test.go` | RFC 9113 §5.1's transitions, one by one; 101st stream; Rapid Reset and CONTINUATION floods; PING, SETTINGS and unknown floods; negative and overflowing windows; flow control, coalesced credits, the hold |
 | `conn_goclient_external_test.go` | the legal paths through a real Go `http.Transport` (h2c), a stand-in for the loop adapter of #961 over `Lane` |
-| `conn_internal_test.go` | `Conn` and `streamState` hold no pointer |
+| `conn_internal_test.go` | `Conn`, the adapter's entry, `connRequests` and `streamState` hold no pointer; the entry stays within `entryBudget` (80 bytes, #961) |
 | `perf_fixtures_test.go`, `gen_perf_test.go`, `http2_bench_test.go` | the `allocs: 0` budgets (race off) and the benchmarks `BENCH.md` records |
 
 ## Why-this-shape
@@ -86,7 +86,14 @@ responses are `internal/core/net`'s `HTTP1RequestValue` and
   what it holds in the lane's arenas (streams, table, hold) — no pointer, no
   slice, so a table of them costs the collector nothing (ADR 0186 §D7), held to
   by a test that walks the type, and an idle connection pays neither a table nor
-  a hold.
+  a hold. Nor a decoder: the HPACK decoder's bookkeeping lives beside its table
+  (`tableArena.decoders`), taken at the first field block, the peer's SETTINGS
+  ACK kept in a flag until then; the adapter keeps a connection's open requests
+  by that table (`laneState.tableReqs`), a request being opened only after a
+  decode. The two counters a block or a batch bounds are narrow (`control` a
+  uint16, `scanFrames` a uint8), so `Conn` is 68 bytes and the adapter's entry
+  80 (`entryBudget`): with the loop's slot, an idle h2c connection costs at most
+  the loop's 256 B of Go heap (#961, `TestLoopHTTP2_idleMemory`).
 - **A stream's state is an index into the lane's arena.** Open streams are a
   list threaded through it, newest first, which is sorted by id: a lookup stops at
   the first older id. The arena and its free list grow to a lane's high water

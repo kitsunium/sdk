@@ -574,3 +574,35 @@ flight now starts zero-copy only once no refused send's notification is
 owed; a flight's sends are sequential and a refused flight goes on plainly,
 so a refusal is one a flight and `zcVoid` never passes one
 (`TestSendZC_noZeroCopyWhileARefusalIsOwed`).
+
+## Amendment 2026-11-15 (#857): `tcp-notsent-lowat` is judged on the bytes not yet sent
+
+#857's original acceptance reads "a 4 MiB Write to a peer that stops reading
+reports OnWritable only once SIOCOUTQ falls below the lowat". The kernel's
+SIOCOUTQ is not the count the lowat governs: it answers `write_seq − snd_una`,
+the bytes not yet acknowledged (`net/ipv4/tcp.c`'s `tcp_ioctl`;
+`include/uapi/linux/sockios.h`: "not sent + not acked"), while
+`TCP_NOTSENT_LOWAT` bounds `write_seq − snd_nxt`, the bytes not yet sent —
+SIOCOUTQNSD, `tcpi_notsent_bytes`, the "unsent data" tcp(7) attributes to
+SIOCOUTQ — and the kernel reports a socket writable once
+`(notsent << 1) < lowat`, whatever is in flight (`tcp_stream_memory_free`,
+`tcp_poll`, `sk_stream_write_space`). Measured on Linux 6.12 with a 128 KiB
+lowat: with the peer reading nothing the two counts are equal (141 504),
+nothing being in flight against a closed window; at each of epoll's
+writability reports, read on the loop's thread before its flush, the bytes
+not yet sent are at most 59 840 while SIOCOUTQ is still at or past the lowat at
+20 of 23, the bytes in flight the peer has not acknowledged. No engine that
+relays the kernel's writability can hold SIOCOUTQ itself below the lowat at
+that instant; holding `OnWritable` until the peer's acknowledgement would wait
+on its delayed ACK and change `OnWritable`'s contract, and io_uring resumes a
+blocked send inside the kernel (`io_send`'s `-EAGAIN`, then its own poll),
+where the loop cannot read it. Relevé selon la règle du propriétaire du
+2026-11-14, the criterion becomes: SIOCOUTQ equal to SIOCOUTQNSD and at or past
+the lowat while the peer reads nothing, `OnWritable` silent; SIOCOUTQNSD below
+the lowat at every writability report epoll gives the loop, SIOCOUTQ there
+logged; `OnWritable` within one 64 KiB segment past the lowat, or the kernel's
+own overshoot on a plain socket; the row missing on a kernel refusing the
+option. `TestConformance_notsentLowat` holds it, the report read through
+`atWritableEdge`, a hook the `loopdebug` build tag compiles in and nothing
+calls without it; the approaches tried and their measures are in
+`internal/service/net/loop/BENCH.md`.

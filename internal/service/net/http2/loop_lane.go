@@ -47,15 +47,10 @@ var defaultLaneLimits = corehttp2.LimitsValue{
 }
 
 // connEntry is one connection of a lane. An idle HTTP/2 connection holds this
-// and nothing else: no request record, no table, no buffer.
+// and nothing else: no request record, no table, no buffer (#961).
 type connEntry struct {
 	// conn is the protocol state.
 	conn Conn
-	// requests is the head of the connection's list of open requests in the
-	// lane's request table, noIndex when none.
-	requests int32
-	// buffered counts the body bytes the connection's open requests hold.
-	buffered int32
 	// gen is the generation of the connection the entry describes.
 	gen uint32
 	// activeAt is the lane batch the connection was last active in.
@@ -73,6 +68,18 @@ type entryFlags uint8
 func (e *connEntry) live() bool {
 	//: set by OnOpen, cleared by OnClose.
 	return e.flags&entryLive != 0
+}
+
+// connRequests are one connection's open requests: the head of its list in
+// the lane's request table, noIndex when none, and the body bytes they hold.
+// A request is opened only once its field block was decoded, so only once the
+// connection took its HPACK table: the lane keeps these by table, not by
+// connection, and an idle connection carries neither (#961).
+type connRequests struct {
+	// head is the list's first record, noIndex when none.
+	head int32
+	// buffered counts the body bytes the connection's open requests hold.
+	buffered int32
 }
 
 // requestState is one HTTP/2 request that outlives the OnData that opened it:
@@ -176,6 +183,9 @@ type laneState struct {
 	// requests are the open requests by index; freeRequests their free list.
 	requests     []*requestState
 	freeRequests int32
+	// tableReqs are each connection's open requests, by the id of the HPACK
+	// table the connection holds (connRequests).
+	tableReqs []connRequests
 	// completed are the requests answered this batch, returned at its end.
 	completed []int32
 	// deferred are the batch's deferred answers.
@@ -302,10 +312,23 @@ func (st *laneState) takeRequest(e *connEntry, stream uint32) (int32, *requestSt
 		idx = int32(len(st.requests) - 1)
 	}
 	r := st.requests[idx]
-	r.resetKeepingBuffers(stream, e.requests)
-	e.requests = idx
+	q := st.reqs(e)
+	r.resetKeepingBuffers(stream, q.head)
+	q.head = idx
 	//: linked.
 	return idx, r
+}
+
+// reqs returns the open requests of e, which holds its HPACK table: the
+// table's entry, the lane's table of them grown to it, a new one with none.
+func (st *laneState) reqs(e *connEntry) *connRequests {
+	id := int(e.conn.table)
+	//: a table the lane has not kept requests for yet.
+	for id >= len(st.tableReqs) {
+		st.tableReqs = append(st.tableReqs, connRequests{head: noIndex})
+	}
+	//: the table's.
+	return &st.tableReqs[id]
 }
 
 // resetKeepingBuffers clears r for a new request, keeping the backing of its
@@ -318,8 +341,13 @@ func (r *requestState) resetKeepingBuffers(stream uint32, next int32) {
 // findRequest returns the record of stream on e and its predecessor, or noIndex.
 func (st *laneState) findRequest(e *connEntry, stream uint32) (idx, prev int32) {
 	prev = noIndex
+	//: no table yet: no field block was decoded, so no request opened.
+	if e.conn.table == noIndex {
+		//: none.
+		return noIndex, prev
+	}
 	//: at most MaxStreams steps.
-	for idx = e.requests; idx != noIndex; idx = st.requests[idx].next {
+	for idx = st.reqs(e).head; idx != noIndex; idx = st.requests[idx].next {
 		//: found.
 		if st.requests[idx].stream == stream {
 			//: with its predecessor, for the unlink.
@@ -336,7 +364,7 @@ func (st *laneState) unlinkRequest(e *connEntry, idx, prev int32) {
 	r := st.requests[idx]
 	//: the head has no predecessor to relink.
 	if prev == noIndex {
-		e.requests = r.next
+		st.reqs(e).head = r.next
 	} else {
 		st.requests[prev].next = r.next
 	}
@@ -369,7 +397,7 @@ func (st *laneState) finishRequest(e *connEntry, idx, prev int32) {
 		st.lane.Consume(&e.conn, r.stream, int(r.uncredited))
 		r.uncredited = 0
 	}
-	e.buffered -= int32(len(r.body))
+	st.reqs(e).buffered -= int32(len(r.body))
 	st.unlinkRequest(e, idx, prev)
 	st.completed = append(st.completed, idx)
 }
@@ -377,8 +405,14 @@ func (st *laneState) finishRequest(e *connEntry, idx, prev int32) {
 // closeRequests abandons every open request of e: an OnBody handler is told,
 // a worker's answer is cancelled.
 func (st *laneState) closeRequests(a *LoopHandler, e *connEntry) {
+	//: no table: no request was ever opened.
+	if e.conn.table == noIndex {
+		//: nothing.
+		return
+	}
+	q := st.reqs(e)
 	//: every record on the connection's list.
-	for idx := e.requests; idx != noIndex; {
+	for idx := q.head; idx != noIndex; {
 		r := st.requests[idx]
 		next := r.next
 		//: a body the handler was reading as it arrived.
@@ -392,5 +426,6 @@ func (st *laneState) closeRequests(a *LoopHandler, e *connEntry) {
 		st.release(idx)
 		idx = next
 	}
-	e.requests, e.buffered = noIndex, 0
+	//: the table's next connection starts with none.
+	q.head, q.buffered = noIndex, 0
 }

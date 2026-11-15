@@ -560,6 +560,7 @@ func (el *epollLoop) conn(slot int32, gen, events uint32) {
 // it drained.
 func (el *epollLoop) writable(slot int32) {
 	r := el.r
+	atWritableEdge(r.conns[slot].fd)
 	r.conns[slot].flags &^= fSending
 	el.flush(r, slot)
 	c := &r.conns[slot]
@@ -724,7 +725,7 @@ func (el *epollLoop) flush(r *ring, slot int32) {
 // last step go out with the settle that follows.
 func (el *epollLoop) afterOutput(r *ring, slot int32) {
 	//: until the step ends; an interrupted one is taken again.
-	for r.conns[slot].fileFD >= 0 && r.conns[slot].state != stDead && el.sendFile(r, slot) {
+	for r.conns[slot].file != noFile && r.conns[slot].state != stDead && el.sendFile(r, slot) {
 	}
 }
 
@@ -732,18 +733,18 @@ func (el *epollLoop) afterOutput(r *ring, slot int32) {
 // interruption only. A socket full, or a step spent, arms EPOLLOUT; a peer or
 // file failure closes the connection.
 func (el *epollLoop) sendFile(r *ring, slot int32) bool {
-	c := &r.conns[slot]
-	off := c.fileOff
-	n, err := syscall.Sendfile(int(c.fd), int(c.fileFD), &off, int(min(c.fileLeft, sendfileStep)))
+	c, f := &r.conns[slot], r.fileOf(slot)
+	off := f.off
+	n, err := syscall.Sendfile(int(c.fd), int(f.fd), &off, int(min(f.left, sendfileStep)))
 	//: by outcome.
 	switch {
 	//: some of it left.
 	case n > 0:
-		c.fileOff, c.fileLeft = off, c.fileLeft-int64(n)
+		f.off, f.left = off, f.left-int64(n)
 		r.st.bytesOut += uint64(n)
 		c.lastIO = el.lp.tick
 		//: the last byte is gone.
-		if c.fileLeft == 0 {
+		if f.left == 0 {
 			r.fileDone(slot)
 			//: any output behind it goes out with the next settle.
 			return false
@@ -780,16 +781,16 @@ func (el *epollLoop) beginFile(r *ring, slot int32, fd int) error {
 		//: refused, nothing queued.
 		return corenet.LoopFileRefused
 	}
-	r.conns[slot].fileFD = int32(dup)
+	r.takeFile(slot, int32(dup))
 	//: held.
 	return nil
 }
 
-// endFile implements fileSender: the duplicate closes; epoll held nothing else.
+// endFile implements fileSender: the duplicate closes and the record is
+// released; epoll held nothing else.
 func (el *epollLoop) endFile(r *ring, slot int32) {
-	c := &r.conns[slot]
-	swallowErr(syscall.Close(int(c.fileFD)))
-	c.fileFD, c.fileOff, c.fileLeft = -1, 0, 0
+	swallowErr(syscall.Close(int(r.fileOf(slot).fd)))
+	r.putFile(slot)
 }
 
 // shutdown implements driver: the descriptor leaves the set and closes, and

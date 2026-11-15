@@ -2113,7 +2113,7 @@ func (rr *uRing) flush(r *ring, slot int32) {
 	//: no output left: a file behind it, or nothing.
 	if c.out.empty() || c.out.off == c.out.len {
 		//: a file to send.
-		if c.fileFD >= 0 {
+		if c.file != noFile {
 			rr.fileStep(slot)
 		}
 		return
@@ -2288,7 +2288,7 @@ func (rr *uRing) backstop(w closeWait) bool {
 	}
 	rr.backstops++
 	//: the recv, then the send when one is the kernel's.
-	return rr.cancelOp(w.slot, udRecv) && (c.flags&fSending == 0 || rr.cancelOp(w.slot, udSend)) && (c.fileBits&ffPoll == 0 || rr.cancelOp(w.slot, udFilePoll))
+	return rr.cancelOp(w.slot, udRecv) && (c.flags&fSending == 0 || rr.cancelOp(w.slot, udSend)) && (c.file == noFile || rr.r.fileOf(w.slot).bits&ffPoll == 0 || rr.cancelOp(w.slot, udFilePoll))
 }
 
 // cancelOp cancels slot's operation op by its user_data, counted, and
@@ -2672,23 +2672,20 @@ func (rr *uRing) beginFile(r *ring, slot int32, fd int) error {
 		//: refused.
 		return corenet.LoopFileRefused
 	}
-	c := &r.conns[slot]
-	c.fileFD, c.pipeR, c.pipeW = int32(dup), int32(pipe[0]), int32(pipe[1])
-	c.pipeHeld, c.fileOps, c.fileBits, c.fileErr = 0, 0, 0, 0
+	f := r.takeFile(slot, int32(dup))
+	f.pipeR, f.pipeW = int32(pipe[0]), int32(pipe[1])
 	//: held.
 	return nil
 }
 
 // endFile implements fileSender: the duplicate and the pipe close. Closing a
 // pipe discards what it holds, so a file given up in mid-step leaves no byte
-// behind, and no operation names them any more (fileOps zero, or the slot
-// released only at zero).
+// behind, and no operation names them any more (the file's ops zero, or the
+// slot released only at zero); the record is released with them.
 func (rr *uRing) endFile(r *ring, slot int32) {
-	c := &r.conns[slot]
-	closeFDs([]int{int(c.fileFD), int(c.pipeR), int(c.pipeW)})
-	c.fileFD, c.pipeR, c.pipeW = -1, -1, -1
-	c.pipeHeld, c.fileOps, c.fileBits, c.fileErr = 0, 0, 0, 0
-	c.fileOff, c.fileLeft = 0, 0
+	f := r.fileOf(slot)
+	closeFDs([]int{int(f.fd), int(f.pipeR), int(f.pipeW)})
+	r.putFile(slot)
 }
 
 // releaseFiles closes what a stopping ring's slots still hold: a slot whose
@@ -2697,7 +2694,7 @@ func (rr *uRing) releaseFiles() {
 	//: every slot of the table.
 	for i := range rr.r.conns {
 		//: still attached.
-		if rr.r.conns[i].fileFD >= 0 {
+		if rr.r.conns[i].file != noFile {
 			rr.endFile(rr.r, int32(i))
 		}
 	}
@@ -2706,10 +2703,10 @@ func (rr *uRing) releaseFiles() {
 // fileStep issues the next step of slot's file: the bytes a pipe already holds
 // to the socket, or one step of file into the pipe linked to the splice out.
 func (rr *uRing) fileStep(slot int32) {
-	c := &rr.r.conns[slot]
+	c, f := &rr.r.conns[slot], rr.r.fileOf(slot)
 	//: what a short splice left in the pipe goes first.
-	if c.pipeHeld > 0 {
-		rr.fileOut(slot, uint32(c.pipeHeld))
+	if f.pipeHeld > 0 {
+		rr.fileOut(slot, uint32(f.pipeHeld))
 		//: in flight.
 		return
 	}
@@ -2724,19 +2721,19 @@ func (rr *uRing) fileStep(slot int32) {
 			return
 		}
 	}
-	n := uint32(min(c.fileLeft, fileStepBytes))
-	prepSpliceIn(rr.u.get(), spliceIn{file: c.fileFD, pipeW: c.pipeW, off: c.fileOff, n: n}, udPack(udFileIn, c.gen, uint32(slot)))
+	n := uint32(min(f.left, fileStepBytes))
+	prepSpliceIn(rr.u.get(), spliceIn{file: f.fd, pipeW: f.pipeW, off: f.off, n: n}, udPack(udFileIn, c.gen, uint32(slot)))
 	s := rr.u.get()
-	prepSpliceOut(s, c.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
+	prepSpliceOut(s, f.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
 	rr.ul.onFD(s)
 	c.ops += 2
-	c.fileOps = 2
+	f.ops = 2
 	c.flags |= fSending
 }
 
 // fileOut issues a splice of n bytes the pipe holds to the socket.
 func (rr *uRing) fileOut(slot int32, n uint32) {
-	c := &rr.r.conns[slot]
+	c, f := &rr.r.conns[slot], rr.r.fileOf(slot)
 	s := rr.u.get()
 	//: no room: the connection fails rather than stalls silently.
 	if s == nil {
@@ -2745,10 +2742,10 @@ func (rr *uRing) fileOut(slot int32, n uint32) {
 		//: closed.
 		return
 	}
-	prepSpliceOut(s, c.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
+	prepSpliceOut(s, f.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
 	rr.ul.onFD(s)
 	c.ops++
-	c.fileOps = 1
+	f.ops = 1
 	c.flags |= fSending
 }
 
@@ -2760,22 +2757,22 @@ func (rr *uRing) onFileIn(slot int32, gen uint32, c *cqe) {
 		//: dropped.
 		return
 	}
-	cc := &rr.r.conns[slot]
-	cc.ops--
-	cc.fileOps--
+	f := rr.r.fileOf(slot)
+	rr.r.conns[slot].ops--
+	f.ops--
 	//: by result.
 	switch {
 	//: bytes in the pipe.
 	case c.res > 0:
-		cc.pipeHeld += c.res
-		cc.fileOff += int64(c.res)
-		cc.fileLeft -= int64(c.res)
+		f.pipeHeld += c.res
+		f.off += int64(c.res)
+		f.left -= int64(c.res)
 	//: nothing: the file is shorter than its head said.
 	case c.res == 0:
-		cc.fileBits |= ffEOF
+		f.bits |= ffEOF
 	//: a cancel changes nothing that the next step would not redo.
 	case c.res != -int32(errnoECANCELED):
-		cc.fileErr = -c.res
+		f.err = -c.res
 	}
 	rr.fileAdvance(slot)
 }
@@ -2788,24 +2785,24 @@ func (rr *uRing) onFileOut(slot int32, gen uint32, c *cqe) {
 		//: dropped.
 		return
 	}
-	cc := &rr.r.conns[slot]
+	cc, f := &rr.r.conns[slot], rr.r.fileOf(slot)
 	cc.ops--
-	cc.fileOps--
+	f.ops--
 	//: by result.
 	switch {
 	//: bytes on the socket.
 	case c.res > 0:
-		cc.pipeHeld -= c.res
+		f.pipeHeld -= c.res
 		rr.r.st.bytesOut += uint64(c.res)
 		cc.lastIO = rr.ul.lp.tick
 	//: the socket is full: wait for it to have room.
 	case c.res == -int32(syscall.EAGAIN):
-		cc.fileBits |= ffFull
+		f.bits |= ffFull
 	//: nothing, or the link was cut because the splice in ran short.
 	case c.res == 0, c.res == -int32(errnoECANCELED):
 	//: the socket failed.
 	default:
-		cc.fileErr = -c.res
+		f.err = -c.res
 	}
 	rr.fileAdvance(slot)
 }
@@ -2817,13 +2814,13 @@ func (rr *uRing) onFilePoll(slot int32, gen uint32, c *cqe) {
 		//: dropped.
 		return
 	}
-	cc := &rr.r.conns[slot]
-	cc.ops--
-	cc.fileOps--
-	cc.fileBits &^= ffPoll
+	f := rr.r.fileOf(slot)
+	rr.r.conns[slot].ops--
+	f.ops--
+	f.bits &^= ffPoll
 	//: a poll that failed: the socket has.
 	if c.res < 0 && c.res != -int32(errnoECANCELED) {
-		cc.fileErr = -c.res
+		f.err = -c.res
 	}
 	rr.fileAdvance(slot)
 }
@@ -2831,9 +2828,9 @@ func (rr *uRing) onFilePoll(slot int32, gen uint32, c *cqe) {
 // fileAdvance decides the file's next step once its last operation in flight
 // has answered, in whatever order the linked pair's two completions came.
 func (rr *uRing) fileAdvance(slot int32) {
-	c := &rr.r.conns[slot]
+	c, f := &rr.r.conns[slot], rr.r.fileOf(slot)
 	//: its sibling of the pair has not answered yet.
-	if c.fileOps > 0 {
+	if f.ops > 0 {
 		//: later.
 		return
 	}
@@ -2847,20 +2844,20 @@ func (rr *uRing) fileAdvance(slot int32) {
 	//: by what the pair found.
 	switch {
 	//: the socket or the file failed.
-	case c.fileErr != 0:
-		rr.failLive(slot, c.fileErr)
+	case f.err != 0:
+		rr.failLive(slot, f.err)
 	//: the socket is full: POLLOUT resumes it.
-	case c.fileBits&ffFull != 0:
-		c.fileBits &^= ffFull
+	case f.bits&ffFull != 0:
+		f.bits &^= ffFull
 		rr.pollOut(slot)
 	//: bytes wait in the pipe: a short socket write, or a short read.
-	case c.pipeHeld > 0:
-		rr.fileOut(slot, uint32(c.pipeHeld))
+	case f.pipeHeld > 0:
+		rr.fileOut(slot, uint32(f.pipeHeld))
 	//: the file ended early: the head promised more than the file holds.
-	case c.fileBits&ffEOF != 0:
+	case f.bits&ffEOF != 0:
 		rr.r.fail(slot, rFile, 0)
 	//: more of the file.
-	case c.fileLeft > 0:
+	case f.left > 0:
 		rr.fileStep(slot)
 	//: the last byte is gone.
 	default:
@@ -2872,7 +2869,7 @@ func (rr *uRing) fileAdvance(slot int32) {
 // pollOut arms a one-shot POLLOUT on slot's socket, tagged so a close that
 // finds it in flight can wait for it.
 func (rr *uRing) pollOut(slot int32) {
-	c := &rr.r.conns[slot]
+	c, f := &rr.r.conns[slot], rr.r.fileOf(slot)
 	s := rr.u.get()
 	//: no room: the connection fails rather than stalls silently.
 	if s == nil {
@@ -2884,7 +2881,7 @@ func (rr *uRing) pollOut(slot int32) {
 	prepPollOut(s, uint32(c.fd), udPack(udFilePoll, c.gen, uint32(slot)))
 	rr.ul.onFD(s)
 	c.ops++
-	c.fileOps = 1
-	c.fileBits |= ffPoll
+	f.ops = 1
+	f.bits |= ffPoll
 	c.flags |= fSending
 }

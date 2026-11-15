@@ -80,6 +80,10 @@ type ring struct {
 	// compacted at its end. A slice, not a link in the slot: a slot released
 	// inside the batch is reset whole, and a link would cut the list there.
 	compact []int32
+	// files are the file bodies in flight, by connCtl.file, and freeFiles the
+	// records released: grown to the most files the ring sent at once (#961).
+	files     []fileCtl
+	freeFiles []int32
 	// drv is the backend.
 	drv driver
 	// st is the ring's counters, published at the end of each batch.
@@ -284,7 +288,7 @@ func (r *ring) abandon(slot int32) {
 func (lp *loop) evictable(r *ring, slot int32) bool {
 	c := &r.conns[slot]
 	//: mid-request, with output, or waiting on a worker: it keeps its place.
-	return c.state == stOpen && c.spill.empty() && c.pending() == 0 && c.fileFD < 0 && !r.drv.unread(r, slot) && !lp.waits(r, slot)
+	return c.state == stOpen && c.spill.empty() && c.pending() == 0 && c.file == noFile && !r.drv.unread(r, slot) && !lp.waits(r, slot)
 }
 
 // waits reports whether slot of r waits on the handler's worker (R3).
@@ -596,7 +600,7 @@ func (r *ring) sent(slot int32, _ int) {
 	c := &r.conns[slot]
 	c.lastIO = r.lp.tick
 	//: someone waits for room.
-	if c.flags&fWantWritable != 0 && c.state == stOpen && c.pending() < r.lp.lowWater && c.fileFD < 0 {
+	if c.flags&fWantWritable != 0 && c.state == stOpen && c.pending() < r.lp.lowWater && c.file == noFile {
 		c.flags &^= fWantWritable
 		r.lp.h.OnWritable(r.lp, r.ref(slot))
 	}
@@ -930,7 +934,7 @@ func (lp *loop) Write(ref corenet.LoopConnRef, p []byte) error {
 	c := &r.conns[slot]
 	//: a file in flight goes first; the per-connection ceiling counts what is
 	//: still the kernel's too; the budget may be spent.
-	if c.fileFD >= 0 || c.pending()+len(p) > lp.sz.outputCap || !lp.queue(r, slot, c, p) {
+	if c.file != noFile || c.pending()+len(p) > lp.sz.outputCap || !lp.queue(r, slot, c, p) {
 		//: refused; OnWritable says when to retry.
 		return r.refuseOutput(c)
 	}

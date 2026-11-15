@@ -14,11 +14,9 @@ type LoopBackend uint8
 // The loop backends. The zero value is LoopBackendAuto.
 const (
 	// LoopBackendAuto takes the best backend the platform's probe reaches:
-	// io_uring, then epoll on Linux, kqueue on darwin, the portable backend
-	// elsewhere — a native backend the probe refuses falls back to it. On
-	// FreeBSD, OpenBSD, NetBSD and DragonFly it stays portable while no
-	// paired row was measured there: kqueue runs there when named,
-	// LoopBackendKqueue (ADR 0222).
+	// io_uring, then epoll on Linux, kqueue on darwin, FreeBSD, OpenBSD,
+	// NetBSD and DragonFly, the portable backend elsewhere — a native
+	// backend the probe refuses falls back to it (ADR 0222).
 	LoopBackendAuto LoopBackend = iota
 	// LoopBackendIOURing is io_uring, on linux/amd64, arm64, riscv64 and loong64,
 	// after the kernel's staged probe.
@@ -30,8 +28,8 @@ const (
 	LoopBackendPortable
 	// LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and
 	// DragonFly, after a staged probe (ADR 0222). LoopBackendAuto takes it on
-	// darwin, where its paired gate held on macos-15; on the BSDs it runs
-	// only when named.
+	// each of them, its paired gate having held on macos-15; named, it never
+	// falls back.
 	LoopBackendKqueue
 )
 

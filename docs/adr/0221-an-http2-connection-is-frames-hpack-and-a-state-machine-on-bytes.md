@@ -378,3 +378,39 @@ nearest reachable, writing the trace down.
 
 The challenges, the approaches tried and refuted with their sources, are in each
 issue's record of 2026-11-15.
+
+## Amendment 2026-11-15 (second) — an idle h2c connection within the loop's 256 B (#961)
+
+The amendment of 2026-11-13 replaced #961's idle bound — "the idle-memory test
+holds 10 000 idle h2c connections within the loop's documented 256 B of Go heap
+each" — by "within the HTTP/1.1 adapter's idle cost plus 200 B", the 256 B being
+the loop's own before any adapter. The owner's decision of 2026-11-14 is to aim
+at the original bound, and it is held.
+
+On the base, `TestLoopHTTP2_idleMemory` (Linux 6.12, go1.27.4, two loops, 10 000
+connections that sent the preface and an empty SETTINGS) read 344 B a
+connection on epoll and 365 B on io_uring. A heap profile split it: the loop's
+slot table 148–177 B (a `connCtl` of 144 bytes and the table's growth), its
+timer link 16–18 B, io_uring's sweep epochs and receive bookkeeping 17 B, and the
+adapter's entry 159–178 B (152 bytes: the HPACK decoder's 48, the field block's
+scan, the open requests). What an idle connection does not use is now taken
+when it is used:
+
+- the loop's slot keeps the index of a file record — a file body's descriptor,
+  pipe, offsets, operations and error, 40 bytes — in the ring's file table
+  (`fileCtl`, `ring.takeFile`): `connCtl` is 104 bytes;
+- the HPACK decoder lives beside its table in the lane's arena, both taken at
+  the connection's first field block, the peer's SETTINGS ACK kept in a flag
+  until then; the adapter keeps a connection's open requests by that table, a
+  request being opened only after a decode; the per-batch control count and the
+  CONTINUATION count are narrowed to what they can reach (`uint16`, `uint8`):
+  `Conn` is 68 bytes and the adapter's entry 80.
+
+Measured after, the same test: 218 B on epoll, 240 B on io_uring — on 6.12,
+whose deferred puts keep an eight-byte sweep epoch a slot, which 6.13 and later
+do not need —, 217 B on linux/386; the loop alone (`TestMemory_idleConnection`)
+137 B on epoll and 148 B on io_uring. `TestLoopHTTP2_idleMemory` and its auto
+twin now hold h2c to 256 B (`h2cIdleBudget`), the HTTP/1.1 reading logged
+beside it; `TestConnHasNoPointer` holds the entry to 80 bytes. The drain part of
+the criterion is unchanged: ADR 0196's suite runs on h2c (the amendment of
+2026-11-13).

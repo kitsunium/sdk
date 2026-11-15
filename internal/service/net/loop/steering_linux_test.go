@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -191,15 +192,37 @@ const (
 	tcpiNotsentOffset = 144
 	// inetDiagMsgLen is struct inet_diag_msg's size, before its attributes.
 	inetDiagMsgLen = 72
+	// idiagWqueueOffset is idiag_wqueue's offset in struct inet_diag_msg:
+	// family, state, timer and retrans, the 48-byte sockid, idiag_expires and
+	// idiag_rqueue before it.
+	idiagWqueueOffset = 60
+	// siocOutqNSD is SIOCOUTQNSD, a TCP socket's bytes not yet sent
+	// (include/uapi/linux/sockios.h: "output queue size (not sent only)"),
+	// absent from package syscall; SIOCOUTQ is TIOCOUTQ, "not sent + not
+	// acked" in the same header.
+	siocOutqNSD = 0x894b
 )
 
 // notsentBytes is tcpi_notsent_bytes of the established TCP socket whose
 // local port is port — the server's side —, read over NETLINK_SOCK_DIAG; -1
 // when none is found or the kernel's tcp_info is too old to carry it.
 func notsentBytes(port int) int {
+	_, unsent := sendQueues(port)
+	return unsent
+}
+
+// sendQueues reads the two send queues of the established TCP socket whose
+// local port is port over NETLINK_SOCK_DIAG: unacked is SIOCOUTQ's count,
+// write_seq − snd_una, the bytes not yet acknowledged (idiag_wqueue,
+// net/ipv4/tcp_diag.c); unsent is SIOCOUTQNSD's, write_seq − snd_nxt, the
+// bytes not yet sent (tcpi_notsent_bytes, net/ipv4/tcp.c's tcp_get_info). It
+// reads a socket io_uring holds as a direct descriptor too, which no ioctl
+// reaches. -1 each when none is found; unsent -1 when the kernel's tcp_info
+// is too old to carry it.
+func sendQueues(port int) (unacked, unsent int) {
 	fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW|syscall.SOCK_CLOEXEC, syscall.NETLINK_INET_DIAG)
 	if err != nil {
-		return -1
+		return -1, -1
 	}
 	defer syscall.Close(fd)
 	// nlmsghdr, then inet_diag_req_v2: family, protocol, ext, pad, states,
@@ -212,27 +235,41 @@ func notsentBytes(port int) int {
 	body[0], body[1], body[2] = syscall.AF_INET, syscall.IPPROTO_TCP, 1<<(inetDiagInfo-1)
 	*(*uint32)(unsafe.Pointer(&body[4])) = 1 << 1 // TCP_ESTABLISHED
 	if err := syscall.Sendto(fd, req, 0, &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK}); err != nil {
-		return -1
+		return -1, -1
 	}
 	buf := make([]byte, 1<<16)
 	for {
 		n, _, err := syscall.Recvfrom(fd, buf, 0)
 		if err != nil {
-			return -1
+			return -1, -1
 		}
 		msgs, err := syscall.ParseNetlinkMessage(buf[:n])
 		if err != nil {
-			return -1
+			return -1, -1
 		}
 		for _, m := range msgs {
 			if m.Header.Type == syscall.NLMSG_DONE || m.Header.Type == syscall.NLMSG_ERROR {
-				return -1
+				return -1, -1
 			}
 			if v, ok := diagNotsent(m.Data, port); ok {
-				return v
+				return int(*(*uint32)(unsafe.Pointer(&m.Data[idiagWqueueOffset]))), v
 			}
 		}
 	}
+}
+
+// ioctlQueues reads fd's two send queues by ioctl: SIOCOUTQ (TIOCOUTQ), the
+// bytes not yet acknowledged, and SIOCOUTQNSD, the bytes not yet sent.
+func ioctlQueues(fd int) (unacked, unsent int, err error) {
+	var v int32
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCOUTQ, uintptr(unsafe.Pointer(&v))); errno != 0 {
+		return 0, 0, errno
+	}
+	unacked = int(v)
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), siocOutqNSD, uintptr(unsafe.Pointer(&v))); errno != 0 {
+		return 0, 0, errno
+	}
+	return unacked, int(v), nil
 }
 
 // diagNotsent reads one inet_diag_msg: its tcpi_notsent_bytes when its
@@ -258,6 +295,60 @@ func diagNotsent(d []byte, port int) (int, bool) {
 		a = a[min((l+3)&^3, len(a)):]
 	}
 	return 0, false
+}
+
+// edge is one writability report of epoll, as read on the loop's thread
+// before the flush: SIOCOUTQ and SIOCOUTQNSD by ioctl.
+type edge struct {
+	unacked, unsent int
+	err             error
+}
+
+// edgeLog records the edges of the connection whose local port port holds.
+type edgeLog struct {
+	port  *atomic.Int64
+	mu    sync.Mutex
+	edges []edge
+}
+
+// record is writableEdge for the test: fd's queues when fd is the
+// connection's — another test's leftover group cannot stand in for it.
+func (l *edgeLog) record(fd int) {
+	sa, err := syscall.Getsockname(fd)
+	in4, ok := sa.(*syscall.SockaddrInet4)
+	if err != nil || !ok || int64(in4.Port) != l.port.Load() {
+		return
+	}
+	unacked, unsent, err := ioctlQueues(fd)
+	l.mu.Lock()
+	l.edges = append(l.edges, edge{unacked: unacked, unsent: unsent, err: err})
+	l.mu.Unlock()
+}
+
+// check holds every edge recorded to the lowat: the bytes not yet sent below
+// it at each one, the kernel's own wake rule (tcp_poll, (notsent << 1) <
+// lowat), and SIOCOUTQ there logged, at or past it where bytes are in flight.
+func (l *edgeLog) check(t *testing.T, lowat int) {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.edges) == 0 {
+		t.Fatal("epoll reported the connection writable not once while the peer drained it")
+	}
+	past, mostUnsent, mostUnacked := 0, 0, 0
+	for _, e := range l.edges {
+		if e.err != nil {
+			t.Fatalf("SIOCOUTQ at a writability edge: %v", e.err)
+		}
+		if e.unsent >= lowat {
+			t.Fatalf("epoll reported the socket writable with %d bytes not yet sent (SIOCOUTQNSD), want below the lowat %d", e.unsent, lowat)
+		}
+		if e.unacked >= lowat {
+			past++
+		}
+		mostUnsent, mostUnacked = max(mostUnsent, e.unsent), max(mostUnacked, e.unacked)
+	}
+	t.Logf("epoll: %d writability edges, SIOCOUTQNSD at most %d (lowat %d); SIOCOUTQ at or past the lowat at %d of them, at most %d: bytes in flight, not acknowledged", len(l.edges), mostUnsent, lowat, past, mostUnacked)
 }
 
 // lowatSegment is how far past the lowat a socket's unsent bytes may go:
@@ -306,20 +397,34 @@ func kernelUnsent(t *testing.T, lowat int) int {
 	return notsentBytes(port)
 }
 
-// TestConformance_notsentLowat pins tcp-notsent-lowat on every backend, on
-// the count the option bounds — tcpi_notsent_bytes, SIOCOUTQNSD's —: with
-// 128 KiB, a 4 MiB Write to a peer that stops reading leaves the socket the
-// lowat unsent and at most one segment more — without the option it would
-// hold its whole send buffer —, OnWritable does not fire while the peer
-// reads nothing, and fires once the peer drained, each time with the socket
-// within that bound; a kernel that refuses the option leaves the row
-// missing. "Below the lowat" itself cannot be read at OnWritable: the kernel
-// reports the socket writable under it, the loop's flush then fills it to
-// the next segment past it, and OnWritable follows the flush.
+// TestConformance_notsentLowat pins tcp-notsent-lowat on every backend
+// (#857). With 128 KiB, a 4 MiB Write to a peer that stops reading leaves
+// SIOCOUTQ — the bytes not yet acknowledged, read as the kernel answers the
+// ioctl (idiag_wqueue) — equal to the bytes not yet sent, nothing being in
+// flight against a closed window, and at or past the lowat, while OnWritable
+// stays silent; without the option the socket would hold its whole send
+// buffer. On epoll, every time the kernel reports the socket writable — the
+// instant the loop's output resumes from, read before its flush
+// (atWritableEdge) — the bytes not yet sent, SIOCOUTQNSD, are below the
+// lowat, while SIOCOUTQ there still counts the bytes in flight the peer has
+// not acknowledged, which no lowat governs (logged); io_uring's resumption is
+// the kernel's own retry of the send, inside io_uring, read at its
+// completion only. OnWritable then fires once the peer drained, each time
+// with the socket at most one segment past the lowat, or past the kernel's
+// own overshoot: the loop's flush fills it before OnWritable follows. A
+// kernel that refuses the option leaves the row missing.
 func TestConformance_notsentLowat(t *testing.T) {
 	const lowat = 128 << 10
 	eachBackend(t, func(t *testing.T, b backendCase) {
 		h := &lowatH{writable: make(chan int, 256)}
+		edges := &edgeLog{port: &h.port}
+		hooked := false
+		if b.backend == corenet.LoopBackendEpoll {
+			//: before the group starts, restored after it closed.
+			restore, ok := hookWritableEdge(edges.record)
+			hooked = ok
+			t.Cleanup(restore)
+		}
 		g, addr := serve(t, b, h, func(c *Config) { c.Value.NotsentLowat = lowat })
 		if row := rowOf(g.State(), corenet.CapabilityTCPNotsentLowat); row.Status != statusOn {
 			t.Fatalf("tcp-notsent-lowat = %+v, want on", row)
@@ -334,6 +439,16 @@ func TestConformance_notsentLowat(t *testing.T) {
 		case q := <-h.writable:
 			t.Fatalf("OnWritable while the peer read nothing, %d bytes unsent", q)
 		default:
+		}
+		//: SIOCOUTQ itself: against a closed window nothing is in flight,
+		//: so the bytes not acknowledged are the bytes not sent.
+		unacked, unsent := sendQueues(port)
+		for deadline := time.Now().Add(time.Second); unacked != unsent && time.Now().Before(deadline); {
+			time.Sleep(10 * time.Millisecond)
+			unacked, unsent = sendQueues(port)
+		}
+		if unacked != unsent || unacked < lowat {
+			t.Fatalf("the peer reading nothing: SIOCOUTQ %d, SIOCOUTQNSD %d; want them equal and at least the lowat %d", unacked, unsent, lowat)
 		}
 		//: the lowat and one segment more, or what the kernel itself leaves
 		//: on a plain socket with the option, and one segment more: never
@@ -382,6 +497,10 @@ func TestConformance_notsentLowat(t *testing.T) {
 			t.Fatal("no OnWritable once the peer drained")
 		}
 		t.Logf("%s: %d OnWritable, at most %d bytes unsent (lowat %d)", b.name, seen, most, lowat)
+		//: the edges, where the loopdebug build tag compiled the hook in.
+		if hooked {
+			edges.check(t, lowat)
+		}
 	})
 	saved := setsockoptHook
 	setsockoptHook = func(fd, level, opt, v int) error {
