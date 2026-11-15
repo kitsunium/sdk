@@ -291,7 +291,16 @@ stream groups, `StartPacket` runs one io_uring lane of a datagram group a
   consumption — and returned by `returnBuffers` after the batch. A recv
   that ran out (ENOBUFS, no `F_MORE`) waits on `starved`, a bounded queue,
   and is re-armed as long as the kernel holds a buffer (`inRing`, per group),
-  not only when this batch returned one. Re-arming only on a batch's own
+  not only when this batch returned one. An entry is the slot and its
+  generation (`starvedRecv`): a connection that finished while queued leaves
+  its entry behind, and `rearmStarved` skips it, where by slot alone it armed
+  a second recv on the next connection the slot served, beside the one
+  `take` armed (#1471, `TestURing_starvedRearmsOnlyItsConnection`). epoll and
+  kqueue queue nothing: a read with no room waits on the socket's
+  level-triggered readiness, reported for that socket alone (epoll's event
+  carries the generation, kqueue's descriptor is unmapped at the close); the
+  datagram lane re-arms its one socket, and the portable backend, server's,
+  reads on each connection's goroutine. Re-arming only on a batch's own
   returns once starved a connection forever (`TestConformance_bufferFaults`).
   `inRing` counts a buffer out only once its completion is reaped, so the
   CQ's backlog (`ready`) is counted out first, and nothing is re-armed while

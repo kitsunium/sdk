@@ -10010,7 +10010,7 @@ sequences:
             - case: reads(c) && len(rr.starved) < starvedCap
               do:
                 - set: rr.starved
-                  value: append(rr.starved, slot)
+                  value: "append(rr.starved, starvedRecv{slot: slot, gen: c.gen})"
             - case: c.state == stOpen
               do:
                 - eval: rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
@@ -10558,19 +10558,22 @@ sequences:
                 do:
                   - break: true
                 when: g < 0
-            - bind: slot
+            - bind: e
               eval: rr.starved[k]
             - op: ++
               set: k
             - opt:
                 do:
-                  - eval: rr.armRecvOn(slot, g)
+                  - eval: rr.armRecvOn(e.slot, g)
                     to: rr.armRecvOn
                   - op: "--"
                     set: left[g]
                   - op: "--"
                     set: room
-                when: reads(&rr.r.conns[slot])
+                init:
+                  bind: c
+                  eval: "&rr.r.conns[e.slot]"
+                when: c.gen == e.gen && reads(c)
       - set: rr.starved
         value: rr.starved[:copy(rr.starved, rr.starved[k:])]
   - of: (*uRing).flush
