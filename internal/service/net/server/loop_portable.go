@@ -594,8 +594,12 @@ func (pl *portableLoop) handleEnd(ev *portableEvent) {
 		//: done.
 		return
 	}
-	//: a clean end of input still lets the output leave.
-	if errors.Is(ev.err, io.EOF) && !pc.reasonSet {
+	//: a clean end of input still lets the output leave — a close decided
+	//: included, the drain's or the handler's: finished here, its output
+	//: still queued or on the wire was lost (#1385). Only a lingering close,
+	//: its writing side already shut after the output, ends at the peer's
+	//: end.
+	if errors.Is(ev.err, io.EOF) && !pc.lingering.Load() {
 		pc.peerDone = true
 		pl.markDirty(ev.slot)
 		//: settled at the end of the batch.

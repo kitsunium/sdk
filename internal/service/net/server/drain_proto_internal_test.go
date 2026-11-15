@@ -108,16 +108,55 @@ func ringCounts(srv *Server) (opens, closes int64) {
 
 // h2cExchange is exchange on h2c: the preface, SETTINGS and one GET on
 // stream 1, answered "ok"; a reset, a GOAWAY with an error or an end before
-// the answer is what went wrong.
+// the answer is what went wrong. Once answered, the connection closes by a
+// reset only when a PING came back acknowledged (h2cSettled).
 func h2cExchange(addr string) (time.Time, string, error) {
 	c, err := stdnet.DialTimeout("tcp", addr, 2*time.Second)
 	connected := time.Now()
 	if err != nil {
 		return connected, "dial: " + err.Error(), err
 	}
-	defer func() { swallowErr(c.Close()) }()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-	return connected, h2cRequest(c, bufio.NewReader(c)), nil
+	br := bufio.NewReader(c)
+	msg := h2cRequest(c, br)
+	//: every byte the client sent acknowledged: a reset leaves no TIME_WAIT.
+	if msg == "" && h2cSettled(c, br) {
+		resetConn(c)
+		return connected, msg, nil
+	}
+	swallowErr(c.Close())
+	return connected, msg, nil
+}
+
+// h2cSettled sends a PING on c and reports whether its ACK came back, read
+// through br: the segment that carries the ACK acknowledges every byte the
+// client sent, the PING last. Without it a reset may not be taken: the
+// client's last segment otherwise is its SETTINGS ACK, which nothing
+// answers, and FreeBSD takes a reset only at the sequence it last
+// acknowledged (tcp_input.c, RFC 5961 §3 against last_ack_sent). Any other
+// gets a challenge ACK; the client's socket gone, the reset that ACK calls
+// for falls under the RST rate limit (net.inet.icmp.icmplim) at these rates,
+// so the server's socket stays established, and a later dial whose random
+// ephemeral port meets it gets an ACK, never a SYN-ACK, and times out: every
+// h2c drain case failed so on FreeBSD (#1448), the line echo — whose last
+// request its echo acknowledges — never. A connection the server ends
+// first reads its end instead, and closes with a FIN.
+func h2cSettled(c stdnet.Conn, br *bufio.Reader) bool {
+	if _, err := c.Write(frameBytes(corehttp2.FramePing, 0, 0, make([]byte, 8))); err != nil {
+		return false
+	}
+	//: frames until the PING's ACK, or the end.
+	for {
+		typ, flags, _, _, err := readH2Frame(br)
+		//: ended, reset or past the deadline: not settled.
+		if err != nil {
+			return false
+		}
+		//: the ACK.
+		if typ == corehttp2.FramePing && flags&corehttp2.FlagAck != 0 {
+			return true
+		}
+	}
 }
 
 // h2cRequest opens h2c on c and makes one GET on stream 1, reading its

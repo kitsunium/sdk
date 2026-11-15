@@ -115,11 +115,9 @@ func budgetGroup(t testing.TB, budget time.Duration, rings int) (*Group, *atomic
 		}
 	})
 	all := heard(t, addr, budgetConns+1)
-	t.Cleanup(func() {
-		for _, c := range all {
-			_ = c.Close()
-		}
-	})
+	// Closed by a reset: no TIME_WAIT left on the ephemeral range for the
+	// tests after it (resetClose).
+	t.Cleanup(func() { resetClose(all) })
 	for _, c := range all {
 		_ = c.SetDeadline(time.Time{})
 	}

@@ -41,7 +41,10 @@ func pendingOf(f *testNode) (reads, fwds int) {
 // held 250 ms before the lift, the test fails 5 runs of 5 so). The cut is
 // now lifted on the follower's loop, the loop that resends, and only while
 // the read has not been resent: an attempt whose resend already went out on
-// the cut link is held to the refusal, and the next attempt asks again.
+// the cut link is held to the refusal, and the next attempt asks again. An
+// attempt whose read the sweep refused at its expiry before resending it —
+// the loop stalled across the resend's window — is retried too: it says
+// nothing of the resend.
 func TestALostReadIndexOrForwardIsAnsweredWithoutALeaderChange(t *testing.T) {
 	type tc struct {
 		name string
@@ -99,9 +102,19 @@ func TestALostReadIndexOrForwardIsAnsweredWithoutALeaderChange(t *testing.T) {
 			termNow := l.node.Status().Term
 			// The cluster is healthy: a write through the follower succeeds.
 			propose(t, f.node, "after=1")
+			// retry marks a read refused at its expiry before its resend ran:
+			// the attempt proves nothing of the resend, and the next one asks
+			// again.
+			retry := false
 			select {
 			case err := <-readErr:
 				switch {
+				// Refused two maximum election timeouts after it was sent,
+				// before the sweep resent it (sweepReads checks the expiry
+				// first): the follower's loop stalled across the resend's
+				// window, a valid run.
+				case !resent && errors.Is(err, coreconsensus.LeadershipUnconfirmed):
+					retry = true
 				case !resent && err != nil:
 					t.Errorf("Barrier after one lost MsgReadIndex, the leader unchanged: %v, want its resend answered", err)
 				case resent && !errors.Is(err, coreconsensus.LeadershipUnconfirmed):
@@ -118,7 +131,7 @@ func TestALostReadIndexOrForwardIsAnsweredWithoutALeaderChange(t *testing.T) {
 			case <-time.After(2 * time.Second):
 				t.Fatal("a lost forward was not answered before its caller's own 3 s deadline")
 			}
-			return !resent
+			return !resent && !retry
 		}
 		for attempt := 1; !lostOnce(); attempt++ {
 			if attempt == tt.attempts {

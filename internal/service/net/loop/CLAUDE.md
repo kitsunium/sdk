@@ -128,7 +128,10 @@ stream groups, `StartPacket` runs one io_uring lane of a datagram group a
   the writable path — a write refused for room, resumed on the event — is
   settled at the batch's end (`settleAfterWrite`, epoll and kqueue; io_uring's
   send completion already marks it dirty): left alone, its close never
-  began and the drain waited for its deadline (FreeBSD, NetBSD). The window between a taker's last empty read
+  began and the drain waited for its deadline (FreeBSD, NetBSD). On io_uring
+  every path that re-arms a recv — bytes, buffers starved then back, a
+  cancel — re-arms a lingering slot's too (`reads`,
+  `TestURing_lingerReadsOnAfterStarveOrCancel`). The window between a taker's last empty read
   and its close is the kernel's: the server's grace empties the queue first,
   and a partial drain in an `SO_REUSEPORT` group is `tcp_migrate_req=1`'s.
 - **A batch costs the slots it touched, never the open ones.** Nothing at a
@@ -332,7 +335,12 @@ stream groups, `StartPacket` runs one io_uring lane of a datagram group a
   60 000, the process unkillable. A slot still waiting on an operation 1 s
   after its shutdown (`closeBackstop`) has its recv and send cancelled by
   user_data, one hash bucket. Without the shutdown on a peer-first close the
-  socket would sit in CLOSE_WAIT, its peer in FIN_WAIT2.
+  socket would sit in CLOSE_WAIT, its peer in FIN_WAIT2. A connection refused
+  at accept — past `MaxConns`, a stopping or drained ring, past the table —
+  owns no slot: `orphanClose` hard-links its shutdown ahead of its
+  `close_direct` (both `udOrphanClose`), and closes alone only without room
+  for the pair; closed alone, the refused peer read no end until its own
+  deadline (#1439, ADR 0200 amended 2026-11-15, `TestConformance_maxConns`).
 - **A CQ the kernel held back is flushed with GETEVENTS.** A secondary is
   entered only to submit; the kernel moves an overflowed CQ (`NODROP`) into
   the ring only on its wait path, so `reapAll` enters with GETEVENTS and
@@ -616,7 +624,19 @@ closed by reset (`resetClose`, as `TestConformance_idleNoWatchdog` and
 `TestConformance_noStarvationAtScale` close theirs): closed by FIN, the suite's
 connections held their conntrack entries two minutes, and with server's suite
 beside this one filled a runner's table, a datagram lane's send refused with
-EPERM (#1377). On
+EPERM (#1377). The drain tests' clients and the tests of thousands of
+connections close so too once they read the server's end (`resetClose`, now
+in `conformance_native_test.go`): the side that closes first keeps a
+TIME_WAIT, the server for a drained connection, and those of
+`drainTakesQueue` and `drainTakesWhatTheQueueHolds` left some 7 000 for a
+minute — a macOS runner's range is 16 384 ports held 30 s —, while each
+client held open to its cleanup kept the drain's linger to `drainLinger`.
+`heardConns` spreads the stop tests' 20 000 dials over eight loopback
+source addresses (`IP_BIND_ADDRESS_NO_PORT`): from one, `connect(2)` walks
+the ephemeral range for a free port, even ports first, and past about 14 000
+connections each dial walked the half already taken — 7 to 9 s of each stop
+test's 9, which with the drain tests reshuffled into its shard brought
+`loop_test`'s shard 3 to Bazel's 60 s (#1439). On
 io_uring the verdict is counted, not timed (`conformance_stop_uring_linux_test.go`):
 `loopHooks.taken` sees every SQE a ring hands the kernel, and the stop must
 issue one shutdown a connection, no cancel by descriptor and no hard link —

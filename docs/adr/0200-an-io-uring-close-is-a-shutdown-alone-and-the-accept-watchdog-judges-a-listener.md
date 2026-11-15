@@ -140,3 +140,22 @@ no longer counts a ring that lost the accept race.
 - `internal/service/net/loop/conformance_stop_linux_test.go` bounds a drain
   and a close of 20,000 idle connections on every backend;
   `watchdog_uring_linux_test.go` pins D1.
+
+## Amendment 2026-11-15 (#1439): a refused connection's close is a shutdown too
+
+D2 made a slot's close a shutdown, because a direct descriptor's close puts
+its file only once the requests issued before it ended. A connection the ring
+accepts and refuses at once — past `MaxConns`, on a stopping ring, on a ring
+the watchdog drained, or past the table — owns no slot, and its direct
+descriptor was closed alone (`orphanClose`): the multishot recvs of the
+ring's other connections held the file, and the refused peer read no end
+until its own deadline. `TestConformance_maxConns` read that deadline, 20 s
+of its shard, and took a timeout for the refusal.
+
+- The refused descriptor gets an `IORING_OP_SHUTDOWN` (`SHUT_RDWR`)
+  hard-linked ahead of its close, so the close runs whatever the shutdown's
+  result; both complete as `udOrphanClose`, which nothing waits on.
+- Without room in the SQ for the pair the close goes alone, as before, and
+  the peer hears its end when the file is put.
+- Test: `TestConformance_maxConns` requires the refused peer to read its end
+  within 5 s, never a timeout; on the code before, io_uring's read ran out.

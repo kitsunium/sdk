@@ -150,6 +150,7 @@ func TestSendZC_notificationHoldsTheFlight(t *testing.T) {
 	}
 	ul := uringOf(g)
 	lp := g.loops[0]
+	echoSent(t, g, ul.rings[0])
 	type seen struct {
 		heldChunk, heldOps, heldOpen bool
 		released                     bool
@@ -315,6 +316,7 @@ func TestSendZC_everyAnswerDelivers(t *testing.T) {
 		}
 		ul, lp := uringOf(g), g.loops[0]
 		rr := ul.rings[0]
+		echoSent(t, g, rr)
 		done := make(chan zcSlot, 1)
 		if err := lp.Post(func(corenet.LoopIO, uintptr) {
 			var out zcSlot
@@ -451,6 +453,7 @@ func TestSendZC_noZeroCopyWhileARefusalIsOwed(t *testing.T) {
 		}
 		ul := uringOf(g)
 		rr := ul.rings[0]
+		echoSent(t, g, rr)
 		var got zcSlot
 		var zc, pend uint8
 		onLoop(t, g, func() {
@@ -514,6 +517,29 @@ func TestSendZC_noZeroCopyWhileARefusalIsOwed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
+}
+
+// echoSent waits until the open slot of rr holds no output: the echo's send
+// completed, and its notification came if it left zero-copy. The peer reads
+// the echo before the loop reaps its send's completion, and a flight injected
+// on the loop's thread in between found the send still in flight — or, its
+// notification still owed, overwrote what the slot counted for it.
+func echoSent(t *testing.T, g *Group, rr *uRing) {
+	t.Helper()
+	waitFor(t, "the echo's send completed", func() bool {
+		idle := false
+		onLoop(t, g, func() {
+			for i := range rr.r.conns {
+				cc := &rr.r.conns[i]
+				//: the open slot: idle once nothing of the echo is held.
+				if cc.state == stOpen {
+					idle = cc.flags&fSending == 0 && cc.out.empty() && cc.flight.empty() && cc.zcPend == 0
+					return
+				}
+			}
+		})
+		return idle
+	})
 }
 
 // zcSlot is the open slot of g's first ring, read on the loop's thread.

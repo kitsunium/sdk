@@ -150,7 +150,9 @@ func TestErrorLog_handshakeFlood(t *testing.T) {
 				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 				_, _ = c.Write([]byte("GET / HTTP/1.1\r\n\r\n"))
 				_, _ = io.Copy(io.Discard, c)
-				_ = c.Close()
+				// The server's end read, closed by a reset: the server,
+				// which closed first, keeps no TIME_WAIT (resetConn).
+				resetConn(c)
 			}
 		})
 	}

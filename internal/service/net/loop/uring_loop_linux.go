@@ -1489,12 +1489,32 @@ func (rr *uRing) refuses(index uint32) bool {
 	return rr.ul.stopping() || (rr.r.draining && !lp.draining) || (lp.sz.maxConns > 0 && lp.grp.live.Load() >= int64(lp.sz.maxConns)) || int(index) >= len(rr.slotOf)
 }
 
-// orphanClose closes a direct descriptor no slot owns.
+// orphanClose closes a direct descriptor no slot owns, its peer told first:
+// a shutdown hard-linked ahead of the close. A direct descriptor's close
+// puts its file only once the requests issued before it ended, and the
+// multishot recvs of the ring's other connections last as long as they do
+// (uRing.shutdown): closed alone, a connection refused past MaxConns, or by a
+// stopping or drained ring, read no end, its peer waiting for its own
+// deadline.
 func (rr *uRing) orphanClose(index uint32) {
 	//: a process descriptor closes at once.
 	if !rr.ul.direct {
 		closeFDs([]int{int(index)})
 		//: closed.
+		return
+	}
+	ud := udPack(udOrphanClose, 0, index)
+	//: the linked pair needs two entries of the SQ, or the chain would split.
+	if !rr.u.room(2) {
+		rr.u.submit()
+	}
+	//: room for the pair: the shutdown, then the close whatever its result.
+	if rr.u.room(2) {
+		s := rr.u.get()
+		prepShutdownFixed(s, index, syscall.SHUT_RDWR, ud)
+		s.flags |= sqeIOHardlink
+		prepCloseDirect(rr.u.get(), index, ud)
+		//: both queued.
 		return
 	}
 	s := rr.u.get()
@@ -1504,7 +1524,8 @@ func (rr *uRing) orphanClose(index uint32) {
 		//: dropped.
 		return
 	}
-	prepCloseDirect(s, index, udPack(udOrphanClose, 0, index))
+	//: room for one: the close alone, the peer told when the file is put.
+	prepCloseDirect(s, index, ud)
 }
 
 // armRecv arms slot's multishot recv on the roomiest group, counted.
@@ -1657,8 +1678,8 @@ func (rr *uRing) takeBuf(c *cqe) {
 // recvCancelled re-arms the recv of a connection still open whose recv was
 // cancelled and ended.
 func (rr *uRing) recvCancelled(slot int32, more bool) {
-	//: open, and the recv ended: armed again.
-	if !more && rr.r.conns[slot].state == stOpen {
+	//: still reading, and the recv ended: armed again.
+	if !more && reads(&rr.r.conns[slot]) {
 		rr.armRecv(slot)
 	}
 }
@@ -1677,7 +1698,7 @@ func (rr *uRing) recvBytes(slot int32, more bool) {
 	}
 	//: re-armed unless the connection is going: a drain's close reads on,
 	//: to linger (ring.lingers).
-	if c := &rr.r.conns[slot]; !more && (c.state == stOpen || (c.state == stClosing && c.reason == rDrain)) {
+	if !more && reads(&rr.r.conns[slot]) {
 		rr.armRecv(slot)
 	}
 }
@@ -1686,13 +1707,27 @@ func (rr *uRing) recvBytes(slot int32, more bool) {
 // be re-armed as buffers come back; past the bounded queue it fails.
 func (rr *uRing) recvStarved(slot int32) {
 	rr.r.st.starved++
-	open := rr.r.conns[slot].state == stOpen
-	//: a bounded queue: past it the connection fails.
-	if open && len(rr.starved) < starvedCap {
+	c := &rr.r.conns[slot]
+	//: by what the slot still reads, and the queue's room.
+	switch {
+	//: queued, to be re-armed: an open connection, or a drain's close that
+	//: reads on to linger.
+	case reads(c) && len(rr.starved) < starvedCap:
 		rr.starved = append(rr.starved, slot)
-	} else if open {
+	//: an open one past the bound fails.
+	case c.state == stOpen:
 		rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
 	}
+	//: a lingering one past the bound reads no more: drainLinger ends it.
+}
+
+// reads reports whether c's recv stays armed: an open connection, or one the
+// drain closes, which reads on to linger (ring.lingers) — on every path that
+// re-arms a recv, so a linger never stops reading on an ENOBUFS or a cancel
+// and closes with input unread.
+func reads(c *connCtl) bool {
+	//: open, or the drain's closing.
+	return c.state == stOpen || (c.state == stClosing && c.reason == rDrain)
 }
 
 // recvEOF marks an open connection's peer done: it settles at the end of the
@@ -2056,8 +2091,8 @@ func (rr *uRing) rearmStarved() {
 		}
 		slot := rr.starved[k]
 		k++
-		//: re-armed only if still open.
-		if rr.r.conns[slot].state == stOpen {
+		//: re-armed only if it still reads.
+		if reads(&rr.r.conns[slot]) {
 			rr.armRecvOn(slot, g)
 			left[g]--
 			room--
