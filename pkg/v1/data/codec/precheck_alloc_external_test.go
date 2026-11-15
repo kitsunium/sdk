@@ -25,9 +25,14 @@ type promotedRecord struct {
 // 1, 1 and 2 (the codec's Marshal of the struct alone allocates 3, 2, 2, 3,
 // one of them boxing the struct, which promotion pays as well). The budget
 // is the base minus the refusal: every allocation the refusal made is gone.
+//
+// Form's is tighter still, 4 (#910 reopened: "at least 4 fewer" than the
+// base's 10 with v's boxing): its promotion writes the one pair `_json=<JSON>`
+// into one buffer of its exact length, so what remains is encoding/json's two
+// allocations, that buffer, and v's boxing. Measured 4.
 func TestPromotedMarshalBuildsNoRefusal(t *testing.T) {
 	v := promotedRecord{ID: 7, Name: "ada"}
-	budgets := map[codec.Format]float64{codec.Form: 8, codec.NDJSON: 7, codec.CSV: 9, codec.PEM: 6}
+	budgets := map[codec.Format]float64{codec.Form: 4, codec.NDJSON: 7, codec.CSV: 9, codec.PEM: 6}
 	for f, budget := range budgets {
 		if _, err := codec.Marshal(f, v); err != nil {
 			t.Fatalf("%s: %v", f, err)

@@ -110,6 +110,24 @@ packages:
       package CLAUDE.md for the full round-trip contract and the two documented
       places where Marshal ∘ Unmarshal is not byte-for-byte identity.
     functions:
+      - doc: |-
+          AppendPair appends the one pair key=value to dst, both percent-escaped as
+          Marshal escapes them, and returns the grown buffer. It writes exactly the
+          bytes Marshal writes for a url.Values holding that one key and one value,
+          but from a payload that is already bytes and without building the map:
+          the buffer is grown once, to the exact length, so a nil dst costs one
+          allocation. The facade's promotion of a value to Form writes its JSON
+          through it (#910).
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: key
+            type: string
+          - name: value
+            type: "[]byte"
+        name: AppendPair
+        out:
+          - type: "[]byte"
       - doc: New returns the urlencoded form codec instance.
         name: New
         out:

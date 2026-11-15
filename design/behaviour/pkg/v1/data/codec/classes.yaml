@@ -488,7 +488,9 @@ functions:
       serialising v with encoding/json and wrapping the JSON bytes in the
       codec's native shape, then re-calling Marshal. Switching on Format
       keeps every per-codec wrap step inline so the data flow is read
-      top-down without per-format helper indirection.
+      top-down without per-format helper indirection. Form is the one format
+      that does not go through wrapForFormat and c.Marshal: its body is one
+      pair, written straight into its exact length.
     name: promoteMarshal
     params: f Format, c Codec, v any
     results: encoded []byte, err error
@@ -635,6 +637,7 @@ imports:
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   fbcodec: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers
+  formcodec: github.com/kitsunium/sdk/internal/service/data/codec/form
   io: io
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
   reflect: reflect

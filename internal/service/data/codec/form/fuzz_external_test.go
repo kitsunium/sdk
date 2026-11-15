@@ -39,3 +39,19 @@ func FuzzRoundTrip(f *testing.F) {
 		}
 	})
 }
+
+// FuzzAppendPair is #910's form target: whatever bytes a payload holds, and
+// whatever key it is bound to, AppendPair writes the bytes net/url's Encode
+// writes for that one pair — so the facade's promotion, which appends the
+// JSON of a value this way, can never drift from the codec's own escaping.
+func FuzzAppendPair(f *testing.F) {
+	for _, seed := range []string{"", "plain", "a b&c=d", `{"id":7,"name":"ada"}`, "\x00\xff\x7f", "日本語", "%zz+"} {
+		f.Add("_json", []byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, key string, value []byte) {
+		got := string(form.AppendPair(nil, key, value))
+		if want := (url.Values{key: {string(value)}}).Encode(); got != want {
+			t.Fatalf("AppendPair(%q, %q) = %q, want %q", key, value, got, want)
+		}
+	})
+}

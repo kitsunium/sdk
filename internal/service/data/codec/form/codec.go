@@ -127,6 +127,23 @@ func (*formCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	return encodeInto(dst, values), nil
 }
 
+// AppendPair appends the one pair key=value to dst, both percent-escaped as
+// Marshal escapes them, and returns the grown buffer. It writes exactly the
+// bytes Marshal writes for a url.Values holding that one key and one value,
+// but from a payload that is already bytes and without building the map:
+// the buffer is grown once, to the exact length, so a nil dst costs one
+// allocation. The facade's promotion of a value to Form writes its JSON
+// through it (#910).
+func AppendPair(dst []byte, key string, value []byte) []byte {
+	//: one grow for the whole pair — key, '=' and value, each at its escaped width.
+	dst = slices.Grow(dst, escapedLen(key)+1+escapedLen(value))
+	//: the key, then the '=', then the value: the order encodeInto writes.
+	dst = appendQueryEscape(dst, key)
+	dst = append(dst, '=')
+	//: the value is bytes; the same escaping rules apply to a byte as to a char.
+	return appendQueryEscape(dst, value)
+}
+
 // Unmarshal parses an urlencoded body into v, which must be a non-nil pointer
 // to url.Values, map[string][]string, or map[string]string.
 func (*formCodec) Unmarshal(data []byte, v any) error {
@@ -427,8 +444,10 @@ func encodedLen(values url.Values, keys []string) int {
 	return total
 }
 
-// escapedLen reports how many bytes appendQueryEscape will write for s.
-func escapedLen(s string) int {
+// escapedLen reports how many bytes appendQueryEscape will write for s. It
+// takes a string or a byte slice so AppendPair measures a payload that is
+// bytes without converting it to a string first.
+func escapedLen[S ~string | ~[]byte](s S) int {
 	//: every byte contributes at least one output byte.
 	total := len(s)
 	//: each escaped byte costs two MORE than the one already counted.
@@ -449,8 +468,9 @@ func escapedLen(s string) int {
 // of net/url.QueryEscape: RFC 3986 §2.3 unreserved bytes travel verbatim,
 // space becomes '+', and every other byte becomes an uppercase "%XX" triple.
 // Hand-rolled because QueryEscape returns a string, which would put one
-// allocation per key and per value on the encode path.
-func appendQueryEscape(dst []byte, s string) []byte {
+// allocation per key and per value on the encode path. A string or a byte
+// slice is walked alike: the rules are defined on bytes.
+func appendQueryEscape[S ~string | ~[]byte](dst []byte, s S) []byte {
 	//: byte-wise walk — the rules are defined on bytes, not runes, so a
 	//: multi-byte rune is escaped one byte at a time exactly as stdlib does.
 	for i := range len(s) {

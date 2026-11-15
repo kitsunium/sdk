@@ -53,6 +53,27 @@ sequences:
           when: "!ok"
       - return: encodeInto(dst, values), nil
         to: encodeInto
+  - of: AppendPair
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendPair
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: appendQueryEscape
+        kind: internal
+    steps:
+      - set: dst
+        to: slices
+        value: slices.Grow(dst, escapedLen(key)+1+escapedLen(value))
+      - set: dst
+        to: appendQueryEscape
+        value: appendQueryEscape(dst, key)
+      - set: dst
+        value: append(dst, '=')
+      - return: appendQueryEscape(dst, value)
+        to: appendQueryEscape
   - of: (*formCodec).Unmarshal
     participants:
       - id: caller

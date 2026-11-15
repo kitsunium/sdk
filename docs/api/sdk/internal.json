@@ -80809,6 +80809,18 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/codec/form.AppendPair",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/data/codec/form",
+      "name": "AppendPair",
+      "spelled": "func(dst []byte, key string, value []byte) []byte",
+      "canonical": "func(dst []byte, key string, value []byte) []byte",
+      "doc": "AppendPair appends the one pair key=value to dst, both percent-escaped as\nMarshal escapes them, and returns the grown buffer. It writes exactly the\nbytes Marshal writes for a url.Values holding that one key and one value,\nbut from a payload that is already bytes and without building the map:\nthe buffer is grown once, to the exact length, so a nil dst costs one\nallocation. The facade's promotion of a value to Form writes its JSON\nthrough it (#910).\n",
+      "file": "service/data/codec/form/codec.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/codec/form.Codec",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/service/data/codec/form",

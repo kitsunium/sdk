@@ -66,6 +66,7 @@ files:
       - (*formCodec).Extensions
       - (*formCodec).Marshal
       - (*formCodec).Append
+      - AppendPair
       - (*formCodec).Unmarshal
       - publish
       - collapseSingle
@@ -86,6 +87,9 @@ files:
 functions:
   - name: New
     results: codec.Codec
+  - name: AppendPair
+    params: dst []byte, key string, value []byte
+    results: "[]byte"
   - doc: |-
       publish writes values through the caller's pointer. The three accepted
       targets differ in fidelity, and the difference is enforced rather than
@@ -139,19 +143,25 @@ functions:
     name: encodedLen
     params: values url.Values, keys []string
     results: int
-  - doc: escapedLen reports how many bytes appendQueryEscape will write for s.
+  - doc: |-
+      escapedLen reports how many bytes appendQueryEscape will write for s. It
+      takes a string or a byte slice so AppendPair measures a payload that is
+      bytes without converting it to a string first.
     name: escapedLen
-    params: s string
+    params: s S
     results: int
+    typeParams: S ~string | ~[]byte
   - doc: |-
       appendQueryEscape appends s to dst using the query-component escaping rules
       of net/url.QueryEscape: RFC 3986 §2.3 unreserved bytes travel verbatim,
       space becomes '+', and every other byte becomes an uppercase "%XX" triple.
       Hand-rolled because QueryEscape returns a string, which would put one
-      allocation per key and per value on the encode path.
+      allocation per key and per value on the encode path. A string or a byte
+      slice is walked alike: the rules are defined on bytes.
     name: appendQueryEscape
-    params: dst []byte, s string
+    params: dst []byte, s S
     results: "[]byte"
+    typeParams: S ~string | ~[]byte
   - doc: |-
       isUnreservedQueryByte reports whether c is an RFC 3986 §2.3 unreserved
       byte, i.e. one net/url.QueryEscape leaves untouched.
