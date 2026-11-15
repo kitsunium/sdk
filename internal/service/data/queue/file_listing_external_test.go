@@ -1,9 +1,12 @@
 package queue_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,9 +34,25 @@ const publisherDirEnv string = "KTNQ_PUBLISHER_QUEUE_DIR"
 // publisherPayload is what the child process publishes.
 const publisherPayload string = "from-another-process"
 
+// publisherBudget bounds the child process's life, whatever became of the
+// test that started it.
+const publisherBudget time.Duration = 30 * time.Second
+
+// brokerIn builds a durable broker over cfg, its directories unwatched when
+// unwatch is set: read again under the listings' rule, the mode every
+// platform but Linux runs, forced here so Linux runs it too.
+func brokerIn(t *testing.T, unwatch bool, cfg svcqueue.FileConfig) corequeue.Broker {
+	t.Helper()
+	broker := requireFileBroker(t, cfg)
+	if unwatch {
+		svcqueue.UnwatchForTest(broker)
+	}
+	return broker
+}
+
 // TestThePublisherProcess is the child [TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen]
 // starts: it publishes one message into the directory it is given, on the
-// real clock, and exits.
+// real clock, and exits. It starts nothing.
 func TestThePublisherProcess(t *testing.T) {
 	dir := os.Getenv(publisherDirEnv)
 	if dir == "" {
@@ -42,27 +61,55 @@ func TestThePublisherProcess(t *testing.T) {
 	publish(t, requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()}), publisherPayload)
 }
 
-// TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen is the decision's
-// proof: a consumer lists an empty queue, another PROCESS publishes into it
-// in the same tick — the mtime the listing recorded does not move — and the
-// consumer's next Receive delivers the message, because a listing whose
-// directory changed within racyMargin of it is never reused.
-func TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen(t *testing.T) {
-	dir := t.TempDir()
-	consumer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
-	receiveNone(t, consumer)
-	listed := stateMtime(t, dir, "ready")
-
-	child := exec.Command(os.Args[0], "-test.run=^TestThePublisherProcess$") //nolint:gosec
-	child.Env = append(os.Environ(), publisherDirEnv+"="+dir)
+// publishFromAnotherProcess runs [TestThePublisherProcess] in a child of this
+// test binary over dir, within publisherBudget. The child's environment is
+// this one with the role's variable REMOVED, then set: a value inherited from
+// a run that was itself a child never names a second directory.
+func publishFromAnotherProcess(t *testing.T, dir string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), publisherBudget)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestThePublisherProcess$") //nolint:gosec
+	child.Env = append(slices.DeleteFunc(os.Environ(), func(entry string) bool {
+		return strings.HasPrefix(entry, publisherDirEnv+"=")
+	}), publisherDirEnv+"="+dir)
 	if out, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("the publisher process = %v\n%s", err, out)
 	}
-	pinMtime(t, dir, "ready", listed)
+}
 
-	got := receiveOne(t, consumer)
-	if string(got.Message.Payload) != publisherPayload {
-		t.Fatalf("Receive delivered %q, want the other process's %q", got.Message.Payload, publisherPayload)
+// TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen is the decision's
+// proof: a consumer lists an empty queue, another PROCESS publishes into it
+// in the same tick — the mtime the listing recorded does not move — and the
+// consumer's next Receive delivers the message: watched, because the kernel
+// queued the rename before it returned; unwatched, because a listing whose
+// directory changed within racyMargin of it is never reused.
+func TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen(t *testing.T) {
+	type tc struct {
+		name string
+		// unwatch reads the directories under the listings' rule: watched,
+		// the kernel's change queue keeps the index where it has one.
+		unwatch bool
+	}
+	tests := []tc{{name: "watched"}, {name: "unwatched", unwatch: true}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		dir := t.TempDir()
+		consumer := brokerIn(t, c.unwatch, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
+		receiveNone(t, consumer)
+		listed := stateMtime(t, dir, "ready")
+
+		publishFromAnotherProcess(t, dir)
+		pinMtime(t, dir, "ready", listed)
+
+		got := receiveOne(t, consumer)
+		if string(got.Message.Payload) != publisherPayload {
+			t.Fatalf("Receive delivered %q, want the other process's %q", got.Message.Payload, publisherPayload)
+		}
+	}
+	//: each mode.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
@@ -71,20 +118,34 @@ func TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen(t *testing.T) {
 // publisher — and a queue that already held a message, so the listing that
 // misses the publication is not an empty one.
 func TestAPublicationByAnotherBrokerInTheTickOfAListingIsSeen(t *testing.T) {
-	dir := t.TempDir()
-	consumer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
-	producer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
-	first := publish(t, producer, "first")
-	if got := receiveOne(t, consumer); got.Message.ID != first.ID {
-		t.Fatalf("Receive delivered %q, want %q", got.Message.ID, first.ID)
+	type tc struct {
+		name string
+		// unwatch reads the directories under the listings' rule: watched,
+		// the kernel's change queue keeps the index where it has one.
+		unwatch bool
 	}
-	listed := stateMtime(t, dir, "ready")
+	tests := []tc{{name: "watched"}, {name: "unwatched", unwatch: true}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		dir := t.TempDir()
+		consumer := brokerIn(t, c.unwatch, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
+		producer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
+		first := publish(t, producer, "first")
+		if got := receiveOne(t, consumer); got.Message.ID != first.ID {
+			t.Fatalf("Receive delivered %q, want %q", got.Message.ID, first.ID)
+		}
+		listed := stateMtime(t, dir, "ready")
 
-	second := publish(t, producer, "second")
-	pinMtime(t, dir, "ready", listed)
+		second := publish(t, producer, "second")
+		pinMtime(t, dir, "ready", listed)
 
-	if got := receiveOne(t, consumer); got.Message.ID != second.ID {
-		t.Fatalf("Receive delivered %q, want the publication made in the listing's tick, %q", got.Message.ID, second.ID)
+		if got := receiveOne(t, consumer); got.Message.ID != second.ID {
+			t.Fatalf("Receive delivered %q, want the publication made in the listing's tick, %q", got.Message.ID, second.ID)
+		}
+	}
+	//: each mode.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
@@ -95,21 +156,35 @@ func TestAPublicationByAnotherBrokerInTheTickOfAListingIsSeen(t *testing.T) {
 // stamps the same mtime. The listing is not reused and the publication is
 // seen.
 func TestACoarseMtimeWithinTheMarginOfItsListingIsNeverTrusted(t *testing.T) {
-	dir := t.TempDir()
-	consumer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
-	producer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
-	coarse := time.Now().Add(-time.Hour).Truncate(2 * time.Second)
-	pinMtime(t, dir, "ready", coarse)
-	svcqueue.SetListingWallForTest(consumer, func() time.Time {
-		return coarse.Add(svcqueue.RacyMarginForTest - time.Nanosecond)
-	})
-	receiveNone(t, consumer)
+	type tc struct {
+		name string
+		// unwatch reads the directories under the listings' rule: watched,
+		// the kernel's change queue keeps the index where it has one.
+		unwatch bool
+	}
+	tests := []tc{{name: "watched"}, {name: "unwatched", unwatch: true}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		dir := t.TempDir()
+		consumer := brokerIn(t, c.unwatch, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
+		producer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
+		coarse := time.Now().Add(-time.Hour).Truncate(2 * time.Second)
+		pinMtime(t, dir, "ready", coarse)
+		svcqueue.SetListingWallForTest(consumer, func() time.Time {
+			return coarse.Add(svcqueue.RacyMarginForTest - time.Nanosecond)
+		})
+		receiveNone(t, consumer)
 
-	published := publish(t, producer, "same-coarse-tick")
-	pinMtime(t, dir, "ready", coarse)
+		published := publish(t, producer, "same-coarse-tick")
+		pinMtime(t, dir, "ready", coarse)
 
-	if got := receiveOne(t, consumer); got.Message.ID != published.ID {
-		t.Fatalf("Receive delivered %q, want %q", got.Message.ID, published.ID)
+		if got := receiveOne(t, consumer); got.Message.ID != published.ID {
+			t.Fatalf("Receive delivered %q, want %q", got.Message.ID, published.ID)
+		}
+	}
+	//: each mode.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
@@ -117,71 +192,107 @@ func TestACoarseMtimeWithinTheMarginOfItsListingIsNeverTrusted(t *testing.T) {
 // case the margin cannot see, shown rather than discovered: the directory's
 // mtime was already old at the listing and is old again after a publication —
 // a tool that restores a directory's mtime, a wall clock stepped back across
-// the listing. The listing is reused, so the publication is not seen at
-// once; it is seen once the listing is listingMaxAge old, which bounds the
-// delay whatever the mtime says.
+// the listing. Unwatched, the listing is reused, so the publication is not
+// seen at once; it is seen once the listing is listingMaxAge old, which
+// bounds the delay whatever the mtime says. Watched, the kernel named the
+// rename, and the next Receive delivers it: the mtime is never read.
 func TestAListingAnMtimeCannotInvalidateIsReadAgainPastItsMaximumAge(t *testing.T) {
-	dir := t.TempDir()
-	consumer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
-	producer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
-	var ahead atomic.Int64
-	svcqueue.SetListingWallForTest(consumer, func() time.Time {
-		return time.Now().Add(time.Duration(ahead.Load()))
-	})
-	old := time.Now().Add(-time.Hour)
-	pinMtime(t, dir, "ready", old)
-	receiveNone(t, consumer)
+	type tc struct {
+		name string
+		// unwatch reads the directories under the listings' rule: watched,
+		// the kernel's change queue keeps the index where it has one.
+		unwatch bool
+	}
+	tests := []tc{{name: "watched"}, {name: "unwatched", unwatch: true}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		dir := t.TempDir()
+		consumer := brokerIn(t, c.unwatch, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
+		producer := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
+		var ahead atomic.Int64
+		svcqueue.SetListingWallForTest(consumer, func() time.Time {
+			return time.Now().Add(time.Duration(ahead.Load()))
+		})
+		old := time.Now().Add(-time.Hour)
+		pinMtime(t, dir, "ready", old)
+		receiveNone(t, consumer)
 
-	published := publish(t, producer, "behind-a-forged-mtime")
-	pinMtime(t, dir, "ready", old)
-	receiveNone(t, consumer)
+		published := publish(t, producer, "behind-a-forged-mtime")
+		pinMtime(t, dir, "ready", old)
+		if watched, _ := svcqueue.WatchStateForTest(consumer); watched {
+			if got := receiveOne(t, consumer); got.Message.ID != published.ID {
+				t.Fatalf("a watched Receive delivered %q, want %q at once", got.Message.ID, published.ID)
+			}
+			return
+		}
+		receiveNone(t, consumer)
 
-	ahead.Store(int64(svcqueue.ListingMaxAgeForTest))
-	if got := receiveOne(t, consumer); got.Message.ID != published.ID {
-		t.Fatalf("Receive past the listing's maximum age delivered %q, want %q", got.Message.ID, published.ID)
+		ahead.Store(int64(svcqueue.ListingMaxAgeForTest))
+		if got := receiveOne(t, consumer); got.Message.ID != published.ID {
+			t.Fatalf("Receive past the listing's maximum age delivered %q, want %q", got.Message.ID, published.ID)
+		}
+	}
+	//: each mode.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
 // TestAnIdlePollOfAQuietQueueReadsNoDirectory is what the cache is for: on a
 // queue nobody has touched for longer than the margin, a Receive and a Stats
-// cost a stat of each state directory and no read of one. The directories are
-// made unreadable after the first look — a read would fail with EACCES —, and
-// every later call still answers, from the listings, what the queue holds.
+// cost a stat of each state directory — watched, a read of the empty change
+// queue — and no read of one. The directories are made unreadable after the
+// first look — a read would fail with EACCES —, and every later call still
+// answers, from the listings and the index, what the queue holds.
 func TestAnIdlePollOfAQuietQueueReadsNoDirectory(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("the superuser reads a directory whatever its mode, so an unreadable one proves nothing")
 	}
-	dir := t.TempDir()
-	clk := clock.NewManualClock(epoch)
-	broker := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy(), Clock: clk})
-	later := delayedPublisher(t, broker)
-	for range 3 {
-		if _, err := later.PublishAt(t.Context(), []byte("later"), epoch.Add(time.Hour)); err != nil {
-			t.Fatalf("PublishAt() = %v", err)
+	type tc struct {
+		name string
+		// unwatch reads the directories under the listings' rule: watched,
+		// the kernel's change queue keeps the index where it has one.
+		unwatch bool
+	}
+	tests := []tc{{name: "watched"}, {name: "unwatched", unwatch: true}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		dir := t.TempDir()
+		clk := clock.NewManualClock(epoch)
+		broker := brokerIn(t, c.unwatch, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy(), Clock: clk})
+		later := delayedPublisher(t, broker)
+		for range 3 {
+			if _, err := later.PublishAt(t.Context(), []byte("later"), epoch.Add(time.Hour)); err != nil {
+				t.Fatalf("PublishAt() = %v", err)
+			}
+		}
+		quiet := time.Now().Add(-time.Hour)
+		for _, state := range []string{"ready", "inflight", "dead"} {
+			pinMtime(t, dir, state, quiet)
+		}
+		receiveNone(t, broker)
+		counter := broker.(corequeue.Counter)
+		if _, err := counter.Stats(t.Context()); err != nil {
+			t.Fatalf("Stats() = %v", err)
+		}
+
+		for _, state := range []string{"ready", "inflight", "dead"} {
+			unreadable(t, dir, state)
+		}
+		for range 5 {
+			receiveNone(t, broker)
+		}
+		stats, err := counter.Stats(t.Context())
+		if err != nil {
+			t.Fatalf("Stats() over unreadable, quiet directories = %v, want the listings' answer", err)
+		}
+		if stats.Queued != 3 || stats.Leased != 0 || stats.Dead != 0 || !stats.NextDueAt.Equal(epoch.Add(time.Hour)) {
+			t.Fatalf("Stats() = %+v, want 3 queued, due at %v", stats, epoch.Add(time.Hour))
 		}
 	}
-	quiet := time.Now().Add(-time.Hour)
-	for _, state := range []string{"ready", "inflight", "dead"} {
-		pinMtime(t, dir, state, quiet)
-	}
-	receiveNone(t, broker)
-	counter := broker.(corequeue.Counter)
-	if _, err := counter.Stats(t.Context()); err != nil {
-		t.Fatalf("Stats() = %v", err)
-	}
-
-	for _, state := range []string{"ready", "inflight", "dead"} {
-		unreadable(t, dir, state)
-	}
-	for range 5 {
-		receiveNone(t, broker)
-	}
-	stats, err := counter.Stats(t.Context())
-	if err != nil {
-		t.Fatalf("Stats() over unreadable, quiet directories = %v, want the listings' answer", err)
-	}
-	if stats.Queued != 3 || stats.Leased != 0 || stats.Dead != 0 || !stats.NextDueAt.Equal(epoch.Add(time.Hour)) {
-		t.Fatalf("Stats() = %+v, want 3 queued, due at %v", stats, epoch.Add(time.Hour))
+	//: each mode.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

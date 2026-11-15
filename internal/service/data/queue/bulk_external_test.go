@@ -716,7 +716,7 @@ func newBrokerErr(t *testing.T, name string, policy corequeue.PolicyValue) (core
 	switch name {
 	case "memory":
 		return svcqueue.NewMemory(svcqueue.MemoryConfig{Policy: policy})
-	case "file":
+	case "file", "file/unwatched":
 		return svcqueue.NewFile(svcqueue.FileConfig{Dir: t.TempDir(), Policy: policy})
 	default:
 		dialect := sqlDialectNamed(t, name)
@@ -754,6 +754,10 @@ func everyJitteredBroker(random func() float64) []brokerFactory {
 				return broker
 			case "file":
 				return requireFileBroker(t, svcqueue.FileConfig{Dir: t.TempDir(), Policy: policy, Clock: clk, Random: random})
+			case "file/unwatched":
+				broker := requireFileBroker(t, svcqueue.FileConfig{Dir: t.TempDir(), Policy: policy, Clock: clk, Random: random})
+				svcqueue.UnwatchForTest(broker)
+				return broker
 			default:
 				dialect := sqlDialectNamed(t, name)
 				engine := newSQLEngine(dialect, jobsTable, true)

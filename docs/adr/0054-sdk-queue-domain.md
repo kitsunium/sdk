@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings; amended in place on 2026-10-21 for kitsunium/sdk#474 — a `Releaser` sibling, and `Consume`'s stop, drain and lease bound (see the Amendment section); [ADR 0183](0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md) — resolves the Deferred `PublishAt`: a queue holds a message until one instant, durably (`DelayedPublisher`), recurrence stays the scheduler's, beside `DelayedNacker` and `OncePublisher`; ADR 0151, amended on 2026-10-23 for kitsunium/sdk#500 — D10's dead letter keeps, beside the origin's reason, code and Public half, the codes its wrappers added (`DeadLetterValue.Trail`); amended in place on 2026-11-02 for kitsunium/sdk#816, #827, #833, #835, #1043, #1046 and #1152 — six siblings that act on a whole queue (`MessageLister`, `Counter`, `Purger`, `DeadLetterPager`, `BatchPublisher`, `Acker` — the Deferred `AckAll`, decided), one order for the dead letters, `PolicyValue.MaxAge`, and the handler's `Acknowledged`; and #1049, the idle workers of one `Consume` polling through one of them (see the second Amendment section); amended in place on 2026-11-03 for kitsunium/sdk#811, #827 and #1045 — the file broker's listing reused while its directory is "racily clean", `PublishMany` under one directory flush, and the Deferred priorities decided: five levels, strict, a compatible name grammar and an opt-in SQL column (see the last Amendment section); [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — resolves the Deferred `third-party/` connector three times: a broker over Valkey streams (`third-party/db/redis/queue`), over NATS JetStream (`third-party/nats/queue`) and over SQS (`third-party/aws/queue/sqs`), each dead-lettering with the cause itself
+- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings; amended in place on 2026-10-21 for kitsunium/sdk#474 — a `Releaser` sibling, and `Consume`'s stop, drain and lease bound (see the Amendment section); [ADR 0183](0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md) — resolves the Deferred `PublishAt`: a queue holds a message until one instant, durably (`DelayedPublisher`), recurrence stays the scheduler's, beside `DelayedNacker` and `OncePublisher`; ADR 0151, amended on 2026-10-23 for kitsunium/sdk#500 — D10's dead letter keeps, beside the origin's reason, code and Public half, the codes its wrappers added (`DeadLetterValue.Trail`); amended in place on 2026-11-02 for kitsunium/sdk#816, #827, #833, #835, #1043, #1046 and #1152 — six siblings that act on a whole queue (`MessageLister`, `Counter`, `Purger`, `DeadLetterPager`, `BatchPublisher`, `Acker` — the Deferred `AckAll`, decided), one order for the dead letters, `PolicyValue.MaxAge`, and the handler's `Acknowledged`; and #1049, the idle workers of one `Consume` polling through one of them (see the second Amendment section); amended in place on 2026-11-03 for kitsunium/sdk#811, #827 and #1045 — the file broker's listing reused while its directory is "racily clean", `PublishMany` under one directory flush, and the Deferred priorities decided: five levels, strict, a compatible name grammar and an opt-in SQL column (see the third Amendment section); amended in place on 2026-11-14 for kitsunium/sdk#811 — a `Receive` walks an index of `ready/` and `inflight/`, kept by inotify on Linux over a local filesystem and read again under the "racily clean" rule elsewhere, the format on disk unchanged (see the last Amendment section); [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — resolves the Deferred `third-party/` connector three times: a broker over Valkey streams (`third-party/db/redis/queue`), over NATS JetStream (`third-party/nats/queue`) and over SQS (`third-party/aws/queue/sqs`), each dead-lettering with the cause itself
 - **Related**: [ADR 0053](0053-sdk-events-domain.md) (the frontier table, written before this domain existed), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0052](0052-sdk-lock-domain.md) (leases that expire, and the `flock(2)` measurement), [ADR 0056](0056-sdk-vfs-domain.md) (`vfs`, whose `WriteAtomic` is this domain's durable publish), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse rather than approximate), [ADR 0001](0001-sdk-go-multimodule-layout.md) / [ADR 0005](0005-sdk-error-codes-dotted-quad.md)
 
 ## Context
@@ -764,6 +764,62 @@ changed; the question is only when it can be believed. Decided:
    it every statement is the one it sent before, byte for byte, and a level
    other than the normal one is refused. The memory broker keeps one ready
    list per level.
+
+## Amendment — 2026-11-14: a Receive walks an index the kernel keeps where it names the changes (kitsunium/sdk#811)
+
+The amendment of 2026-11-03 made a QUIET queue cheap and left a queue in
+motion where it was: a `Receive` that leases and a `Nack` that hands back
+change `ready/` at every call, the mtime cannot tell this consumer's rename
+from another process's in the same tick, so `ready/` was read, copied and
+sorted on every `Receive` — 7× depth 10 at depth 1 000, where #811 asks 2×,
+a ratio that grows on a faster disk, since the fixed system calls shrink and
+the per-entry cost does not. The owner held the issue to its original bound
+(2026-11-13). Decided:
+
+1. **A `Receive` walks an index, not a listing.** The file broker keeps
+   `ready/` as one heap per level and `inflight/` as one heap, in the orders
+   the sorted listings had, with a map from name to heap handle; only a name
+   the state's grammar reads is indexed. A `Receive` reads the heads: its
+   cost no longer depends on the depth but through O(log n). The index is a
+   hint and never the truth: the rename that takes a message is still the
+   only arbiter (D6), a name in excess costs one `ENOENT`, a name missing
+   costs a delay bounded by the next full read. D6's "one message, one name"
+   and every guarantee of D1 to D3 are unchanged.
+2. **Where the kernel names the changes, it keeps the index.** On Linux,
+   over a local filesystem, the first `Receive` watches `ready/` and
+   `inflight/` with inotify — the directories `os.Root` opened, through
+   `/proc/self/fd`, never a path resolved again — then reads them whole, and
+   every look first drains the change queue without blocking. The kernel
+   queues an event inside the system call that causes it, before it
+   returns, so **a change another process finished before a `Receive` is
+   seen by that `Receive`**: the freshness #811 asks of the first `Receive`
+   after a publication holds with no margin, stricter than point 1 of the
+   2026-11-03 amendment. An overflow of the queue reads both directories
+   whole at the next look; a directory moved, removed or unmounted drops the
+   watch; a full read runs every minute whatever the queue said.
+3. **Everywhere else, point 1 of 2026-11-03 decides when the index is read
+   again**, unchanged: macOS's FSEvents and kqueue and the BSDs' and illumos'
+   interfaces say that a directory changed and not what, which is the
+   mtime's problem again; a network or FUSE filesystem (named by `statfs`'s
+   `f_type`) is changed by hosts this kernel does not see; no instance left
+   (`max_user_instances`), no `/proc`, a lost watch fall back the same way.
+   A full read there is a mark and a sweep, never a sort, and on Linux it
+   looks each name up in the read's own buffer, so a name already indexed
+   costs no allocation. The bound of #811 is NOT claimed on these platforms:
+   no portable signal separates this broker's renames from another
+   process's in the same tick without a change of the format on disk, which
+   is not made.
+4. **The format on disk does not change.** A broker of an earlier release
+   sharing the directory is one more process whose renames the kernel names
+   — and reads under the old rule what this one writes.
+5. **What it costs.** One inotify instance and two watches per broker that
+   receives, released by `Close`; a broker that only publishes opens none.
+   About 200 bytes of memory per message the index holds.
+
+Measured by the bench A/B lane on the CI runner against `ee1f48ba2`, the
+issue's base: `BENCH.md` records the figures. Windows' `ReadDirectoryChangesW`
+names the entries too, and is not wired: the file broker is refused on
+Windows (ADR 0018).
 
 ## References
 

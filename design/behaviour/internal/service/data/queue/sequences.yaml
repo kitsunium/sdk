@@ -1198,6 +1198,8 @@ sequences:
         kind: actor
       - id: (*fileBroker).Close
         kind: self
+      - id: b.index.unwatch
+        kind: internal
       - id: b.root.Close
         kind: value
       - id: closer.Close
@@ -1207,6 +1209,9 @@ sequences:
       - id: backendFailed
         kind: internal
     steps:
+      - bind: watchErr
+        eval: b.index.unwatch("the broker is closed")
+        to: b.index.unwatch
       - bind: rootErr
         eval: b.root.Close()
         to: b.root.Close
@@ -1228,7 +1233,7 @@ sequences:
               to: backendFailed
           init:
             bind: closeErr
-            eval: cmp.Or(rootErr, publisherErr)
+            eval: cmp.Or(rootErr, publisherErr, watchErr)
             to: cmp
           when: closeErr != nil
       - return: nil
@@ -2934,7 +2939,820 @@ sequences:
             - return: "0"
           when: err != nil
       - return: count
-  - of: (*stateListing).reusable
+  - of: compareItems
+    participants:
+      - id: caller
+        kind: actor
+      - id: compareItems
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - return: cmp.Or(cmp.Compare(first.at, second.at), compareStem(first.name, second.name))
+        to: cmp
+  - of: (*dirIndex).init
+    steps:
+      - set: d.state, d.parse, d.stale
+        value: state, parse, true
+      - set: d.slots
+        value: make(map[string]indexSlot)
+      - set: d.heaps
+        value: make([]*heap.IndexedHeap[indexItem], 0, levels)
+      - loop:
+          do:
+            - set: d.heaps
+              value: append(d.heaps, heap.NewIndexed(compareItems))
+          range: levels
+  - of: (*dirIndex).insert
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dirIndex).insert
+        kind: self
+      - id: nameStem
+        kind: internal
+      - id: d.heaps[bucket].Push
+        kind: value
+    steps:
+      - bind: parsed, ok
+        eval: d.parse(name)
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - var:
+          name: bucket
+          type: uint8
+      - opt:
+          do:
+            - bind: digit, _
+              eval: nameStem(name)
+              to: nameStem
+            - set: bucket
+              value: digit - '0'
+          when: len(d.heaps) > 1
+      - bind: handle
+        eval: "d.heaps[bucket].Push(indexItem{name: name, at: parsed.At})"
+        to: d.heaps[bucket].Push
+      - set: d.slots[name]
+        value: "indexSlot{name: name, handle: handle, seen: d.gen, bucket: bucket}"
+  - of: (*dirIndex).mark
+    steps:
+      - opt:
+          do:
+            - set: slot.seen
+              value: d.gen
+            - set: d.slots[slot.name]
+              value: slot
+          when: slot.seen != d.gen
+  - of: (*dirIndex).lookup
+    steps:
+      - set: slot, ok
+        value: d.slots[string(raw)]
+      - return: slot, ok
+  - of: (*dirIndex).see
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dirIndex).see
+        kind: self
+      - id: d.mark
+        kind: internal
+      - id: d.insert
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.mark(slot)
+              to: d.mark
+            - return: ""
+          init:
+            bind: slot, ok
+            eval: d.slots[name]
+          when: ok
+      - eval: d.insert(name)
+        to: d.insert
+  - of: (*dirIndex).seeBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dirIndex).seeBytes
+        kind: self
+      - id: d.lookup
+        kind: internal
+      - id: d.mark
+        kind: internal
+      - id: d.insert
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: d.mark(slot)
+              to: d.mark
+            - return: ""
+          init:
+            bind: slot, ok
+            eval: d.lookup(raw)
+            to: d.lookup
+          when: ok
+      - opt:
+          do:
+            - eval: d.insert(string(raw))
+              to: d.insert
+          when: bytes.HasSuffix(raw, suffixMessageBytes)
+  - of: (*dirIndex).drop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dirIndex).drop
+        kind: self
+      - id: d.lookup
+        kind: internal
+      - id: d.heaps[slot.bucket].Remove
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: d.heaps[slot.bucket].Remove(slot.handle)
+              to: d.heaps[slot.bucket].Remove
+            - eval: delete(d.slots, slot.name)
+          init:
+            bind: slot, ok
+            eval: d.lookup(raw)
+            to: d.lookup
+          when: ok
+  - of: (*dirIndex).sweep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*dirIndex).sweep
+        kind: self
+      - id: d.heaps[slot.bucket].Remove
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: d.heaps[slot.bucket].Remove(slot.handle)
+                    to: d.heaps[slot.bucket].Remove
+                  - eval: delete(d.slots, name)
+                when: slot.seen != d.gen
+          key: name
+          range: d.slots
+          value: slot
+  - of: (*fileIndex).of
+    steps:
+      - opt:
+          do:
+            - return: "&x.ready"
+          when: state == dirReady
+      - return: "&x.inflight"
+  - of: (*fileIndex).start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).start
+        kind: self
+      - id: x.ready.init
+        kind: internal
+      - id: x.inflight.init
+        kind: internal
+      - id: watchStates
+        kind: internal
+    steps:
+      - set: x.started
+        value: "true"
+      - eval: x.ready.init(dirReady, parseReady, readyLevels)
+        to: x.ready.init
+      - eval: x.inflight.init(dirInflight, parseInflight, 1)
+        to: x.inflight.init
+      - set: x.buf
+        value: new([direntBufferBytes]byte)
+      - opt:
+          do:
+            - set: x.why
+              value: "\"unwatched by the broker's owner\""
+            - return: ""
+          when: x.unwatched
+      - set: x.watch, x.why
+        to: watchStates
+        value: watchStates(b.root)
+  - of: (*fileIndex).sync
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).sync
+        kind: self
+      - id: x.start
+        kind: internal
+      - id: x.drain
+        kind: internal
+      - id: x.of
+        kind: internal
+      - id: x.relist
+        kind: internal
+      - id: x.syncUnwatched
+        kind: internal
+    steps:
+      - lock:
+          mutex: x.mu
+      - opt:
+          do:
+            - eval: x.start(b)
+              to: x.start
+          when: "!x.started"
+      - opt:
+          do:
+            - eval: x.drain()
+              to: x.drain
+          when: x.watch != nil
+      - bind: index
+        eval: x.of(state)
+        to: x.of
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: x.relist(b, index)
+                    to: x.relist
+                when: index.stale || b.listed.wall().Sub(index.relistedAt) >= watchedRelistAge
+            - return: nil
+          when: x.watch != nil
+      - return: x.syncUnwatched(b, index)
+        to: x.syncUnwatched
+  - of: (*fileIndex).syncUnwatched
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).syncUnwatched
+        kind: self
+      - id: b.root.Stat
+        kind: value
+      - id: backendFailed
+        kind: internal
+      - id: x.relist
+        kind: internal
+    steps:
+      - bind: listedAt
+        eval: b.listed.wall()
+      - bind: info, statErr
+        eval: b.root.Stat(index.state)
+        to: b.root.Stat
+      - opt:
+          do:
+            - return: backendFailed("stat", index.state, statErr)
+              to: backendFailed
+          when: statErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: "!index.stale && !index.stamp.listedAt.IsZero() && index.stamp.reusable(info.ModTime(), listedAt)"
+      - opt:
+          do:
+            - return: relistErr
+          init:
+            bind: relistErr
+            eval: x.relist(b, index)
+            to: x.relist
+          when: relistErr != nil
+      - set: index.stamp
+        value: "listingStamp{listedAt: listedAt, modTime: info.ModTime()}"
+      - return: nil
+  - of: (*fileIndex).relist
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).relist
+        kind: self
+      - id: b.root.Open
+        kind: value
+      - id: backendFailed
+        kind: internal
+      - id: readEntries
+        kind: internal
+      - id: dir.Close
+        kind: value
+      - id: index.sweep
+        kind: internal
+    steps:
+      - op: ++
+        set: index.gen
+      - bind: dir, openErr
+        eval: b.root.Open(index.state)
+        to: b.root.Open
+      - opt:
+          do:
+            - set: index.stale
+              value: "true"
+            - return: backendFailed("readdir", index.state, openErr)
+              to: backendFailed
+          when: openErr != nil
+      - bind: readErr
+        eval: readEntries(dir, x.buf[:], index)
+        to: readEntries
+      - bind: closeErr
+        eval: dir.Close()
+        to: dir.Close
+      - opt:
+          do:
+            - set: index.stale
+              value: "true"
+            - return: backendFailed("readdir", index.state, cmp.Or(readErr, closeErr))
+              to: backendFailed
+          when: readErr != nil || closeErr != nil
+      - eval: index.sweep()
+        to: index.sweep
+      - set: index.stale, index.relistedAt
+        value: false, b.listed.wall()
+      - return: nil
+  - of: (*fileIndex).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).drain
+        kind: self
+      - id: x.watch.drain
+        kind: internal
+      - id: x.watch.close
+        kind: internal
+    steps:
+      - bind: lost, drainErr
+        eval: x.watch.drain(x)
+        to: x.watch.drain
+      - opt:
+          do:
+            - return: ""
+          when: "!lost && drainErr == nil"
+      - set: x.why
+        value: "\"the watch was lost: a state directory moved or vanished, or its queue failed\""
+      - opt:
+          do:
+            - op: +=
+              set: x.why
+              value: "\"; closing it failed too\""
+          init:
+            bind: closeErr
+            eval: x.watch.close()
+            to: x.watch.close
+          when: closeErr != nil
+      - set: x.watch
+        value: nil
+      - set: x.ready.stale, x.inflight.stale
+        value: true, true
+  - of: (*fileIndex).added
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).added
+        kind: self
+      - id: x.of(state).seeBytes
+        kind: internal
+    steps:
+      - eval: x.of(state).seeBytes(name)
+        to: x.of(state).seeBytes
+  - of: (*fileIndex).removed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).removed
+        kind: self
+      - id: x.of(state).drop
+        kind: internal
+    steps:
+      - eval: x.of(state).drop(name)
+        to: x.of(state).drop
+  - of: (*fileIndex).overflowed
+    steps:
+      - set: x.ready.stale, x.inflight.stale
+        value: true, true
+  - of: (*fileIndex).head
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).head
+        kind: self
+      - id: index.heaps[bucket].Peek
+        kind: value
+    steps:
+      - lock:
+          mutex: x.mu
+      - bind: item, _, found
+        eval: index.heaps[bucket].Peek()
+        to: index.heaps[bucket].Peek
+      - return: item.name, found
+  - of: (*fileIndex).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).take
+        kind: self
+      - id: index.heaps[bucket].Peek
+        kind: value
+      - id: index.heaps[bucket].Pop
+        kind: value
+    steps:
+      - lock:
+          mutex: x.mu
+      - bind: item, _, found
+        eval: index.heaps[bucket].Peek()
+        to: index.heaps[bucket].Peek
+      - opt:
+          do:
+            - return: "false"
+          when: "!found || item.name != name"
+      - eval: index.heaps[bucket].Pop()
+        to: index.heaps[bucket].Pop
+      - eval: delete(index.slots, name)
+      - return: "true"
+  - of: (*fileIndex).invalidate
+    steps:
+      - lock:
+          mutex: x.mu
+      - set: index.stale
+        value: "true"
+  - of: (*fileIndex).unwatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileIndex).unwatch
+        kind: self
+      - id: x.watch.close
+        kind: internal
+    steps:
+      - lock:
+          mutex: x.mu
+      - set: x.unwatched
+        value: "true"
+      - opt:
+          do:
+            - return: nil
+          when: x.watch == nil
+      - bind: closeErr
+        eval: x.watch.close()
+        to: x.watch.close
+      - set: x.watch, x.why
+        value: nil, why
+      - set: x.ready.stale, x.inflight.stale
+        value: true, true
+      - return: closeErr
+  - of: watchStates
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchStates
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: watchState
+        kind: internal
+      - id: file.SyscallConn
+        kind: value
+    steps:
+      - bind: descriptor, initErr
+        eval: syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
+        to: syscall
+      - opt:
+          do:
+            - return: "nil, \"inotify_init1: \" + initErr.Error()"
+          when: initErr != nil
+      - bind: file
+        eval: os.NewFile(uintptr(descriptor), "inotify")
+        to: os
+      - set: watch
+        value: "&stateWatch{file: file, states: [2]string{dirReady, dirInflight}}"
+      - loop:
+          do:
+            - bind: wd, refused
+              eval: watchState(root, descriptor, state)
+              to: watchState
+            - opt:
+                do:
+                  - return: nil, closedWhy(file, refused)
+                when: refused != ""
+            - set: watch.wds[index]
+              value: wd
+          key: index
+          range: watch.states
+          value: state
+      - bind: raw, rawErr
+        eval: file.SyscallConn()
+        to: file.SyscallConn
+      - opt:
+          do:
+            - return: "nil, closedWhy(file, \"inotify: \"+rawErr.Error())"
+          when: rawErr != nil
+      - set: watch.raw, watch.read
+        value: raw, watch.readOnce
+      - return: watch, ""
+  - of: closedWhy
+    participants:
+      - id: caller
+        kind: actor
+      - id: closedWhy
+        kind: self
+      - id: held.Close
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "why + \"; close: \" + closeErr.Error()"
+          init:
+            bind: closeErr
+            eval: held.Close()
+            to: held.Close
+          when: closeErr != nil
+      - return: why
+  - of: watchState
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchState
+        kind: self
+      - id: root.Open
+        kind: internal
+      - id: watchOpened
+        kind: internal
+    steps:
+      - bind: dir, openErr
+        eval: root.Open(state)
+        to: root.Open
+      - opt:
+          do:
+            - return: "0, \"open \" + state + \": \" + openErr.Error()"
+          when: openErr != nil
+      - set: wd, why
+        to: watchOpened
+        value: watchOpened(dir, descriptor, state)
+      - return: wd, closedWhy(dir, why)
+  - of: watchOpened
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchOpened
+        kind: self
+      - id: runtime
+        kind: stdlib
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: held
+        eval: int(dir.Fd())
+      - defer: runtime.KeepAlive(dir)
+        to: runtime
+      - var:
+          name: fs
+          type: syscall.Statfs_t
+      - opt:
+          do:
+            - return: "0, \"statfs \" + state + \": \" + statErr.Error()"
+          init:
+            bind: statErr
+            eval: syscall.Fstatfs(held, &fs)
+            to: syscall
+          when: statErr != nil
+      - opt:
+          do:
+            - return: 0, "a network or FUSE filesystem (f_type 0x" + strconv.FormatUint(uint64(magic), 16) + ")"
+          init:
+            bind: magic
+            eval: uint32(fs.Type)
+          when: remoteFilesystem(magic)
+      - bind: added, addErr
+        eval: syscall.InotifyAddWatch(descriptor, "/proc/self/fd/"+strconv.Itoa(held), watchMask)
+        to: syscall
+      - opt:
+          do:
+            - return: "0, \"inotify_add_watch \" + state + \": \" + addErr.Error()"
+          when: addErr != nil
+      - return: int32(added), ""
+  - of: (*stateWatch).readOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stateWatch).readOnce
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - set: w.filled, w.readErr
+        to: syscall
+        value: syscall.Read(int(descriptor), w.buf[:])
+      - return: "true"
+  - of: (*stateWatch).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stateWatch).drain
+        kind: self
+      - id: w.raw.Read
+        kind: value
+      - id: index.overflowed
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: false, rawErr
+                init:
+                  bind: rawErr
+                  eval: w.raw.Read(w.read)
+                  to: w.raw.Read
+                when: rawErr != nil
+            - switch:
+                cases:
+                  - case: w.readErr == syscall.EAGAIN
+                    do:
+                      - return: false, nil
+                  - case: w.readErr == syscall.EINTR
+                    do:
+                      - continue: true
+                  - case: w.readErr != nil
+                    do:
+                      - return: false, w.readErr
+                  - default: true
+                    do:
+                      - opt:
+                          do:
+                            - return: true, nil
+                          when: w.apply(index, w.buf[:w.filled])
+          range: maxDrainReads
+      - eval: index.overflowed()
+        to: index.overflowed
+      - return: false, nil
+  - of: (*stateWatch).apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stateWatch).apply
+        kind: self
+      - id: binary.NativeEndian.Uint32
+        kind: value
+      - id: index.overflowed
+        kind: internal
+    steps:
+      - loop:
+          cond: len(events) >= inotifyHeader
+          do:
+            - bind: wd
+              eval: int32(binary.NativeEndian.Uint32(events))
+            - bind: mask
+              eval: binary.NativeEndian.Uint32(events[eventMaskAt:])
+              to: binary.NativeEndian.Uint32
+            - bind: end
+              eval: inotifyHeader + int(binary.NativeEndian.Uint32(events[eventLenAt:]))
+            - opt:
+                do:
+                  - eval: index.overflowed()
+                    to: index.overflowed
+                  - return: "false"
+                when: end > len(events)
+            - bind: name
+              eval: events[inotifyHeader:end]
+            - set: events
+              value: events[end:]
+            - opt:
+                do:
+                  - return: "true"
+                when: w.applyOne(index, wd, mask, name)
+      - return: "false"
+  - of: (*stateWatch).applyOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stateWatch).applyOne
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: index.overflowed
+        kind: internal
+      - id: index.added
+        kind: internal
+      - id: index.removed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: name
+              value: name[:cut]
+          init:
+            bind: cut
+            eval: bytes.IndexByte(name, 0)
+            to: bytes
+          when: cut >= 0
+      - switch:
+          cases:
+            - case: mask&syscall.IN_Q_OVERFLOW != 0
+              do:
+                - eval: index.overflowed()
+                  to: index.overflowed
+            - case: mask&lostMask != 0
+              do:
+                - return: "true"
+            - case: mask&addedMask != 0 && mask&syscall.IN_ISDIR == 0
+              do:
+                - eval: index.added(w.stateOf(wd), name)
+                  to: index.added
+            - case: mask&removedMask != 0
+              do:
+                - eval: index.removed(w.stateOf(wd), name)
+                  to: index.removed
+            - default: true
+      - return: "false"
+  - of: (*stateWatch).stateOf
+    steps:
+      - opt:
+          do:
+            - return: w.states[0]
+          when: wd == w.wds[0]
+      - return: w.states[1]
+  - of: (*stateWatch).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*stateWatch).close
+        kind: self
+      - id: w.file.Close
+        kind: value
+    steps:
+      - return: w.file.Close()
+        to: w.file.Close
+  - of: readEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: readEntries
+        kind: self
+      - id: runtime
+        kind: stdlib
+      - id: syscall
+        kind: stdlib
+      - id: seeDirents
+        kind: internal
+    steps:
+      - bind: held
+        eval: int(dir.Fd())
+      - defer: runtime.KeepAlive(dir)
+        to: runtime
+      - loop:
+          do:
+            - bind: filled, readErr
+              eval: syscall.ReadDirent(held, buf)
+              to: syscall
+            - opt:
+                do:
+                  - continue: true
+                when: readErr == syscall.EINTR
+            - opt:
+                do:
+                  - return: readErr
+                when: readErr != nil
+            - opt:
+                do:
+                  - return: nil
+                when: filled <= 0
+            - eval: seeDirents(buf[:filled], index)
+              to: seeDirents
+          forever: true
+  - of: seeDirents
+    participants:
+      - id: caller
+        kind: actor
+      - id: seeDirents
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: index.seeBytes
+        kind: internal
+    steps:
+      - loop:
+          cond: len(entries) > direntNameAt
+          do:
+            - bind: size
+              eval: int(binary.NativeEndian.Uint16(entries[direntReclen:]))
+            - opt:
+                do:
+                  - return: ""
+                when: size <= direntNameAt || size > len(entries)
+            - bind: name
+              eval: entries[direntNameAt:size]
+            - set: entries
+              value: entries[size:]
+            - opt:
+                do:
+                  - set: name
+                    value: name[:cut]
+                init:
+                  bind: cut
+                  eval: bytes.IndexByte(name, 0)
+                  to: bytes
+                when: cut >= 0
+            - eval: index.seeBytes(name)
+              to: index.seeBytes
+  - of: listingStamp.reusable
     steps:
       - return: |-
           modTime.Equal(l.modTime) &&
@@ -2998,7 +3816,7 @@ sequences:
             bind: cached
             eval: slot.Load()
             to: slot.Load
-          when: cached != nil && cached.reusable(info.ModTime(), listedAt)
+          when: cached != nil && cached.stamp.reusable(info.ModTime(), listedAt)
       - bind: read, readErr
         eval: b.readNames(state)
         to: b.readNames
@@ -3006,7 +3824,7 @@ sequences:
           do:
             - return: nil, readErr
           when: readErr != nil
-      - eval: "slot.Store(&stateListing{listedAt: listedAt, modTime: info.ModTime(), names: read})"
+      - eval: "slot.Store(&stateListing{names: read, stamp: listingStamp{listedAt: listedAt, modTime: info.ModTime()}})"
         to: slot.Store
       - return: read, nil
   - of: (*fileBroker).readNames
@@ -4002,25 +4820,26 @@ sequences:
         kind: actor
       - id: (*fileBroker).leaseVisible
         kind: self
-      - id: b.namesOf
+      - id: b.index.sync
         kind: internal
-      - id: b.leaseStep
+      - id: b.leaseLevel
         kind: internal
     steps:
-      - bind: entries, listErr
-        eval: b.namesOf(dirReady)
-        to: b.namesOf
       - opt:
           do:
-            - return: nil, 0, listErr
-          when: listErr != nil
+            - return: nil, 0, syncErr
+          init:
+            bind: syncErr
+            eval: b.index.sync(b, dirReady)
+            to: b.index.sync
+          when: syncErr != nil
       - bind: walk
         eval: "leaseWalk{now: now, max: max}"
       - loop:
           do:
             - bind: full, stepErr
-              eval: b.leaseStep(&walk, base)
-              to: b.leaseStep
+              eval: b.leaseLevel(&walk, level)
+              to: b.leaseLevel
             - opt:
                 do:
                   - return: nil, 0, stepErr
@@ -4029,47 +4848,87 @@ sequences:
                 do:
                   - return: walk.out, now, nil
                 when: full
-          key: _
-          range: entries
-          value: base
+          key: level
+          range: readyLevels
       - return: walk.out, walk.later, nil
-  - of: (*fileBroker).leaseStep
+  - of: (*fileBroker).leaseLevel
     participants:
       - id: caller
         kind: actor
-      - id: (*fileBroker).leaseStep
+      - id: (*fileBroker).leaseLevel
         kind: self
+      - id: b.index.head
+        kind: internal
       - id: parseReady
         kind: internal
-      - id: nameStem
+      - id: earliest
+        kind: internal
+      - id: messageExpired
+        kind: internal
+      - id: b.leaseOne
+        kind: internal
+      - id: b.index.invalidate
+        kind: internal
+    steps:
+      - bind: ready
+        eval: "&b.index.ready"
+      - loop:
+          do:
+            - bind: base, found
+              eval: b.index.head(ready, level)
+              to: b.index.head
+            - opt:
+                do:
+                  - return: false, nil
+                when: "!found"
+            - bind: name, _
+              eval: parseReady(base)
+              to: parseReady
+            - opt:
+                do:
+                  - set: walk.later
+                    to: earliest
+                    value: earliest(walk.later, name.At)
+                  - return: false, nil
+                when: name.At > walk.now
+            - bind: expired
+              eval: messageExpired(b.policy, name.EnqueuedAt, walk.now)
+              to: messageExpired
+            - opt:
+                do:
+                  - return: true, nil
+                when: "!expired && len(walk.out) == walk.max"
+            - opt:
+                do:
+                  - continue: true
+                when: "!b.index.take(ready, level, base)"
+            - opt:
+                do:
+                  - eval: b.index.invalidate(ready)
+                    to: b.index.invalidate
+                  - return: false, stepErr
+                init:
+                  bind: stepErr
+                  eval: b.leaseOne(walk, name, base, expired)
+                  to: b.leaseOne
+                when: stepErr != nil
+          forever: true
+  - of: (*fileBroker).leaseOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileBroker).leaseOne
+        kind: self
+      - id: b.expireReady
         kind: internal
       - id: b.takeLease
         kind: internal
     steps:
-      - bind: name, ok
-        eval: parseReady(base)
-        to: parseReady
-      - bind: digit, _
-        eval: nameStem(base)
-        to: nameStem
       - opt:
           do:
-            - return: false, nil
-          when: "!ok || digit == walk.skipping"
-      - opt:
-          do:
-            - set: walk.later, walk.skipping
-              value: earliest(walk.later, name.At), digit
-            - return: false, nil
-          when: name.At > walk.now
-      - opt:
-          do:
-            - return: false, b.expireReady(name, base, walk.now)
-          when: messageExpired(b.policy, name.EnqueuedAt, walk.now)
-      - opt:
-          do:
-            - return: true, nil
-          when: len(walk.out) == walk.max
+            - return: b.expireReady(name, base, walk.now)
+              to: b.expireReady
+          when: expired
       - bind: delivery, leased, leaseErr
         eval: b.takeLease(name, base, walk.now)
         to: b.takeLease
@@ -4078,7 +4937,7 @@ sequences:
             - set: walk.out
               value: append(walk.out, delivery)
           when: leased
-      - return: false, leaseErr
+      - return: leaseErr
   - of: (*fileBroker).takeLease
     participants:
       - id: caller
@@ -4172,45 +5031,58 @@ sequences:
         kind: actor
       - id: (*fileBroker).reclaim
         kind: self
-      - id: b.namesOf
+      - id: b.index.sync
+        kind: internal
+      - id: b.index.head
         kind: internal
       - id: parseInflight
         kind: internal
       - id: b.recoverOne
         kind: internal
+      - id: b.index.invalidate
+        kind: internal
     steps:
-      - bind: entries, listErr
-        eval: b.namesOf(dirInflight)
-        to: b.namesOf
+      - bind: inflight
+        eval: "&b.index.inflight"
       - opt:
           do:
-            - return: 0, listErr
-          when: listErr != nil
+            - return: 0, syncErr
+          init:
+            bind: syncErr
+            eval: b.index.sync(b, dirInflight)
+            to: b.index.sync
+          when: syncErr != nil
       - loop:
           do:
-            - bind: name, ok
-              eval: parseInflight(base)
-              to: parseInflight
+            - bind: base, found
+              eval: b.index.head(inflight, 0)
+              to: b.index.head
             - opt:
                 do:
-                  - continue: true
-                when: "!ok"
+                  - return: 0, nil
+                when: "!found"
+            - bind: name, _
+              eval: parseInflight(base)
+              to: parseInflight
             - opt:
                 do:
                   - return: name.At, nil
                 when: name.At > now
             - opt:
                 do:
+                  - continue: true
+                when: "!b.index.take(inflight, 0, base)"
+            - opt:
+                do:
+                  - eval: b.index.invalidate(inflight)
+                    to: b.index.invalidate
                   - return: 0, recoverErr
                 init:
                   bind: recoverErr
                   eval: b.recoverOne(name, base, now)
                   to: b.recoverOne
                 when: recoverErr != nil
-          key: _
-          range: entries
-          value: base
-      - return: 0, nil
+          forever: true
   - of: (*fileBroker).recoverOne
     participants:
       - id: caller

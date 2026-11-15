@@ -1,6 +1,18 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: remoteFilesystem
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: magic == remote
+          key: _
+          range: remoteMagics
+          value: remote
+      - return: "false"
   - of: isHex
     steps:
       - loop:

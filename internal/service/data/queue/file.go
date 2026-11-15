@@ -78,6 +78,10 @@ type fileBroker struct {
 	// listed is the last listing of each state directory, reused while the
 	// directory's mtime says nothing changed (file_listing.go, issue #811).
 	listed listings
+	// index is what a Receive walks: ready/ and inflight/ in their orders,
+	// kept by the kernel's change queue where it names the changes
+	// (file_index.go, issue #811).
+	index fileIndex
 }
 
 // NewFile returns a broker whose messages survive the process that published
@@ -163,8 +167,8 @@ func (b *fileBroker) Wake() corequeue.WakeValue {
 	return wakeValue(signal, at, b.clk.Now())
 }
 
-// Close releases the broker's directory descriptors: its own root, and the
-// one its atomic publisher holds.
+// Close releases the broker's descriptors: its own root, the one its atomic
+// publisher holds, and the instance that watches its directories.
 //
 // It satisfies io.Closer, reached by type assertion (ADR 0039) exactly as the
 // session file store's Close is, so the frozen Broker port grows no method.
@@ -173,6 +177,7 @@ func (b *fileBroker) Wake() corequeue.WakeValue {
 // messages stay on disk: Close ends this broker's use of them, and every call
 // after it fails.
 func (b *fileBroker) Close() error {
+	watchErr := b.index.unwatch("the broker is closed")
 	rootErr := b.root.Close()
 	var publisherErr error
 	//: the publisher is internal/service/data/vfs's OS filesystem, which owns a
@@ -182,7 +187,7 @@ func (b *fileBroker) Close() error {
 	}
 	//: both are released whatever the first answered; the broker's own
 	//: descriptor speaks first.
-	if closeErr := cmp.Or(rootErr, publisherErr); closeErr != nil {
+	if closeErr := cmp.Or(rootErr, publisherErr, watchErr); closeErr != nil {
 		//: QueueBackendFailed, the cause kept.
 		return backendFailed("close", "", closeErr)
 	}

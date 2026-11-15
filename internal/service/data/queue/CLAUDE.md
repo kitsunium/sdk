@@ -38,12 +38,15 @@ package declares no code.
 | `memory.go` | `NewMemory` and the in-heap broker: the lease expiry on an indexed heap — one entry per lease in flight, re-keyed by `Extend` and removed by every call that ends the lease (`unlease`, #1036) —, the ready list ordered at insertion; `Reject`, `Release`, `NackAfter`, `PublishAt`, `PublishOnce` (a map of the keys reserved and a heap of their windows' ends, `dropPassedOnce`), `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter`, `Messages`, `PutMessage` |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` / `once_end.go` | `MemoryConfig` and the three values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `PublishAt` (a queued name whose visibility is the instant), `write` (the durable publication both share, waking nobody), `Ack`, receipt resolution |
-| `file_listing.go` | `namesOf`: a state directory's names, its last listing reused while the directory's mtime has not moved and was older than the listing by `racyMargin`, `listingMaxAge` at most (issue #811); `readNames` (`Readdirnames`, sorted) |
+| `file_listing.go` | `namesOf`: a state directory's names, its last listing reused while the directory's mtime has not moved and was older than the listing by `racyMargin`, `listingMaxAge` at most (issue #811) — the rule itself is `listingStamp.reusable`, which the index's unwatched mode reads too; `readNames` (`Readdirnames`, sorted) |
+| `file_index.go` | `fileIndex`, what a `Receive` walks (issue #811, 2026-11-14): `ready/` in a heap per level and `inflight/` in one, each a `dirIndex` (`kernel/collections/heap.IndexedHeap` + a map from name to handle), brought up to its directory by `sync` — the kernel's changes applied where they are watched, a full read past `watchedRelistAge` or on an overflow; elsewhere a full read under `listingStamp.reusable` —, a full read being a mark and a sweep (`relist`, `see`, `seeBytes`, `sweep`), no sort; `head` / `take`, the two looks that hand a name to one goroutine of the broker; `invalidate`, `unwatch` |
+| `file_index_linux.go` | the watch: one inotify instance per receiving broker, `IN_NONBLOCK`, read through `RawConn` (`drain`, `apply`); each state directory watched through `/proc/self/fd/<the descriptor os.Root opened>`, refused on a network or FUSE filesystem (`remoteMagics`, by `fstatfs`); `readEntries` over `getdents64`, a name looked up in the read's buffer without a copy |
+| `file_index_other.go` | every other platform: no watch, and `readEntries` over `Readdirnames` in steps of 256 |
 | `file_once.go` | `PublishOnce` (ADR 0183): the message written first, then the key reserved — `once/<sha256>.key`, written under a name of its own with `O_EXCL` and `link(2)`ed to the key's —, a racer's message withdrawn before anybody is woken (`withdraw`), a passed reservation set aside and read again before it is removed (`dropPassed`), and the sweep, at most once a minute per broker (`sweepOnce`) |
 | `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
 | `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through the kernel's reader, `internal/kernel/fs/winacl` |
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
-| `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
+| `file_receive.go` | `Receive`, the reclaim walk and the ready walk over the index (`leaseLevel`, `leaseOne`), the rename that IS the exclusion |
 | `file_dead.go` | `Nack` and `NackAfter` (one `nackWith`, the delay the policy's or the caller's), `Reject`, `Release` (one rename back into `ready/`, visible now, the count one lower), `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding — a `trail` header line only when the cause has one (issue #500) |
 | `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (a burial's record, published atomically and durably), `Messages` (`liveFiles`, `parseLive`: the two state directories' names, sorted by identifier) and `PutMessage` (a `ready/` file, as a retry leaves one), `deadRecordsOf` — every record of one message by its ID |
 | `sql.go` | `NewSQL`, the SQL broker, `Publish` and `PublishAt` (one INSERT, `due` the instant), `Ack`, `Nack` and `NackAfter` (one `nackWith`), `Release`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
@@ -245,9 +248,84 @@ that relist at once store two valid snapshots. The gain is an idle poll, a
 `Stats` and a listing of a QUIET queue: one stat per directory
 (`TestAnIdlePollOfAQuietQueueReadsNoDirectory` makes the directories
 unreadable and still gets its answers). A queue being consumed changes its
-directory at every lease and is read every time, as before — reusing a
-listing after this consumer's own rename would also reuse it after another
-process's rename in the same tick. `BENCH.md` has both.
+directory at every lease, and a listing of it is read every time — reusing
+one after this consumer's own rename would also reuse it after another
+process's rename in the same tick. That is why a `Receive` no longer walks a
+listing at all: it walks the index below. `namesOf` still serves `Stats`,
+`Messages`, the dead letters and the bulk siblings. `BENCH.md` has both.
+
+## A Receive walks an index the kernel keeps where it names the changes (issue #811, 2026-11-14)
+
+The rule above cannot make a backlog in motion cheap: the mtime does not
+tell this consumer's rename from another process's in the same tick, so a
+`Receive` that leases and a `Nack` that hands back relisted `ready/` every
+time — a read, a string and a sort an entry, 7× depth 10 at depth 1 000
+where the issue asks 2×, and the ratio WORSENS on a faster disk, where the
+fixed system calls shrink and the per-entry cost does not. Only a signal
+that NAMES the change separates the two, and that is the decision of
+ADR 0054's amendment of 2026-11-14:
+
+- **The index.** `fileIndex` holds `ready/` as five heaps, one a level,
+  ordered as the sorted listing was — the instant, then the rest of the name
+  (`compareItems`) —, and `inflight/` as one heap in deadline order; a map
+  from name to heap handle removes a name from anywhere. Only a name its
+  state's grammar reads is indexed, so a `.vfs-*.tmp`, a stray file or a
+  directory is skipped exactly as the walk skipped it. A `Receive` reads the
+  heads, never the directory: depth costs O(log n) a lease.
+- **Watched (Linux, a local filesystem).** At the first `Receive` the broker
+  opens one inotify instance (`IN_NONBLOCK | IN_CLOEXEC`), watches `ready/`
+  and `inflight/` — added, gone, the directory itself moved or vanished —,
+  then reads both whole. Every look first drains the instance: a read that
+  answers `EAGAIN` when nothing changed. The kernel queues an event INSIDE
+  the `rename(2)` or `unlink(2)` that causes it, before the call returns, so
+  a change another process finished before this `Receive` is in the queue
+  it drains: **the first `Receive` after a publication sees it, with no
+  margin and no mtime** — stricter than the rule above
+  (`TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen/watched`,
+  `TestAListingAnMtimeCannotInvalidateIsReadAgainPastItsMaximumAge/watched`).
+  The broker's own renames reach its index the same way; its walk takes a
+  name out of the heap before renaming it, so the event that follows finds
+  nothing to do.
+- **What the watch cannot vouch for is read whole, never guessed.** A
+  directory is watched through `/proc/self/fd/<n>`, `n` the descriptor
+  `os.Root` opened — never a path resolved again —, and only on a filesystem
+  whose every change this kernel makes: `fstatfs` refuses NFS, SMB/CIFS,
+  FUSE, Ceph, 9P, virtiofs and the rest of `remoteMagics`. An
+  `IN_Q_OVERFLOW` (past `max_queued_events`) — or a drain still reading after
+  `maxDrainReads` (64) reads, a writer outpacing it — reads both directories
+  whole at the next look (`TestAWatchedIndexIsReadWholeAgainAfterTheKernelsQueueOverflows`);
+  a watched directory moved, removed or unmounted drops the watch for good,
+  and the broker reads under the rule above from then on
+  (`TestAWatchWhoseDirectoryMovedFallsBackToTheListingsRule`); and the index
+  is read whole every `watchedRelistAge` (one minute) whatever the queue
+  said — a net under a defect of this code, never what keeps a publication
+  visible.
+- **Unwatched: every other platform, and every refusal above** — no instance
+  (`EMFILE` past `max_user_instances`, 128 by default, shared by the user's
+  processes), no `/proc`, a remote filesystem, a lost watch, a test's
+  `UnwatchForTest`. The index is read again exactly when `namesOf` would
+  read its listing (`listingStamp.reusable`), so the guarantee is the rule
+  above, unchanged. A full read is a mark and a sweep: each name met is kept
+  or indexed, each name not met dropped, nothing sorted; on Linux it reads
+  `getdents64` into a buffer of the broker's and looks a name up in place
+  (`m[string(b)]` allocates nothing), so only a name the index lacks is
+  copied. macOS's FSEvents and kqueue, the BSDs' and illumos' interfaces say
+  THAT a directory changed and not WHAT, which is the mtime's problem again;
+  Windows' `ReadDirectoryChangesW` would name the entries, and is not wired:
+  the file broker is refused there anyway (ADR 0018).
+- **One mutex, held for the index only.** `head` reads a heap's first name,
+  the walk decides outside the lock, `take` removes it only if it is still
+  first — so two goroutines of one broker never try one message, and the
+  rename still settles a race with any other process. An operation that
+  fails after `take` (the medium refused a rename) marks the index stale: the
+  name may still be there, and the next look reads whole.
+- **What it costs.** One instance and two watches per RECEIVING broker — a
+  broker that only publishes opens none —, released by `Close`, or with the
+  instance's `os.File` when a broker is collected unclosed; a 16 KiB event
+  buffer and an 8 KiB read buffer; about 200 bytes per message the index
+  holds (the name, its map entry, its heap cell), some 200 MB for a million. The
+  directory format is unchanged: a broker of an earlier release sharing the
+  directory is one more process whose renames the kernel names.
 
 ## Where `internal/service/data/vfs` is used, and where it stops
 

@@ -177,14 +177,16 @@ func BenchmarkNack(b *testing.B) {
 	}
 }
 
-// BenchmarkReceiveBacklog is the durable broker's KNOWN SCALING LIMIT,
-// measured rather than asserted: a Receive reads and sorts the WHOLE queued
-// directory, so a deep backlog costs more per lease than a shallow one.
+// BenchmarkReceiveBacklog measures whether a Receive costs more over a deep
+// backlog in motion than over a shallow one — each iteration leases a
+// message and hands it back, so ready/ changes at every call. Issue #811
+// holds depth1000 to twice depth10, in ns/op and in allocs/op: the file
+// broker walks an index of ready/ (file_index.go), kept by inotify on Linux,
+// and read again under the listings' rule elsewhere.
 //
 // The memory broker is measured beside it as the control. Its ready list is
 // ordered at insertion and its lease deadlines are in a min-heap, so it does
-// not scale with depth at all — which is exactly the shape of the difference
-// a reader sizing a durable queue needs to see.
+// not scale with depth at all.
 //
 // As in BenchmarkReceiveBatch, the Nack that restores the backlog is inside
 // the timed region and its own cost is reported separately.
