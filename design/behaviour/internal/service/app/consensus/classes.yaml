@@ -8740,8 +8740,8 @@ types:
           that entry itself: a learner still waiting for its snapshot, which applies
           nothing, held the JOIN for its whole deadline and answered
           OUTCOME_UNKNOWN although the leader had committed the admission. Only
-          the leader and a voter level with it (joinServes) answer; every other
-          node refuses before it proposes anything. A stopped node is left to the
+          the leader and a voter it knows to be level with it (joinServes) answer;
+          every other node refuses before it proposes anything. A stopped node is left to the
           path that answers its stop.
         name: joinElsewhere
         recv: n *Node
@@ -8751,7 +8751,8 @@ types:
           reads st, answers a JOIN it forwards promptly: it follows a known leader
           as a voter that holds its state (joinVoter), and its apply and its log are
           level with the leader's (joinLevel) (#1422). A learner, a joiner, a node
-          with no table, a candidate and a lagging voter do not.
+          with no table, a candidate, a lagging voter and a voter that does not know
+          its leader's last index (#1447) do not.
         name: joinServes
         params: st *raft.StatusValue
         recv: n *Node
@@ -8767,7 +8768,12 @@ types:
       - doc: |-
           joinLevel reports whether this node's apply is not held back, and its
           applied index and its log are within joinApplyLag entries of its commit
-          index and of the leader's last index as its last heartbeat carried it.
+          index and of the leader's last index as its last heartbeat carried it. A
+          node that knows no last index of its leader — a leader of protocol 3 or
+          below sends none, and none came yet in this term — cannot tell how far
+          behind it is, and is not level (#1447): at 100 entries against a leader
+          at 100 000, it forwarded the JOIN and waited its whole deadline for an
+          AddLearner it was far from applying.
         name: joinLevel
         params: st *raft.StatusValue
         recv: n *Node

@@ -598,3 +598,28 @@ under coverage before touching `shard_count`.
   `TestAnInstalledSilencePointSurvivesARestart`,
   `TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm`; no mutation, the
   type is full).
+- Drop a forward, or the answer to one, as an older term's message
+  (`stepTerm`, `forwardKind`): both belong to the submission id, not to a
+  term. A refusal says the entry was never appended and a position
+  resolves when its index is applied, whatever the term the receiver moved
+  to; dropped, the forward that crossed a change of term was never answered
+  and the answer that did was never read, and the follower's sweep answered
+  OUTCOME_UNKNOWN for an entry the leader had refused, or committed. A
+  leader that hands over for its stalled apply sends its TimeoutNow beside
+  the OVERLOADED it answers, which `TestApplyLagBackpressure` met under load
+  (#1440, `TestAForwardAnsweredAcrossAChangeOfTermIsResolved`,
+  `TestAForwardReachingALeaderThatMovedOnIsRefusedNotLeader`). Nor answer
+  a forward at this node's term: the answer has a safety side, and its
+  term is the forward's (`handleForward`, D5, D9 (b), R1-18). Stamped with
+  the receiver's later term, the answer to a forward of an older term
+  raised the forwarder's past D5's live-leader refusal: a follower that
+  had just heard its live leader took a term with no vote and no leader,
+  granted the next vote of it, and a lease read on the leader it had
+  acknowledged missed a write the new leader committed (the safety review
+  of #1457, 47 schedules of 47;
+  `TestAForwardAnswerNeverRaisesTheForwardersTerm`,
+  `TestALeaseHoldsAcrossALateForwardAnswer`; no mutation, the type is
+  full: each test takes its mutation as an argument, the answer re-stamped
+  in flight with its sender's term, and requires it caught). The same
+  class through an older append's or heartbeat's answer (`answerOlderTerm`,
+  R1-18) predates this and is #1472.

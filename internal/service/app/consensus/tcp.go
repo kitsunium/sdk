@@ -2180,8 +2180,9 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 
 // Join implements Joiner: the JOIN goes to each address in turn until one
 // member answers JOIN_ACK with the position its AddLearner was appended at.
-// A member that cannot answer at once refuses NOT_LEADER naming the leader's
-// address, which is tried next.
+// A member that cannot answer at once refuses NOT_LEADER, naming the leader
+// when it knows one, and that leader's address only when it knows the
+// address too; a named address is tried next.
 func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
 	gen := t.hold.begin()
 	pos, err := t.joinVia(ctx, &cfg, gen)

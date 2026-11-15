@@ -1500,6 +1500,14 @@ func (a *fwdTable) remember(k fwdKey, v fwdAnswer, limit int) {
 // taken the first answer and dropped the second (#401). A forward already
 // answered, in this term or an earlier one, is answered again with the same
 // answer, position or refusal, and nothing is proposed.
+//
+// The answer carries the forward's term, never this node's later one. A
+// forward of an older term goes on here (stepTerm, #1440), and its answer,
+// stamped with this node's term, raised the forwarder's: a follower that
+// had just heard its live leader adopted a term with no vote and no leader,
+// past D5's live-leader refusal, then granted a vote of that term, and a
+// lease read on the leader it had acknowledged missed a write the new
+// leader committed (D9 (b), R1-18: a refusal never moves a term).
 func (r *Raft) handleForward(m core.MessageValue) {
 	key := fwdKey{from: m.From, ctx: m.Context}
 	a, ok := r.fwdAnswers.lookup(key)
@@ -1512,7 +1520,7 @@ func (r *Raft) handleForward(m core.MessageValue) {
 		resp = core.MsgForwardAdminResp
 	}
 	r.send(core.MessageValue{
-		Kind: resp, To: m.From, Context: m.Context,
+		Kind: resp, To: m.From, Context: m.Context, Term: m.Term,
 		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm, Commit: a.commit,
 	})
 }
