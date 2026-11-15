@@ -7700,6 +7700,450 @@ the measure, the rate and the rule; the engine does not change.
   VM's disk (median 1.07), the stream at 8.0 MiB/s through B each time.
   The verdict is the lane's on its runner.
 
+## Amendment — an answer stays at the term of the request it answers, and only the refused leader or pre-candidate takes a later one; protocol version 5 (2026-11-15, #1472)
+
+**Status: the principle is the owner's decision of 2026-11-15 on
+[#1472](https://github.com/kitsunium/sdk/issues/1472) (its fix direction 2:
+a node does not adopt a higher term carried by an answer to older-term
+traffic, the answer staying at the sender's term, closing the class at its
+source, consistent with R1-18). Revised the same day on the safety review
+of its first version, by the owner's decisions on that review's points:
+the leader refused its own append or heartbeat and the pre-candidate
+refused its own PreVote take the refuser's term, carried in `LogTerm`
+(the review's option L2), and protocol version 5 is raised under D18's
+rule, a node of 5 answering no append or heartbeat of an older term from a
+leader of a previous release (option M3). This text awaits the owner's
+validation.** One protocol raise, to 5, which changes no frame layout and no
+format; no raft mutation (the type is full: the tests carry theirs). The
+Decision is unchanged; R1-18 of D5 and D18's announcements read as amended
+below.
+
+- **The defect (D0 of the safety review of #1457).** R1-18 answered an
+  append or a heartbeat of an older term with a refusal stamped with the
+  refuser's term, so that the stale leader would learn of it. The node
+  that reads the refusal may no longer be that leader. A node that led
+  term 2, its heartbeat to X delayed, followed G at term 3 and had just
+  acknowledged G's round when X, a candidate of term 4, refused that
+  heartbeat: it took term 4 from the refusal with no vote and no leader,
+  through no live-leader check, then granted X's vote request of term 4,
+  delayed on the control lane while the refusal crossed the data lane,
+  which keep no order between them. X led term 4 and committed a write
+  while G still served lease reads that missed it: D5's refusal and the
+  lease's condition (b) of D9 broken. Three step functions over a network
+  that only delays, drops and reorders lanes (D15's fault model): 48
+  schedules of 48 violated the lease on `main`, on #1457 and with its fix
+  of the forward's answer. ReadIndex, the default, was not affected. A
+  deposed leader's refusal of the reads it held, sent from the term it
+  moved to, and a PreVote's refusal read after its campaign ended, were
+  the same class.
+- **The rule at the source.** An answer is at the term of the request it
+  answers. A node of protocol 5 refuses an append or a heartbeat of an
+  older term at that term, `Reject`, `Code` `NOT_LEADER`, index 0, its own
+  term in `LogTerm`, when the request announces protocol 5, and at the term
+  after the request's otherwise (the amendment of 2026-11-16, below); a
+  PreVote of an older term at the term it asks for, its own term in
+  `LogTerm`. A deposed leader refuses the reads it held at the term they
+  were asked at. A forward's answer keeps the forward's term (the
+  amendment of 2026-11-15, #1447).
+- **The rule at the receiver.** A message of a later term than its
+  receiver's is read at that term only when it is a request of that term:
+  an append or a heartbeat of its leader, a vote request past D5's
+  live-leader refusal, a PreVote, whose prospective term moves nothing. The
+  list is closed: every other kind — an answer, a read and a forward, which
+  a node sends its own leader at its own term, and any kind the list does
+  not name — never moves a term, but for the two readers that hold no lease
+  promise, each reading the refusal of its own request. The leader refused
+  its append or heartbeat steps down at the refuser's term (`LogTerm`, or
+  `Term` from a previous release): a leader of a term acknowledged no round
+  of a later leader, or it would have taken that term. The pre-candidate
+  refused its PreVote loses its campaign at the refuser's term, never below
+  the term it asked for: it is outside its vote window, so in no live
+  leader's lease quorum. A granted PreVote's prospective term moves nothing,
+  as before; any other role drops the message.
+- **R1-18, amended.** Its first rule, a refusal never moves a term, holds
+  for every reader but the two above. Its second reads: a node stuck at a
+  higher term answers an AppendEntries of a lower term from a leader of
+  protocol 5 at that term, `NOT_LEADER`, its term in `LogTerm`; the leader
+  steps down at the stuck node's term and a PreVote round decides. A leader
+  of a previous release is answered at the term after its request's and
+  steps down there (the amendment of 2026-11-16). The
+  leader falls on the refusal of its next append or heartbeat to the stuck
+  node, within a heartbeat interval and a round trip (at most 100 ms after
+  the heal with the default timing), and does not count the refusal as
+  contact for CheckQuorum. One PreVote round then readmits the stuck node,
+  whatever its gap: it follows a leader with the cluster's log within
+  1.96 s of the heal at worst, one, three or ten terms ahead (16 seeds
+  each), as before #1472. The first version of this amendment had the
+  leader step down at its own term and the cluster climb to the stuck
+  node's term one round a term, about 1.45 s a term with no write
+  committing meanwhile, 14.5 s for ten (the review's §3).
+- **Protocol version 5 (D18).**
+  - **The announcement.** `MessageFlags` has no bit left (ADR 0241 left
+    it so), so `FlagProtocol5` shares `FlagNoLease`'s, which every release
+    reads on a `MsgReadIndex` alone: over the 113 releases of the internal
+    module that hold the engine, `internal/v0.1.1` to `internal/v0.30.4`
+    (`internal/v0.1.0` holds none),
+    its one reader is `stepLeader`'s `MsgReadIndex` case. A node of 5 sets
+    it on every frame but a read, where it keeps its meaning, beside
+    `FlagProtocol2` to `4`; a leader reads a member's announcement off its
+    answers, never off a read, and a node of 4 or below ignores the bit on
+    every other kind. Misread, it would only make a read wait for a round.
+  - **What 5 changes.** A node of 5 answers an append or a heartbeat of an
+    older term at that term only from a leader whose frame announces 5 (and
+    one that does not at the term after it, since the amendment of
+    2026-11-16; what follows is the second version's reason). A leader of a
+    previous release read that refusal as one of its log: it counted it as
+    contact, so CheckQuorum never deposed it, and with one more failure
+    among its other followers no write committed for as long as it led,
+    while a majority of the voters lived (16 schedules of 16, 30 s each;
+    the review's §4.1). From a silent member it read `FlagTruncated`, which
+    `send` added to every refusal a silent node sends, lowered the member's
+    match to 0 and resent its log from index 1 at every refusal, at the
+    network's round trip (§1). Sent nothing, it is deposed by CheckQuorum as
+    on any silence: in the same schedule a write commits within 2.9 s of the
+    heal with the stuck node one term ahead and within 6 s three terms ahead,
+    16 seeds each. A refusal of an older term, `NOT_LEADER`, no longer
+    carries `FlagTruncated`: it reports no truncation.
+  - **What 5 leaves.** No format waits for the raise:
+    `RaiseClusterVersion(5)` is refused until every member of the latest
+    configuration announces 5 (`announcedBy`, `checkAnnounced`), a node of
+    4 stops on a committed raise to 5 as D18 says, and at cluster version 5
+    every format is protocol 4's.
+  - **`LogTerm` on these refusals.** No previous release reads it there:
+    each reads `LogTerm` on a vote request, a PreVote and an append (the
+    election restriction, the leader record, the log match) and on a
+    forward's answer (its position), never on a `MsgAppResp` or a
+    `MsgPreVoteResp` (the same 113 releases). The append's refusal goes to
+    a leader of 5, and to one of a previous release at the next term, which
+    reads `Term` alone; the PreVote's goes to any pre-candidate, and one of
+    a previous release takes the term the refusal is stamped with, the one
+    it asked for, as under the first version.
+- **Mixed clusters.** The class of D0 through R1-18's refusal, a deposed
+  leader's read refusal and a forward's answer is closed when either node
+  runs this release: a refuser of this release answers at the request's
+  term, and a leader of a previous release at the next term, which raises
+  no reader that moved past the request's term (amended on 2026-11-16); a
+  reader of this release takes a later term from no answer but the refusal
+  of its own request or campaign. A PreVote's refusal is not closed for a reader of a
+  previous release: one that reads it after its campaign ended, following
+  a live leader, still takes the term it is stamped with, the one it asked
+  for, whatever the refuser's release, as `main` did (the review's §4.2;
+  with three voters the refuser can only be the candidate, whose vote
+  request precedes its refusal on the control lane, so it takes four or
+  five). A stuck member of this release under a leader of a previous
+  release, sent nothing back, waited for that leader's deposition by
+  CheckQuorum, which one more failure among its followers brings, or for
+  its upgrade: while that leader kept a quorum, the cluster ran one voter
+  short. The amendment of 2026-11-16 refuses that leader at the next term,
+  which deposes it.
+- **Tests.** Raft's `TestALeaseHoldsAcrossALateAppendAnswer` (the
+  review's schedule, 64 seeds: 48 reach it and none violates the lease,
+  with X or F alone run as a previous release too; every node run as a
+  previous release, 48 of 48 violate it, as on the base),
+  `TestOnlyARequestRaisesAFollowersTerm` (every answer, a read, a forward
+  and a kind no release names, at a later term, leave a follower of a live
+  leader at its term and refusing the next vote),
+  `TestARefusedPreCandidateTakesTheRefusersTerm`,
+  `TestAnOlderTermIsAnsweredAtItsTerm` (the refusals at their request's
+  term, `LogTerm`, nothing to a leader of a previous release),
+  `TestAStaleLeaderStepsDownAtTheRefusersTerm`,
+  `TestAStuckMemberIsReadmittedAfterItsLeaderStepsDown` (R1-18 end to end
+  on three step functions, one, three and ten terms ahead),
+  `TestASilentMembersRefusalOfAnOlderTermIsNoTruncationReport` (§1),
+  `TestAMixedClusterWritesAgainAfterAFailure` (§4.1, every mix of
+  releases, since 2026-11-16 at gaps 1, 3, 6 and 10 and the leader failing
+  too),
+  `TestAMixedClusterOfProtocol4And5KeepsReplicatingAndRefusesTheRaise`
+  (the announcement, the raise refused until node 3 is upgraded, then
+  admitted), `TestAReadCarriesFlagNoLeaseOnlyWhenItAsksForARound`,
+  `TestLeaseReadsAreLinearizableUnderFaultsInAMixedCluster`
+  (reads under the lease, partitions, drops and crashes, one or two nodes
+  of protocol 4: a net, not a detector of D0, whose schedule the simulator
+  never plays). Each check is also run with its nodes as a release before
+  this one (`termFromAnswers`), which it must catch, and the simulator runs
+  every node of `simOptions.speaks` below 5 so.
+  `TestALeaseHoldsAcrossALateForwardAnswer` reads the forward's answer on
+  F of a previous release too, where the answer's term is all that keeps
+  the lease, and its re-stamped answers on a previous release, which
+  catches them, and on this one, which drops them.
+
+## Amendment — a leader of a previous release is refused at the next term, and a node of a previous release climbs one election timeout a term (2026-11-16, #1472)
+
+**Status: the owner's decision of 2026-11-16 on
+[#1472](https://github.com/kitsunium/sdk/issues/1472), after the safety
+review of the amendment of 2026-11-15 found no safety defect: fix its two
+observations on mixed clusters, O1 and O2, before the pull request. O2's
+bound is raised under the owner's rule of 2026-11-14, with the trail below.
+This text awaits the owner's validation, and a new safety review gates the
+pull request.** No frame layout, flag, field, message or protocol value is
+added beyond protocol 5 and the bit it shares with `FlagNoLease`; what a
+previous release reads and answers is unchanged. The Decision is unchanged;
+R1-18 and the amendment of 2026-11-15 read as amended here.
+
+- **O1, the defect.** Under the amendment of 2026-11-15 a node of 5 sent
+  nothing back to a leader of a previous release of a lower term (its
+  option M3), so that CheckQuorum would depose it. A leader that keeps a
+  quorum is never deposed so, and a member of 5 one term ahead or more
+  stayed out for good: a leadership transfer to a member already upgraded
+  whose vote requests were lost left it a candidate one term ahead while
+  the leader of 4 took its leadership back, still out after 120 s, 10
+  schedules of 10; a member cut off, stuck ahead and healed, nobody
+  failing, 16 seeds of 16 with the leader and the third node of 4, 10 of 16
+  with the leader alone. At three voters the rolling upgrade's gate of D20
+  (`failure_tolerance >= 1`, this node acknowledges the leader) then never
+  opens, and the rollout script waits for ever; the runbook's advice to
+  hand the leadership to an upgraded node is one of the triggers.
+- **O1, the ways compared** on the three axes the owner named — D0 and D1
+  stay closed, a published release behaves as it does, and the upgrade
+  procedure of D20 holds:
+  - **The transfer refuses a target of a higher protocol.** A leader of 4
+    cannot be changed; the target of 5 could refuse a `TimeoutNow` that
+    does not announce 5. Safe, and nothing of 4 changes, but every planned
+    stop of a leader of 4 after the first upgrade then costs an election
+    instead of a hand-off, and it closes the transfer's trigger alone: a
+    member ahead after a lost campaign stays out.
+  - **The member left out comes back after a while.** Back means the
+    leader of 4 steps down, which it does only on a later term: answered
+    at the member's own term, a node that had led the request's term and
+    since followed a live leader takes it with no vote and no leader, past
+    D5's live-leader refusal (D0 reopened between a refuser of 5 and a
+    reader of 4: its review's option M2); answered at the leader's own
+    term, the leader reads a refusal of its log, contact, as before M3.
+  - **Chosen: the leader of 4 is refused at the term after its request's**
+    (`refuseOlderLeader`): `MsgAppResp`, `Reject`, `NOT_LEADER`, the
+    request's index, the refuser's term in `LogTerm`, which no release of 4
+    reads there. A node still at the request's term led it, so it
+    acknowledged no round of a later leader, and steps down at once, as at
+    any later term; a node past it finds the refusal of its own term or an
+    older one, which a follower drops and a leader of that term reads once
+    as a stale refusal of its log, the frame a node of 4 one term ahead has
+    always sent. It is the one term past the request's that raises no
+    other reader; it is never past the refuser's own. A refusal re-stamped
+    with the refuser's term is caught by
+    `TestARefusalAtTheNextTermRaisesOnlyTheLeaderOfTheRequest` and by D0's
+    schedule. Nothing of 4 changes: it reads a refusal at a later term as
+    it always did. The procedure holds: a member of 5 ahead of a leader of
+    4 deposes it within a heartbeat interval, as R1-18 always did.
+  - **Why the next-term refusal reopens neither D0 nor D1.** D0 is a node
+    that acknowledged a live leader's round, then took a later term from a
+    late answer, with no vote and no leader, past D5's live-leader refusal,
+    and granted the next vote of that term while the lease that counted its
+    acknowledgement held. The refusal goes to the node that sent the
+    request, L, which led term g (the transport authenticates the sender,
+    R7-05), at term g+1, never past the refuser's own term since g is below
+    it. What L takes depends on where it stands when it reads it:
+    - **At term g** — leading it, or deposed at g by CheckQuorum, or back
+      from a failed transfer — L takes g+1, with no vote and no leader, as
+      any release takes a later term from any message. It holds no
+      promise. At g it acknowledged rounds of no leader but itself: one
+      leader per term, and a round of a later leader would have moved it
+      past g first. The rounds it acknowledged before g were those of
+      leaders of older terms, before its campaign for g, which it started
+      outside its vote window (a timer's campaign) or on a transfer whose
+      issuer dropped its lease at the start (`startTransfer`): every lease
+      that counted them expired before L may vote at g+1 (D5's premise:
+      the lease is shorter than the vote window less the drift). Its own
+      lease ends in the same step, as every release ends it on stepping
+      down. This is the argument of the leader branch of L2 (the safety
+      review of the amendment of 2026-11-15, §1.2), for a reader of a
+      previous release.
+    - **At term g+1** — the refusal is of its own term. A follower, a
+      candidate or a pre-candidate of any release drops a `MsgAppResp` of
+      its term. A leader of g+1 of a previous release reads it once as a
+      stale refusal of its log, which its progress no longer awaits, and
+      counts it once as contact, with no `FlagTruncated` (`NOT_LEADER`),
+      so no match is lowered: the very frame a member of a previous
+      release one term ahead has always sent, but for `LogTerm` and
+      `Code`, which no release of protocol 4 reads on this kind. Its next
+      append to the refuser is refused at g+2, and it steps down. A leader
+      of this release steps down at once (`refusedForLaterTerm`). No term
+      moves.
+    - **Past g+1** — the refusal is of an older term, which no release
+      answers or reads: a `MsgAppResp` of an older term is dropped.
+    So the term g+1 is taken only by the node that led g and holds no
+    promise; a node that followed a later leader, which a lease may count,
+    is at g+1 or past it and moves nothing. D1 is the forward's answer,
+    which this amendment does not touch: it keeps the forward's term
+    (`handleForward`). Measured on D0's schedule with F of a previous
+    release and X of this one, the refusal read by F at term 3: none of
+    2 362 schedules violates the lease; the same refusal re-stamped with
+    the refuser's term in flight is caught by D0's schedule and by
+    `TestARefusalAtTheNextTermRaisesOnlyTheLeaderOfTheRequest`. The
+    owner accepted this way on 2026-11-16 on the condition that a safety
+    review confirms it; otherwise the silence of M3 returns.
+  - **Measured** (three step functions, 16 seeds a case, the review's
+    schedules): after the failed transfer, the member follows a leader with
+    its log within 1.3 s, whatever the mix (out for good with the leader
+    and the third node of 4); cut off and healed, nobody failing, within
+    1.9 s one term ahead, 3.74, 6.92 and 9.98 s three, six and ten terms
+    ahead with the leader and the third node of 4 (O2 below), never out;
+    a cluster of three nodes of 4 rolled over to this release, the
+    leadership handed to the first node upgraded with its vote requests
+    lost, reopens every step's gate and takes the raise to 5, 16 seeds of
+    16 (none past that transfer's step before).
+  - **What it costs: writes stop while the nodes of 4 climb, with no
+    failure.** The leader of 4 that steps down at g+1 is followed by
+    another node of 4 elected below the member's term, which the member
+    refuses at its first heartbeat in turn, and so on until the nodes of 4
+    reach the member's term, each round raising them strictly, so it
+    converges. Meanwhile no client write commits, with a healthy majority
+    and nobody failing: the longest cut, the member gap terms ahead of the
+    leader and the third node of 4, is 1.9, 3.74, 6.92 and 9.98 s at gaps 1,
+    3, 6 and 10 (the leader alone of 4: 1.9, 2.94, 5.6 and 7.5 s), about
+    one second a term past the first, within `gapBound` below, measured: a
+    test holds the member's readmission to it, not this cut; under M3 the
+    writes went on but the member stayed out for good, and on `main` the
+    cut is 1.9 s whatever the gap, with D0 open. One term ahead, the gap a
+    failed transfer leaves, it costs the 1.9 s of a cluster of this
+    release. The owner accepted this cut on 2026-11-16, bounded by
+    `gapBound`.
+- **O2, the defect.** One more failure as the member ahead returns, two
+  live voters of three: a node of 4 that must climb to the member's term
+  reads only `Term` from the refusal of its PreVote, the term it asked for,
+  and climbs one PreVote round, about 1.6 s, a term. A write committed
+  2.88, 6, 10.56 and 17.44 s after the heal one, three, six and ten terms
+  ahead, against 1.9 s in a cluster of this release (the leader's last
+  follower failing; the leader failing, 1.88, 5.48, 10.08 and 16.4 s,
+  against 1.88 and 3.52 s).
+- **O2, the original bound**, the owner's: a cut close to the 1.9 s of a
+  cluster of this release, without changing what a published release does.
+- **O2, the designs tried, measured on the same schedules:**
+  - **The next-term refusal of O1, alone** (shipped): the leader of 4
+    steps down at once instead of waiting for CheckQuorum, so one term
+    ahead the cut is a cluster of this release's, 1.9 s; past it the node
+    of 4 still climbs: 3.36, 8.02 and 14.68 s three, six and ten terms
+    ahead, the leader failing 5.48, 10.08 and 16.4 s.
+  - **A PreVote that does not announce 5 refused at the refuser's term**,
+    as a previous release refuses it (the safety review's suggestion): the
+    node of 4 takes the member's term in one round, 3.36 s whatever the
+    gap. It breaks the narrowing of the amendment of 2026-11-15: a node of
+    4 that pre-campaigned at term 3 and since followed a live leader at
+    term q, refused late by a member of 5 at term 10, takes term 10 and
+    grants the next vote of it at 7 reader terms of 7 (q from 3 to 9),
+    against 1 of 7 (q = 3) at the term it asked for; a lease read on that
+    leader then misses the write the next leader commits (D9 (b)). The
+    class of PreVote refusals read late by a node of 4 returns to its
+    width on `main`, now with a refuser of 5.
+  - **The member's term carried by its vote request**, which every
+    release reads under D5's live-leader refusal: a member of 5 that
+    refuses a request of a node of 4 below its own term, outside its vote
+    window, campaigns at once without a PreVote round. The cut falls to
+    2.02 s whatever the gap, the leader failing 3.8 s (3.52 s in a cluster
+    of this release). It breaks safety, through a class this amendment
+    leaves open (below): it makes the member a candidate in a minority,
+    where its PreVote round could not be won, so that class is reached
+    without a won PreVote. Five voters, L
+    leading term 3 with its lease on R and Y, O of 4 and X of 5 at term 6
+    cut off from L: O's PreVote reaches X, which campaigns at term 7; O
+    takes term 7; R's late PreVote reaches O, which refuses it at term 7,
+    the term R then takes with no vote and no leader; X's vote request,
+    late, reaches R, which grants it, R having heard L 0 s before in a
+    window of 1 s, and X leads term 7 with O and R while L serves lease
+    reads. Without the campaign X never becomes a candidate in that
+    schedule; R's step from term 3 to term 7 is the class between two
+    nodes of a previous release, O refusing and R reading, which this
+    amendment leaves open and which a candidate of either release, with a
+    vote request held since an earlier campaign, can use too. Kept
+    to four voters or fewer it is safe only with a configuration that is
+    current, which a member stuck ahead may not hold, and it departs from
+    D5's PreVote, which a node uses whenever its timer fires.
+  - **Why nothing else can work from a node of 5 alone.** A node of 4 reads
+    a later term from an answer's `Term` alone. Every answer term past the
+    one asked for, or past the request's next, raises a reader that may
+    have followed a live leader since (D0's class), and the one other
+    carrier of a term that every release judges under D5, a vote request,
+    needs a candidate. The climb of a node of 4 is the price of keeping
+    both closed.
+- **O2, the new bound, raised under the owner's rule of 2026-11-14
+  ("relevé selon la règle du propriétaire du 2026-11-14").** The bound is
+  the formula the code holds (`gapBound`), not the best values measured:
+  a write after one more failure, the member gap terms ahead, commits
+  within a heartbeat interval and one maximum election timeout a term of
+  gap when a node of a previous release must climb to the term of a member
+  of this release, 100 ms + gap × 2 s, that is 2.1, 6.1, 12.1 and 20.1 s at
+  gaps 1, 3, 6 and 10, and within two otherwise (4.1 s); the member ahead
+  is readmitted within the same bound (`TestAMixedClusterWritesAgainAfterAFailure`,
+  `TestAMemberAheadIsReadmittedUnderALeaderThatKeepsItsQuorum`). What the
+  code gives under it, at worst over 16 seeds, the leader and the third
+  node of 4: the leader failing, 1.88, 5.48, 10.08 and 16.4 s, the worst
+  case, 16.4 s ten terms ahead; the leader's other follower failing, 1.9,
+  3.36, 8.02 and 14.68 s; nobody failing, 1.9, 3.74, 6.92 and 9.98 s (O1's
+  cost, measured, the readmission alone held by a test). The values of 2026-11-16's decision, 1.9, 3.36, 8.02 and 14.68 s,
+  were the follower's case alone. In a cluster of this release the cut is
+  1.9 s, 3.52 s when the leader fails two terms ahead or more, and one term
+  ahead in a mixed one it is 1.9 s too. A gap of two or more needs several
+  campaigns won in PreVote and then lost, or transfers that failed, during
+  the upgrade window.
+- **The rolling upgrade to protocol 5 (D20's rollout, as amended).** Any
+  order; each step waits for its gate as before. A member of 5 ahead of a
+  leader of 4 no longer holds the gate shut: the leader steps down at the
+  next term and the gate reopens within an election timeout and a
+  heartbeat interval one term ahead. If a step's gate stays shut, compare
+  every member's `Status().Term`: a member of 5 several terms ahead of the
+  nodes of 4 stops the writes, with nobody failing, until they reach its
+  term, about one second a term (9.98 s ten terms ahead), and one more
+  failure in that window about 1.6 s a term (16.4 s ten terms ahead), both
+  within `gapBound`. `RaiseClusterVersion(5)` only once every member runs
+  this release; it is refused before (`VERSION_UNSUPPORTED`), a node rolled
+  back to 4 before the raise is admitted again, and after the raise a node
+  of 4 stops on it (D18).
+- **O3.** A read is never an announcement: `TestAReadNeverAnnounces`, the
+  safety review's test under the repository's name, fails when a leader
+  reads the announcement off a read (its mutation N17), green otherwise.
+- **O4.** The 113 releases that hold the engine run from
+  `internal/v0.1.1` to `internal/v0.30.4`; `internal/v0.1.0` holds none
+  (corrected above). `FlagProtocol5` and `FlagNoLease` have one value, so a
+  `switch` that names both does not compile: the facade's documentation
+  and the package guides say so. `noteSilence`'s comment no longer says a
+  silent node flags every refusal.
+- **O5.** A node run as a release before #1472 (`termFromAnswers`) speaks
+  protocol 4 at most: it refuses a raise to 5 and stops on one committed,
+  as such a release does (`TestARunAsAPreviousReleaseSpeaksProtocol4`).
+- **O7.** The source rule, R1-18's refusal at the request's term, is now
+  defence in depth: a leader of 5 is its only reader, and the receiver's
+  closed list keeps every other at its term; its loss is caught by the
+  mechanism tests alone, as the review found (its N13). The package guide
+  says so.
+- **O8.** A `NOT_LEADER` from a node outside the configuration deposes no
+  leader (`refusedForLaterTerm`, `TestOnlyAMembersRefusalStepsALeaderDown`);
+  a previous release's refusal at a later term is read before membership,
+  as in every release, and the transport drops a removed member's frames
+  once the admission set is republished.
+- **O9.** The flags byte is full: a protocol 6 needs another carrier for
+  its announcement, decided before it is opened (the core's guide).
+- **O6.** The branch is rebased on `main`, #1362's fix included
+  (`becomeFollower` never lowers a term), which every `max` of the
+  amendment of 2026-11-15 only raises; `FuzzStep` runs on the merged tree.
+- **What stays open, unchanged since `main`.** The class between two
+  nodes of a previous release: one refuses older-term traffic at its own
+  term, the other, a follower of a live leader, takes that term from the
+  late refusal with no vote and no leader, and grants the next vote of it
+  past D5's live-leader refusal. The candidate it elects may run either
+  release: a member of 5 whose vote request of that term was held since an
+  earlier campaign uses it as well as a node of 4 (the safety review of
+  this amendment, its O3 and O6). It closes once one of the two runs this
+  release, and disappears with the last pair of nodes of 4. The class of a
+  PreVote refusal read late by a node of 4, narrowed to a reader that
+  stayed at its campaign's term (the amendment of 2026-11-15), stays open
+  too.
+- **A leader upgraded to 5 may step down on its own frame from before its
+  upgrade.** L, of 4, leads term g and its heartbeat of term g is delayed;
+  L is upgraded, restarts and leads g+1; a member at g+1 then reads the
+  old frame, which announces no 5, and refuses it at g+1, `NOT_LEADER`; L,
+  now of 5, reads a refusal of its own term and steps down at g+1, its
+  vote kept (the safety review's O4). Liveness alone: one more election,
+  and it needs a frame of the old process read after the new one was
+  elected, which a connection's order makes unlikely. No term moves and no
+  promise is involved. It is left as it is, tracked by an issue of lot L1.
+- **Verification.** D0's and D1's schedules over 3 000 seeds and the eight
+  mixes: no term taken from a late refusal but where both the refuser and
+  the reader run a previous release, as on the amendment of 2026-11-15
+  (2 362 and 2 332 schedules reached a mix); the candidate those two then
+  elect may run either release. Every mutation of that amendment and of its
+  review is caught but N3, which its review found equivalent; so are the
+  refusal at the leader's own term, at the refuser's, or none, the
+  membership check dropped and the emulation speaking 5.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7759,6 +8203,7 @@ the measure, the rate and the rule; the engine does not change.
 | #1447, #1440 | Raft lot L1, 2026-11-15 | a voter that does not know its leader's last index refuses a JOIN `NOT_LEADER`, the leader's address named only when known; a forward and its answer of an older term are handled at the receiver's term, so a forward that crossed a change of term is answered and no longer left to `OUTCOME_UNKNOWN`, the answer carrying the forward's term and never the receiver's later one, which raised the forwarder's past D5's live-leader refusal and broke D9 (b)'s lease (the safety review of #1457); no format change, no protocol raise, no raft mutation (amendment of 2026-11-15, #1447, #1440) |
 | #912, #1364 | the leader's loop turn, 2026-11-15 | `BENCH.md`'s `TURN` rows keep the leader's turns raw through a test `Meter` and its `ENC` rows a turn's bytes on both paths; "not worse" is the A/B lane's `cturn`, the high end of the 95 % interval of head over base at most 1.00, against `ee1f48ba2` and the repaired parent of #912, and the bytes its `cenc`, at most 1/N; the loop reads the step function's `Summary` and asks `SameConf` instead of cloning both memberships through `Status` at each read, publishes a status it compared on the stack, and encodes a frame without entries at its length; read-only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #912, #1364) |
 | #920, #1365 | the commit while a snapshot streams, 2026-11-15 | `BENCH.md`'s `TCP/<device>/paced+stream` rows measure the data lane's commit p99 while a stream paced at 8 MiB/s runs against the same cluster's windows without one — A, B, A under one leader, a machine that keeps no state, the learner on tmpfs —, and print B over `TCP/<device>/paced` beside it; the A/B lane's `cstream` holds when the high end of the 95 % interval of B / A is at most 1.10, `cstream-scale` publishes 2 and 32 MiB/s; test code only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #920, #1365) |
+| #1472 | the owner's decision, 2026-11-15, revised the same day on its safety review (options L2 and M3), and on 2026-11-16 on the review of that revision (O1, O2); text awaiting the owner's validation | an answer stays at the term of the request it answers, R1-18's refusal of an older append or heartbeat at that term with `NOT_LEADER` and the refuser's term in `LogTerm`, a PreVote's at the term it asks for, a deposed leader's read refusals at the term they were asked at; a later term is taken only from the refusal of one's own request, by the leader of that append or heartbeat and the pre-candidate of that PreVote, so one PreVote round readmits a stuck node; protocol version 5, its announcement on `FlagNoLease`'s bit, a node of 5 answering no older append or heartbeat of a leader of a previous release; a `NOT_LEADER` refusal carries no `FlagTruncated`; no format change, no raft mutation (amendment of 2026-11-15, #1472); a leader of a previous release refused at the term after its request's, which deposes it, and a node of a previous release climbing one election timeout a term, the bound raised under the owner's rule of 2026-11-14 (amendment of 2026-11-16) |
 
 ## raft-sql-poc (owner's prior Raft)
 
