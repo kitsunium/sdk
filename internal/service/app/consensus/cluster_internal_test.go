@@ -1451,8 +1451,18 @@ func TestInstallAfterTheReceiverMovedPastTheSnapshot(t *testing.T) {
 
 // The last guard, on the apply goroutine: a restore queued for a snapshot
 // the machine already passed leaves the machine as it is (review H3).
+//
+// The snapshot is planted behind the follower's two newest, the first one
+// its retention removes (R6-02). The follower's own cut, due on the last
+// batch staleSnapshot applied, ran that retention between the Commit and
+// the restore's Open, which found no snapshot and answered SNAPSHOT_CORRUPT
+// (#1451). The follower's cuts are held from before the Create until the
+// snapshot is held open, so no retention runs while it is unpinned. Once
+// they are released, the cut they coalesced, if any, and a retention the
+// test runs itself find it pinned, and their removal of it is refused.
 func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
 	c, l, f, meta, body, tok := staleSnapshot(t)
+	release := holdCuts(t, f.node)
 	sink, _, err := f.snaps.Create(meta.ID, meta)
 	if err != nil {
 		t.Fatal(err)
@@ -1463,15 +1473,56 @@ func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
 	if err := sink.Commit(meta); err != nil {
 		t.Fatal(err)
 	}
+	held, err := f.snaps.Open(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	f.node.retain()
 	done := make(chan error, 1)
 	f.node.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
-	if err := <-done; err != nil {
+	err = <-done
+	if cerr := held.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got := f.node.Status().Applied; got < tok.Index {
 		t.Fatalf("the restore moved applied back to %d from %d", got, tok.Index)
 	}
 	checkNothingLost(t, c, l, f)
+}
+
+// holdCuts waits until n has no cut in flight and none coalesced, then
+// marks one in flight, as SaveSnapshot does on its caller's goroutine: no
+// cut starts, nor the retention one ends on, until release, and a trigger
+// meanwhile is coalesced. release clears the mark and asks for that
+// trigger as a cut's end does (cutPending); it runs once, at the latest at
+// the test's cleanup.
+func holdCuts(t *testing.T, n *Node) (release func()) {
+	t.Helper()
+	ss := &n.snapState
+	waitFor(t, "the cuts to settle", func() bool {
+		ss.mu.Lock()
+		defer ss.mu.Unlock()
+		if ss.inFlight || ss.pending {
+			return false
+		}
+		ss.inFlight = true
+		return true
+	})
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			ss.mu.Lock()
+			ss.inFlight = false
+			ss.mu.Unlock()
+			n.cutPending()
+		})
+	}
+	t.Cleanup(release)
+	return release
 }
 
 // smallFrames is a transport whose frames are smaller than a batch.
