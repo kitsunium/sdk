@@ -21,7 +21,7 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (th
 | `codec-fuzz.yml` | nightly schedule (04:53 UTC), manual `workflow_dispatch` (`fuzztime` input) | `scripts/ci/codec-fuzz.sh`: every fuzz target of the codec and transform families (#897) — format codecs, compressed frame, stdlib and vendor transform engines, vendor parsers — for a bounded time each, 1 minute by default; a crasher fails the run and its input is uploaded as the `codec-fuzz-crashers-<run>` artefact. An alarm, like the consensus lane; the seed corpus runs as plain tests in the `bazel` job. |
 | `net-kernel-gate.yml` | pull request opened, synchronised or reopened; `merge_group` (`checks_requested`) | The network engines' merge gate (plan P8-infra, R7). `changes` runs `scripts/ci/net-gate-paths.sh` between the base and the evaluated commit — the base branch's tip and the merge commit on a pull request, the queue's `base_sha` and `head_sha` in the queue —, so no path filter sits on the trigger; `lanes` runs the net suites on the runner's kernel (`host`, race on) and on Ubuntu noble's own 6.8 under QEMU/KVM (`noble-6.8`, booted by `scripts/ci/boot-guest.sh`, one retry of the boot), each leg declaring `requiredBackends` and `requiredCaps`, linked into the loop suite, which fails closed; `bench` runs engine A against engine B on L1, L1big, L1h2, L2 and L3, ten interleaved rounds on one GitHub-hosted runner, after checking the checkout IS the evaluated commit, then ten rounds of Sparse once `scripts/ci/net-veth.sh gro` gave the veth pair's far end a NAPI instance (busy polling, #979), then, as root on the veth pair (the addresses handed through `sudo env`, the runner's sudo ignoring `-E`; a skip fails the step), `TestBlackhole_*` (#971: a peer that vanishes with 1 MiB unsent fails within 3 s of a 1 s `UserTimeout` on every loop backend and the goroutine engine, and stays open 60 s with `tcp-user-timeout` off — the tests' one lane, they skip elsewhere), then `tools/netgate` judges the plan's gates and the samples and the report are uploaded as `net-bench-<sha>`; `bench-darwin` (macos-15, pull requests only, no part of the verdict) shortens the MSL to 1 s and widens the ephemeral range from 16384, since each round leaves 8 000 loopback ports in TIME_WAIT, then runs L1's kqueue pairs ten rounds and `netgate -only kqueue,cal-L1-kqueue` reports them as `net-bench-darwin-<sha>` (#976); `net-kernel-gate` (`if: always()`) passes through `scripts/ci/net-gate-verdict.sh` when the filter succeeded and either found nothing or the lanes and the bench both passed. Read-only token, `cancel-in-progress` on pull requests only, every job capped within the 45-minute budget. Not required yet: see §Merge queue |
 | `bazel-bench.yml` | manual `workflow_dispatch` (`count` input), weekly schedule (Sunday 06:00 UTC), PRs labelled `run-bench` | Kernel benchmarks — not part of the PR gate: the bench targets are `manual` in Bazel, so the job runs `go test -bench` in `internal/kernel` directly, as `make sdk-bench` does locally |
-| `bench-ab.yml` | manual `workflow_dispatch` (`suites`, `mode`, `base`, `head`, `pattern`, `benchtime`, `rounds`, `runner`, `enforce`); pull request opened, synchronised or reopened touching a suite's package or the lane's files (`paths:`) | The performance lot's A/B (§bench-ab.yml): per suite of `scripts/ci/bench-ab.conf`, a base binary — the head's benchmark files laid over it where they compile — and a head binary, interleaved rounds A B, B A, benchstat, step 0 (`-gcflags=-m=2`, `perf stat`, the mutex, block and CPU profiles a suite asks for), and a verdict per threshold row headed by the runner's processor model, published as `bench-ab-<suite>-<run>-<attempt>`. Never a merge gate; read-only token, hosted runners |
+| `bench-ab.yml` | manual `workflow_dispatch` (`suites`, `mode`, `base`, `head`, `pattern`, `benchtime`, `rounds`, `runner`, `enforce`; dispatches that differ in `suites`, `head`, `mode`, `base` or `runner` run side by side); pull request opened, synchronised or reopened touching a suite's package or the lane's files (`paths:`) | The performance lot's A/B (§bench-ab.yml): per suite of `scripts/ci/bench-ab.conf`, a base binary — the head's benchmark files laid over it where they compile — and a head binary, interleaved rounds A B, B A, benchstat, step 0 (`-gcflags=-m=2`, `perf stat`, the mutex, block and CPU profiles a suite asks for), and a verdict per threshold row headed by the runner's processor model, published as `bench-ab-<suite>-<run>-<attempt>`. Never a merge gate; read-only token, hosted runners |
 
 ## Merge queue
 
@@ -221,11 +221,12 @@ with an empty `KIT_READ_TOKEN` means the secret was removed, and fails.
 ## bench-ab.yml (the performance lot's A/B)
 
 The measurements of kitsunium/sdk#1038, #1059, #808, #834, #811, #1016, #1035,
-#827, #840 and #1034, on a GitHub-hosted runner — never on a development VM, whose clock, overlay
+#827, #840, #1034, #1102, #910 and #892, on a GitHub-hosted runner — never on a development VM, whose clock, overlay
 file system and memory balloon decide its numbers. The table is
-`scripts/ci/bench-ab.conf`: its **suites** (a package directory, the
+`scripts/ci/bench-ab.conf`: its **suites** (a package directory — under
+`internal/`, `pkg/v1/` or `third-party/` —, the
 `-test.bench` expression, `-test.benchtime`, `-test.cpu`, the CPUs a rule needs,
-the runner, the base commit the issues cite — `ee1f48ba2` for all ten) and its
+the runner, the base commit the issues cite — `ee1f48ba2` for all of them) and its
 **rules**, one a threshold row, each naming its issue; a `step0` record names the
 profiles a suite wants recorded. The suites: `kcache*` (#1038, #834, #808),
 `dcache*` (#1059, #808), `dcache-bulk` (#840: `FetchMany_16` per key, 16 × 0.40,
@@ -234,7 +235,27 @@ and its million-entry row in `dcache-scale`), `queue` and `queue-scale` (#811),
 changes run it too), `logger` (#1016), `sflight` and `sflight-8` (#1035:
 singleflight at `-4` and, on a runner of 8 CPUs or more, `-8`), `ring` and
 `ring-spsc` (#1034: two suites, because a two-level `-test.bench` expression on a
-benchmark with no sub-benchmark discovers nothing and reports nothing).
+benchmark with no sub-benchmark discovers nothing and reports nothing),
+`transform` (#1102, `internal/service/data/transform`: zero allocations and
+bytes into a sized `dst`, a nil `dst`'s B/op at most 1.5 × the plaintext — 36
+`value` rules on the head's rows), `codec-promote` (#910,
+`pkg/v1/data/codec`; the form codec's engine runs it too: the promoted form's
+allocations, four fewer than the base's — a `delta` rule) and `tstream` (#892,
+`third-party/transform`: each stream row against its block row, both the
+head's, at 4 MiB — eight `ratio` rules at 1.10 — and two floor rows,
+`BenchmarkStreamFloor`, the proof that no single-goroutine stream verifying
+s2's checksums holds the bound on a family when they fail too; a CPU profile of
+the s2 stream's decompression as its `step0`).
+
+**Outside `internal/`.** A suite's directory may be a package of `pkg/v1/` or of
+a vendor module under `third-party/`. `bench-ab-build.sh` and `bench-ab-step0.sh`
+build in the nearest `go.mod` above the package with `GOWORK=off`, so a vendor
+module is built as its consumers build it, through the `replace` directives of
+its own `go.mod` (`third-party/transform` needs `../../internal` and downloads
+`klauspost/compress`: the leg needs the network, as `go install benchstat`
+does). A pull request that changes `third-party/transform/` or `pkg/v1/data/codec/`
+runs the suite through the workflow's `paths:` (`bench-ab.bats` holds the list
+to the table's).
 
 Per suite, one leg (`ab <suite>`):
 
@@ -265,7 +286,10 @@ Per suite, one leg (`ab <suite>`):
    together. The workflow hands the record down as `STEP0_PROFILES` and
    `STEP0_PATTERN`.
 5. **The verdict**: `bench-ab-verdict.sh`, one line a rule — `ab` (a row's head
-   over its base), `ratio` (two head rows), `diff` (two head rows' difference),
+   over its base), `delta` (a row's head MINUS its base, in the metric's own
+   unit — a count or a size the head must lower by so much, #910's `<= -4`
+   allocs/op —, labelled `head-base`; `missing` when the base lacks the row, as
+   a delta against nothing would be a delta against zero), `ratio` (two head rows), `diff` (two head rows' difference),
    `value` (one head row) or `cross` (a head row over a DIFFERENT row of the
    base: a row only the head carries, an internal benchmark or a floor row,
    against the base's own — #1035's step 1 alone, #1034's `SCStorePair`
@@ -316,6 +340,17 @@ organization"; no self-hosted runner is registered). Judging #808 needs a
 GitHub-hosted larger runner (a Team or Enterprise plan, a runner group allowed
 on public repositories, 8 cores or more, its label given as `runner`) — never a
 self-hosted runner reachable from a fork's pull request.
+
+**Dispatches side by side.** A pull request keeps the group `<workflow>-<ref>`
+and cancels the run a push replaces. A dispatch's group adds `suites`, `head`,
+`mode`, `base` and `runner` to it, and nothing cancels a dispatch: two
+dispatches of different suites, heads, bases or runners — #892's one dispatch a
+runner family — run at the same time, where the former group (the ref alone)
+made every dispatch from `main` replace the one still waiting. A dispatch that
+repeats all five of one in progress waits for it, and a third replaces the second
+still waiting (GitHub keeps one pending run a group): `rounds`, `pattern` and
+`benchtime` are not in the group, so a repeat is told apart by its `runner`,
+`base` or `head`.
 
 **A run by hand**, once the workflow is on `main`:
 

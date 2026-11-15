@@ -6,14 +6,16 @@
 # and writes OUTDIR/verdict.tsv and OUTDIR/verdict.md, the latter on stdout.
 #
 # The rule, per line of the table:
-#   1. each round gives one value: ROW's head over ROW's base (ab), ROW over
-#      ROW2 in the head (ratio), ROW minus ROW2 in the head (diff), ROW in
-#      the head (value), or ROW in the head over ROW2 in the BASE (cross: a
-#      row only the head has, judged against the base's different row) — a
-#      ratio over a zero is 1 when the numerator is zero too, infinite
-#      otherwise; a round that lacks either row gives no value, so a row the
-#      binary does not carry (a benchmark its pull request has not landed yet)
-#      leaves the rule `missing`, never passing;
+#   1. each round gives one value: ROW's head over ROW's base (ab), ROW's
+#      head minus ROW's base (delta: the change of a count or a size, in its
+#      own unit), ROW over ROW2 in the head (ratio), ROW minus ROW2 in the
+#      head (diff), ROW in the head (value), or ROW in the head over ROW2 in
+#      the BASE (cross: a row only the head has, judged against the base's
+#      different row) — a ratio over a zero is 1 when the numerator is zero
+#      too, infinite otherwise; a round that lacks either row gives no value,
+#      so a row the binary does not carry (a benchmark its pull request has not
+#      landed yet) leaves the rule `missing`, never passing — a delta over a
+#      row the base lacks included;
 #   2. the values of the rounds are summarised as benchstat summarises a
 #      sample (golang.org/x/perf benchmath, AssumeNothing): the median, and the
 #      distribution-free 95 % interval whose ends are the k-th smallest and the
@@ -122,6 +124,9 @@ END {
       if (kind[r] == "ab") {
         if (!has("head", rd, row[r], m) || !has("base", rd, row[r], m)) continue
         x = quotient(val("head", rd, row[r], m), val("base", rd, row[r], m))
+      } else if (kind[r] == "delta") {
+        if (!has("head", rd, row[r], m) || !has("base", rd, row[r], m)) continue
+        x = val("head", rd, row[r], m) - val("base", rd, row[r], m)
       } else if (kind[r] == "ratio") {
         if (!has("head", rd, row[r], m) || !has("head", rd, row2[r], m)) continue
         x = quotient(val("head", rd, row[r], m), val("head", rd, row2[r], m))
@@ -159,6 +164,7 @@ END {
     gating = (mode[r] == "gate" || enforce == 1)
     if (gating && verdict != "pass") failed = 1
     what = (kind[r] == "ab") ? metric[r] " " row[r] " head/base" : \
+           (kind[r] == "delta") ? metric[r] " " row[r] " head-base" : \
            (kind[r] == "ratio") ? metric[r] " " row[r] " / " row2[r] : \
            (kind[r] == "cross") ? metric[r] " " row[r] " head / " row2[r] " base" : \
            (kind[r] == "diff") ? metric[r] " " row[r] " - " row2[r] : metric[r] " " row[r]
