@@ -221,7 +221,7 @@ with an empty `KIT_READ_TOKEN` means the secret was removed, and fails.
 ## bench-ab.yml (the performance lot's A/B)
 
 The measurements of kitsunium/sdk#1038, #1059, #808, #834, #811, #1016, #1035,
-#827, #840, #1034, #1102, #910 and #892, on a GitHub-hosted runner — never on a development VM, whose clock, overlay
+#827, #840, #1034, #1102, #910, #892, #912 and #1364, on a GitHub-hosted runner — never on a development VM, whose clock, overlay
 file system and memory balloon decide its numbers. The table is
 `scripts/ci/bench-ab.conf`: its **suites** (a package directory — under
 `internal/`, `pkg/v1/` or `third-party/` —, the
@@ -245,7 +245,18 @@ allocations, four fewer than the base's — a `delta` rule) and `tstream` (#892,
 head's, at 4 MiB — eight `ratio` rules at 1.10 — and two floor rows,
 `BenchmarkStreamFloor`, the proof that no single-goroutine stream verifying
 s2's checksums holds the bound on a family when they fail too; a CPU profile of
-the s2 stream's decompression as its `step0`).
+the s2 stream's decompression as its `step0`), `cturn` (#912,
+`internal/service/app/consensus`: the leader's loop turn at 1 000 proposals/s,
+three and five nodes over loopback mTLS, one paced run of 5 s an op, its p99
+taken from every observation a test `Meter` keeps raw — `p99-us/turn`, a metric
+the benchmark reports itself — head over base at most 1.00, two `ab` rules; a
+CPU profile of the turn as its `step0`; #1364 dispatches it with
+`base=bench/912-parent`, the parent of #912's commit with the one line that
+builds it) and `cenc` (#912: a leader turn's bytes, the shared body over the
+per-follower frames the driver keeps for a transport without `BatchSender`,
+both the head's, at most 1/N — two `ratio` rules on `B/op`). A metric is
+`<what>/<per>`, letters, digits, `%` and `-` before the slash, letters and
+digits after it.
 
 **Outside `internal/`.** A suite's directory may be a package of `pkg/v1/` or of
 a vendor module under `third-party/`. `bench-ab-build.sh` and `bench-ab-step0.sh`
