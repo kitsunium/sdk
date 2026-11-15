@@ -703,7 +703,7 @@
       "dir": "kernel/collections/cache",
       "layer": "kernel",
       "family": "collections",
-      "doc": "Package cache provides a generic, concurrency-safe LRU + TTL cache\n(Cache[K,V]) — a kernel primitive (stdlib-only, no domain vocabulary). It\nreuses the kernel clock so TTL expiry is testable. Fetch on a hit is\nallocation-free (map lookup + intrusive-list splice); Set allocates one entry\nper new key. Reads and writes are serialised by a single mutex. Fetch is\nnamed Fetch (not Get) because a hit mutates state (LRU promotion + counters).\n\nPackage cache — the New constructor configuration.\n\nPackage cache — the intrusive doubly-linked LRU node.\n\nPackage cache — the key/value pair carried out of the locked section so the\nOnEvict observer never runs while the cache mutex is held.\n\nPackage cache — the read-only counters snapshot.\n\nPackage cache — the S3-FIFO side of the policy: admission into the small\nor main queue, the hit counter, and the walk that picks a victim.\n\nPackage cache — the S3-FIFO ghost: the hashes of the keys probation\nevicted, bounded.\n\nPackage cache — the intrusive list each queue is.\n\nPackage cache — the eviction policies a Cache runs.\n\nPackage cache — Striped: independent Caches behind one hash, each with\nits own lock.\n\nPackage cache — UnlockedMap: the cache without its lock, for a caller that\nalready serialises every call.\n\nPackage cache — the expiry heap: a 4-ary heap of int64 deadlines.\n"
+      "doc": "Package cache provides a generic, concurrency-safe LRU + TTL cache\n(Cache[K,V]) — a kernel primitive (stdlib-only, no domain vocabulary). It\nreuses the kernel clock so TTL expiry is testable. Fetch on a hit is\nallocation-free (map lookup + intrusive-list splice); Set allocates one entry\nper new key. Reads and writes are serialised by a single mutex. Fetch is\nnamed Fetch (not Get) because a hit mutates state (LRU promotion + counters).\n\nPackage cache — the New constructor configuration.\n\nPackage cache — the intrusive doubly-linked LRU node.\n\nPackage cache — the key/value pair carried out of the locked section so the\nOnEvict observer never runs while the cache mutex is held.\n\nPackage cache — the read-only counters snapshot.\n\nPackage cache — the S3-FIFO side of the policy: admission into the small\nor main queue, and the walk that picks a victim.\n\nPackage cache — the S3-FIFO ghost: the hashes of the keys probation\nevicted, bounded.\n\nPackage cache — the W-TinyLFU side of the policy: the window, the\nprobation and protected segments, and the admission contest.\n\nPackage cache — the frequency sketch W-TinyLFU admits by: four-bit\ncounters, a key's four in one cache line, halved as they age.\n\nPackage cache — the intrusive list each queue is.\n\nPackage cache — the eviction policies a Cache runs.\n\nPackage cache — Striped: independent Caches behind one hash, each with\nits own lock.\n\nPackage cache — UnlockedMap: the cache without its lock, for a caller that\nalready serialises every call.\n\nPackage cache — the expiry heap: a 4-ary heap of int64 deadlines.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/kernel/collections/heap",
@@ -64200,7 +64200,7 @@
       "recv": "Cache",
       "spelled": "func(key K) (value V, ok bool)",
       "canonical": "func(key K) (value V, ok bool)",
-      "doc": "Fetch returns the value for key and whether it was present and unexpired. A\nhit promotes the entry to most-recently-used (hence Fetch, not a pure Get).\n",
+      "doc": "Fetch returns the value for key and whether it was present and unexpired. A\nhit is recorded by the policy — under LRU it promotes the entry to\nmost-recently-used —, hence Fetch, not a pure Get.\n",
       "file": "kernel/collections/cache/cache.go",
       "layer": "kernel",
       "family": "collections"
@@ -64294,7 +64294,7 @@
         {
           "name": "MaxEntries",
           "type": "int",
-          "doc": "MaxEntries caps the live entry count (LRU eviction above it). 0 = unbounded.\n"
+          "doc": "MaxEntries caps the live entry count (the policy evicts above it). 0 = unbounded.\n"
         },
         {
           "name": "DefaultTTL",
@@ -64375,7 +64375,7 @@
       "name": "Policy",
       "spelled": "uint8",
       "canonical": "uint8",
-      "doc": "Policy chooses which entry a full Cache evicts. The zero value is\nPolicyLRU, today's behaviour; an unknown value runs as PolicyLRU, and\nStats says which policy runs.\n",
+      "doc": "Policy chooses which entry a full Cache evicts: PolicyLRU, PolicyS3FIFO or\nPolicyTinyLFU. The zero value is PolicyLRU, today's behaviour; an unknown\nvalue runs as PolicyLRU, and Stats says which policy runs.\n",
       "file": "kernel/collections/cache/policy.go",
       "layer": "kernel",
       "family": "collections"
@@ -64401,7 +64401,20 @@
       "spelled": "Policy",
       "canonical": "github.com/kitsunium/sdk/internal/kernel/collections/cache.Policy",
       "value": "1",
-      "doc": "PolicyS3FIFO is S3-FIFO (Yang et al., SOSP 2023): a new key enters a small\nprobationary FIFO holding a tenth of the capacity; one hit there promotes\nit to the main FIFO when it reaches the tail, none sends its key to a\nbounded ghost set, and a key the ghost remembers is admitted straight into\nmain. A one-time scan therefore churns the small queue and leaves the hot\nset in main. A hit only sets a counter — it moves nothing.\n",
+      "doc": "PolicyS3FIFO is S3-FIFO (Yang et al., SOSP 2023): a new key enters a small\nprobationary FIFO holding a fiftieth of the capacity; one hit there\npromotes it to the main FIFO when it reaches the tail, none sends its key\nto a ghost set holding a quarter of the capacity in hashes, and a key the\nghost remembers is admitted straight into main. A one-time scan therefore\nchurns the small queue and leaves the hot set in main. A hit only sets a\ncounter — it moves nothing.\n",
+      "file": "kernel/collections/cache/policy.go",
+      "layer": "kernel",
+      "family": "collections"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyTinyLFU",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/kernel/collections/cache",
+      "name": "PolicyTinyLFU",
+      "spelled": "Policy",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/collections/cache.Policy",
+      "value": "2",
+      "doc": "PolicyTinyLFU is W-TinyLFU (Einziger, Friedman and Manes, ACM TOS 2017):\na new key enters an LRU window holding a hundredth of the capacity; the\nkey the window pushes out moves into main when main has room, and\notherwise contests main's next victim — the least recently used of main's\nprobationary segment — and stays only when a frequency sketch says it was\nused more, and twice at least. A second use in main moves an entry into\nthe protected segment, four fifths of main. Every Set and every hit counts\nits key: the first use in a period in a doorkeeper, a Bloom filter, the\nlater ones in a count-min sketch of four-bit counters halved every ten\nuses an entry of the bound, so a key used once — a scan, the long tail —\nnever displaces one used more, and the counts follow what is used now. A\nkey just written is always served: the window holds it.\n",
       "file": "kernel/collections/cache/policy.go",
       "layer": "kernel",
       "family": "collections"
@@ -64449,7 +64462,7 @@
       "name": "Striped",
       "spelled": "[K comparable, V any] struct{}",
       "canonical": "[K comparable, V any] struct{}",
-      "doc": "Striped spreads its keys over independent Caches — stripes — each behind\nits own lock, so goroutines working on keys of different stripes never\nwait for one another. A key always lands in the same stripe, chosen by a\nhash of the key.\n\nEach stripe holds an equal share of MaxEntries and MaxWeight, at least one\nunit when the bound is set: the policy is exact within a stripe and\napproximate across them — the victim is the least-recently-used entry of\nthe stripe that overflowed, not of the whole cache. OnEvict fires per\nstripe, outside that stripe's lock, as a Cache fires it. With one stripe a\nStriped behaves exactly as one Cache.\n\nThe zero value is NOT usable — construct with NewStriped.\n",
+      "doc": "Striped spreads its keys over independent Caches — stripes — each behind\nits own lock, so goroutines working on keys of different stripes never\nwait for one another. A key always lands in the same stripe, chosen by a\nhash of the key.\n\nEach stripe holds an equal share of MaxEntries and MaxWeight, at least one\nunit when the bound is set: the policy is exact within a stripe and\napproximate across them — the victim is the policy's victim in the stripe\nthat overflowed, not in the whole cache. OnEvict fires per\nstripe, outside that stripe's lock, as a Cache fires it. With one stripe a\nStriped behaves exactly as one Cache.\n\nThe zero value is NOT usable — construct with NewStriped.\n",
       "file": "kernel/collections/cache/striped.go",
       "layer": "kernel",
       "family": "collections"
@@ -64591,7 +64604,7 @@
       "name": "UnlockedMap",
       "spelled": "[K comparable, V any] struct{}",
       "canonical": "[K comparable, V any] struct{}",
-      "doc": "UnlockedMap is the cache without its lock: the same LRU or S3-FIFO policy, TTL,\nbounds, sweep and counters as Cache, for a caller that already serialises\nevery call under a lock of its own — a store that keeps more state beside\nthe entries, which a second lock inside would only slow down. It is NOT\nsafe for concurrent use: two goroutines calling it at once race, which the\nrace detector reports. OnEvict runs at the end of the call that evicted,\nonce the cache is consistent again, so it may call back into the cache;\nunder the caller's lock it runs under that lock. The zero value is NOT\nusable — construct with NewUnlockedMap.\n",
+      "doc": "UnlockedMap is the cache without its lock: the same eviction policy, TTL,\nbounds, sweep and counters as Cache, for a caller that already serialises\nevery call under a lock of its own — a store that keeps more state beside\nthe entries, which a second lock inside would only slow down. It is NOT\nsafe for concurrent use: two goroutines calling it at once race, which the\nrace detector reports. OnEvict runs at the end of the call that evicted,\nonce the cache is consistent again, so it may call back into the cache;\nunder the caller's lock it runs under that lock. The zero value is NOT\nusable — construct with NewUnlockedMap.\n",
       "file": "kernel/collections/cache/unlocked.go",
       "layer": "kernel",
       "family": "collections"
@@ -79496,7 +79509,7 @@
         {
           "name": "Policy",
           "type": "kcache.Policy",
-          "doc": "Policy is the eviction policy: least recently used (the zero), or\nS3-FIFO, which keeps a hot set through a scan.\n"
+          "doc": "Policy is the eviction policy: least recently used (the zero), S3-FIFO,\nwhich keeps a hot set through a scan, or W-TinyLFU, which admits a key\nonly when it was used more than the one it replaces.\n"
         },
         {
           "name": "LeasePoll",

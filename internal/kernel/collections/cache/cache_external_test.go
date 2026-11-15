@@ -10,11 +10,12 @@ import (
 )
 
 // policies are the eviction policies every behavioural table runs under: a
-// contract that holds under LRU must hold under S3-FIFO too (#834).
-var policies = []cache.Policy{cache.PolicyLRU, cache.PolicyS3FIFO}
+// contract that holds under LRU must hold under S3-FIFO and W-TinyLFU too
+// (#834).
+var policies = []cache.Policy{cache.PolicyLRU, cache.PolicyS3FIFO, cache.PolicyTinyLFU}
 
 // policyNames names the policies' subtests.
-var policyNames = map[cache.Policy]string{cache.PolicyLRU: "lru", cache.PolicyS3FIFO: "s3fifo"}
+var policyNames = map[cache.Policy]string{cache.PolicyLRU: "lru", cache.PolicyS3FIFO: "s3fifo", cache.PolicyTinyLFU: "tinylfu"}
 
 // forEachPolicy runs one test body once per policy, as parallel subtests.
 func forEachPolicy(t *testing.T, run func(t *testing.T, policy cache.Policy)) {

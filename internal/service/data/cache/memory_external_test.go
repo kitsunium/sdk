@@ -23,12 +23,12 @@ import (
 var errOrigin = errors.New("origin unreachable")
 
 // forEachPolicy runs body once per eviction policy, as parallel subtests
-// named lru and s3fifo: every memory store a body builds through newStore or
-// policyConfig runs the policy its subtest names, so each table of this
-// package runs twice (#834).
+// named lru, s3fifo and tinylfu: every memory store a body builds through
+// newStore or policyConfig runs the policy its subtest names, so each table
+// of this package runs three times (#834).
 func forEachPolicy(t *testing.T, body func(t *testing.T)) {
 	t.Helper()
-	for _, name := range []string{"lru", "s3fifo"} {
+	for _, name := range []string{"lru", "s3fifo", "tinylfu"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			body(t)
@@ -40,8 +40,11 @@ func forEachPolicy(t *testing.T, body func(t *testing.T)) {
 func policyConfig(t *testing.T, cfg svccache.MemoryConfig) svccache.MemoryConfig {
 	t.Helper()
 	//: forEachPolicy names the subtest after the policy.
-	if strings.Contains(t.Name(), "/s3fifo") {
+	switch {
+	case strings.Contains(t.Name(), "/s3fifo"):
 		cfg.Policy = kcache.PolicyS3FIFO
+	case strings.Contains(t.Name(), "/tinylfu"):
+		cfg.Policy = kcache.PolicyTinyLFU
 	}
 	return cfg
 }

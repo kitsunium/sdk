@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-13T12:00:00Z -->
+<!-- updated: 2026-11-15T12:00:00Z -->
 # internal/service/data/cache/
 
 ## Purpose
@@ -266,9 +266,12 @@ discovers until an incident.
   stripe's share of `MaxBytes` is refused with `CACHE_ENTRY_REJECTED` — the
   primitive would store it alone and overrun the bound.
 - **Policy.** `MemoryConfig.Policy` is forwarded to every stripe's primitive
-  (`kcache.PolicyLRU`, the zero, or `PolicyS3FIFO`). Every external table of
-  this package runs under both (`forEachPolicy`; `newStore` and `policyConfig`
-  read the policy off the subtest's name).
+  (`kcache.PolicyLRU`, the zero, `PolicyS3FIFO` or `PolicyTinyLFU`). Every
+  external table of this package runs under the three (`forEachPolicy`;
+  `newStore` and `policyConfig` read the policy off the subtest's name), and
+  the internal shapes too (`forEachShape`). Under W-TinyLFU a key just written
+  is always served — the window holds it —, and one used once never displaces
+  one used more (#834).
 - **Clock.** A `clock.CoarseClock` (#814) as `MemoryConfig.Clock` makes a TTL'd
   hit's clock read an atomic load; every expiry is then late by up to its
   resolution.
