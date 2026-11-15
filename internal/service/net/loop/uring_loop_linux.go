@@ -178,15 +178,12 @@ type uRing struct {
 	fill uint8
 	// queueDone is, per listener, that the ring took its share of the
 	// listener's queue as the group drains and handed it back (plan P6);
-	// queueCancel that a cancel of its accepts is in flight; queueEmptied
-	// that the queue read empty right after a round of its accepts ran, which
-	// ends the ring's take once they came back (#1385). take is takeOff for a
-	// ring that takes nothing more: the watchdog drained it before the group
-	// did, or an accept failed during the take.
-	queueDone    []bool
-	queueCancel  []bool
-	queueEmptied []bool
-	take         uint8
+	// queueCancel that a cancel of its accepts is in flight. take is takeOff
+	// for a ring that takes nothing more: the watchdog drained it before the
+	// group did, or an accept failed during the take.
+	queueDone   []bool
+	queueCancel []bool
+	take        uint8
 	// taken is, per listener, how many accepts the drain's take armed:
 	// bounded by queueTakeMax, past which the arrivals outpace the drain.
 	taken []int
@@ -616,7 +613,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	lp := ul.lp
 	rr := &uRing{
 		ul: ul, u: u, armed: make([]int, len(ul.lfds)),
-		queueDone: doneOutside(ul.owners, lp.index), queueCancel: make([]bool, len(ul.lfds)), queueEmptied: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
+		queueDone: doneOutside(ul.owners, lp.index), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
 	}
 	rr.r = newRing(lp, i, rr)
 	//: stage 4: provided buffers and the sparse table.
@@ -952,12 +949,15 @@ func (rr *uRing) cancelAccept(i int) bool {
 // that completed as its cancel crossed it is served like any other —, it
 // arms as many single-shot accepts as the queue holds (TCP_INFO), up to
 // queueTakeBatch a batch as epoll and kqueue take, within the room above the
-// reserve, submits them, and reads the queue again once they ran: empty
-// there, the ring's take is over, as epoll's is at its first EAGAIN. It
-// hands the listener back to the group's set once the queue read empty and
-// none of its accepts is in flight; the last ring closes it. An accept left
-// waiting on an empty queue, because another ring took the connection, is
-// cancelled again.
+// reserve, submits them and reads the queue again, round after round: an
+// accept on a queue that holds a connection completes as it is submitted, so
+// an empty read is the take's EAGAIN. When every accept of the rounds
+// completed so, none waits on the listener, and the ring hands it back to
+// the group's set at that read, its last before the close, as epoll does;
+// the last taker closes it, and the rounds' connections are opened as the
+// next batch reaps them. An accept left waiting on an empty queue, because
+// another ring took the connection, is cancelled, and the queue read again
+// once it came back.
 //
 // Read a batch after the round instead, the queue was never empty under
 // arrivals once a batch outlasted the gap between two of them, and
@@ -965,7 +965,10 @@ func (rr *uRing) cancelAccept(i int) bool {
 // budget with the queue at its backlog, and the close reset connections
 // queued half a second before it (#1385). acceptDepth bounds the accepts a
 // serving ring keeps waiting, never what the take arms for a queue it
-// counted.
+// counted. Handed back a batch after an empty read, on that read, the
+// listener closed on what arrived in between — the rest of the batch, the
+// wait and the next reap, 70 to 230 ms on a loaded runner —, reset unread
+// (#1385, after #1460).
 func (rr *uRing) takeQueues() {
 	//: each listener not handed back yet.
 	for i, fd := range rr.ul.lfds {
@@ -976,59 +979,85 @@ func (rr *uRing) takeQueues() {
 	}
 }
 
-// takeQueue is takeQueues' step on listener i, fd.
+// takeQueue is takeQueues' step on listener i, fd: once no accept of the
+// ring is in flight on it, rounds of accepts, each submitted and the queue
+// read right after it, until a read finds it empty — the listener handed
+// back at that read when every accept completed as it was submitted — or
+// until the batch's share of queueTakeBatch is armed.
 func (rr *uRing) takeQueue(i, fd int) {
-	q := rr.waiting(i, fd)
-	//: accepts in flight: the drain's cancels, or this take's own.
+	//: accepts in flight: the drain's cancels, or a round's left waiting on
+	//: a connection another ring took.
 	if rr.armed[i] > 0 {
 		//: one waits on an empty queue: cancelled, once.
-		if q == 0 && !rr.queueCancel[i] {
+		if !rr.queueCancel[i] && rr.waiting(i, fd) == 0 {
 			rr.queueCancel[i] = rr.cancelAccept(i)
 		}
-		//: their completions come first.
+		//: their completions come first; the queue is read again then.
 		return
 	}
 	rr.queueCancel[i] = false
-	//: empty: handed back.
-	if q == 0 {
-		rr.queueDone[i] = true
-		rr.ul.set.handBack(i)
-		//: taken.
-		return
-	}
-	n := min(q, queueTakeBatch, rr.acceptRoom(), queueTakeMax-rr.taken[i])
-	//: queued, but no entry free, or process descriptors out until the
-	//: backoff ends: the drain's closes make room, and the take waits.
-	if n == 0 || (rr.paused && rr.ul.lp.tick < rr.resumeAt) {
+	//: the rounds, up to the batch's share; what is queued past it, or
+	//: without room, waits for the next batch, the listener kept.
+	if !rr.takeRounds(i, fd) {
 		//: next batch.
 		return
 	}
-	rr.taken[i] += rr.armTake(i, fd, n)
-	rr.queueEmptied[i] = rr.tookAll(fd)
+	//: an accept of the rounds still waits on the listener: cancelled, and
+	//: the queue read again once it came back.
+	if rr.u.completed(udPack(udAccept, 0, uint32(i))) < rr.armed[i] {
+		rr.queueCancel[i] = rr.cancelAccept(i)
+		//: not handed back on this read.
+		return
+	}
+	rr.queueDone[i] = true
+	rr.ul.set.handBack(i)
+}
+
+// takeRounds arms and submits rounds of accepts on listener i, fd, each as
+// many as the queue holds, and reports whether a read found the queue
+// empty, or the take over, before the batch's share was armed or the room
+// ran out.
+func (rr *uRing) takeRounds(i, fd int) bool {
+	share := queueTakeBatch
+	//: a round at a time, the queue read right after each.
+	for {
+		q := rr.waiting(i, fd)
+		//: empty, or the take over.
+		if q == 0 {
+			//: read.
+			return true
+		}
+		n := min(q, share, rr.acceptRoom(), queueTakeMax-rr.taken[i])
+		//: queued, but no entry free, process descriptors out until the
+		//: backoff ends, or the batch's share armed: the drain's closes
+		//: make room, and the take goes on at the next batch.
+		if n == 0 || (rr.paused && rr.ul.lp.tick < rr.resumeAt) {
+			//: next batch.
+			return false
+		}
+		armed := rr.armTake(i, fd, n)
+		rr.taken[i] += armed
+		share -= armed
+		rr.u.submit()
+		//: the SQ had no room for the whole round: the rest next batch.
+		if armed < n {
+			//: next batch.
+			return false
+		}
+	}
 }
 
 // waiting is how many connections listener i, fd, holds for the ring's
-// take: none for a ring the watchdog drained, whose accept failed, past its
-// budget, or whose queue read empty after its last round — it takes nothing
-// more.
+// take: none for a ring the watchdog drained, whose accept failed, or past
+// its budget — it takes nothing more.
 func (rr *uRing) waiting(i, fd int) int {
 	//: its take of the listener is over.
-	if rr.take != takeOn || rr.taken[i] >= queueTakeMax || rr.queueEmptied[i] {
+	if rr.take != takeOn || rr.taken[i] >= queueTakeMax {
 		//: none.
 		return 0
 	}
 	//: what the queue holds.
 	return queued(fd)
-}
-
-// tookAll submits the take's round and reports whether listener fd's queue
-// reads empty once it ran: a single-shot accept on a queue that holds a
-// connection completes as it is submitted, so what the queue holds then
-// arrived during the submission, or was left to an accept still in flight.
-func (rr *uRing) tookAll(fd int) bool {
-	rr.u.submit()
-	//: nothing left behind the round.
-	return queued(fd) == 0
 }
 
 // armTake arms n single-shot accepts on listener i, fd, for the drain's take,
@@ -1052,12 +1081,14 @@ func (rr *uRing) armTake(i, fd, n int) int {
 }
 
 // queuesTaken reports whether every ring of the loop handed every listener
-// back.
+// back and reaped every accept it armed: the take hands a listener back with
+// its last round's accepts completed, not yet reaped, and the loop stops
+// only once their connections are open.
 func (ul *uLoop) queuesTaken() bool {
 	//: every ring, every listener.
 	for _, rr := range ul.rings {
-		//: one left.
-		if slices.Contains(rr.queueDone, false) {
+		//: one left, or an accept still to reap.
+		if slices.Contains(rr.queueDone, false) || armedAny(rr.armed) {
 			//: not yet.
 			return false
 		}
@@ -2566,6 +2597,8 @@ func listenerQueue(fd int) uint32 {
 // control applies the group's drain.
 func (ul *uLoop) control() {
 	lp := ul.lp
+	if lp.draining {
+	}
 	//: the drain: the accepts in flight are cancelled, the listeners'
 	//: queues taken, then handed back; settled connections close.
 	if ul.drainReq.Load() && !lp.draining {

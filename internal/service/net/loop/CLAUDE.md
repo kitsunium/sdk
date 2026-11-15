@@ -98,18 +98,28 @@ stream groups, `StartPacket` runs one io_uring lane of a datagram group a
   zero-timeout `ppoll` on a Unix socket, `acceptDepth` a round —, within the
   room above the reserve (none left,
   or a process-descriptor backoff, waits: never read as empty), `queueTakeMax`
-  in all, submits the round and reads the queue again once it ran (`tookAll`:
-  a single-shot accept on a queue that holds a connection completes as it is
-  submitted, so an empty read there is epoll's `EAGAIN`, and ends the ring's
-  take of the listener — `queueEmptied`), an accept's failure stopping the take only when `takeWaits` says the
+  in all, submits the round and reads the queue again at once, round after
+  round up to `queueTakeBatch` a batch (`takeRounds`): a single-shot accept on
+  a queue that holds a connection completes as it is submitted, so an empty
+  read is epoll's `EAGAIN`. When the CQ holds a completion for every accept
+  the rounds armed (`uring.completed`), none waits on the listener and it is
+  handed back at that read, the last before the close; the rounds'
+  connections open as the next batch reaps them, and the loop stops only
+  once it reaped every accept it armed (`queuesTaken`). An accept's failure stops the take only when `takeWaits` says the
   listener failed or no descriptor will come (`EMFILE`/`ENFILE`, the group
-  holding no connection), cancels one left waiting on an empty queue, and hands the
-  listener back once the queue read empty with none in flight. Read a batch
+  holding no connection); one left waiting on an empty queue — another ring
+  took its connection — is cancelled, and the queue read again once it came
+  back, never judged on a read made before. Read a batch
   after the round instead, the queue was never empty under arrivals once a
   batch outlasted the gap between two dials, and `acceptDepth` a round fell
   behind one dialer: the take ran to its budget with the queue at its
   backlog, and the close reset connections queued 475 ms before it (#1385,
   ADR 0196 amended 2026-11-14; `TestConformance_drainTakesWhatTheQueueHolds`).
+  Handed back a batch after an empty read, on that read alone, the listener
+  closed on what arrived in between — the rest of the batch, the wait and
+  the next reap, 70 to 230 ms on a loaded runner —, reset unread (#1385
+  after #1460, ADR 0196 amended 2026-11-15;
+  `TestConformance_drainClosesOnItsLastRead`).
   The listener closes when
   its last taker hands it back (`listenerSet`), before the established
   connections drain; a loop stops once its connections are gone and its
@@ -140,11 +150,18 @@ stream groups, `StartPacket` runs one io_uring lane of a datagram group a
   and its close is the kernel's: the server's grace empties the queue first,
   and a partial drain in an `SO_REUSEPORT` group is `tcp_migrate_req=1`'s.
 - **A batch costs the slots it touched, never the open ones.** Nothing at a
-  batch's end walks the LRU: the dirty list names the slots to flush, and the
-  compaction list (`ring.compact`, deduplicated by `fCompact`) the slots whose
-  spill's head was consumed. The compaction list is a slice, not a link in
-  `connCtl`: a slot released inside the batch is reset whole by `emptyConn`,
-  which would cut a linked list there. At a few hundred requests a second a
+  batch's end walks the LRU: the dirty list (`ring.dirty`, deduplicated by
+  `fDirty`) names the slots to flush, and the compaction list
+  (`ring.compact`, deduplicated by `fCompact`) the slots whose spill's head
+  was consumed. Both are slices, not links in `connCtl`: a slot released
+  inside the batch is reset whole by `emptyConn`, which cuts a linked list
+  there. The dirty list was one: epoll, kqueue and io_uring on process
+  descriptors release a slot as it fails, a peer's reset seen in the batch,
+  and every slot listed behind it kept `fDirty` unflushed — its answer never
+  left, its close never finished, and an h2c drain waited for its deadline
+  (#1385, `TestCore_releaseKeepsTheDirtyList`). A listed slot released, then
+  taken again, is settled as its new connection, which costs nothing when it
+  has nothing to send or close. At a few hundred requests a second a
   batch holds one or two requests, so a walk of ten thousand idle keep-alive
   connections per batch was paid per request.
   `TestCore_batchCostIndependentOfOpen` pins it, `BenchmarkCore_batch`
@@ -637,8 +654,12 @@ Unix listener): the loop held at
 its batch end, 384 connections queued with their request — more than one
 epoll burst and than io_uring's accepts in flight —, then the drain, every one
 reading its echo and a clean end, the listener refusing after; 1 280 queued
-past epoll's batch; and `TestConformance_drainOutOfDescriptors`, a child
-under RLIMIT 64 whose take waits for the drain's closes. The stop's cost
+past epoll's batch; `TestConformance_drainClosesOnItsLastRead`, a burst of
+connections dialled between every two batches of the drain until a dial is
+refused, every one served — the listener closes only on a read of its
+queue made as it is handed back; and
+`TestConformance_drainOutOfDescriptors`, a child under RLIMIT 64 whose take
+waits for the drain's closes. The stop's cost
 (`conformance_stop_linux_test.go`, ADR 0200): 20 000 idle connections, heard
 once, on three rings, drained and closed, every peer reading the end, then
 closed by reset (`resetClose`, as `TestConformance_idleNoWatchdog` and

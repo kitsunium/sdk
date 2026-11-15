@@ -148,8 +148,6 @@ type connCtl struct {
 	// lruPrev and lruNext link the ring's open connections, least recent first.
 	lruPrev int32
 	lruNext int32
-	// dirtyNext links the ring's dirty list.
-	dirtyNext int32
 	// zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
 	// send of it zero-copy, zcHold none for now — zcPend is at its bound —
 	// until its notifications came, the rest then sent plainly. zcPend counts
@@ -181,6 +179,6 @@ func emptyConn(gen uint32) connCtl {
 	return connCtl{
 		gen: gen, fd: -1, file: noFile, state: stFree, reason: rNone,
 		spill: chunkRef{idx: noChunk}, out: chunkRef{idx: noChunk}, flight: chunkRef{idx: noChunk},
-		lruPrev: noLink, lruNext: noLink, dirtyNext: noLink,
+		lruPrev: noLink, lruNext: noLink,
 	}
 }

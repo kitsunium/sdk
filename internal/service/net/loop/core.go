@@ -74,8 +74,12 @@ type ring struct {
 	// at the head.
 	lruHead int32
 	lruTail int32
-	// dirtyHead starts the list of slots to flush at the end of the batch.
-	dirtyHead int32
+	// dirty lists the slots to flush at the end of the batch, each once
+	// (fDirty). A slice, not a link in the slot, as compact is: a slot
+	// released inside the batch is reset whole, and a link cut the list
+	// there — every slot behind kept its fDirty, so no later markDirty listed
+	// it again, and its output never left nor its close finished (#1385).
+	dirty []int32
 	// compact lists the slots whose spill's head was consumed in the batch,
 	// compacted at its end. A slice, not a link in the slot: a slot released
 	// inside the batch is reset whole, and a link would cut the list there.
@@ -203,7 +207,7 @@ func newRing(lp *loop, i int, drv driver) *ring {
 	return &ring{
 		lp: lp, index: i, drv: drv,
 		wheel:   newWheel(0, lp.tick),
-		lruHead: noLink, lruTail: noLink, dirtyHead: noLink,
+		lruHead: noLink, lruTail: noLink,
 		pub: &ringStats{},
 	}
 }
@@ -508,27 +512,23 @@ func (r *ring) markDirty(slot int32) {
 		return
 	}
 	c.flags |= fDirty
-	c.dirtyNext = r.dirtyHead
-	r.dirtyHead = slot
+	r.dirty = append(r.dirty, slot)
 }
 
 // flushDirty sends every dirty slot's output and finishes the closes it
-// waited for. It runs once OnBatchEnd has returned.
+// waited for. It runs once OnBatchEnd has returned. A slot released in the
+// batch and still listed is settled as what it holds now: free, it has
+// nothing to settle; taken again, its new connection is, and a settle only
+// sends what was written and finishes a close or a peer's end, each of which
+// listed the slot already.
 func (r *ring) flushDirty() {
-	//: the list is taken whole; a flush that dirties a slot lists it again.
-	for s := r.dirtyHead; s != noLink; {
-		r.dirtyHead = noLink
-		//: walked from the snapshot.
-		for s != noLink {
-			c := &r.conns[s]
-			nxt := c.dirtyNext
-			c.flags &^= fDirty
-			c.dirtyNext = noLink
-			r.settle(s)
-			s = nxt
-		}
-		s = r.dirtyHead
+	//: by index: a settle that dirties a slot lists it again, behind.
+	for i := 0; i < len(r.dirty); i++ {
+		s := r.dirty[i]
+		r.conns[s].flags &^= fDirty
+		r.settle(s)
 	}
+	r.dirty = r.dirty[:0]
 }
 
 // settle flushes slot's output and finishes it when it was waiting to close
