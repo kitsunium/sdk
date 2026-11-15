@@ -23,17 +23,6 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
-// The in-process queues an engine keeps beside the kernel's while its handler
-// is held at a batch end: io_uring's single-shot accepts stay armed in the
-// kernel and complete into the ring (the loop's acceptDepth), and the portable
-// backend's acceptor keeps accepting into its lane's event channel
-// (portableEvents) and holds one more blocked on the send. epoll and the
-// goroutine engine accept on the thread the test holds, and keep none.
-const (
-	heldURingAccepts    int = 32
-	heldPortableAccepts int = portableEvents + 1
-)
-
 // listenQueueOf reads a listening TCP socket's queue with TCP_INFO: on a
 // listener the kernel answers its length (tcpi_unacked) and its maximum
 // (tcpi_sacked), the backlog listen(2) applied, the clamp to somaxconn
@@ -101,20 +90,21 @@ func (h *heldLoopH) OnBatchEnd(corenet.LoopIO) {
 
 func (h *heldLoopH) OnClose(corenet.LoopIO, corenet.LoopConnRef, error) {}
 
-// heldEngine is one engine under test: how to declare its group, how many
-// connections it takes off the kernel's queue while held, and how it is held
-// and released.
+// heldEngine is one engine under test: how to declare its group, and how it
+// is held and released.
 type heldEngine struct {
-	name  string
-	extra int
+	name string
 	// declare declares the group on srv and returns the hold, which blocks
 	// until the accept path is held once c0 connected, and the release.
 	declare func(t *testing.T, srv *Server) (hold func(t *testing.T, ln stdnet.Listener), release func())
 }
 
 // heldEngines are the goroutine engine, held in its admission — Admit runs on
-// the acceptor, under the Admission's mutex, which the test holds — and the
-// loop backends the platform has, held at their batch end.
+// the acceptor, under the Admission's mutex, which the test holds — and every
+// loop backend the platform has, held at their batch end: io_uring, whose
+// Backlog group runs DEFER_TASKRUN so an armed accept waits for the loop to
+// reap, epoll, and the portable backend, whose acceptor a Backlog group's
+// gate holds while no lane waits.
 func heldEngines() []heldEngine {
 	out := []heldEngine{{
 		name: "goroutine",
@@ -137,16 +127,9 @@ func heldEngines() []heldEngine {
 			return hold, release
 		},
 	}}
-	for _, b := range []corenet.LoopBackend{corenet.LoopBackendIOURing, corenet.LoopBackendEpoll} {
-		extra := 0
-		switch b {
-		case corenet.LoopBackendIOURing:
-			extra = heldURingAccepts
-		case corenet.LoopBackendPortable:
-			extra = heldPortableAccepts
-		}
+	for _, b := range []corenet.LoopBackend{corenet.LoopBackendIOURing, corenet.LoopBackendEpoll, corenet.LoopBackendPortable} {
 		out = append(out, heldEngine{
-			name: b.String(), extra: extra,
+			name: b.String(),
 			declare: func(t *testing.T, srv *Server) (func(*testing.T, stdnet.Listener), func()) {
 				h := &heldLoopH{gate: make(chan struct{}), held: make(chan struct{})}
 				srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Plaintext(), Backlog(1),
@@ -170,14 +153,13 @@ func heldEngines() []heldEngine {
 
 // TestBacklog_heldAcceptPathQueuesBacklogPlusOne pins #978's first criterion
 // at the group's level, on every engine: a Backlog(1) group whose accept path
-// is held completes at most two TCP connects beyond what the engine itself
-// took off the queue — Linux queues backlog + 1 established connections — and
-// drops the SYN of the rest, which the dialers' 200 ms bound then ends. State
-// reports Backlog 1 and the kernel's own maximum, read back with TCP_INFO from
-// the group's listener, is 1. On io_uring the ring's armed accepts and on the
-// portable backend the lane's event channel take connections off the queue
-// while the handler is held (heldURingAccepts, heldPortableAccepts): the
-// backlog bounds what waits past them.
+// is held completes at most two TCP connects — Linux queues backlog + 1
+// established connections — and drops the SYN of the rest, which the
+// dialers' 200 ms bound then ends: no engine takes a connection off the queue
+// while it is held. State reports Backlog 1 and the kernel's own maximum,
+// read back with TCP_INFO from the group's listener, is 1. io_uring holds it
+// through DEFER_TASKRUN, which the group's Backlog opts it into: where the
+// kernel lacks it, the row says so and the case is skipped.
 func TestBacklog_heldAcceptPathQueuesBacklogPlusOne(t *testing.T) {
 	for _, e := range heldEngines() {
 		t.Run(e.name, func(t *testing.T) {
@@ -192,6 +174,14 @@ func TestBacklog_heldAcceptPathQueuesBacklogPlusOne(t *testing.T) {
 			}
 			t.Cleanup(func() { swallowErr(srv.Close()) })
 			t.Cleanup(release)
+			if e.name == corenet.LoopBackendIOURing.String() {
+				if status := capabilityStatus(srv, corenet.CapabilityURingDeferTaskrun); status != "on" {
+					if status != "missing" {
+						t.Fatalf("uring-defer-taskrun is %q on a Backlog group, want on, or missing on a kernel without it", status)
+					}
+					t.Skip("this kernel has no DEFER_TASKRUN: the row says so, and armed accepts complete while the loop is held")
+				}
+			}
 			row := srv.State().Listeners[0]
 			if row.Backlog != 1 || row.Degraded {
 				t.Fatalf("row = %+v, want Backlog 1 and not degraded", row)
@@ -209,15 +199,46 @@ func TestBacklog_heldAcceptPathQueuesBacklogPlusOne(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = c0.Close() })
 			hold(t, lns[0])
-			dialers := e.extra + 5
+			const dialers = 8
 			got := connectsWithin(t, row.Address, dialers, 200*time.Millisecond)
+			queued, _ := listenQueueOf(t, lns[0])
+			conns := loopConns(srv)
 			release()
-			if got > e.extra+2 || got < 1 {
-				t.Fatalf("%d of %d connects completed with the accept path held, want 1 to %d (the engine's %d, then backlog + 1)",
-					got, dialers, e.extra+2, e.extra)
+			if got > 2 || got < 1 {
+				t.Fatalf("%d of %d connects completed with the accept path held, want 1 to 2 (backlog + 1): %d in the kernel's queue, %d connections the engine holds",
+					got, dialers, queued, conns)
 			}
 		})
 	}
+}
+
+// loopConns is how many connections srv's loop groups hold — on the portable
+// backend, those an acceptor handed a lane included, opened or not —, -1 for
+// a server with none.
+func loopConns(srv *Server) int64 {
+	st := srv.State()
+	if len(st.Loops) == 0 {
+		return -1
+	}
+	var n int64
+	for _, g := range st.Loops {
+		for _, r := range g.RingStates {
+			n += r.Conns
+		}
+	}
+	return n
+}
+
+// capabilityStatus is the status State reports for c on srv's one loop group.
+func capabilityStatus(srv *Server, c corenet.Capability) string {
+	for _, g := range srv.State().Loops {
+		for _, row := range g.Capabilities {
+			if row.Name == c {
+				return row.Status
+			}
+		}
+	}
+	return ""
 }
 
 // TestBacklog_defaultIsTheHostsSomaxconn pins Backlog(0) and the group
@@ -358,42 +379,86 @@ func (h *heldEchoH) OnBatchEnd(corenet.LoopIO) {
 	<-h.gate
 }
 
-// TestBacklog_drainThroughASmallQueue pins #978's drain criterion on the
-// native backends, whose drain takes the listen queue (ADR 0196 §D3): a group
+// TestBacklog_drainThroughASmallQueue pins #978's drain criterion on every
+// loop backend, whose drain takes the listen queue (ADR 0196 §D3): a group
 // of Backlog(8) whose loop is held while 384 peers dial, then drained with a
-// grace, serves every connection the kernel queued — each peer whose line the
-// handler read gets its echo, then the end, never a reset —, the group opens
-// and closes as many connections as peers it served, and Shutdown returns nil.
-//
-// A peer the kernel never queued is not the drain's to serve, and the test
-// tells it apart rather than counting it (#1353). Past eight requests in
-// SYN_RECV the kernel answers with SYN cookies, and a final ACK — or the
-// request behind it — that finds the accept queue full is dropped with no
-// request kept (tcp_abort_on_overflow off): the peer believes itself
-// connected and retransmits on its own RTO (1, 3, 7, 15 s), the
-// retransmissions of one cohort arrive together and overflow again, and one
-// that comes after the grace meets the closed listener and is reset. Such a
-// peer is lost only if the handler never read its line, nothing was echoed
-// to it, and its reset came once Shutdown had begun; any other failure is
-// the drain's. Under Bazel's parallel shards 38 of 385 were so (#1353), on
-// this VM with -race none to a few; the portable backend, whose acceptor is
-// not the handler's goroutine, meets the same kernel more often, and is
-// judged by TestBacklog_loopGroupServesThroughASmallQueue.
+// grace, serves every one of them — each peer gets its echo, then the end,
+// never a reset, the group opens and closes exactly as many connections, and
+// Shutdown returns nil. The peers the full queue refused while the loop was
+// held retry, and are served: as the drain begins the group's queue is
+// widened to the host's somaxconn (widenBacklogs), so a peer's next SYN, or
+// the final ACK and data a SYN cookie's peer sends again, is queued rather
+// than dropped once more. Before that a cohort of retries overflowed the
+// eight places whenever the loop was slow to take — under Bazel's parallel
+// shards 38 of 385 peers had every retry of the 8 s grace dropped and met the
+// closed listener (#1353) —; widened, nothing is lost under that load
+// (six drains at once on two CPUs, BENCH.md edition 2026-11-15).
 func TestBacklog_drainThroughASmallQueue(t *testing.T) {
-	for _, b := range []corenet.LoopBackend{corenet.LoopBackendIOURing, corenet.LoopBackendEpoll} {
+	for _, b := range []corenet.LoopBackend{corenet.LoopBackendIOURing, corenet.LoopBackendEpoll, corenet.LoopBackendPortable} {
 		t.Run(b.String(), func(t *testing.T) {
+			// Side by side: each case waits out the same retransmission
+			// timers, so three in a row would hold one Bazel shard 27 s.
+			t.Parallel()
 			served, lost := drainSmallQueue(t, b, drainBacklogGrace, drainBacklogStagger)
 			t.Logf("%d peers served, %d never queued by the kernel and refused or reset at the listener's close", served, lost)
+			if lost != 0 || served != drainBacklogPeers {
+				t.Fatalf("%d of %d peers served, %d lost: every peer the queue refused must be served", served, drainBacklogPeers, lost)
+			}
 		})
 	}
 }
 
-// TestBacklog_drainLossIsTheKernels reproduces #1353's loss on purpose: the
+// TestBacklog_drainWidensTheQueue pins widenBacklogs: once Shutdown begins,
+// the listen queue of a Backlog(1) group's listener is the host's somaxconn
+// for the grace, read back with TCP_INFO from the kernel, on the goroutine
+// engine and a loop's; State still reports the depth the group asked for.
+func TestBacklog_drainWidensTheQueue(t *testing.T) {
+	want := min(hostSomaxconn(), maxListenerBacklog)
+	if want <= 1 {
+		t.Fatalf("somaxconn unreadable on Linux: %d", want)
+	}
+	for _, loop := range []bool{false, true} {
+		t.Run("loop="+strconv.FormatBool(loop), func(t *testing.T) {
+			srv := New(WithDrainGrace(2 * time.Second))
+			if loop {
+				srv.Group("g", Listen("tcp", "127.0.0.1:0"), Plaintext(), Backlog(1),
+					Loop(corenet.LoopValue{Backend: corenet.LoopBackendEpoll, Loops: 1})).
+					HandleLoop(&heldLoopH{gate: make(chan struct{}), held: make(chan struct{})})
+			} else {
+				srv.Group("g", Listen("tcp", "127.0.0.1:0"), Plaintext(), Shards(1), Backlog(1)).
+					Handle(corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error { return nil }))
+			}
+			if err := srv.Start(t.Context()); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			t.Cleanup(func() { swallowErr(srv.Close()) })
+			ln := boundListeners(srv)[0]
+			if _, depth := listenQueueOf(t, ln); depth != 1 {
+				t.Fatalf("the kernel's backlog before the drain is %d, want 1", depth)
+			}
+			done := make(chan error, 1)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				done <- srv.Shutdown(ctx)
+			}()
+			waitFor(t, func() bool { _, depth := listenQueueOf(t, ln); return int(depth) == want })
+			if row := srv.State().Listeners[0]; row.Backlog != 1 {
+				t.Fatalf("State reports Backlog %d during the drain, want the group's 1", row.Backlog)
+			}
+			if err := <-done; err != nil {
+				t.Fatalf("Shutdown: %v", err)
+			}
+		})
+	}
+}
+
+// TestBacklog_drainLossIsTheKernels is the drain's limit, on purpose: the
 // same drain with one cohort of peers and a grace of 300 ms, shorter than a
-// dropped final ACK's first retransmission. Peers are lost — every one of
-// them a connection the kernel never queued, refused or reset once the
-// listener closed, its line never read —, and the drain still served every
-// connection it opened.
+// refused SYN's first retransmission (1 s). A peer whose retry comes once the
+// listener closed is lost — refused or reset, its line never read: the
+// kernel kept nothing of it, and no queue, widened or not, can hold what is
+// not sent yet —, and the drain still serves every connection it opened.
 func TestBacklog_drainLossIsTheKernels(t *testing.T) {
 	served, lost := drainSmallQueue(t, corenet.LoopBackendEpoll, 300*time.Millisecond, 0)
 	t.Logf("%d peers served, %d never queued by the kernel", served, lost)

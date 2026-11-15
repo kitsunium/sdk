@@ -155,6 +155,50 @@ func TestProtocols_ALPN(t *testing.T) {
 	}
 }
 
+// TestProtocols_h2AloneRefusesAtTheHandshake pins #964's refusal on net/http's
+// engine: an HTTP group serving h2 alone over TLS fails the handshake of a
+// client offering http/1.1 alone with no_application_protocol (RFC 7301
+// §3.2) — crypto/tls lets such a client through with no protocol (Go issue
+// 46310) — and of one offering only protocols the group does not serve; a
+// client offering h2 negotiates it, and one offering no ALPN completes the
+// handshake with no protocol, as RFC 7301 leaves it. A group serving both
+// keeps crypto/tls's own negotiation: http/1.1 alone is served HTTP/1.1.
+func TestProtocols_h2AloneRefusesAtTheHandshake(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		opts    []server.GroupOption
+		offer   []string
+		want    string
+		refused bool
+	}
+	h2Alone := []server.GroupOption{server.Protocols("h2")}
+	tests := []tc{
+		{name: "h2 alone, http/1.1 offered", opts: h2Alone, offer: []string{"http/1.1"}, refused: true},
+		{name: "h2 alone, nothing it serves offered", opts: h2Alone, offer: []string{"spdy/3", "http/1.0"}, refused: true},
+		{name: "h2 alone, h2 offered", opts: h2Alone, offer: []string{"http/1.1", "h2"}, want: "h2"},
+		{name: "h2 alone, no ALPN", opts: h2Alone},
+		{name: "both, http/1.1 offered", offer: []string{"http/1.1"}, want: "http/1.1"},
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			id, pool := alpnIdentity(t)
+			addr := startTLSHTTP(t, id, protoEcho, c.opts...)
+			got, err := negotiate(t, addr, pool, c.offer...)
+			if c.refused {
+				if err == nil || !strings.Contains(err.Error(), "no application protocol") {
+					t.Fatalf("offered %q: negotiated %q, %v, want no_application_protocol", c.offer, got, err)
+				}
+				return
+			}
+			if err != nil || got != c.want {
+				t.Fatalf("offered %q: negotiated %q, %v, want %q", c.offer, got, err, c.want)
+			}
+		})
+	}
+}
+
 // TestProtocols_refused pins every combination Start refuses with
 // ProtocolsRefused, the reason named, before anything is bound; and a loop
 // group, which refuses the option itself.

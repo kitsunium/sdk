@@ -153,7 +153,7 @@ func (a *httpAdapter) ServeConn(ctx context.Context, c corenet.Conn) error {
 // MaxConns the flag set here is what makes admit hand the connection's slot to
 // the socket, which returns it when it closes (see trackedConn).
 func markHijacked(c corenet.Conn) {
-	pooled, ok := c.(*conn)
+	pooled, ok := pooledOf(c)
 	//: a handler that received something other than the pooled wrapper — a
 	//: middleware's own type — has nothing here to mark, and nothing here would
 	//: have closed it either.
@@ -365,7 +365,7 @@ func (a *httpAdapter) currentBridge() *chanListener {
 // listener — because it type-asserts on it to populate Request.TLS. Handing it
 // our pooled wrapper would make every HTTPS request look like plaintext.
 func rawSocket(c corenet.Conn) stdnet.Conn {
-	pooled, ok := c.(*conn)
+	pooled, ok := pooledOf(c)
 	//: a non-pooled implementation is already the socket itself.
 	if !ok || pooled.Conn == nil {
 		//: a non-pooled implementation is already the socket itself.
