@@ -45,6 +45,26 @@ func TestASpanReachesTheCollector(t *testing.T) {
 	}
 }
 
+// A span queued after a drive read the batch sink's echo — the sink re-armed
+// after an empty turn, the order OpenBSD's slower hand-over gave the app's
+// harness — is sent all the same: the next drive moves the clock to the
+// echo it held back, the one wait the span stands on. The first drive ends
+// only once it holds that echo, so the order is forced on every platform.
+func TestASpanQueuedOnTheSinksEchoIsSent(t *testing.T) {
+	clk := newTestClock()
+	col := newCollector(t, clk)
+	fx := openExport(t, config(clk, col.URL, ""))
+	fx.span(t, "first")
+	clk.drive(t, "the first span sent, the sink's echo held", func() bool {
+		return fx.stats(plug.OTLPTraces).Sent == 1 && clk.holding()
+	})
+	fx.span(t, "second")
+	clk.drive(t, "the second span sent", func() bool { return fx.stats(plug.OTLPTraces).Sent == 2 })
+	if posts := col.postsTo(tracesPath); len(posts) != 2 || !holds(posts[1:], "second") {
+		t.Errorf("the collector received %d trace requests, want the second span in the second", len(posts))
+	}
+}
+
 // A collector that is down is asked again on the backoff, the same batch,
 // until it is back: the batch is sent once it answers, after two retries,
 // each at least the backoff's first wait after the one before.

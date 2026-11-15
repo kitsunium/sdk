@@ -19,11 +19,10 @@ import (
 
 // The numbers every case shares. An attempt — and with it the batch sink's
 // hand-over of a batch to its queue —, a lease and a settle are bounded far
-// beyond anything a case advances, so none ends inside one, however far the
-// batch sink's recurring delay moves the clock while a loaded machine is
-// still queueing a batch; the driver advances the clock past every wait from
-// floor to ceiling — the backoff, a Retry-After and the batch sink's delay
-// among them —, and never past an attempt's bound, a lease's or a settle's.
+// beyond anything a case advances, so none ends inside one; the driver
+// advances the clock past every wait from floor to ceiling — the backoff, a
+// Retry-After and the batch sink's delay among them —, and never past an
+// attempt's bound, a lease's or a settle's.
 // A consumer's idle poll, below floor, is never advanced: a batch queued in
 // the process wakes its consumer at once.
 const (
@@ -46,18 +45,32 @@ var epoch = time.Date(2026, time.October, 22, 9, 0, 0, 0, time.UTC)
 // After —, so the driver advances it exactly when something waits.
 type testClock struct {
 	*clock.ManualClock
-	armed chan time.Duration
+	armed chan armedWait
+	// mu guards held.
+	mu sync.Mutex
+	// held maps each timer whose last arming a drive took for an echo, and
+	// did not advance, to the instant that arming fires; a timer leaves it
+	// when it is armed again or stopped.
+	held map[*reportedTimer]time.Time
+}
+
+// armedWait is one wait armed on a testClock: the timer that armed it — nil
+// for an After —, its duration, and the instant it fires.
+type armedWait struct {
+	timer *reportedTimer
+	d     time.Duration
+	at    time.Time
 }
 
 // newTestClock is a testClock at epoch.
 func newTestClock() *testClock {
-	return &testClock{ManualClock: clock.NewManualClock(epoch), armed: make(chan time.Duration, 1<<16)}
+	return &testClock{ManualClock: clock.NewManualClock(epoch), armed: make(chan armedWait, 1<<16), held: map[*reportedTimer]time.Time{}}
 }
 
-// report says a wait of d was armed.
-func (c *testClock) report(d time.Duration) {
+// report says timer — nil for an After — armed a wait of d.
+func (c *testClock) report(timer *reportedTimer, d time.Duration) {
 	select {
-	case c.armed <- d:
+	case c.armed <- armedWait{timer: timer, d: d, at: c.Now().Add(d)}:
 	default:
 	}
 }
@@ -65,7 +78,7 @@ func (c *testClock) report(d time.Duration) {
 // NewTimer arms a timer and reports it; its Reset reports too.
 func (c *testClock) NewTimer(d time.Duration) plug.Timer {
 	timer := &reportedTimer{Timer: c.ManualClock.NewTimer(d), c: c}
-	c.report(d)
+	c.report(timer, d)
 	return timer
 }
 
@@ -75,7 +88,7 @@ func (c *testClock) NewTicker(d time.Duration) plug.Ticker { return c.ManualCloc
 // After arms a wait and reports it.
 func (c *testClock) After(d time.Duration) <-chan time.Time {
 	ch := c.ManualClock.After(d)
-	c.report(d)
+	c.report(nil, d)
 	return ch
 }
 
@@ -88,28 +101,89 @@ type reportedTimer struct {
 // Reset re-arms the timer and reports it.
 func (t *reportedTimer) Reset(d time.Duration) bool {
 	active := t.Timer.Reset(d)
-	t.c.report(d)
+	t.c.report(t, d)
 	return active
+}
+
+// Stop disarms the timer: no drive advances a wait of it any more.
+func (t *reportedTimer) Stop() bool {
+	t.c.mu.Lock()
+	delete(t.c.held, t)
+	t.c.mu.Unlock()
+	return t.Timer.Stop()
 }
 
 // drive advances the clock past each wait from floor to ceiling as it is
 // armed, until done holds; it fails the test once waitBudget passed on the
 // wall clock. It never sleeps: between two waits it yields.
+//
+// A timer re-armed with no other wait armed since its last arming is not
+// advanced again: the batch sink re-arms its delay each time it fires, so
+// advancing that echo fired it again, at once, and drive moved the clock a
+// delay per turn of its loop — minutes of the clock while one request was on
+// the wire — past the forwarder's RecountInterval, whose recount at the
+// stop raced the batch's hand-back (issue #1371). The clock moves when the
+// work arms a wait — a send's bound, a backoff, a delivery's lease — and
+// never for a loop alone.
+//
+// An echo is held, not forgotten: a drive starts by moving the clock to the
+// latest instant a held echo still fires at. The sink's echo is reported
+// once, when it is armed; a drive that read it as an echo before it ended
+// left the sink waiting on it, and a span the case queued next sat there
+// with no wait reported to move the clock — the app's harness showed it on
+// OpenBSD (TestAnOTLPSwitchToTheDatabaseWarnsThenMigrates). A case queues
+// its work before it drives, so that work stands on the held echo; moved
+// once a drive, the clock moves a delay per drive, never per turn.
 func (c *testClock) drive(t *testing.T, what string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(waitBudget)
+	c.advanceHeld()
+	var last *reportedTimer
 	for !done() {
 		if time.Now().After(deadline) {
-			t.Fatalf("%s: not reached within %v", what, waitBudget)
+			t.Fatalf("%s: not reached within %v (the clock at %s)", what, waitBudget, c.Now().Format(time.TimeOnly))
 		}
 		select {
-		case d := <-c.armed:
-			if d >= floor && d < ceiling {
-				c.Advance(d)
+		case w := <-c.armed:
+			echo := w.timer != nil && w.timer == last
+			last = w.timer
+			advances := w.d >= floor && w.d < ceiling
+			c.mu.Lock()
+			delete(c.held, w.timer)
+			if echo && advances {
+				c.held[w.timer] = w.at
+			}
+			c.mu.Unlock()
+			if !echo && advances {
+				c.Advance(w.d)
 			}
 		default:
 			runtime.Gosched()
 		}
+	}
+}
+
+// holding reports whether a drive holds an echo it did not advance.
+func (c *testClock) holding() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.held) > 0
+}
+
+// advanceHeld moves the clock to the latest instant an echo held by a past
+// drive still fires at, and forgets every held echo.
+func (c *testClock) advanceHeld() {
+	c.mu.Lock()
+	var latest time.Time
+	for _, at := range c.held {
+		if at.After(latest) {
+			latest = at
+		}
+	}
+	clear(c.held)
+	c.mu.Unlock()
+	if now := c.Now(); latest.After(now) {
+		c.Advance(latest.Sub(now))
 	}
 }
 
