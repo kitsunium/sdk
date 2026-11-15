@@ -17,7 +17,7 @@ generic). Code range `0.1.8.*`. Not published in `pkg/v1` (ADR 0159 §4).
 |---|---|
 | `record.go` | the record framing (`appendRecord`, `parseRecord`, `sealedBody`), the checkpoint payload, `DefaultSegmentBytes` |
 | `log.go` | `Log`, `Open`, `Append`, `Sync` (the two-step batch), `Read`, `Range`, `Kind`, `DropBefore`, `Bounds`, `Close` |
-| `rewrite.go` | `Rewrite` (#824, ADR 0230's amendment): a segment holding a record the caller's edit changed parsed, re-encoded with the same indexes, batches and end flags, written to its `.tmp`, synced, renamed over the old file (closed first, for Windows), the directory synced; the slots moved |
+| `rewrite.go` | `Rewrite` (#824, ADR 0230's amendment): a segment holding a record the caller's edit changed parsed, re-encoded with the same indexes, batches and end flags, written to its `.tmp`, synced, renamed over the old file (closed first, for Windows), the directory synced; the slots moved; the segment being written grows when an edit lengthened its records, so the seal of its next rotation still fits |
 | `recover.go` | the recovery: scan in chunks, batch sequence, unknown layouts, `classifyTail`, replay, sync at open, tail positioning |
 | `segment.go` | segment publication (zero-filled `.tmp`, checkpoint, sync, rename, directory sync), the background preparation, rotation, prefix drop |
 | `errors.go` | `failed` / `damaged` / `outside`, the fields every error carries |
@@ -25,7 +25,7 @@ generic). Code range `0.1.8.*`. Not published in `pkg/v1` (ADR 0159 §4).
 | `gen_codes.go` | the eight codes and sentinels, written by kit gen from `design/kernel/fs.yaml` |
 | `tail_internal_test.go` | `TestATailIsTornOrDamaged`: the consensus tail cases ported (see below), plus the seal-without-its-next-segment, end-record and sealed-scan tests |
 | `fuzz_internal_test.go` | `FuzzOpenTail`, `FuzzScanSegment` (ported), `FuzzParseRecord` |
-| `rewrite_external_test.go` | a rewrite read back changed and every other record unchanged, before and after a reopen, a sealed segment shrunk, the last one still appended to; an edit that changes nothing writes nothing and is never offered a dropped record; a pending batch synced first |
+| `rewrite_external_test.go` | a rewrite read back changed and every other record unchanged, before and after a reopen, a sealed segment shrunk, the last one still appended to; an edit that changes nothing writes nothing and is never offered a dropped record; a pending batch synced first; a last segment an edit grew still sealed at its rotation and reopened |
 | `seglog_bench_test.go` | `AppendSync` for 1, 16 and 256 records, `Range` — `BENCH.md` |
 
 ## The format
@@ -73,7 +73,9 @@ batch, garbage after a complete batch and a length near 2^31 (all repaired);
 a hole before a later batch, damage inside a batch whose end record is
 valid, a newer layout's record behind a hole and a hole in an earlier
 segment (all refused, unchanged). `FuzzOpenTail` seeds itself with the same
-shapes and holds every input to one of the two verdicts.
+shapes and holds every input to one of the two verdicts. The three fuzz
+targets run beyond their seeds in the nightly consensus fuzz lane
+(`scripts/ci/consensus-fuzz.sh`), eight minutes each.
 
 ## Do NOT
 

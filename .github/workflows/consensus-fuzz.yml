@@ -33,8 +33,9 @@ jobs:
     if: github.repository == 'kitsunium/sdk'
     runs-on: ubuntu-latest
     # Seven decoder targets at 8 minutes each and FuzzStep at 10 (#924),
-    # plus the build and the corpus.
-    timeout-minutes: 90
+    # the three of kernel/fs/seglog, the segmented log extracted from the
+    # consensus log (#820), at 8 each, plus the build and the corpus.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
