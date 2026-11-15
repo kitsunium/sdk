@@ -26,6 +26,6 @@ func bytesFromReflectValue(view reflectView) []byte {
 		//: extract the byte from the addressable index.
 		buf[i] = byte(rv.Index(i).Uint())
 	}
-	//: caller owns the freshly-allocated slice.
+	//: the caller owns the freshly-allocated slice.
 	return buf
 }
