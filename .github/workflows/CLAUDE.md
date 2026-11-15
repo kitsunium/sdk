@@ -243,8 +243,8 @@ bytes into a sized `dst`, a nil `dst`'s B/op at most 1.5 × the plaintext — 36
 allocations, four fewer than the base's — a `delta` rule) and `tstream` (#892,
 `third-party/transform`: each stream row against its block row, both the
 head's, at 4 MiB — eight `ratio` rules at 1.10 — and two floor rows,
-`BenchmarkStreamFloor`, the proof that no single-goroutine stream verifying
-s2's checksums holds the bound on a family when they fail too; a CPU profile of
+`BenchmarkStreamFloor`, a measured base of this implementation's copy and
+CRC-32C on a family, not a proof about every stream, when they fail too; a CPU profile of
 the s2 stream's decompression as its `step0`), `cturn` (#912,
 `internal/service/app/consensus`: the leader's loop turn at 1 000 proposals/s,
 three and five nodes over loopback mTLS, one paced run of 5 s an op, its p99
