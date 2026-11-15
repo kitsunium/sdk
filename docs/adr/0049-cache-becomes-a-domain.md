@@ -1,6 +1,6 @@
 # ADR 0049 — `cache` becomes a domain, and gains the kernel primitive it needed to
 
-- **Status**: Accepted — amended 2026-11-02 (the L6 wave: `Expirer`, `BulkFetcher` / `BulkSetter`, `Refresher` and `Absent`, stripes, bytes and policy, and `Leaser` — a lease across processes); amended 2026-11-13 (#1059: one lock on a hit, the kernel's `UnlockedMap` under the stripe's mutex, and a record that keeps no copy of the primitive's deadline or weight)
+- **Status**: Accepted — amended 2026-11-02 (the L6 wave: `Expirer`, `BulkFetcher` / `BulkSetter`, `Refresher` and `Absent`, stripes, bytes and policy, and `Leaser` — a lease across processes); amended 2026-11-13 (#1059: one lock on a hit, the kernel's `UnlockedMap` under the stripe's mutex, and a record that keeps no copy of the primitive's deadline or weight); amended 2026-11-15 (#840: `FetchMany` answers by position, in slices the caller hands it, a repeated key read once without a map)
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — the distributed backend this ADR defers to `third-party/`: a Valkey store implementing the four ports (`third-party/db/redis/cache`), the far tier of a chain, its cross-replica fill lease unfenced and said so; [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) §8 — `singleflight`'s shared context, the same one, keeps the root `context.WithoutCancel(leaderCtx)` built in the call record, one allocation fewer (#813)
@@ -444,3 +444,34 @@ stack. Three decisions follow, none of which changes what a caller observes.
 The verdict on the bound is the interleaved A/B of `bench-ab.yml` on the
 runner, the upper end of the 95 % interval against 1.10; the figures go to
 `internal/service/data/cache/BENCH.md`.
+
+## Amendment — 2026-11-15: a batch answers by position ([#840](https://github.com/kitsunium/sdk/issues/840))
+
+The owner kept #840's bound — `FetchMany` of 16 keys at most 40 % of
+`Fetch_Hit` a key on the memory store — rather than the price the amendment
+of 2026-11-02 stated. Measured before any change (`internal/service/data/cache/BENCH.md`
+§#840, step 0 at both commits): the batch paid one lock per stripe but
+everything else once a key — the primitive's `Fetch` and its clock read, and a
+result map whose allocation, two more hashes a key and collection cost, alone,
+more than the bound. Three decisions follow.
+
+- **`BulkFetcher.FetchMany` answers by position** — a published shape changed
+  while v0, as ADR 0040 allows, said here and in the package's guide:
+  `FetchMany(ctx, keys, values, found) ([]V, []bool, error)` appends one
+  answer a key, in order, to slices the caller hands it, grown only when their
+  capacity is short. It is Go's `append` contract, so a caller reusing its
+  last batch's slices allocates nothing, and no slice can be too short to be
+  refused. The method changes rather than gaining a sibling beside the map's:
+  the bound names `FetchMany`, the map is the cost, and no store outside this
+  package's two implemented it — a remote tier's MGET answers by position
+  too. On an error nothing is appended.
+- **A repeated key is still read once**, without a map: the kernel's batched
+  read (ADR 0025, amended the same day) marks an entry with the number of the
+  batch that read it, and every position naming the key is answered.
+- **The chain** keeps one `FetchEntry` pass per tier over the positions still
+  missing, asks a repeated key once, and promotes a tier's hits as one batch
+  under #460's guard — a write that overtakes the batch skips it whole.
+
+The verdict on the bound is the interleaved A/B of `bench-ab.yml` on the
+runner — `840-fetchmany16-per-key`, and `840-fetchmany16-1m` in its scale
+mode —, the high end of the interval against 6.4.

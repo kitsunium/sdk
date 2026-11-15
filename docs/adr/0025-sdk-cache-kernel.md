@@ -1,6 +1,6 @@
 # ADR 0025 — Generic LRU+TTL cache as a kernel primitive (`cache`)
 
-- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node; #1059: `UnlockedMap.Deadline`); amended 2026-11-15 (#834: S3-FIFO's shares, and W-TinyLFU as a third policy)
+- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node; #1059: `UnlockedMap.Deadline`); amended 2026-11-15 (#834: S3-FIFO's shares, and W-TinyLFU as a third policy); amended 2026-11-15 (#840: `UnlockedMap.FetchMany`, a batched read — one clock read, a read-once mark in a bit of the node's hit counter)
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0010 (recycler), ADR 0011 (snapshot), ADR 0006 (ring) — the kernel-primitive precedents; ADR 0024 (Phase-B wave)
@@ -203,3 +203,27 @@ library alone — stand.
   The sketch's layout, the node's and the hit's cost are in the package's
   `NOTES.md`; the hit's cost is the A/B lane's to judge (`834-fetch-hit-s3fifo`,
   `834-fetch-hit-tinylfu`).
+
+## Amendment — 2026-11-15: a batched read on the core without its lock ([#840](https://github.com/kitsunium/sdk/issues/840))
+
+The cache domain's `FetchMany` (ADR 0049, amended the same day) needed what
+`UnlockedMap.Fetch` called once a key does not give: one clock read for a
+batch, and a read-once rule for a key the batch names twice, without a map.
+`UnlockedMap.FetchMany(keys, refs) []*V` appends one reference a key — the
+entry's own value, nil for a miss — read as `Fetch` reads it, except that the
+clock is read once a batch, at the first entry that carries a deadline; that a
+chunk of sixteen lookups is issued before any entry is read, so their cache
+misses overlap; and that a later position naming an entry the batch already
+found gets the same reference without a relink or a count. A hit is recorded
+as `Fetch` records it, under every policy: LRU's relink, S3-FIFO's counter,
+and W-TinyLFU's sketch with its move — the window's front, or out of probation
+into protected, whose oldest go back while it holds more than its share. The
+read-once mark is the top bit of the node's hit counter, which S3-FIFO's two
+bits leave free: the node, filled to its 64 bytes by W-TinyLFU's period and
+hash, has no byte left for a field of its own. The batch keeps the entries it
+marked and clears every mark before it returns, so no mark is ever seen
+outside a `FetchMany`. A reference is valid until the next call
+into the map, read under the caller's lock and never written through; `refs`
+grows only when its capacity is short. `Cache`, `Striped` and every other path
+are unchanged, and `pkg/v1/data/cache`, which does not alias `UnlockedMap`,
+exports nothing new.

@@ -83,6 +83,15 @@ constants:
         value: "3"
     name: maxFreq
   - doc: |-
+      readMark is the bit of an entry's freq FetchMany marks a hit it recorded
+      with, under every policy, for the length of one batch: far above maxFreq,
+      and cleared before the batch returns (#840).
+    items:
+      - name: readMark
+        type: uint8
+        value: 1 << 7
+    name: readMark
+  - doc: |-
       smallShare is the small queue's share of the capacity, written as the
       divisor it is used as: a fiftieth. The paper's tenth admitted into main
       keys that came back once by chance; measured over 100 million accesses
@@ -198,6 +207,14 @@ constants:
         type: uint64
         value: "2"
     name: windowShare
+  - doc: |-
+      lookupChunk is how many lookups FetchMany issues before it reads an entry
+      (#840): sixteen independent map accesses, a stack array of pointers.
+    items:
+      - name: lookupChunk
+        type: int
+        value: "16"
+    name: lookupChunk
 files:
   - decls:
       - cacheLine
@@ -266,6 +283,7 @@ files:
     name: policy.go
   - decls:
       - maxFreq
+      - readMark
       - smallShare
       - ghostShare
       - (*UnlockedMap).admitS3FIFO
@@ -336,11 +354,17 @@ files:
       - olderThan
     name: tinylfu.go
   - decls:
+      - lookupChunk
       - UnlockedMap
+      - batchRead
       - tinyLFUShares
       - NewUnlockedMap
       - (*UnlockedMap).init
       - (*UnlockedMap).Fetch
+      - (*UnlockedMap).FetchMany
+      - (*UnlockedMap).readChunk
+      - (*UnlockedMap).reapInBatch
+      - (*UnlockedMap).clearMarks
       - (*UnlockedMap).missed
       - (*UnlockedMap).Deadline
       - (*UnlockedMap).Set
@@ -423,6 +447,7 @@ imports:
   iter: iter
   maphash: hash/maphash
   math: math
+  slices: slices
   sync: sync
   time: time
 package:
@@ -633,7 +658,9 @@ types:
         type: int32
       - doc: |-
           freq counts the hits since admission or the last demotion, capped at
-          maxFreq (S3-FIFO only).
+          maxFreq (S3-FIFO only). Its top bit, readMark, is FetchMany's: set on an
+          entry the batch in progress recorded a hit of, and cleared before the
+          batch returns (#840) — the node has no byte left for a mark of its own.
         name: freq
         type: uint8
       - doc: queue says which list the entry sits in (LRU uses main alone).
@@ -1011,6 +1038,12 @@ types:
         type: uint64
       - name: evictions
         type: uint64
+      - doc: |-
+          marked holds the entries the FetchMany in progress set readMark on, so
+          the batch clears exactly those before it returns (#840); kept between
+          calls, emptied, so a batch reuses its room.
+        name: marked
+        type: "[]*entry[K, V]"
     kind: struct
     methods:
       - doc: admit places a new entry by the policy. Caller holds the lock.
@@ -1211,6 +1244,32 @@ types:
         params: key K
         recv: c *UnlockedMap[K, V]
         results: value V, ok bool
+      - name: FetchMany
+        params: keys []K, refs []*V
+        recv: c *UnlockedMap[K, V]
+        results: "[]*V"
+      - doc: |-
+          readChunk reads one chunk of a batch into out, a reference a key: every
+          lookup first, then every entry, with nothing called on a hit's path. Caller
+          holds the lock.
+        name: readChunk
+        params: batch *batchRead[K, V], chunk []K, out []*V
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          reapInBatch reaps ent, an entry a batch found past its deadline, as Fetch
+          reaps one, and looks the chunk's later keys up again: one of them may name
+          the entry just reaped, looked up before it went. A nil ent — a key the map
+          does not hold — reaps nothing. Caller holds the lock.
+        name: reapInBatch
+        params: batch *batchRead[K, V], ent *entry[K, V], later []K, laterEnts []*entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          clearMarks clears readMark on every entry the batch set it on, so no
+          entry outside a FetchMany carries it — S3-FIFO's counter reads freq whole —
+          and forgets them, so the map holds no entry through its scratch. Caller
+          holds the lock.
+        name: clearMarks
+        recv: c *UnlockedMap[K, V]
       - doc: |-
           missed counts a miss of Fetch, reaping ent — the entry the key named, its
           deadline passed — when there is one, and runs OnEvict for it once the map
@@ -1378,6 +1437,26 @@ types:
         params: ent *entry[K, V]
         recv: c *UnlockedMap[K, V]
     name: UnlockedMap
+    typeParams: K comparable, V any
+  - doc: |-
+      batchRead is one FetchMany in progress (#840): the instant all of its
+      deadlines are judged at, what it counted and what it reaped.
+    fields:
+      - doc: pending holds what the batch reaped, for OnEvict once it is done.
+        name: pending
+        type: "[]evictionValue[K, V]"
+      - doc: |-
+          now is the batch's one reading of the clock, since the epoch; read only
+          when an entry carries a deadline.
+        name: now
+        type: int64
+      - doc: recorded counts the hits the batch recorded, missed its misses.
+        name: recorded
+        type: uint64
+      - name: missed
+        type: uint64
+    kind: struct
+    name: batchRead
     typeParams: K comparable, V any
   - doc: |-
       tinyLFUShares are W-TinyLFU's segment bounds, derived once from the

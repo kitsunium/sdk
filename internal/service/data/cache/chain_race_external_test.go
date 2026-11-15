@@ -148,7 +148,7 @@ func heldInTier(t *testing.T, tier *gatedTier, key string) (string, bool) {
 // before the promotion starts must not be overwritten by v1 in a nearer tier
 // — on a chain of two tiers and of three, for a Delete, a Set, and an
 // InvalidateTag, through Fetch, through Load and through FetchMany's batched
-// promotion.
+// promotion of two far hits (#840), which the write skips whole.
 func TestAPromotionNeverUndoesAWriteThatRanDuringItsFarRead(t *testing.T) {
 	t.Parallel()
 	forEachPolicy(t, testAPromotionNeverUndoesAWriteThatRanDuringItsFarRead)
@@ -176,9 +176,11 @@ func testAPromotionNeverUndoesAWriteThatRanDuringItsFarRead(t *testing.T) {
 				return forever("filled"), nil
 			})
 		},
-		//: a batched promotion (#840) takes the same guard as a single one.
+		//: a batched promotion (#840) takes the same guard as a single one:
+		//: two far hits, "k" paused inside its read and "j" read after the
+		//: write, promoted together or not at all.
 		"fetchmany": func(c corecache.Store[string]) {
-			_, _ = c.(corecache.BulkFetcher[string]).FetchMany(ctx, []string{"k"})
+			_, _, _ = c.(corecache.BulkFetcher[string]).FetchMany(ctx, []string{"k", "j"}, nil, nil)
 		},
 	}
 	for _, tiers := range []int{2, 3} {
@@ -189,6 +191,9 @@ func testAPromotionNeverUndoesAWriteThatRanDuringItsFarRead(t *testing.T) {
 					chain, gated := raceChain(t, tiers)
 					far := gated[tiers-1]
 					if err := far.Set(ctx, "k", forever("v1", "t")); err != nil {
+						t.Fatal(err)
+					}
+					if err := far.Set(ctx, "j", forever("w1")); err != nil {
 						t.Fatal(err)
 					}
 					paused := far.armFetch()
@@ -202,6 +207,11 @@ func testAPromotionNeverUndoesAWriteThatRanDuringItsFarRead(t *testing.T) {
 					for i, tier := range gated[:tiers-1] {
 						if v, ok := heldInTier(t, tier, "k"); ok && v != w.want {
 							t.Fatalf("tier %d holds %q after the write returned; want %q", i, v, w.want)
+						}
+						//: a batch is promoted whole or not at all: "j", read
+						//: after the write, is no fresher than the batch.
+						if v, ok := heldInTier(t, tier, "j"); ok && readName == "fetchmany" {
+							t.Fatalf("tier %d holds j = %q from a batch a write overtook", i, v)
 						}
 					}
 					v, ok, err := chain.Fetch(ctx, "k")

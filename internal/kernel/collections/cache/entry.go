@@ -39,7 +39,9 @@ type entry[K comparable, V any] struct {
 	// or 1 without one.
 	weight int32
 	// freq counts the hits since admission or the last demotion, capped at
-	// maxFreq (S3-FIFO only).
+	// maxFreq (S3-FIFO only). Its top bit, readMark, is FetchMany's: set on an
+	// entry the batch in progress recorded a hit of, and cleared before the
+	// batch returns (#840) — the node has no byte left for a mark of its own.
 	freq uint8
 	// queue says which list the entry sits in (LRU uses main alone).
 	queue queueID

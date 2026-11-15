@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-13T12:00:00Z -->
+<!-- updated: 2026-11-15T12:00:00Z -->
 # internal/service/data/cache/
 
 ## Purpose
@@ -26,9 +26,9 @@ allocated. This package declares no code.
 | `chain_config.go` | `ChainConfig` — the `OnPromoteError` hook and why it should be wired; the `Clock` and `LeasePoll` `LoadLeased` waits on (#830) |
 | `lease.go` | `LoadLeased` on both stores — the cross-process lease from a `lock.Locker`, the waiting loop, `CACHE_LEASE_FAILED` (#830) |
 | `memory.go` | `NewMemory` / `NewWeighedMemory` + `memoryStore[V]` and its `memoryStripe[V]`s — the store, its lock discipline, `Expire`, and `Load` with negative entries |
-| `memory_bulk.go` | `FetchMany` / `SetMany` on the memory store — one lock per stripe per batch (#840) |
+| `memory_bulk.go` | `FetchMany` / `SetMany` on the memory store — one lock per stripe per batch; `FetchMany` answers by position in the caller's slices, through one batched read of the primitive, with no map and, up to 64 keys, nothing allocated (#840) |
 | `memory_refresh.go` | `LoadRefreshing` on the memory store — refresh-ahead, one background fill per key (#838) |
-| `chain_bulk.go` | `Expire`, `FetchMany`, `SetMany` and `LoadRefreshing` on the chain (#1059, #840, #838) |
+| `chain_bulk.go` | `Expire`, `FetchMany` (one pass per tier over the positions still missing, a repeated key read once — `firstOf`), `SetMany` and `LoadRefreshing` on the chain (#1059, #840, #838) |
 | `record.go` | `record[V]` — what the primitive actually stores: the value, the tags and the negative entry's `absent`, seven words for a string value; the deadline and the weight are the primitive's (#1059) |
 | `tagindex.go` | `tagIndex` — `byKey` / `byTag`, and why both exist |
 | `chain.go` | `NewChain` + `chainStore[V]` — promotion, write order, delete order, and the guard that keeps a promotion from undoing a write (`announce` / `finish`, #460) |
@@ -73,7 +73,7 @@ they do not share a mechanism:
 | Path | Unlinked by |
 |---|---|
 | capacity eviction | `OnEvict` → `onEvict` |
-| TTL expiry (lazy, on `Fetch`) | `OnEvict` → `onEvict` |
+| TTL expiry (lazy, on `Fetch`, or on `FetchMany` at the end of its batch — #840) | `OnEvict` → `onEvict` |
 | TTL expiry swept by `Expire` (#1059) | `OnEvict` → `onEvict` |
 | overwrite (`Set` on an existing key) | `tagIndex.add` calls `remove` first |
 | explicit `Delete` / `InvalidateTag` | direct `tagIndex.remove` |
@@ -81,7 +81,8 @@ they do not share a mechanism:
 The fourth is the trap: the primitive **deliberately does not fire `OnEvict`
 for an explicit `Delete`**, so a store relying only on the callback would leak
 every deleted key's tags. `TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds`
-runs a workload that exercises all four and then asserts index ⊆ store.
+runs a workload that exercises all four — its lazy expiry through `Fetch` and
+through `FetchMany` alternately — and then asserts index ⊆ store.
 
 ## Why every tier must implement `EntryFetcher` and `Tagger`
 
@@ -150,6 +151,11 @@ discovers until an incident.
   the third-party doctrine and belong under `third-party/` — a separate change
   with its own dependency budget.
 - Promise cross-replica stampede protection. See §"One process, and only one".
+- Answer `FetchMany` through a map, or read a key twice in one batch (#840):
+  it answers by position in the caller's slices, through one
+  `UnlockedMap.FetchMany` a stripe, which records each hit as `Fetch` does
+  under every policy. `TestFetchManyAllocatesNothing` (alloc lane) holds 16
+  and 64 keys to zero allocations.
 
 ## Verification
 
@@ -160,4 +166,4 @@ bazel test --config=race //internal/service/data/cache:cache_test
 
 ## Reference in NOTES.md
 
-Moved unchanged to `internal/service/data/cache/NOTES.md`, under the same titles, and read only by a change that needs its mechanics: `One process, and only one`; ``LoadLeased` takes the lease, from the lock domain (#830)`; `What the tag index costs, measured`; `The chain: nothing is atomic, and the ordering says which side is p...`; `A promotion never writes back what a write replaced (#460)`; `Stripes, bytes, policy (#808, #839, #834)`; `Sweeps, batches, refresh-ahead, negative entries (#1059, #840, #838)`; `What a hit costs, and why it is one call deep (#1059)`.
+Moved unchanged to `internal/service/data/cache/NOTES.md`, under the same titles, and read only by a change that needs its mechanics: `One process, and only one`; ``LoadLeased` takes the lease, from the lock domain (#830)`; `What the tag index costs, measured`; `The chain: nothing is atomic, and the ordering says which side is p...`; `A promotion never writes back what a write replaced (#460)`; `Stripes, bytes, policy (#808, #839, #834)`; `Sweeps, batches, refresh-ahead, negative entries (#1059, #840, #838)`; `What a hit costs, and why it is one call deep (#1059)`; `What a batch costs, and why it answers by position (#840)`.

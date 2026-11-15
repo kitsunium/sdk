@@ -317,7 +317,7 @@
       "spelled": "[V any] corecache.BulkFetcher[V]",
       "canonical": "[V any] github.com/kitsunium/sdk/internal/core/data/cache.BulkFetcher[V]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/cache.BulkFetcher",
-      "doc": "BulkFetcher is the sibling that reads many keys in one call — one lock per\nstripe, one pass per tier.\n",
+      "doc": "BulkFetcher is the sibling that reads many keys in one call — one lock per\nstripe, one pass per tier — and answers by position, in slices you hand it\nand may reuse from one batch to the next.\n",
       "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"

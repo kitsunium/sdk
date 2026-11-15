@@ -480,9 +480,11 @@ sequences:
         kind: self
       - id: c.generation.Load
         kind: value
-      - id: distinct
+      - id: extend
         kind: internal
-      - id: fetchPass
+      - id: firstOf
+        kind: internal
+      - id: batch.pass
         kind: internal
       - id: c.promoteMany
         kind: internal
@@ -490,55 +492,77 @@ sequences:
       - bind: seen
         eval: c.generation.Load()
         to: c.generation.Load
-      - bind: found
-        eval: make(map[string]V, len(keys))
+      - bind: values, answers
+        eval: extend(values, len(keys))
+        to: extend
+      - bind: found, hits
+        eval: extend(found, len(keys))
+        to: extend
+      - bind: batch
+        eval: "chainBatch[V]{keys: keys, values: answers, found: hits}"
+      - bind: first
+        eval: firstOf(keys)
+        to: firstOf
       - bind: missing
-        eval: distinct(keys)
-        to: distinct
+        eval: make([]int, 0, len(keys))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: missing
+                    value: append(missing, at)
+                when: from == at
+          key: at
+          range: first
+          value: from
       - loop:
           do:
             - opt:
                 do:
                   - break: true
                 when: len(missing) == 0
-            - bind: hits, still, fetchErr
-              eval: fetchPass(ctx, position, level, missing)
-              to: fetchPass
+            - bind: promote, still, fetchErr
+              eval: batch.pass(ctx, position, level, missing)
+              to: batch.pass
             - opt:
                 do:
-                  - return: nil, fetchErr
+                  - eval: clear(answers)
+                  - eval: clear(hits)
+                  - return: values[:len(values)-len(keys)], found[:len(found)-len(keys)], fetchErr
                 when: fetchErr != nil
-            - loop:
-                do:
-                  - set: found[key]
-                    value: entry.Value
-                key: key
-                range: hits
-                value: entry
             - opt:
                 do:
-                  - eval: c.promoteMany(ctx, hits, position, seen)
+                  - eval: c.promoteMany(ctx, promote, position, seen)
                     to: c.promoteMany
-                when: position > 0 && len(hits) > 0
+                when: len(promote) > 0
             - set: missing
               value: still
           key: position
           range: c.tiers
           value: level
-      - return: found, nil
-  - of: fetchPass
+      - loop:
+          do:
+            - set: answers[at], hits[at]
+              value: answers[from], hits[from]
+          key: at
+          range: first
+          value: from
+      - return: values, found, nil
+  - of: (*chainBatch).pass
     participants:
       - id: caller
         kind: actor
-      - id: fetchPass
+      - id: (*chainBatch).pass
         kind: self
       - id: level.entry.FetchEntry
         kind: value
     steps:
-      - set: hits
-        value: make(map[string]corecache.EntryValue[V], len(missing))
+      - set: still
+        value: missing[:0]
       - loop:
           do:
+            - bind: key
+              eval: b.keys[at]
             - bind: stored, ok, fetchErr
               eval: level.entry.FetchEntry(ctx, key)
               to: level.entry.FetchEntry
@@ -549,15 +573,25 @@ sequences:
             - opt:
                 do:
                   - set: still
-                    value: append(still, key)
+                    value: append(still, at)
                   - continue: true
                 when: "!ok"
-            - set: hits[key]
-              value: stored
+            - set: b.values[at], b.found[at]
+              value: stored.Value, true
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: promote
+                          value: make(map[string]corecache.EntryValue[V], len(missing))
+                      when: promote == nil
+                  - set: promote[key]
+                    value: stored
+                when: position > 0
           key: _
           range: missing
-          value: key
-      - return: hits, still, nil
+          value: at
+      - return: promote, still, nil
   - of: (*chainStore).promoteMany
     participants:
       - id: caller
@@ -1684,84 +1718,159 @@ sequences:
         kind: actor
       - id: (*memoryStore).FetchMany
         kind: self
-      - id: s.stripes[0].fetchInto
+      - id: extend
         kind: internal
-      - id: s.stripes[at].fetchInto
+      - id: s.single.fetchInto
+        kind: internal
+      - id: s.fetchStriped
         kind: internal
     steps:
-      - bind: found
-        eval: make(map[string]V, len(keys))
+      - bind: values, answers
+        eval: extend(values, len(keys))
+        to: extend
+      - bind: found, hits
+        eval: extend(found, len(keys))
+        to: extend
       - opt:
           do:
-            - eval: s.stripes[0].fetchInto(found, keys)
-              to: s.stripes[0].fetchInto
-            - return: found, nil
-          when: len(s.stripes) == 1
-      - loop:
-          do:
-            - opt:
-                do:
-                  - eval: s.stripes[at].fetchInto(found, group)
-                    to: s.stripes[at].fetchInto
-                when: len(group) > 0
-          key: at
-          range: s.groupByStripe(keys)
-          value: group
-      - return: found, nil
+            - eval: s.single.fetchInto(keys, answers, hits)
+              to: s.single.fetchInto
+            - return: values, found, nil
+          when: s.single != nil
+      - eval: s.fetchStriped(keys, answers, hits)
+        to: s.fetchStriped
+      - return: values, found, nil
   - of: (*memoryStripe).fetchInto
     participants:
       - id: caller
         kind: actor
       - id: (*memoryStripe).fetchInto
         kind: self
-      - id: m.lru.Fetch
+      - id: warmKeys
+        kind: internal
+      - id: m.lru.FetchMany
         kind: value
+      - id: answerOf
+        kind: internal
     steps:
+      - var:
+          name: scratch
+          type: "[batchOnStack]*record[V]"
+      - eval: warmKeys(keys)
+        to: warmKeys
       - lock:
           mutex: m.mu
+      - bind: refs
+        eval: m.lru.FetchMany(keys, scratch[:0])
+        to: m.lru.FetchMany
       - loop:
           do:
-            - opt:
-                do:
-                  - continue: true
-                init:
-                  bind: _, seen
-                  eval: found[key]
-                when: seen
-            - opt:
-                do:
-                  - set: found[key]
-                    value: rec.value
-                init:
-                  bind: rec, ok
-                  eval: m.lru.Fetch(key)
-                  to: m.lru.Fetch
-                when: ok && rec.absent == nil
-          key: _
-          range: keys
-          value: key
-  - of: (*memoryStore).groupByStripe
+            - set: values[at], found[at]
+              to: answerOf
+              value: answerOf(rec)
+          key: at
+          range: refs
+          value: rec
+  - of: (*memoryStore).fetchStriped
     participants:
       - id: caller
         kind: actor
-      - id: (*memoryStore).groupByStripe
+      - id: (*memoryStore).fetchStriped
         kind: self
-      - id: s.stripeIndex
+      - id: slices
+        kind: stdlib
+      - id: s.stripes[at].fetchAt
         kind: internal
     steps:
-      - bind: groups
-        eval: make([][]string, len(s.stripes))
+      - var:
+          name: orderOn
+          type: "[batchOnStack]uint64"
+      - var:
+          name: keysOn
+          type: "[batchOnStack]string"
+      - var:
+          name: refsOn
+          type: "[batchOnStack]*record[V]"
+      - bind: order, sorted, refs
+        eval: orderOn[:0], keysOn[:0], refsOn[:0]
+      - opt:
+          do:
+            - set: order, sorted
+              value: make([]uint64, 0, len(keys)), make([]string, 0, len(keys))
+          when: len(keys) > batchOnStack
+      - loop:
+          do:
+            - set: order
+              value: append(order, uint64(s.stripeIndex(key))<<stripeShift|uint64(at))
+          key: at
+          range: keys
+          value: key
+      - eval: slices.Sort(order)
+        to: slices
+      - loop:
+          do:
+            - set: sorted
+              value: append(sorted, keys[packed&positionMask])
+          key: _
+          range: order
+          value: packed
+      - loop:
+          cond: start < len(order)
+          do:
+            - bind: at
+              eval: order[start] >> stripeShift
+            - bind: end
+              eval: start + 1
+            - loop:
+                cond: end < len(order) && order[end]>>stripeShift == at
+                do:
+                  - op: ++
+                    set: end
+            - set: refs
+              to: s.stripes[at].fetchAt
+              value: s.stripes[at].fetchAt(sorted[start:end], order[start:end], refs[:0], values, found)
+            - set: start
+              value: end
+          init: start := 0
+  - of: (*memoryStripe).fetchAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*memoryStripe).fetchAt
+        kind: self
+      - id: m.lru.FetchMany
+        kind: value
+      - id: answerOf
+        kind: internal
+    steps:
+      - lock:
+          mutex: m.mu
+      - set: refs
+        to: m.lru.FetchMany
+        value: m.lru.FetchMany(keys, refs)
       - loop:
           do:
             - bind: at
-              eval: s.stripeIndex(key)
-              to: s.stripeIndex
-            - set: groups[at]
-              value: append(groups[at], key)
-          key: _
-          range: keys
-          value: key
-      - return: groups
+              eval: order[i] & positionMask
+            - set: values[at], found[at]
+              to: answerOf
+              value: answerOf(rec)
+          key: i
+          range: refs
+          value: rec
+      - return: refs
+  - of: answerOf
+    steps:
+      - opt:
+          do:
+            - return: value, false
+          when: rec == nil || rec.absent != nil
+      - return: rec.value, true
+  - of: extend
+    steps:
+      - set: all
+        value: slices.Grow(s, n)[:len(s)+n]
+      - return: all, all[len(s):]
   - of: (*memoryStore).SetMany
     participants:
       - id: caller

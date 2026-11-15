@@ -22,7 +22,7 @@ dep-light; cross-OS portable.
 | methods `Fetch`/`Set`/`SetTTL`/`Delete`/`Len`/`Purge`/`Stats` | inherited from the aliased type |
 | `Store[V]` | alias of `corecache.Store[V]` — `Fetch`/`Set`/`Delete` on string keys, FROZEN at three methods (ADR 0039) |
 | `EntryFetcher[V]` / `Tagger` / `Loader[V]` | siblings reached by type assertion: `FetchEntry` (value, remaining TTL, tags), `InvalidateTag`, `Load(ctx, key, fill)` |
-| `Expirer` / `BulkFetcher[V]` / `BulkSetter[V]` / `Refresher[V]` / `Leaser[V]` | the L6 siblings, on both stores: `Expire(ctx)` (a caller-driven sweep, #1059), `FetchMany` / `SetMany` (#840), `LoadRefreshing` (refresh-ahead, #838), `LoadLeased(ctx, key, fill, locker)` (a lease across processes from a `lock.Locker`, #830) |
+| `Expirer` / `BulkFetcher[V]` / `BulkSetter[V]` / `Refresher[V]` / `Leaser[V]` | the L6 siblings, on both stores: `Expire(ctx)` (a caller-driven sweep, #1059), `FetchMany` — one answer a key, by position, appended to slices you hand it and may reuse, since #840 — / `SetMany` (#840), `LoadRefreshing` (refresh-ahead, #838), `LoadLeased(ctx, key, fill, locker)` (a lease across processes from a `lock.Locker`, #830) |
 | `Absent(cause, ttl)` / `AbsentTTLOf(err)` | the mark a fill returns to have a "does not exist" answer kept as a negative entry (#838) |
 | `Entry[V]` / `Fill[V]` / `NoExpiry` | aliases of `corecache.EntryValue[V]` / `corecache.Fill[V]`; `NoExpiry` is the TTL with no deadline, distinct from the zero TTL (the store's default) |
 | `MemoryConfig` / `ChainConfig` | type aliases onto `internal/service/data/cache` |
@@ -43,6 +43,12 @@ dep-light; cross-OS portable.
   `Leaser` is the sibling that crosses the boundary, and what it buys depends on
   what the processes share (one fill through a shared far tier, turns over a
   memory store alone).
+- **`BulkFetcher.FetchMany` changed shape in v0** (#840, ADR 0049 amended
+  2026-11-15, ADR 0040): `FetchMany(ctx, keys) (map[string]V, error)` became
+  `FetchMany(ctx, keys, values, found) ([]V, []bool, error)`, one answer a key
+  appended in order. A caller migrates by reading `values[i]` / `found[i]`
+  for `keys[i]` where it read the map; one that hands back `values[:0]` and
+  `found[:0]` of its last batch allocates nothing. A release note says so.
 - The package comment is in `doc.go`, which kit writes from the design
   (`design/data/cache.yaml`, ADR 0167): edit the design, run `kit gen`, then `make api`
   and `make docs-readme`. `README.md` is written by `tools/genindex` from

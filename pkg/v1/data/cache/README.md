@@ -66,7 +66,7 @@ A hit promotes the entry in the recency order and moves the counters, so a read 
 - [func NewStriped\[K comparable, V any\]\(cfg Config\[K, V\], stripes int, hash func\(key K\) uint64\) \*Striped\[K, V\]](<#NewStriped>)
 - [func NewWeighedMemory\[V any\]\(cfg MemoryConfig, weigh func\(value V\) int64\) \(store Store\[V\], err error\)](<#NewWeighedMemory>)
 - [type BulkFetcher](<#BulkFetcher>)
-  - [func \(BulkFetcher\) FetchMany\(ctx context.Context, keys \[\]string\) \(map\[string\]V, error\)](<#BulkFetcher.FetchMany>)
+  - [func \(BulkFetcher\) FetchMany\(ctx context.Context, keys \[\]string, values \[\]V, found \[\]bool\) \(\[\]V, \[\]bool, error\)](<#BulkFetcher.FetchMany>)
 - [type BulkSetter](<#BulkSetter>)
   - [func \(BulkSetter\) SetMany\(ctx context.Context, entries map\[string\]EntryValue\[V\]\) error](<#BulkSetter.SetMany>)
 - [type Cache](<#Cache>)
@@ -305,7 +305,7 @@ NewWeighedMemory builds an in-process store bounded by MaxBytes as well as MaxEn
 <a name="BulkFetcher"></a>
 ## type [BulkFetcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
-BulkFetcher is the sibling that reads many keys in one call — one lock per stripe, one pass per tier.
+BulkFetcher is the sibling that reads many keys in one call — one lock per stripe, one pass per tier — and answers by position, in slices you hand it and may reuse from one batch to the next.
 
 ```go
 type BulkFetcher[V any] = corecache.BulkFetcher[V]
@@ -315,7 +315,7 @@ BulkFetcher is an alias of `github.com/kitsunium/sdk/internal/core/data/cache.Bu
 
 ```go
 type BulkFetcher[V any] interface {
-	FetchMany(ctx context.Context, keys []string) (map[string]V, error)
+	FetchMany(ctx context.Context, keys []string, values []V, found []bool) ([]V, []bool, error)
 }
 ```
 
@@ -323,10 +323,10 @@ type BulkFetcher[V any] interface {
 ### func \(BulkFetcher\) [FetchMany](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
 
 ```go
-func (BulkFetcher) FetchMany(ctx context.Context, keys []string) (map[string]V, error)
+func (BulkFetcher) FetchMany(ctx context.Context, keys []string, values []V, found []bool) ([]V, []bool, error)
 ```
 
-FetchMany returns the values of the keys the store holds, and no entry for a key it does not. It mutates the store as Fetch does. Duplicate keys are read once.
+FetchMany appends to values and found one answer for every key of keys, in order: the value keys\[i] holds and true, or V's zero value and false when the store does not hold it. It mutates the store as Fetch does. A key named more than once is read once, and every position naming it is answered. values and found grow only when their capacity is short: a caller that hands back the slices of its last batch, emptied, reuses them. On an error nothing is appended.
 
 <a name="BulkSetter"></a>
 ## type [BulkSetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)

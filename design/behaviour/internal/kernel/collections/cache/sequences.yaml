@@ -1712,6 +1712,139 @@ sequences:
       - op: ++
         set: c.hits
       - return: ent.val, true
+  - of: (*UnlockedMap).FetchMany
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).FetchMany
+        kind: self
+      - id: c.sinceEpoch
+        kind: internal
+      - id: c.readChunk
+        kind: internal
+      - id: c.clearMarks
+        kind: internal
+      - id: c.notifyEvicted
+        kind: internal
+    steps:
+      - bind: held
+        eval: len(refs)
+      - set: refs
+        value: slices.Grow(refs, len(keys))[:held+len(keys)]
+      - var:
+          name: batch
+          type: batchRead[K, V]
+      - opt:
+          do:
+            - set: batch.now
+              to: c.sinceEpoch
+              value: c.sinceEpoch()
+          when: c.expiry.size() > 0
+      - loop:
+          cond: base < len(keys)
+          do:
+            - bind: end
+              eval: min(base+lookupChunk, len(keys))
+            - eval: c.readChunk(&batch, keys[base:end], refs[held+base:held+end])
+              to: c.readChunk
+          init: base := 0
+          post: base += lookupChunk
+      - eval: c.clearMarks()
+        to: c.clearMarks
+      - op: +=
+        set: c.hits
+        value: batch.recorded
+      - op: +=
+        set: c.misses
+        value: batch.missed
+      - eval: c.notifyEvicted(batch.pending)
+        to: c.notifyEvicted
+      - return: refs
+  - of: (*UnlockedMap).readChunk
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).readChunk
+        kind: self
+      - id: c.reapInBatch
+        kind: internal
+      - id: c.touch
+        kind: internal
+    steps:
+      - var:
+          name: ents
+          type: "[lookupChunk]*entry[K, V]"
+      - loop:
+          do:
+            - set: ents[i]
+              value: c.items[key]
+          key: i
+          range: chunk
+          value: key
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out[i]
+                    value: nil
+                  - op: ++
+                    set: batch.missed
+                  - eval: c.reapInBatch(batch, ent, chunk[i+1:], ents[i+1:len(chunk)])
+                    to: c.reapInBatch
+                  - continue: true
+                when: ent == nil || (ent.slot != 0 && batch.now >= ent.deadline)
+            - opt:
+                do:
+                  - eval: c.touch(ent)
+                    to: c.touch
+                  - op: "|="
+                    set: ent.freq
+                    value: readMark
+                  - set: c.marked
+                    value: append(c.marked, ent)
+                  - op: ++
+                    set: batch.recorded
+                when: ent.freq&readMark == 0
+            - set: out[i]
+              value: "&ent.val"
+          key: i
+          range: ents[:len(chunk)]
+          value: ent
+  - of: (*UnlockedMap).reapInBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).reapInBatch
+        kind: self
+      - id: c.removeEvict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: ent == nil
+      - eval: c.removeEvict(ent, &batch.pending)
+        to: c.removeEvict
+      - loop:
+          do:
+            - set: laterEnts[j]
+              value: c.items[key]
+          key: j
+          range: later
+          value: key
+  - of: (*UnlockedMap).clearMarks
+    steps:
+      - loop:
+          do:
+            - op: "&^="
+              set: ent.freq
+              value: readMark
+          key: _
+          range: c.marked
+          value: ent
+      - eval: clear(c.marked)
+      - set: c.marked
+        value: c.marked[:0]
   - of: (*UnlockedMap).missed
     participants:
       - id: caller

@@ -15,10 +15,9 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
 | File | Surface |
 |---|---|
 | `cache.go` | `Cache[K,V]` + `NewCache` + `Fetch`/`Set`/`SetTTL`/`Delete`/`Expire`/`Keys`/`Len`/`Purge`/`Stats` — a `sync.Mutex` around an `UnlockedMap`, OnEvict drained after the unlock |
-| `unlocked.go` | `UnlockedMap[K,V]` + `NewUnlockedMap` — the cache without its lock (#1038, for #1059): the lookup, the write path, the deadlines, the sweep and the eviction loop every `Cache` call runs; `Deadline`, the read of an entry's deadline (#1059); `tinyLFUShares`, W-TinyLFU's segment bounds it holds
-|
+| `unlocked.go` | `UnlockedMap[K,V]` + `NewUnlockedMap` — the cache without its lock (#1038, for #1059): the lookup, the write path, the deadlines, the sweep and the eviction loop every `Cache` call runs; `Deadline`, the read of an entry's deadline (#1059); `tinyLFUShares`, W-TinyLFU's segment bounds it holds; `FetchMany`, the batched read the cache domain's `FetchMany` stands on (#840) |
 | `deadline.go` | `deadlineHeap[K,V]` — the expiry heap: 4-ary, `int64` deadlines inline, each entry's slot its cell plus one |
-| `entry.go` | `entry[K,V]` — intrusive list node, with its deadline, its heap slot, its weight, its S3-FIFO counter, its W-TinyLFU period and sketch hash: 64 bytes for a string key and a word-sized value |
+| `entry.go` | `entry[K,V]` — intrusive list node, with its deadline, its heap slot, its weight, its S3-FIFO counter — its top bit `FetchMany`'s read-once mark (#840) —, its W-TinyLFU period and sketch hash: 64 bytes for a string key and a word-sized value |
 | `list.go` | `entryList[K,V]` — the intrusive doubly-linked list each queue is, with its count and summed weight |
 | `policy.go` | `Policy` — `PolicyLRU` (the zero) / `PolicyS3FIFO` / `PolicyTinyLFU` — and the three calls every policy answers: `admit`, `touch`, `evictOne` |
 | `s3fifo.go` | S3-FIFO: admission into small or main (`admitS3FIFO`), the small/main walk (`evictS3FIFO`, `evictSmall`, `evictMain`), the shares (`smallShare`, a fiftieth; `ghostShare`, a quarter) |
@@ -68,6 +67,13 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
   `int64` range (a TTL of centuries) is held at its maximum. An entry has a
   deadline when its heap slot is set, so a deadline of 0 is a deadline.
   `Test_entry_size` holds the budget.
+- **A batched read records each hit as `Fetch` does** (#840, ADR 0025
+  amended 2026-11-15): `UnlockedMap.FetchMany` calls the policy's `touch` for
+  a key's first position, under every policy, so a run of batches leaves the
+  map where the same keys read one by one leave it
+  (`TestFetchManyKeepsEachPolicysState`). Its read-once mark is `readMark`,
+  freq's top bit, cleared before the call returns (`Test_UnlockedMap_clearMarks`):
+  never add a field to the node for it. The rest is `NOTES.md` §The batched read.
 - **Expiry: lazy, plus a sweep the CALLER drives** (#1038). An expired entry is
   reaped by the next `Fetch` of its key, by a capacity eviction, or by
   `Expire()`. Every entry carrying a deadline sits in an expiry heap
@@ -187,4 +193,4 @@ bazel test --config=race //internal/kernel/collections/cache:cache_test
 
 ## Reference in NOTES.md
 
-`internal/kernel/collections/cache/NOTES.md`, read by a change that needs the mechanics of `PolicyTinyLFU`: `W-TinyLFU's sketch`; `The node stays one cache line`; `What a hit costs`.
+`internal/kernel/collections/cache/NOTES.md`, read by a change that needs the mechanics of `PolicyTinyLFU` or of `FetchMany`: `W-TinyLFU's sketch`; `The node stays one cache line`; `What a hit costs`; `The batched read`.
