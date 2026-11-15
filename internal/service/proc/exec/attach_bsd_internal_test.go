@@ -70,10 +70,19 @@ func TestReadRecordReadsTheKernel(t *testing.T) {
 // that is once the child has left execve: os.StartProcess returns as soon as
 // execve has closed the child's close-on-exec descriptors, before execve is
 // done, and NetBSD answers the record of a process still inside execve with
-// no start (fill_kproc2 reads it as a zombie while execve holds p_reflock).
-// On NetBSD 10.1 a child signalled in that window was not ended (#1379): in
-// one attempt, TestReadRecordReadsTheKernel read its child with start 0 and
-// its cleanup's SIGKILL left the sleeper its whole 30 s, while
+// no start. In NetBSD 10's sources the start is there from the fork
+// (kern_fork.c, fork1: getmicrotime into p_stats->p_start) but withheld:
+// execve holds p_reflock as a writer from execve_loadvm to the end of
+// execve_runproc (kern_exec.c), after fd_closeexec; sysctl_doeproc reads a
+// process whose p_reflock it cannot take as a reader as a zombie
+// (kern_proc.c), and fill_kproc2 writes p_uvalid, p_ustart_sec and
+// p_ustart_usec only for a process that is not one, in a record allocated
+// zeroed. A start of 0 is that, never a misread: bsdabi's offsets (pid 116,
+// uid 136, ruid 140, p_ustart_sec 456, p_ustart_usec 460) are the header's,
+// and the pid read back matched (#1452, whose child was read straight after
+// Start). On NetBSD 10.1 a child signalled in that window was not ended
+// (#1379): in one attempt, TestReadRecordReadsTheKernel read its child with
+// start 0 and its cleanup's SIGKILL left the sleeper its whole 30 s, while
 // TestKnoteFiresAtExit's knote, registered and signalled in the same window,
 // never fired in 10 s.
 func startRunningSleeper(t *testing.T) *os.Process {
