@@ -2,6 +2,8 @@ package ring_test
 
 import (
 	"errors"
+	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -218,5 +220,162 @@ func TestDrainYieldsEveryItemOldestFirstAndStopsWhenAskedTo(t *testing.T) {
 	}
 	for range ring.Drain(q) {
 		t.Fatal("an empty ring yielded an item")
+	}
+}
+
+// TestQueue_ContractAcrossGoroutines pins the three guarantees every design of
+// the happy rows must keep, each across goroutines that learn of the other
+// side's step through a channel: the items written are readable by the reader
+// told of them, a slot read is free for the writer told of it, and Len is a
+// snapshot a third goroutine may take while both sides run (-race holds it).
+// A cursor published once a group of operations fails the first two; a
+// cursor Len reads from a plain field, the third (#1034, BENCH.md 2026-11-15).
+func TestQueue_ContractAcrossGoroutines(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		check func(t *testing.T, q ring.Queue[int])
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		q, err := ring.New[int](4)
+		if err != nil {
+			t.Fatalf("New(4) = %v", err)
+		}
+		c.check(t, q)
+	}
+	tests := []tc{
+		{"the items written are readable by the reader told of them", readerToldOfWrites},
+		{"a slot read is free for the writer told of it", writerToldOfARead},
+		{"Len is a snapshot a third goroutine may take", lenFromAThirdGoroutine},
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// readerToldOfWrites writes bursts of one to Capacity items on this goroutine,
+// each told to a reader goroutine after its last write: every item of the
+// burst must be there, in order, lap after lap.
+func readerToldOfWrites(t *testing.T, q ring.Queue[int]) {
+	t.Helper()
+	told, read := make(chan []int), make(chan error)
+	go func() {
+		for burst := range told {
+			read <- readBurst(q, burst)
+		}
+	}()
+	defer close(told)
+	next := 0
+	for lap := range 3 {
+		for size := 1; size <= q.Capacity(); size++ {
+			burst := make([]int, size)
+			for i := range burst {
+				burst[i] = next
+				if err := q.TryWrite(next); err != nil {
+					t.Fatalf("lap %d: TryWrite(%d) = %v", lap, next, err)
+				}
+				next++
+			}
+			told <- burst
+			if err := <-read; err != nil {
+				t.Fatalf("lap %d, a burst of %d: %v", lap, size, err)
+			}
+		}
+	}
+}
+
+// readBurst reads len(want) items off q and reports the first that is not
+// the one wanted.
+func readBurst(q ring.Queue[int], want []int) error {
+	for _, item := range want {
+		got, err := q.TryRead()
+		//: an item written before the reader was told is never missing.
+		if err != nil {
+			return fmt.Errorf("TryRead for item %d = %w", item, err)
+		}
+		//: and never another one.
+		if got != item {
+			return fmt.Errorf("TryRead = %d, want %d", got, item)
+		}
+	}
+	return nil
+}
+
+// writerToldOfARead fills the ring, then has a reader goroutine read one item
+// and tell this goroutine, which writes: the slot read must be free, lap
+// after lap.
+func writerToldOfARead(t *testing.T, q ring.Queue[int]) {
+	t.Helper()
+	for i := range q.Capacity() {
+		if err := q.TryWrite(i); err != nil {
+			t.Fatalf("filling: TryWrite(%d) = %v", i, err)
+		}
+	}
+	told, read := make(chan struct{}), make(chan error)
+	go func() {
+		for range told {
+			_, err := q.TryRead()
+			read <- err
+		}
+	}()
+	defer close(told)
+	for i := range 3 * q.Capacity() {
+		told <- struct{}{}
+		if err := <-read; err != nil {
+			t.Fatalf("TryRead on a full ring = %v", err)
+		}
+		if err := q.TryWrite(q.Capacity() + i); err != nil {
+			t.Fatalf("TryWrite after the reader freed a slot of a full ring = %v, want nil", err)
+		}
+	}
+}
+
+// lenFromAThirdGoroutine moves items from a writer to a reader while this
+// goroutine takes Len: every snapshot within [0, Capacity], none of them a
+// data race.
+func lenFromAThirdGoroutine(t *testing.T, q ring.Queue[int]) {
+	t.Helper()
+	const items = 20000
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	wg.Go(func() {
+		for i := range items {
+			//: a full ring yields to the reader.
+			for q.TryWrite(i) != nil {
+				runtime.Gosched()
+			}
+		}
+	})
+	wg.Go(func() {
+		defer close(done)
+		for read := 0; read < items; {
+			//: an empty ring yields to the writer.
+			if _, err := q.TryRead(); err != nil {
+				runtime.Gosched()
+				continue
+			}
+			read++
+		}
+	})
+	bad, outside := 0, false
+	for running := true; running; {
+		select {
+		case <-done:
+			running = false
+		default:
+			//: one snapshot outside the bounds is enough to report.
+			if n := q.Len(); n < 0 || n > q.Capacity() {
+				bad, outside = n, true
+			}
+			runtime.Gosched()
+		}
+	}
+	wg.Wait()
+	if outside {
+		t.Errorf("Len = %d while both sides ran, outside [0, %d]", bad, q.Capacity())
 	}
 }
