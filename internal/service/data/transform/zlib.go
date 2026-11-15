@@ -3,9 +3,34 @@ package transform
 import (
 	"bytes"
 	"compress/zlib"
+	"encoding/binary"
+	"hash/adler32"
+	"io"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// The RFC 1950 §2.2 envelope the block decode reads itself (zlibBody,
+// zlibCheckTrailer): field widths, the one method and window, the FDICT bit and
+// the one dictionary id this scheme accepts.
+const (
+	// zlibHeaderLen is the header: CMF and FLG.
+	zlibHeaderLen int = 2
+	// zlibDictIDLen is the DICTID field an FDICT header adds.
+	zlibDictIDLen int = 4
+	// zlibTrailerLen is the Adler-32 trailer.
+	zlibTrailerLen int = 4
+	// zlibMethodDeflate is CM, the only compression method RFC 1950 defines.
+	zlibMethodDeflate byte = 8
+	// zlibMaxWindow is the largest CINFO RFC 1950 allows: a 32 KiB window.
+	zlibMaxWindow byte = 7
+	// zlibFlagDict is FLG's FDICT bit: a preset dictionary is named.
+	zlibFlagDict byte = 0x20
+	// zlibEmptyDictID is the Adler-32 of no bytes, the DICTID compress/zlib
+	// accepts from a reader built without a dictionary, and so the only one
+	// this package accepts: it never writes a dictionary, so it never reads one.
+	zlibEmptyDictID uint32 = 1
 )
 
 // ZlibCompressor is the zlib singleton, registered with core/data/transform at
@@ -176,36 +201,119 @@ func zlibDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
 // zlibDecompressCore is the shared body behind both the layer backstop and the
 // caller-supplied ceiling. It reports an over-cap stream as tooLarge rather
 // than choosing a sentinel, so each caller can name the fact in its own terms.
+//
+// It reads the RFC 1950 envelope itself — the two-byte header and the four-byte
+// Adler-32 trailer — over the pooled raw-DEFLATE decoder, because compress/zlib
+// builds a fresh digest (adler32.New) on every Reset and so allocates once per
+// call, however large the caller's dst (kitsunium/sdk#1102). The body is still
+// decoded by compress/flate and the sum is hash/adler32's; only the thirty
+// lines of envelope are this package's, and every refusal is the stdlib's own
+// sentinel (zlib.ErrHeader, zlib.ErrDictionary, zlib.ErrChecksum,
+// io.ErrUnexpectedEOF) so errors.Is reads what it always read. The stream
+// readers (NewReader) keep compress/zlib.
 func zlibDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge bool, err error) {
-	//: a recycled zlib reader validates the 2-byte header up-front, exactly as a
-	//: fresh one does; a bad header fails here either way.
-	box, rerr := takeZlibReader(src)
-	//: malformed header — surface the failure via the zlib sentinel.
-	if rerr != nil {
+	//: the header is judged before any decoder is borrowed.
+	body, herr := zlibBody(src)
+	//: a malformed header is the caller's stream, under the zlib sentinel.
+	if herr != nil {
 		//: wrap the header error under the zlib sentinel.
+		return dst, false, errs.Wrap(herr, zlibWrap)
+	}
+	//: the pooled raw-DEFLATE decoder, reading the box's own reader over body.
+	box, rerr := takeFlateReader(body)
+	//: a decoder that could not be prepared is a zlib-direction failure.
+	if rerr != nil {
+		//: wrap the reset error under the zlib sentinel.
 		return dst, false, errs.Wrap(rerr, zlibWrap)
 	}
 	//: return the decoder on every exit below.
-	defer releaseZlibReader(box)
+	defer releaseFlateReader(box)
 	//: drain the reader straight onto dst through the shared bounded helper.
-	out, overflow, derr := appendAllBounded(dst, box.rc, max)
+	out, overflow, derr := appendAllBounded(dst, box.rc, &box.probe, max)
 	//: fold a Close fault into the result so the reader error is never dropped.
 	if cerr := box.rc.Close(); cerr != nil && derr == nil {
 		//: a clean drain followed by a Close fault still fails decompression.
 		derr = cerr
 	}
-	//: a read/close fault (corrupt body, bad checksum, truncation) is a failure.
+	//: a read/close fault (corrupt body, truncation) is a failure.
 	if derr != nil {
 		//: wrap the body error under the zlib sentinel.
 		return dst, false, errs.Wrap(derr, zlibWrap)
 	}
 	//: an over-cap stream is reported as such; the CALLER picks the sentinel,
 	//: because "too big" means different things to the layer that owns the
-	//: backstop and to one that supplied a tighter ceiling of its own.
+	//: backstop and to one that supplied a tighter ceiling of its own. The
+	//: decode stopped at the ceiling, so the trailer is not read.
 	if overflow {
 		//: no plaintext escapes an over-cap stream.
 		return dst, true, nil
 	}
+	//: the box's reader sits just past the DEFLATE stream — flate reads a
+	//: bytes.Reader byte by byte and never beyond its own end — so what is
+	//: left of body is the trailer, read in place with no buffer of its own.
+	if terr := zlibCheckTrailer(body[len(body)-box.in.Len():], out[len(dst):]); terr != nil {
+		//: wrap the trailer fault under the zlib sentinel.
+		return dst, false, errs.Wrap(terr, zlibWrap)
+	}
 	//: the bounded plaintext, already on the caller's dst.
 	return out, false, nil
+}
+
+// zlibBody validates src's RFC 1950 header and returns what follows it, the
+// DEFLATE stream and its trailer. Its refusals are compress/zlib's, in the
+// order compress/zlib makes them: a stream too short for the header, or for the
+// DICTID an FDICT header promises, is io.ErrUnexpectedEOF, a header that is not
+// CM 8 with a window of at most 32 KiB and a multiple of 31 is zlib.ErrHeader,
+// and a DICTID other than the empty dictionary's is zlib.ErrDictionary.
+func zlibBody(src []byte) (body []byte, err error) {
+	//: not even the two header bytes: the stdlib reports a short read, not EOF.
+	if len(src) < zlibHeaderLen {
+		//: io.ErrUnexpectedEOF, as compress/zlib's ReadFull turns io.EOF into.
+		return nil, io.ErrUnexpectedEOF
+	}
+	cmf, flg := src[0], src[1]
+	//: the method, the window and the check bits, exactly as the stdlib tests them.
+	if cmf&0x0f != zlibMethodDeflate || cmf>>4 > zlibMaxWindow || (uint16(cmf)<<8|uint16(flg))%31 != 0 {
+		//: the stdlib's own sentinel.
+		return nil, zlib.ErrHeader
+	}
+	body = src[zlibHeaderLen:]
+	//: no preset dictionary: the DEFLATE stream follows the header at once.
+	if flg&zlibFlagDict == 0 {
+		//: the common case.
+		return body, nil
+	}
+	//: an FDICT header carries four more bytes, the dictionary's Adler-32.
+	if len(body) < zlibDictIDLen {
+		//: a short DICTID is a short read.
+		return nil, io.ErrUnexpectedEOF
+	}
+	//: this scheme reads no dictionary, so only the empty one's id is honoured.
+	if binary.BigEndian.Uint32(body) != zlibEmptyDictID {
+		//: the stdlib's own sentinel.
+		return nil, zlib.ErrDictionary
+	}
+	//: the DEFLATE stream follows the DICTID.
+	return body[zlibDictIDLen:], nil
+}
+
+// zlibCheckTrailer judges tail, what the DEFLATE stream left of the input,
+// against plain, what it decoded: a tail shorter than four bytes is
+// io.ErrUnexpectedEOF, a big-endian Adler-32 that is not plain's is
+// zlib.ErrChecksum. Bytes past the four are ignored, as compress/zlib ignores
+// them. The sum is one pass of hash/adler32 over the plaintext already on the
+// caller's dst, so it allocates nothing.
+func zlibCheckTrailer(tail, plain []byte) error {
+	//: the stream ended before its checksum: a short read, not EOF.
+	if len(tail) < zlibTrailerLen {
+		//: io.ErrUnexpectedEOF, as the stdlib reports it.
+		return io.ErrUnexpectedEOF
+	}
+	//: RFC 1950 is big-endian, unlike RFC 1952.
+	if binary.BigEndian.Uint32(tail) != adler32.Checksum(plain) {
+		//: the stdlib's own sentinel.
+		return zlib.ErrChecksum
+	}
+	//: the plaintext is the one the encoder summed.
+	return nil
 }
