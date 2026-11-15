@@ -9387,7 +9387,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: st.LeaderLast > st.Last+joinApplyLag || n.applyOverloaded()
+          when: st.LeaderLast == 0 || st.LeaderLast > st.Last+joinApplyLag || n.applyOverloaded()
       - eval: n.am.Lock()
         to: n.am.Lock
       - bind: applied

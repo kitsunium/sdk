@@ -598,3 +598,16 @@ under coverage before touching `shard_count`.
   `TestAnInstalledSilencePointSurvivesARestart`,
   `TestAnInstallLowersTheSilencePointOnlyOverAnotherTerm`; no mutation, the
   type is full).
+- Drop a forward, or the answer to one, as an older term's message
+  (`stepTerm`, `forwardKind`): both belong to the submission id, not to a
+  term. A refusal says the entry was never appended and a position
+  resolves when its index is applied, whatever the term the receiver moved
+  to; dropped, the forward that crossed a change of term was never answered
+  and the answer that did was never read, and the follower's sweep answered
+  OUTCOME_UNKNOWN for an entry the leader had refused, or committed. A
+  leader that hands over for its stalled apply sends its TimeoutNow beside
+  the OVERLOADED it answers, which `TestApplyLagBackpressure` met under load
+  (#1440, `TestAForwardAnsweredAcrossAChangeOfTermIsResolved`,
+  `TestAForwardReachingALeaderThatMovedOnIsRefusedNotLeader`; no mutation:
+  the answer it restores is liveness, the outcome it replaces was already
+  safe).

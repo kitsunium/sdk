@@ -691,6 +691,17 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   before anything reached its log admits the members only from a JOIN
   answer, and was locked out for good. `alreadyJoined` answers it and
   proposes nothing (#533, `TestAJoinerRestartedBeforeItsFirstInstallRejoins`).
+- Drop the answer to a forward because this node's term moved since, nor
+  leave unanswered a forward that reaches its leader after that leader's
+  term moved: the submission id correlates both, and the sweep answered
+  OUTCOME_UNKNOWN for an entry the leader had refused OVERLOADED or
+  NOT_LEADER, or had committed. `TestApplyLagBackpressure`'s blocked apply
+  makes the leader hand over after the maximum election timeout (#554),
+  and its forward met the change of term under load; it now sends again,
+  through the leader of the moment, a forward refused NOT_LEADER, and never
+  takes OUTCOME_UNKNOWN (raft's `stepTerm`, #1440,
+  `TestAForwardAnsweredAcrossAChangeOfTermIsResolved`,
+  `TestAForwardReachingALeaderThatMovedOnIsRefusedNotLeader`).
 - Forward a JOIN from a node that would answer it only once it applied the
   `AddLearner` itself: a learner still waiting for its snapshot held it for
   its whole deadline and answered OUTCOME_UNKNOWN although the leader had
@@ -698,13 +709,18 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   a voter that may vote, holds a table, its apply not held back and within
   `joinApplyLag` entries of its commit and of the leader's last index)
   answer; any other node refuses NOT_LEADER at once, before the rate, the
-  slot and the authorizer, its reason naming the leader and its address
-  (`joinElsewhere`, `notLeaderJoinReason`), and both transports try that
-  leader next, each target once, at most `joinFollows` leaders followed
-  (`joinQueue`, `leaderOfJoinRefusal`; no frame change) (#1422,
+  slot and the authorizer, its reason naming the leader when it knows one
+  and its address when it knows that too (`joinElsewhere`,
+  `notLeaderJoinReason`), and both transports try that leader next, each
+  target once, at most `joinFollows` leaders followed (`joinQueue`,
+  `leaderOfJoinRefusal`; no frame change) (#1422,
   `TestAJoinThroughALearnerAwaitingItsSnapshotIsRefusedNotLeaderAtOnce`,
   `TestATCPJoinerFollowsTheLeaderANotLeaderRefusalNames`,
-  `TestAJoinThroughALevelVoterIsForwarded`).
+  `TestAJoinThroughALevelVoterIsForwarded`). A voter that knows no last
+  index of its leader — a leader of protocol 3 or below sends none, and no
+  heartbeat of the term carried one yet — cannot tell how far behind it is
+  and is not level: it refuses too (#1447,
+  `TestAJoinThroughAVoterThatDoesNotKnowTheLeadersLastIndexIsRefusedNotLeader`).
 - Remove the snapshot a node with no table holds before its replacement
   is published, or an installed copy that did not restore on such a node:
   its members are read from that metadata, and a node left none admitted

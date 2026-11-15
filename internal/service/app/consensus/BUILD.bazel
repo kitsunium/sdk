@@ -163,6 +163,7 @@ go_test(
         "filelog_index_internal_test.go",
         "filelog_internal_test.go",
         "filelog_range_internal_test.go",
+        "forwardterm_internal_test.go",
         "founding_internal_test.go",
         "gen_api_test.go",
         "groupcommit_internal_test.go",

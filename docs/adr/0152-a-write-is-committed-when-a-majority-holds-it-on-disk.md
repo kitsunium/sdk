@@ -7476,6 +7476,57 @@ leader's address, and that the joiner tries the leader.
   was asked — the authorizer runs on a node that answers, never on one that
   sends the joiner elsewhere.
 
+## Amendment — a voter that does not know its leader's last index refuses a JOIN, and a forward is answered across a change of term (2026-11-15, #1447, #1440)
+
+Two corrections of the rules a member follows when it does not lead; no
+frame changes, no protocol raise, no raft mutation.
+
+- **A JOIN reaches a voter that cannot tell how far behind it is
+  ([#1447](https://github.com/kitsunium/sdk/issues/1447)).** The amendment
+  of 2026-11-14 lets a voter answer a JOIN when its log is within 1 024
+  entries of "the leader's last index as its last heartbeat carried it".
+  A leader of protocol 3 or below carries none, and none has come before
+  the first heartbeat of a term: the index read 0, and a voter at 100
+  entries against a leader at 100 000 passed the check, forwarded the
+  `AddLearner` and waited its deadline to apply it — the timeout and the
+  `OUTCOME_UNKNOWN` #1422 removed for a learner. A voter that knows no last
+  index of its leader is not level: it refuses `NOT_LEADER`, as a learner
+  does. The refusal names the leader when the refusing member knows one,
+  and the leader's address only when it knows that address too
+  (`TCPTransport.Join`'s doc said the address always).
+- **A forward and its answer belong to their submission id, not to a term
+  ([#1440](https://github.com/kitsunium/sdk/issues/1440)).** D6 answers a
+  forwarded command with the leader's refusal, the one exception to
+  `OUTCOME_UNKNOWN`, or with its position. The step function dropped every
+  message of an older term but an append, a heartbeat and a PreVote, so a
+  forward that reached its leader after that leader's term moved went
+  unanswered, and an answer read by a follower whose term had moved was
+  never read: the follower's sweep answered `OUTCOME_UNKNOWN` two maximum
+  election timeouts later, for an entry the leader had refused or, in the
+  second case, appended and committed. `TestApplyLagBackpressure` met it
+  under load: its blocked apply makes the leader hand over after the
+  maximum election timeout (the progress watch of #554), and the hand-off's
+  `TimeoutNow` reached the forwarding follower before the `OVERLOADED` the
+  leader had answered; the forward was never appended. A forward and the
+  answer to one, of an older term, are now handled at the receiver's term:
+  a deposed leader refuses the forward `NOT_LEADER` naming the leader it
+  follows, a leader of the later term proposes it, both under the same
+  deduplication of the submission id (#401), and the answer resolves the
+  forward as at its own term. Every other message of an older term is
+  dropped or answered as before.
+- **Tests.**
+  `TestAJoinThroughAVoterThatDoesNotKnowTheLeadersLastIndexIsRefusedNotLeader`
+  (red on the base: admitted through the voter),
+  `TestAForwardAnsweredAcrossAChangeOfTermIsResolved` (red on the base:
+  `OUTCOME_UNKNOWN` for a committed entry),
+  `TestAForwardReachingALeaderThatMovedOnIsRefusedNotLeader` (red on the
+  base: `OUTCOME_UNKNOWN` after two maximum election timeouts);
+  `TestAJoinThroughALevelVoterIsForwarded` waits until the voter knows the
+  leader's last index; `TestApplyLagBackpressure` sends a forward refused
+  `NOT_LEADER` again through the leader of the moment, takes no other
+  answer than `OVERLOADED`, and checks that proposals are accepted again
+  once every node applied its commit, on the leader of that moment.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7532,6 +7583,7 @@ leader's address, and that the joiner tries the leader.
 | #763 (c) | the owner's decision, 2026-11-01 | a member's `TruncateAndStaySilent` reads the configuration the cluster runs with from a live member, every other member its log names asked under the key the log pins, the newest answer judged, and is refused `RECOVER_REFUSED`, its log and silence condition untouched (the audit line is written first), when that configuration lists none of the kept members, no longer lists the node, or when no member answers; `QuarantineOptions`, `ClearQuarantineWith` and `AskMembership` added, a transport lane `laneMembership` (5) that an older member ends unanswered; no raft frame, payload or record change, nothing persisted, no protocol raise, no raft mutation (amendment of 2026-11-01, #763) |
 | #911 | bench lane, 2026-11-11 | `make bench` runs the consensus lane (`consensus_bench_test`, race off, `manual`) and writes `internal/service/app/consensus/BENCH.md`; D16's commit target is revised to 2 × the nearest RTT + 4 × the fsync p99, its throughput and failover targets confirmed, each on the `BENCH.md` row it rests on |
 | #1422 | the owner's decision, 2026-11-14 | a node that cannot answer a JOIN at once — any but the leader and a voter level with it — refuses it `NOT_LEADER`, the leader's id and address in the reason, before the slot's rate and the authorizer, and the shipped joiners try the named leader next; no format change, no protocol raise, no raft mutation (amendment of 2026-11-14, #1422) |
+| #1447, #1440 | Raft lot L1, 2026-11-15 | a voter that does not know its leader's last index refuses a JOIN `NOT_LEADER`, the leader's address named only when known; a forward and its answer of an older term are handled at the receiver's term, so a forward that crossed a change of term is answered and no longer left to `OUTCOME_UNKNOWN`; no format change, no protocol raise, no raft mutation (amendment of 2026-11-15, #1447, #1440) |
 
 ## raft-sql-poc (owner's prior Raft)
 

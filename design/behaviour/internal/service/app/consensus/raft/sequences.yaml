@@ -5286,13 +5286,13 @@ sequences:
     steps:
       - switch:
           cases:
-            - case: m.Term == 0 || m.Term == r.term
-              do:
-                - return: "true"
             - case: m.Term > r.term
               do:
                 - return: r.stepHigherTerm(now, m)
                   to: r.stepHigherTerm
+            - case: m.Term == 0 || m.Term == r.term || forwardKind(m.Kind)
+              do:
+                - return: "true"
             - default: true
               do:
                 - eval: r.answerOlderTerm(m)
@@ -5316,6 +5316,17 @@ sequences:
       - eval: r.adoptTerm(m)
         to: r.adoptTerm
       - return: "true"
+  - of: forwardKind
+    steps:
+      - switch:
+          cases:
+            - case: core.MsgForward, core.MsgForwardAdmin, core.MsgForwardResp, core.MsgForwardAdminResp
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": k
   - of: (*Raft).adoptTerm
     participants:
       - id: caller

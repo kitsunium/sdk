@@ -30,8 +30,8 @@ const joinNotLeader = "not the leader; leader "
 // that entry itself: a learner still waiting for its snapshot, which applies
 // nothing, held the JOIN for its whole deadline and answered
 // OUTCOME_UNKNOWN although the leader had committed the admission. Only
-// the leader and a voter level with it (joinServes) answer; every other
-// node refuses before it proposes anything. A stopped node is left to the
+// the leader and a voter it knows to be level with it (joinServes) answer;
+// every other node refuses before it proposes anything. A stopped node is left to the
 // path that answers its stop.
 func (n *Node) joinElsewhere() (string, bool) {
 	var lead coreconsensus.NodeID
@@ -57,7 +57,8 @@ func (n *Node) joinElsewhere() (string, bool) {
 // reads st, answers a JOIN it forwards promptly: it follows a known leader
 // as a voter that holds its state (joinVoter), and its apply and its log are
 // level with the leader's (joinLevel) (#1422). A learner, a joiner, a node
-// with no table, a candidate and a lagging voter do not.
+// with no table, a candidate, a lagging voter and a voter that does not know
+// its leader's last index (#1447) do not.
 func (n *Node) joinServes(st *raft.StatusValue) bool {
 	return n.joinVoter(st) && n.joinLevel(st)
 }
@@ -76,10 +77,16 @@ func (n *Node) joinVoter(st *raft.StatusValue) bool {
 
 // joinLevel reports whether this node's apply is not held back, and its
 // applied index and its log are within joinApplyLag entries of its commit
-// index and of the leader's last index as its last heartbeat carried it.
+// index and of the leader's last index as its last heartbeat carried it. A
+// node that knows no last index of its leader — a leader of protocol 3 or
+// below sends none, and none came yet in this term — cannot tell how far
+// behind it is, and is not level (#1447): at 100 entries against a leader
+// at 100 000, it forwarded the JOIN and waited its whole deadline for an
+// AddLearner it was far from applying.
 func (n *Node) joinLevel(st *raft.StatusValue) bool {
-	if st.LeaderLast > st.Last+joinApplyLag || n.applyOverloaded() {
-		// Still catching up with the leader's log, or apply held back.
+	if st.LeaderLast == 0 || st.LeaderLast > st.Last+joinApplyLag || n.applyOverloaded() {
+		// The leader's last index unknown, still catching up with the
+		// leader's log, or apply held back.
 		return false
 	}
 	n.am.Lock()

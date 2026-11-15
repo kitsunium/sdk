@@ -877,6 +877,7 @@ files:
       - (*Raft).Step
       - (*Raft).stepTerm
       - (*Raft).stepHigherTerm
+      - forwardKind
       - (*Raft).adoptTerm
       - (*Raft).answerOlderTerm
       - (*Raft).stepAnyRole
@@ -1090,6 +1091,12 @@ functions:
     name: recorded
     params: v core.SessionValue, ok bool, seq uint64, sum uint32
     results: core.PositionValue, errs.Code, bool
+  - doc: |-
+      forwardKind reports whether k is a forwarded proposal or the answer to
+      one, both of which a submission id correlates (#1440).
+    name: forwardKind
+    params: k core.MessageKind
+    results: bool
   - doc: |-
       founding returns the payload of e when e is a founding membership entry,
       the entry 1 Bootstrap writes; ok is false for any other entry.
@@ -3673,7 +3680,8 @@ types:
       - doc: |-
           stepTerm reconciles m's term with this node's before anything else reads
           m: a higher term makes it a follower, unless the message is one a higher
-          term must not impose; an older term is answered so its sender steps down.
+          term must not impose; an older term is answered so its sender steps down,
+          but for a forward and its answer, which go on at this node's term.
           It reports whether m goes on to be handled at this node's term.
         name: stepTerm
         params: now time.Time, m core.MessageValue

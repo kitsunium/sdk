@@ -1092,21 +1092,21 @@ func TestApplyLagBackpressure(t *testing.T) {
 	if !overloaded {
 		t.Fatal("no OVERLOADED while apply was blocked")
 	}
-	// A command forwarded by a follower meets the same backpressure
-	// (review M2).
-	for _, tn := range c.nodes {
-		if tn == l {
-			continue
-		}
-		fctx, fcancel := context.WithTimeout(ctx, 2*time.Second)
-		_, _, err := tn.node.Propose(fctx, []byte("forwarded=1"))
-		fcancel()
-		if !errors.Is(err, coreconsensus.Overloaded) {
-			t.Fatalf("forwarded under backpressure: %v", err)
-		}
-		break
-	}
+	forwardedOverloaded(ctx, t, c)
 	close(gate)
+	// Every node applies what it holds, then the leader of the moment
+	// accepts proposals again.
+	for _, tn := range c.nodes {
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			if st := tn.node.Status(); st.Applied >= st.Commit {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("node %d never applied its commit: %+v", tn.id, tn.node.Status())
+			}
+		}
+	}
+	l = c.settledLeader(5 * time.Second)
 	for {
 		_, _, err := l.node.Propose(ctx, []byte("after=1"))
 		if err == nil {
@@ -1116,6 +1116,33 @@ func TestApplyLagBackpressure(t *testing.T) {
 			t.Fatalf("after apply caught up: %v", err)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// forwardedOverloaded checks that a command forwarded by a follower meets
+// the apply backpressure (review M2). Apply blocked for the maximum election
+// timeout makes the leader hand over (#554), so the leadership moves while
+// apply stays blocked: a forward is answered OVERLOADED by the leader it
+// reaches, or NOT_LEADER, nothing appended, by a node that leads no longer,
+// and is sent again from a follower of the leader of the moment. It is never
+// OUTCOME_UNKNOWN: the answer of a forward that crossed a change of term was
+// dropped as an older term's, and the sweep answered it so (#1440).
+func forwardedOverloaded(ctx context.Context, t *testing.T, c *cluster) {
+	t.Helper()
+	for {
+		l := c.leader(5 * time.Second)
+		f := c.otherThan(l)
+		fctx, fcancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _, err := f.node.Propose(fctx, []byte("forwarded=1"))
+		fcancel()
+		switch {
+		case errors.Is(err, coreconsensus.Overloaded):
+			return
+		case errors.Is(err, coreconsensus.NotLeader) && ctx.Err() == nil:
+			time.Sleep(10 * time.Millisecond)
+		default:
+			t.Fatalf("forwarded under backpressure: %v", err)
+		}
 	}
 }
 
