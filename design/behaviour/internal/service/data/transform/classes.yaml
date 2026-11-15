@@ -94,10 +94,12 @@ files:
       - spillChunk
       - spillPool
       - appendAllBounded
+      - drainBox
       - fillSpare
       - boundedRead
       - spill
       - fillChunks
+      - ceilingFirst
       - probeEnd
       - settle
       - releaseSpill
@@ -213,6 +215,12 @@ functions:
       partial payload — dst's spare capacity may have been written, which the
       port's convention allows.
 
+      The ceiling outranks the fault (ADR 0213, kitsunium/sdk#1432): a decoder
+      hands over the last bytes of a cut stream in the same return as its sticky
+      fault, so a read that brings the detector byte and a fault together is an
+      overflow, and the fault is not reported. A fault is reported only when the
+      stream gave no more than max bytes before it (see ceilingFirst).
+
       A dst that holds the payload exactly leaves the stream unread at its end, and
       the end is found by asking for ONE byte into probe — the decoder's own box
       owns it, so asking costs nothing — and never by taking a 32 KiB spill chunk
@@ -227,6 +235,15 @@ functions:
       materialising the production ceiling and without mutating shared state.
     name: appendAllBounded
     params: dst []byte, r io.Reader, probe *[1]byte, max int64
+    results: decoded []byte, overflow bool, err error
+  - doc: |-
+      drainBox drains a boxed decoder onto dst under max, then closes it, and says
+      what the stream owed: an overflow, a fault, or the payload. The decoder's
+      Close reports the sticky fault of a cut stream, and a stream past the
+      ceiling is refused for its size whatever its end holds (kitsunium/sdk#1432),
+      so a Close fault is judged only when the stream stayed within max.
+    name: drainBox
+    params: dst []byte, box *readerBox, max int64
     results: decoded []byte, overflow bool, err error
   - doc: |-
       fillSpare reads r into out's spare capacity, never more than limit bytes
@@ -255,9 +272,18 @@ functions:
     params: br *boundedRead, chunks []*spillChunk, spilled int, held int64
     results: filled []*spillChunk, total int, overflow bool, err error
   - doc: |-
+      ceilingFirst orders the two refusals a read can owe (kitsunium/sdk#1432):
+      read is every byte the stream has handed over past dst's prefix, fault the
+      one that came with them. Past max the answer is the ceiling's — overflow, no
+      fault — because the plaintext a caller refused to hold is a size fact
+      whatever the rest of the stream holds; within max the fault stands.
+    name: ceilingFirst
+    params: fault error, read, max int64
+    results: overflow bool, err error
+  - doc: |-
       probeEnd asks r for one byte into probe, and says what came back: carried,
-      that probe[0] is the stream's next byte; ended, that the stream is over with
-      nothing more to take; or a fault. A decoder that answers with no byte and no
+      that probe[0] is the stream's next byte (a fault beside it is returned with
+      it); ended, that the stream is over with nothing more to take; or a fault. A decoder that answers with no byte and no
       error is asked again, as io.Reader permits. When room is false — the limit is
       reached, so the detector byte is already in — nothing is asked: the loop in
       spill judges the overflow.

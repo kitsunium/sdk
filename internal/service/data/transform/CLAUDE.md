@@ -56,7 +56,7 @@ refactor that quietly turned one into the other would fail rather than ship.
 | `flate.go`   | `FlateCompressor` singleton + `NewFlateCompressor(level)` + `flateCompressor` (Algorithm "flate") |
 | `zlib.go`    | `ZlibCompressor` singleton + `NewZlibCompressor(level)` + `zlibCompressor` (Algorithm "zlib"); `usableLevel`, the one clamp of the three knobs; the block decode's own RFC 1950 envelope — `zlibBody` (header, FDICT id) and `zlibCheckTrailer` (Adler-32) — over the pooled flate decoder, errors the stdlib's own sentinels (#1102) |
 | `pool.go`    | the recycled stdlib codecs — `take*`/`release*` per scheme, the per-level writer pools of all three schemes (`newLevelPools`, `levelPool`, #900), and `readerBox` with `boundedStream`, the stream reader built on it (a pooled decoder read under the caller's ceiling — the probe byte at the ceiling is `appendAllBounded`'s detector in stream form); `takeFlateReaderFrom` takes the pool as a `readerBoxPool` so the Reset-fault gate runs on a pool whose Get returns what Put stored — a `sync.Pool` guarantees no such thing (P migration, a collection), and a fixture it missed once poisoned a later flate decode under `bazel coverage` |
-| `bounded.go` | `appendAllBounded` — the shared layer-local decompression bound and tail: `dst`'s spare capacity first, then pooled 32 KiB spill chunks (`spillPool`, at most 32 handed back per call) and one growth of `dst` to its final length (#1102); the end of a stream that filled `dst` exactly is found by one byte into the box's `probe` (`probeEnd`), never by taking a chunk (`BENCH.md` §12.2) |
+| `bounded.go` | `appendAllBounded` — the shared layer-local decompression bound and tail: `dst`'s spare capacity first, then pooled 32 KiB spill chunks (`spillPool`, at most 32 handed back per call) and one growth of `dst` to its final length (#1102); the end of a stream that filled `dst` exactly is found by one byte into the box's `probe` (`probeEnd`), never by taking a chunk (`BENCH.md` §12.2); the ceiling outranks a cut stream's fault (#1432): a decoder hands the last bytes of a cut stream over with its sticky fault, so a read past `max` beside a fault is the overflow (`ceilingFirst`), and `drainBox` judges the decoder's `Close` fault only for a stream that stayed within `max` |
 | `stream.go`  | the stream form of the three schemes (ADR 0213): `NewReader` / `NewWriter` on each, and `poolStream` (a pooled per-level encoder until `Close`, over the `resetter` the three stdlib writers share); the reader, `boundedStream`, is `pool.go`'s, beside the `readerBox` it reads through |
 | `wrap.go`    | `gzipWrap` / `flateWrap` / `zlibWrap` — the WrapParams restating `core/data/transform`'s `GzipFailed` (0.3.26.1) / `FlateFailed` (0.3.26.2) / `ZlibFailed` (0.3.26.3) |
 
@@ -287,6 +287,16 @@ cycle, and the layer firewall), so the vendor module carries the rows that
 transfer — all but `DecompressBounded`'s, until #917, and the stream form
 equal to the block form, which s2's framing is not.
 
+`ceiling_external_test.go` (#1432) — `Test_Ceiling_TruncatedPastMax`: gzip, flate
+and zlib streams cut at many offsets, judged around what each cut still decodes
+to (read from the standard library): a ceiling below it is `DecompressedTooLarge`
+and never the cut's `GZIP_FAILED` / `FLATE_FAILED` / `ZLIB_FAILED`, a ceiling at
+or above it is the scheme's code, through `DecompressBounded` over a `dst` absent,
+sized to the ceiling and sized to the plaintext, and through `NewReader`. The
+stream reader already answered in that order — it asks its probe byte before it
+looks at the decoder's fault — so its rows pin it; the block path was the one red.
+`third-party/transform`'s zstd and s2 were swept the same way and hold the order.
+
 ## Verification
 
 ```sh
@@ -297,4 +307,4 @@ cd internal/service && GOWORK=off go test -race -cover ./data/transform/...
 
 ## Fuzz (#897)
 
-`fuzz_external_test.go` — `FuzzDecompressBounded`: for gzip, flate and zlib: `DecompressBounded` never panics nor returns more than its ceiling, agrees with `Decompress` on what it accepts, and `Compress` then `DecompressBounded` gives the input back; zlib's engine is also held, on every input, to `compress/zlib` (`fuzzZlibAgrees`: same bytes on what both accept, the standard library's error on what both refuse), the guard on the envelope read in this package (#1102). The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.
+`fuzz_external_test.go` — `FuzzDecompressBounded`: for gzip, flate and zlib: `DecompressBounded` never panics nor returns more than its ceiling, agrees with `Decompress` on what it accepts, and `Compress` then `DecompressBounded` gives the input back; zlib's engine is also held, on every input, to `compress/zlib` (`fuzzZlibAgrees`: same bytes on what both accept, the standard library's error on what both refuse), the guard on the envelope read in this package (#1102). `fuzzPastCeiling` holds gzip and flate, and `fuzzZlibAgrees` zlib, to the ceiling-first order: what the standard library decodes past the ceiling is `DecompressedTooLarge` and no other code (#1432). The seed corpus runs with the package's tests; `scripts/ci/codec-fuzz.sh` (nightly, `codec-fuzz.yml`) explores it.
