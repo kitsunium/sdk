@@ -246,9 +246,27 @@ bound), a frame naming an unknown dictionary `DICTIONARY_MISMATCH`.
   chunk — which `Decompress` refuses and `NewReader` refuses the block form of,
   both as `S2_FAILED` (`TestTheStreamFormsAgainstTheBlockForms`). A zstd stream
   is frames, which `Decompress` reads.
-- **Measured** (`BENCH.md` §Streams): within 3 % of the block form for zstd at
-  4 MiB, faster on incompressible bytes; s2 within 10 % on JSON, 78 % slower on
-  random bytes, where decoding is a copy and the stream's CRC-32C is the work.
+- **Drained without a copy** (#892). The reader is an `io.WriterTo`:
+  `io.Copy` hands the caller's writer each decoded block in one `Write`, from
+  where it was decoded — zstd through `Decoder.WriteTo`, s2 through
+  `s2Frame` — behind `ceilingWriter`, which lets `limit` bytes through and
+  refuses the next one as `Read` does. A failure of the caller's writer ends
+  the stream: its own error, unwrapped as `io.Copy` returns it, then sticky.
+- **s2's framing is read by the package** (`s2frame.go`). `s2.Reader` can only
+  copy a block into the caller's buffer, and its `DecodeConcurrent` starts
+  goroutines even at one; `s2Frame` reads the same chunks with the same bounds,
+  checked before anything is allocated, and the same errors (`s2.ErrCorrupt`,
+  `ErrCRC`, `ErrUnsupported`), each block's CRC-32C verified before a byte of
+  it leaves. `TestS2FrameReadsWhatTheLibraryReads` and
+  `FuzzS2FrameAgainstTheLibrary` hold it to `s2.Reader`, through `Read` and
+  `WriteTo`: same bytes, same error. The writer cuts 256 KiB blocks
+  (`s2StreamBlockSize`): 1 MiB outgrew a core's L2, so the CRC and the copy
+  reread each block from L3; the reader still takes the format's 4 MiB.
+- **Measured** (`BENCH.md` §Streams): every stream row within the 10 % of the
+  block form at 4 MiB on this box, s2 decompression of random bytes 21 %
+  faster than its block form where it was 78 % slower; the bound itself is the
+  `tstream` suite of the A/B lane, on the runner, with a floor row
+  (`BenchmarkStreamFloor`) that proves where no checked stream can hold it.
 
 ## The conformance table (#1123)
 
@@ -329,7 +347,8 @@ without revisiting that ratio would make the guard bite legitimate traffic.
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `transform.go` | `DefaultMaxDecompressedBytes`, `checkLimit` |
 | `bounded.go` | the caller's ceiling (#917): `DecompressBounded` on both compressors, the zstd header check, the capped decode, the bounded-stream fallback |
-| `stream.go` | the stream form (ADR 0213): `NewReader` / `NewWriter` on both compressors, `boundedStream`, `encoderStream`, the s2 stream pools |
+| `stream.go` | the stream form (ADR 0213): `NewReader` / `NewWriter` on both compressors, `boundedStream` (an `io.WriterTo` too, #892), `ceilingWriter`, `encoderStream`, the s2 stream pools |
+| `s2frame.go` | `s2Frame`, the s2 framing format's decoder `NewReader` reads through — `Read` and `WriteTo`, `s2.Reader`'s bounds and errors (#892) — and `s2StreamBlockSize` |
 | `zstd.go` | `Zstd` singleton, `ZstdCompressor` (its shared encoder, decoder and capped decoder), `NewZstdCompressor`, `NewZstdCompressorWithDictionary`, `newZstd`, `ZstdLevel`, `encoderLevel`, `isLimitError`, `frameDictionaryID`, `joinTail` (the tail decode, #1163) |
 | `s2.go` | `S2` singleton, `S2Compressor`, `NewS2Compressor` |
 | `gen_codes.go` | `0.3.63.1`–`0.3.63.6`; `ZstdFailed`, `S2Failed`, `DecompressionLimitExceeded`, `LimitMisconfigured`, `DictionaryMismatch`, `DictionaryInvalid` — written by kit gen from `design/third-party/transform.yaml` (ADR 0164) |

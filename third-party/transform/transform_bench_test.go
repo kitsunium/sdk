@@ -2,7 +2,9 @@ package transform_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"math/rand/v2"
 	"slices"
@@ -400,6 +402,86 @@ func benchStreamRows(b *testing.B, name string, c coretransform.Compressor, stre
 			}
 			if err = r.Close(); err != nil {
 				b.Fatal(err)
+			}
+		}
+	})
+}
+
+// BenchmarkStreamFloor is the least any s2 stream reader that verifies the
+// format's checksums does per block, without the framing and without writing
+// anywhere (#892): a stored block copied out of the source and its CRC-32C
+// (random), a compressed one decoded and its CRC-32C (json), into a buffer
+// reused across blocks. It is a proof row, not a bound: when it is not within
+// 10 % of the block form on a machine, no such stream is either.
+func BenchmarkStreamFloor(b *testing.B) {
+	for _, corpus := range benchCorpora() {
+		var framed bytes.Buffer
+		w, err := tptransform.S2.(coretransform.StreamingCompressor).NewWriter(&framed)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err = w.Write(corpus.data); err != nil {
+			b.Fatal(err)
+		}
+		if err = w.Close(); err != nil {
+			b.Fatal(err)
+		}
+		benchStreamFloor(b, corpus.name+"/s2", s2Chunks(b, framed.Bytes()), len(corpus.data))
+	}
+}
+
+// s2Chunk is one block chunk of a framed s2 stream: its type, its masked
+// CRC-32C and its body.
+type s2Chunk struct {
+	kind byte
+	sum  uint32
+	body []byte
+}
+
+// s2Chunks lists the block chunks of a framed s2 stream, skipping the rest.
+func s2Chunks(tb testing.TB, framed []byte) []s2Chunk {
+	tb.Helper()
+	var out []s2Chunk
+	for len(framed) >= 4 {
+		size := int(framed[1]) | int(framed[2])<<8 | int(framed[3])<<16
+		if 4+size > len(framed) {
+			tb.Fatalf("a chunk of %d bytes past the stream's end", size)
+		}
+		chunk := framed[4 : 4+size]
+		if framed[0] <= 0x01 {
+			out = append(out, s2Chunk{framed[0], binary.LittleEndian.Uint32(chunk), chunk[4:]})
+		}
+		framed = framed[4+size:]
+	}
+	return out
+}
+
+// s2FloorBlock is a chunk's block in block: decoded, or copied when stored.
+func s2FloorBlock(block []byte, c s2Chunk) ([]byte, error) {
+	if c.kind == 0x00 {
+		return s2.Decode(block, c.body)
+	}
+	return block[:copy(block, c.body)], nil
+}
+
+// benchStreamFloor runs the floor over chunks, the stream's blocks.
+func benchStreamFloor(b *testing.B, name string, chunks []s2Chunk, plainLen int) {
+	b.Helper()
+	table := crc32.MakeTable(crc32.Castagnoli)
+	b.Run(name, func(b *testing.B) {
+		block := make([]byte, 4<<20)
+		b.SetBytes(int64(plainLen))
+		b.ReportAllocs()
+		for b.Loop() {
+			for _, c := range chunks {
+				plain, err := s2FloorBlock(block, c)
+				if err != nil {
+					b.Fatal(err)
+				}
+				crc := crc32.Update(0, table, plain)
+				if (crc>>15|crc<<17)+0xa282ead8 != c.sum {
+					b.Fatal("the floor's CRC-32C does not match the stream's")
+				}
 			}
 		}
 	})

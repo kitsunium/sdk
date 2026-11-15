@@ -2,6 +2,8 @@ package transform_test
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"runtime"
 	"testing"
@@ -166,4 +168,120 @@ func TestADictionaryStreamNeedsItsDictionary(t *testing.T) {
 	if !errs.HasCode(rerr, tptransform.CodeDictionaryMismatch) {
 		t.Fatalf("without it: err=%v, want DictionaryMismatch", rerr)
 	}
+}
+
+// TestAStreamWritesToWhatItReads: io.Copy drains a stream through its
+// WriteTo (#892), and hands the caller's writer what Read hands over, under
+// every ceiling — all of it and the end, or exactly the ceiling's bytes and
+// DecompressedTooLarge, sticky through both WriteTo and Read — after a
+// first Read or none.
+func TestAStreamWritesToWhatItReads(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		sc      streamScheme
+		ceiling int64
+		first   int
+	}
+	plain := bytes.Repeat([]byte("copied, never buffered "), 40000)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		stream := writeStream(t, c.sc.c, plain)
+		r, err := c.sc.c.NewReader(bytes.NewReader(stream), c.ceiling)
+		if err != nil {
+			t.Fatalf("%s: NewReader: %v", c.name, err)
+		}
+		defer func() {
+			if cerr := r.Close(); cerr != nil {
+				t.Errorf("%s: Close: %v", c.name, cerr)
+			}
+		}()
+		if _, ok := r.(io.WriterTo); !ok {
+			t.Fatalf("%s: the stream is not an io.WriterTo", c.name)
+		}
+		head := make([]byte, c.first)
+		if _, rerr := io.ReadFull(r, head); rerr != nil {
+			t.Fatalf("%s: the first Read: %v", c.name, rerr)
+		}
+		var out bytes.Buffer
+		_, cerr := io.Copy(&out, r)
+		got := append(head, out.Bytes()...)
+		fits := c.ceiling >= int64(len(plain))
+		handed := min(max(c.ceiling, 0), int64(len(plain)))
+		if !bytes.Equal(got, plain[:handed]) {
+			t.Fatalf("%s: handed over %d bytes, want the first %d", c.name, len(got), handed)
+		}
+		if fits && cerr != nil || !fits && !errors.Is(cerr, coretransform.DecompressedTooLarge) {
+			t.Fatalf("%s: io.Copy err=%v, fits=%v", c.name, cerr, fits)
+		}
+		_, again := r.(io.WriterTo).WriteTo(io.Discard)
+		_, read := r.Read(make([]byte, 8))
+		if fits && (again != nil || read != io.EOF) || !fits && (!errors.Is(again, coretransform.DecompressedTooLarge) || !errors.Is(read, coretransform.DecompressedTooLarge)) {
+			t.Fatalf("%s: after the outcome WriteTo=%v, Read=%v", c.name, again, read)
+		}
+	}
+	for _, sc := range streamSchemes(t) {
+		for _, ceiling := range []int64{int64(len(plain)), int64(len(plain)) + 1, int64(len(plain)) - 1, 300 << 10, 1, 0, -1} {
+			for _, first := range []int{0, 1} {
+				//: a first Read needs a byte the ceiling admits.
+				if first > 0 && ceiling < 1 {
+					continue
+				}
+				runCase(t, tc{fmt.Sprintf("%s/ceiling %d/first %d", sc.name, ceiling, first), sc, ceiling, first})
+			}
+		}
+	}
+}
+
+// TestAStreamStopsWhereItsWriterDoes: a caller's writer that fails stops
+// io.Copy with that very error, unwrapped as io.Copy returns it, and the
+// stream is spent: every read after returns it too. One that takes less
+// than it is given without an error stops it with io.ErrShortWrite.
+func TestAStreamStopsWhereItsWriterDoes(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		sc   streamScheme
+		w    *refusingWriter
+		want error
+	}
+	stream := func(sc streamScheme) []byte {
+		return writeStream(t, sc.c, bytes.Repeat([]byte("refused "), 100000))
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		r, err := c.sc.c.NewReader(bytes.NewReader(stream(c.sc)), 1<<30)
+		if err != nil {
+			t.Fatalf("%s: NewReader: %v", c.name, err)
+		}
+		n, cerr := io.Copy(c.w, r)
+		if cerr != c.want || n != c.w.took {
+			t.Fatalf("%s: io.Copy wrote %d (%d taken), err=%v, want %v", c.name, n, c.w.took, cerr, c.want)
+		}
+		if _, again := r.Read(make([]byte, 8)); again != c.want {
+			t.Fatalf("%s: a Read after it: %v, want %v", c.name, again, c.want)
+		}
+		if closeErr := r.Close(); closeErr != nil {
+			t.Fatalf("%s: Close: %v", c.name, closeErr)
+		}
+	}
+	for _, sc := range streamSchemes(t) {
+		runCase(t, tc{sc.name + "/failing", sc, &refusingWriter{take: 1 << 10, fail: io.ErrClosedPipe}, io.ErrClosedPipe})
+		runCase(t, tc{sc.name + "/short", sc, &refusingWriter{take: 1 << 10}, io.ErrShortWrite})
+	}
+}
+
+// refusingWriter takes take bytes of the first write it is handed, then
+// returns fail — nil for a writer that takes less without saying why.
+type refusingWriter struct {
+	take int
+	took int64
+	fail error
+}
+
+// Write implements io.Writer.
+func (w *refusingWriter) Write(p []byte) (n int, err error) {
+	n = min(w.take, len(p))
+	w.took += int64(n)
+	return n, w.fail
 }

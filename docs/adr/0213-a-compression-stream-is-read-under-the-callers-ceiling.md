@@ -147,3 +147,47 @@ the aliases and the two functions are additions.
   `pkg/v1/data/transform` `TestAStreamStopsAtItsLimit`
 - `internal/service/data/transform/BENCH.md` §14, `third-party/transform/BENCH.md`
   §Streams
+
+## Amendment — 2026-11-15: a stream is drained without a copy, and s2's exception is withdrawn (#892)
+
+Proposed, pending the owner's decision. #892's bound — every zstd and s2 stream
+row within 10 % of the block form at 4 MiB — was reopened by the owner on
+2026-11-13: the first Consequence above, "one exception is measured and kept",
+was written by the change it excused, and is not the owner's. Measured
+before this amendment, s2's stream decompressed random bytes 78 % slower than
+its block form. The exception is withdrawn; three changes, none exported, put
+the row 21 % ahead of it on the box that measured 78 % (Zen 1, whose CRC-32C is
+the slowest of the families CI runs on), and the bound itself is held by the
+interleaved A/B lane, suite `tstream`, on the runner.
+
+1. **s2's writer cuts 256 KiB blocks.** The library's 1 MiB block outgrew a
+   core's L2, so the reader's CRC and its copy reread every block from L3.
+   JSON's stream ratio moves from 3.383 to 3.375. The bytes stay the s2
+   framing format, read by every s2 reader and by this SDK's earlier versions;
+   the reader still takes the format's 4 MiB blocks, and nothing at rest
+   depends on the block size. D2's memory line reads: one block, 256 KiB for a
+   stream this SDK wrote, at most 4 MiB for any.
+2. **A stream is an `io.WriterTo`.** `io.Copy` hands the caller's writer each
+   decoded block in one `Write`, from where it was decoded, instead of copying
+   it into a buffer of its own: zstd through `Decoder.WriteTo`, s2 through the
+   decoder of item 3. D2's ceiling is the same through both: at most `max`
+   bytes reach the writer, then the byte past them is `DecompressedTooLarge`,
+   sticky. A failure of the caller's writer ends the stream with that writer's
+   own error, unwrapped as `io.Copy` returns it, and sticky.
+3. **s2's framing format is read by the SDK.** `s2.Reader` has no way to hand a
+   block over without copying it, and its `DecodeConcurrent` starts goroutines
+   even at a concurrency of one, which D5 refuses. `third-party/transform`
+   reads the published framing format itself (`s2frame.go`): the same chunks,
+   the same bounds checked before anything is allocated (4 MiB a block, 64 KiB
+   in a snappy-identified stream, a chunk no longer than a 4 MiB block's worst
+   encoding), the same errors, and each block's CRC-32C verified before a byte
+   of it leaves, as D3 requires. It uses `s2.Decode` and `hash/crc32` and
+   nothing else of the vendor's stream code, and a differential test and fuzz
+   target hold it to `s2.Reader`: same bytes, same error.
+
+D1, D3, D4, D5, D6 and D7 are unchanged; no exported symbol changes. A floor
+row (`BenchmarkStreamFloor`: a block's copy or decode and its CRC-32C, nothing
+else) goes with the lane's rules, so that a family of runner on which it misses
+the bound proves no single-goroutine stream that verifies s2's checksums can
+hold it there. linux/386 computes CRC-32C without SSE 4.2: the bound is the
+amd64 runner's.

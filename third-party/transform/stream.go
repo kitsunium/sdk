@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"errors"
 	"io"
 
 	"github.com/klauspost/compress/s2"
@@ -22,20 +23,27 @@ func releaseZstdDecoder(pool *recycler.Pool[*zstd.Decoder], dec *zstd.Decoder) {
 	pool.Put(dec)
 }
 
-// releaseS2Reader unbinds an s2 stream reader from the caller's reader and
+// releaseS2Frame unbinds an s2 stream decoder from the caller's reader and
 // hands it back to the shared pool.
-func releaseS2Reader(dec *s2.Reader) {
-	dec.Reset(nil)
-	s2ReaderPool.Put(dec)
+func releaseS2Frame(dec *s2Frame) {
+	dec.reset(nil)
+	s2FramePool.Put(dec)
 }
 
-// s2ReaderPool and s2WriterPool recycle the s2 stream codecs: every
+// s2FramePool and s2WriterPool recycle the s2 stream codecs: every
 // S2Compressor builds them with the same options, so one pool serves all, and
-// a stream costs no 1 MiB buffer per call once the pool is warm.
+// a stream costs no block buffer per call once the pool is warm.
 var (
-	s2ReaderPool = recycler.NewPool(func() *s2.Reader { return nil })
+	s2FramePool  = recycler.NewPool(func() *s2Frame { return new(s2Frame) })
 	s2WriterPool = recycler.NewPool(func() *s2.Writer { return nil })
 )
+
+// streamDecoder is what both schemes' stream decoders are: a reader that can
+// also write what it decodes into a writer, which io.Copy prefers.
+type streamDecoder interface {
+	io.Reader
+	io.WriterTo
+}
 
 // boundedStream is the reader NewReader returns for both schemes (ADR 0213):
 // the library's stream decoder read under the caller's ceiling. It hands over
@@ -45,9 +53,14 @@ var (
 // is classified as the block path classifies it, so a window past the
 // compressor's ceiling is DecompressionLimitExceeded and a frame naming an
 // unknown dictionary is DictionaryMismatch.
+//
+// It is an io.WriterTo too, so io.Copy hands the caller's writer each decoded
+// block in one Write, never copied into a buffer of io.Copy's (#892): zstd's
+// Decoder.WriteTo and s2Frame.WriteTo write through ceiling, which lets limit
+// bytes through and refuses the next one as Read does.
 type boundedStream struct {
 	// dec is the decoder, nil once Close has released it.
-	dec io.Reader
+	dec streamDecoder
 	// release hands dec back to its pool; Close calls it once.
 	release func()
 	// classify turns a library error into the scheme's.
@@ -60,6 +73,9 @@ type boundedStream struct {
 	err error
 	// probe is the one byte asked of the decoder at the ceiling.
 	probe [1]byte
+	// ceiling is the writer WriteTo hands the decoder, a field so that it
+	// costs no allocation.
+	ceiling ceilingWriter
 }
 
 // Read implements io.Reader under the ceiling.
@@ -109,6 +125,96 @@ func (s *boundedStream) settle(rerr error) error {
 	//: a corrupt stream, a refusal of the library's, the caller's reader.
 	s.err = s.classify(rerr)
 	return s.err
+}
+
+// WriteTo implements io.WriterTo under the ceiling: at most left bytes reach
+// w, then a byte past them is DecompressedTooLarge, as through Read. A fault
+// of w ends the stream: it is returned as is, and kept.
+func (s *boundedStream) WriteTo(w io.Writer) (n int64, err error) {
+	//: an outcome is final; the end has nothing more to write.
+	if s.err != nil {
+		return 0, s.ended()
+	}
+	//: closed: the decoder is released and must not be touched.
+	if s.dec == nil {
+		return 0, errs.Wrap(io.ErrClosedPipe, *s.closed)
+	}
+	s.ceiling = ceilingWriter{w: w, left: s.left}
+	n, werr := s.dec.WriteTo(&s.ceiling)
+	s.left = s.ceiling.left
+	failure := s.ceiling.failure
+	//: the caller's writer is not kept past the call.
+	s.ceiling = ceilingWriter{}
+	switch {
+	//: the stream ended within the ceiling, its checksums verified.
+	case werr == nil:
+		s.err = io.EOF
+		return n, nil
+	//: a byte past the ceiling, or w's own failure: what stopped the decoder.
+	//: errors.Is, not ==, so a caller's error of an uncomparable type is safe.
+	case errors.Is(werr, failure):
+		s.err = werr
+	//: a corrupt stream, a refusal of the library's, the caller's reader.
+	default:
+		s.err = s.classify(werr)
+	}
+	return n, s.err
+}
+
+// ended is what a WriteTo after the outcome returns: nothing at the end, the
+// sticky error otherwise.
+func (s *boundedStream) ended() error {
+	//: the end is not an error to a WriterTo.
+	if s.err == io.EOF {
+		return nil
+	}
+	return s.err
+}
+
+// ceilingWriter is the writer boundedStream.WriteTo hands the decoder: it
+// passes left bytes on to w and refuses a byte past them. failure is the
+// error it returned the decoder, so that one is told from the decoder's own.
+type ceilingWriter struct {
+	w       io.Writer
+	left    int64
+	failure error
+}
+
+// Write implements io.Writer: p up to the ceiling reaches w, and a byte of p
+// past it is DecompressedTooLarge once what fitted is written.
+func (c *ceilingWriter) Write(p []byte) (n int, err error) {
+	over := int64(len(p)) > c.left
+	//: only what the ceiling still admits is passed on.
+	if over {
+		p = p[:c.left]
+	}
+	n, err = c.pass(p)
+	//: the byte past the ceiling, once the bytes within it are written.
+	if err == nil && over {
+		err = coretransform.DecompressedTooLarge
+	}
+	c.failure = err
+	return n, err
+}
+
+// pass writes p, within the ceiling, to w: a short count is
+// io.ErrShortWrite, and a count outside p a writer's fault read as none.
+func (c *ceilingWriter) pass(p []byte) (n int, err error) {
+	//: an empty write reaches nobody.
+	if len(p) == 0 {
+		return 0, nil
+	}
+	n, err = c.w.Write(p)
+	//: a count outside what was given is a writer's fault, read as none.
+	if n < 0 || n > len(p) {
+		n, err = 0, io.ErrShortWrite
+	}
+	c.left -= int64(n)
+	//: a writer that took less without saying why.
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	return n, err
 }
 
 // Close releases the decoder, once. It does not close the caller's reader; a
@@ -257,15 +363,10 @@ func (z *ZstdCompressor) NewWriter(w io.Writer) (wc io.WriteCloser, err error) {
 // a malformed stream when handed a block, and refused by Decompress the other
 // way. Its memory is one stream block, at most the framing format's 4 MiB.
 func (s *S2Compressor) NewReader(r io.Reader, limit int64) (rc io.ReadCloser, err error) {
-	dec := s2ReaderPool.Get()
-	//: a hit is rebound to r, a miss built for it.
-	if dec != nil {
-		dec.Reset(r)
-	} else {
-		dec = s2.NewReader(r)
-	}
+	dec := s2FramePool.Get()
+	dec.reset(r)
 	return &boundedStream{
-		dec: dec, release: func() { releaseS2Reader(dec) },
+		dec: dec, release: func() { releaseS2Frame(dec) },
 		classify: s.classifyStream, closed: &s2Wrap, left: max(0, limit),
 	}, nil
 }
@@ -287,7 +388,7 @@ func (*S2Compressor) NewWriter(w io.Writer) (wc io.WriteCloser, err error) {
 	if enc != nil {
 		enc.Reset(w)
 	} else {
-		enc = s2.NewWriter(w, s2.WriterConcurrency(1))
+		enc = s2.NewWriter(w, s2.WriterConcurrency(1), s2.WriterBlockSize(s2StreamBlockSize))
 	}
 	return &encoderStream{enc: enc, wrap: &s2Wrap, release: func() {
 		//: unbind the caller's writer before the pool keeps the encoder.
