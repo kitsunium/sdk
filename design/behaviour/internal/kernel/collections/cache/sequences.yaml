@@ -482,6 +482,100 @@ sequences:
         kind: actor
       - id: (*UnlockedMap).admit
         kind: self
+      - id: c.admitS3FIFO
+        kind: internal
+      - id: c.admitTinyLFU
+        kind: internal
+      - id: c.main.pushFront
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: PolicyS3FIFO
+              do:
+                - eval: c.admitS3FIFO(ent)
+                  to: c.admitS3FIFO
+            - case: PolicyTinyLFU
+              do:
+                - eval: c.admitTinyLFU(ent)
+                  to: c.admitTinyLFU
+            - default: true
+              do:
+                - set: ent.queue
+                  value: queueMain
+                - eval: c.main.pushFront(ent)
+                  to: c.main.pushFront
+          "on": c.policy
+  - of: (*UnlockedMap).touch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).touch
+        kind: self
+      - id: c.touchTinyLFU
+        kind: internal
+      - id: c.main.moveFront
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: PolicyS3FIFO
+              do:
+                - opt:
+                    do:
+                      - op: ++
+                        set: ent.freq
+                    when: ent.freq < maxFreq
+            - case: PolicyTinyLFU
+              do:
+                - eval: c.touchTinyLFU(ent)
+                  to: c.touchTinyLFU
+            - default: true
+              do:
+                - eval: c.main.moveFront(ent)
+                  to: c.main.moveFront
+          "on": c.policy
+  - of: (*UnlockedMap).evictOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).evictOne
+        kind: self
+      - id: c.evictS3FIFO
+        kind: internal
+      - id: c.evictTinyLFU
+        kind: internal
+      - id: c.removeEvict
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: PolicyS3FIFO
+              do:
+                - return: c.evictS3FIFO(fresh, pending)
+                  to: c.evictS3FIFO
+            - case: PolicyTinyLFU
+              do:
+                - return: c.evictTinyLFU(fresh, pending)
+                  to: c.evictTinyLFU
+            - default: true
+              do:
+                - bind: victim
+                  eval: c.main.tail
+                - opt:
+                    do:
+                      - return: "false"
+                    when: victim == nil || victim == fresh
+                - eval: c.removeEvict(victim, pending)
+                  to: c.removeEvict
+                - return: "true"
+          "on": c.policy
+  - of: (*UnlockedMap).admitS3FIFO
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).admitS3FIFO
+        kind: self
       - id: c.main.pushFront
         kind: internal
       - id: c.small.pushFront
@@ -494,64 +588,11 @@ sequences:
             - eval: c.main.pushFront(ent)
               to: c.main.pushFront
             - return: ""
-          when: c.policy != PolicyS3FIFO
-      - opt:
-          do:
-            - set: ent.queue
-              value: queueMain
-            - eval: c.main.pushFront(ent)
-              to: c.main.pushFront
-            - return: ""
           when: c.ghost.remembers(ent.key)
       - set: ent.queue
         value: queueSmall
       - eval: c.small.pushFront(ent)
         to: c.small.pushFront
-  - of: (*UnlockedMap).touch
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*UnlockedMap).touch
-        kind: self
-      - id: c.main.moveFront
-        kind: internal
-    steps:
-      - opt:
-          do:
-            - opt:
-                do:
-                  - op: ++
-                    set: ent.freq
-                when: ent.freq < maxFreq
-            - return: ""
-          when: c.policy == PolicyS3FIFO
-      - eval: c.main.moveFront(ent)
-        to: c.main.moveFront
-  - of: (*UnlockedMap).evictOne
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*UnlockedMap).evictOne
-        kind: self
-      - id: c.evictS3FIFO
-        kind: internal
-      - id: c.removeEvict
-        kind: internal
-    steps:
-      - opt:
-          do:
-            - return: c.evictS3FIFO(fresh, pending)
-              to: c.evictS3FIFO
-          when: c.policy == PolicyS3FIFO
-      - bind: victim
-        eval: c.main.tail
-      - opt:
-          do:
-            - return: "false"
-          when: victim == nil || victim == fresh
-      - eval: c.removeEvict(victim, pending)
-        to: c.removeEvict
-      - return: "true"
   - of: (*UnlockedMap).evictS3FIFO
     steps:
       - opt:
@@ -658,9 +699,284 @@ sequences:
     steps:
       - opt:
           do:
-            - return: c.maxEntries
+            - return: max(c.maxEntries/ghostShare, 1)
           when: c.maxEntries > 0
-      - return: len(c.items)
+      - return: max(len(c.items)/ghostShare, 1)
+  - of: (*frequencySketch).size
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*frequencySketch).size
+        kind: self
+      - id: s.advance
+        kind: internal
+    steps:
+      - set: entries
+        value: min(max(entries, 1), sketchMaxEntries)
+      - bind: blocks
+        eval: "1"
+      - loop:
+          cond: blocks*blockWords < entries
+          do:
+            - op: <<=
+              set: blocks
+              value: "1"
+      - bind: table
+        eval: make([]sketchBlock, blocks)
+      - set: s.blocks
+        value: table
+      - set: s.blockMask
+        value: uint32(blocks) - 1
+      - set: s.additions
+        value: "0"
+      - set: s.sampleSize
+        value: sketchSample * entries
+      - bind: bits
+        eval: doorMinBits
+      - loop:
+          cond: bits/doorBitsPerSample < s.sampleSize && bits < doorMaxBits
+          do:
+            - op: <<=
+              set: bits
+              value: "1"
+      - bind: door
+        eval: make([]uint64, bits/doorMinBits)
+      - set: s.door
+        value: door
+      - set: s.doorMask
+        value: uint32(bits - 1)
+      - eval: s.advance()
+        to: s.advance
+  - of: (*frequencySketch).advance
+    steps:
+      - op: ++
+        set: s.period
+      - opt:
+          do:
+            - op: ++
+              set: s.period
+            - set: s.wrapped
+              value: "true"
+          when: s.period == periodStale
+  - of: (*frequencySketch).fit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*frequencySketch).fit
+        kind: self
+      - id: s.size
+        kind: internal
+    steps:
+      - bind: words
+        eval: len(s.blocks) * blockWords
+      - opt:
+          do:
+            - return: ""
+          when: entries <= words || words >= sketchMaxEntries
+      - eval: s.size(entries)
+        to: s.size
+  - of: (*frequencySketch).clear
+    steps:
+      - eval: clear(s.blocks)
+      - eval: clear(s.door)
+      - set: s.additions
+        value: "0"
+  - of: (*frequencySketch).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*frequencySketch).record
+        kind: self
+      - id: s.doorCells
+        kind: internal
+      - id: s.increment
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(s.blocks) == 0
+      - bind: first, second, third
+        eval: s.doorCells(hash)
+        to: s.doorCells
+      - set: "*seen"
+        value: s.period
+      - opt:
+          do:
+            - eval: s.increment(hash)
+              to: s.increment
+            - return: ""
+          when: s.doorHolds(first, second, third)
+      - op: "|="
+        set: s.door[first>>6]
+        value: 1 << (first & 63)
+      - op: "|="
+        set: s.door[second>>6]
+        value: 1 << (second & 63)
+      - op: "|="
+        set: s.door[third>>6]
+        value: 1 << (third & 63)
+  - of: (*frequencySketch).touch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*frequencySketch).touch
+        kind: self
+      - id: s.increment
+        kind: internal
+      - id: s.record
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: s.increment(hash)
+              to: s.increment
+            - return: ""
+          when: "*seen == s.period"
+      - eval: s.record(hash, seen)
+        to: s.record
+  - of: (*frequencySketch).estimateHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*frequencySketch).estimateHeld
+        kind: self
+      - id: s.frequency
+        kind: internal
+    steps:
+      - bind: count
+        eval: s.frequency(hash)
+        to: s.frequency
+      - opt:
+          do:
+            - op: ++
+              set: count
+          when: len(s.blocks) != 0 && seen == s.period
+      - return: count
+  - of: (*frequencySketch).doorCells
+    steps:
+      - bind: low
+        eval: uint64(hash) * doorMixLow
+      - bind: high
+        eval: uint64(hash) * doorMixHigh
+      - return: uint32(low) & s.doorMask, uint32(low>>32) & s.doorMask, uint32(high>>32) & s.doorMask
+  - of: (*frequencySketch).doorHolds
+    steps:
+      - return: |-
+          s.door[first>>6]&(1<<(first&63)) != 0 &&
+          		s.door[second>>6]&(1<<(second&63)) != 0 &&
+          		s.door[third>>6]&(1<<(third&63)) != 0
+  - of: (*frequencySketch).counters
+    steps:
+      - set: mix
+        value: hash * counterMix
+      - op: ^=
+        set: mix
+        value: mix >> 14
+      - return: "&s.blocks[hash&s.blockMask], mix"
+  - of: (*frequencySketch).increment
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*frequencySketch).increment
+        kind: self
+      - id: s.counters
+        kind: internal
+      - id: s.age
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(s.blocks) == 0
+      - bind: block, mix
+        eval: s.counters(hash)
+        to: s.counters
+      - bind: added
+        eval: |-
+          bump(&block[mix&1], mix>>1&15) |
+          		bump(&block[2|mix>>8&1], mix>>9&15) |
+          		bump(&block[4|mix>>16&1], mix>>17&15) |
+          		bump(&block[6|mix>>24&1], mix>>25&15)
+      - opt:
+          do:
+            - return: ""
+          when: added == 0
+      - op: ++
+        set: s.additions
+      - opt:
+          do:
+            - eval: s.age()
+              to: s.age
+          when: s.additions >= s.sampleSize
+  - of: bump
+    steps:
+      - bind: shift
+        eval: nibble << 2
+      - bind: room
+        eval: (*word>>shift&counterMax+1)>>4 ^ 1
+      - op: +=
+        set: "*word"
+        value: room << shift
+      - return: room
+  - of: (*frequencySketch).frequency
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*frequencySketch).frequency
+        kind: self
+      - id: s.counters
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: len(s.blocks) == 0
+      - bind: block, mix
+        eval: s.counters(hash)
+        to: s.counters
+      - bind: least
+        eval: block[mix&1] >> ((mix >> 1 & 15) << 2) & counterMax
+      - set: least
+        value: min(least, block[2|mix>>8&1]>>((mix>>9&15)<<2)&counterMax)
+      - set: least
+        value: min(least, block[4|mix>>16&1]>>((mix>>17&15)<<2)&counterMax)
+      - return: min(least, block[6|mix>>24&1]>>((mix>>25&15)<<2)&counterMax)
+  - of: (*frequencySketch).age
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*frequencySketch).age
+        kind: self
+      - id: bits
+        kind: stdlib
+      - id: s.advance
+        kind: internal
+    steps:
+      - bind: odd
+        eval: "0"
+      - loop:
+          do:
+            - bind: block
+              eval: "&s.blocks[at]"
+            - loop:
+                do:
+                  - op: +=
+                    set: odd
+                    to: bits
+                    value: bits.OnesCount64(word & counterLowBits)
+                  - set: block[w]
+                    value: word >> 1 & counterHalfMask
+                key: w
+                range: block
+                value: word
+          key: at
+          range: s.blocks
+      - set: s.additions
+        value: (s.additions - odd/4) / 2
+      - eval: clear(s.door)
+      - eval: s.advance()
+        to: s.advance
   - of: NewStriped
     participants:
       - id: caller
@@ -903,6 +1219,328 @@ sequences:
   - of: (*Striped).Stripes
     steps:
       - return: len(s.stripes)
+  - of: (*UnlockedMap).initTinyLFU
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).initTinyLFU
+        kind: self
+      - id: c.sketch.size
+        kind: internal
+      - id: protectedShare
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: c.shares.window
+              value: max(c.maxEntries/windowShare, 1)
+            - set: c.shares.protected
+              value: int(protectedShare(int64(c.maxEntries - c.shares.window)))
+            - eval: c.sketch.size(c.maxEntries)
+              to: c.sketch.size
+          when: c.maxEntries > 0
+      - opt:
+          do:
+            - set: c.shares.windowWeight
+              value: max(c.maxWeight/int64(windowShare), 1)
+            - set: c.shares.protectedWeight
+              to: protectedShare
+              value: protectedShare(c.maxWeight - c.shares.windowWeight)
+            - opt:
+                do:
+                  - eval: c.sketch.size(blockWords)
+                    to: c.sketch.size
+                when: c.maxEntries == 0
+          when: c.maxWeight > 0
+  - of: protectedShare
+    steps:
+      - return: size/int64(fifths)*int64(protectedFifths) + size%int64(fifths)*int64(protectedFifths)/int64(fifths)
+  - of: (*UnlockedMap).admitTinyLFU
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).admitTinyLFU
+        kind: self
+      - id: c.sketch.fit
+        kind: internal
+      - id: c.sketch.record
+        kind: internal
+      - id: c.retireMarks
+        kind: internal
+      - id: c.small.pushFront
+        kind: internal
+      - id: c.probate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: c.sketch.fit(len(c.items))
+                    to: c.sketch.fit
+                when: c.maxEntries == 0
+            - set: ent.hash
+              value: uint32(maphash.Comparable(sketchSeed, ent.key))
+            - eval: c.sketch.record(ent.hash, &ent.period)
+              to: c.sketch.record
+            - opt:
+                do:
+                  - eval: c.retireMarks()
+                    to: c.retireMarks
+                when: c.sketch.wrapped
+          when: c.sketch.blocks != nil
+      - set: ent.queue
+        value: queueSmall
+      - eval: c.small.pushFront(ent)
+        to: c.small.pushFront
+      - loop:
+          cond: c.windowIsLarge()
+          do:
+            - bind: candidate
+              eval: c.small.tail
+            - opt:
+                do:
+                  - return: ""
+                when: candidate == ent || !c.mainHasRoom(candidate)
+            - eval: c.probate(candidate)
+              to: c.probate
+  - of: (*UnlockedMap).touchTinyLFU
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).touchTinyLFU
+        kind: self
+      - id: c.countHit
+        kind: internal
+      - id: c.main.moveFront
+        kind: internal
+      - id: c.reorderTinyLFU
+        kind: internal
+    steps:
+      - eval: c.countHit(ent)
+        to: c.countHit
+      - opt:
+          do:
+            - eval: c.main.moveFront(ent)
+              to: c.main.moveFront
+            - return: ""
+          when: ent.queue == queueMain
+      - eval: c.reorderTinyLFU(ent)
+        to: c.reorderTinyLFU
+  - of: (*UnlockedMap).countHit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).countHit
+        kind: self
+      - id: c.sketch.touch
+        kind: internal
+      - id: c.retireMarks
+        kind: internal
+    steps:
+      - eval: c.sketch.touch(ent.hash, &ent.period)
+        to: c.sketch.touch
+      - opt:
+          do:
+            - eval: c.retireMarks()
+              to: c.retireMarks
+          when: c.sketch.wrapped
+  - of: (*UnlockedMap).retireMarks
+    steps:
+      - set: c.sketch.wrapped
+        value: "false"
+      - loop:
+          do:
+            - set: ent.period
+              value: periodStale
+          key: _
+          range: c.items
+          value: ent
+  - of: (*UnlockedMap).reorderTinyLFU
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).reorderTinyLFU
+        kind: self
+      - id: c.small.moveFront
+        kind: internal
+      - id: c.probation.unlink
+        kind: internal
+      - id: c.main.pushFront
+        kind: internal
+      - id: c.main.unlink
+        kind: internal
+      - id: c.probation.pushFront
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.small.moveFront(ent)
+              to: c.small.moveFront
+            - return: ""
+          when: ent.queue == queueSmall
+      - eval: c.probation.unlink(ent)
+        to: c.probation.unlink
+      - set: ent.queue
+        value: queueMain
+      - eval: c.main.pushFront(ent)
+        to: c.main.pushFront
+      - loop:
+          cond: c.protectedIsLarge()
+          do:
+            - bind: demoted
+              eval: c.main.tail
+            - eval: c.main.unlink(demoted)
+              to: c.main.unlink
+            - set: demoted.queue
+              value: queueProbation
+            - eval: c.probation.pushFront(demoted)
+              to: c.probation.pushFront
+  - of: (*UnlockedMap).evictTinyLFU
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).evictTinyLFU
+        kind: self
+      - id: olderThan
+        kind: internal
+      - id: c.contest
+        kind: internal
+      - id: c.mainVictim
+        kind: internal
+      - id: c.removeEvict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: c.contest(candidate, fresh, pending)
+                    to: c.contest
+                  - return: "true"
+                init:
+                  bind: candidate
+                  eval: olderThan(&c.small, fresh)
+                  to: olderThan
+                when: candidate != nil
+          when: c.windowIsLarge()
+      - bind: victim
+        eval: c.mainVictim(fresh)
+        to: c.mainVictim
+      - opt:
+          do:
+            - set: victim
+              to: olderThan
+              value: olderThan(&c.small, fresh)
+          when: victim == nil
+      - opt:
+          do:
+            - return: "false"
+          when: victim == nil
+      - eval: c.removeEvict(victim, pending)
+        to: c.removeEvict
+      - return: "true"
+  - of: (*UnlockedMap).contest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).contest
+        kind: self
+      - id: c.probate
+        kind: internal
+      - id: c.mainVictim
+        kind: internal
+      - id: c.sketch.estimateHeld
+        kind: internal
+      - id: c.removeEvict
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.probate(candidate)
+              to: c.probate
+            - return: ""
+          when: c.mainHasRoom(candidate)
+      - bind: victim
+        eval: c.mainVictim(fresh)
+        to: c.mainVictim
+      - bind: used
+        eval: c.sketch.estimateHeld(candidate.hash, candidate.period)
+        to: c.sketch.estimateHeld
+      - opt:
+          do:
+            - eval: c.removeEvict(candidate, pending)
+              to: c.removeEvict
+            - return: ""
+          when: victim == nil || used < admitAtLeast || used <= c.sketch.estimateHeld(victim.hash, victim.period)
+      - eval: c.removeEvict(victim, pending)
+        to: c.removeEvict
+      - eval: c.probate(candidate)
+        to: c.probate
+  - of: (*UnlockedMap).probate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).probate
+        kind: self
+      - id: c.small.unlink
+        kind: internal
+      - id: c.probation.pushFront
+        kind: internal
+    steps:
+      - eval: c.small.unlink(ent)
+        to: c.small.unlink
+      - set: ent.queue
+        value: queueProbation
+      - eval: c.probation.pushFront(ent)
+        to: c.probation.pushFront
+  - of: (*UnlockedMap).mainVictim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).mainVictim
+        kind: self
+      - id: olderThan
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: victim
+          init:
+            bind: victim
+            eval: olderThan(&c.probation, fresh)
+            to: olderThan
+          when: victim != nil
+      - return: olderThan(&c.main, fresh)
+        to: olderThan
+  - of: (*UnlockedMap).windowIsLarge
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: c.maxEntries > 0 && c.small.count > c.shares.window
+      - return: c.maxWeight > 0 && c.small.weight > c.shares.windowWeight
+  - of: (*UnlockedMap).protectedIsLarge
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: c.maxEntries > 0 && c.main.count > c.shares.protected
+      - return: c.maxWeight > 0 && c.main.weight > c.shares.protectedWeight
+  - of: (*UnlockedMap).mainHasRoom
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: c.maxEntries > 0 && c.probation.count+c.main.count >= c.maxEntries-c.shares.window
+      - return: c.maxWeight <= 0 || c.probation.weight+c.main.weight+int64(ent.weight) <= c.maxWeight-c.shares.windowWeight
+  - of: olderThan
+    steps:
+      - opt:
+          do:
+            - return: l.tail
+          when: l.tail != skip
+      - return: skip.prev
   - of: NewUnlockedMap
     participants:
       - id: caller
@@ -924,6 +1562,8 @@ sequences:
       - id: (*UnlockedMap).init
         kind: self
       - id: newGhostSet
+        kind: internal
+      - id: c.initTinyLFU
         kind: internal
     steps:
       - set: c.clk
@@ -947,14 +1587,23 @@ sequences:
         value: PolicyLRU
       - set: c.items
         value: make(map[K]*entry[K, V], c.maxEntries)
-      - opt:
-          do:
-            - set: c.policy
-              value: PolicyS3FIFO
-            - set: c.ghost
-              to: newGhostSet
-              value: newGhostSet[K]()
-          when: cfg.Policy == PolicyS3FIFO
+      - switch:
+          cases:
+            - case: PolicyS3FIFO
+              do:
+                - set: c.policy
+                  value: PolicyS3FIFO
+                - set: c.ghost
+                  to: newGhostSet
+                  value: newGhostSet[K]()
+            - case: PolicyTinyLFU
+              do:
+                - set: c.policy
+                  value: PolicyTinyLFU
+                - eval: c.initTinyLFU()
+                  to: c.initTinyLFU
+            - default: true
+          "on": cfg.Policy
   - of: (*UnlockedMap).Fetch
     participants:
       - id: caller
@@ -963,9 +1612,11 @@ sequences:
         kind: self
       - id: c.missed
         kind: internal
-      - id: c.touch
-        kind: internal
       - id: c.main.moveFront
+        kind: internal
+      - id: c.countHit
+        kind: internal
+      - id: c.reorderTinyLFU
         kind: internal
     steps:
       - bind: ent
@@ -979,15 +1630,30 @@ sequences:
                 type: V
             - return: zero, false
           when: ent == nil || (ent.slot != 0 && c.sinceEpoch() >= ent.deadline)
-      - alt:
-          - do:
-              - eval: c.touch(ent)
-                to: c.touch
-            when: c.policy == PolicyS3FIFO
-          - do:
-              - eval: c.main.moveFront(ent)
-                to: c.main.moveFront
-            else: true
+      - switch:
+          cases:
+            - case: PolicyLRU
+              do:
+                - eval: c.main.moveFront(ent)
+                  to: c.main.moveFront
+            - case: PolicyS3FIFO
+              do:
+                - set: ent.freq
+                  value: min(ent.freq+1, maxFreq)
+            - default: true
+              do:
+                - eval: c.countHit(ent)
+                  to: c.countHit
+                - alt:
+                    - do:
+                        - eval: c.main.moveFront(ent)
+                          to: c.main.moveFront
+                      when: ent.queue == queueMain
+                    - do:
+                        - eval: c.reorderTinyLFU(ent)
+                          to: c.reorderTinyLFU
+                      else: true
+          "on": c.policy
       - op: ++
         set: c.hits
       - return: ent.val, true
@@ -1128,12 +1794,16 @@ sequences:
         kind: self
       - id: c.ghost.reset
         kind: internal
+      - id: c.sketch.clear
+        kind: internal
     steps:
       - set: c.items
         value: make(map[K]*entry[K, V], c.maxEntries)
       - set: c.main
         value: entryList[K, V]{}
       - set: c.small
+        value: entryList[K, V]{}
+      - set: c.probation
         value: entryList[K, V]{}
       - set: c.expiry
         value: deadlineHeap[K, V]{}
@@ -1142,7 +1812,16 @@ sequences:
             - eval: c.ghost.reset()
               to: c.ghost.reset
           when: c.policy == PolicyS3FIFO
+      - eval: c.sketch.clear()
+        to: c.sketch.clear
   - of: (*UnlockedMap).Stats
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).Stats
+        kind: self
+      - id: c.weight
+        kind: internal
     steps:
       - var:
           name: weight
@@ -1150,7 +1829,8 @@ sequences:
       - opt:
           do:
             - set: weight
-              value: c.main.weight + c.small.weight
+              to: c.weight
+              value: c.weight()
           when: c.maxWeight > 0 || c.weightOf != nil
       - return: "StatsValue{Hits: c.hits, Misses: c.misses, Evictions: c.evictions, Weight: weight, Policy: c.policy}"
   - of: (*UnlockedMap).fetch
@@ -1161,9 +1841,11 @@ sequences:
         kind: self
       - id: c.removeEvict
         kind: internal
-      - id: c.touch
-        kind: internal
       - id: c.main.moveFront
+        kind: internal
+      - id: c.countHit
+        kind: internal
+      - id: c.reorderTinyLFU
         kind: internal
     steps:
       - bind: ent
@@ -1182,15 +1864,30 @@ sequences:
                 type: V
             - return: zero, false
           when: ent == nil || (ent.slot != 0 && c.sinceEpoch() >= ent.deadline)
-      - alt:
-          - do:
-              - eval: c.touch(ent)
-                to: c.touch
-            when: c.policy == PolicyS3FIFO
-          - do:
-              - eval: c.main.moveFront(ent)
-                to: c.main.moveFront
-            else: true
+      - switch:
+          cases:
+            - case: PolicyLRU
+              do:
+                - eval: c.main.moveFront(ent)
+                  to: c.main.moveFront
+            - case: PolicyS3FIFO
+              do:
+                - set: ent.freq
+                  value: min(ent.freq+1, maxFreq)
+            - default: true
+              do:
+                - eval: c.countHit(ent)
+                  to: c.countHit
+                - alt:
+                    - do:
+                        - eval: c.main.moveFront(ent)
+                          to: c.main.moveFront
+                      when: ent.queue == queueMain
+                    - do:
+                        - eval: c.reorderTinyLFU(ent)
+                          to: c.reorderTinyLFU
+                      else: true
+          "on": c.policy
       - op: ++
         set: c.hits
       - return: ent.val, true
@@ -1206,9 +1903,9 @@ sequences:
         kind: internal
       - id: c.weigh
         kind: internal
-      - id: c.admit
-        kind: internal
       - id: c.main.pushFront
+        kind: internal
+      - id: c.admit
         kind: internal
       - id: c.setDeadline
         kind: internal
@@ -1245,12 +1942,12 @@ sequences:
         value: ent
       - alt:
           - do:
-              - eval: c.admit(ent)
-                to: c.admit
-            when: c.policy == PolicyS3FIFO
-          - do:
               - eval: c.main.pushFront(ent)
                 to: c.main.pushFront
+            when: c.policy == PolicyLRU
+          - do:
+              - eval: c.admit(ent)
+                to: c.admit
             else: true
       - opt:
           do:
@@ -1454,7 +2151,10 @@ sequences:
           do:
             - return: "true"
           when: c.maxEntries > 0 && count > c.maxEntries
-      - return: c.maxWeight > 0 && count > 1 && c.main.weight+c.small.weight > c.maxWeight
+      - return: c.maxWeight > 0 && count > 1 && c.weight() > c.maxWeight
+  - of: (*UnlockedMap).weight
+    steps:
+      - return: c.main.weight + c.small.weight + c.probation.weight
   - of: (*UnlockedMap).evictIfNeeded
     participants:
       - id: caller
@@ -1551,11 +2251,18 @@ sequences:
           value: ev
   - of: (*UnlockedMap).listOf
     steps:
-      - opt:
-          do:
-            - return: "&c.small"
-          when: ent.queue == queueSmall
-      - return: "&c.main"
+      - switch:
+          cases:
+            - case: queueSmall
+              do:
+                - return: "&c.small"
+            - case: queueProbation
+              do:
+                - return: "&c.probation"
+            - default: true
+              do:
+                - return: "&c.main"
+          "on": ent.queue
   - of: (*UnlockedMap).unlink
     participants:
       - id: caller

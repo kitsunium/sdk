@@ -115,12 +115,12 @@ func assertStripeIndexed(t *testing.T, stripe *memoryStripe[string]) {
 	}
 }
 
-// forEachShape runs body at one stripe and at eight (#808), under both
-// eviction policies (#834), as parallel subtests.
+// forEachShape runs body at one stripe and at eight (#808), under every
+// eviction policy (#834), as parallel subtests.
 func forEachShape(t *testing.T, body func(t *testing.T, stripes int, policy kcache.Policy)) {
 	t.Helper()
 	for _, stripes := range []int{1, 8} {
-		for _, policy := range []kcache.Policy{kcache.PolicyLRU, kcache.PolicyS3FIFO} {
+		for _, policy := range []kcache.Policy{kcache.PolicyLRU, kcache.PolicyS3FIFO, kcache.PolicyTinyLFU} {
 			t.Run("stripes="+strconv.Itoa(stripes)+"/policy="+strconv.Itoa(int(policy)), func(t *testing.T) {
 				t.Parallel()
 				body(t, stripes, policy)

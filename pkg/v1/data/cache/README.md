@@ -145,6 +145,15 @@ PolicyS3FIFO admits new keys into a small probationary queue and keeps the ones 
 
 Initialised with `github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyS3FIFO`.
 
+<a name="PolicyTinyLFU"></a>
+```go
+const PolicyTinyLFU Policy = 2
+```
+
+PolicyTinyLFU admits a key into the main part of the cache only when a frequency sketch says it was used more than the key it would replace, so neither a scan nor a long tail of keys used once displaces the hot set. A key just written is always served, though: it is the window's, never the loser of a contest, so with room for one key it replaces any other.
+
+Initialised with `github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyTinyLFU`.
+
 ## Variables
 
 <a name="BackendFailed"></a>
@@ -385,7 +394,7 @@ Expire removes every entry whose deadline has passed and reports how many it rem
 func (*Cache) Fetch(key K) (value V, ok bool)
 ```
 
-Fetch returns the value for key and whether it was present and unexpired. A hit promotes the entry to most-recently-used (hence Fetch, not a pure Get).
+Fetch returns the value for key and whether it was present and unexpired. A hit is recorded by the policy — under LRU it promotes the entry to most-recently-used —, hence Fetch, not a pure Get.
 
 <a name="Cache.Keys"></a>
 ### func \(Cache\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/cache.go>)
@@ -487,7 +496,7 @@ Config is an alias of `github.com/kitsunium/sdk/internal/kernel/collections/cach
 
 ```go
 type Config[K comparable, V any] struct {
-	// MaxEntries caps the live entry count (LRU eviction above it). 0 = unbounded.
+	// MaxEntries caps the live entry count (the policy evicts above it). 0 = unbounded.
 	MaxEntries int
 	// DefaultTTL applies to Set entries (SetTTL overrides per-entry). 0 = no expiry.
 	DefaultTTL time.Duration
@@ -713,8 +722,11 @@ type MemoryConfig struct {
 	// CACHE_ENTRY_REJECTED at Set. Negative is refused, and so is a positive
 	// MaxBytes given to [NewMemory], which has no weigher to measure it with.
 	MaxBytes   int64
-	// Policy is the eviction policy: least recently used (the zero), or
-	// S3-FIFO, which keeps a hot set through a scan.
+	// Policy is the eviction policy: least recently used (the zero), S3-FIFO,
+	// which keeps a hot set through a scan, or W-TinyLFU, which admits a key
+	// to its main part only when it was used more than the one it replaces.
+	// A key just written is always kept, whatever it displaces: with room for
+	// one key, one written once replaces one used often.
 	Policy     kcache.Policy
 	// LeasePoll is how often LoadLeased reads the store again while another
 	// process holds a key's lease. 0 means 25ms, the file locker's own poll;
@@ -726,7 +738,7 @@ type MemoryConfig struct {
 <a name="Policy"></a>
 ## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
-Policy chooses the entry a full cache evicts: [PolicyLRU](#PolicyLRU), the zero, or [PolicyS3FIFO](#PolicyS3FIFO).
+Policy chooses the entry a full cache evicts: [PolicyLRU](#PolicyLRU), the zero, [PolicyS3FIFO](#PolicyS3FIFO) or [PolicyTinyLFU](#PolicyTinyLFU).
 
 ```go
 type Policy = kcache.Policy

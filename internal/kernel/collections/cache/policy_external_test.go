@@ -76,3 +76,108 @@ func TestAGhostKeyIsAdmittedIntoMain(t *testing.T) {
 		t.Error("a key the ghost remembered was evicted by a scan shorter than main")
 	}
 }
+
+// TestTinyLFUKeepsTheHotSetThroughAScan is W-TinyLFU's scan resistance: a hot
+// set used several times, then a sweep of cold keys twice the capacity. Each
+// cold key leaves the window as a candidate used once, against main's victim
+// used more: it is refused, and main keeps the hot set.
+func TestTinyLFUKeepsTheHotSetThroughAScan(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		capacity int
+		hot      int
+		// least is the hot keys that must survive: a cold key whose four
+		// counters all share with hot keys' is admitted (a count-min
+		// sketch's error, about one key in two hundred), hence a margin.
+		least int
+	}
+	tests := []tc{
+		{name: "a hundred slots, fifty hot keys", capacity: 100, hot: 50, least: 45},
+		{name: "four hundred slots, two hundred hot keys", capacity: 400, hot: 200, least: 180},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		store := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: c.capacity, Policy: cache.PolicyTinyLFU})
+		hot := make([]string, c.hot)
+		for i := range hot {
+			hot[i] = "hot-" + strconv.Itoa(i)
+		}
+		for range 3 {
+			for _, key := range hot {
+				if _, ok := store.Fetch(key); !ok {
+					store.Set(key, 1)
+				}
+			}
+		}
+		for i := range 2 * c.capacity {
+			store.Set("scan-"+strconv.Itoa(i), 0)
+		}
+		kept := 0
+		for _, key := range hot {
+			if _, ok := store.Fetch(key); ok {
+				kept++
+			}
+		}
+		if kept < c.least {
+			t.Errorf("W-TinyLFU kept %d of %d hot keys through the scan, want at least %d", kept, c.hot, c.least)
+		}
+		if got := store.Stats().Policy; got != cache.PolicyTinyLFU {
+			t.Errorf("Stats().Policy = %d, want PolicyTinyLFU", got)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestTinyLFUServesTheKeyJustWritten pins that the admission never refuses a
+// write outright: a new key enters the window, so a Set followed by a Fetch
+// hits even when main is full of keys used far more. The guarantee is the
+// write's, not the usage's: a fresh write is never the loser of a contest,
+// so with room for one key a key used often is displaced by one written once.
+func TestTinyLFUServesTheKeyJustWritten(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		capacity int
+		// displaced is whether the fresh writes push every busy key out.
+		displaced bool
+	}
+	tests := []tc{
+		{name: "main full of busy keys", capacity: 20, displaced: false},
+		{name: "room for one key", capacity: 1, displaced: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		store := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: c.capacity, Policy: cache.PolicyTinyLFU})
+		for range 5 {
+			for i := range c.capacity {
+				key := "busy-" + strconv.Itoa(i)
+				if _, ok := store.Fetch(key); !ok {
+					store.Set(key, i)
+				}
+			}
+		}
+		for i := range 50 {
+			key := "new-" + strconv.Itoa(i)
+			store.Set(key, i)
+			if _, ok := store.Fetch(key); !ok {
+				t.Fatalf("%s missed right after its Set", key)
+			}
+		}
+		_, held := store.Fetch("busy-0")
+		if held == c.displaced {
+			t.Errorf("a busy key held = %v after the fresh writes, want %v", held, !c.displaced)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

@@ -640,8 +640,11 @@ types:
         name: MaxBytes
         type: int64
       - doc: |-
-          Policy is the eviction policy: least recently used (the zero), or
-          S3-FIFO, which keeps a hot set through a scan.
+          Policy is the eviction policy: least recently used (the zero), S3-FIFO,
+          which keeps a hot set through a scan, or W-TinyLFU, which admits a key
+          to its main part only when it was used more than the one it replaces.
+          A key just written is always kept, whatever it displaces: with room for
+          one key, one written once replaces one used often.
         name: Policy
         type: kcache.Policy
       - doc: |-

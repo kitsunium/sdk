@@ -637,7 +637,7 @@
       "spelled": "kcache.Policy",
       "canonical": "github.com/kitsunium/sdk/internal/kernel/collections/cache.Policy",
       "owner": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.Policy",
-      "doc": "Policy chooses the entry a full cache evicts: [PolicyLRU], the zero, or\n[PolicyS3FIFO].\n",
+      "doc": "Policy chooses the entry a full cache evicts: [PolicyLRU], the zero,\n[PolicyS3FIFO] or [PolicyTinyLFU].\n",
       "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -666,6 +666,20 @@
       "value": "1",
       "init": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyS3FIFO",
       "doc": "PolicyS3FIFO admits new keys into a small probationary queue and keeps\nthe ones hit there in a main one, so a one-time scan does not flush the\nhot set.\n",
+      "file": "cache/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/cache.PolicyTinyLFU",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/cache",
+      "name": "PolicyTinyLFU",
+      "spelled": "Policy",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/data/cache.Policy",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyTinyLFU",
+      "doc": "PolicyTinyLFU admits a key into the main part of the cache only when a\nfrequency sketch says it was used more than the key it would replace, so\nneither a scan nor a long tail of keys used once displaces the hot set. A\nkey just written is always served, though: it is the window's, never\nthe loser of a contest, so with room for one key it replaces any other.\n",
       "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"
