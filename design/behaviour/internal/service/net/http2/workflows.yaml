@@ -137,6 +137,10 @@ workflows:
     steps:
       - set: prev
         value: noIndex
+      - opt:
+          do:
+            - return: noIndex, prev
+          when: e.conn.table == noIndex
       - loop:
           cond: idx != noIndex
           do:
@@ -146,7 +150,7 @@ workflows:
                 when: st.requests[idx].stream == stream
             - set: prev
               value: idx
-          init: idx = e.requests
+          init: idx = st.reqs(e).head
           post: idx = st.requests[idx].next
       - return: noIndex, prev
   - of: parseDecimal

@@ -203,7 +203,6 @@ func (a *LoopHandler) OnOpen(io corenet.LoopIO, ref corenet.LoopConnRef) {
 	st.remember(io)
 	e := st.entry(ref)
 	e.kind, e.gen, e.flags = kindSniffing, ref.Gen, entryLive
-	e.requests, e.buffered = noIndex, 0
 }
 
 // OnData implements corenet.LoopHandler: the first bytes decide the

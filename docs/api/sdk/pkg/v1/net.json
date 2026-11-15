@@ -2773,7 +2773,7 @@
       "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.LoopBackend",
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/net.LoopBackendKqueue",
-      "doc": "LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe,\nwhen named: LoopBackendAuto does not choose it yet.\n",
+      "doc": "LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe;\nLoopBackendAuto takes it there.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

@@ -301,11 +301,10 @@ func TestOperatorPlan(t *testing.T) {
 }
 
 // checkKqueuePlan holds plan on darwin and the BSDs to R5 and to ADR 0222
-// §D6 as amended on 2026-11-13, on both sides of kqueueAuto: kqueue when the
+// §D6 as amended on 2026-11-15, on both sides of kqueueAuto: kqueue when the
 // code named it, or asked for auto where auto takes it, and the environment
 // allows it; the fallback exactly for auto's kqueue; the floor for
-// everything else — auto on the BSDs, and io_uring and epoll, refused by
-// startLoopEngine there.
+// everything else — io_uring and epoll, refused by startLoopEngine there.
 func checkKqueuePlan(t *testing.T, name string, env operatorEnv, code corenet.LoopBackend) {
 	t.Helper()
 	for _, auto := range []bool{true, false} {
@@ -324,12 +323,12 @@ func checkKqueuePlan(t *testing.T, name string, env operatorEnv, code corenet.Lo
 }
 
 // TestKqueueAuto pins where auto takes kqueue (ADR 0222 §D6, amended
-// 2026-11-13): darwin, whose paired rows held on macos-15, and none of the
-// BSDs, which have no measured row.
+// 2026-11-15): darwin and every BSD, the platforms kqueue runs on, its
+// paired rows having held on macos-15; nowhere else.
 func TestKqueueAuto(t *testing.T) {
 	t.Parallel()
 	for goos, want := range map[string]bool{
-		"darwin": true, "freebsd": false, "openbsd": false, "netbsd": false, "dragonfly": false,
+		"darwin": true, "freebsd": true, "openbsd": true, "netbsd": true, "dragonfly": true,
 		"linux": false, "windows": false, "illumos": false, "solaris": false,
 	} {
 		if got := kqueueAuto(goos); got != want {
@@ -339,40 +338,38 @@ func TestKqueueAuto(t *testing.T) {
 }
 
 // TestOperatorPlan_kqueueAuto pins, on any platform, what auto and an
-// explicit kqueue plan on darwin and on the BSDs: auto takes kqueue on
-// darwin with its fallback to portable, unless the operator lowers it —
-// KITSUNIUM_NET_ENGINE=portable restores the default before 2026-11-13 —,
-// and stays portable on FreeBSD and the other BSDs whatever the environment;
-// an explicit kqueue runs on both when the operator lets it through.
+// explicit kqueue plan on darwin and on each BSD: auto takes kqueue with its
+// fallback to portable, unless the operator lowers it —
+// KITSUNIUM_NET_ENGINE=portable restores the default before 2026-11-13 on
+// darwin and before 2026-11-15 on the BSDs —; an explicit kqueue runs when
+// the operator lets it through, and never falls back.
 func TestOperatorPlan_kqueueAuto(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		code   corenet.LoopBackend
-		vars   map[string]string
-		darwin loopPlan
-		bsd    loopPlan
+		code corenet.LoopBackend
+		vars map[string]string
+		want loopPlan
 	}{
-		{corenet.LoopBackendAuto, nil, loopPlan{backend: corenet.LoopBackendKqueue, fallback: true}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendAuto, map[string]string{corenet.EnvEngine: "portable"}, loopPlan{backend: corenet.LoopBackendPortable}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "kqueue"}, loopPlan{backend: corenet.LoopBackendPortable}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendAuto, map[string]string{corenet.EnvEngine: "kqueue"}, loopPlan{backend: corenet.LoopBackendKqueue, fallback: true}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "epoll"}, loopPlan{backend: corenet.LoopBackendKqueue, fallback: true}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendKqueue, nil, loopPlan{backend: corenet.LoopBackendKqueue}, loopPlan{backend: corenet.LoopBackendKqueue}},
-		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvEngine: "epoll"}, loopPlan{backend: corenet.LoopBackendKqueue}, loopPlan{backend: corenet.LoopBackendKqueue}},
-		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvDisable: "epoll"}, loopPlan{backend: corenet.LoopBackendKqueue}, loopPlan{backend: corenet.LoopBackendKqueue}},
-		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvDisable: "kqueue"}, loopPlan{backend: corenet.LoopBackendPortable}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvEngine: "portable"}, loopPlan{backend: corenet.LoopBackendPortable}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendPortable, nil, loopPlan{backend: corenet.LoopBackendPortable}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendEpoll, nil, loopPlan{backend: corenet.LoopBackendPortable}, loopPlan{backend: corenet.LoopBackendPortable}},
-		{corenet.LoopBackendIOURing, nil, loopPlan{backend: corenet.LoopBackendPortable}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendAuto, nil, loopPlan{backend: corenet.LoopBackendKqueue, fallback: true}},
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvEngine: "portable"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "kqueue"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvEngine: "kqueue"}, loopPlan{backend: corenet.LoopBackendKqueue, fallback: true}},
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "epoll"}, loopPlan{backend: corenet.LoopBackendKqueue, fallback: true}},
+		{corenet.LoopBackendKqueue, nil, loopPlan{backend: corenet.LoopBackendKqueue}},
+		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvEngine: "epoll"}, loopPlan{backend: corenet.LoopBackendKqueue}},
+		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvDisable: "epoll"}, loopPlan{backend: corenet.LoopBackendKqueue}},
+		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvDisable: "kqueue"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendKqueue, map[string]string{corenet.EnvEngine: "portable"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendPortable, nil, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendEpoll, nil, loopPlan{backend: corenet.LoopBackendPortable}},
+		{corenet.LoopBackendIOURing, nil, loopPlan{backend: corenet.LoopBackendPortable}},
 	}
-	for _, tc := range cases {
-		env := readOperator(envOf(tc.vars))
-		if got := env.kqueuePlan(tc.code, kqueueTaken(tc.code, "darwin")); got.backend != tc.darwin.backend || got.fallback != tc.darwin.fallback {
-			t.Errorf("%v under %v on darwin = %+v, want %+v", tc.code, tc.vars, got, tc.darwin)
-		}
-		if got := env.kqueuePlan(tc.code, kqueueTaken(tc.code, "freebsd")); got.backend != tc.bsd.backend || got.fallback != tc.bsd.fallback {
-			t.Errorf("%v under %v on freebsd = %+v, want %+v", tc.code, tc.vars, got, tc.bsd)
+	for _, goos := range []string{"darwin", "freebsd", "openbsd", "netbsd", "dragonfly"} {
+		for _, tc := range cases {
+			env := readOperator(envOf(tc.vars))
+			if got := env.kqueuePlan(tc.code, kqueueTaken(tc.code, goos)); got.backend != tc.want.backend || got.fallback != tc.want.fallback {
+				t.Errorf("%v under %v on %s = %+v, want %+v", tc.code, tc.vars, goos, got, tc.want)
+			}
 		}
 	}
 }
@@ -402,8 +399,7 @@ func TestOperator_servesTheLoopGroupBelowTheCeiling(t *testing.T) {
 			srv := newServer(envOf(tc.vars))
 			t.Cleanup(func() { swallowErr(srv.Close()) })
 			// kqueue named, so the operator's switches are what lowers it on
-			// darwin and the BSDs alike; auto takes it on darwin alone
-			// (ADR 0222 §D6, amended 2026-11-13).
+			// darwin and the BSDs alike, whatever auto's plan there.
 			var lv corenet.LoopValue
 			if nativePoller == corenet.CapabilityKqueue {
 				lv.Backend = corenet.LoopBackendKqueue

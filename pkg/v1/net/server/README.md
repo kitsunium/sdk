@@ -503,7 +503,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendIOURing`
 const LoopBackendKqueue LoopBackend = 4
 ```
 
-LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe, when named: LoopBackendAuto does not choose it yet.
+LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe; LoopBackendAuto takes it there.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendKqueue`.
 

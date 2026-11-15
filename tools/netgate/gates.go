@@ -221,7 +221,7 @@ var (
 		},
 		{
 			Step: "kqueue", Load: loadL1, A: "goroutine", B: "loop-kqueue", Criteria: p6Criteria,
-			Pending: "macos-15 lane (bench-darwin), judged alone with -only, reported: auto takes kqueue on darwin since this row held P6 on run 43358351908 (ADR 0222, #976)",
+			Pending: "macos-15 lane (bench-darwin), judged alone with -only, reported: auto takes kqueue on darwin since this row held P6 on run 43358351908, and on the BSDs since 2026-11-15 (ADR 0222, #976)",
 		},
 		{
 			Step: "cal-L1-kqueue", Load: loadL1, A: "loop-kqueue", B: "loop-kqueue", Criteria: calHTTPCriteria,

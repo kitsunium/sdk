@@ -2,8 +2,9 @@
 
 // Package server — the idle cost of an HTTP/2 connection on a native loop
 // (ADR 0186 §D7, #961's last criterion): 10 000 connections that opened with
-// the preface and sent nothing else cost the loop's Go heap no more than an
-// idle connection on HTTP/1.1 does. The clients are raw sockets, so the Go
+// the preface and sent nothing else cost the server's Go heap at most the
+// loop's documented 256 B each — the loop's slot and timer link, the h2
+// adapter's entry, both tables' growth. The clients are raw sockets, so the Go
 // heap measured is the server's alone.
 package server
 
@@ -26,12 +27,14 @@ import (
 // idleConnsH2 is how many idle connections the measure holds.
 const idleConnsH2 = 10000
 
-// TestLoopHTTP2_idleMemory measures an idle h2c connection against an idle
-// HTTP/1.1 connection of the same harness, on epoll. The second's cost is the
-// http1 adapter's, the same order as the first's: the 256 B that
-// loop/CLAUDE.md gives an idle connection is the loop's alone, before any
-// adapter state, so #961's bound is held by this comparison instead: an idle
-// h2c connection costs at most what the codec's Conn adds over HTTP/1.1.
+// TestLoopHTTP2_idleMemory holds #961's idle bound on epoll: an idle h2c
+// connection costs at most h2cIdleBudget, the 256 B of Go heap the loop's
+// package documentation gives an idle connection (ADR 0186 §D7) — its slot,
+// its timer link and the adapter's entry, the tables' growth included, since
+// the slot's file state, the HPACK decoder, the held bytes and the open
+// requests are taken only when used. An idle HTTP/1.1 connection of the same
+// harness is read beside it, alternately, and logged: the http1 adapter's
+// state for a request begun, not this bound's.
 //
 // Each figure is the median of idleRounds readings taken in alternation, each
 // after the process settled (settle): a reading is the live heap's growth
@@ -59,8 +62,8 @@ func TestLoopHTTP2_idleMemory(t *testing.T) {
 		}
 		h1, h2 := median(h1s), median(h2s)
 		t.Logf("%s: idle heap per connection: http/1.1 %.0f B, h2c %.0f B (medians of %v and %v)", c.backend, h1, h2, h1s, h2s)
-		if h2 > h1+h2cConnBudget {
-			t.Fatalf("%s: an idle h2c connection costs %.0f B against %.0f B for HTTP/1.1, over the budget of %d B the codec's state may add", c.backend, h2, h1, h2cConnBudget)
+		if h2 > h2cIdleBudget {
+			t.Fatalf("%s: an idle h2c connection costs %.0f B of Go heap, past the loop's %d B", c.backend, h2, h2cIdleBudget)
 		}
 	}
 	for _, c := range cases {
@@ -87,8 +90,8 @@ func TestLoopHTTP2_idleMemoryAuto(t *testing.T) {
 		}
 		h1, h2 := median(h1s), median(h2s)
 		t.Logf("%s: idle heap per connection: http/1.1 %.0f B, h2c %.0f B (medians of %v and %v)", c.backend, h1, h2, h1s, h2s)
-		if h2 > h1+h2cConnBudget {
-			t.Fatalf("%s: an idle h2c connection costs %.0f B against %.0f B for HTTP/1.1, over the budget of %d B the codec's state may add", c.backend, h2, h1, h2cConnBudget)
+		if h2 > h2cIdleBudget {
+			t.Fatalf("%s: an idle h2c connection costs %.0f B of Go heap, past the loop's %d B", c.backend, h2, h2cIdleBudget)
 		}
 	}
 	for _, c := range cases {
@@ -176,9 +179,11 @@ func settleHeap() {
 // h2cOpening is the HTTP/2 preface and an empty SETTINGS.
 var h2cOpening = []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\x00\x00\x00\x04\x00\x00\x00\x00\x00")
 
-// h2cConnBudget is the most an idle h2c connection may add over an HTTP/1.1
-// one: its Conn and the table's growth.
-const h2cConnBudget = 200
+// h2cIdleBudget is the most Go heap an idle h2c connection may cost: the
+// 256 B the loop's package documentation gives an idle connection on a
+// native backend (internal/service/net/loop/doc.go, ADR 0186 §D7), held for
+// h2c by #961's original criterion.
+const h2cIdleBudget = 256
 
 // idleHeapPerConn holds idleConnsH2 connections that sent opening and reports
 // the server's heap per connection. wantFrame reads the server's first frame,

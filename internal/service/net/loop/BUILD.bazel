@@ -128,6 +128,8 @@ go_test(
         "drain_shape_linux_test.go",
         "drain_take_linux_test.go",
         "drain_take_uring_linux_test.go",
+        "edge_debug_off_linux_test.go",
+        "edge_debug_on_linux_test.go",  # keep: compiled under the loopdebug tag this target sets
         "fill_uring_bench_test.go",
         "fill_uring_linux_test.go",
         "gen_api_test.go",

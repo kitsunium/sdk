@@ -11630,7 +11630,15 @@ sequences:
       - return: code == corenet.LoopBackendKqueue || code == corenet.LoopBackendAuto && kqueueAuto(goos)
   - of: kqueueAuto
     steps:
-      - return: goos == "darwin"
+      - switch:
+          cases:
+            - case: "\"darwin\", \"freebsd\", \"openbsd\", \"netbsd\", \"dragonfly\""
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": goos
   - of: (*optionSet).add
     steps:
       - op: "|="
