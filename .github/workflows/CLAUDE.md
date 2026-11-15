@@ -238,7 +238,7 @@ with an empty `KIT_READ_TOKEN` means the secret was removed, and fails.
 ## bench-ab.yml (the performance lot's A/B)
 
 The measurements of kitsunium/sdk#1038, #1059, #808, #834, #811, #1016, #1035,
-#827, #840, #1034, #1102, #910, #892, #912 and #1364, on a GitHub-hosted runner — never on a development VM, whose clock, overlay
+#827, #840, #1034, #1102, #910, #892, #912, #1364, #920 and #1365, on a GitHub-hosted runner — never on a development VM, whose clock, overlay
 file system and memory balloon decide its numbers. The table is
 `scripts/ci/bench-ab.conf`: its **suites** (a package directory — under
 `internal/`, `pkg/v1/` or `third-party/` —, the
@@ -269,9 +269,17 @@ taken from every observation a test `Meter` keeps raw — `p99-us/turn`, a metri
 the benchmark reports itself — head over base at most 1.00, two `ab` rules; a
 CPU profile of the turn as its `step0`; #1364 dispatches it with
 `base=bench/912-parent`, the parent of #912's commit with the one line that
-builds it) and `cenc` (#912: a leader turn's bytes, the shared body over the
+builds it), `cenc` (#912: a leader turn's bytes, the shared body over the
 per-follower frames the driver keeps for a transport without `BatchSender`,
-both the head's, at most 1/N — two `ratio` rules on `B/op`). A metric is
+both the head's, at most 1/N — two `ratio` rules on `B/op`) and `cstream`
+(#920, #1365: the data lane's commit p99 while a snapshot stream paced at
+8 MiB/s runs, three voters over loopback mTLS on `data-disk` and on `tmpfs`, a
+learner on tmpfs, one op the windows A, B and A of one cluster, ~25 s; its
+two rows `paced` and `paced+stream` both the head's — the base has no pacing
+and leaves the file out —, B over A at most 1.10, two `ratio` rules on
+`p99-ms/commit`; a CPU profile of the op as its `step0`), with
+`cstream-scale` publishing 2 and 32 MiB/s under the same bound on a dispatch
+with `mode=scale`. A metric is
 `<what>/<per>`, letters, digits, `%` and `-` before the slash, letters and
 digits after it.
 
