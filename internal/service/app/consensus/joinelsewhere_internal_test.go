@@ -11,6 +11,7 @@ import (
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
 // #1422: a learner still waiting for its snapshot forwarded a JOIN and
@@ -112,6 +113,76 @@ func TestAJoinThroughALevelVoterIsForwarded(t *testing.T) {
 	c := newClusterWith(t, &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{9, 2, 3}, size: 3})
 	l := c.settledLeader(5 * time.Second)
 	f := c.otherThan(l)
+	levelVoter(t, l, f)
+	if leaderLastOf(t, f) == 0 {
+		t.Fatal("setup: the follower never learnt the leader's last index")
+	}
+	b, id, tr := joinerThrough(t, c, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := tr.Join(ctx, coreconsensus.JoinConfig{Stamp: must(b.log.Stamp())(t), Address: "mem"})
+	if err != nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("a JOIN through a level voter: %v after %v, want admitted at once", err, time.Since(start))
+	}
+	if _, ok := l.node.Membership().Member(id); !ok {
+		t.Fatal("the JOIN answered is not in the leader's configuration")
+	}
+}
+
+// #1447: a voter whose leader sends no last index — a leader of protocol 3
+// or below — passed #1422's check whatever its lag, forwarded the JOIN and
+// waited to apply the AddLearner itself: at 100 entries against a leader at
+// 100 000, the JOIN waited out its deadline. A voter that does not know
+// its leader's last index cannot tell how far behind it is: it refuses at
+// once, NOT_LEADER naming the leader, and proposes nothing.
+func TestAJoinThroughAVoterThatDoesNotKnowTheLeadersLastIndexIsRefusedNotLeader(t *testing.T) {
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{9, 2, 4}, size: 3}
+	c.configure = func(_ *testNode, cfg *Config) {
+		cfg.Transport = protocol3Heartbeats{cfg.Transport.(*MemoryTransport)}
+	}
+	newClusterWith(t, c)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	levelVoter(t, l, f)
+	if last := leaderLastOf(t, f); last != 0 {
+		t.Fatalf("setup: the follower knows the leader's last index %d", last)
+	}
+	b, id, tr := joinerThrough(t, c, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := tr.Join(ctx, coreconsensus.JoinConfig{Stamp: must(b.log.Stamp())(t), Address: "mem"})
+	took := time.Since(start)
+	if !errs.HasCode(err, coreconsensus.CodeNotLeader) || took > 2*time.Second {
+		t.Fatalf("a JOIN through a voter that does not know the leader's last index: %v after %v, want NOT_LEADER at once", err, took)
+	}
+	if lead, ok := LeaderHint(err); !ok || lead != l.id {
+		t.Fatalf("the refusal names leader %d (%v), want %d: %v", lead, ok, l.id, err)
+	}
+	if _, ok := l.node.Membership().Member(id); ok {
+		t.Fatal("the refused JOIN admitted B")
+	}
+}
+
+// protocol3Heartbeats sends a node's heartbeats as a leader of protocol 3
+// does: without FlagProtocol4, so with no last index (#919).
+type protocol3Heartbeats struct{ *MemoryTransport }
+
+func (p protocol3Heartbeats) Send(to coreconsensus.NodeID, frame []byte) {
+	var m coreconsensus.MessageValue
+	if len(frame) > 5 && coreconsensus.MessageKind(frame[5]) == coreconsensus.MsgHeartbeat && wire.ParseMessage(frame, &m) == nil {
+		m.Flags &^= coreconsensus.FlagProtocol4
+		m.RejectHint = 0
+		frame = wire.AppendMessage(nil, &m)
+	}
+	p.MemoryTransport.Send(to, frame)
+}
+
+// levelVoter writes through leader l and waits until follower f applied
+// the write.
+func levelVoter(t *testing.T, l, f *testNode) {
+	t.Helper()
 	propose(t, l.node, "a=1")
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		if v, _ := f.sm.get("a"); v == "1" {
@@ -121,6 +192,30 @@ func TestAJoinThroughALevelVoterIsForwarded(t *testing.T) {
 			t.Fatalf("setup: the follower never applied the write: %+v", f.node.Status())
 		}
 	}
+}
+
+// leaderLastOf is the leader's last index as n's last heartbeat of its
+// term carried it, once n heard a heartbeat after its write applied: 0
+// when the heartbeats carry none.
+func leaderLastOf(t *testing.T, n *testNode) uint64 {
+	t.Helper()
+	var last uint64
+	read := func() {
+		if !n.node.exec(func() { last = n.node.r.Status().LeaderLast }) {
+			t.Fatal("setup: the node stopped")
+		}
+	}
+	for deadline := time.Now().Add(time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if read(); last != 0 || time.Now().After(deadline) {
+			return last
+		}
+	}
+}
+
+// joinerThrough starts a joiner B that reaches member via alone, and
+// returns it with its id and its transport.
+func joinerThrough(t *testing.T, c *cluster, via *testNode) (*testNode, coreconsensus.NodeID, *MemoryTransport) {
+	t.Helper()
 	b := &testNode{log: NewMemoryLog(), snaps: NewMemorySnapshots(), sm: newKV()}
 	id, _, err := InitLog(b.log, c.cid, "slot-b")
 	if err != nil {
@@ -128,22 +223,13 @@ func TestAJoinThroughALevelVoterIsForwarded(t *testing.T) {
 	}
 	b.id = id
 	for _, x := range c.nodes {
-		if x != f {
+		if x != via {
 			c.net.Cut(id, x.id, true)
 		}
 	}
 	c.nodes = append(c.nodes, b)
 	c.start(b)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	start := time.Now()
-	_, err = NewMemoryTransport(c.net, id).Join(ctx, coreconsensus.JoinConfig{Stamp: must(b.log.Stamp())(t), Address: "mem"})
-	if err != nil || time.Since(start) > 2*time.Second {
-		t.Fatalf("a JOIN through a level voter: %v after %v, want admitted at once", err, time.Since(start))
-	}
-	if _, ok := l.node.Membership().Member(id); !ok {
-		t.Fatal("the JOIN answered is not in the leader's configuration")
-	}
+	return b, id, NewMemoryTransport(c.net, id)
 }
 
 // #1422: a TCP joiner whose only address is a member that cannot answer at

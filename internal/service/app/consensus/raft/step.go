@@ -30,15 +30,25 @@ func (r *Raft) Step(now time.Time, m core.MessageValue) {
 
 // stepTerm reconciles m's term with this node's before anything else reads
 // m: a higher term makes it a follower, unless the message is one a higher
-// term must not impose; an older term is answered so its sender steps down.
+// term must not impose; an older term is answered so its sender steps down,
+// but for a forward and its answer, which go on at this node's term.
 // It reports whether m goes on to be handled at this node's term.
 func (r *Raft) stepTerm(now time.Time, m core.MessageValue) bool {
 	switch {
-	case m.Term == 0 || m.Term == r.term:
-		// Local-only kinds carry no term; a message of this term goes on.
-		return true
 	case m.Term > r.term:
 		return r.stepHigherTerm(now, m)
+	case m.Term == 0 || m.Term == r.term || forwardKind(m.Kind):
+		// Local-only kinds carry no term; a message of this term goes on.
+		// So do a forward and its answer of an older term: they belong to
+		// the submission id, never to a term. Dropped as an older term's,
+		// a forward that crossed a change of term was never answered, and
+		// an answer that did was never read, so the forward went to the
+		// sweep's OUTCOME_UNKNOWN although the leader had refused it or
+		// given its position. A leader that hands over for its stalled
+		// apply sends its TimeoutNow beside the OVERLOADED it answers
+		// (#1440). The answer keeps the forward's term (handleForward), so
+		// it never raises the forwarder's past D5's live-leader refusal.
+		return true
 	default:
 		r.answerOlderTerm(m)
 		return false
@@ -56,6 +66,17 @@ func (r *Raft) stepHigherTerm(now time.Time, m core.MessageValue) bool {
 	}
 	r.adoptTerm(m)
 	return true
+}
+
+// forwardKind reports whether k is a forwarded proposal or the answer to
+// one, both of which a submission id correlates (#1440).
+func forwardKind(k core.MessageKind) bool {
+	switch k {
+	case core.MsgForward, core.MsgForwardAdmin, core.MsgForwardResp, core.MsgForwardAdminResp:
+		return true
+	default:
+		return false
+	}
 }
 
 // adoptTerm makes this node a follower at m's higher term, following its
