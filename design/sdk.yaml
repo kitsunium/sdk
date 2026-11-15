@@ -892,6 +892,16 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Step
     allocs: 1
     fixture: StepApp64
+  # The loop's read of the step function at every turn (#912): Summary and
+  # SameConf allocate nothing, where Status clones both memberships, two
+  # allocations a call that the leader's loop paid two to four times a
+  # turn.
+  - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Summary
+    allocs: 0
+    fixture: Summary
+  - fn: go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SameConf
+    allocs: 0
+    fixture: SameConf
   # The frame codec and the chain sum allocate nothing (D15's 0): an append
   # of 64 entries encoded into a warm buffer and decoded into a warm
   # MessageValue, and one entry's chain value. The log record codec's 0,

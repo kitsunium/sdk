@@ -67,6 +67,36 @@ Three memory nodes in a synctest bubble, every frame delayed by half its pair's 
 | `SIM/commit` (1 000 proposals/s from a FRA or RBX leader) | 2000 | 15.268 ms | 17.125 ms | 17.153 ms |
 | `SIM/failover` (leader killed → first commit under the next, 60 seeds) | 60 | 1509 ms | 3211 ms | 3211 ms |
 
+## The leader's loop turn at 1 000 proposals/s (`BenchmarkLeaderLoopTurnAt1000PerSecond`)
+
+#912's second criterion (#1364): `consensus_loop_turn_seconds` on the leader while it takes 1 000 proposals/s of 256 B, three and five nodes over loopback mTLS with memory logs, so that a turn is the loop's work and not a disk's; one paced run of 5 s a row. The series' first bucket is 0.5 ms and these turns last microseconds, so the leader's Meter keeps every observation raw: a p99 read on the histogram would be its first bound before and after any change. Commit is a proposal's latency from its due time to its return. Measured on AMD EPYC 7351P 16-Core Processor (4 cores, GOMAXPROCS 4), go1.27.4 linux/amd64, `perf/consensus-turn-encode` at `cc4fe9713`, 2026-11-15T07:17:18Z.
+
+| Row | Turns | p50 | p99 | max | commit p99 |
+|---|---|---|---|---|---|
+| `TURN/followers=2` | 34751 | 2.16 µs | 33.32 µs | 425 µs | 1.402 ms |
+| `TURN/followers=4` | 54408 | 2.14 µs | 34.95 µs | 466 µs | 1.502 ms |
+
+## A leader turn's bytes, per follower (`BenchmarkLeaderTurnEncoding`)
+
+#912's second criterion (#1364): "bytes allocated per batch divided by the follower count". One op is a leader turn of 64 entries of 256 B to N followers in replicate state, through the driver's `sendMessages`: `shared` through a `BatchSender`, the entries encoded once for every follower and the turn's headers in one buffer (#912); `per-peer` through a transport without the sibling, which the driver still sends `AppendMessage`'s whole frame per follower, each grown from nil — the path before #912, byte for byte. Both are this binary's, so the ratio needs no other commit; it holds when shared / per-peer is at most 1/N. Measured on AMD EPYC 7351P 16-Core Processor (4 cores, GOMAXPROCS 4), go1.27.4 linux/amd64, `perf/consensus-turn-encode` at `cc4fe9713`, 2026-11-15T07:17:18Z.
+
+| Row | shared B/op | shared allocs/op | per-peer B/op | per-peer allocs/op | shared / per-peer | Bound 1/N | Verdict |
+|---|---|---|---|---|---|---|---|
+| `ENC/followers=2` | 19296 | 2 | 169456 | 36 | 0.114 | 0.500 | met |
+| `ENC/followers=4` | 19520 | 2 | 338914 | 72 | 0.058 | 0.250 | met |
+
+## Not worse than before: the A/B lane on the TURN and ENC rows (#912, #1364)
+
+"Not worse than before" compares two commits, which one host's rows cannot: the A/B lane (`.github/workflows/bench-ab.yml`, suites `cturn` and `cenc` of `scripts/ci/bench-ab.conf`) runs the base's test binary, built with the head's `loopturn_bench_test.go`, and the head's alternated on one runner, twenty rounds or more, and a rule holds when the high end of the 95 % interval of its per-round values meets its threshold: `TURN`'s p99 head over base at most 1.00, `ENC`'s shared over per-peer at most 1/N. Two bases: `ee1f48ba2`, the suites' own, main before lot L1, and `bench/912-parent`, the parent of #912's commit with the one line of `stream.go` that makes it build. Each verdict is the lane's `verdict.md`, committed under `testdata/bench/` as `<suite>-<base>.verdict.md`.
+
+No verdict is committed yet:
+
+```sh
+gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f suites=cturn,cenc -f rounds=40
+gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f suites=cturn -f base=bench/912-parent -f rounds=40
+CONSENSUS_BENCH_ONLY=ab make bench-consensus   # once each verdict.md is committed
+```
+
 ## D16's provisional targets on this host
 
 `fsync` in a target is one fdatasync; a batch costs two. ADR 0152's amendment of 2026-11-11 records the verdicts and what is still to measure on the three VPS.
@@ -86,11 +116,13 @@ Three memory nodes in a synctest bubble, every frame delayed by half its pair's 
 make bench                       # every generator, this file included
 make bench-consensus             # this file alone
 CONSENSUS_BENCH_DEVICES=nvme=/mnt/nvme/bench,tmpfs=/dev/shm make bench-consensus
+CONSENSUS_BENCH_ONLY=turn,enc make bench-consensus   # the TURN and ENC rows alone, in place (#912, #1364)
+CONSENSUS_BENCH_ONLY=ab make bench-consensus         # the A/B verdicts committed under testdata/bench/, nothing measured
 make profile-consensus WAVE=before && make profile-consensus WAVE=after
 make benchstat-diff BEFORE=before AFTER=after
 ```
 
-## Hand-run micro-benchmarks (#913, #922, #923, #1109, #1364)
+## Hand-run micro-benchmarks (#913, #922, #923, #1109)
 
 Not written by the generator above: refreshed by the commands each part names (`filelog_bench_test.go`: `cd internal && go test -run '^$' -bench BenchmarkFileLogEntries -benchmem -count=3 ./service/app/consensus/`).
 
@@ -272,28 +304,3 @@ BenchmarkApplied1WithAForwardOutstanding-10    	83174492	        17.58 ns/op	   
 - Before #1109 the same entry wrote the `results` map, appended to
   `resultOrder` and, past 4 096 entries, deleted the oldest and resliced its
   head, then broadcast to every parked caller.
-
-### A leader turn's bytes per follower (#912, #1364)
-
-From `sendshared_bench_test.go`; refresh with `cd internal && go test -run='^$' -bench=BenchmarkALeaderTurnPerFollower -benchmem -count=3 ./service/app/consensus/`.
-A leader turn of 64 entries of 256 B to N followers in replicate state,
-sent through a transport that keeps nothing: `B/op` is the batch's bytes,
-divided below by N. The "before" side is the same file copied onto `main`
-before lot L1 (a7eb89f0d), its node built without the `batch` field: the
-parent of #912's own commit does not build its tests (`stream.go`, an
-earlier commit of the lot), so the lot as a whole is the comparison.
-Taken 2026-11-13 on devbox (AMD EPYC 7351P, 8 cores, Linux 6.12.101 amd64,
-go1.27.4), `GOMAXPROCS=4`, three runs alike to the byte.
-
-| Followers | before: B/op | before: allocs/op | before: B per follower | after: B/op | after: allocs/op | after: B per follower |
-|---|---|---|---|---|---|---|
-| 2 | 169 456 | 36 | 84 728 | 19 296 | 2 | 9 648 |
-| 4 | 338 913 | 72 | 84 728 | 19 520 | 2 | 4 880 |
-
-- **Per follower the batch costs 1/N of one encoding** now: one body of
-  the 64 entries and one block of headers, whatever N; before, each
-  follower's frame was encoded from nil (18 allocations of a growing buffer
-  each).
-- The loop-turn p99 at 1 000 proposals/s (#1364's other half) is not in
-  this file: the generator that would read it (#911) does not exist before
-  lot L1, so no "before" can be taken by copying it.

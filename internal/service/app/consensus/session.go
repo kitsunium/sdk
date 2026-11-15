@@ -92,7 +92,7 @@ func (n *Node) proposeSessionAt(now time.Time, p *proposal) {
 		p.done <- propResult{err: origin(sentinelOf(code), errs.String("leader", n.stamp.ID.String()))}
 		return
 	}
-	n.appendedSession(p, pos, n.r.Status().Commit, true)
+	n.appendedSession(p, pos, n.r.Summary().Commit, true)
 }
 
 // appendedSession registers a session command at pos, which the leader
