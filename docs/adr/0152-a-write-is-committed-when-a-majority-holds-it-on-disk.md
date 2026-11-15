@@ -7423,6 +7423,59 @@ after as many warm-up calls (ADR 0165), three runs alike:
   `TestPerfAllocsAppendMessage` with 30 000 allocations over the 30 000
   calls, and the change was reverted.
 
+## Amendment — a JOIN a node cannot answer at once is refused NOT_LEADER, naming the leader (2026-11-14, #1422)
+
+D4's member "proposes the `AddLearner` and answers `JOIN_ACK` once it is
+appended". A member that does not lead forwards the `AddLearner` and, as
+for any proposal it forwards, answers once it has applied the entry itself
+([#1422](https://github.com/kitsunium/sdk/issues/1422)). A learner still
+waiting for its snapshot applies nothing: the leader committed the
+admission at once, and the JOIN waited out its ten seconds and returned
+`OUTCOME_UNKNOWN`. The owner decided, on 2026-11-14, that a node that
+cannot answer a JOIN promptly refuses it at once with `NOT_LEADER` and the
+leader's address, and that the joiner tries the leader.
+
+- **Who answers.** The leader, and a voter level with it: one that knows a
+  leader, is a voter of its configuration that may vote (not joining),
+  holds a table, whose apply is not held back by `MaxApplyLagBytes`, and
+  whose applied index and log are within 1 024 entries of its commit index
+  and of the leader's last index as its last heartbeat carried it — about a
+  tenth of a second of apply at D16's 10 000 entries a second. Every other
+  node — a learner, a joiner, a node with no table, a candidate, a voter
+  catching up — refuses. The check runs after the engine's own screening and
+  the answer to a member asking again (#533), before the slot's rate, the
+  slot and key checks and the authorizer: a refusal proposes nothing and
+  counts nothing against the slot. Every admission check stays where it was,
+  at the node that proposes.
+- **No frame changes.** `JOIN_REFUSED` already carries any code and a
+  reason. The refusal is `NOT_LEADER` with the reason `not the leader;
+  leader <id> at <address>`, the address the refusing node's configuration
+  records for its leader, left out when it knows none or when the reason's
+  256 bytes would cut it, and `not the leader; no leader known` with no
+  leader. A joiner of any version reads a `NOT_LEADER` and tries its next
+  address.
+- **The joiner follows.** The shipped transports read the leader back from
+  the reason: the error carries it in the `leader` field `LeaderHint`
+  reads, and the TCP transport tries the named address next, the memory
+  double the named node, each target once per `Join`, and at most two
+  leaders followed past the configured targets. A followed address is
+  dialled under `JoinConfig.Pins` and its answer taken under the same rule
+  as any other (review M4): the refusing member names an address, never a
+  key.
+- **Tests.** `TestAJoinThroughALearnerAwaitingItsSnapshotIsRefusedNotLeaderAtOnce`
+  (red on the base: `OUTCOME_UNKNOWN` after 10 s),
+  `TestATCPJoinerFollowsTheLeaderANotLeaderRefusalNames` (red on the base:
+  `NOT_LEADER`), `TestAJoinThroughALevelVoterIsForwarded`,
+  `TestANotLeaderJoinReasonNamesTheLeader`,
+  `TestAJoinQueueFollowsTheNamedLeaderOnceEach`;
+  `TestTwoLearnersAreStreamedOneAfterTheOther` (#1412) sends its second
+  JOIN through the learner and the leader again.
+  `TestJoinRefusalCarriesTheAuthorizersReason` now sends its JOIN to the
+  leader: the member it named, restarted with the others, had not always
+  heard the new leader yet, and refused `NOT_LEADER` before its authorizer
+  was asked — the authorizer runs on a node that answers, never on one that
+  sends the joiner elsewhere.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7478,6 +7531,7 @@ after as many warm-up calls (ADR 0165), three runs alike:
 | #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
 | #763 (c) | the owner's decision, 2026-11-01 | a member's `TruncateAndStaySilent` reads the configuration the cluster runs with from a live member, every other member its log names asked under the key the log pins, the newest answer judged, and is refused `RECOVER_REFUSED`, its log and silence condition untouched (the audit line is written first), when that configuration lists none of the kept members, no longer lists the node, or when no member answers; `QuarantineOptions`, `ClearQuarantineWith` and `AskMembership` added, a transport lane `laneMembership` (5) that an older member ends unanswered; no raft frame, payload or record change, nothing persisted, no protocol raise, no raft mutation (amendment of 2026-11-01, #763) |
 | #911 | bench lane, 2026-11-11 | `make bench` runs the consensus lane (`consensus_bench_test`, race off, `manual`) and writes `internal/service/app/consensus/BENCH.md`; D16's commit target is revised to 2 × the nearest RTT + 4 × the fsync p99, its throughput and failover targets confirmed, each on the `BENCH.md` row it rests on |
+| #1422 | the owner's decision, 2026-11-14 | a node that cannot answer a JOIN at once — any but the leader and a voter level with it — refuses it `NOT_LEADER`, the leader's id and address in the reason, before the slot's rate and the authorizer, and the shipped joiners try the named leader next; no format change, no protocol raise, no raft mutation (amendment of 2026-11-14, #1422) |
 
 ## raft-sql-poc (owner's prior Raft)
 

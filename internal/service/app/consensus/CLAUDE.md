@@ -691,6 +691,20 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   before anything reached its log admits the members only from a JOIN
   answer, and was locked out for good. `alreadyJoined` answers it and
   proposes nothing (#533, `TestAJoinerRestartedBeforeItsFirstInstallRejoins`).
+- Forward a JOIN from a node that would answer it only once it applied the
+  `AddLearner` itself: a learner still waiting for its snapshot held it for
+  its whole deadline and answered OUTCOME_UNKNOWN although the leader had
+  committed it. Only the leader and a voter level with it (`joinServes`:
+  a voter that may vote, holds a table, its apply not held back and within
+  `joinApplyLag` entries of its commit and of the leader's last index)
+  answer; any other node refuses NOT_LEADER at once, before the rate, the
+  slot and the authorizer, its reason naming the leader and its address
+  (`joinElsewhere`, `notLeaderJoinReason`), and both transports try that
+  leader next, each target once, at most `joinFollows` leaders followed
+  (`joinQueue`, `leaderOfJoinRefusal`; no frame change) (#1422,
+  `TestAJoinThroughALearnerAwaitingItsSnapshotIsRefusedNotLeaderAtOnce`,
+  `TestATCPJoinerFollowsTheLeaderANotLeaderRefusalNames`,
+  `TestAJoinThroughALevelVoterIsForwarded`).
 - Remove the snapshot a node with no table holds before its replacement
   is published, or an installed copy that did not restore on such a node:
   its members are read from that metadata, and a node left none admitted

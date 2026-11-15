@@ -4463,6 +4463,8 @@ packages:
           - doc: |-
               Join implements Joiner: the JOIN goes to each address in turn until one
               member answers JOIN_ACK with the position its AddLearner was appended at.
+              A member that cannot answer at once refuses NOT_LEADER naming the leader's
+              address, which is tried next.
             in:
               - name: ctx
                 type: context.Context

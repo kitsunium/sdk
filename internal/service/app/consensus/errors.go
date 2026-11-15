@@ -229,11 +229,16 @@ func JoinRefusalReason(err error) (string, bool) {
 	return "", false
 }
 
-// joinRefused builds the joiner's JOIN_REFUSED, its reason in a field.
+// joinRefused builds the joiner's JOIN_REFUSED, its reason in a field. A
+// NOT_LEADER whose reason names the leader also carries it in the field
+// LeaderHint reads, as a proposal's NOT_LEADER does (#1422).
 func joinRefused(code errs.Code, reason string) error {
 	reason = sanitizeReason(reason)
 	if reason == "" {
 		return origin(sentinelOf(code))
+	}
+	if lead, _, ok := leaderOfJoinReason(reason); ok && code == coreconsensus.CodeNotLeader {
+		return origin(sentinelOf(code), errs.String("reason", reason), errs.String("leader", lead.String()))
 	}
 	return origin(sentinelOf(code), errs.String("reason", reason))
 }

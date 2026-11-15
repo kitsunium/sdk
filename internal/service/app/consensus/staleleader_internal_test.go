@@ -485,16 +485,16 @@ func TestAStaleVoterHearsTheNewLeaderBeforeTheRaise(t *testing.T) {
 // network, retried until a member admits it as a learner.
 func (c *cluster) join(t *testing.T, slot string) *testNode {
 	t.Helper()
-	return c.joinThrough(t, slot, nil)
+	return c.joinThrough(t, slot)
 }
 
-// joinThrough is join with the JOIN sent to via alone, when via is not nil:
-// the joiner's links to every other node are cut while it joins, then
-// restored. The memory transport tries the other nodes in a random order,
-// and a learner still waiting for its own snapshot, when tried first,
-// forwards the AddLearner but answers only once it applied it: a test that
-// holds that learner's snapshot waited out the JOIN's ten seconds (#1412).
-func (c *cluster) joinThrough(t *testing.T, slot string, via *testNode) *testNode {
+// joinThrough is join with the JOIN sent to the nodes of via alone, when
+// via names any: the joiner's links to every other node are cut while it
+// joins, then restored. The memory transport tries the other nodes in a
+// random order; a learner still waiting for its own snapshot, tried first,
+// refuses NOT_LEADER naming the leader, which the transport tries next
+// (#1412, #1422).
+func (c *cluster) joinThrough(t *testing.T, slot string, via ...*testNode) *testNode {
 	t.Helper()
 	tn := &testNode{log: NewMemoryLog(), snaps: NewMemorySnapshots(), sm: newKV()}
 	id, _, err := InitLog(tn.log, c.cid, slot)
@@ -502,8 +502,8 @@ func (c *cluster) joinThrough(t *testing.T, slot string, via *testNode) *testNod
 		t.Fatal(err)
 	}
 	tn.id = id
-	if via != nil {
-		others := slices.DeleteFunc(slices.Clone(c.nodes), func(x *testNode) bool { return x == via })
+	if len(via) > 0 {
+		others := slices.DeleteFunc(slices.Clone(c.nodes), func(x *testNode) bool { return slices.Contains(via, x) })
 		cut := func(on bool) {
 			for _, x := range others {
 				c.net.Cut(id, x.id, on)

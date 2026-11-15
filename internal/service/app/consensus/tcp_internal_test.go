@@ -587,7 +587,9 @@ func (d denyJoin) Authorize(context.Context, coreconsensus.JoinRequestValue) (co
 }
 
 // joinWith restarts every member under auth, then has a new node of a new
-// slot JOIN them over TCP, and returns the joiner's error.
+// slot JOIN the leader over TCP, and returns the joiner's error. The JOIN
+// goes to the leader: a member that has not heard it since the restart
+// refuses NOT_LEADER before its authorizer is asked (#1422).
 func joinWith(t *testing.T, auth coreconsensus.JoinAuthorizer) error {
 	t.Helper()
 	ca, cid, ns := newTCPCluster(t)
@@ -598,7 +600,7 @@ func joinWith(t *testing.T, auth coreconsensus.JoinAuthorizer) error {
 		tn.auth = auth
 		tn.start(t, cid)
 	}
-	tcpLeader(t, ns)
+	l := tcpLeader(t, ns)
 	j := &tcpNode{slot: "site-new", log: NewMemoryLog(), snaps: NewMemorySnapshots()}
 	j.cert, j.spki = ca.issue(t, SAN(cid, j.slot), nil)
 	j.listen(t, ca)
@@ -609,7 +611,7 @@ func joinWith(t *testing.T, auth coreconsensus.JoinAuthorizer) error {
 	st := must(j.log.Stamp())(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)})
+	_, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{l.addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)})
 	return err
 }
 

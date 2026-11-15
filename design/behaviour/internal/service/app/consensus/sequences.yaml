@@ -3321,6 +3321,8 @@ sequences:
         kind: internal
       - id: origin
         kind: internal
+      - id: leaderOfJoinReason
+        kind: internal
     steps:
       - set: reason
         to: sanitizeReason
@@ -3330,6 +3332,15 @@ sequences:
             - return: origin(sentinelOf(code))
               to: origin
           when: reason == ""
+      - opt:
+          do:
+            - return: origin(sentinelOf(code), errs.String("reason", reason), errs.String("leader", lead.String()))
+              to: origin
+          init:
+            bind: lead, _, ok
+            eval: leaderOfJoinReason(reason)
+            to: leaderOfJoinReason
+          when: ok && code == coreconsensus.CodeNotLeader
       - return: origin(sentinelOf(code), errs.String("reason", reason))
         to: origin
   - of: align8
@@ -8950,6 +8961,8 @@ sequences:
         kind: internal
       - id: n.alreadyJoined
         kind: internal
+      - id: n.joinElsewhere
+        kind: internal
       - id: n.cfg.JoinAuthorizer.Authorize
         kind: value
       - id: n.obs.warn
@@ -8982,6 +8995,14 @@ sequences:
             eval: n.alreadyJoined(&r)
             to: n.alreadyJoined
           when: ok
+      - opt:
+          do:
+            - return: coreconsensus.PositionValue{}, coreconsensus.CodeNotLeader, why
+          init:
+            bind: why, elsewhere
+            eval: n.joinElsewhere()
+            to: n.joinElsewhere
+          when: elsewhere
       - opt:
           do:
             - return: refuse("one JOIN per slot per election timeout")
@@ -9298,6 +9319,172 @@ sequences:
         eval: n.exec(func() { m = n.r.Status().Conf })
         to: n.exec
       - return: m, ok
+  - of: (*Node).joinElsewhere
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).joinElsewhere
+        kind: self
+      - id: notLeaderJoinReason
+        kind: internal
+    steps:
+      - var:
+          name: lead
+          type: coreconsensus.NodeID
+      - var:
+          name: addr
+          type: string
+      - bind: serves
+        eval: "true"
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: |-
+            !n.exec(func() {
+            		st := n.r.Status()
+            		if st.Role == coreconsensus.RoleLeader {
+            			return
+            		}
+            		lead = st.Lead
+            		if m, ok := st.Conf.Member(lead); ok {
+            			addr = m.Address
+            		}
+            		serves = n.joinServes(&st)
+            	}) || serves
+      - return: notLeaderJoinReason(lead, addr), true
+        to: notLeaderJoinReason
+  - of: (*Node).joinServes
+    steps:
+      - return: n.joinVoter(st) && n.joinLevel(st)
+  - of: (*Node).joinVoter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).joinVoter
+        kind: self
+      - id: st.Conf.Member
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: st.Lead == 0 || st.Lead == n.stamp.ID || st.Role != coreconsensus.RoleFollower
+      - bind: me, ok
+        eval: st.Conf.Member(n.stamp.ID)
+        to: st.Conf.Member
+      - return: ok && me.Voter && !me.Joining && n.canVote && !n.r.NoTable()
+  - of: (*Node).joinLevel
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).joinLevel
+        kind: self
+      - id: n.am.Lock
+        kind: value
+      - id: n.am.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: st.LeaderLast > st.Last+joinApplyLag || n.applyOverloaded()
+      - eval: n.am.Lock()
+        to: n.am.Lock
+      - bind: applied
+        eval: n.applied
+      - eval: n.am.Unlock()
+        to: n.am.Unlock
+      - return: applied+joinApplyLag >= st.Commit
+  - of: notLeaderJoinReason
+    steps:
+      - opt:
+          do:
+            - return: "\"not the leader; no leader known\""
+          when: lead == 0
+      - bind: why
+        eval: joinNotLeader + lead.String()
+      - opt:
+          do:
+            - set: why
+              value: at
+          init:
+            bind: at
+            eval: why + " at " + addr
+          when: addr != "" && sanitizeReason(at) == at
+      - return: why
+  - of: leaderOfJoinRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: leaderOfJoinRefusal
+        kind: self
+      - id: JoinRefusalReason
+        kind: internal
+      - id: leaderOfJoinReason
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, "", false
+          when: "!errs.HasCode(err, coreconsensus.CodeNotLeader)"
+      - bind: why, _
+        eval: JoinRefusalReason(err)
+        to: JoinRefusalReason
+      - return: leaderOfJoinReason(why)
+        to: leaderOfJoinReason
+  - of: leaderOfJoinReason
+    participants:
+      - id: caller
+        kind: actor
+      - id: leaderOfJoinReason
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+      - id: coreconsensus
+        kind: package
+    steps:
+      - bind: rest, found
+        eval: strings.CutPrefix(why, joinNotLeader)
+        to: strings
+      - opt:
+          do:
+            - return: 0, "", false
+          when: "!found"
+      - bind: id, addr, _
+        eval: strings.Cut(rest, " at ")
+        to: strings
+      - bind: v, err
+        eval: strconv.ParseUint(id, 10, 64)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, "", false
+          when: err != nil || v == 0
+      - return: coreconsensus.NodeID(v), addr, true
+        to: coreconsensus
+  - of: newJoinQueue
+    steps:
+      - return: "&joinQueue[K]{todo: slices.Clone(targets), tried: make(map[K]bool, len(targets))}"
+  - of: (*joinQueue).follow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*joinQueue).follow
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: q.tried[leader] || q.follows == joinFollows
+      - op: ++
+        set: q.follows
+      - set: q.todo
+        to: slices
+        value: slices.Insert(q.todo, 0, leader)
   - of: NewMemoryLog
     steps:
       - return: "&MemoryLog{first: 1}"
@@ -10283,87 +10470,130 @@ sequences:
         kind: actor
       - id: (*MemoryTransport).joinVia
         kind: self
-      - id: t.net.othersThan
-        kind: internal
       - id: origin
         kind: internal
-      - id: x.mu.Lock
-        kind: value
-      - id: x.mu.Unlock
-        kind: value
-      - id: slices
-        kind: stdlib
-      - id: t.hold.install
+      - id: newJoinQueue
+        kind: internal
+      - id: t.joinOne
+        kind: internal
+      - id: t.installAnswer
         kind: internal
       - id: joinRefused
         kind: internal
+      - id: leaderOfJoinRefusal
+        kind: internal
+      - id: t.net.route
+        kind: internal
+      - id: q.follow
+        kind: internal
     steps:
-      - bind: targets
-        eval: t.net.othersThan(t.id)
-        to: t.net.othersThan
       - bind: req
         eval: |-
           coreconsensus.JoinRequestValue{
           		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
           		Slot: cfg.Stamp.Slot, Address: cfg.Address, MaxSnapshotBytes: max(cfg.MaxSnapshotBytes, 0),
+          		SPKI: memSPKI(t.id),
           	}
       - bind: last
         eval: origin(coreconsensus.JoinRefused, errs.String("why", "no member"))
         to: origin
+      - bind: q
+        eval: newJoinQueue(t.net.othersThan(t.id))
+        to: newJoinQueue
       - loop:
+          cond: more
           do:
-            - eval: x.mu.Lock()
-              to: x.mu.Lock
-            - bind: j, jr
-              eval: x.join, x.joinR
-            - eval: x.mu.Unlock()
-              to: x.mu.Unlock
-            - opt:
-                do:
-                  - continue: true
-                when: (j == nil && jr == nil) || t.net.route(t.id, x.id) == nil
-            - bind: peer
-              eval: "coreconsensus.AuthenticatedPeerValue{Slot: cfg.Stamp.Slot, SPKI: memSPKI(t.id)}"
-            - set: req.SPKI
-              value: peer.SPKI
-            - var:
-                name: pos
-                type: coreconsensus.PositionValue
-            - var:
-                name: code
-                type: errs.Code
-            - var:
-                name: reason
-                type: string
-            - alt:
-                - do:
-                    - set: pos, code, reason
-                      value: jr(ctx, peer, req)
-                  when: jr != nil
-                - do:
-                    - set: pos, code
-                      value: j(ctx, peer, req)
-                  else: true
-            - opt:
-                do:
-                  - eval: x.mu.Lock()
-                    to: x.mu.Lock
-                  - bind: answer
-                    eval: slices.Clone(x.members)
-                    to: slices
-                  - eval: x.mu.Unlock()
-                    to: x.mu.Unlock
-                  - eval: t.hold.install(gen, func() { t.setMembershipAt(joinGroup, answer, rankedAt(len(answer), pos.Index)) })
-                    to: t.hold.install
-                  - return: pos, nil
-                when: code == 0
+            - bind: pos, code, reason, asked
+              eval: t.joinOne(ctx, x, &req)
+              to: t.joinOne
+            - switch:
+                cases:
+                  - case: "!asked"
+                    do:
+                      - continue: true
+                  - case: code == 0
+                    do:
+                      - eval: t.installAnswer(gen, x, pos.Index)
+                        to: t.installAnswer
+                      - return: pos, nil
             - set: last
               to: joinRefused
               value: joinRefused(code, reason)
-          key: _
-          range: targets
-          value: x
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - eval: q.follow(to)
+                          to: q.follow
+                      init:
+                        bind: to
+                        eval: t.net.route(t.id, lead)
+                        to: t.net.route
+                      when: to != nil
+                init:
+                  bind: lead, _, named
+                  eval: leaderOfJoinRefusal(last)
+                  to: leaderOfJoinRefusal
+                when: named
+          init: x, more := q.next()
+          post: x, more = q.next()
       - return: coreconsensus.PositionValue{}, last
+  - of: (*MemoryTransport).installAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).installAnswer
+        kind: self
+      - id: x.mu.Lock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: x.mu.Unlock
+        kind: value
+      - id: t.hold.install
+        kind: internal
+    steps:
+      - eval: x.mu.Lock()
+        to: x.mu.Lock
+      - bind: answer
+        eval: slices.Clone(x.members)
+        to: slices
+      - eval: x.mu.Unlock()
+        to: x.mu.Unlock
+      - eval: t.hold.install(gen, func() { t.setMembershipAt(joinGroup, answer, rankedAt(len(answer), at)) })
+        to: t.hold.install
+  - of: (*MemoryTransport).joinOne
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).joinOne
+        kind: self
+      - id: x.mu.Lock
+        kind: value
+      - id: x.mu.Unlock
+        kind: value
+    steps:
+      - eval: x.mu.Lock()
+        to: x.mu.Lock
+      - bind: j, jr
+        eval: x.join, x.joinR
+      - eval: x.mu.Unlock()
+        to: x.mu.Unlock
+      - opt:
+          do:
+            - return: pos, 0, "", false
+          when: (j == nil && jr == nil) || t.net.route(t.id, x.id) == nil
+      - bind: peer
+        eval: "coreconsensus.AuthenticatedPeerValue{Slot: req.Slot, SPKI: req.SPKI}"
+      - opt:
+          do:
+            - set: pos, code, reason
+              value: jr(ctx, peer, *req)
+            - return: pos, code, reason, true
+          when: jr != nil
+      - set: pos, code
+        value: j(ctx, peer, *req)
+      - return: pos, code, "", true
   - of: memSPKI
     participants:
       - id: caller
@@ -28652,7 +28882,13 @@ sequences:
         kind: self
       - id: origin
         kind: internal
+      - id: newJoinQueue
+        kind: internal
       - id: t.joinOne
+        kind: internal
+      - id: leaderOfJoinRefusal
+        kind: internal
+      - id: q.follow
         kind: internal
     steps:
       - bind: req
@@ -28677,7 +28913,11 @@ sequences:
       - var:
           name: refused
           type: error
+      - bind: q
+        eval: newJoinQueue(cfg.Addresses)
+        to: newJoinQueue
       - loop:
+          cond: ok
           do:
             - bind: pos, answered, err
               eval: "t.joinOne(ctx, addr, &joinTry{req: req, pins: cfg.Pins, gen: gen})"
@@ -28691,13 +28931,21 @@ sequences:
                     do:
                       - set: refused
                         value: err
+                      - opt:
+                          do:
+                            - eval: q.follow(at)
+                              to: q.follow
+                          init:
+                            bind: _, at, named
+                            eval: leaderOfJoinRefusal(err)
+                            to: leaderOfJoinRefusal
+                          when: named && at != ""
                   - default: true
                     do:
                       - set: last
                         value: err
-          key: _
-          range: cfg.Addresses
-          value: addr
+          init: addr, ok := q.next()
+          post: addr, ok = q.next()
       - opt:
           do:
             - return: coreconsensus.PositionValue{}, refused

@@ -395,45 +395,66 @@ func (t *MemoryTransport) refreshJoin(ctx context.Context) (bool, error) {
 }
 
 // joinVia sends the JOIN of cfg to every other transport of the network in
-// turn, and installs the answer in the hold's generation gen.
+// turn, the leader a member refusing it NOT_LEADER names next (#1422), and
+// installs the answer in the hold's generation gen.
 func (t *MemoryTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64) (coreconsensus.PositionValue, error) {
-	targets := t.net.othersThan(t.id)
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
 		Slot: cfg.Stamp.Slot, Address: cfg.Address, MaxSnapshotBytes: max(cfg.MaxSnapshotBytes, 0),
+		SPKI: memSPKI(t.id),
 	}
 	last := origin(coreconsensus.JoinRefused, errs.String("why", "no member"))
-	for _, x := range targets {
-		x.mu.Lock()
-		j, jr := x.join, x.joinR
-		x.mu.Unlock()
-		if (j == nil && jr == nil) || t.net.route(t.id, x.id) == nil {
+	q := newJoinQueue(t.net.othersThan(t.id))
+	for x, more := q.next(); more; x, more = q.next() {
+		pos, code, reason, asked := t.joinOne(ctx, x, &req)
+		switch {
+		case !asked:
 			continue
-		}
-		peer := coreconsensus.AuthenticatedPeerValue{Slot: cfg.Stamp.Slot, SPKI: memSPKI(t.id)}
-		req.SPKI = peer.SPKI
-		var pos coreconsensus.PositionValue
-		var code errs.Code
-		var reason string
-		if jr != nil {
-			pos, code, reason = jr(ctx, peer, req)
-		} else {
-			pos, code = j(ctx, peer, req)
-		}
-		if code == 0 {
-			// The JOIN answer carries the members the target admits, the
-			// target included, and the joiner admits them apart from its
-			// engine's configuration until it is admitted itself (#552),
-			// as of the AddLearner it answers (#742).
-			x.mu.Lock()
-			answer := slices.Clone(x.members)
-			x.mu.Unlock()
-			t.hold.install(gen, func() { t.setMembershipAt(joinGroup, answer, rankedAt(len(answer), pos.Index)) })
+		case code == 0:
+			t.installAnswer(gen, x, pos.Index)
 			return pos, nil
 		}
 		last = joinRefused(code, reason)
+		if lead, _, named := leaderOfJoinRefusal(last); named {
+			if to := t.net.route(t.id, lead); to != nil {
+				// The leader a member that could not answer at once
+				// named is tried next, as the TCP transport does (#1422).
+				q.follow(to)
+			}
+		}
 	}
 	return coreconsensus.PositionValue{}, last
+}
+
+// installAnswer installs, in the hold's generation gen, the answer of x to
+// a JOIN whose AddLearner is at index at: the JOIN answer carries the
+// members the target admits, the target included, and the joiner admits
+// them apart from its engine's configuration until it is admitted itself
+// (#552), as of the AddLearner it answers (#742).
+func (t *MemoryTransport) installAnswer(gen uint64, x *MemoryTransport, at uint64) {
+	x.mu.Lock()
+	answer := slices.Clone(x.members)
+	x.mu.Unlock()
+	t.hold.install(gen, func() { t.setMembershipAt(joinGroup, answer, rankedAt(len(answer), at)) })
+}
+
+// joinOne sends req to x, under the slot and key the memory transport
+// authenticates this node with. asked is false when x serves no JOIN or the
+// link to it is cut.
+func (t *MemoryTransport) joinOne(ctx context.Context, x *MemoryTransport, req *coreconsensus.JoinRequestValue) (pos coreconsensus.PositionValue, code errs.Code, reason string, asked bool) {
+	x.mu.Lock()
+	j, jr := x.join, x.joinR
+	x.mu.Unlock()
+	if (j == nil && jr == nil) || t.net.route(t.id, x.id) == nil {
+		return pos, 0, "", false
+	}
+	peer := coreconsensus.AuthenticatedPeerValue{Slot: req.Slot, SPKI: req.SPKI}
+	if jr != nil {
+		pos, code, reason = jr(ctx, peer, *req)
+		return pos, code, reason, true
+	}
+	pos, code = j(ctx, peer, *req)
+	return pos, code, "", true
 }
 
 // othersThan is every transport of the network but self's, in map order.

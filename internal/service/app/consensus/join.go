@@ -44,6 +44,13 @@ func (n *Node) joinReason(ctx context.Context, from coreconsensus.AuthenticatedP
 		// and nothing is proposed, nor counted against the slot (#533).
 		return pos, 0, ""
 	}
+	if why, elsewhere := n.joinElsewhere(); elsewhere {
+		// A node that would answer only once it applied the AddLearner
+		// itself refuses at once, naming the leader: nothing is proposed,
+		// nor counted against the slot, and the joiner tries the leader
+		// (#1422).
+		return coreconsensus.PositionValue{}, coreconsensus.CodeNotLeader, why
+	}
 	if n.joinRateLimited(r.Slot) {
 		return refuse("one JOIN per slot per election timeout")
 	}

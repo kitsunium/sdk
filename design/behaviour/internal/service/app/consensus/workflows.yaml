@@ -253,6 +253,20 @@ workflows:
           range: n.Membership().Members
           value: m
       - return: "false"
+  - of: (*joinQueue).next
+    steps:
+      - loop:
+          cond: len(q.todo) > 0
+          do:
+            - set: k, q.todo
+              value: q.todo[0], q.todo[1:]
+            - opt:
+                do:
+                  - set: q.tried[k]
+                    value: "true"
+                  - return: k, true
+                when: "!q.tried[k]"
+      - return: k, false
   - of: (*MemoryNetwork).othersThan
     steps:
       - lock:

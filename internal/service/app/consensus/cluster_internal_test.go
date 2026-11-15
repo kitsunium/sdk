@@ -208,6 +208,13 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 					t.Errorf("hard close %d: %v", tn.id, err)
 				}
 			}
+			// The transport's delivery goroutine holds the node through
+			// its bound callbacks: left running, every cluster of a
+			// -count=20 run stayed reachable, and the 32-bit lane ran
+			// out of its 4 GiB of address space (#1422).
+			if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
+				t.Errorf("close transport %d: %v", tn.id, err)
+			}
 		}
 	})
 	return c
