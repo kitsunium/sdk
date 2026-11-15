@@ -212,6 +212,30 @@ Issue #827 asked for at most 55 % of `Publish` at sixteen; this is 59–62 %
 on this VM. What is left is the sixteen file flushes, which each message
 needs before its rename; sharing them would mean flushing the temporaries
 concurrently, which vfs does not do (ADR 0056, amended 2026-11-03).
+
+### Since 2026-11-15: the batch's file flushes in flight together
+
+Issue #827 was reopened for its original bound (the owner, 2026-11-13).
+The serial design could not reach it at any batch size — its asymptote,
+the batch of 256, reads 57 to 60 % — so vfs now flushes a window of
+sixteen temporaries together, each still before its own rename, the
+renames in order after the window's flushes (ADR 0056, amended 2026-11-15;
+`internal/service/data/vfs/BENCH.md`). Nothing changes in this package.
+Indicative figures, not of record: this VM, go1.27.4, `-test.cpu=4`,
+`-benchtime=100x`, test binaries of `origin/main` `6e4c06d6d` and of the
+change in six interleaved rounds:
+
+| Benchmark | serial (`6e4c06d6d`) | a window in flight |
+|---|---|---|
+| `Publish/file/64` | 2.99–3.29 ms, 40 allocs | 3.07–3.18 ms, 40 allocs (one message, unchanged) |
+| `PublishMany/file/16`, a message | 1.85–1.91 ms (0.57–0.63 of `Publish`), 553 allocs a batch | **0.40–0.99 ms (0.13–0.32)**, 593 allocs a batch |
+
+The two modes of the new row are the journal's: the window's flushes land
+in one or in a few commits. The rows of record are the bench A/B lane's on
+the CI runner — suite `queue-publish`, rule `827-publishmany16-per-msg`,
+`PublishMany/file/16`'s ns/op at most 16 × 0.55 = 8.8 times
+`Publish/file/64`'s — and are written here from that run's artefact, none
+before it.
 `Publish/file` reads 50 allocations where the table above reads 42: the
 eight of #803's commit group.
 

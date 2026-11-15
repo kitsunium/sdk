@@ -801,8 +801,11 @@ passed.
   one; memory under one lock, one wake. **The file broker names every
   message, then hands the batch to vfs's `AtomicBatchWriter.WriteAtomicAll`**
   (`mintFileBatch`): each message its own atomic publication with its own file
-  flush, and `ready/` flushed ONCE after the last rename — 1.9 ms a message
-  for a batch of sixteen against `Publish`'s 3.1 ms. A failure at the k-th
+  flush, and `ready/` flushed ONCE after the last rename; since 2026-11-15
+  the file flushes of a window of sixteen are in flight together (ADR 0056,
+  amended), the renames still in order — indicatively 0.4 to 1.0 ms a message
+  for a batch of sixteen against `Publish`'s 3.1 ms on the VM, the runner's
+  lane the figure of record (BENCH.md). A failure at the k-th
   returns the first k−1, durable; a directory flush that failed returns none
   (visible, durability in doubt, as `Publish` returns nothing beside the same
   failure). A publisher without the sibling publishes message by message

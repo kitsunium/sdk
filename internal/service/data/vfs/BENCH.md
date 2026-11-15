@@ -191,7 +191,8 @@ the files):
 
 The directory flush is shared; the sixteen file flushes are not, and they are
 what is left: each must reach the device before its own rename. A batch of one
-costs what `WriteAtomic` costs.
+costs what `WriteAtomic` costs. (Since 2026-11-15 the file flushes of a window are in flight
+together — below.)
 
 ## The name in one allocation, the idle directory flushed in place (#813, 2026-11-12)
 
@@ -229,3 +230,30 @@ one tiny allocation the profile does not see. The twelve removed:
 (`alloc_external_test.go`, the race-off lane and `test-386`) holds the
 publication to the criterion, 22 on the caller's stack: nineteen counted here,
 22 on CI's linux/386 runner, whose `os.Root` makes three more.
+
+## A window's file flushes in flight together (#827, 2026-11-15)
+
+The batch above left each file's flush one after the other, and #827's
+bound — `PublishMany/file/16` at 55 % of `Publish/file` a message — sits
+under the serial design's asymptote: the batch of 256 already read 57 to
+60 %. `WriteAtomicAll` now runs windows of sixteen files: each temporary is
+created and written in order, its flush and close started on a goroutine as
+soon as it is written, and the renames follow in order once every flush of
+the window has returned (ADR 0056, amended 2026-11-15). Indicative figures,
+not of record: this VM (8-core AMD EPYC 7351P, Linux 6.12.101+deb13-amd64,
+ext4 `rw,relatime,discard` under `TMPDIR`), go1.27.4, `-test.cpu=4`, test
+binaries of `origin/main` `6e4c06d6d` and of the change run in interleaved
+rounds, `-benchtime=5x` for 256, three rounds:
+
+| Benchmark | serial (`6e4c06d6d`) | a window in flight |
+|---|---|---|
+| `WriteAtomicAll/os/256` | 1.70–1.91 ms a file, 3 897 allocs a batch | **0.32–0.36 ms a file**, 4 550 allocs a batch |
+
+Each flush in flight adds a goroutine and its closure (`group.Go`, 2.5
+allocations a file), against a millisecond of flush. The queue's
+`PublishMany/file/16` rows are in `internal/service/data/queue/BENCH.md`.
+
+The figures of record are the bench A/B lane's, on the CI runner: suite
+`queue-publish` of `scripts/ci/bench-ab.conf`, which a change under this
+package runs, rule `827-publishmany16-per-msg`. None is written here before
+that run.

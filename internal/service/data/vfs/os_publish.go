@@ -2,6 +2,7 @@ package vfs
 
 import (
 	"cmp"
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"sync/atomic"
 
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
+	"github.com/kitsunium/sdk/internal/kernel/concur/group"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -51,6 +53,13 @@ const tempNameRoom int = 128
 
 // tempCounterBytes is the width of the counter in a name, before its hex.
 const tempCounterBytes int = 8
+
+// publishWindow is how many files of a batch ([osFS.WriteAtomicAll]) have
+// their temporaries open and their flushes in flight at once (#827): enough
+// for a journal to commit a window's flushes together, few enough that a
+// batch of any size holds sixteen descriptors and sixteen blocked threads at
+// most, and that a crash leaves sixteen orphaned temporaries at most.
+const publishWindow int = 16
 
 var (
 	// tempCounter numbers this process's temporaries: unique within the
@@ -179,11 +188,21 @@ func publish(ops atomicOps, name string, data []byte, perm fs.FileMode) error {
 // after the last of them gives every file of the batch the guarantee a flush
 // per file gave each, at half the device round trips.
 //
+// The batch runs in windows of [publishWindow] files: each window's
+// temporaries are created and written in order, each one's flush started as
+// soon as it is written, so the window's flushes are in flight together —
+// still one per file, each before its own rename, the journal free to
+// commit them together (ADR 0056, amended 2026-11-15) —; once every flush
+// has returned, the renames follow in the batch's order, stopping at the
+// first file whose steps 1 to 4 failed. The next window begins only once
+// this one is renamed whole.
+//
 // Every target is checked before any is written, so a refusal publishes
 // nothing. A failure at a file's steps 1 to 4 leaves that file and the rest
-// unpublished and their previous bytes untouched; the files already renamed
-// are flushed with their directories first, so the count returned beside
-// PublishFailed is a count of durable files.
+// unpublished and their previous bytes untouched, no temporary of theirs
+// surviving; the files already renamed are flushed with their directories
+// first, so the count returned beside PublishFailed is a count of durable
+// files.
 func (o *osFS) WriteAtomicAll(files []corevfs.FileValue, perm fs.FileMode) (published int, err error) {
 	//: the guard WriteAtomic runs, for every file, before a byte is written.
 	for _, file := range files {
@@ -196,25 +215,176 @@ func (o *osFS) WriteAtomicAll(files []corevfs.FileValue, perm fs.FileMode) (publ
 	return publishAll(o.ops, files, perm)
 }
 
-// publishAll runs steps 1 to 4 for every file over ops, then step 5 once per
-// directory renamed into, and returns how many files were renamed into place.
+// publishAll runs steps 1 to 4 for every file over ops, a window at a time,
+// then step 5 once per directory renamed into, and returns how many files
+// were renamed into place.
 func publishAll(ops atomicOps, files []corevfs.FileValue, perm fs.FileMode) (published int, err error) {
 	var dirs []string
-	//: in order: a failure stops the batch at the file it struck.
-	for index, file := range files {
-		//: steps 1 to 4 of this file.
-		if stageErr := stage(ops, file.Name, file.Data, perm); stageErr != nil {
+	//: window after window, each renamed whole before the next is written.
+	for start := 0; start < len(files); start += publishWindow {
+		window := files[start:min(start+publishWindow, len(files))]
+		renamed, stageErr := stageWindow(ops, window, perm)
+		dirs = appendDirs(dirs, window[:renamed])
+		//: a failure stops the batch at the file it struck.
+		if stageErr != nil {
 			//: the files before it are visible: durable before the count says
 			//: so — or DirectorySyncFailed, which wins.
-			return index, cmp.Or(syncDirs(ops, dirs), stageErr)
-		}
-		//: each directory once, in the order the batch reached it.
-		if dir := path.Dir(file.Name); !slices.Contains(dirs, dir) {
-			dirs = append(dirs, dir)
+			return start + renamed, cmp.Or(syncDirs(ops, dirs), stageErr)
 		}
 	}
 	//: step 5, once per directory.
 	return len(files), syncDirs(ops, dirs)
+}
+
+// appendDirs appends to dirs the directory of every file of files it does
+// not hold yet, in the order the batch reaches them.
+func appendDirs(dirs []string, files []corevfs.FileValue) []string {
+	//: each directory once.
+	for _, file := range files {
+		//: a directory not seen yet.
+		if dir := path.Dir(file.Name); !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	//: the directories renamed into so far.
+	return dirs
+}
+
+// stageWindow runs steps 1 to 4 for every file of window: the temporaries
+// created and written in order, each one's flush started as soon as it is
+// written ([writeWindow]), then, once every flush has returned, the renames
+// in order, up to the first file whose write, flush, close or rename failed.
+// That file's temporary and every later one are removed, so renamed counts
+// the files published, from the first, and err is the failure of
+// window[renamed] — PublishFailed, the lowest index winning whatever order
+// the flushes answered in.
+func stageWindow(ops atomicOps, window []corevfs.FileValue, perm fs.FileMode) (renamed int, err error) {
+	temps, verdicts, writeErr := writeWindow(ops, window, perm)
+	//: step 4, in the batch's order.
+	for index, temp := range temps {
+		var failure error
+		//: a flush of the window failed: this file's own verdict.
+		if verdicts != nil {
+			failure = verdicts[index]
+		}
+		//: flushed to the device: THE atomic step.
+		if failure == nil {
+			failure = ops.rename(temp.name, window[index].Name)
+		}
+		//: this file and every later one stay unpublished.
+		if failure != nil {
+			//: PublishFailed, after their temporaries are gone.
+			return index, discardAll(ops, temps[index:], window[index].Name, failure)
+		}
+	}
+	//: every temporary written is renamed; writeErr names the file the
+	//: writing stopped at, its temporary already removed.
+	return len(temps), writeErr
+}
+
+// writeWindow runs steps 1 and 2 for the files of window, in order, and
+// starts step 3 for each as soon as it is written, so a file's flush
+// overlaps the writing of the next ones and the flushes of the others. It
+// returns the temporaries written, flushed and closed, once every flush has
+// returned, and each flush's verdict at its temporary's index — nil, the
+// slice, when every flush succeeded. The first file whose temporary cannot
+// be created or written ends the writing: its temporary removed, its
+// failure returned as PublishFailed beside the temporaries before it.
+func writeWindow(ops atomicOps, window []corevfs.FileValue, perm fs.FileMode) (temps []tempHandle, verdicts []error, err error) {
+	temps = make([]tempHandle, 0, len(window))
+	flusher := newWindowFlusher(len(window))
+	//: every flush started has returned when this does, on a panic too.
+	defer func() {
+		//: no flush failed: no verdict to read.
+		if flusher.wait() == nil {
+			verdicts = nil
+		}
+	}()
+	//: in order: the window stops at the first file that fails.
+	for index, file := range window {
+		temp, createErr := createTemp(ops, file.Name, perm)
+		//: never created: nothing to remove.
+		if createErr != nil {
+			//: PublishFailed — the destination is untouched.
+			return temps, flusher.verdicts, failPublish(createErr, kerrs.String("path", file.Name))
+		}
+		//: half-written: closed by writeTemp, removed by discard.
+		if writeErr := writeTemp(temp.file, file.Data); writeErr != nil {
+			//: PublishFailed, after the orphan is gone.
+			return temps, flusher.verdicts, discard(ops, temp.name, file.Name, writeErr)
+		}
+		temps = append(temps, temp)
+		flusher.start(index, temp.file)
+	}
+	//: every file of the window written; its flushes joined by the defer.
+	return temps, flusher.verdicts, nil
+}
+
+// windowFlusher runs step 3 for the temporaries of one window, each on a
+// goroutine of its own: a flush and its close, the verdict written at the
+// temporary's index. Concurrent flushes of one filesystem are what a
+// journal commits together (ext4's jbd2 among them): sixteen flushes one
+// after the other cost sixteen device round trips, sixteen in flight a few.
+// A window of one has nothing to overlap, and flushes on the caller's
+// goroutine.
+type windowFlusher struct {
+	runner   *group.Group
+	verdicts []error
+}
+
+// newWindowFlusher returns the flusher of a window of files temporaries.
+func newWindowFlusher(files int) windowFlusher {
+	flusher := windowFlusher{verdicts: make([]error, files)}
+	//: more than one flush to overlap: a group, bounded by the window.
+	if files > 1 {
+		flusher.runner, _ = group.New(context.Background(), files)
+	}
+	//: ready for the window's first temporary.
+	return flusher
+}
+
+// start flushes and closes the temporary file at index, on a goroutine of
+// its own unless the window is of one.
+func (f windowFlusher) start(index int, file tempFile) {
+	//: a window of one: here, at once.
+	if f.runner == nil {
+		f.verdicts[index] = syncAndClose(file)
+		//: flushed.
+		return
+	}
+	f.runner.Go(func(context.Context) error {
+		f.verdicts[index] = syncAndClose(file)
+		//: the group keeps the first to fail; its slot names which file.
+		return f.verdicts[index]
+	})
+}
+
+// wait returns once every flush started has, re-raising a panic one of them
+// raised after the others ([group.Group.Wait]), and reports a flush that
+// failed — which, the verdicts say; nil when every one succeeded. The join
+// is the happens-before edge that makes every verdict visible to the caller.
+func (f windowFlusher) wait() error {
+	//: a window of one flushed in start.
+	if f.runner == nil {
+		//: its verdict, or nil for an empty window.
+		return cmp.Or(f.verdicts...)
+	}
+	//: the first flush to fail, in time; nil when none did.
+	return f.runner.Wait()
+}
+
+// discardAll removes the temporaries of temps — the one of the file a
+// window stopped at and every later one, all closed — and returns cause as
+// PublishFailed for name, the first removal that failed kept beneath it, as
+// [discard] does for one.
+func discardAll(ops atomicOps, temps []tempHandle, name string, cause error) error {
+	var removeErr error
+	//: every temporary, whatever an earlier removal answered.
+	for _, temp := range temps {
+		removeErr = cmp.Or(removeErr, ops.remove(temp.name))
+	}
+	//: a removal that failed is still reported, just not instead of cause.
+	return failPublish(cmp.Or(cause, removeErr), kerrs.String("path", name))
 }
 
 // syncDirs flushes every directory of dirs — all of them, a failure
@@ -262,14 +432,34 @@ func stage(ops atomicOps, name string, data []byte, perm fs.FileMode) error {
 // writeAndSync writes the payload, flushes it to the device, and closes the
 // handle. It never renames: the caller owns the ordering.
 func writeAndSync(file tempFile, data []byte) error {
-	//: one Write; the payload is a whole file, never a stream.
+	//: a failed write is closed already.
+	if writeErr := writeTemp(file, data); writeErr != nil {
+		//: the write's failure.
+		return writeErr
+	}
+	//: flushed, then closed.
+	return syncAndClose(file)
+}
+
+// writeTemp writes the payload into a temporary in one Write — the payload
+// is a whole file, never a stream — and closes the handle when it fails, so
+// the descriptor is not leaked along with the failure: the removal that
+// follows does not need it open.
+func writeTemp(file tempFile, data []byte) error {
+	//: one Write.
 	if _, writeErr := file.Write(data); writeErr != nil {
-		//: close before returning so the descriptor is not leaked along with
-		//: the failure — the removal that follows does not need it open.
+		//: the first failure, the descriptor released.
 		return cmp.Or(writeErr, file.Close())
 	}
-	//: flush BEFORE the rename, or the rename publishes a name for bytes that
-	//: may not be on the device yet.
+	//: written, still open for its flush.
+	return nil
+}
+
+// syncAndClose flushes a written temporary to the device and closes it. It
+// runs BEFORE the rename, or the rename publishes a name for bytes that may
+// not be on the device yet.
+func syncAndClose(file tempFile) error {
+	//: a flush that fails still releases the descriptor.
 	if syncErr := file.Sync(); syncErr != nil {
 		//: same rule: release the descriptor, keep the first failure.
 		return cmp.Or(syncErr, file.Close())

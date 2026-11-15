@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
@@ -424,8 +425,9 @@ func failingSyncOps() atomicOps {
 }
 
 // countingOps wraps ops and counts the file flushes and the directory flushes
-// each mechanic performs — the strace-free count issue #827 asks for.
-func countingOps(ops atomicOps, files, dirs *int) atomicOps {
+// each mechanic performs — the strace-free count issue #827 asks for. The
+// file flushes of a batch's window run at once, so their count is atomic.
+func countingOps(ops atomicOps, files *atomic.Int64, dirs *int) atomicOps {
 	counted := ops
 	counted.create = func(name string, perm fs.FileMode) (tempFile, error) {
 		file, err := ops.create(name, perm)
@@ -444,12 +446,12 @@ func countingOps(ops atomicOps, files, dirs *int) atomicOps {
 // countedTemp counts its Sync calls.
 type countedTemp struct {
 	tempFile
-	syncs *int
+	syncs *atomic.Int64
 }
 
 // Sync counts, then flushes.
 func (c *countedTemp) Sync() error {
-	*c.syncs++
+	c.syncs.Add(1)
 	return c.tempFile.Sync()
 }
 
@@ -477,21 +479,31 @@ func TestABatchFlushesEachFileOnceAndItsDirectoryOnce(t *testing.T) {
 			t.Fatalf("MkdirAll(%s) = %v", dir, err)
 		}
 	}
-	var files, dirs int
+	var files atomic.Int64
+	var dirs int
 	disk.ops = countingOps(disk.nativeOps(), &files, &dirs)
 	if published, err := disk.WriteAtomicAll(batchOf("ready", 16), 0o600); published != 16 || err != nil {
 		t.Fatalf("WriteAtomicAll(16) = %d, %v, want 16, nil", published, err)
 	}
-	if files != 16 || dirs != 1 {
-		t.Fatalf("a batch of 16 flushed %d files and %d directories, want 16 and 1", files, dirs)
+	if files.Load() != 16 || dirs != 1 {
+		t.Fatalf("a batch of 16 flushed %d files and %d directories, want 16 and 1", files.Load(), dirs)
 	}
-	files, dirs = 0, 0
+	files.Store(0)
+	dirs = 0
 	mixed := append(batchOf("ready", 2), batchOf("dead", 2)...)
 	if published, err := disk.WriteAtomicAll(mixed, 0o600); published != 4 || err != nil {
 		t.Fatalf("WriteAtomicAll(two directories) = %d, %v, want 4, nil", published, err)
 	}
-	if files != 4 || dirs != 2 {
-		t.Fatalf("a batch across two directories flushed %d files and %d directories, want 4 and 2", files, dirs)
+	if files.Load() != 4 || dirs != 2 {
+		t.Fatalf("a batch across two directories flushed %d files and %d directories, want 4 and 2", files.Load(), dirs)
+	}
+	files.Store(0)
+	dirs = 0
+	if published, err := disk.WriteAtomicAll(batchOf("ready", 3*publishWindow+5), 0o600); published != 3*publishWindow+5 || err != nil {
+		t.Fatalf("WriteAtomicAll(%d) = %d, %v, want all, nil", 3*publishWindow+5, published, err)
+	}
+	if files.Load() != int64(3*publishWindow+5) || dirs != 1 {
+		t.Fatalf("a batch of %d in windows flushed %d files and %d directories, want one each and 1", 3*publishWindow+5, files.Load(), dirs)
 	}
 }
 
@@ -514,7 +526,8 @@ func TestABatchThatFailsAtTheKthFileLeavesTheFirstKDurableAndTheRestUntouched(t 
 				}
 			}
 			before := []string{hashOf(t, filepath.Join(dir, batch[1].Name)), hashOf(t, filepath.Join(dir, batch[2].Name))}
-			var files, dirs int
+			var files atomic.Int64
+			var dirs int
 			calls := 0
 			native := disk.nativeOps()
 			sabotaged := brittleOps(disk, failAt, false)
