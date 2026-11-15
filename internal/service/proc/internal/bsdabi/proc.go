@@ -33,6 +33,9 @@ const (
 	usecPerSec int64 = 1_000_000
 	// noStructSize marks a record without a field stating its own size.
 	noStructSize int = -1
+	// noValidity marks a record without a field stating whether the kernel
+	// filled its start.
+	noValidity int = -1
 )
 
 // FreeBSD's struct kinfo_proc (sys/sys/user.h): its size is KINFO_PROC_SIZE
@@ -121,6 +124,9 @@ const (
 	openBSDEuid int = 128
 	// openBSDRuid is p_ruid's offset.
 	openBSDRuid int = 132
+	// openBSDUvalid is p_uvalid's offset (64 bits), set by FILL_KPROC for a
+	// process that is not a zombie.
+	openBSDUvalid int = 400
 	// openBSDSec is p_ustart_sec's offset (64 bits).
 	openBSDSec int = 408
 	// openBSDUsec is p_ustart_usec's offset (32 bits).
@@ -140,6 +146,9 @@ const (
 	netBSDEuid int = 136
 	// netBSDRuid is p_ruid's offset.
 	netBSDRuid int = 140
+	// netBSDUvalid is p_uvalid's offset (64 bits), set by fill_kproc2 for a
+	// process sysctl_doeproc does not read as a zombie (kern_proc.c).
+	netBSDUvalid int = 448
 	// netBSDSec is p_ustart_sec's offset (32 bits).
 	netBSDSec int = 456
 	// netBSDUsec is p_ustart_usec's offset (32 bits).
@@ -156,7 +165,8 @@ type field struct {
 
 // procLayout is where one kernel's process record keeps what ProcRecord
 // reads: the record's size, a structure-size field to check it by, the pid
-// to check it against, the users and the start time.
+// to check it against, the users, the start time and the field stating the
+// start was filled.
 type procLayout struct {
 	// op is the second name of the sysctl: KERN_PROC or KERN_PROC2.
 	op int32
@@ -172,6 +182,9 @@ type procLayout struct {
 	structSize int
 	// pid, ruid and euid are 32-bit fields.
 	pid, ruid, euid int
+	// uvalid is the offset of the 64-bit p_uvalid, noValidity when the record
+	// has none.
+	uvalid int
 	// sec and usec are the start time's halves.
 	sec, usec field
 }
@@ -180,43 +193,43 @@ var (
 	// freeBSDLP64 is struct kinfo_proc on amd64, arm64 and riscv64.
 	freeBSDLP64 = procLayout{
 		op: kernProc, size: freeBSDLP64Size, exact: true, structSize: freeBSDStructSize,
-		pid: freeBSDLP64Pid, ruid: freeBSDLP64Ruid, euid: freeBSDLP64Euid,
+		pid: freeBSDLP64Pid, ruid: freeBSDLP64Ruid, euid: freeBSDLP64Euid, uvalid: noValidity,
 		sec: field{freeBSDLP64Sec, int64Bytes}, usec: field{freeBSDLP64Usec, int64Bytes},
 	}
 	// freeBSD386 is struct kinfo_proc on i386.
 	freeBSD386 = procLayout{
 		op: kernProc, size: freeBSD386Size, exact: true, structSize: freeBSDStructSize,
-		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid,
+		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid, uvalid: noValidity,
 		sec: field{freeBSD32Sec, int32Bytes}, usec: field{freeBSD386Usec, int32Bytes},
 	}
 	// freeBSDArm is struct kinfo_proc on arm.
 	freeBSDArm = procLayout{
 		op: kernProc, size: freeBSDArmSize, exact: true, structSize: freeBSDStructSize,
-		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid,
+		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid, uvalid: noValidity,
 		sec: field{freeBSD32Sec, int64Bytes}, usec: field{freeBSDArmUsec, int32Bytes},
 	}
 	// dragonFly is struct kinfo_proc's prefix on amd64.
 	dragonFly = procLayout{
 		op: kernProc, size: dragonFlyBuffer, structSize: noStructSize,
-		pid: dragonFlyPid, ruid: dragonFlyRuid, euid: dragonFlyEuid,
+		pid: dragonFlyPid, ruid: dragonFlyRuid, euid: dragonFlyEuid, uvalid: noValidity,
 		sec: field{dragonFlySec, int64Bytes}, usec: field{dragonFlyUsec, int64Bytes},
 	}
 	// darwin is struct kinfo_proc on amd64 and arm64.
 	darwin = procLayout{
 		op: kernProc, size: darwinSize, exact: true, structSize: noStructSize,
-		pid: darwinPid, ruid: darwinRuid, euid: darwinEuid,
+		pid: darwinPid, ruid: darwinRuid, euid: darwinEuid, uvalid: noValidity,
 		sec: field{darwinSec, int64Bytes}, usec: field{darwinUsec, int32Bytes},
 	}
 	// openBSD is struct kinfo_proc's prefix on every architecture.
 	openBSD = procLayout{
 		op: kernProcOpenBSD, sized: true, size: openBSDPrefix, exact: true, structSize: noStructSize,
-		pid: openBSDPid, ruid: openBSDRuid, euid: openBSDEuid,
+		pid: openBSDPid, ruid: openBSDRuid, euid: openBSDEuid, uvalid: openBSDUvalid,
 		sec: field{openBSDSec, int64Bytes}, usec: field{openBSDUsec, int32Bytes},
 	}
 	// netBSD is struct kinfo_proc2's prefix on every architecture.
 	netBSD = procLayout{
 		op: kernProc2, sized: true, size: netBSDPrefix, exact: true, structSize: noStructSize,
-		pid: netBSDPid, ruid: netBSDRuid, euid: netBSDEuid,
+		pid: netBSDPid, ruid: netBSDRuid, euid: netBSDEuid, uvalid: netBSDUvalid,
 		sec: field{netBSDSec, int32Bytes}, usec: field{netBSDUsec, int32Bytes},
 	}
 )
@@ -249,17 +262,30 @@ func ProcRequest(goos, goarch string, pid int) (mib []int32, size int, ok bool) 
 // and effective users. ok is false when buf is not that record as the layout
 // of goos and goarch lays it out — shorter than it, of another size than the
 // record states, or naming another process than pid.
-func ProcRecord(goos, goarch string, pid int, buf []byte) (start int64, ruid, euid int, ok bool) {
+//
+// valid is the record's p_uvalid on NetBSD and OpenBSD, which the kernel sets
+// only for a process it does not read as a zombie: false for a process that
+// has exited and, on NetBSD, for one in the middle of its execve(2), whose
+// p_reflock sysctl cannot take. The start is then 0 and says nothing, and the
+// users may be those the execve is replacing. FreeBSD, DragonFly and darwin
+// state no such thing, and valid is true there.
+func ProcRecord(goos, goarch string, pid int, buf []byte) (start int64, ruid, euid int, valid, ok bool) {
 	l := layoutOf(goos, goarch)
 	//: a kernel this package cannot read, a record of another size, or of
 	//: another process.
 	if l == nil || !l.fits(buf) || readInt32(buf, l.pid) != int64(pid) {
 		//: refused, never misread.
-		return 0, 0, 0, false
+		return 0, 0, 0, false, false
+	}
+	ruid, euid = int(binary.NativeEndian.Uint32(buf[l.ruid:])), int(binary.NativeEndian.Uint32(buf[l.euid:]))
+	//: p_uvalid zero: the kernel filled no start.
+	if l.uvalid != noValidity && binary.NativeEndian.Uint64(buf[l.uvalid:]) == 0 {
+		//: the users as read, no start.
+		return 0, ruid, euid, false, true
 	}
 	start = int64(readField(buf, l.sec))*usecPerSec + int64(readField(buf, l.usec))
 	//: the start and the two users.
-	return start, int(binary.NativeEndian.Uint32(buf[l.ruid:])), int(binary.NativeEndian.Uint32(buf[l.euid:])), true
+	return start, ruid, euid, true, true
 }
 
 // fits reports whether buf is a whole record of l: its size, and the size it
@@ -276,8 +302,10 @@ func (l *procLayout) fits(buf []byte) bool {
 
 // end is the offset just past the farthest field l reads.
 func (l *procLayout) end() int {
-	//: the three 32-bit fields and the two halves of the start.
-	return max(l.pid+int32Bytes, l.ruid+int32Bytes, l.euid+int32Bytes, l.sec.off+l.sec.width, l.usec.off+l.usec.width)
+	//: the three 32-bit fields, p_uvalid where there is one, and the two
+	//: halves of the start.
+	return max(l.pid+int32Bytes, l.ruid+int32Bytes, l.euid+int32Bytes, l.uvalid+int64Bytes,
+		l.sec.off+l.sec.width, l.usec.off+l.usec.width)
 }
 
 // readInt32 reads the signed 32-bit integer at off.

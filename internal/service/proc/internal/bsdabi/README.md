@@ -6,7 +6,7 @@ datagram's sender from FreeBSD's `sockcred2`.
 
 ```go
 func ProcRequest(goos, goarch string, pid int) (mib []int32, size int, ok bool)
-func ProcRecord(goos, goarch string, pid int, buf []byte) (start int64, ruid, euid int, ok bool)
+func ProcRecord(goos, goarch string, pid int, buf []byte) (start int64, ruid, euid int, valid, ok bool)
 func Sockcred2(data []byte) (pid, uid, gid int, ok bool)
 ```
 

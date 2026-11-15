@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-08T00:00:00Z -->
+<!-- updated: 2026-11-15T00:00:00Z -->
 # internal/service/proc/internal/bsdabi/
 
 ## Purpose
@@ -27,10 +27,10 @@ Importers: `proc/exec` (`attach_bsd.go`), `proc/systemd/notify`
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `proc.go` | `ProcRequest` (the sysctl name and buffer size), `ProcRecord` (start, ruid, euid); one `procLayout` per kernel and ABI, every offset a named constant citing its header |
+| `proc.go` | `ProcRequest` (the sysctl name and buffer size), `ProcRecord` (start, ruid, euid, valid); one `procLayout` per kernel and ABI, every offset a named constant citing its header |
 | `sockcred.go` | `Sockcred2`: `struct sockcred2` (sys/socket.h) — version 0, the sender's PID, real uid and real gid, the groups it counts present, at most `CMGROUP_MAX` (16) |
 | `sockcred_external_test.go` | the structure transcribed member by member, laid out by the same C rules; 0, 1 and 16 groups; the refusals |
-| `proc_external_test.go` | `cStruct` and `cUnion`, the C rules, over member-by-member transcriptions of each header: the record built at the transcription's offsets must decode; the refusals |
+| `proc_external_test.go` | `cStruct` and `cUnion`, the C rules, over member-by-member transcriptions of each header: the record built at the transcription's offsets must decode; the refusals; `p_uvalid` 0 read as no start (`TestProcRecordValidity`) |
 
 ## The layouts, and how they were checked
 
@@ -41,8 +41,19 @@ Importers: `proc/exec` (`attach_bsd.go`), `proc/systemd/notify`
 | FreeBSD arm | same | 816 | 40, 136, 140, 280 (8), 288 (4) |
 | DragonFly amd64 | `{1, 14, 1, pid}` | `kinfo_proc`, prefix of ≥ 224 in a 4096 buffer | 220, 132, 204, 96 (8), 104 (8) |
 | darwin amd64, arm64 | `{1, 14, 1, pid}` | `kinfo_proc`, 648 | 40, 420, 392, 0 (8), 8 (4) |
-| OpenBSD, every arch | `{1, 66, 1, pid, 424, 1}` | `kinfo_proc` prefix, 424 | 108, 128, 132, 408 (8), 416 (4) |
-| NetBSD, every arch | `{1, 47, 1, pid, 464, 1}` | `kinfo_proc2` prefix, 464 | 116, 136, 140, 456 (4), 460 (4) |
+| OpenBSD, every arch | `{1, 66, 1, pid, 424, 1}` | `kinfo_proc` prefix, 424 | 108, 128, 132, 408 (8), 416 (4); `p_uvalid` 400 (8) |
+| NetBSD, every arch | `{1, 47, 1, pid, 464, 1}` | `kinfo_proc2` prefix, 464 | 116, 136, 140, 456 (4), 460 (4); `p_uvalid` 448 (8) |
+
+**Validity (#1453).** NetBSD's and OpenBSD's records carry `p_uvalid`, an
+`int64` just before `p_ustart_sec`, which the kernel sets only for a process
+it does not read as a zombie: OpenBSD's `FILL_KPROC` for one without
+`PS_ZOMBIE`, NetBSD's `fill_kproc2` for one that is not `P_ZOMBIE` and whose
+`p_reflock` `sysctl_doeproc` could take as a reader — so not for a process
+inside its execve(2), which holds it as a writer (`kern_exec.c`,
+`kern_proc.c`). `ProcRecord` then reports `valid` false and a start of 0,
+the users as the record holds them. FreeBSD, DragonFly and darwin have no
+such field: `valid` is true there. What to do with a record not valid yet is
+the caller's (`proc/exec`, `record_bsd.go`).
 
 Each offset was computed twice before it was written: by gcc from the header
 (sys/user.h, sys/kinfo.h, xnu's bsd/sys/sysctl.h and proc.h, sys/sysctl.h),

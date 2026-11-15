@@ -2689,7 +2689,7 @@
       "name": "AttachPIDFile",
       "spelled": "func(ctx context.Context, path string, want AttachScope) (proc Process, err error)",
       "canonical": "func(ctx context.Context, path string, want github.com/kitsunium/sdk/pkg/v1/proc/process.AttachScope) (proc github.com/kitsunium/sdk/pkg/v1/proc/process.Process, err error)",
-      "doc": "AttachPIDFile reads the PID file at path safely — absolute, walked without a\nsymbolic link at its end, a regular file holding one PID, else\nPIDFileRefused — and adopts the process it names as Attach does. A file\nanother user could have written or redirected is trusted only through want:\nthe process must lie in its cgroup and run as one of its users, and a want\nthat bounds nothing is AdoptionRefused. Linux, darwin and the BSDs; off Linux\na cgroup bound is AdoptionRefused, as there is no cgroup to check.\n",
+      "doc": "AttachPIDFile reads the PID file at path safely — absolute, walked without a\nsymbolic link at its end, a regular file holding one PID, else\nPIDFileRefused — and adopts the process it names as Attach does. A file\nanother user could have written or redirected is trusted only through want:\nthe process must lie in its cgroup and run as one of its users, and a want\nthat bounds nothing is AdoptionRefused. Linux, darwin and the BSDs; off Linux\na cgroup bound is AdoptionRefused, as there is no cgroup to check, and a\nusers bound waits up to a second for a process caught in its execve(2).\n",
       "file": "process/gen_facade.go",
       "layer": "public",
       "family": "proc"
