@@ -2221,6 +2221,7 @@ files:
       - udSlot
       - pollFd
       - uRing
+      - starvedRecv
       - closeWait
       - uLoop
       - ringUses
@@ -6102,10 +6103,11 @@ types:
         name: taken
         type: "[]int"
       - doc: |-
-          starved are slots whose recv ran out of buffers, re-armed as buffers
-          come back; recycle the buffers the batch handed out.
+          starved are the connections whose recv ran out of buffers, each a
+          slot and its generation then, re-armed as buffers come back; recycle
+          the buffers the batch handed out.
         name: starved
-        type: "[]int32"
+        type: "[]starvedRecv"
       - name: recycle
         type: "[]uint16"
       - doc: |-
@@ -6856,6 +6858,20 @@ types:
         params: slot int32, alive bool
         recv: rr *uRing
     name: uRing
+  - doc: |-
+      starvedRecv is a connection whose recv ran out of buffers: its slot, and
+      the slot's generation then. The generation tells the connection from the
+      next one the slot serves: one that finished while queued leaves its entry
+      behind, and re-armed by slot alone it would arm a second recv on its
+      successor, beside the one take armed, which would split the socket's
+      bytes between two requests (#1471).
+    fields:
+      - name: slot
+        type: int32
+      - name: gen
+        type: uint32
+    kind: struct
+    name: starvedRecv
   - doc: |-
       closeWait is a slot whose close waits on its shutdown: its generation then,
       and the tick its backstop is due at.

@@ -190,9 +190,10 @@ type uRing struct {
 	// taken is, per listener, how many accepts the drain's take armed:
 	// bounded by queueTakeMax, past which the arrivals outpace the drain.
 	taken []int
-	// starved are slots whose recv ran out of buffers, re-armed as buffers
-	// come back; recycle the buffers the batch handed out.
-	starved []int32
+	// starved are the connections whose recv ran out of buffers, each a
+	// slot and its generation then, re-armed as buffers come back; recycle
+	// the buffers the batch handed out.
+	starved []starvedRecv
 	recycle []uint16
 	// given is, per group, the buffers handed to the kernel so far;
 	// armedOn the recvs armed on it; recvGroup, per slot, the group its
@@ -254,6 +255,17 @@ type uRing struct {
 	// judged is the tick the watchdog last looked at the listeners: once a
 	// tick, not once a batch, since a look is a getsockopt each.
 	judged int64
+}
+
+// starvedRecv is a connection whose recv ran out of buffers: its slot, and
+// the slot's generation then. The generation tells the connection from the
+// next one the slot serves: one that finished while queued leaves its entry
+// behind, and re-armed by slot alone it would arm a second recv on its
+// successor, beside the one take armed, which would split the socket's
+// bytes between two requests (#1471).
+type starvedRecv struct {
+	slot int32
+	gen  uint32
 }
 
 // closeWait is a slot whose close waits on its shutdown: its generation then,
@@ -1713,7 +1725,7 @@ func (rr *uRing) recvStarved(slot int32) {
 	//: queued, to be re-armed: an open connection, or a drain's close that
 	//: reads on to linger.
 	case reads(c) && len(rr.starved) < starvedCap:
-		rr.starved = append(rr.starved, slot)
+		rr.starved = append(rr.starved, starvedRecv{slot: slot, gen: c.gen})
 	//: an open one past the bound fails.
 	case c.state == stOpen:
 		rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
@@ -2089,11 +2101,13 @@ func (rr *uRing) rearmStarved() {
 		if g < 0 {
 			break
 		}
-		slot := rr.starved[k]
+		e := rr.starved[k]
 		k++
-		//: re-armed only if it still reads.
-		if reads(&rr.r.conns[slot]) {
-			rr.armRecvOn(slot, g)
+		//: re-armed only if the connection that starved still holds its
+		//: slot, and still reads: one that finished left its entry behind,
+		//: and the slot's next connection has its own recv.
+		if c := &rr.r.conns[e.slot]; c.gen == e.gen && reads(c) {
+			rr.armRecvOn(e.slot, g)
 			left[g]--
 			room--
 		}
