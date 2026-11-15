@@ -11,6 +11,14 @@ constants:
         value: "2"
     name: minChainTiers
   - doc: |-
+      linearRepeats is the longest batch firstOf searches for repeats by
+      comparing keys: past it, a map finds them.
+    items:
+      - name: linearRepeats
+        type: int
+        value: "32"
+    name: linearRepeats
+  - doc: |-
       maxStripes caps MemoryConfig.Stripes: past it, the stripes cost more memory
       and walk time (InvalidateTag, Expire) than any core count can win back.
     items:
@@ -35,6 +43,29 @@ constants:
         type: string
         value: "\"cache:\""
     name: leasePrefix
+  - doc: |-
+      batchOnStack is the longest batch FetchMany answers with its scratch on the
+      stack: past it, the scratch — a reference a key, and on a striped store a
+      sort key and a key a key — is allocated for the call.
+    items:
+      - name: batchOnStack
+        type: int
+        value: "64"
+    name: batchOnStack
+  - doc: |-
+      stripeShift places a key's stripe above its position in fetchStriped's sort
+      keys: a stripe index needs ten bits (maxStripes), a position the 54 below.
+    items:
+      - name: stripeShift
+        type: int
+        value: "54"
+    name: stripeShift
+  - doc: positionMask keeps the position of a fetchStriped sort key.
+    items:
+      - name: positionMask
+        type: uint64
+        value: 1<<stripeShift - 1
+    name: positionMask
   - doc: |-
       initialIndexCapacity pre-sizes both index maps and each tag bucket. It is a
       hint, not a bound: a store with no tagged entry must not pay for a large
@@ -69,9 +100,11 @@ files:
       - tierFailure
     name: chain.go
   - decls:
+      - linearRepeats
+      - chainBatch
       - (*chainStore).Expire
       - (*chainStore).FetchMany
-      - fetchPass
+      - (*chainBatch).pass
       - (*chainStore).promoteMany
       - setBatch
       - (*chainStore).SetMany
@@ -79,7 +112,7 @@ files:
       - (*chainStore).claimRefresh
       - (*chainStore).refresh
       - (*chainStore).releaseRefresh
-      - distinct
+      - firstOf
     name: chain_bulk.go
   - decls:
       - ChainConfig
@@ -140,9 +173,16 @@ files:
       - (*memoryStore).fillAndStore
     name: memory.go
   - decls:
+      - batchOnStack
+      - stripeShift
+      - positionMask
       - (*memoryStore).FetchMany
       - (*memoryStripe).fetchInto
-      - (*memoryStore).groupByStripe
+      - (*memoryStore).fetchStriped
+      - (*memoryStripe).fetchAt
+      - answerOf
+      - warmKeys
+      - extend
       - (*memoryStore).SetMany
       - (*memoryStore).setInto
       - (*memoryStore).stripeIndex
@@ -205,23 +245,18 @@ functions:
     params: position int, operation, key string, cause error
     results: error
   - doc: |-
-      fetchPass is one tier's pass over the missing keys: the entries it holds,
-      and the keys it does not.
-    name: fetchPass
-    params: ctx context.Context, position int, level tier[V], missing []string
-    results: hits map[string]corecache.EntryValue[V], still []string, err error
-    typeParams: V any
-  - doc: |-
       setBatch stores entries into store — through its BulkSetter when it has
       one, one Set per entry otherwise — and returns the failures by key.
     name: setBatch
     params: ctx context.Context, store corecache.Store[V], entries map[string]corecache.EntryValue[V]
     results: map[string]error
     typeParams: V any
-  - doc: distinct returns keys without duplicates, in their first order.
-    name: distinct
+  - doc: |-
+      firstOf returns, for every position of keys, the position at which its key
+      first appears: its own for a first occurrence.
+    name: firstOf
     params: keys []string
-    results: "[]string"
+    results: "[]int"
   - doc: misconfigured builds the CACHE_MISCONFIGURED refusal naming option.
     name: misconfigured
     params: option string, fields ...kerrs.FieldValue
@@ -272,6 +307,33 @@ functions:
     params: s *memoryStore[V], key string
     results: uint64
     typeParams: V any
+  - doc: |-
+      answerOf is what a position answers for the primitive's reference rec: the
+      value and true for a live, positive entry; the zero value and false for a
+      miss, or a negative entry, which holds no value.
+    name: answerOf
+    params: rec *record[V]
+    results: value V, found bool
+    typeParams: V any
+  - doc: |-
+      warmKeys reads the first byte of every key before the batch takes its
+      stripe's lock, and returns their sum, which nothing reads (#840). At scale a
+      key's bytes are a cache miss of their own, which the map's hash would wait
+      for one key at a time, under the lock; read together, outside it, the
+      misses overlap — on the shared VM, 387 to 353 ns a key out of 262 144
+      entries, and nothing measurable on the threshold's 1 024. A striped store
+      needs none: the stripe hash it takes of every key first reads the same
+      bytes. Kept out of line, so the reads are never dropped as dead code.
+    name: warmKeys
+    params: keys []string
+    results: byte
+  - doc: |-
+      extend lengthens s by n elements, growing it only when its capacity is
+      short, and returns it with the n elements added.
+    name: extend
+    params: s []T, n int
+    results: all, added []T
+    typeParams: T any
   - doc: |-
       remainingOf is the entry's remaining lifetime at now, its deadline the
       primitive's: 0 for an entry with no deadline, and never negative.
@@ -513,15 +575,17 @@ types:
         recv: c *chainStore[V]
         results: removed int, err error
       - doc: |-
-          FetchMany reads near to far with the missing set shrinking (#840): each
-          tier gets ONE pass, over the keys no nearer tier held, and the hits of a far
-          tier are promoted into every nearer one as a batch, under the same write
-          guard a single promotion takes (#460). A broken tier stops the walk, as it
-          stops Fetch's.
+          FetchMany appends to values and found one answer for every key of keys, in
+          order, reading near to far with the missing keys shrinking (#840): each tier
+          gets ONE pass, over the keys no nearer tier held, and the hits of a far tier
+          are promoted into every nearer one as a batch, under the same write guard a
+          single promotion takes (#460). A key named twice is read once, and every
+          position naming it answered. A broken tier stops the walk, as it stops
+          Fetch's, and nothing is appended.
         name: FetchMany
-        params: ctx context.Context, keys []string
+        params: ctx context.Context, keys []string, values []V, found []bool
         recv: c *chainStore[V]
-        results: map[string]V, error
+        results: "[]V, []bool, error"
       - doc: |-
           promoteMany writes a far tier's hits into every nearer tier, as promote
           writes one: nothing when a write is running or began since seen was read.
@@ -574,6 +638,29 @@ types:
         recv: c *chainStore[V]
         results: value V, err error
     name: chainStore
+    typeParams: V any
+  - doc: |-
+      chainBatch is a chain's FetchMany in progress: its keys, and the answers
+      their positions are written to.
+    fields:
+      - name: keys
+        type: "[]string"
+      - name: values
+        type: "[]V"
+      - name: found
+        type: "[]bool"
+    kind: struct
+    methods:
+      - doc: |-
+          pass is one tier's pass over the missing positions: the value of each key
+          the tier holds written at its position, the entries a nearer tier must be
+          given (none from the nearest), and the positions the tier does not hold,
+          which reuse missing's array.
+        name: pass
+        params: ctx context.Context, position int, level tier[V], missing []int
+        recv: b *chainBatch[V]
+        results: promote map[string]corecache.EntryValue[V], still []int, err error
+    name: chainBatch
     typeParams: V any
   - fields:
       - doc: |-
@@ -941,21 +1028,24 @@ types:
         recv: s *memoryStore[V]
         results: value V, err error
       - doc: |-
-          FetchMany returns the values of the keys the store holds (#840): the keys
-          are grouped by stripe and each stripe is locked once for all of its keys,
-          where N Fetches lock N times. It mutates the store as Fetch does; a
-          negative entry is a miss; a duplicate key is read once.
+          FetchMany appends to values and found one answer for every key of keys, in
+          order (#840): the value keys[i] holds and true, or the zero value and false
+          for a miss or a negative entry. It mutates the store as Fetch does, and a
+          key named twice is read once (the primitive's batch). Each stripe is locked
+          once for all of its keys, and the primitive reads the clock once for them;
+          no map is built and, for a batch of at most batchOnStack keys whose slices
+          have the room, nothing is allocated.
         name: FetchMany
-        params: _ context.Context, keys []string
+        params: _ context.Context, keys []string, values []V, found []bool
         recv: s *memoryStore[V]
-        results: map[string]V, error
+        results: "[]V, []bool, error"
       - doc: |-
-          groupByStripe splits keys by the stripe each lands in, indexed like
-          s.stripes.
-        name: groupByStripe
-        params: keys []string
+          fetchStriped answers keys on a striped store: the positions sorted by
+          stripe — the caller's order kept within one —, then each stripe locked once
+          for its own keys.
+        name: fetchStriped
+        params: keys []string, values []V, found []bool
         recv: s *memoryStore[V]
-        results: "[][]string"
       - doc: |-
           SetMany stores every entry under its key (#840). Every entry is validated
           first: one the store refuses fails the call and stores nothing. Each stripe
@@ -1042,11 +1132,19 @@ types:
         recv: m *memoryStripe[V]
         results: int
       - doc: |-
-          fetchInto reads keys under one acquisition of the stripe's lock, adding each
-          live value to found.
+          fetchInto answers keys in values and found, position for position, under
+          one acquisition of the stripe's lock.
         name: fetchInto
-        params: found map[string]V, keys []string
+        params: keys []string, values []V, found []bool
         recv: m *memoryStripe[V]
+      - doc: |-
+          fetchAt answers keys under one acquisition of the stripe's lock, each at the
+          position its sort key in order carries, and returns refs for the next
+          stripe's use.
+        name: fetchAt
+        params: keys []string, order []uint64, refs []*record[V], values []V, found []bool
+        recv: m *memoryStripe[V]
+        results: "[]*record[V]"
       - doc: |-
           claimRefresh records that a refresh of key is starting and reports whether
           none was running. Caller holds mu.

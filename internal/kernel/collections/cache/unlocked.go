@@ -3,10 +3,15 @@ package cache
 import (
 	"iter"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
+
+// lookupChunk is how many lookups FetchMany issues before it reads an entry
+// (#840): sixteen independent map accesses, a stack array of pointers.
+const lookupChunk int = 16
 
 // UnlockedMap is the cache without its lock: the same LRU or S3-FIFO policy, TTL,
 // bounds, sweep and counters as Cache, for a caller that already serialises
@@ -41,6 +46,24 @@ type UnlockedMap[K comparable, V any] struct {
 	hits      uint64
 	misses    uint64
 	evictions uint64
+	// batch numbers the FetchMany calls, from 1: an entry whose own batch is
+	// the current one was read earlier in the same call (#840).
+	batch uint32
+}
+
+// batchRead is one FetchMany in progress (#840): its number, the instant all
+// of its deadlines are judged at, what it counted and what it reaped.
+type batchRead[K comparable, V any] struct {
+	// pending holds what the batch reaped, for OnEvict once it is done.
+	pending []evictionValue[K, V]
+	// now is the batch's one reading of the clock, since the epoch; read only
+	// when an entry carries a deadline.
+	now int64
+	// recorded counts the hits the batch recorded, missed its misses.
+	recorded uint64
+	missed   uint64
+	// number is the batch's, which marks the entries it read.
+	number uint32
 }
 
 // NewUnlockedMap builds an UnlockedMap from cfg, as NewCache builds a Cache. A nil
@@ -102,6 +125,102 @@ func (c *UnlockedMap[K, V]) Fetch(key K) (value V, ok bool) {
 	c.hits++
 	//: the live value.
 	return ent.val, true
+}
+
+// FetchMany appends to refs one reference for every key of keys, in order:
+// the value keys[i] holds, or nil when the map does not hold it unexpired.
+// Each key is read as Fetch reads it, except that the clock is read once for
+// the batch, and not at all while no entry carries a deadline, every deadline
+// judged at that instant. A key keys names more than once is read once: its
+// first position records the hit, and every later one gets the same reference
+// without moving the entry or counting it again. A reference is the map's own
+// value: valid until the next call into the map, to be read, never written
+// through. refs grows only when its capacity is short. OnEvict runs at the end
+// of the call for every entry the batch reaped.
+func (c *UnlockedMap[K, V]) FetchMany(keys []K, refs []*V) []*V {
+	held := len(refs)
+	refs = slices.Grow(refs, len(keys))[:held+len(keys)]
+	batch := batchRead[K, V]{number: c.nextBatch()}
+	//: a deadline somewhere: the batch's one reading of the clock.
+	if c.expiry.size() > 0 {
+		batch.now = c.sinceEpoch()
+	}
+	//: the batch, a chunk at a time.
+	for base := 0; base < len(keys); base += lookupChunk {
+		end := min(base+lookupChunk, len(keys))
+		c.readChunk(&batch, keys[base:end], refs[held+base:held+end])
+	}
+	c.hits += batch.recorded
+	c.misses += batch.missed
+	c.notifyEvicted(batch.pending)
+	//: the caller's references, one per key appended.
+	return refs
+}
+
+// readChunk reads one chunk of a batch into out, a reference a key: every
+// lookup first, then every entry, with nothing called on a hit's path. Caller
+// holds the lock.
+func (c *UnlockedMap[K, V]) readChunk(batch *batchRead[K, V], chunk []K, out []*V) {
+	// ents holds the chunk's lookups: every map access is issued before any
+	// entry is read, so their cache misses overlap where, one key at a time,
+	// each would wait for the one before.
+	var ents [lookupChunk]*entry[K, V]
+	//: first every lookup of the chunk.
+	for i, key := range chunk {
+		ents[i] = c.items[key]
+	}
+	//: then every entry.
+	for i, ent := range ents[:len(chunk)] {
+		//: a miss: no entry, or one whose deadline the batch's instant passed.
+		if ent == nil || (ent.slot != 0 && batch.now >= ent.deadline) {
+			out[i] = nil
+			batch.missed++
+			c.reapInBatch(batch, ent, chunk[i+1:], ents[i+1:len(chunk)])
+			continue
+		}
+		//: the key's first position in the batch records the hit.
+		if ent.batch != batch.number {
+			ent.batch = batch.number
+			c.touch(ent)
+			batch.recorded++
+		}
+		out[i] = &ent.val
+	}
+}
+
+// reapInBatch reaps ent, an entry a batch found past its deadline, as Fetch
+// reaps one, and looks the chunk's later keys up again: one of them may name
+// the entry just reaped, looked up before it went. A nil ent — a key the map
+// does not hold — reaps nothing. Caller holds the lock.
+func (c *UnlockedMap[K, V]) reapInBatch(batch *batchRead[K, V], ent *entry[K, V], later []K, laterEnts []*entry[K, V]) {
+	//: a key the map does not hold: nothing to reap.
+	if ent == nil {
+		//: a miss and nothing more.
+		return
+	}
+	c.removeEvict(ent, &batch.pending)
+	//: the chunk's later lookups, made again.
+	for j, key := range later {
+		laterEnts[j] = c.items[key]
+	}
+}
+
+// nextBatch numbers a new FetchMany and returns its number. The count wraps
+// after 2^32 batches: the wrap clears every entry's mark first, so an entry
+// last read 2^32 batches ago is never taken for one read in this batch.
+// Caller holds the lock.
+func (c *UnlockedMap[K, V]) nextBatch() uint32 {
+	c.batch++
+	//: wrapped: no entry may keep a number the count reaches again.
+	if c.batch == 0 {
+		//: every mark back to "never read by a batch".
+		for _, ent := range c.items {
+			ent.batch = 0
+		}
+		c.batch = 1
+	}
+	//: this batch's number.
+	return c.batch
 }
 
 // missed counts a miss of Fetch, reaping ent — the entry the key named, its

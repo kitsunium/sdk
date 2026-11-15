@@ -43,14 +43,18 @@ func TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds(t *testing.T) {
 }
 
 // tagIndexWorkload is TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds on one
-// configuration. The sweep (#1059) is a fifth removal path, so the workload
-// runs it too.
+// configuration. The sweep (#1059) is a fifth removal path, and a batch's
+// lazy expiry (#840) a sixth, so the workload runs both too.
 func tagIndexWorkload(t *testing.T, cfg MemoryConfig) {
 	t.Helper()
 	manual := clock.NewManualClock(time.Unix(0, 0))
 	cfg.Clock = manual
 	store := concrete(t, cfg)
 	ctx := t.Context()
+	probes := make([]string, 40)
+	for at := range probes {
+		probes[at] = strconv.Itoa(at)
+	}
 
 	for round := range 200 {
 		key := strconv.Itoa(round % 40)
@@ -80,9 +84,17 @@ func tagIndexWorkload(t *testing.T, cfg MemoryConfig) {
 				t.Fatalf("Expire: %v", err)
 			}
 		}
-		//: touch every key so lazy expiry actually fires.
-		for probe := range 40 {
-			if _, _, fetchErr := store.Fetch(ctx, strconv.Itoa(probe)); fetchErr != nil {
+		//: touch every key so lazy expiry actually fires — one Fetch a key on
+		//: even rounds, one FetchMany of all forty on odd ones, whose batch
+		//: reaps through the same onEvict (#840).
+		if round%2 == 1 {
+			if _, _, fetchErr := store.FetchMany(ctx, probes, nil, nil); fetchErr != nil {
+				t.Fatalf("FetchMany: %v", fetchErr)
+			}
+			continue
+		}
+		for _, probe := range probes {
+			if _, _, fetchErr := store.Fetch(ctx, probe); fetchErr != nil {
 				t.Fatalf("Fetch: %v", fetchErr)
 			}
 		}
@@ -266,4 +278,68 @@ func TestTheByteBoundHoldsAfterEverySet(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestFetchManyReadsARepeatOnce pins the port's read-once rule on the memory
+// store (#840), striped and not: a key a batch names three times is answered
+// at every position and recorded once by its stripe's primitive, a negative
+// entry is a miss at its position, and every miss counts as Fetch counts it.
+func TestFetchManyReadsARepeatOnce(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name       string
+		keys       []string
+		want       []string
+		hits, miss uint64
+	}
+	tests := []tc{
+		{name: "a repeat", keys: []string{"a", "b", "a", "a"}, want: []string{"A", "B", "A", "A"}, hits: 2},
+		{name: "a negative entry", keys: []string{"n", "a", "n"}, want: []string{"", "A", ""}, hits: 2},
+		{name: "a repeated miss", keys: []string{"x", "a", "x"}, want: []string{"", "A", ""}, hits: 1, miss: 2},
+	}
+	runCase := func(t *testing.T, c tc, stripes int, policy kcache.Policy) {
+		t.Helper()
+		store := concrete(t, MemoryConfig{MaxEntries: 64, Stripes: stripes, Policy: policy})
+		mustSet(t, store, "a", "A")
+		mustSet(t, store, "b", "B")
+		negative := store.stripeOf("n")
+		negative.mu.Lock()
+		store.store(negative, "n", record[string]{absent: corecache.CacheBackendFailed}, time.Hour, 0)
+		negative.mu.Unlock()
+		before := primitiveStats(store)
+		values, found, err := store.FetchMany(t.Context(), c.keys, nil, nil)
+		if err != nil {
+			t.Fatalf("FetchMany: %v", err)
+		}
+		for at, want := range c.want {
+			if values[at] != want || found[at] != (want != "") {
+				t.Errorf("position %d (%q) = (%q, %v), want (%q, %v)", at, c.keys[at], values[at], found[at], want, want != "")
+			}
+		}
+		after := primitiveStats(store)
+		if hits, misses := after.Hits-before.Hits, after.Misses-before.Misses; hits != c.hits || misses != c.miss {
+			t.Fatalf("the primitives counted %d hits and %d misses, want %d and %d", hits, misses, c.hits, c.miss)
+		}
+	}
+	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
+		for _, c := range tests {
+			t.Run(c.name, func(t *testing.T) {
+				t.Parallel()
+				runCase(t, c, stripes, policy)
+			})
+		}
+	})
+}
+
+// primitiveStats sums the counters of every stripe's primitive.
+func primitiveStats(store *memoryStore[string]) kcache.StatsValue {
+	var sum kcache.StatsValue
+	for _, stripe := range store.stripes {
+		stripe.mu.Lock()
+		stats := stripe.lru.Stats()
+		stripe.mu.Unlock()
+		sum.Hits += stats.Hits
+		sum.Misses += stats.Misses
+	}
+	return sum
 }

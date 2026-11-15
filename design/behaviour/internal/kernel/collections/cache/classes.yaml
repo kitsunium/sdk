@@ -66,6 +66,14 @@ constants:
         type: int
         value: "10"
     name: smallShare
+  - doc: |-
+      lookupChunk is how many lookups FetchMany issues before it reads an entry
+      (#840): sixteen independent map accesses, a stack array of pointers.
+    items:
+      - name: lookupChunk
+        type: int
+        value: "16"
+    name: lookupChunk
 files:
   - decls:
       - cacheLine
@@ -161,10 +169,16 @@ files:
       - (*Striped).Stripes
     name: striped.go
   - decls:
+      - lookupChunk
       - UnlockedMap
+      - batchRead
       - NewUnlockedMap
       - (*UnlockedMap).init
       - (*UnlockedMap).Fetch
+      - (*UnlockedMap).FetchMany
+      - (*UnlockedMap).readChunk
+      - (*UnlockedMap).reapInBatch
+      - (*UnlockedMap).nextBatch
       - (*UnlockedMap).missed
       - (*UnlockedMap).Deadline
       - (*UnlockedMap).Set
@@ -224,6 +238,7 @@ imports:
   iter: iter
   maphash: hash/maphash
   math: math
+  slices: slices
   sync: sync
   time: time
 package:
@@ -403,7 +418,7 @@ types:
       deadline.
 
       The layout is a budget (#1038): for a string key and a word-sized value the
-      node is 58 bytes, so it lands in the 64-byte size class — one class, and one
+      node is 62 bytes, so it lands in the 64-byte size class — one class, and one
       cache line, since the runtime places an object of that class on a 64-byte
       boundary. A time.Time deadline (24 bytes) and a heap handle (8) had taken it
       to 80 bytes, two lines, and every insertion paid the larger class.
@@ -431,6 +446,13 @@ types:
           or 1 without one.
         name: weight
         type: int32
+      - doc: |-
+          batch is the FetchMany that last recorded a hit of the entry, numbered
+          by UnlockedMap.batch: a key one batch names twice is read once (#840).
+          It takes four of the six bytes the fields above left as padding, so the
+          node keeps its size class.
+        name: batch
+        type: uint32
       - doc: |-
           freq counts the hits since admission or the last demotion, capped at
           maxFreq (S3-FIFO only).
@@ -643,6 +665,11 @@ types:
         type: uint64
       - name: evictions
         type: uint64
+      - doc: |-
+          batch numbers the FetchMany calls, from 1: an entry whose own batch is
+          the current one was read earlier in the same call (#840).
+        name: batch
+        type: uint32
     kind: struct
     methods:
       - doc: |-
@@ -717,6 +744,33 @@ types:
         params: key K
         recv: c *UnlockedMap[K, V]
         results: value V, ok bool
+      - name: FetchMany
+        params: keys []K, refs []*V
+        recv: c *UnlockedMap[K, V]
+        results: "[]*V"
+      - doc: |-
+          readChunk reads one chunk of a batch into out, a reference a key: every
+          lookup first, then every entry, with nothing called on a hit's path. Caller
+          holds the lock.
+        name: readChunk
+        params: batch *batchRead[K, V], chunk []K, out []*V
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          reapInBatch reaps ent, an entry a batch found past its deadline, as Fetch
+          reaps one, and looks the chunk's later keys up again: one of them may name
+          the entry just reaped, looked up before it went. A nil ent — a key the map
+          does not hold — reaps nothing. Caller holds the lock.
+        name: reapInBatch
+        params: batch *batchRead[K, V], ent *entry[K, V], later []K, laterEnts []*entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          nextBatch numbers a new FetchMany and returns its number. The count wraps
+          after 2^32 batches: the wrap clears every entry's mark first, so an entry
+          last read 2^32 batches ago is never taken for one read in this batch.
+          Caller holds the lock.
+        name: nextBatch
+        recv: c *UnlockedMap[K, V]
+        results: uint32
       - doc: |-
           missed counts a miss of Fetch, reaping ent — the entry the key named, its
           deadline passed — when there is one, and runs OnEvict for it once the map
@@ -878,4 +932,27 @@ types:
         params: ent *entry[K, V]
         recv: c *UnlockedMap[K, V]
     name: UnlockedMap
+    typeParams: K comparable, V any
+  - doc: |-
+      batchRead is one FetchMany in progress (#840): its number, the instant all
+      of its deadlines are judged at, what it counted and what it reaped.
+    fields:
+      - doc: pending holds what the batch reaped, for OnEvict once it is done.
+        name: pending
+        type: "[]evictionValue[K, V]"
+      - doc: |-
+          now is the batch's one reading of the clock, since the epoch; read only
+          when an entry carries a deadline.
+        name: now
+        type: int64
+      - doc: recorded counts the hits the batch recorded, missed its misses.
+        name: recorded
+        type: uint64
+      - name: missed
+        type: uint64
+      - doc: number is the batch's, which marks the entries it read.
+        name: number
+        type: uint32
+    kind: struct
+    name: batchRead
     typeParams: K comparable, V any

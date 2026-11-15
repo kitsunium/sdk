@@ -130,43 +130,204 @@ func TestChainExpireSweepsEveryTier(t *testing.T) {
 }
 
 // TestFetchManyAfterSetManyReturnsEveryKey is #840's conformance on both
-// stores, striped and not: every stored key comes back, a missing key has no
-// entry, and a duplicate is answered once.
+// stores, striped and not: after a SetMany, a FetchMany answers every
+// position of its batch in order — each stored key with its value, a missing
+// key with the zero value and false, a repeated key at each of its positions
+// —, after whatever the slices it was handed already held. The long batch
+// takes the striped store's scratch past the stack's.
 func TestFetchManyAfterSetManyReturnsEveryKey(t *testing.T) {
 	t.Parallel()
-	forEachPolicy(t, func(t *testing.T) {
-		near := newStore(t, svccache.MemoryConfig{MaxEntries: 64, Stripes: 8})
-		far := newStore(t, svccache.MemoryConfig{MaxEntries: 64})
-		chain, err := svccache.NewChain(svccache.ChainConfig{}, near, far)
+	type tc struct {
+		name   string
+		build  func(t *testing.T) corecache.Store[string]
+		stored int
+	}
+	memory := func(stripes int) func(t *testing.T) corecache.Store[string] {
+		return func(t *testing.T) corecache.Store[string] {
+			t.Helper()
+			return newStore(t, svccache.MemoryConfig{MaxEntries: 256, Stripes: stripes})
+		}
+	}
+	chain := func(t *testing.T) corecache.Store[string] {
+		t.Helper()
+		near := newStore(t, svccache.MemoryConfig{MaxEntries: 256, Stripes: 8})
+		far := newStore(t, svccache.MemoryConfig{MaxEntries: 256})
+		built, err := svccache.NewChain(svccache.ChainConfig{}, near, far)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for name, store := range map[string]corecache.Store[string]{"memory": far, "chain": chain} {
-			batch := map[string]corecache.EntryValue[string]{}
-			for i := range 20 {
-				batch[name+strconv.Itoa(i)] = entry("v"+strconv.Itoa(i), corecache.NoExpiry)
+		return built
+	}
+	tests := []tc{
+		{"memory", memory(1), 20},
+		{"memory/striped", memory(8), 20},
+		{"memory/striped/long", memory(8), 100},
+		{"chain", chain, 20},
+		{"chain/long", chain, 100},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		store := c.build(t)
+		batch := map[string]corecache.EntryValue[string]{}
+		for i := range c.stored {
+			batch["k"+strconv.Itoa(i)] = entry("v"+strconv.Itoa(i), corecache.NoExpiry)
+		}
+		if err := store.(corecache.BulkSetter[string]).SetMany(t.Context(), batch); err != nil {
+			t.Fatalf("SetMany: %v", err)
+		}
+		keys := []string{"k0", "absent", "k0"}
+		for i := range c.stored {
+			keys = append(keys, "k"+strconv.Itoa(i))
+		}
+		values, found, err := store.(corecache.BulkFetcher[string]).FetchMany(t.Context(), keys, []string{"held"}, []bool{true})
+		if err != nil {
+			t.Fatalf("FetchMany: %v", err)
+		}
+		if len(values) != 1+len(keys) || len(found) != 1+len(keys) || values[0] != "held" || !found[0] {
+			t.Fatalf("FetchMany = %d values, %d found, first (%q, %v); want %d each after the one held", len(values), len(found), values[0], found[0], 1+len(keys))
+		}
+		for at, key := range keys {
+			want, stored := batch[key]
+			if got, ok := values[1+at], found[1+at]; ok != stored || got != want.Value {
+				t.Errorf("position %d (%q) = (%q, %v), want (%q, %v)", at, key, got, ok, want.Value, stored)
 			}
-			if err := store.(corecache.BulkSetter[string]).SetMany(t.Context(), batch); err != nil {
-				t.Fatalf("%s: SetMany: %v", name, err)
-			}
-			keys := []string{name + "0", name + "0", "absent"}
-			for i := range 20 {
-				keys = append(keys, name+strconv.Itoa(i))
-			}
-			got, err := store.(corecache.BulkFetcher[string]).FetchMany(t.Context(), keys)
-			if err != nil {
-				t.Fatalf("%s: FetchMany: %v", name, err)
-			}
-			if len(got) != 20 {
-				t.Fatalf("%s: FetchMany found %d keys, want 20", name, len(got))
-			}
-			for key, want := range batch {
-				if got[key] != want.Value {
-					t.Errorf("%s: %q = %q, want %q", name, key, got[key], want.Value)
-				}
+		}
+	}
+	forEachPolicy(t, func(t *testing.T) {
+		for _, c := range tests {
+			t.Run(c.name, func(t *testing.T) {
+				t.Parallel()
+				runCase(t, c)
+			})
+		}
+	})
+}
+
+// TestFetchManyReportsANegativeEntryAsAMiss pins #838's rule through the
+// batch (#840): a key whose fill answered Absent holds no value, so its
+// position answers the zero value and false, as Fetch reports a miss.
+func TestFetchManyReportsANegativeEntryAsAMiss(t *testing.T) {
+	t.Parallel()
+	forEachPolicy(t, func(t *testing.T) {
+		store := newStore(t, svccache.MemoryConfig{MaxEntries: 8})
+		ctx := t.Context()
+		absent := func(context.Context) (corecache.EntryValue[string], error) {
+			return corecache.EntryValue[string]{}, corecache.Absent(sql.ErrNoRows, time.Minute)
+		}
+		if _, err := store.(corecache.Loader[string]).Load(ctx, "missing", absent); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("Load = %v, want sql.ErrNoRows", err)
+		}
+		if err := store.Set(ctx, "here", entry("v", time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		values, found, err := store.(corecache.BulkFetcher[string]).FetchMany(ctx, []string{"missing", "here"}, nil, nil)
+		if err != nil || found[0] || values[0] != "" || !found[1] || values[1] != "v" {
+			t.Fatalf("FetchMany = (%q, %v, %v), want the negative entry a miss and here a hit", values, found, err)
+		}
+	})
+}
+
+// TestAChainFetchManyThatFailsAppendsNothing pins the batch's error path: a
+// broken tier stops the walk, as it stops Fetch's, and the slices come back as
+// they were handed — the nearer tier's hits are not served beside the
+// failure.
+func TestAChainFetchManyThatFailsAppendsNothing(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		broken int
+	}
+	tests := []tc{
+		{name: "the near tier", broken: 0},
+		{name: "the far tier", broken: 1},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		tiers := []*flakyStore{newFlaky(t), newFlaky(t)}
+		chain, err := svccache.NewChain[string](svccache.ChainConfig{}, tiers[0], tiers[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := t.Context()
+		if err := tiers[0].Set(ctx, "near", entry("n", corecache.NoExpiry)); err != nil {
+			t.Fatal(err)
+		}
+		if err := tiers[1].Set(ctx, "far", entry("f", corecache.NoExpiry)); err != nil {
+			t.Fatal(err)
+		}
+		tiers[c.broken].fails = failGet
+		values, found, err := chain.(corecache.BulkFetcher[string]).FetchMany(ctx, []string{"near", "far"}, []string{"held"}, []bool{true})
+		if !errs.HasCode(err, corecache.CodeCacheTierFailed) {
+			t.Fatalf("FetchMany = %v, want CACHE_TIER_FAILED", err)
+		}
+		if len(values) != 1 || len(found) != 1 || values[0] != "held" || !found[0] {
+			t.Fatalf("FetchMany appended to a failed batch: %q, %v", values, found)
+		}
+	}
+	forEachPolicy(t, func(t *testing.T) {
+		for _, c := range tests {
+			t.Run(c.name, func(t *testing.T) {
+				t.Parallel()
+				runCase(t, c)
+			})
+		}
+	})
+}
+
+// TestFetchManyReusesTheSlicesItIsHanded pins the contract a zero-allocation
+// batch rests on (#840), on both stores: slices with the room for the batch
+// are written in place, and grow only when their capacity is short.
+func TestFetchManyReusesTheSlicesItIsHanded(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		keys    int
+		inPlace bool
+	}
+	tests := []tc{
+		{name: "the room for every key", keys: 16, inPlace: true},
+		{name: "the room for some", keys: 17, inPlace: false},
+	}
+	runCase := func(t *testing.T, c tc, store corecache.Store[string]) {
+		t.Helper()
+		keys := make([]string, c.keys)
+		for at := range keys {
+			keys[at] = "k" + strconv.Itoa(at)
+		}
+		values, found := make([]string, 0, 16), make([]bool, 0, 16)
+		gotValues, gotFound, err := store.(corecache.BulkFetcher[string]).FetchMany(t.Context(), keys, values, found)
+		if err != nil || len(gotValues) != c.keys || len(gotFound) != c.keys {
+			t.Fatalf("FetchMany = (%d values, %d found, %v), want %d each", len(gotValues), len(gotFound), err, c.keys)
+		}
+		inPlace := &gotValues[0] == &values[:1][0] && &gotFound[0] == &found[:1][0]
+		if inPlace != c.inPlace {
+			t.Fatalf("written in place = %v, want %v", inPlace, c.inPlace)
+		}
+	}
+	forEachPolicy(t, func(t *testing.T) {
+		for _, c := range tests {
+			for name, store := range map[string]corecache.Store[string]{
+				"memory":         newStore(t, svccache.MemoryConfig{MaxEntries: 64}),
+				"memory/striped": newStore(t, svccache.MemoryConfig{MaxEntries: 64, Stripes: 8}),
+				"chain":          newChainOfTwo(t),
+			} {
+				t.Run(c.name+"/"+name, func(t *testing.T) {
+					t.Parallel()
+					runCase(t, c, store)
+				})
 			}
 		}
 	})
+}
+
+// newChainOfTwo is a chain of two memory tiers.
+func newChainOfTwo(t *testing.T) corecache.Store[string] {
+	t.Helper()
+	chain, err := svccache.NewChain(svccache.ChainConfig{}, newStore(t, svccache.MemoryConfig{MaxEntries: 64}), newStore(t, svccache.MemoryConfig{MaxEntries: 64}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return chain
 }
 
 // TestSetManyStoresNothingWhenOneEntryIsRefused pins all-or-nothing.
@@ -211,8 +372,9 @@ func (c *countingTier) InvalidateTag(ctx context.Context, tag string) (int, erro
 }
 
 // TestChainFetchManyMakesOnePassPerTier is #840's chain acceptance: each tier
-// is asked only for the keys every nearer tier missed, once each, and the far
-// tier's hits are promoted so the next batch is answered near.
+// is asked only for the keys every nearer tier missed, once each — a key the
+// batch names twice included —, and the far tier's hits are promoted so the
+// next batch is answered near.
 func TestChainFetchManyMakesOnePassPerTier(t *testing.T) {
 	t.Parallel()
 	forEachPolicy(t, func(t *testing.T) {
@@ -231,23 +393,34 @@ func TestChainFetchManyMakesOnePassPerTier(t *testing.T) {
 		if err := near.Set(ctx, "0", entry("v", corecache.NoExpiry)); err != nil {
 			t.Fatal(err)
 		}
-		keys := []string{"0", "1", "2", "3", "4", "5", "6", "7", "absent"}
-		got, err := chain.(corecache.BulkFetcher[string]).FetchMany(ctx, keys)
-		if err != nil || len(got) != 8 {
-			t.Fatalf("FetchMany = (%d keys, %v), want 8", len(got), err)
+		keys := []string{"0", "1", "2", "3", "4", "5", "6", "7", "absent", "3"}
+		_, found, err := chain.(corecache.BulkFetcher[string]).FetchMany(ctx, keys, nil, nil)
+		if err != nil || hitsOf(found) != 9 {
+			t.Fatalf("FetchMany = (%d hits, %v), want 9", hitsOf(found), err)
 		}
 		if n, f := near.fetches.Load(), far.fetches.Load(); n != 9 || f != 8 {
-			t.Fatalf("near answered %d FetchEntry, far %d; want 9 and 8 — one pass each, far only for the near misses", n, f)
+			t.Fatalf("near answered %d FetchEntry, far %d; want 9 and 8 — one pass each, far only for the near misses, a repeat read once", n, f)
 		}
 		near.fetches.Store(0)
 		far.fetches.Store(0)
-		if _, err := chain.(corecache.BulkFetcher[string]).FetchMany(ctx, keys[:8]); err != nil {
+		if _, _, err := chain.(corecache.BulkFetcher[string]).FetchMany(ctx, keys[:8], nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		if f := far.fetches.Load(); f != 0 {
 			t.Errorf("after the batched promotion the far tier answered %d reads, want 0", f)
 		}
 	})
+}
+
+// hitsOf counts the positions a FetchMany found.
+func hitsOf(found []bool) int {
+	hits := 0
+	for _, ok := range found {
+		if ok {
+			hits++
+		}
+	}
+	return hits
 }
 
 // TestLoadRefreshingServesTheOldValueWhileOneFillReplacesIt is #838's first

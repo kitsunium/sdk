@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-13T12:00:00Z -->
+<!-- updated: 2026-11-15T12:00:00Z -->
 # internal/service/data/cache/
 
 ## Purpose
@@ -26,9 +26,9 @@ allocated. This package declares no code.
 | `chain_config.go` | `ChainConfig` — the `OnPromoteError` hook and why it should be wired; the `Clock` and `LeasePoll` `LoadLeased` waits on (#830) |
 | `lease.go` | `LoadLeased` on both stores — the cross-process lease from a `lock.Locker`, the waiting loop, `CACHE_LEASE_FAILED` (#830) |
 | `memory.go` | `NewMemory` / `NewWeighedMemory` + `memoryStore[V]` and its `memoryStripe[V]`s — the store, its lock discipline, `Expire`, and `Load` with negative entries |
-| `memory_bulk.go` | `FetchMany` / `SetMany` on the memory store — one lock per stripe per batch (#840) |
+| `memory_bulk.go` | `FetchMany` / `SetMany` on the memory store — one lock per stripe per batch; `FetchMany` answers by position in the caller's slices, through one batched read of the primitive, with no map and, up to 64 keys, nothing allocated (#840) |
 | `memory_refresh.go` | `LoadRefreshing` on the memory store — refresh-ahead, one background fill per key (#838) |
-| `chain_bulk.go` | `Expire`, `FetchMany`, `SetMany` and `LoadRefreshing` on the chain (#1059, #840, #838) |
+| `chain_bulk.go` | `Expire`, `FetchMany` (one pass per tier over the positions still missing, a repeated key read once — `firstOf`), `SetMany` and `LoadRefreshing` on the chain (#1059, #840, #838) |
 | `record.go` | `record[V]` — what the primitive actually stores: the value, the tags and the negative entry's `absent`, seven words for a string value; the deadline and the weight are the primitive's (#1059) |
 | `tagindex.go` | `tagIndex` — `byKey` / `byTag`, and why both exist |
 | `chain.go` | `NewChain` + `chainStore[V]` — promotion, write order, delete order, and the guard that keeps a promotion from undoing a write (`announce` / `finish`, #460) |
@@ -130,7 +130,7 @@ they do not share a mechanism:
 | Path | Unlinked by |
 |---|---|
 | capacity eviction | `OnEvict` → `onEvict` |
-| TTL expiry (lazy, on `Fetch`) | `OnEvict` → `onEvict` |
+| TTL expiry (lazy, on `Fetch`, or on `FetchMany` at the end of its batch — #840) | `OnEvict` → `onEvict` |
 | TTL expiry swept by `Expire` (#1059) | `OnEvict` → `onEvict` |
 | overwrite (`Set` on an existing key) | `tagIndex.add` calls `remove` first |
 | explicit `Delete` / `InvalidateTag` | direct `tagIndex.remove` |
@@ -138,7 +138,8 @@ they do not share a mechanism:
 The fourth is the trap: the primitive **deliberately does not fire `OnEvict`
 for an explicit `Delete`**, so a store relying only on the callback would leak
 every deleted key's tags. `TestTagIndexNeverNamesAKeyTheStoreNoLongerHolds`
-runs a workload that exercises all four and then asserts index ⊆ store.
+runs a workload that exercises all four — its lazy expiry through `Fetch` and
+through `FetchMany` alternately — and then asserts index ⊆ store.
 
 ## What the tag index costs, measured
 
@@ -283,13 +284,18 @@ discovers until an incident.
   to near, and reports the total of removals, as `InvalidateTag` counts them.
   A full store also evicts a dead entry before a live one (the primitive's
   eviction loop tries the expiry heap's top first).
-- **`BulkFetcher` / `BulkSetter`.** The memory store groups the keys by stripe
-  and locks each stripe once per batch. `SetMany` validates every entry before
-  storing any (all or nothing on one store). The chain's `FetchMany` makes ONE
-  pass per tier over the keys every nearer tier missed, and promotes a tier's
-  hits into the nearer tiers as a batch (through a tier's `BulkSetter` when it
-  has one) under the same `announce`/generation guard as a single promotion
-  (#460); `SetMany` writes far to near after validating every entry.
+- **`BulkFetcher` / `BulkSetter`.** `FetchMany(ctx, keys, values, found)`
+  appends one answer a key, in order, to the caller's slices — the value and
+  true, or the zero value and false for a miss or a negative entry —, growing
+  them only when their capacity is short (#840, below). `SetMany` validates
+  every entry before storing any (all or nothing on one store), then locks each
+  stripe once for its entries. The chain's `FetchMany` makes ONE pass per tier
+  over the positions every nearer tier missed — a key the batch names twice
+  asked once (`firstOf`) and answered at each of its positions —, and promotes
+  a tier's hits into the nearer tiers as a batch (through a tier's
+  `BulkSetter` when it has one) under the same `announce`/generation guard as
+  a single promotion (#460); a broken tier stops the walk and appends nothing.
+  `SetMany` writes far to near after validating every entry.
 - **`Refresher`.** `LoadRefreshing(ctx, key, fill, before)`: a hit whose
   remaining lifetime is below `before` is returned at once and ONE background
   fill per key starts — claimed under the stripe's lock in `refreshing`, so N
@@ -330,6 +336,40 @@ holds the record to its words. The verdict is the interleaved A/B of
 `bench-ab.yml` (rules `1059-fetch-hit`, `1059-load-hit`,
 `1059-fetch-hit-allocs`); `scale_bench_test.go` adds `Fetch_Hit_1M` and
 `Load_Hit_1M`, a million entries read in a random order, for its scale mode.
+
+## What a batch costs, and why it answers by position (#840)
+
+The owner held `FetchMany` of 16 keys to 40 % of `Fetch_Hit` a key. The batch
+had paid a lock per stripe but everything else per key: the primitive's
+`Fetch` (two calls, not inlined), a clock read for every key with a deadline,
+and a result map — 1 240 B, four allocations, two more hashes a key and the
+collection they bring. `BENCH.md` §#840 measures the designs; what stands:
+
+- **Answers by position, in the caller's slices.** `FetchMany` appends to
+  `values` and `found` (ADR 0049, amended 2026-11-15): a caller handing back the
+  slices of its last batch, emptied, allocates nothing. The map was the
+  biggest cost, and no other store implemented the sibling.
+- **One batched read of the primitive.** `UnlockedMap.FetchMany` (ADR 0025,
+  amended 2026-11-15) reads the clock once a batch, issues a chunk of sixteen
+  lookups before it reads an entry, and calls nothing on a hit's path; it hands
+  back references to its records, which `fetchInto` / `fetchAt` read under the
+  stripe's lock that found them (`answerOf`). Up to `batchOnStack` (64) keys the
+  references — and on a striped store the sort keys and the keys in stripe
+  order — are stack arrays; past it they are allocated for the call.
+- **A repeat is read once** — the port's promise kept without a map: the
+  primitive marks an entry with the number of the batch that read it.
+- **A striped store** sorts the positions by stripe (`stripeShift`, the stripe
+  above a 54-bit position), keeps the caller's order within a stripe, and locks
+  each stripe once; its stripe hash reads every key's bytes. An unstriped store
+  reads each key's first byte before its lock (`warmKeys`): at scale the
+  misses overlap instead of waiting one key at a time.
+
+`TestFetchManyAllocatesNothing` (`fetchmany_alloc_external_test.go`,
+`//go:build !race`, the alloc lane) holds a batch of 16 and of 64 keys to zero
+allocations on one stripe and on eight. The verdict on the bound is the
+interleaved A/B of `bench-ab.yml` (rules `840-fetchmany16-per-key` and, in the
+scale mode, `840-fetchmany16-1m` over `FetchMany_16_1M`, which lives in
+`siblings_scale_bench_test.go` so the base's binary keeps `scale_bench_test.go`).
 
 ## Do NOT
 

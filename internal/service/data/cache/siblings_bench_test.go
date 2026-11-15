@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -180,21 +181,25 @@ func BenchmarkInvalidateTag_In100k_Striped(b *testing.B) {
 	}
 }
 
-// BenchmarkFetchMany_16 reads 16 seeded keys in one call; ns/key is the
-// per-key cost to set against Fetch_Hit (#840).
+// BenchmarkFetchMany_16 reads 16 seeded keys in one call, its answers in the
+// slices of the call before (#840); ns/key is the per-key cost to set against
+// Fetch_Hit, which reads one key held in L1 where this one walks 1 024 keys
+// sixteen at a time, every key relinked.
 func BenchmarkFetchMany_16(b *testing.B) {
 	keys := benchKeys(1024)
 	store := stripedStore(b, 1, keys)
 	bulk := store.(corecache.BulkFetcher[string])
 	ctx := b.Context()
+	values, found := make([]string, 0, 16), make([]bool, 0, 16)
 	b.ReportAllocs()
 	b.ResetTimer()
 	i := 0
 	for b.Loop() {
 		start := (i * 16) & 1023
-		got, err := bulk.FetchMany(ctx, keys[start:start+16])
-		if err != nil || len(got) != 16 {
-			b.Fatalf("FetchMany = (%d keys, %v)", len(got), err)
+		var err error
+		values, found, err = bulk.FetchMany(ctx, keys[start:start+16], values[:0], found[:0])
+		if err != nil || len(found) != 16 || slices.Contains(found, false) {
+			b.Fatalf("FetchMany = (%d answers, %v)", len(found), err)
 		}
 		i++
 	}

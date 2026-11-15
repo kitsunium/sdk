@@ -48,9 +48,11 @@ go_test(
     name = "cache_test",
     size = "small",
     srcs = [
+        "allocwindow_test.go",
         "cache_bench_test.go",
         "chain_external_test.go",
         "chain_race_external_test.go",
+        "fetchmany_alloc_external_test.go",
         "gen_api_test.go",
         "lease_external_test.go",
         "lease_process_external_test.go",
@@ -60,6 +62,7 @@ go_test(
         "scale_bench_test.go",
         "siblings_bench_test.go",
         "siblings_external_test.go",
+        "siblings_scale_bench_test.go",
     ],
     embed = [":cache"],
     deps = [

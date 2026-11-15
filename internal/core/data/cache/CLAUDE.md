@@ -70,6 +70,14 @@ tier chaining.
   formatting rule for each of those before it could.
 - **A miss is not an error.** `Fetch` reports `(zero, false, nil)`. A cache
   that does not hold something has done nothing wrong.
+- **A batch answers by position** (#840, ADR 0049 amended 2026-11-15).
+  `BulkFetcher.FetchMany(ctx, keys, values, found)` appends one answer a key,
+  in order, to slices the caller hands it, growing them only when their
+  capacity is short — the `append` contract. It returned a map of the keys
+  found until #840: the map cost more than the 40 % of `Fetch_Hit` a key the
+  issue allowed, alone, and nothing outside this domain's two stores
+  implemented the sibling, so its shape changed while v0 (ADR 0040) rather
+  than gaining a sibling of its own. A key named twice is still read once.
 - **Three TTL meanings, two spellings in the primitive.** `>0` is a lifetime,
   `0` means "the store's default", `NoExpiry` (−1) means no deadline. Any other
   negative value is refused, not reinterpreted — the primitive would read it as

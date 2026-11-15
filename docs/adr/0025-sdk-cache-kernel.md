@@ -1,6 +1,6 @@
 # ADR 0025 — Generic LRU+TTL cache as a kernel primitive (`cache`)
 
-- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node; #1059: `UnlockedMap.Deadline`)
+- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node; #1059: `UnlockedMap.Deadline`); amended 2026-11-15 (#840: `UnlockedMap.FetchMany`, a batched read — one clock read, a read-once mark in the node's padding)
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0010 (recycler), ADR 0011 (snapshot), ADR 0006 (ring) — the kernel-primitive precedents; ADR 0024 (Phase-B wave)
@@ -156,3 +156,22 @@ hit — no counter moves and a passed deadline is reported, not reaped.
 `UnlockedMap.Fetch` writes its lookup out rather than delegating to the
 `fetch` a `Cache` calls under its lock, so a hit through it is one call deep;
 `Cache`'s own path does not change.
+
+## Amendment — 2026-11-15: a batched read on the core without its lock ([#840](https://github.com/kitsunium/sdk/issues/840))
+
+The cache domain's `FetchMany` (ADR 0049, amended the same day) needed what
+`UnlockedMap.Fetch` called once a key does not give: one clock read for a
+batch, and a read-once rule for a key the batch names twice, without a map.
+`UnlockedMap.FetchMany(keys, refs) []*V` appends one reference a key — the
+entry's own value, nil for a miss — read as `Fetch` reads it, except that the
+clock is read once a batch, at the first entry that carries a deadline; that a
+chunk of sixteen lookups is issued before any entry is read, so their cache
+misses overlap, and nothing is called on a hit's path; and that an entry
+records the number of the batch that read it — four bytes of the node's
+padding, so it keeps its 64-byte class — and a later position naming it gets
+the same reference without a relink or a count. The count wraps after 2^32
+batches by clearing every mark first. A reference is valid until the next call
+into the map, read under the caller's lock and never written through; `refs`
+grows only when its capacity is short. `Cache`, `Striped` and every other path
+are unchanged, and `pkg/v1/data/cache`, which does not alias `UnlockedMap`,
+exports nothing new.

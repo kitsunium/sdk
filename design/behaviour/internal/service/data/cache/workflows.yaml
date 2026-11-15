@@ -1,29 +1,69 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
-  - of: distinct
+  - of: firstOf
     steps:
-      - bind: seen
-        eval: make(map[string]struct{}, len(keys))
-      - bind: out
-        eval: make([]string, 0, len(keys))
+      - bind: first
+        eval: make([]int, len(keys))
+      - opt:
+          do:
+            - loop:
+                do:
+                  - set: first[at]
+                    value: at
+                  - loop:
+                      do:
+                        - opt:
+                            do:
+                              - set: first[at]
+                                value: first[before]
+                              - break: true
+                            when: keys[before] == key
+                      key: before
+                      range: at
+                key: at
+                range: keys
+                value: key
+            - return: first
+          when: len(keys) <= linearRepeats
+      - bind: firstAt
+        eval: make(map[string]int, len(keys))
       - loop:
           do:
             - opt:
                 do:
+                  - set: first[at]
+                    value: from
                   - continue: true
                 init:
-                  bind: _, dup
-                  eval: seen[key]
-                when: dup
-            - set: seen[key]
-              value: struct{}{}
-            - set: out
-              value: append(out, key)
+                  bind: from, seen
+                  eval: firstAt[key]
+                when: seen
+            - set: firstAt[key]
+              value: at
+            - set: first[at]
+              value: at
+          key: at
+          range: keys
+          value: key
+      - return: first
+  - of: warmKeys
+    steps:
+      - var:
+          name: sum
+          type: byte
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: +=
+                    set: sum
+                    value: key[0]
+                when: len(key) > 0
           key: _
           range: keys
           value: key
-      - return: out
+      - return: sum
   - of: (*tagIndex).remove
     steps:
       - bind: tags, found
