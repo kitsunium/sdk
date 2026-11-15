@@ -342,14 +342,34 @@ END observed, without a status it cannot read.
   would make a live process read as another, and `Stop` would take that ESRCH
   for "already gone".
 - **A child still inside `execve(2)`.** `os.StartProcess` returns once execve
-  has closed the child's close-on-exec descriptors, before execve is done, and
-  NetBSD answers the record of a process still inside it with no start time
-  (`fill_kproc2` reads it as a zombie while execve holds `p_reflock`). On
-  NetBSD 10.1 a child signalled in that window was not ended: its knote never
-  fired in 10 s, and a `SIGKILL` left a `sleep 30` its whole 30 s (#1379). The
-  BSD tests that signal a child start it with `startRunningSleeper` — one
-  execve, `/bin/sleep`, returned once its record carries a start. The kernel
-  line that drops the signal is not identified.
+  has closed the child's close-on-exec descriptors (`fd_closeexec`), before
+  execve is done, and NetBSD answers the record of a process still inside it
+  with no start time (#1452). In NetBSD 10's sources the start is set at the
+  fork (`fork1`, `p_stats->p_start`) and withheld: execve holds `p_reflock` as
+  a writer from `execve_loadvm` to the end of `execve_runproc`,
+  `sysctl_doeproc` reads a process whose `p_reflock` it cannot take as a
+  reader as a zombie, and `fill_kproc2` then leaves `p_uvalid`,
+  `p_ustart_sec` and `p_ustart_usec` at the zeros of the record's
+  allocation. Not a misread: `bsdabi`'s offsets are the header's (116, 136,
+  140, 456, 460, recomputed by gcc from netbsd-10's `sys/sysctl.h`). On
+  NetBSD 10.1 a child signalled in that window was not ended, though
+  `kill(2)` accepted the signal: its knote never fired in 10 s, a `SIGKILL`
+  left a `sleep 30` its whole 30 s (#1379), and a `SIGTERM` sent through an
+  adopted handle let it exit 0 after its 30 s, its usage a sleep's (#1445).
+  The BSD tests that signal or read a child start it once its program runs:
+  `startRunningSleeper` (internal) — one execve, `/bin/sleep`, returned once
+  its record carries a start —, and `startReading` (external) — `cat` on a
+  FIFO, returned once the test's non-blocking write end opened, which no open
+  does before cat holds the FIFO, as #1430 did for `proc/service`. The kernel
+  line that lets the pending signal go unacted is not identified: reading
+  `kpsignal2`, `execsigs` and `execve_runproc`, a process-directed signal
+  stays in `p_sigpend`.
+- **Attach inside that window.** A users bound compares the start read before
+  the knotes with the one read after; on NetBSD a process inside its execve
+  reads with none, so an adoption that straddles the end of its execve is
+  refused with ESRCH ("the pid changed hands"). Not changed here: it needs
+  `bsdabi` to say when the record states no start (`p_uvalid`), a change of
+  its designed surface.
 - **Their PID file walk** is the same `pidWalk` over `os.Root` directories
   (`pidfile_bsd.go`): `openat` `O_NOFOLLOW`, `fstatat`, `readlinkat`, a
   descent proven by device and inode; the file examined by `fstatat`, opened
