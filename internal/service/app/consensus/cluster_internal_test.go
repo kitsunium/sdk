@@ -1451,6 +1451,13 @@ func TestInstallAfterTheReceiverMovedPastTheSnapshot(t *testing.T) {
 
 // The last guard, on the apply goroutine: a restore queued for a snapshot
 // the machine already passed leaves the machine as it is (review H3).
+//
+// The snapshot is planted behind the follower's two newest, the first one
+// its retention removes (R6-02). The follower's own cut, due on the last
+// batch staleSnapshot applied, ran that retention between the Commit and
+// the restore's Open, which found no snapshot and answered SNAPSHOT_CORRUPT
+// (#1451). It is held open until the restore returned, so a removal is
+// refused, and the retention runs in that window on every run.
 func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
 	c, l, f, meta, body, tok := staleSnapshot(t)
 	sink, _, err := f.snaps.Create(meta.ID, meta)
@@ -1463,9 +1470,18 @@ func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
 	if err := sink.Commit(meta); err != nil {
 		t.Fatal(err)
 	}
+	held, err := f.snaps.Open(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.node.retain()
 	done := make(chan error, 1)
 	f.node.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
-	if err := <-done; err != nil {
+	err = <-done
+	if cerr := held.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got := f.node.Status().Applied; got < tok.Index {
