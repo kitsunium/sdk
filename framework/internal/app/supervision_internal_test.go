@@ -21,17 +21,46 @@ import (
 // loop, a declared loop — it gives up once it failed more often than its
 // intensity allows (GiveUpAfter): the component stops, its liveness check
 // "supervised:<node>" fails with the reason, and the problem says so. The
-// tests run on a manual clock and move it a second at a time, yielding in
-// between, never sleeping.
+// tests run on a manual clock and move it past a restart's backoff only once
+// the supervisor has armed it, never sleeping.
 
 // errBoom is a product's failure.
 var errBoom = errs.New(CodeLoopStart, "BOOM", "boom", "the test's failure")
 
+// armingClock is a manual clock that reports the duration of every timer
+// armed on it, so a case moves it past a wait once that wait is armed.
+type armingClock struct {
+	*clock.ManualClock
+	armed chan time.Duration
+}
+
+// NewTimer arms a timer and reports its duration.
+func (c *armingClock) NewTimer(d time.Duration) clock.Timer {
+	timer := c.ManualClock.NewTimer(d)
+	select {
+	case c.armed <- d:
+	default:
+	}
+	return timer
+}
+
+// forget drops every timer reported so far: what is reported next was armed
+// after the call.
+func (c *armingClock) forget() {
+	for {
+		select {
+		case <-c.armed:
+		default:
+			return
+		}
+	}
+}
+
 // startSupervised runs svc in memory on a manual clock and returns the app
 // and its clock.
-func startSupervised(t *testing.T, svc *Service) (*App, *clock.ManualClock) {
+func startSupervised(t *testing.T, svc *Service) (*App, *armingClock) {
 	t.Helper()
-	clk := manualAt()
+	clk := &armingClock{ManualClock: manualAt(), armed: make(chan time.Duration, 1<<10)}
 	a := NewApp(svc.name, svc).With(InMemory(), Clock(clk), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard))
 	must(t, a.Start(t.Context()))
 	stopAtCleanup(t, a)
@@ -58,23 +87,36 @@ func loopOf(a *App, name string) model.Loop {
 	return l
 }
 
-// advanceUntil moves clk a second at a time, yielding between moves, until
-// cond holds; it fails the test once the clock moved more than limit.
-func advanceUntil(t *testing.T, clk *clock.ManualClock, limit time.Duration, what string, cond func() bool) {
+// afterBackoff moves clk past the backoff the supervisor of the loop node
+// armed after a failure, then waits on the wall clock until cond holds. The
+// case calls clk.forget before the failure; the clock moves once the loop
+// says it is restarting and a timer of that backoff was armed since — never
+// before, since a timer counts from the instant it is armed, and a clock
+// moved while the supervisor still drew the failure left it short of the
+// backoff (issue #1420). The clock has not moved since the failure, so the
+// backoff is what is left until the loop's next run.
+func afterBackoff(t *testing.T, a *App, clk *armingClock, node, what string, cond func() bool) {
 	t.Helper()
-	began := clk.Now()
-	for !cond() {
-		if clk.Since(began) > limit {
-			t.Fatalf("the clock moved %v and still not %s", clk.Since(began), what)
+	var next time.Time
+	until(t, "the loop restarting", func() bool {
+		l := loopOf(a, node)
+		if l.State != model.LoopRestarting || l.NextRun == nil {
+			return false
 		}
-		clk.Advance(time.Second)
-		for range 64 {
-			if cond() {
-				return
-			}
-			runtime.Gosched()
+		next = *l.NextRun
+		return true
+	})
+	backoff := next.Sub(clk.Now())
+	until(t, "the backoff armed", func() bool {
+		select {
+		case d := <-clk.armed:
+			return d == backoff
+		default:
+			return false
 		}
-	}
+	})
+	clk.Advance(backoff)
+	until(t, what, cond)
 }
 
 // gaveUpSaid reports whether the app's problems say node was given up.
@@ -122,8 +164,9 @@ func TestARoutineThatFailsTooOftenIsGivenUp(t *testing.T) {
 	if r, status := liveness(t, a, check); r.Err != nil || status != health.StatusHealthy {
 		t.Fatalf("a routine that runs: %+v, %v", r, status)
 	}
+	clk.forget()
 	f.fail <- struct{}{}
-	advanceUntil(t, clk, time.Hour, "restarted", func() bool { return loopOf(a, f.r.id).Restarts == 1 })
+	afterBackoff(t, a, clk, f.r.id, "restarted", func() bool { return loopOf(a, f.r.id).Restarts == 1 })
 	f.fail <- struct{}{}
 	until(t, "the routine to be given up", func() bool {
 		r, _ := liveness(t, a, check)
@@ -148,11 +191,13 @@ func TestARoutineWhoseFailuresAreFarApartIsRestarted(t *testing.T) {
 	f := newFailingRoutine(svc, GiveUpAfter(1, time.Minute))
 	a, clk := startSupervised(t, svc)
 	check := supervisedCheck + f.r.id
+	clk.forget()
 	f.fail <- struct{}{}
-	advanceUntil(t, clk, 30*time.Second, "restarted", func() bool { return loopOf(a, f.r.id).Restarts == 1 })
+	afterBackoff(t, a, clk, f.r.id, "restarted", func() bool { return loopOf(a, f.r.id).Restarts == 1 })
 	clk.Advance(2 * time.Minute)
+	clk.forget()
 	f.fail <- struct{}{}
-	advanceUntil(t, clk, 30*time.Second, "restarted again", func() bool { return loopOf(a, f.r.id).Restarts == 2 })
+	afterBackoff(t, a, clk, f.r.id, "restarted again", func() bool { return loopOf(a, f.r.id).Restarts == 2 })
 	if r, status := liveness(t, a, check); r.Err != nil || status != health.StatusHealthy {
 		t.Errorf("a routine that fails once a span: %v, %v; want it live", r.Err, status)
 	}

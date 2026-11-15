@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -249,34 +250,53 @@ func (c *collected) holds(path string, words ...string) bool {
 // when something waits, as otlpengine's harness does.
 type drivenClock struct {
 	*clock.ManualClock
-	armed chan time.Duration
+	armed chan armedWait
 	// horizon is the instant drive never advances the clock past: its
 	// start plus driveHorizon.
 	horizon time.Time
+	// mu guards held.
+	mu sync.Mutex
+	// held maps each timer whose last arming a drive took for an echo, and
+	// did not advance, to the instant that arming fires; a timer leaves it
+	// when it is armed again or stopped.
+	held map[*drivenTimer]time.Time
 }
 
 // driveHorizon is how far drive ever moves a drivenClock from its start.
 // The batch sink re-arms its five-second delay each time it fires, so a
-// drive without a horizon advanced the clock five seconds per turn of its
-// loop for as long as a send took on the wall clock — thousands of turns a
-// second —, past an attempt's bound (10h here) and a batch's age (24h)
-// within one slow loopback round trip: the batches were counted expired and
-// the readiness said degraded, as a Windows runner showed (issue #598). An
-// hour holds every wait a case needs — the sink's delay, the metrics'
-// interval, a hundred backoffs of the default curve — and stays far below
-// every bound a case does not test.
+// drive that advanced every wait without a horizon moved the clock five
+// seconds per turn of its loop for as long as a send took on the wall clock
+// — thousands of turns a second —, past an attempt's bound (10h here) and a
+// batch's age (24h) within one slow loopback round trip: the batches were
+// counted expired and the readiness said degraded, as a Windows runner
+// showed (issue #598). drive no longer advances that echo (issue #1408); the
+// horizon stays the bound of what it may advance. An hour holds every wait a
+// case needs — the sink's delay, the metrics' interval, a hundred backoffs
+// of the default curve — and stays far below every bound a case does not
+// test.
 const driveHorizon = time.Hour
+
+// armedWait is one wait armed on a drivenClock: the timer that armed it —
+// nil for a ticker or an After —, its duration, and the instant it fires.
+type armedWait struct {
+	timer *drivenTimer
+	d     time.Duration
+	at    time.Time
+}
 
 // newDrivenClock is a drivenClock at a fixed instant.
 func newDrivenClock() *drivenClock {
 	start := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
-	return &drivenClock{ManualClock: clock.NewManualClock(start), armed: make(chan time.Duration, 1<<16), horizon: start.Add(driveHorizon)}
+	return &drivenClock{
+		ManualClock: clock.NewManualClock(start), armed: make(chan armedWait, 1<<16), horizon: start.Add(driveHorizon),
+		held: map[*drivenTimer]time.Time{},
+	}
 }
 
-// report says a wait of d was armed.
-func (c *drivenClock) report(d time.Duration) {
+// report says timer — nil for a ticker or an After — armed a wait of d.
+func (c *drivenClock) report(timer *drivenTimer, d time.Duration) {
 	select {
-	case c.armed <- d:
+	case c.armed <- armedWait{timer: timer, d: d, at: c.Now().Add(d)}:
 	default:
 	}
 }
@@ -284,21 +304,21 @@ func (c *drivenClock) report(d time.Duration) {
 // NewTimer arms a timer and reports it; its Reset reports too.
 func (c *drivenClock) NewTimer(d time.Duration) clock.Timer {
 	timer := &drivenTimer{Timer: c.ManualClock.NewTimer(d), c: c}
-	c.report(d)
+	c.report(timer, d)
 	return timer
 }
 
 // NewTicker arms a ticker and reports its period.
 func (c *drivenClock) NewTicker(d time.Duration) clock.Ticker {
 	ticker := c.ManualClock.NewTicker(d)
-	c.report(d)
+	c.report(nil, d)
 	return ticker
 }
 
 // After arms a wait and reports it.
 func (c *drivenClock) After(d time.Duration) <-chan time.Time {
 	ch := c.ManualClock.After(d)
-	c.report(d)
+	c.report(nil, d)
 	return ch
 }
 
@@ -311,8 +331,16 @@ type drivenTimer struct {
 // Reset re-arms the timer and reports it.
 func (t *drivenTimer) Reset(d time.Duration) bool {
 	active := t.Timer.Reset(d)
-	t.c.report(d)
+	t.c.report(t, d)
 	return active
+}
+
+// Stop disarms the timer: no drive advances a wait of it any more.
+func (t *drivenTimer) Stop() bool {
+	t.c.mu.Lock()
+	delete(t.c.held, t)
+	t.c.mu.Unlock()
+	return t.Timer.Stop()
 }
 
 // drive advances the clock past each wait of one second to ten minutes as
@@ -324,21 +352,131 @@ func (t *drivenTimer) Reset(d time.Duration) bool {
 // bound — and with it the batch sink's hand-over of a batch to its queue —,
 // ten hours in these cases, and a batch's age are never reached, however
 // long a send takes on the wall clock.
+//
+// Nor is a timer re-armed with no other wait armed since its last arming:
+// the batch sink re-arms its delay each time it fires, so advancing that
+// echo fired it again, at once, and drive moved the clock five seconds per
+// turn of its loop while a send took its time on the wall clock — toward the
+// horizon, past which the forwarder's next backoff is never advanced (issue
+// #1408). The clock moves when the work arms a wait — a send's bound, a
+// backoff, a ticker —, not for the sink's loop alone. A retry refused at
+// once is work all the same: a case whose sender refuses a batch it does not
+// look at moves the clock a backoff per turn, and keeps its sender to the
+// batches it reads.
+//
+// An echo is held, not forgotten: a drive starts by moving the clock to the
+// latest instant a held echo still fires at. The sink's echo is reported
+// once, when it is armed; a drive that read it as an echo before it ended —
+// the export's hand-over returned before the case's condition held, as on
+// OpenBSD — left the sink waiting on it, and a span the case queued next sat
+// there with no wait reported to move the clock
+// (TestAnOTLPSwitchToTheDatabaseWarnsThenMigrates). A case queues its work
+// before it drives, so that work stands on the held echo; moved once a
+// drive, the clock moves a delay per drive, never per turn.
 func (c *drivenClock) drive(t *testing.T, what string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
+	c.advanceHeld()
+	var last *drivenTimer
 	for !done() {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s: not reached (the clock at %s, its horizon at %s)", what, c.Now().Format(time.TimeOnly), c.horizon.Format(time.TimeOnly))
 		}
 		select {
-		case d := <-c.armed:
-			if d >= time.Second && d < 10*time.Minute && !c.Now().Add(d).After(c.horizon) {
-				c.Advance(d)
+		case w := <-c.armed:
+			echo := w.timer != nil && w.timer == last
+			last = w.timer
+			c.mu.Lock()
+			delete(c.held, w.timer)
+			if echo && c.advances(w.d) {
+				c.held[w.timer] = w.at
+			}
+			c.mu.Unlock()
+			if !echo && c.advances(w.d) {
+				c.Advance(w.d)
 			}
 		default:
 			runtime.Gosched()
 		}
+	}
+}
+
+// advances reports whether drive moves the clock past a wait of d armed now:
+// one of a second to ten minutes that ends short of the horizon.
+func (c *drivenClock) advances(d time.Duration) bool {
+	return d >= time.Second && d < 10*time.Minute && !c.Now().Add(d).After(c.horizon)
+}
+
+// advanceHeld moves the clock to the latest instant an echo held by a past
+// drive still fires at, short of the horizon, and forgets every held echo.
+func (c *drivenClock) advanceHeld() {
+	c.mu.Lock()
+	var latest time.Time
+	for _, at := range c.held {
+		if at.After(latest) {
+			latest = at
+		}
+	}
+	clear(c.held)
+	c.mu.Unlock()
+	if now := c.Now(); latest.After(now) && !latest.After(c.horizon) {
+		c.Advance(latest.Sub(now))
+	}
+}
+
+// sinkLoop runs the batch sink's loop as drive sees it, until the case
+// ends: one timer of five seconds, re-armed each time it fires, and an
+// export — its bound of ten hours armed, then stopped — for each span queued
+// since the last one. It returns the spans queued, the spans exported and
+// the times the timer was re-armed.
+func sinkLoop(t *testing.T, clk *drivenClock) (queued, exported, rearmed *atomic.Int64) {
+	t.Helper()
+	queued, exported, rearmed = &atomic.Int64{}, &atomic.Int64{}, &atomic.Int64{}
+	timer := clk.NewTimer(5 * time.Second)
+	stop, ended := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(ended)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-timer.C():
+			}
+			for exported.Load() < queued.Load() {
+				bound := clk.NewTimer(10 * time.Hour)
+				exported.Add(1)
+				bound.Stop()
+			}
+			timer.Reset(5 * time.Second)
+			rearmed.Add(1)
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		<-ended
+		timer.Stop()
+	})
+	return queued, exported, rearmed
+}
+
+// A drive that read the sink's echo before its condition held — the order
+// OpenBSD's slower hand-over gave TestAnOTLPSwitchToTheDatabaseWarnsThenMigrates
+// — leaves the next span on that echo, which no wait reported since can
+// move: the next drive moves the clock to it, once, and the span is
+// exported. The first drive ends only once the sink re-armed after an empty
+// turn and drive read that echo, so the order is forced on every platform.
+func TestDriveAdvancesTheEchoItHeldBack(t *testing.T) {
+	clk := newDrivenClock()
+	queued, exported, rearmed := sinkLoop(t, clk)
+	queued.Add(1)
+	clk.drive(t, "the first span exported, the sink's echo read", func() bool {
+		return exported.Load() == 1 && rearmed.Load() >= 2 && len(clk.armed) == 0
+	})
+	at := clk.Now()
+	queued.Add(1)
+	clk.drive(t, "the second span exported", func() bool { return exported.Load() == 2 })
+	if moved := clk.Now().Sub(at); moved > 10*time.Second {
+		t.Errorf("the clock moved %v for one span, want a delay or two", moved)
 	}
 }
 
