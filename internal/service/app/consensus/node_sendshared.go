@@ -54,6 +54,15 @@ func (b *appendBodies) reset() {
 	b.ranges = b.ranges[:0]
 }
 
+// entrylessFrame is AppendMessage's frame of m, a message without entries,
+// in a buffer of MessageHeaderLen bytes, the length of every such frame but
+// a forward's trace: grown from nil, the frame took four to five
+// allocations, up to 128 bytes, for its 112 (#912). The bytes are
+// AppendMessage's.
+func entrylessFrame(m *coreconsensus.MessageValue) []byte {
+	return wire.AppendMessage(make([]byte, 0, wire.MessageHeaderLen), m)
+}
+
 // sendShared sends ms through bs: every append that carries entries as its
 // header and the body it shares with the other appends of the same
 // entries, every other message through Send as before. The headers of the
@@ -77,9 +86,9 @@ func (n *Node) sendShared(bs coreconsensus.BatchSender, ms []coreconsensus.Messa
 	}
 	for i := range ms {
 		m := &ms[i]
-		//: a message without entries is encoded whole, as before.
+		//: a message without entries is encoded whole, into its exact length.
 		if len(m.Entries) == 0 {
-			n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, m))
+			n.cfg.Transport.Send(m.To, entrylessFrame(m))
 			continue
 		}
 		//: a learner the newest snapshot is too large for is fed nothing (#613).

@@ -16,15 +16,20 @@ package consensus
 //   - TestGenerateBenchMD: the generator. It drives the three through
 //     testing.Benchmark, runs the simulator distributions D16 asks for in a
 //     synctest bubble (a Benchmark cannot: synctest.Test takes a *testing.T),
-//     and writes BENCH.md beside this file.
+//     measures the leader's loop turn at 1 000 proposals/s and a turn's
+//     bytes per follower (#912, #1364: loopturn_bench_test.go,
+//     turnencoding_bench_test.go), copies the A/B lane's verdicts on them
+//     (testdata/bench/*.verdict.md), and writes BENCH.md beside this file.
+//     CONSENSUS_BENCH_ONLY=turn,enc,ab measures and rewrites those sections
+//     alone, each in place, the rest of the file kept.
 //
 // The file is gazelle-excluded and compiled into the `manual`, race-off
-// target `consensus_bench_test` alone under Bazel (rule 12): nothing in
+// target `consensus_bench_test` under Bazel (rule 12): nothing in
 // `bazel test //...` runs it. Under `go test` it joins the package's binary,
 // where its benchmarks run only under -bench and the generator stays idle
 // unless -run names it. It is self-contained: it uses the package's
-// production code and nothing of its other test files, so the Bazel target
-// needs this one source.
+// production code and, of its other test files, only the bench files the
+// same target compiles, each self-contained too.
 
 import (
 	"bytes"
@@ -39,6 +44,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"math/big"
 	"net/url"
@@ -81,6 +87,23 @@ const (
 	// benchDevicesEnv names the devices to measure, as name=dir pairs
 	// separated by commas; unset, the data disk and /dev/shm.
 	benchDevicesEnv = "CONSENSUS_BENCH_DEVICES"
+	// benchOnlyEnv names the sections a run measures and rewrites alone,
+	// comma-separated among turn, enc and ab, each in place in the BENCH.md
+	// it finds, the rest kept as it stands; unset, the whole lane runs.
+	benchOnlyEnv = "CONSENSUS_BENCH_ONLY"
+	// benchVerdictDir is where the A/B lane's verdicts on the TURN and ENC
+	// rows are committed, relative to the package (#912, #1364).
+	benchVerdictDir = "testdata/bench"
+)
+
+// The headings of the sections CONSENSUS_BENCH_ONLY rewrites in place, and
+// of the two a section missing from the file is inserted before.
+const (
+	benchTurnHeading    = "## The leader's loop turn at 1 000 proposals/s (`BenchmarkLeaderLoopTurnAt1000PerSecond`)"
+	benchEncHeading     = "## A leader turn's bytes, per follower (`BenchmarkLeaderTurnEncoding`)"
+	benchABHeading      = "## Not worse than before: the A/B lane on the TURN and ENC rows (#912, #1364)"
+	benchTargetsHeading = "## D16's provisional targets on this host"
+	benchReproHeading   = "## Reproduce"
 )
 
 // The RTT matrix of ADR 0152's Context, the three sites' measured means.
@@ -920,6 +943,18 @@ func TestGenerateBenchMD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consensus bench: %v: nothing measured, %s left as it is", err, out)
 	}
+	if only := benchOnly(t); only != nil {
+		if before == nil {
+			t.Fatalf("%s rewrites sections of the BENCH.md it finds, and there is none at %s", benchOnlyEnv, out)
+		}
+		rep := &benchReport{}
+		rep.measureTurns(t, only)
+		if err := os.WriteFile(out, []byte(rep.spliceInto(string(before), collectBenchEnvelope(), only)), 0o644); err != nil {
+			t.Fatalf("consensus bench: write %s: %v", out, err)
+		}
+		t.Logf("rewrote %v in %s", slices.Sorted(maps.Keys(only)), out)
+		return
+	}
 	rep := &benchReport{devices: benchDevices()}
 	for _, dev := range rep.devices {
 		rep.logRows = append(rep.logRows, benchRow{
@@ -941,6 +976,7 @@ func TestGenerateBenchMD(t *testing.T) {
 	}
 	rep.propose = testing.Benchmark(BenchmarkThreeNodePropose)
 	rep.sim = benchSimulate(t, rep.simSync())
+	rep.measureTurns(t, nil)
 	if err = os.WriteFile(out, []byte(keepHandRun(rep.render(collectBenchEnvelope()), before)), 0o644); err != nil {
 		panic(fmt.Sprintf("consensus bench: write %s: %v", out, err))
 	}
@@ -1002,6 +1038,11 @@ type benchReport struct {
 	tcpRows []benchRow
 	propose testing.BenchmarkResult
 	sim     *benchSimResult
+	// turns, encs and verdicts are the rows of #912 and #1364: the
+	// leader's loop turn, a turn's bytes, and the A/B lane's verdicts.
+	turns    []benchTurnRow
+	encs     []benchEncRow
+	verdicts []benchVerdict
 }
 
 // dataDisk is the first measured log row, the device the simulator's disk
@@ -1189,11 +1230,24 @@ func (rep *benchReport) render(env benchEnvelope) string {
 	fmt.Fprintf(&b, "| `SIM/failover` (leader killed → first commit under the next, %d seeds) | %d | %.0f ms | %.0f ms | %.0f ms |\n", benchFailoverSeeds,
 		s.failover.len(), benchMS(s.failover.quantile(0.5)), benchMS(s.failover.quantile(0.99)), benchMS(s.failover.quantile(1)))
 
+	b.WriteString("\n" + rep.turnSection(env))
+	b.WriteString("\n" + rep.encSection(env))
+	b.WriteString("\n" + rep.abSection())
+
 	rep.renderTargets(&b)
 
-	b.WriteString("\n## Reproduce\n\n```sh\nmake bench                       # every generator, this file included\n")
+	b.WriteString("\n" + benchReproSection())
+	return b.String()
+}
+
+// benchReproSection is the commands that refresh this file.
+func benchReproSection() string {
+	var b strings.Builder
+	b.WriteString(benchReproHeading + "\n\n```sh\nmake bench                       # every generator, this file included\n")
 	b.WriteString("make bench-consensus             # this file alone\n")
 	b.WriteString("CONSENSUS_BENCH_DEVICES=nvme=/mnt/nvme/bench,tmpfs=/dev/shm make bench-consensus\n")
+	b.WriteString("CONSENSUS_BENCH_ONLY=turn,enc make bench-consensus   # the TURN and ENC rows alone, in place (#912, #1364)\n")
+	b.WriteString("CONSENSUS_BENCH_ONLY=ab make bench-consensus         # the A/B verdicts committed under " + benchVerdictDir + "/, nothing measured\n")
 	b.WriteString("make profile-consensus WAVE=before && make profile-consensus WAVE=after\n")
 	b.WriteString("make benchstat-diff BEFORE=before AFTER=after\n```\n")
 	return b.String()
@@ -1238,4 +1292,216 @@ func (rep *benchReport) renderTargets(b *strings.Builder) {
 	}
 	got := benchMS(rep.sim.failover.quantile(0.99))
 	fmt.Fprintf(b, "| D16: failover p99 ≤ 3.5 s | `SIM/failover` | %.0f ms | 3500 ms | %s |\n", got, verdict(got <= 3500))
+}
+
+// ─── #912 and #1364: the leader's loop turn and a turn's bytes ──────────
+
+// benchSections are the sections benchOnlyEnv may name.
+var benchSections = []string{"turn", "enc", "ab"}
+
+// benchOnly is the set of sections benchOnlyEnv names, nil when it is
+// unset; a name that is none of benchSections fails the run.
+func benchOnly(t *testing.T) map[string]bool {
+	v := os.Getenv(benchOnlyEnv)
+	if v == "" {
+		return nil
+	}
+	only := map[string]bool{}
+	for name := range strings.SplitSeq(v, ",") {
+		name = strings.TrimSpace(name)
+		if !slices.Contains(benchSections, name) {
+			t.Fatalf("%s=%q: %q is none of %v", benchOnlyEnv, v, name, benchSections)
+		}
+		only[name] = true
+	}
+	return only
+}
+
+// benchTurnRow is one TURN row: the leader's loop turns at one cluster
+// size.
+type benchTurnRow struct {
+	followers int
+	r         testing.BenchmarkResult
+}
+
+// benchEncRow is one ENC row: a turn's bytes on both paths at one follower
+// count.
+type benchEncRow struct {
+	followers       int
+	shared, perPeer testing.BenchmarkResult
+}
+
+// benchVerdict is one verdict of the A/B lane committed under
+// benchVerdictDir: its file's name and its text.
+type benchVerdict struct {
+	name, text string
+}
+
+// measureTurns measures the sections of #912 and #1364 want names, all of
+// them when want is nil: the leader's loop turns at each cluster size, a
+// turn's bytes on both paths at each follower count, and the A/B lane's
+// verdicts read back.
+func (rep *benchReport) measureTurns(t *testing.T, want map[string]bool) {
+	if want == nil || want["turn"] {
+		for _, f := range ltFollowers {
+			rep.turns = append(rep.turns, benchTurnRow{
+				followers: f, r: testing.Benchmark(func(b *testing.B) { benchLoopTurn(b, f) }),
+			})
+		}
+	}
+	if want == nil || want["enc"] {
+		for _, f := range teFollowers {
+			rep.encs = append(rep.encs, benchEncRow{
+				followers: f,
+				shared:    testing.Benchmark(func(b *testing.B) { benchTurnEncoding(b, f, true) }),
+				perPeer:   testing.Benchmark(func(b *testing.B) { benchTurnEncoding(b, f, false) }),
+			})
+		}
+	}
+	if want == nil || want["ab"] {
+		rep.verdicts = readBenchVerdicts(t)
+	}
+}
+
+// readBenchVerdicts reads the verdicts committed under benchVerdictDir, in
+// the order of their names; none when the directory holds none.
+func readBenchVerdicts(t *testing.T) []benchVerdict {
+	dir := benchVerdictDir
+	if root := os.Getenv("BUILD_WORKSPACE_DIRECTORY"); root != "" {
+		dir = filepath.Join(root, filepath.Dir(benchOutputRelativePath), benchVerdictDir)
+	}
+	paths, err := filepath.Glob(filepath.Join(dir, "*.verdict.md"))
+	if err != nil {
+		t.Fatalf("consensus bench: the verdicts under %s: %v", dir, err)
+	}
+	slices.Sort(paths)
+	var out []benchVerdict
+	for _, p := range paths {
+		text, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("consensus bench: read %s: %v", p, err)
+		}
+		out = append(out, benchVerdict{name: filepath.Base(p), text: benchDemoted(string(text))})
+	}
+	return out
+}
+
+// benchDemoted is text with every second-level heading lowered by one, so
+// that a verdict never ends the section that holds it, and one final
+// newline.
+func benchDemoted(text string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "## ") {
+			lines[i] = "#" + l
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// measuredOn dates a section a run may measure apart from the rest of the
+// file (benchOnlyEnv): the host, the toolchain, the commit and the time.
+func (env benchEnvelope) measuredOn() string {
+	return fmt.Sprintf("Measured on %s (%s cores, GOMAXPROCS %d), %s, `%s` at `%s`, %s.",
+		env.CPU, env.Cores, runtime.GOMAXPROCS(0), env.Go, env.Branch, env.Commit, env.At)
+}
+
+// turnSection is the TURN rows: the leader's loop turns at 1 000
+// proposals/s (#912, #1364).
+func (rep *benchReport) turnSection(env benchEnvelope) string {
+	var b strings.Builder
+	b.WriteString(benchTurnHeading + "\n\n")
+	b.WriteString("#912's second criterion (#1364): `consensus_loop_turn_seconds` on the leader while it takes 1 000 proposals/s of 256 B, ")
+	b.WriteString("three and five nodes over loopback mTLS with memory logs, so that a turn is the loop's work and not a disk's; one paced run of 5 s a row. ")
+	b.WriteString("The series' first bucket is 0.5 ms and these turns last microseconds, so the leader's Meter keeps every observation raw: ")
+	b.WriteString("a p99 read on the histogram would be its first bound before and after any change. ")
+	b.WriteString("Commit is a proposal's latency from its due time to its return. ")
+	b.WriteString(env.measuredOn() + "\n\n")
+	b.WriteString("| Row | Turns | p50 | p99 | max | commit p99 |\n|---|---|---|---|---|---|\n")
+	for _, r := range rep.turns {
+		id := fmt.Sprintf("TURN/followers=%d", r.followers)
+		if r.r.N == 0 {
+			fmt.Fprintf(&b, "| `%s` | — | — | — | — | not measured |\n", id)
+			continue
+		}
+		fmt.Fprintf(&b, "| `%s` | %.0f | %.2f µs | %.2f µs | %.0f µs | %.3f ms |\n", id, r.r.Extra["turns/op"],
+			r.r.Extra["p50-us/turn"], r.r.Extra["p99-us/turn"], r.r.Extra["max-us/turn"], r.r.Extra["p99-ms/commit"])
+	}
+	return b.String()
+}
+
+// encSection is the ENC rows: a leader turn's bytes on both paths, against
+// 1/N (#912, #1364).
+func (rep *benchReport) encSection(env benchEnvelope) string {
+	var b strings.Builder
+	b.WriteString(benchEncHeading + "\n\n")
+	b.WriteString("#912's second criterion (#1364): \"bytes allocated per batch divided by the follower count\". ")
+	b.WriteString("One op is a leader turn of 64 entries of 256 B to N followers in replicate state, through the driver's `sendMessages`: ")
+	b.WriteString("`shared` through a `BatchSender`, the entries encoded once for every follower and the turn's headers in one buffer (#912); ")
+	b.WriteString("`per-peer` through a transport without the sibling, which the driver still sends `AppendMessage`'s whole frame per follower, ")
+	b.WriteString("each grown from nil — the path before #912, byte for byte. Both are this binary's, so the ratio needs no other commit; ")
+	b.WriteString("it holds when shared / per-peer is at most 1/N. ")
+	b.WriteString(env.measuredOn() + "\n\n")
+	b.WriteString("| Row | shared B/op | shared allocs/op | per-peer B/op | per-peer allocs/op | shared / per-peer | Bound 1/N | Verdict |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|\n")
+	for _, r := range rep.encs {
+		id := fmt.Sprintf("ENC/followers=%d", r.followers)
+		if r.shared.N == 0 || r.perPeer.N == 0 || r.perPeer.AllocedBytesPerOp() == 0 {
+			fmt.Fprintf(&b, "| `%s` | — | — | — | — | — | — | not measured |\n", id)
+			continue
+		}
+		ratio := float64(r.shared.AllocedBytesPerOp()) / float64(r.perPeer.AllocedBytesPerOp())
+		bound := 1 / float64(r.followers)
+		verdict := "met"
+		if ratio > bound {
+			verdict = "**not met**"
+		}
+		fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %d | %.3f | %.3f | %s |\n", id, r.shared.AllocedBytesPerOp(), r.shared.AllocsPerOp(),
+			r.perPeer.AllocedBytesPerOp(), r.perPeer.AllocsPerOp(), ratio, bound, verdict)
+	}
+	return b.String()
+}
+
+// abSection is the A/B lane's verdicts on the TURN and ENC rows, as
+// committed under benchVerdictDir (#912, #1364).
+func (rep *benchReport) abSection() string {
+	var b strings.Builder
+	b.WriteString(benchABHeading + "\n\n")
+	b.WriteString("\"Not worse than before\" compares two commits, which one host's rows cannot: the A/B lane (`.github/workflows/bench-ab.yml`, ")
+	b.WriteString("suites `cturn` and `cenc` of `scripts/ci/bench-ab.conf`) runs the base's test binary, built with the head's `loopturn_bench_test.go`, ")
+	b.WriteString("and the head's alternated on one runner, twenty rounds or more, and a rule holds when the high end of the 95 % interval of its per-round values ")
+	b.WriteString("meets its threshold: `TURN`'s p99 head over base at most 1.00, `ENC`'s shared over per-peer at most 1/N. ")
+	b.WriteString("Two bases: `ee1f48ba2`, the suites' own, main before lot L1, and `bench/912-parent`, the parent of #912's commit with the one line of ")
+	b.WriteString("`stream.go` that makes it build. Each verdict is the lane's `verdict.md`, committed under `" + benchVerdictDir + "/` as `<suite>-<base>.verdict.md`.\n\n")
+	if len(rep.verdicts) == 0 {
+		b.WriteString("No verdict is committed yet:\n\n```sh\n")
+		b.WriteString("gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f suites=cturn,cenc -f rounds=40\n")
+		b.WriteString("gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f suites=cturn -f base=bench/912-parent -f rounds=40\n")
+		b.WriteString("CONSENSUS_BENCH_ONLY=ab make bench-consensus   # once each verdict.md is committed\n```\n")
+		return b.String()
+	}
+	for i, v := range rep.verdicts {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "From `%s/%s`:\n\n%s", benchVerdictDir, v.name, v.text)
+	}
+	return b.String()
+}
+
+// spliceInto is doc with the sections only names measured again, and the
+// commands that refresh the file, each in place of its own; a section the
+// file does not hold yet is inserted before D16's targets.
+func (rep *benchReport) spliceInto(doc string, env benchEnvelope, only map[string]bool) string {
+	anchors := []string{benchTargetsHeading, benchReproHeading, benchHandRunHeading}
+	if only["turn"] {
+		doc = benchSplice(doc, benchTurnHeading, rep.turnSection(env), anchors...)
+	}
+	if only["enc"] {
+		doc = benchSplice(doc, benchEncHeading, rep.encSection(env), anchors...)
+	}
+	if only["ab"] {
+		doc = benchSplice(doc, benchABHeading, rep.abSection(), anchors...)
+	}
+	return benchSplice(doc, benchReproHeading, benchReproSection(), benchHandRunHeading)
 }

@@ -253,7 +253,7 @@ func (p *applyProgress) noteApplied(commit, applied uint64, now time.Time) {
 // the loop.
 func (n *Node) applyReady(st *coreconsensus.StatusValue, now time.Time) bool {
 	p := &n.progress
-	ok := applyReady(p.caughtUp, st.Commit, st.Applied, now.Sub(p.movedAt), n.r.Status().Timing.ElectionTimeoutMin)
+	ok := applyReady(p.caughtUp, st.Commit, st.Applied, now.Sub(p.movedAt), n.r.Summary().Timing.ElectionTimeoutMin)
 	if !ok && st.Applied < st.Commit {
 		p.caughtUp = false
 	}
@@ -279,7 +279,7 @@ func (n *Node) loopHealth(h *HealthValue) {
 	h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals = n.r.ChainRefusal()
 	conf := n.r.Status().Conf
 	h.SnapshotLimit = snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
-	rs := n.r.Status()
+	rs := n.r.Summary()
 	h.ReplicationLagEntries, h.LeaderLastAppend = replicationLag(&rs, now)
 	last := rs.Last
 	window := rs.Timing.ElectionTimeoutMin
@@ -301,7 +301,7 @@ func (n *Node) loopHealth(h *HealthValue) {
 // follower whose disk is slow holds in memory entries it cannot yet
 // acknowledge, and the leader's Lag of it agrees with this within the
 // window in flight. The leader reports 0 and -1.
-func replicationLag(st *raft.StatusValue, now time.Time) (uint64, time.Duration) {
+func replicationLag(st *raft.SummaryValue, now time.Time) (uint64, time.Duration) {
 	if st.Role == coreconsensus.RoleLeader {
 		return 0, -1
 	}

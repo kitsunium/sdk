@@ -227,7 +227,7 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, error)
 	var meta coreconsensus.SnapshotMetaValue
 	var commit uint64
 	ok := n.exec(func() {
-		if commit = n.r.Status().Commit; idx > commit {
+		if commit = n.r.Summary().Commit; idx > commit {
 			return
 		}
 		eng := n.r.EngineAt(idx)
@@ -907,7 +907,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	sent, moved, progress := new(atomic.Int64), new(atomic.Int64), new(atomic.Int64)
 	moved.Store(n.clk.Now().UnixNano())
 	n.sending[to] = sendPin{index: meta.Position.Index, since: moved.Load(), sent: sent, moved: moved, progress: progress, size: meta.EncodedSize}
-	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
+	offer := coreconsensus.InstallOfferValue{Term: n.r.Summary().Term, SnapshotID: meta.ID, Meta: meta}
 	ctx, cancel := context.WithCancel(context.Background())
 	n.sendStop[to] = cancel
 	n.wg.Go(func() {
@@ -986,7 +986,7 @@ func (n *Node) closeSent(h coreconsensus.SnapshotHandle, id string) {
 // waiting peer is served.
 func (n *Node) transferDone(to coreconsensus.NodeID, index uint64, err error) {
 	if err == nil {
-		pin := n.streamedPin(to, index, n.r.Status().Last, n.clk.Now())
+		pin := n.streamedPin(to, index, n.r.Summary().Last, n.clk.Now())
 		if held, ok := n.sending[to]; ok && held.since != 0 {
 			// The pin's age counts from the offer (D13).
 			pin.since = held.since

@@ -33,7 +33,7 @@ func (n *Node) probeLeader(now time.Time) {
 	if n.lastRole == coreconsensus.RoleLeader || n.lastLead == 0 {
 		return
 	}
-	every := n.r.Status().Timing.ElectionTimeoutMin / 2
+	every := n.r.Summary().Timing.ElectionTimeoutMin / 2
 	if !n.contact.probeAt.IsZero() && now.Sub(n.contact.probeAt) < every {
 		return
 	}
@@ -67,5 +67,5 @@ func (n *Node) leaderConfirmed(now time.Time) bool {
 	case n.lastRole == coreconsensus.RoleLeader:
 		return true
 	}
-	return n.contact.from == n.lastLead && now.Sub(n.contact.heard) <= n.r.Status().Timing.ElectionTimeoutMax
+	return n.contact.from == n.lastLead && now.Sub(n.contact.heard) <= n.r.Summary().Timing.ElectionTimeoutMax
 }

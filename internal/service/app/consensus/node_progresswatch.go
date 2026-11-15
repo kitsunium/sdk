@@ -44,7 +44,7 @@ type progressWatch struct {
 // It runs on the loop, at every tick; a hand-off for a stuck apply is
 // remembered across the change of leadership (watchApplied).
 func (n *Node) watchProgress(now time.Time) {
-	st := n.r.Status()
+	st := n.r.Summary()
 	w := &n.watch
 	n.am.Lock()
 	applied := n.applied
@@ -72,7 +72,8 @@ func (n *Node) watchProgress(now time.Time) {
 	if (!stuckSync && !stuckApply) || st.Transfer != 0 {
 		return
 	}
-	n.handOver(now, &st, applied, stuckApply)
+	// The memberships are read, and cloned, only for a hand-over (#912).
+	n.handOver(now, new(n.r.Status()), applied, stuckApply)
 }
 
 // handOver starts the transfer of a leader that makes no progress to the

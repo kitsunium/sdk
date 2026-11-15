@@ -354,7 +354,7 @@ func (n *Node) observePeers() {
 	}
 	o.lastPeers = now
 	o.setGauge(mFailureTolerance, float64(n.r.FailureTolerance(now)))
-	st := n.r.Status()
+	st := n.r.Summary()
 	o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
 	lag, _ := replicationLag(&st, now)
 	o.setGauge(mReplicationLag, float64(lag))

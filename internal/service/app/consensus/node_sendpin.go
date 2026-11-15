@@ -92,7 +92,7 @@ func (n *Node) renewPin(to coreconsensus.NodeID, pin sendPin, now time.Time) sen
 	}
 	match, _, ok := n.r.Progress(to)
 	pos := max(pin.index, match)
-	if !ok || !pin.follow.catchingUp(pos, n.r.Status().Last) {
+	if !ok || !pin.follow.catchingUp(pos, n.r.Summary().Last) {
 		return pin
 	}
 	pin.until, pin.follow.at = now.Add(n.pinBound(to)), pos
@@ -135,7 +135,7 @@ func (n *Node) pinAt(to coreconsensus.NodeID, pin *sendPin, now time.Time) (uint
 // costs it one transfer; a stuck receiver holds compaction at most the
 // capped bound at a time, and never once the log is tight.
 func (n *Node) pinBound(to coreconsensus.NodeID) time.Duration {
-	return time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax << n.pinScale[to]
+	return time.Duration(pinAfterStream) * n.r.Summary().Timing.ElectionTimeoutMax << n.pinScale[to]
 }
 
 // streamDue reports whether the stream of pin to peer to is to be
@@ -180,7 +180,7 @@ func (n *Node) logTight() bool {
 // nothing.
 func (n *Node) growPin(to coreconsensus.NodeID, now time.Time) {
 	_, heard, ok := n.r.Progress(to)
-	if !ok || n.logTight() || n.pinScale[to] >= pinScaleMax || now.Sub(heard) >= n.r.Status().Timing.ElectionTimeoutMax {
+	if !ok || n.logTight() || n.pinScale[to] >= pinScaleMax || now.Sub(heard) >= n.r.Summary().Timing.ElectionTimeoutMax {
 		return
 	}
 	n.pinScale[to]++
@@ -200,7 +200,7 @@ func (n *Node) growPin(to coreconsensus.NodeID, now time.Time) {
 // stream, before the peer answered anything, and the cuts of the writes
 // that followed compacted past the entry it needed next (#588).
 func (n *Node) watchPins(now time.Time) {
-	last := n.r.Status().Last
+	last := n.r.Summary().Last
 	ended := false
 	for to, pin := range n.sending {
 		pin = n.renewPin(to, pin, now)
