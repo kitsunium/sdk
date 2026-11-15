@@ -1,6 +1,6 @@
 # ADR 0025 — Generic LRU+TTL cache as a kernel primitive (`cache`)
 
-- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node)
+- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node; #1059: `UnlockedMap.Deadline`)
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0010 (recycler), ADR 0011 (snapshot), ADR 0006 (ring) — the kernel-primitive precedents; ADR 0024 (Phase-B wave)
@@ -146,3 +146,13 @@ decisions follow, none of which changes what a caller observes.
 Recycling the nodes stays deferred, for the reason given above. The verdict
 on the bound is the interleaved A/B of `bench-ab.yml` on the runner, the
 upper end of the 95 % interval against 1.05; the figures go to `BENCH.md`.
+
+The cache domain, moving onto the `UnlockedMap` the same day (#1059, ADR 0049
+amended 2026-11-13), needed one read the map did not offer: an entry's
+deadline, which its records had copied because the primitive did not expose
+it. `UnlockedMap.Deadline(key)` returns it on the clock it was taken from
+(`epoch.Add`), the zero `Time` for an entry without one; it is a read, not a
+hit — no counter moves and a passed deadline is reported, not reaped.
+`UnlockedMap.Fetch` writes its lookup out rather than delegating to the
+`fetch` a `Cache` calls under its lock, so a hit through it is one call deep;
+`Cache`'s own path does not change.

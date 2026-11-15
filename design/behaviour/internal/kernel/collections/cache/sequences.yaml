@@ -961,7 +961,43 @@ sequences:
         kind: actor
       - id: (*UnlockedMap).Fetch
         kind: self
-      - id: c.fetch
+      - id: c.missed
+        kind: internal
+      - id: c.touch
+        kind: internal
+      - id: c.main.moveFront
+        kind: internal
+    steps:
+      - bind: ent
+        eval: c.items[key]
+      - opt:
+          do:
+            - eval: c.missed(ent)
+              to: c.missed
+            - var:
+                name: zero
+                type: V
+            - return: zero, false
+          when: ent == nil || (ent.slot != 0 && c.sinceEpoch() >= ent.deadline)
+      - alt:
+          - do:
+              - eval: c.touch(ent)
+                to: c.touch
+            when: c.policy == PolicyS3FIFO
+          - do:
+              - eval: c.main.moveFront(ent)
+                to: c.main.moveFront
+            else: true
+      - op: ++
+        set: c.hits
+      - return: ent.val, true
+  - of: (*UnlockedMap).missed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).missed
+        kind: self
+      - id: c.removeEvict
         kind: internal
       - id: c.notifyEvicted
         kind: internal
@@ -969,12 +1005,36 @@ sequences:
       - var:
           name: pending
           type: "[]evictionValue[K, V]"
-      - set: value, ok
-        to: c.fetch
-        value: c.fetch(key, &pending)
+      - opt:
+          do:
+            - eval: c.removeEvict(ent, &pending)
+              to: c.removeEvict
+          when: ent != nil
+      - op: ++
+        set: c.misses
       - eval: c.notifyEvicted(pending)
         to: c.notifyEvicted
-      - return: value, ok
+  - of: (*UnlockedMap).Deadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).Deadline
+        kind: self
+      - id: c.epoch.Add
+        kind: value
+    steps:
+      - bind: ent
+        eval: c.items[key]
+      - opt:
+          do:
+            - return: time.Time{}, false
+          when: ent == nil
+      - opt:
+          do:
+            - return: time.Time{}, true
+          when: ent.slot == 0
+      - return: c.epoch.Add(time.Duration(ent.deadline)), true
+        to: c.epoch.Add
   - of: (*UnlockedMap).Set
     participants:
       - id: caller

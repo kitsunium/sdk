@@ -213,3 +213,67 @@ func TestADeadlineSurvivesTheClockBeforeTheEpoch(t *testing.T) {
 		})
 	}
 }
+
+// TestUnlockedMapDeadlineIsARead pins Deadline (#1059): the instant a TTL'd
+// entry expires, as the clock read it at the write — re-stamped by an
+// overwrite, cleared by one without a TTL —, the zero Time for an entry
+// without one, nothing for an absent key, and an entry past its deadline
+// reported rather than reaped. No call moves a counter, Len or the order:
+// a store that reads the deadline beside a Fetch must not count two hits.
+func TestUnlockedMapDeadlineIsARead(t *testing.T) {
+	t.Parallel()
+	start := time.Unix(1_700_000_000, 0)
+	type tc struct {
+		name  string
+		write func(c *cache.UnlockedMap[string, int], clk *fakeClock)
+		// after moves the clock once the writes are done.
+		after time.Duration
+		want  time.Time
+		ok    bool
+	}
+	tests := []tc{
+		{name: "an absent key", write: func(*cache.UnlockedMap[string, int], *fakeClock) {}, ok: false},
+		{name: "no deadline", write: func(c *cache.UnlockedMap[string, int], _ *fakeClock) { c.Set("k", 1) }, ok: true},
+		{name: "a TTL", write: func(c *cache.UnlockedMap[string, int], _ *fakeClock) { c.SetTTL("k", 1, time.Minute) }, want: start.Add(time.Minute), ok: true},
+		{name: "a TTL after the epoch", write: func(c *cache.UnlockedMap[string, int], clk *fakeClock) {
+			c.SetTTL("epoch", 0, time.Hour)
+			clk.advance(time.Second)
+			c.SetTTL("k", 1, time.Minute)
+		}, want: start.Add(time.Second + time.Minute), ok: true},
+		{name: "an overwrite re-stamps it", write: func(c *cache.UnlockedMap[string, int], clk *fakeClock) {
+			c.SetTTL("k", 1, time.Minute)
+			clk.advance(time.Second)
+			c.SetTTL("k", 2, time.Hour)
+		}, want: start.Add(time.Second + time.Hour), ok: true},
+		{name: "an overwrite without a TTL clears it", write: func(c *cache.UnlockedMap[string, int], _ *fakeClock) {
+			c.SetTTL("k", 1, time.Minute)
+			c.SetTTL("k", 2, 0)
+		}, ok: true},
+		{name: "a passed deadline is reported, not reaped", write: func(c *cache.UnlockedMap[string, int], _ *fakeClock) {
+			c.SetTTL("k", 1, time.Minute)
+		}, after: time.Hour, want: start.Add(time.Minute), ok: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		forEachPolicy(t, func(t *testing.T, policy cache.Policy) {
+			clk := &fakeClock{now: start}
+			store := cache.NewUnlockedMap(cache.Config[string, int]{Clock: clk, Policy: policy})
+			c.write(store, clk)
+			clk.advance(c.after)
+			stats, held := store.Stats(), store.Len()
+			got, ok := store.Deadline("k")
+			if ok != c.ok || !got.Equal(c.want) {
+				t.Fatalf("Deadline = %v, %v, want %v, %v", got, ok, c.want, c.ok)
+			}
+			if store.Stats() != stats || store.Len() != held {
+				t.Errorf("Deadline moved the cache: Stats %+v -> %+v, Len %d -> %d", stats, store.Stats(), held, store.Len())
+			}
+		})
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

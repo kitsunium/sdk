@@ -118,17 +118,15 @@ files:
       - newMemory
       - (*memoryStore).newStripe
       - (*memoryStore).absentWeight
-      - (*memoryStore).weightOf
+      - (*memoryStripe).weightOf
       - (*memoryStore).stripeOf
       - maphashString
       - (*memoryStripe).onEvict
-      - (*memoryStripe).drainEvicted
-      - (*memoryStripe).fetch
       - (*memoryStore).Fetch
       - (*memoryStore).FetchEntry
       - (*memoryStore).entryOf
       - (*memoryStore).remaining
-      - (*memoryStore).fetchRecord
+      - (*memoryStore).lookup
       - (*memoryStore).Set
       - (*memoryStore).validate
       - (*memoryStore).store
@@ -275,10 +273,10 @@ functions:
     results: uint64
     typeParams: V any
   - doc: |-
-      remainingOf is the entry's remaining lifetime at now: 0 for an entry with
-      no deadline, and never negative.
+      remainingOf is the entry's remaining lifetime at now, its deadline the
+      primitive's: 0 for an entry with no deadline, and never negative.
     name: remainingOf
-    params: expireAt, now time.Time
+    params: deadline, now time.Time
     results: time.Duration
   - doc: refusedWindow is the CACHE_MISCONFIGURED refusal of a refresh window.
     name: refusedWindow
@@ -731,32 +729,42 @@ types:
       primitive and a tag index under a mutex of its own, and a singleflight group
       in front of the fill path.
 
-      # One mutex per stripe, taken for reads too
+      # One mutex per stripe, taken for reads too, and the only one
 
       A key lives in exactly one stripe, picked by a seeded hash of the key, and
       everything that stripe holds is under its own sync.Mutex, which Fetch takes
-      exclusively. That is not an oversight: the primitive's own Fetch already
-      takes a WRITE lock, because a hit moves the entry and counters, so there was
-      never a shared-read path to lose. Serialising the stripe's tag index on the
-      SAME lock is what makes the index and the entries agree at every observable
-      moment — with two locks, a key would be briefly live but unindexed, and an
-      InvalidateTag crossing that window would report success while leaving the
-      entry fetchable. The argument holds per stripe because a key is in one.
-      Operations on keys of different stripes never wait for each other (#808).
+      exclusively. That is not an oversight: a hit moves the entry and counters,
+      so there was never a shared-read path to lose. Serialising the stripe's tag
+      index on the SAME lock is what makes the index and the entries agree at
+      every observable moment — with two locks, a key would be briefly live but
+      unindexed, and an InvalidateTag crossing that window would report success
+      while leaving the entry fetchable. The argument holds per stripe because a
+      key is in one. Operations on keys of different stripes never wait for each
+      other (#808).
+
+      The primitive is the kernel's UnlockedMap, the cache without its lock: the
+      stripe's mutex already serialises every call into it, so a second lock
+      inside would protect nothing and cost every hit two atomics and a deferred
+      unlock (#1059).
 
       # onEvict must never lock
 
-      The primitive calls OnEvict after releasing its own lock, but still on the
-      caller's goroutine — the goroutine that is inside one of the methods below,
-      holding the stripe's mutex. A callback that took it would deadlock outright,
-      sync.Mutex not being reentrant. So onEvict only APPENDS to the stripe's
-      evicted, a field that is by construction reachable solely while that mutex
-      is held, and the surrounding method drains it. The invariant is short and
-      must stay that way: no path into a primitive runs without its stripe's
-      mutex, and onEvict takes no lock.
+      The primitive calls OnEvict at the end of the call that evicted, once its
+      map is consistent, on the caller's goroutine — the goroutine that is inside
+      one of the methods below, holding the stripe's mutex. A callback that took
+      it would deadlock outright, sync.Mutex not being reentrant. So onEvict
+      takes no lock: it unlinks the key from the stripe's tag index, which that
+      mutex, held by the caller, already guards. The invariant is short and must
+      stay that way: no path into a primitive runs without its stripe's mutex,
+      and onEvict takes no lock.
     fields:
       - name: stripes
         type: "[]*memoryStripe[V]"
+      - doc: |-
+          single is the one stripe of an unstriped store, nil otherwise: the
+          common store finds its stripe without a hash or an index.
+        name: single
+        type: "*memoryStripe[V]"
       - doc: seed keys the hash that picks a key's stripe.
         name: seed
         type: maphash.Seed
@@ -805,11 +813,6 @@ types:
         name: absentWeight
         recv: s *memoryStore[V]
         results: int64
-      - doc: "weightOf is the primitive's WeightOf: the weight Set measured, once."
-        name: weightOf
-        params: _ string, rec record[V]
-        recv: s *memoryStore[V]
-        results: int64
       - doc: stripeOf returns the stripe key lives in.
         name: stripeOf
         params: key string
@@ -834,26 +837,31 @@ types:
         params: _ context.Context, key string
         recv: s *memoryStore[V]
         results: entry corecache.EntryValue[V], found bool, err error
-      - doc: entryOf turns a record into the entry a caller may hand back to Set.
+      - doc: |-
+          entryOf turns a record and its deadline into the entry a caller may hand
+          back to Set.
         name: entryOf
-        params: rec record[V]
+        params: rec record[V], deadline time.Time
         recv: s *memoryStore[V]
         results: corecache.EntryValue[V]
       - doc: |-
-          remaining converts a stored deadline into a TTL a caller can hand back to
-          Set. Caller holds nothing — it only reads the clock.
+          remaining converts the primitive's deadline into a TTL a caller can hand
+          back to Set. Caller holds nothing — it only reads the clock.
         name: remaining
-        params: rec record[V]
+        params: deadline time.Time
         recv: s *memoryStore[V]
         results: time.Duration
       - doc: |-
-          fetchRecord reads one key under its stripe's lock. The lock is released
-          by hand rather than deferred: this is every read's path, and nothing
-          between the two calls can panic short of a broken primitive.
-        name: fetchRecord
+          lookup reads one key under its stripe's lock and returns what a read
+          answers with: the value, whether the key was found, and a negative entry's
+          error. A hit records itself and a miss may reap an expired entry, whose
+          onEvict unlinks it from the tag index under the same lock. The lock is
+          released by hand rather than deferred: this is every read's path, and
+          nothing between the two calls can panic short of a broken primitive.
+        name: lookup
         params: key string
         recv: s *memoryStore[V]
-        results: rec record[V], found bool
+        results: value V, found bool, absent error
       - doc: |-
           Set stores entry under key. An entry the store cannot represent is REFUSED
           rather than reinterpreted — see [validateEntry] — and so is one heavier than
@@ -872,10 +880,12 @@ types:
         recv: s *memoryStore[V]
         results: weight int64, err error
       - doc: |-
-          store writes rec under key into stripe, its deadline from ttl. Caller holds
-          stripe.mu and has validated the entry; rec.tags is the caller's slice.
+          store writes rec under key into stripe, its deadline from ttl and its
+          weight as validate measured it. The deadline is the primitive's, read off
+          the clock once, by the primitive. Caller holds stripe.mu and has validated
+          the entry; rec.tags is the caller's slice.
         name: store
-        params: stripe *memoryStripe[V], key string, rec record[V], ttl time.Duration
+        params: stripe *memoryStripe[V], key string, rec record[V], ttl time.Duration, weight int64
         recv: s *memoryStore[V]
       - doc: "Delete removes key. Idempotent: a key that names nothing reports nil."
         name: Delete
@@ -986,14 +996,15 @@ types:
       - name: mu
         type: sync.Mutex
       - name: lru
-        type: "*kcache.Cache[string, record[V]]"
+        type: "*kcache.UnlockedMap[string, record[V]]"
       - name: tags
         type: "*tagIndex"
       - doc: |-
-          : evicted collects the keys the primitive dropped during the call in
-          : progress. Guarded by mu; see the memoryStore type comment.
-        name: evicted
-        type: "[]string"
+          : writing is the weight of the write in progress, measured once by
+          : validate and read back by the primitive's WeightOf during that write.
+          : Guarded by mu.
+        name: writing
+        type: int64
       - doc: |-
           : refreshing holds the keys a background refresh is running for (#838).
           : Guarded by mu.
@@ -1002,27 +1013,31 @@ types:
     kind: struct
     methods:
       - doc: |-
-          onEvict records a key the primitive dropped by capacity or expiry. It takes
-          NO lock — see the memoryStore type comment.
+          weightOf is the primitive's WeightOf: the weight validate measured for the
+          write in progress. The primitive weighs an entry when it is stored, on the
+          call that stores it, so the stripe's writing is that entry's weight; the
+          caller's weigher runs once per write, and the record carries no copy of
+          what the primitive keeps. Caller holds mu.
+        name: weightOf
+        params: _ string, _ record[V]
+        recv: m *memoryStripe[V]
+        results: int64
+      - doc: |-
+          onEvict unlinks from the tag index a key the primitive dropped by capacity
+          or expiry, at the end of the primitive's call. It takes NO lock: the caller
+          holds mu — see the memoryStore type comment. Leaving a key behind would
+          grow the reverse index forever and make it name entries that do not exist.
         name: onEvict
         params: key string, _ record[V]
         recv: m *memoryStripe[V]
-      - doc: |-
-          drainEvicted unlinks every key the primitive just dropped from the tag
-          index. Caller holds mu.
-        name: drainEvicted
-        recv: m *memoryStripe[V]
-      - doc: fetch is the one place a stripe's primitive is read. Caller holds mu.
-        name: fetch
-        params: key string
-        recv: m *memoryStripe[V]
-        results: rec record[V], found bool
       - doc: invalidate drops the stripe's keys carrying tag and reports how many.
         name: invalidate
         params: tag string
         recv: m *memoryStripe[V]
         results: int
-      - doc: expire sweeps one stripe.
+      - doc: |-
+          expire sweeps one stripe; the sweep fires onEvict for each removal, which
+          unlinks it from the tag index.
         name: expire
         recv: m *memoryStripe[V]
         results: int
@@ -1047,13 +1062,20 @@ types:
     typeParams: V any
   - doc: |-
       record is the value the kernel primitive holds: the caller's payload plus the
-      things the primitive has no concept of.
+      things the primitive has no concept of. It holds nothing the primitive
+      already keeps (#1059): the deadline is the primitive's, read back through
+      UnlockedMap.Deadline when FetchEntry or LoadRefreshing needs what is left
+      of it, and the weight is the primitive's, measured once at Set and handed
+      over through the stripe's write in progress (memoryStripe.weightOf). For a
+      string value the record is seven words, so a hit returns it, and its found
+      flag, in registers at every level (the amd64 ABI's nine result registers);
+      with the deadline and the weight it was eleven, copied through memory three
+      times on every hit.
 
-      expireAt is duplicated here even though the primitive tracks its own TTL,
-      because FetchEntry must report the REMAINING lifetime and the primitive does
-      not expose it. Promoting an entry between tiers with its ORIGINAL TTL would
-      refresh it on every move, so an entry that keeps being promoted would never
-      expire — a cache that cannot be emptied by time.
+      FetchEntry still reports the REMAINING lifetime, not the original: promoting
+      an entry between tiers with its ORIGINAL TTL would refresh it on every move,
+      so an entry that keeps being promoted would never expire — a cache that
+      cannot be emptied by time.
 
       tags is the SAME slice the tag index owns, not a copy: one slice means the
       entry and its index entry can never disagree, and the caller's own slice
@@ -1065,17 +1087,10 @@ types:
     fields:
       - name: value
         type: V
-      - name: expireAt
-        type: time.Time
       - name: tags
         type: "[]string"
       - name: absent
         type: error
-      - doc: |-
-          weight is what the record counts against MaxBytes, measured once at
-          Set; 0 when the store bounds no bytes.
-        name: weight
-        type: int64
     kind: struct
     name: record
     typeParams: V any

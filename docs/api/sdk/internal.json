@@ -64597,6 +64597,19 @@
       "family": "collections"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.(*UnlockedMap[...]).Deadline",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/collections/cache",
+      "name": "Deadline",
+      "recv": "UnlockedMap",
+      "spelled": "func(key K) (deadline time.Time, ok bool)",
+      "canonical": "func(key K) (deadline time.Time, ok bool)",
+      "doc": "Deadline returns the instant the entry under key expires, on the cache's\nclock, and whether key is present; an entry without a deadline answers the\nzero Time. It is a read, not a hit: the policy records nothing, no counter\nmoves, and an entry whose deadline has passed is reported, not reaped.\n",
+      "file": "kernel/collections/cache/unlocked.go",
+      "layer": "kernel",
+      "family": "collections"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.(*UnlockedMap[...]).Delete",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/kernel/collections/cache",

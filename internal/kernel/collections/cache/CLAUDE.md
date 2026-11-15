@@ -15,7 +15,7 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
 | File | Surface |
 |---|---|
 | `cache.go` | `Cache[K,V]` + `NewCache` + `Fetch`/`Set`/`SetTTL`/`Delete`/`Expire`/`Keys`/`Len`/`Purge`/`Stats` — a `sync.Mutex` around an `UnlockedMap`, OnEvict drained after the unlock |
-| `unlocked.go` | `UnlockedMap[K,V]` + `NewUnlockedMap` — the cache without its lock (#1038, for #1059): the lookup, the write path, the deadlines, the sweep and the eviction loop every `Cache` call runs |
+| `unlocked.go` | `UnlockedMap[K,V]` + `NewUnlockedMap` — the cache without its lock (#1038, for #1059): the lookup, the write path, the deadlines, the sweep and the eviction loop every `Cache` call runs; `Deadline`, the read of an entry's deadline (#1059) |
 | `deadline.go` | `deadlineHeap[K,V]` — the expiry heap: 4-ary, `int64` deadlines inline, each entry's slot its cell plus one |
 | `entry.go` | `entry[K,V]` — intrusive list node, with its deadline, its heap slot, its weight and its S3-FIFO counter: 64 bytes for a string key and a word-sized value |
 | `list.go` | `entryList[K,V]` — the intrusive doubly-linked list each queue is, with its count and summed weight |
@@ -45,6 +45,17 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
   through the same seeded operations and compares every observable.
   Named `UnlockedMap`, not the reviews' `Unlocked`: an exported struct names
   its role by a suffix (KTN-STRUCT-ROLE), and `cache.UnlockedCache` stutters.
+- **What the domain needs, and no more** (#1059). The cache domain keeps its
+  records in an `UnlockedMap` and no longer copies what the map holds:
+  `Deadline(key)` reads an entry's deadline back onto the clock it was taken
+  from (`epoch.Add`), the zero `Time` for none — a read, never a hit, no
+  counter moved, a passed deadline reported rather than reaped
+  (`TestUnlockedMapDeadlineIsARead`) — and the weight stays the one
+  `WeightOf` answered when the entry was stored, the call the domain's
+  stripe hands it over on. `UnlockedMap.Fetch` writes its lookup out instead
+  of delegating to `fetch`, which a `Cache` calls under its lock: a hit is
+  one call deep and sets up no eviction list, and only a miss leaves for
+  `missed`. `Cache`'s own path is unchanged.
 - **The node is 64 bytes** (#1038). For a string key and a word-sized value
   the entry is 58 bytes: the 64-byte size class, one cache line. A deadline
   is an `int64` of nanoseconds since the cache's epoch — the clock's reading

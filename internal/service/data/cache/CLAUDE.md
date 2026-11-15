@@ -1,12 +1,13 @@
-<!-- updated: 2026-10-03T09:00:00Z -->
+<!-- updated: 2026-11-13T12:00:00Z -->
 # internal/service/data/cache/
 
 ## Purpose
 
 The concrete cache stores implementing `internal/core/data/cache` (ADR 0049):
 
-- **`NewMemory[V]`** — the kernel LRU + TTL primitive, a two-way tag index
-  beside it, and a `kernel/concur/singleflight` group in front of the fill path.
+- **`NewMemory[V]`** — the kernel LRU + TTL primitive (its `UnlockedMap`,
+  under the stripe's one lock — #1059), a two-way tag index beside it, and a
+  `kernel/concur/singleflight` group in front of the fill path.
   Implements `Store` + `EntryFetcher` + `Tagger` + `Loader`.
 - **`NewChain[V]`** — puts one store in front of another (L1/L2), promoting a
   far hit into every nearer tier with its **remaining** TTL and its tags.
@@ -28,7 +29,7 @@ allocated. This package declares no code.
 | `memory_bulk.go` | `FetchMany` / `SetMany` on the memory store — one lock per stripe per batch (#840) |
 | `memory_refresh.go` | `LoadRefreshing` on the memory store — refresh-ahead, one background fill per key (#838) |
 | `chain_bulk.go` | `Expire`, `FetchMany`, `SetMany` and `LoadRefreshing` on the chain (#1059, #840, #838) |
-| `record.go` | `record[V]` — what the primitive actually stores, why `expireAt` is duplicated, the negative entry's `absent` and the measured `weight` |
+| `record.go` | `record[V]` — what the primitive actually stores: the value, the tags and the negative entry's `absent`, seven words for a string value; the deadline and the weight are the primitive's (#1059) |
 | `tagindex.go` | `tagIndex` — `byKey` / `byTag`, and why both exist |
 | `chain.go` | `NewChain` + `chainStore[V]` — promotion, write order, delete order, and the guard that keeps a promotion from undoing a write (`announce` / `finish`, #460) |
 | `tier.go` | `tier[V]` — one level, with its three capabilities resolved once |
@@ -97,19 +98,25 @@ said wherever the sibling is:
 One `sync.Mutex` covers **both** the primitive and the tag index, and `Fetch`
 takes it exclusively.
 
-That is not an oversight. The primitive's own `Fetch` already takes a *write*
-lock, because a hit promotes the entry and moves counters — there was never a
-shared-read path to give up. Putting the tag index under the **same** lock is
-what makes the index and the entries agree at every observable moment. With two
-locks, a key would be briefly live but unindexed, and an `InvalidateTag`
-crossing that window would report success while leaving the entry fetchable.
+That is not an oversight. A hit promotes the entry and moves counters — there
+was never a shared-read path to give up. Putting the tag index under the
+**same** lock is what makes the index and the entries agree at every
+observable moment. With two locks, a key would be briefly live but unindexed,
+and an `InvalidateTag` crossing that window would report success while
+leaving the entry fetchable.
 
-The primitive calls `OnEvict` after releasing its own lock but still on the
-**caller's goroutine** — the goroutine that is inside one of our methods,
-holding `s.mu`. A callback taking `s.mu` would deadlock outright. So:
+It is the **only** lock (#1059). The primitive is the kernel's `UnlockedMap`,
+the cache without its lock: the stripe's mutex already serialises every call
+into it, and the locked `Cache` it replaced paid a second mutex, two deferred
+calls and an eviction list on every hit for nothing.
 
-> **`onEvict` takes no lock. It appends to `s.evicted`, a field reachable only
-> while `s.mu` is held, and the surrounding method drains it.**
+The primitive calls `OnEvict` at the end of the call that evicted, once its
+map is consistent, on the **caller's goroutine** — the goroutine that is inside
+one of our methods, holding `s.mu`. A callback taking `s.mu` would deadlock
+outright. So:
+
+> **`onEvict` takes no lock. It unlinks the key from the stripe's tag index,
+> which the mutex the caller holds already guards.**
 
 `TestEvictionUnderTheStoreLockDoesNotDeadlock` provokes it. If the invariant
 ever breaks, that test does not fail — it **hangs**, and the `go test` timeout
@@ -122,9 +129,9 @@ they do not share a mechanism:
 
 | Path | Unlinked by |
 |---|---|
-| capacity eviction | `OnEvict` → `drainEvicted` |
-| TTL expiry (lazy, on `Fetch`) | `OnEvict` → `drainEvicted` |
-| TTL expiry swept by `Expire` (#1059) | `OnEvict` → `drainEvicted` |
+| capacity eviction | `OnEvict` → `onEvict` |
+| TTL expiry (lazy, on `Fetch`) | `OnEvict` → `onEvict` |
+| TTL expiry swept by `Expire` (#1059) | `OnEvict` → `onEvict` |
 | overwrite (`Set` on an existing key) | `tagIndex.add` calls `remove` first |
 | explicit `Delete` / `InvalidateTag` | direct `tagIndex.remove` |
 
@@ -204,7 +211,9 @@ out. A tag invalidation that silently misses one copy is worse than one that
 was never offered — so the chain refuses to be built rather than degrade at the
 moment nobody is looking. `FetchEntry` also reports the **remaining** TTL, not
 the original: promoting with the original would refresh the entry on every
-move, so a popular entry would become immortal.
+move, so a popular entry would become immortal. What is left is the
+primitive's deadline (`UnlockedMap.Deadline`), read under the lock that found
+the entry, against the store's clock (#1059).
 
 ## ADR 0031 — where this domain clamps and where it refuses
 
@@ -236,9 +245,10 @@ discovers until an incident.
 
 - **Stripes.** `MemoryConfig.Stripes` (0 = 1; held at `MaxEntries` and at 1024;
   negative refused) splits the store into `memoryStripe`s, each a primitive, a
-  tag index, an `evicted` scratch and the mutex over the three — the lock
-  discipline above holds per stripe, because a key lives in exactly one
-  (`maphash.String` over a per-store seed). `MaxEntries` and `MaxBytes` are
+  tag index and the mutex over both — the lock discipline above holds per
+  stripe, because a key lives in exactly one (`maphash.String` over a
+  per-store seed); an unstriped store keeps its one stripe in `single` and
+  hashes nothing. `MaxEntries` and `MaxBytes` are
   divided between the stripes, the remainder to the first ones, so the bounds
   are exact in total and the eviction order exact within a stripe only.
   `InvalidateTag` and `Expire` walk the stripes one lock at a time; `Load`'s
@@ -248,8 +258,11 @@ discovers until an incident.
   generic, so the weigher comes through `NewWeighedMemory[V](cfg, weigh func(V) int64)`;
   `NewMemory` refuses a positive `MaxBytes` (`CACHE_MISCONFIGURED`), and so does
   `NewWeighedMemory` a nil weigher or a non-positive bound — two half-stated
-  bounds. The weigher runs once per write, in `validate`, and the weight rides
-  in the record for the primitive's `WeightOf`. An entry heavier than one
+  bounds. The weigher runs once per write, in `validate`; the stripe hands the
+  weight to the primitive through `writing`, the weight of the write in
+  progress, which the primitive's `WeightOf` reads on the call that stores the
+  entry (#1059) — the record carries no copy
+  (`TestThePrimitiveWeighsWhatValidateMeasured`). An entry heavier than one
   stripe's share of `MaxBytes` is refused with `CACHE_ENTRY_REJECTED` — the
   primitive would store it alone and overrun the bound.
 - **Policy.** `MemoryConfig.Policy` is forwarded to every stripe's primitive
@@ -292,6 +305,31 @@ discovers until an incident.
   report a miss, a `Set` replaces it, and it counts in capacity, tags, expiry
   and (one unit) bytes. The chain keeps no negative entry: a tier has no port to
   store one, so `Absent` passes through it.
+
+## What a hit costs, and why it is one call deep (#1059)
+
+The owner held `Fetch_Hit` and `Load_Hit` to 10 % of `ee1f48ba2`. The wave of
+2026-11-02 had put them 15 to 29 % over it; `-gcflags=-m=2` and the
+disassembly of `Fetch` at both commits named two causes, both removed here:
+
+- **Two locks.** Every call into the primitive already held the stripe's
+  mutex, and the locked `Cache` took its own on top, with two deferred calls
+  and an eviction list. The stripe now holds the kernel's `UnlockedMap`; the
+  stripe's mutex is the only one.
+- **A record returned through memory.** The record had grown to eleven words
+  (a `time.Time` deadline and an `int64` weight, both copies of what the
+  primitive keeps), past the amd64 ABI's nine result registers, so every
+  level — `Cache.Fetch`, the stripe, `fetchRecord` — copied it through the
+  stack. It is seven words now, and `lookup` hands back only the value, the
+  negative answer and the found flag: a hit comes back in registers.
+
+Also on the path: an unstriped store reaches its stripe through `single`
+without a hash (`stripeOf` inlines), and `UnlockedMap.Fetch` writes its lookup
+out, so a hit is `Fetch` → `lookup` → `UnlockedMap.Fetch`. `Test_record_size`
+holds the record to its words. The verdict is the interleaved A/B of
+`bench-ab.yml` (rules `1059-fetch-hit`, `1059-load-hit`,
+`1059-fetch-hit-allocs`); `scale_bench_test.go` adds `Fetch_Hit_1M` and
+`Load_Hit_1M`, a million entries read in a random order, for its scale mode.
 
 ## Do NOT
 
