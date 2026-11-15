@@ -22,7 +22,7 @@ func (l *evictionLog) record(key string, val []byte) {
 // table of this package runs on Cache, which is an UnlockedMap under a mutex, and
 // an UnlockedMap driven by the same operations must answer as that Cache answers.
 // Each case drives both through one seeded sequence of Set, SetTTL, Fetch,
-// Delete, Expire, Purge and clock moves, under both policies, and compares at
+// Delete, Expire, Purge and clock moves, under every policy, and compares at
 // every step what a caller can observe: the value and hit of every Fetch, the
 // count Expire returns, Len, Stats, the keys Keys yields and every OnEvict.
 func TestUnlockedMapBehavesAsCache(t *testing.T) {

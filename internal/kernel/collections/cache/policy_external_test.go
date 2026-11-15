@@ -76,3 +76,64 @@ func TestAGhostKeyIsAdmittedIntoMain(t *testing.T) {
 		t.Error("a key the ghost remembered was evicted by a scan shorter than main")
 	}
 }
+
+// TestTinyLFUKeepsTheHotSetThroughAScan is W-TinyLFU's scan resistance: a hot
+// set used several times, then a sweep of cold keys twice the capacity. Each
+// cold key leaves the window as a candidate used once, against main's victim
+// used more: it is refused, and main keeps the hot set.
+func TestTinyLFUKeepsTheHotSetThroughAScan(t *testing.T) {
+	t.Parallel()
+	const capacity = 100
+	c := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: capacity, Policy: cache.PolicyTinyLFU})
+	hot := make([]string, 50)
+	for i := range hot {
+		hot[i] = "hot-" + strconv.Itoa(i)
+	}
+	for range 3 {
+		for _, key := range hot {
+			if _, ok := c.Fetch(key); !ok {
+				c.Set(key, 1)
+			}
+		}
+	}
+	for i := range 2 * capacity {
+		c.Set("scan-"+strconv.Itoa(i), 0)
+	}
+	kept := 0
+	for _, key := range hot {
+		if _, ok := c.Fetch(key); ok {
+			kept++
+		}
+	}
+	//: a cold key whose four counters all share with hot keys' is admitted
+	//: (a count-min sketch's error, about one key in two hundred): a margin.
+	if kept < 45 {
+		t.Errorf("W-TinyLFU kept %d of 50 hot keys through the scan, want at least 45", kept)
+	}
+	if got := c.Stats().Policy; got != cache.PolicyTinyLFU {
+		t.Errorf("Stats().Policy = %d, want PolicyTinyLFU", got)
+	}
+}
+
+// TestTinyLFUServesTheKeyJustWritten pins that the admission never refuses a
+// write outright: a new key enters the window, so a Set followed by a Fetch
+// hits even when main is full of keys used far more.
+func TestTinyLFUServesTheKeyJustWritten(t *testing.T) {
+	t.Parallel()
+	c := cache.NewCache[string, int](cache.Config[string, int]{MaxEntries: 20, Policy: cache.PolicyTinyLFU})
+	for range 5 {
+		for i := range 20 {
+			key := "busy-" + strconv.Itoa(i)
+			if _, ok := c.Fetch(key); !ok {
+				c.Set(key, i)
+			}
+		}
+	}
+	for i := range 50 {
+		key := "new-" + strconv.Itoa(i)
+		c.Set(key, i)
+		if _, ok := c.Fetch(key); !ok {
+			t.Fatalf("%s missed right after its Set", key)
+		}
+	}
+}

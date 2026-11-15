@@ -4,20 +4,22 @@ package cache
 // enough to survive three passes of main's clock hand.
 const maxFreq uint8 = 3
 
-// smallShare is the small queue's share of the capacity: one tenth, the
-// paper's figure, written as the divisor it is used as.
-const smallShare int = 10
+// smallShare is the small queue's share of the capacity, written as the
+// divisor it is used as: a fiftieth. The paper's tenth admitted into main
+// keys that came back once by chance; measured over 100 million accesses
+// (#834, BENCH.md), a fiftieth keeps 0.9 points more of a Zipf s = 1.0 at a
+// tenth of the keys, and more of every Zipf, scan and loop cell.
+const smallShare int = 50
 
-// admit places a new entry: at the front of the LRU list, or for S3-FIFO in
-// the small queue — main when the ghost remembers its key. Caller holds the lock.
-func (c *UnlockedMap[K, V]) admit(ent *entry[K, V]) {
-	//: LRU has one list, and a new entry is its most recent.
-	if c.policy != PolicyS3FIFO {
-		ent.queue = queueMain
-		c.main.pushFront(ent)
-		//: admitted.
-		return
-	}
+// ghostShare is the ghost's share of the capacity, written as the divisor it
+// is used as: a quarter. A ghost as long as main (the paper's) remembers keys
+// that recur too rarely to earn main, which they then share with the hot set;
+// a quarter admits a key straight into main only when it came back soon.
+const ghostShare int = 4
+
+// admitS3FIFO places a new entry in the small queue, or in main when the
+// ghost remembers its key. Caller holds the lock.
+func (c *UnlockedMap[K, V]) admitS3FIFO(ent *entry[K, V]) {
 	//: a key evicted from probation without a hit comes back: it skips
 	//: probation, which is what makes a recurring key survive a scan.
 	if c.ghost.remembers(ent.key) {
@@ -30,41 +32,6 @@ func (c *UnlockedMap[K, V]) admit(ent *entry[K, V]) {
 	c.small.pushFront(ent)
 }
 
-// touch records a hit: LRU promotes the entry, S3-FIFO counts it. Caller
-// holds the lock.
-func (c *UnlockedMap[K, V]) touch(ent *entry[K, V]) {
-	//: S3-FIFO moves nothing on a hit; the counter is read at eviction.
-	if c.policy == PolicyS3FIFO {
-		//: saturating, two bits' worth.
-		if ent.freq < maxFreq {
-			ent.freq++
-		}
-		//: counted.
-		return
-	}
-	//: under LRU every entry sits in main.
-	c.main.moveFront(ent)
-}
-
-// evictOne removes one entry by the policy, never fresh — the entry the
-// current Set wrote — and reports whether it found a victim. Caller holds the lock.
-func (c *UnlockedMap[K, V]) evictOne(fresh *entry[K, V], pending *[]evictionValue[K, V]) bool {
-	//: S3-FIFO picks its queue; LRU takes main's tail.
-	if c.policy == PolicyS3FIFO {
-		//: the two queues, in the order the policy prefers.
-		return c.evictS3FIFO(fresh, pending)
-	}
-	victim := c.main.tail
-	//: nothing but the entry just written is left to evict.
-	if victim == nil || victim == fresh {
-		//: no victim.
-		return false
-	}
-	c.removeEvict(victim, pending)
-	//: evicted.
-	return true
-}
-
 // evictS3FIFO evicts from the small queue while it holds its share or main is
 // empty, from main otherwise, and falls back to the other queue when the
 // first has nothing it may evict. A walk of probation that evicts nothing may
@@ -72,7 +39,7 @@ func (c *UnlockedMap[K, V]) evictOne(fresh *entry[K, V], pending *[]evictionValu
 // not have: main is asked again rather than the bound given up (#1380).
 // Caller holds the lock.
 func (c *UnlockedMap[K, V]) evictS3FIFO(fresh *entry[K, V], pending *[]evictionValue[K, V]) bool {
-	//: probation first while it is over its tenth, or when main is empty.
+	//: probation first while it is over its share, or when main is empty.
 	if c.small.count > 0 && (c.main.count == 0 || c.smallIsLarge()) {
 		//: small, then main, which holds what small promoted.
 		return c.evictSmall(fresh, pending) || c.evictMain(fresh, pending)
@@ -81,15 +48,15 @@ func (c *UnlockedMap[K, V]) evictS3FIFO(fresh *entry[K, V], pending *[]evictionV
 	return c.evictMain(fresh, pending) || c.evictSmall(fresh, pending) || c.evictMain(fresh, pending)
 }
 
-// smallIsLarge reports whether the small queue holds its tenth of the bound
+// smallIsLarge reports whether the small queue holds its share of the bound
 // that applies. Caller holds the lock.
 func (c *UnlockedMap[K, V]) smallIsLarge() bool {
-	//: a count bound: a tenth of the entries.
+	//: a count bound: a fiftieth of the entries.
 	if c.maxEntries > 0 && c.small.count*smallShare >= c.maxEntries {
 		//: over its share.
 		return true
 	}
-	//: a weight bound: a tenth of the weight.
+	//: a weight bound: a fiftieth of the weight.
 	return c.maxWeight > 0 && c.small.weight*int64(smallShare) >= c.maxWeight
 }
 
@@ -167,14 +134,15 @@ func (c *UnlockedMap[K, V]) evictMain(fresh *entry[K, V], pending *[]evictionVal
 	return false
 }
 
-// ghostBound is how many hashes the ghost keeps: the entry bound when there is
-// one, else the live count. Caller holds the lock.
+// ghostBound is how many hashes the ghost keeps: a quarter of the entry
+// bound when there is one, else of the live count, and at least one. Caller
+// holds the lock.
 func (c *UnlockedMap[K, V]) ghostBound() int {
-	//: a count bound sizes the ghost like main.
+	//: a count bound sizes the ghost.
 	if c.maxEntries > 0 {
-		//: the entry bound.
-		return c.maxEntries
+		//: a quarter of the entry bound.
+		return max(c.maxEntries/ghostShare, 1)
 	}
-	//: a weight bound alone: as many hashes as live entries.
-	return len(c.items)
+	//: a weight bound alone: a quarter of the live entries.
+	return max(len(c.items)/ghostShare, 1)
 }

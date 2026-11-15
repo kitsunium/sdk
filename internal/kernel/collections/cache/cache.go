@@ -32,7 +32,8 @@ func NewCache[K comparable, V any](cfg Config[K, V]) *Cache[K, V] {
 }
 
 // Fetch returns the value for key and whether it was present and unexpired. A
-// hit promotes the entry to most-recently-used (hence Fetch, not a pure Get).
+// hit is recorded by the policy — under LRU it promotes the entry to
+// most-recently-used —, hence Fetch, not a pure Get.
 func (c *Cache[K, V]) Fetch(key K) (value V, ok bool) {
 	//: registered BEFORE the unlock defer so LIFO runs it AFTER the unlock —
 	//: OnEvict is user code and must never see the lock held.
