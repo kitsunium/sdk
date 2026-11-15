@@ -47,20 +47,28 @@ type adopted struct {
 	pid      int
 }
 
-// procRecord is what the kernel's process record says of a process: when it
-// started, as the kernel states it, and its real and effective users.
-type procRecord struct {
-	start      int64
-	ruid, euid int
+// attachProcess holds pid by two knotes and checks want against the process
+// they hold, reading the kernel's records on the system clock.
+func attachProcess(pid int, want coreproc.AttachValue) (coreproc.Process, error) {
+	//: the kernel's records.
+	return kernelRecords().attach(pid, want)
 }
 
-// attachProcess holds pid by two knotes and checks want against the process
-// they hold. A cgroup bound is refused: these kernels have none. A users bound
-// is read from the kernel's record (bsdabi) before and after the knotes are
-// registered; the two must state one start time — a pid that changed hands in
-// between is refused —, and the knote still silent afterwards proves the reads
-// concerned the process held, so its pid was not yet another's.
-func attachProcess(pid int, want coreproc.AttachValue) (coreproc.Process, error) {
+// kernelRecords is the recordSource of production: sysctl(3) through bsdabi,
+// a knote registration as the probe, the system clock.
+func kernelRecords() recordSource {
+	//: the kernel, on the system clock.
+	return recordSource{read: readRecord, alive: probeKnote, clk: clock.System}
+}
+
+// attach holds pid by two knotes and checks want against the process they
+// hold. A cgroup bound is refused: these kernels have none. A users bound is
+// read from the kernel's record (bsdabi) before and after the knotes are
+// registered, each read again until the kernel states it valid (await); the
+// two must state one start time — a pid that changed hands in between is
+// refused —, and the knote still silent afterwards proves the reads concerned
+// the process held, so its pid was not yet another's.
+func (s recordSource) attach(pid int, want coreproc.AttachValue) (coreproc.Process, error) {
 	//: no cgroup to check a cgroup bound by.
 	if want.Cgroup != "" {
 		//: ADOPTION_REFUSED naming the bound.
@@ -71,10 +79,11 @@ func attachProcess(pid int, want coreproc.AttachValue) (coreproc.Process, error)
 	//: the record a users bound is checked on, read once before the knotes.
 	if len(want.UIDs) > 0 {
 		var err error
-		before, err = readRecord(pid)
-		//: gone, or no record this build can read.
+		before, err = s.await(pid)
+		//: gone, no record this build can read, or none valid within the bound.
 		if err != nil {
-			//: SIGNAL_FAILED (ESRCH), HANDLE_UNAVAILABLE or UNSUPPORTED_PLATFORM.
+			//: SIGNAL_FAILED (ESRCH), HANDLE_UNAVAILABLE, ADOPTION_REFUSED or
+			//: UNSUPPORTED_PLATFORM.
 			return nil, err
 		}
 	}
@@ -85,7 +94,7 @@ func attachProcess(pid int, want coreproc.AttachValue) (coreproc.Process, error)
 		return nil, err
 	}
 	//: the users bound, on the process the knotes hold.
-	if err = a.checkUsersHeld(want, before); err != nil {
+	if err = a.checkUsersHeld(s, want, before); err != nil {
 		a.release()
 		//: ADOPTION_REFUSED or SIGNAL_FAILED.
 		return nil, err
@@ -100,15 +109,16 @@ func attachProcess(pid int, want coreproc.AttachValue) (coreproc.Process, error)
 	return a, nil
 }
 
-// checkUsersHeld reads the record again, now that the knotes hold the process,
-// requires the start time read before, and checks want's users on it.
-func (a *adopted) checkUsersHeld(want coreproc.AttachValue, before procRecord) error {
+// checkUsersHeld reads the record again from s, now that the knotes hold the
+// process, until the kernel states it valid, requires the start time read
+// before, and checks want's users on it.
+func (a *adopted) checkUsersHeld(s recordSource, want coreproc.AttachValue, before procRecord) error {
 	//: no user bound: nothing was read.
 	if len(want.UIDs) == 0 {
 		//: within every bound given.
 		return nil
 	}
-	after, err := readRecord(a.pid)
+	after, err := s.await(a.pid)
 	//: gone meanwhile, or the pid now names another process.
 	if err == nil && after.start != before.start {
 		//: what a signal to the process read first would answer.
@@ -177,6 +187,24 @@ func openKnote(pid int) (*os.File, syscall.RawConn, error) {
 	}
 	//: the knote, held.
 	return f, raw, nil
+}
+
+// probeKnote reports whether the kernel still finds a live process at pid, by
+// registering a knote on it and dropping it at once: nil while it does,
+// SIGNAL_FAILED (ESRCH) once the process has exited — the kernels' knote
+// refuses a zombie (NetBSD's proc_find, OpenBSD's PS_EXITING) —, and
+// HANDLE_UNAVAILABLE for a process this one may not watch, as newAdopted
+// would answer.
+func probeKnote(pid int) error {
+	kq, _, err := openKnote(pid)
+	//: gone, or not to be watched.
+	if err != nil {
+		//: the classified refusal.
+		return err
+	}
+	swallowErr(kq.Close())
+	//: alive.
+	return nil
 }
 
 // classifyKnote maps a refused registration: ESRCH is a process gone
@@ -320,10 +348,10 @@ func pollKnote(raw syscall.RawConn) (bool, error) {
 }
 
 // readRecord asks the kernel for the record of pid (sysctl(3), bsdabi's name
-// and layout for this build's GOOS and GOARCH). A process gone — the kernel's
-// ESRCH, or an empty answer — is SIGNAL_FAILED; a record this build cannot
-// read is HANDLE_UNAVAILABLE, never a guess; a GOARCH without a known layout
-// is UNSUPPORTED_PLATFORM.
+// and layout for this build's GOOS and GOARCH), valid or not as the kernel
+// states it. A process gone — the kernel's ESRCH, or an empty answer — is
+// SIGNAL_FAILED; a record this build cannot read is HANDLE_UNAVAILABLE, never
+// a guess; a GOARCH without a known layout is UNSUPPORTED_PLATFORM.
 func readRecord(pid int) (procRecord, error) {
 	mib, size, ok := bsdabi.ProcRequest(runtime.GOOS, runtime.GOARCH, pid)
 	//: no layout for this architecture.
@@ -347,12 +375,12 @@ func readRecord(pid int) (procRecord, error) {
 		//: no record to check a bound on.
 		return procRecord{}, wrapAdoptionRefused(errno, errs.Int("pid", pid), errs.String("why", "the process record is unreadable"))
 	}
-	start, ruid, euid, ok := bsdabi.ProcRecord(runtime.GOOS, runtime.GOARCH, pid, buf[:n])
+	start, ruid, euid, valid, ok := bsdabi.ProcRecord(runtime.GOOS, runtime.GOARCH, pid, buf[:n])
 	//: not the layout this build reads.
 	if !ok {
 		//: refused, never misread.
 		return procRecord{}, wrapHandleUnavailable(nil, errs.Int("pid", pid), errs.String("why", "the process record is not the layout this build reads"))
 	}
 	//: the record.
-	return procRecord{start: start, ruid: ruid, euid: euid}, nil
+	return procRecord{start: start, ruid: ruid, euid: euid, valid: valid}, nil
 }

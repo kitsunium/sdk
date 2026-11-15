@@ -3603,7 +3603,10 @@ packages:
 
           Off Linux there is no cgroup, so a Cgroup bound is AdoptionRefused; the
           users are read from the kernel's process record (sysctl kinfo_proc), whose
-          start time must be the same before and after the knotes are registered.
+          start time must be the same before and after the knotes are registered. A
+          record the kernel has not filled yet — NetBSD's, for a process inside its
+          execve(2) — is read again every 5 ms, for a second at most on the system
+          clock, and the process is AdoptionRefused if it never is.
           Each directory of the walk is held open for reading there, where Linux needs
           only the permission to search it.
         in:
@@ -3861,6 +3864,13 @@ packages:
           and effective users. ok is false when buf is not that record as the layout
           of goos and goarch lays it out — shorter than it, of another size than the
           record states, or naming another process than pid.
+
+          valid is the record's p_uvalid on NetBSD and OpenBSD, which the kernel sets
+          only for a process it does not read as a zombie: false for a process that
+          has exited and, on NetBSD, for one in the middle of its execve(2), whose
+          p_reflock sysctl cannot take. The start is then 0 and says nothing, and the
+          users may be those the execve is replacing. FreeBSD, DragonFly and darwin
+          state no such thing, and valid is true there.
         in:
           - name: goos
           - name: goarch
@@ -3876,6 +3886,7 @@ packages:
           - name: ruid
           - name: euid
             type: int
+          - name: valid
           - name: ok
             type: bool
       - doc: |-
@@ -6356,7 +6367,8 @@ packages:
             another user could have written or redirected is trusted only through want:
             the process must lie in its cgroup and run as one of its users, and a want
             that bounds nothing is AdoptionRefused. Linux, darwin and the BSDs; off Linux
-            a cgroup bound is AdoptionRefused, as there is no cgroup to check.
+            a cgroup bound is AdoptionRefused, as there is no cgroup to check, and a
+            users bound waits up to a second for a process caught in its execve(2).
           forward: svcexec.AttachPIDFile
           in:
             - name: ctx

@@ -51,6 +51,12 @@ constants:
         name: noStructSize
         type: int
         value: "-1"
+      - doc: |-
+          noValidity marks a record without a field stating whether the kernel
+          filled its start.
+        name: noValidity
+        type: int
+        value: "-1"
     name: int32Bytes
   - doc: |-
       FreeBSD's struct kinfo_proc (sys/sys/user.h): its size is KINFO_PROC_SIZE
@@ -205,6 +211,12 @@ constants:
         name: openBSDRuid
         type: int
         value: "132"
+      - doc: |-
+          openBSDUvalid is p_uvalid's offset (64 bits), set by FILL_KPROC for a
+          process that is not a zombie.
+        name: openBSDUvalid
+        type: int
+        value: "400"
       - doc: openBSDSec is p_ustart_sec's offset (64 bits).
         name: openBSDSec
         type: int
@@ -237,6 +249,12 @@ constants:
         name: netBSDRuid
         type: int
         value: "140"
+      - doc: |-
+          netBSDUvalid is p_uvalid's offset (64 bits), set by fill_kproc2 for a
+          process sysctl_doeproc does not read as a zombie (kern_proc.c).
+        name: netBSDUvalid
+        type: int
+        value: "448"
       - doc: netBSDSec is p_ustart_sec's offset (32 bits).
         name: netBSDSec
         type: int
@@ -322,7 +340,7 @@ functions:
     results: mib []int32, size int, ok bool
   - name: ProcRecord
     params: goos, goarch string, pid int, buf []byte
-    results: start int64, ruid, euid int, ok bool
+    results: start int64, ruid, euid int, valid, ok bool
   - doc: readInt32 reads the signed 32-bit integer at off.
     name: readInt32
     params: buf []byte, off int
@@ -373,7 +391,8 @@ types:
   - doc: |-
       procLayout is where one kernel's process record keeps what ProcRecord
       reads: the record's size, a structure-size field to check it by, the pid
-      to check it against, the users and the start time.
+      to check it against, the users, the start time and the field stating the
+      start was filled.
     fields:
       - doc: "op is the second name of the sysctl: KERN_PROC or KERN_PROC2."
         name: op
@@ -403,6 +422,11 @@ types:
       - doc: pid, ruid and euid are 32-bit fields.
         name: euid
         type: int
+      - doc: |-
+          uvalid is the offset of the 64-bit p_uvalid, noValidity when the record
+          has none.
+        name: uvalid
+        type: int
       - doc: sec and usec are the start time's halves.
         name: sec
         type: field
@@ -431,7 +455,7 @@ vars:
         value: |-
           procLayout{
           		op: kernProc, size: freeBSDLP64Size, exact: true, structSize: freeBSDStructSize,
-          		pid: freeBSDLP64Pid, ruid: freeBSDLP64Ruid, euid: freeBSDLP64Euid,
+          		pid: freeBSDLP64Pid, ruid: freeBSDLP64Ruid, euid: freeBSDLP64Euid, uvalid: noValidity,
           		sec: field{freeBSDLP64Sec, int64Bytes}, usec: field{freeBSDLP64Usec, int64Bytes},
           	}
       - doc: freeBSD386 is struct kinfo_proc on i386.
@@ -439,7 +463,7 @@ vars:
         value: |-
           procLayout{
           		op: kernProc, size: freeBSD386Size, exact: true, structSize: freeBSDStructSize,
-          		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid,
+          		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid, uvalid: noValidity,
           		sec: field{freeBSD32Sec, int32Bytes}, usec: field{freeBSD386Usec, int32Bytes},
           	}
       - doc: freeBSDArm is struct kinfo_proc on arm.
@@ -447,7 +471,7 @@ vars:
         value: |-
           procLayout{
           		op: kernProc, size: freeBSDArmSize, exact: true, structSize: freeBSDStructSize,
-          		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid,
+          		pid: freeBSD32Pid, ruid: freeBSD32Ruid, euid: freeBSD32Euid, uvalid: noValidity,
           		sec: field{freeBSD32Sec, int64Bytes}, usec: field{freeBSDArmUsec, int32Bytes},
           	}
       - doc: dragonFly is struct kinfo_proc's prefix on amd64.
@@ -455,7 +479,7 @@ vars:
         value: |-
           procLayout{
           		op: kernProc, size: dragonFlyBuffer, structSize: noStructSize,
-          		pid: dragonFlyPid, ruid: dragonFlyRuid, euid: dragonFlyEuid,
+          		pid: dragonFlyPid, ruid: dragonFlyRuid, euid: dragonFlyEuid, uvalid: noValidity,
           		sec: field{dragonFlySec, int64Bytes}, usec: field{dragonFlyUsec, int64Bytes},
           	}
       - doc: darwin is struct kinfo_proc on amd64 and arm64.
@@ -463,7 +487,7 @@ vars:
         value: |-
           procLayout{
           		op: kernProc, size: darwinSize, exact: true, structSize: noStructSize,
-          		pid: darwinPid, ruid: darwinRuid, euid: darwinEuid,
+          		pid: darwinPid, ruid: darwinRuid, euid: darwinEuid, uvalid: noValidity,
           		sec: field{darwinSec, int64Bytes}, usec: field{darwinUsec, int32Bytes},
           	}
       - doc: openBSD is struct kinfo_proc's prefix on every architecture.
@@ -471,7 +495,7 @@ vars:
         value: |-
           procLayout{
           		op: kernProcOpenBSD, sized: true, size: openBSDPrefix, exact: true, structSize: noStructSize,
-          		pid: openBSDPid, ruid: openBSDRuid, euid: openBSDEuid,
+          		pid: openBSDPid, ruid: openBSDRuid, euid: openBSDEuid, uvalid: openBSDUvalid,
           		sec: field{openBSDSec, int64Bytes}, usec: field{openBSDUsec, int32Bytes},
           	}
       - doc: netBSD is struct kinfo_proc2's prefix on every architecture.
@@ -479,7 +503,7 @@ vars:
         value: |-
           procLayout{
           		op: kernProc2, sized: true, size: netBSDPrefix, exact: true, structSize: noStructSize,
-          		pid: netBSDPid, ruid: netBSDRuid, euid: netBSDEuid,
+          		pid: netBSDPid, ruid: netBSDRuid, euid: netBSDEuid, uvalid: netBSDUvalid,
           		sec: field{netBSDSec, int32Bytes}, usec: field{netBSDUsec, int32Bytes},
           	}
     name: freeBSDLP64

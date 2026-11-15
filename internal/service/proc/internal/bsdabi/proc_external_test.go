@@ -232,7 +232,10 @@ type recordCase struct {
 	mibTail                    []int32
 	structSize                 string
 	pid, ruid, euid, sec, usec string
-	secWidth, usecWidth        int
+	// uvalid is the member stating the start was filled, "" where the
+	// header has none.
+	uvalid              string
+	secWidth, usecWidth int
 }
 
 // recordCases are the layouts ProcRecord must read, one per ABI.
@@ -247,13 +250,15 @@ func recordCases() []recordCase {
 	openbsd := func(goarch string) recordCase {
 		return recordCase{
 			goos: "openbsd", goarch: goarch, st: openBSDKinfoProc(lp64.i64), size: 424, mibOp: 66, mibTail: []int32{424, 1},
-			pid: "p_pid", ruid: "p_ruid", euid: "p_uid", sec: "p_ustart_sec", usec: "p_ustart_usec", secWidth: 8, usecWidth: 4,
+			pid: "p_pid", ruid: "p_ruid", euid: "p_uid", sec: "p_ustart_sec", usec: "p_ustart_usec", uvalid: "p_uvalid",
+			secWidth: 8, usecWidth: 4,
 		}
 	}
 	netbsd := func(goarch string) recordCase {
 		return recordCase{
 			goos: "netbsd", goarch: goarch, st: netBSDKinfoProc2(lp64.i64), size: 464, mibOp: 47, mibTail: []int32{464, 1},
-			pid: "p_pid", ruid: "p_ruid", euid: "p_uid", sec: "p_ustart_sec", usec: "p_ustart_usec", secWidth: 4, usecWidth: 4,
+			pid: "p_pid", ruid: "p_ruid", euid: "p_uid", sec: "p_ustart_sec", usec: "p_ustart_usec", uvalid: "p_uvalid",
+			secWidth: 4, usecWidth: 4,
 		}
 	}
 	darwin := func(goarch string) recordCase {
@@ -286,7 +291,8 @@ func put(buf []byte, off, width int, v uint64) {
 }
 
 // fixture is c's record for pid, users 1001/1002 and a start of
-// 1700000000.123456 s, every other byte 0xA5.
+// 1700000000.123456 s, p_uvalid 1 where the header has it, every other byte
+// 0xA5.
 func fixture(t *testing.T, c recordCase, pid int) []byte {
 	t.Helper()
 	buf := make([]byte, c.size)
@@ -306,6 +312,12 @@ func fixture(t *testing.T, c recordCase, pid int) []byte {
 	put(buf, c.st.members[c.euid], 4, 1002)
 	put(buf, c.st.members[c.sec], c.secWidth, 1700000000)
 	put(buf, c.st.members[c.usec], c.usecWidth, 123456)
+	if c.uvalid != "" {
+		if _, ok := c.st.members[c.uvalid]; !ok {
+			t.Fatalf("%s/%s: the transcription has no member %s", c.goos, c.goarch, c.uvalid)
+		}
+		put(buf, c.st.members[c.uvalid], 8, 1)
+	}
 	return buf
 }
 
@@ -332,9 +344,10 @@ func TestProcRecordReadsTheHeadersLayout(t *testing.T) {
 			if c.goos == "dragonfly" && size < c.size {
 				t.Fatalf("ProcRequest size %d holds no record of %d", size, c.size)
 			}
-			start, ruid, euid, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid, fixture(t, c, pid))
-			if !ok || start != 1700000000*1_000_000+123456 || ruid != 1001 || euid != 1002 {
-				t.Fatalf("ProcRecord = %d, %d, %d, %v; want 1700000000123456, 1001, 1002", start, ruid, euid, ok)
+			start, ruid, euid, valid, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid, fixture(t, c, pid))
+			if !ok || !valid || start != 1700000000*1_000_000+123456 || ruid != 1001 || euid != 1002 {
+				t.Fatalf("ProcRecord = %d, %d, %d, %v, %v; want 1700000000123456, 1001, 1002, true, true",
+					start, ruid, euid, valid, ok)
 			}
 		})
 	}
@@ -348,21 +361,21 @@ func TestProcRecordRefusals(t *testing.T) {
 	const pid = 4242
 	for _, c := range recordCases() {
 		good := fixture(t, c, pid)
-		if _, _, _, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid+1, good); ok {
+		if _, _, _, _, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid+1, good); ok {
 			t.Errorf("%s/%s: another pid's record accepted", c.goos, c.goarch)
 		}
-		if _, _, _, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid, good[:c.st.members[c.pid]]); ok {
+		if _, _, _, _, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid, good[:c.st.members[c.pid]]); ok {
 			t.Errorf("%s/%s: a record cut before its pid accepted", c.goos, c.goarch)
 		}
 		if c.goos != "dragonfly" {
-			if _, _, _, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid, append(slices.Clone(good), 0)); ok {
+			if _, _, _, _, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid, append(slices.Clone(good), 0)); ok {
 				t.Errorf("%s/%s: a record one byte too long accepted", c.goos, c.goarch)
 			}
 		}
 		if c.structSize != "" {
 			bad := slices.Clone(good)
 			put(bad, c.st.members[c.structSize], 4, uint64(c.size+8))
-			if _, _, _, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid, bad); ok {
+			if _, _, _, _, ok := bsdabi.ProcRecord(c.goos, c.goarch, pid, bad); ok {
 				t.Errorf("%s/%s: a record stating another size accepted", c.goos, c.goarch)
 			}
 		}
@@ -379,7 +392,7 @@ func TestProcRecordRefusals(t *testing.T) {
 		if _, _, ok := bsdabi.ProcRequest(p[0], p[1], pid); ok {
 			t.Errorf("ProcRequest(%s/%s) has a layout", p[0], p[1])
 		}
-		if _, _, _, ok := bsdabi.ProcRecord(p[0], p[1], pid, make([]byte, 4096)); ok {
+		if _, _, _, _, ok := bsdabi.ProcRecord(p[0], p[1], pid, make([]byte, 4096)); ok {
 			t.Errorf("ProcRecord(%s/%s) decoded a record", p[0], p[1])
 		}
 	}
@@ -393,5 +406,57 @@ func TestProcRecordRefusals(t *testing.T) {
 		if _, _, ok := bsdabi.ProcRequest("freebsd", "amd64", bad); ok {
 			t.Errorf("ProcRequest(pid %d) asked", bad)
 		}
+	}
+}
+
+// TestProcRecordValidity pins p_uvalid (#1453): on NetBSD and OpenBSD a
+// record whose p_uvalid is 0 — a process the kernel reads as a zombie, or on
+// NetBSD one inside its execve(2) — is the process's (ok) but states no start
+// (valid false, start 0), whatever the start's bytes hold; any other value is
+// a filled record. Kernels whose record has no such field read every record
+// as valid, whatever lies where NetBSD keeps it.
+func TestProcRecordValidity(t *testing.T) {
+	t.Parallel()
+	const pid = 4242
+	type tc struct {
+		name      string
+		c         recordCase
+		uvalid    uint64
+		wantValid bool
+		wantStart int64
+	}
+	const filled = int64(1700000000*1_000_000 + 123456)
+	cases := []tc{}
+	for _, c := range recordCases() {
+		if c.uvalid == "" {
+			cases = append(cases, tc{name: c.goos + "/" + c.goarch + "/no field", c: c, wantValid: true, wantStart: filled})
+			continue
+		}
+		cases = append(cases,
+			tc{name: c.goos + "/" + c.goarch + "/zero", c: c, uvalid: 0, wantValid: false, wantStart: 0},
+			tc{name: c.goos + "/" + c.goarch + "/one", c: c, uvalid: 1, wantValid: true, wantStart: filled},
+			tc{name: c.goos + "/" + c.goarch + "/high bit", c: c, uvalid: 1 << 63, wantValid: true, wantStart: filled},
+		)
+	}
+	runCase := func(t *testing.T, cs tc) {
+		t.Helper()
+		buf := fixture(t, cs.c, pid)
+		if cs.c.uvalid != "" {
+			put(buf, cs.c.st.members[cs.c.uvalid], 8, cs.uvalid)
+		} else {
+			// Zero where NetBSD keeps p_uvalid: it means nothing here.
+			put(buf, 448, 8, 0)
+		}
+		start, ruid, euid, valid, ok := bsdabi.ProcRecord(cs.c.goos, cs.c.goarch, pid, buf)
+		if !ok || valid != cs.wantValid || start != cs.wantStart || ruid != 1001 || euid != 1002 {
+			t.Fatalf("ProcRecord = %d, %d, %d, %v, %v; want %d, 1001, 1002, %v, true",
+				start, ruid, euid, valid, ok, cs.wantStart, cs.wantValid)
+		}
+	}
+	for _, cs := range cases {
+		t.Run(cs.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, cs)
+		})
 	}
 }
