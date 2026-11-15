@@ -1,12 +1,13 @@
 name: Bench A/B
 # The performance lot's measurements (kitsunium/sdk#1038, #1059, #808, #834,
-# #811, #1016, #1035, #827, #840, #1034, #1102, #910, #892, #912, #1364): a base
-# commit against a head commit, on the suites of scripts/ci/bench-ab.conf — the
-# kernel cache, the cache domain, the queue's file broker and its publication,
-# singleflight, the ring, the logger, the transform domain, the promoted codecs,
-# the vendor module third-party/transform's streams, and the consensus leader's
-# loop turn and its bytes —, every row an issue names judged against the
-# threshold its issue wrote.
+# #811, #1016, #1035, #827, #840, #1034, #1102, #910, #892, #912, #1364, #920,
+# #1365): a base commit against a head commit, on the suites of
+# scripts/ci/bench-ab.conf — the kernel cache, the cache domain, the queue's
+# file broker and its publication, singleflight, the ring, the logger, the
+# transform domain, the promoted codecs, the vendor module
+# third-party/transform's streams, the consensus leader's loop turn and its
+# bytes, and the data lane's commit while a paced snapshot stream runs —, every
+# row an issue names judged against the threshold its issue wrote.
 #
 #   - `plan`: the suites this run measures — on a pull request, those whose
 #     paths it changed (every normal suite when it changed the lane itself);
