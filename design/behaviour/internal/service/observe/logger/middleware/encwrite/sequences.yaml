@@ -106,6 +106,17 @@ sequences:
           when: ferr != nil
       - return: s.downstream.Write(ctx, r, framed)
         to: s.downstream.Write
+  - of: (*EncWriter).WantsAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*EncWriter).WantsAttrs
+        kind: self
+      - id: corelogger
+        kind: package
+    steps:
+      - return: corelogger.SinkWantsAttrs(s.downstream)
+        to: corelogger
   - of: (*EncWriter).sealFramed
     participants:
       - id: caller

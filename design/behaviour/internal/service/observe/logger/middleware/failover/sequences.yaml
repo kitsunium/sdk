@@ -72,6 +72,17 @@ sequences:
           range: s.chain
           value: branch
       - return: 0, exhausted(collected, len(s.chain), rec)
+  - of: (*failoverSink).WantsAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*failoverSink).WantsAttrs
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.ContainsFunc(s.chain, corelogger.SinkWantsAttrs)
+        to: slices
   - of: exhausted
     participants:
       - id: caller

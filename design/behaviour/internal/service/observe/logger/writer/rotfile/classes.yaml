@@ -80,6 +80,7 @@ files:
       - openHardened
       - newRotatingSink
       - (*rotatingSink).Write
+      - (*rotatingSink).WantsAttrs
       - (*rotatingSink).WriteBatch
       - (*rotatingSink).writeLocked
       - retained
@@ -441,6 +442,12 @@ types:
         recv: s *rotatingSink
         results: n int, err error
       - doc: |-
+          WantsAttrs answers false to corelogger.AttrsRequester: it writes the encoder's bytes to its file and reads nothing else of the record but its level, so the
+          handler spares it the merged attributes (#1016).
+        name: WantsAttrs
+        recv: s *rotatingSink
+        results: bool
+      - doc: |-
           WriteBatch appends every payload to the active file in ONE write, under
           the local mutex, rotating first when the batch would push the file past
           MaxBytes — the threshold is checked once per batch, as a single record is
@@ -552,10 +559,15 @@ vars:
           	},
           }
     name: openRefusals
-  - doc: rotatingSink takes a whole backlog in one write (#807).
+  - grouped: true
     items:
-      - name: _
+      - doc: rotatingSink takes a whole backlog in one write (#807).
+        name: _
         type: corelogger.BatchSink
+        value: (*rotatingSink)(nil)
+      - doc: rotatingSink says whether it reads RecordEvent.Attrs (#1016).
+        name: _
+        type: corelogger.AttrsRequester
         value: (*rotatingSink)(nil)
     name: _
   - doc: |-

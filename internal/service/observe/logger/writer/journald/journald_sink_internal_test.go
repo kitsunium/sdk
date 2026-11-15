@@ -225,3 +225,13 @@ func Test_journaldSink_Close(t *testing.T) {
 		})
 	}
 }
+
+// TestJournaldSinkReadsOnlyTheBytes (#1016): the sink answers false to
+// corelogger.AttrsRequester — it sends the line alone — so a handler spares it the merged
+// attributes.
+func TestJournaldSinkReadsOnlyTheBytes(t *testing.T) {
+	t.Parallel()
+	if corelogger.SinkWantsAttrs(&journaldSink{}) {
+		t.Fatal("the sink asks for RecordEvent.Attrs, want false: it sends the line alone")
+	}
+}

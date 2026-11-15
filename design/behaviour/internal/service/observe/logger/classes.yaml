@@ -98,6 +98,8 @@ files:
       - (*genericHandler).Enabled
       - (*genericHandler).Handle
       - (*genericHandler).encode
+      - (*genericHandler).render
+      - (*genericHandler).merge
       - (*genericHandler).derive
       - (*genericHandler).WithAttrs
       - (*genericHandler).WithGroup
@@ -466,6 +468,12 @@ types:
         name: groups
         type: "[]string"
       - doc: |-
+          sinkAttrs is the sink's answer to corelogger.AttrsRequester, asked once
+          at construction: false hands it the record's own attributes, unmerged
+          and uncopied, since it reads only the bytes (#1016).
+        name: sinkAttrs
+        type: bool
+      - doc: |-
           floor is the minimum level the handler emits, read on every record so a
           level.Var retuned with Set takes effect on the next one (#1015); a
           handler built from a plain Level holds level.Fixed. Derived handlers
@@ -490,21 +498,42 @@ types:
       - doc: |-
           Handle encodes r through the configured encoder and forwards the bytes to
           the configured sink. Borrows a scratch buffer from kernel/concur/buffer so the
-          ENCODING step itself does not allocate; the record's attrs clone is a
-          separate cost (one slice per emit — see pkg/v1/observe/logger/BENCH.md).
+          ENCODING step itself does not allocate; the attrs the sink is handed are a
+          separate cost — one slice for a record with attributes of its own, none
+          for a record without them or a sink that reads only the bytes (#1016, see
+          pkg/v1/observe/logger/BENCH.md).
         name: Handle
         params: ctx context.Context, r corelogger.RecordEvent
         recv: h *genericHandler
         results: error
       - doc: |-
-          encode renders r into dst and returns the line and r's attributes with the
-          bound ones first — the one allocation of an emit. With a PrefixEncoder the
-          bound attributes are the prefix rendered when they were bound, and only r's
-          own are rendered here (#1016); otherwise the encoder renders the merged set.
+          encode renders r into dst and returns the line and the attributes the sink
+          is handed. With a PrefixEncoder the bound attributes are the prefix rendered
+          when they were bound, and only r's own are rendered here (#1016); otherwise
+          the encoder renders the merged set. The sink is handed the bound attributes
+          first, then r's — or r's alone when it reads none (corelogger.AttrsRequester).
         name: encode
         params: dst []byte, r corelogger.RecordEvent
         recv: h *genericHandler
-        results: line []byte, merged []corelogger.AttrValue
+        results: line []byte, attrs []corelogger.AttrValue
+      - doc: |-
+          render writes r with the bound attributes h holds as a prefix, if any:
+          either nothing is bound or the encoder rendered it when it was.
+        name: render
+        params: dst []byte, r corelogger.RecordEvent
+        recv: h *genericHandler
+        results: "[]byte"
+      - doc: |-
+          merge returns the bound attributes followed by own. A record with none of
+          its own shares h.attrs, clipped to its length so a sink's append
+          reallocates rather than writing past it: the array is immutable once
+          bound (WithAttrs copies it) and the record is read-only (corelogger.Sink),
+          so the copy — 64 bytes an attribute — buys nothing (#1016). Otherwise it is
+          the one allocation of an emit.
+        name: merge
+        params: own []corelogger.AttrValue
+        recv: h *genericHandler
+        results: "[]corelogger.AttrValue"
       - doc: |-
           derive returns a child of h bound to attrs under groups, its prefix
           rendered once for the pair when the encoder is a PrefixEncoder.

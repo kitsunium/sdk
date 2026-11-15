@@ -10,6 +10,7 @@ files:
       - TeeSink
       - NewTeeSink
       - (*TeeSink).Write
+      - (*TeeSink).WantsAttrs
       - (*TeeSink).fanOut
       - (*TeeSink).handleAllFailed
       - wrapAllBranchesFailed
@@ -70,6 +71,9 @@ types:
         params: ctx context.Context, r corelogger.RecordEvent, p []byte
         recv: t *TeeSink
         results: n int, err error
+      - name: WantsAttrs
+        recv: t *TeeSink
+        results: bool
       - doc: |-
           fanOut delivers the record to every primary, returning the first accepted
           byte count, whether any primary accepted it, and the collected causes.

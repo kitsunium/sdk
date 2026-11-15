@@ -31,6 +31,10 @@ type genericHandler struct {
 	prefix []byte
 	// groups is the active group prefix stack accumulated via WithGroup.
 	groups []string
+	// sinkAttrs is the sink's answer to corelogger.AttrsRequester, asked once
+	// at construction: false hands it the record's own attributes, unmerged
+	// and uncopied, since it reads only the bytes (#1016).
+	sinkAttrs bool
 	// floor is the minimum level the handler emits, read on every record so a
 	// level.Var retuned with Set takes effect on the next one (#1015); a
 	// handler built from a plain Level holds level.Fixed. Derived handlers
@@ -69,7 +73,7 @@ func NewHandlerLeveled(enc encoder.Encoder, sink corelogger.Sink, floor level.Le
 	//: an encoder that renders bound attributes once is kept as one (#1016).
 	penc, _ := enc.(corelogger.PrefixEncoder)
 	//: hand back the configured handler bound to the real wall clock.
-	return &genericHandler{enc: enc, penc: penc, sink: sink, floor: floorOrInfo(floor), clk: clock.System}, nil
+	return &genericHandler{enc: enc, penc: penc, sink: sink, sinkAttrs: corelogger.SinkWantsAttrs(sink), floor: floorOrInfo(floor), clk: clock.System}, nil
 }
 
 // floorOrInfo is floor, or the constant Info floor for a nil one — the zero
@@ -97,8 +101,10 @@ func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) 
 
 // Handle encodes r through the configured encoder and forwards the bytes to
 // the configured sink. Borrows a scratch buffer from kernel/concur/buffer so the
-// ENCODING step itself does not allocate; the record's attrs clone is a
-// separate cost (one slice per emit — see pkg/v1/observe/logger/BENCH.md).
+// ENCODING step itself does not allocate; the attrs the sink is handed are a
+// separate cost — one slice for a record with attributes of its own, none
+// for a record without them or a sink that reads only the bytes (#1016, see
+// pkg/v1/observe/logger/BENCH.md).
 func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) error {
 	//: honour context cancellation early so the encoder step never runs.
 	if ctx != nil && ctx.Err() != nil {
@@ -122,7 +128,7 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) e
 	defer buffer.Put(bp)
 	//: format the record into the borrowed buffer, then hand the sink the
 	//: record with the bound attrs prepended — route predicates and the memory
-	//: sink read them.
+	//: sink read them — or its own alone, for a sink that reads none.
 	line, merged := h.encode(*bp, r)
 	*bp = line
 	r.Attrs = merged
@@ -132,26 +138,56 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) e
 	return werr
 }
 
-// encode renders r into dst and returns the line and r's attributes with the
-// bound ones first — the one allocation of an emit. With a PrefixEncoder the
-// bound attributes are the prefix rendered when they were bound, and only r's
-// own are rendered here (#1016); otherwise the encoder renders the merged set.
-func (h *genericHandler) encode(dst []byte, r corelogger.RecordEvent) (line []byte, merged []corelogger.AttrValue) {
-	merged = mergeAttrs(h.attrs, r.Attrs)
-	//: nothing rendered ahead of time: the encoder renders everything.
+// encode renders r into dst and returns the line and the attributes the sink
+// is handed. With a PrefixEncoder the bound attributes are the prefix rendered
+// when they were bound, and only r's own are rendered here (#1016); otherwise
+// the encoder renders the merged set. The sink is handed the bound attributes
+// first, then r's — or r's alone when it reads none (corelogger.AttrsRequester).
+func (h *genericHandler) encode(dst []byte, r corelogger.RecordEvent) (line []byte, attrs []corelogger.AttrValue) {
+	//: bound attributes not rendered ahead of time: the encoder renders them.
+	if h.prefix == nil && len(h.attrs) > 0 {
+		attrs = h.merge(r.Attrs)
+		r.Attrs = attrs
+		return h.enc.Append(dst, h.groups, r), attrs
+	}
+	line = h.render(dst, r)
+	//: a sink that reads only the bytes is spared the merge.
+	if !h.sinkAttrs {
+		return line, r.Attrs
+	}
+	return line, h.merge(r.Attrs)
+}
+
+// render writes r with the bound attributes h holds as a prefix, if any:
+// either nothing is bound or the encoder rendered it when it was.
+func (h *genericHandler) render(dst []byte, r corelogger.RecordEvent) []byte {
+	//: nothing bound: the record alone.
 	if h.prefix == nil {
-		r.Attrs = merged
-		return h.enc.Append(dst, h.groups, r), merged
+		return h.enc.Append(dst, h.groups, r)
 	}
 	//: the prefix, then the record's own attributes.
-	return h.penc.AppendWithPrefix(dst, h.groups, h.prefix, r), merged
+	return h.penc.AppendWithPrefix(dst, h.groups, h.prefix, r)
+}
+
+// merge returns the bound attributes followed by own. A record with none of
+// its own shares h.attrs, clipped to its length so a sink's append
+// reallocates rather than writing past it: the array is immutable once
+// bound (WithAttrs copies it) and the record is read-only (corelogger.Sink),
+// so the copy — 64 bytes an attribute — buys nothing (#1016). Otherwise it is
+// the one allocation of an emit.
+func (h *genericHandler) merge(own []corelogger.AttrValue) []corelogger.AttrValue {
+	//: nothing to append to the bound set.
+	if len(own) == 0 {
+		return slices.Clip(h.attrs)
+	}
+	return mergeAttrs(h.attrs, own)
 }
 
 // derive returns a child of h bound to attrs under groups, its prefix
 // rendered once for the pair when the encoder is a PrefixEncoder.
 func (h *genericHandler) derive(attrs []corelogger.AttrValue, groups []string) *genericHandler {
 	//: share encoder/sink/floor/clk; attrs, groups and prefix are the child's.
-	child := &genericHandler{enc: h.enc, penc: h.penc, sink: h.sink, attrs: attrs, groups: groups, floor: h.floor, clk: h.clk}
+	child := &genericHandler{enc: h.enc, penc: h.penc, sink: h.sink, sinkAttrs: h.sinkAttrs, attrs: attrs, groups: groups, floor: h.floor, clk: h.clk}
 	//: render once what every record of the child would render again.
 	if h.penc != nil && len(attrs) > 0 {
 		child.prefix = h.penc.AppendAttrs(nil, groups, attrs)

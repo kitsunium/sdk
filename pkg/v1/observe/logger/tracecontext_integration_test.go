@@ -23,8 +23,10 @@ var allocProbeAttrs = []logger.Attr{logger.String("k", "v")}
 
 // TestT34TraceCorrelationAddsNoAllocation is the hard constraint of the trace
 // correlation work: the logger's steady-state cost is EXACTLY one heap
-// allocation per emit — the attrs clone the handler makes on every record —
-// and stamping a record with its span must not buy a second one.
+// allocation per emit carrying attributes of its own — the copy of the bound
+// attributes and the record's the handler hands its sink — and none for an
+// emit without them, which shares the bound array (#1016); stamping a record
+// with its span must not buy one more.
 //
 // It is deliberately stricter than TestPerfAllocsBuildSend, which
 // asserts only ">= 1" (it exists to refute a "zero-allocation" doc claim, so it
@@ -46,7 +48,7 @@ var allocProbeAttrs = []logger.Attr{logger.String("k", "v")}
 // `traced != plain` was worse still: both sides round the same way, so an extra
 // allocation charged only to the in-span path stayed invisible until it reached
 // one per record. Against traceRuns the first assertion means what it says —
-// exactly one per emit, no more and no fewer. What that exactness costs is
+// exactly perEmit per emit, no more and no fewer. What that exactness costs is
 // stated where it is paid, in allocwindow_test.go's mallocsOver: the collector
 // is held off for the window, since a collection drains the sync.Pool the
 // Builder comes from (measured, 2 007 allocations over 2 000 emits on the one
@@ -58,7 +60,8 @@ var allocProbeAttrs = []logger.Attr{logger.String("k", "v")}
 // MUTATION-CHECKED. Giving pkg/v1/observe/logger a package-level
 // `seenTraces [][corelogger.TraceIDLen]byte` and appending the extracted
 // TraceID to it inside TraceContextFromContext — the shape of any "which traces
-// has this process logged for?" instrument — fails all three arms:
+// has this process logged for?" instrument — fails all three arms (measured
+// before #1016, when an emit without attributes of its own allocated one too):
 //
 //	variadic Info, no attrs: 2000 emits inside a span performed 2013
 //	  allocations, want the same 2000 as outside one
@@ -91,6 +94,9 @@ func TestT34TraceCorrelationAddsNoAllocation(t *testing.T) {
 	type tc struct {
 		name string
 		emit func(ctx context.Context)
+		// perEmit is the exact count an emit allocates: the attrs copy, or
+		// nothing when the record has no attribute of its own.
+		perEmit uint64
 	}
 	tests := []tc{
 		{
@@ -98,8 +104,9 @@ func TestT34TraceCorrelationAddsNoAllocation(t *testing.T) {
 			emit: func(ctx context.Context) { logger.Info(ctx, lg, "msg") },
 		},
 		{
-			name: "LogAttrs slice overload",
-			emit: func(ctx context.Context) { logger.LogAttrs(ctx, lg, logger.LevelInfo, "msg", allocProbeAttrs) },
+			name:    "LogAttrs slice overload",
+			emit:    func(ctx context.Context) { logger.LogAttrs(ctx, lg, logger.LevelInfo, "msg", allocProbeAttrs) },
+			perEmit: 1,
 		},
 		{
 			name: "Build().Send() chainable path",
@@ -108,6 +115,7 @@ func TestT34TraceCorrelationAddsNoAllocation(t *testing.T) {
 				allocSink = b
 				b.Send(ctx, "msg")
 			},
+			perEmit: 1,
 		},
 	}
 	//: the runtime's lazily built caches are paid on a Logger no window
@@ -139,10 +147,10 @@ func TestT34TraceCorrelationAddsNoAllocation(t *testing.T) {
 		t.Helper()
 		plain := measure(tc.emit, t.Context())
 		traced := measure(tc.emit, tracedContext(t.Context()))
-		//: exactly one per emit — the handler's attrs clone, and nothing else.
-		//: An EXACT total, not a budget: one-per-emit times traceRuns.
-		if plain != uint64(traceRuns) {
-			t.Errorf("%s: %d emits with no span performed %d allocations, want exactly %d (one attrs clone each)", tc.name, traceRuns, plain, traceRuns)
+		//: exactly perEmit per emit — the handler's attrs copy, and nothing else.
+		//: An EXACT total, not a budget: perEmit times traceRuns.
+		if want := tc.perEmit * uint64(traceRuns); plain != want {
+			t.Errorf("%s: %d emits with no span performed %d allocations, want exactly %d (%d attrs copy each)", tc.name, traceRuns, plain, want, tc.perEmit)
 		}
 		//: and stamping the span buys nothing on top of it.
 		if traced != plain {

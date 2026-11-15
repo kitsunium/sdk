@@ -3,6 +3,7 @@ package multi
 import (
 	"context"
 	"errors"
+	"slices"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	coremulti "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/multi"
@@ -73,6 +74,13 @@ func (s *fanoutSink) Write(ctx context.Context, r corelogger.RecordEvent, p []by
 	}
 	//: happy path — every branch accepted the payload.
 	return n, nil
+}
+
+// WantsAttrs answers corelogger.AttrsRequester: true when any branch reads
+// RecordEvent.Attrs, since every branch receives the record (#1016).
+func (s *fanoutSink) WantsAttrs() bool {
+	//: one reader among the branches is enough.
+	return slices.ContainsFunc(s.branches, corelogger.SinkWantsAttrs)
 }
 
 // Flush forwards the call to every distinct branch and aggregates per-branch

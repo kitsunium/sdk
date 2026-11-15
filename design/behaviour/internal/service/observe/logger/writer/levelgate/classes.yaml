@@ -9,6 +9,7 @@ files:
       - Floor
       - NewLeveled
       - (*gateSink).Write
+      - (*gateSink).WantsAttrs
       - (*gateSink).WriteBatch
       - (*gateSink).forwardRun
       - (*gateSink).Flush
@@ -58,6 +59,10 @@ types:
         params: ctx context.Context, r corelogger.RecordEvent, p []byte
         recv: s *gateSink
         results: n int, err error
+      - doc: WantsAttrs answers corelogger.AttrsRequester for the gated sink, which receives the record unchanged (#1016).
+        name: WantsAttrs
+        recv: s *gateSink
+        results: bool
       - doc: |-
           WriteBatch forwards the records at or above the floor and drops the rest,
           counting a dropped record as delivered, as Write reports a drop (#807). Each
@@ -86,9 +91,14 @@ types:
         results: error
     name: gateSink
 vars:
-  - doc: gateSink takes a batch from the async drainer and passes it on (#807).
+  - grouped: true
     items:
-      - name: _
+      - doc: gateSink takes a batch from the async drainer and passes it on (#807).
+        name: _
         type: corelogger.BatchSink
+        value: (*gateSink)(nil)
+      - doc: gateSink says whether it reads RecordEvent.Attrs (#1016).
+        name: _
+        type: corelogger.AttrsRequester
         value: (*gateSink)(nil)
     name: _

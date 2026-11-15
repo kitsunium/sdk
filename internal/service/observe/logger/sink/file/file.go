@@ -133,6 +133,13 @@ func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 	return written, nil
 }
 
+// WantsAttrs answers false to corelogger.AttrsRequester: it writes the encoder's bytes to its file and reads nothing else of the record but its level, so the
+// handler spares it the merged attributes (#1016).
+func (s *fileSink) WantsAttrs() bool {
+	//: the bytes are the whole record to this sink.
+	return false
+}
+
 // WriteBatch appends every payload to the file in ONE write, under the
 // local mutex, and reports how many records landed whole (#807): the async
 // middleware hands a backlog over in one call, and the write(2) per record

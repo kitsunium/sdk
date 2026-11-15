@@ -87,6 +87,12 @@ func (s *gateSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 	return s.inner.Write(ctx, r, p)
 }
 
+// WantsAttrs answers corelogger.AttrsRequester for the gated sink, which receives the record unchanged (#1016).
+func (s *gateSink) WantsAttrs() bool {
+	//: the record reaches the wrapped sink as it came.
+	return corelogger.SinkWantsAttrs(s.inner)
+}
+
 // WriteBatch forwards the records at or above the floor and drops the rest,
 // counting a dropped record as delivered, as Write reports a drop (#807). Each
 // run of consecutive kept records goes to the inner sink as one sub-slice —

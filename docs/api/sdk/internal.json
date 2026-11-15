@@ -1463,7 +1463,7 @@
       "dir": "service/observe/logger",
       "layer": "service",
       "family": "observe",
-      "doc": "Package logger — declares the chainable Builder API — the low-allocation\nhot path for callers that care about per-call cost. Pulled from a\nrecycler.Pool[*chainBuilder], the builder accumulates attrs without\nallocating beyond the pre-sized scratchpad and returns to the pool on\nSend. It is NOT allocation-free end to end: the handler clones the\naccumulated attrs on every Send, so exactly one slice escapes per emit\n(see pkg/v1/observe/logger/BENCH.md).\n\nPackage logger — declares genericHandler — the corelogger.Handler\nimplementation that composes an Encoder (format) with a Sink (transport).\nIt replaces the legacy TextHandler that fused both responsibilities into\none struct, and ships as the single Handler the service layer offers.\n\nPackage logger — wires a core.Handler into a core.Logger. It\nprovides the thin loggerImpl that routes Log calls through the Handler's\nEnabled fast-path and honours With-derived attrs via copy-on-write.\n\nPackage logger — a Logger that owns the writers it was built over, and the\none call that releases them.\n\nPackage logger — declares the recycled event-record bucket consumed\nby the Builder API. Pulling RecordEvent values from a recycler.Pool\nremoves the builder and scratchpad allocations from the hot path; the\nhandler still clones the accumulated attrs on every Send, so the\nsteady-state cost is ONE heap allocation per emit, not zero. Combined\nwith the kind-discriminated Value union the remaining per-call cost is\ndominated by the encoder + sink rather than GC pressure.\n\nPackage logger — declares the sourceHandler decorator — a Handler\nmiddleware that resolves the RecordEvent.PC captured by the front-end into a\nstructured \"source\" attribute (file:line:function) before delegating to the\nwrapped Handler. It is additive and opt-in: the record shape is unchanged\nuntil a caller wraps a Logger via WithCaller, and resolution is stdlib-only\n(runtime.CallersFrames).\n\nPackage logger — implements the TextHandler — a concrete\ncore.Handler that renders RecordEvent values as\n\"TIME LEVEL msg key=val...\" and writes the bytes to an io.Writer under a\nmutex. It composes the kernel/concur/buffer pool and kernel/clock abstraction so\nthat tests can drive it deterministically.\n"
+      "doc": "Package logger — declares the chainable Builder API — the low-allocation\nhot path for callers that care about per-call cost. Pulled from a\nrecycler.Pool[*chainBuilder], the builder accumulates attrs without\nallocating beyond the pre-sized scratchpad and returns to the pool on\nSend. It is NOT allocation-free end to end: the handler clones the\naccumulated attrs on every Send, so exactly one slice escapes per emit\n(see pkg/v1/observe/logger/BENCH.md).\n\nPackage logger — declares genericHandler — the corelogger.Handler\nimplementation that composes an Encoder (format) with a Sink (transport).\nIt replaces the legacy TextHandler that fused both responsibilities into\none struct, and ships as the single Handler the service layer offers.\n\nPackage logger — wires a core.Handler into a core.Logger. It\nprovides the thin loggerImpl that routes Log calls through the Handler's\nEnabled fast-path and honours With-derived attrs via copy-on-write.\n\nPackage logger — a Logger that owns the writers it was built over, and the\none call that releases them.\n\nPackage logger — declares the recycled event-record bucket consumed\nby the Builder API. Pulling RecordEvent values from a recycler.Pool\nremoves the builder and scratchpad allocations from the hot path; the\nhandler still copies the accumulated attrs on every Send for a sink\nthat reads them, so the steady-state cost is ONE heap allocation per\nemit, not zero — none for a sink that reads only the bytes\n(corelogger.AttrsRequester). Combined\nwith the kind-discriminated Value union the remaining per-call cost is\ndominated by the encoder + sink rather than GC pressure.\n\nPackage logger — declares the sourceHandler decorator — a Handler\nmiddleware that resolves the RecordEvent.PC captured by the front-end into a\nstructured \"source\" attribute (file:line:function) before delegating to the\nwrapped Handler. It is additive and opt-in: the record shape is unchanged\nuntil a caller wraps a Logger via WithCaller, and resolution is stdlib-only\n(runtime.CallersFrames).\n\nPackage logger — implements the TextHandler — a concrete\ncore.Handler that renders RecordEvent values as\n\"TIME LEVEL msg key=val...\" and writes the bytes to an io.Writer under a\nmutex. It composes the kernel/concur/buffer pool and kernel/clock abstraction so\nthat tests can drive it deterministically.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/observe/logger/encoder",
@@ -39837,6 +39837,31 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger.AttrsRequester",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/logger",
+      "name": "AttrsRequester",
+      "spelled": "interface{WantsAttrs() (wants bool)}",
+      "canonical": "interface{WantsAttrs() (wants bool)}",
+      "doc": "AttrsRequester is the sibling port (ADR 0039) of a Sink that reads\nRecordEvent.Attrs. A handler asks its Sink once, at construction, and\ncopies the bound attributes and the record's own into one array — an\nallocation an emit, for a record with attributes of its own — only when\nthe answer is true: a Sink that writes the encoder's bytes and nothing\nelse would be handed an array it never reads. A record with none of its\nown carries the bound array itself, shared and read-only (Sink). A Sink\nthat answers false receives the record's own\nattributes as the caller passed them, neither merged nor copied, and\nMUST NOT read them: the caller may reuse them once the emit returns. A\nSink that does not implement it answers true (SinkWantsAttrs); a\ndecorator answers for the Sink it wraps, and a fan-out true when any\nbranch does.\n",
+      "file": "core/observe/logger/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger.AttrsRequester.WantsAttrs",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/logger",
+      "name": "WantsAttrs",
+      "recv": "AttrsRequester",
+      "spelled": "func() (wants bool)",
+      "canonical": "func() (wants bool)",
+      "doc": "WantsAttrs reports whether records handed to this Sink must carry\nthe bound attributes and the record's own in RecordEvent.Attrs.\n",
+      "file": "core/observe/logger/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger.BatchSink",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/observe/logger",
@@ -40570,7 +40595,7 @@
       "name": "Sink",
       "spelled": "interface{Close() (err error); Flush(ctx context.Context) (err error); Write(ctx context.Context, r RecordEvent, p []byte) (n int, err error)}",
       "canonical": "interface{Close() (err error); Flush(ctx context.Context) (err error); Write(ctx context.Context, r github.com/kitsunium/sdk/internal/core/observe/logger.RecordEvent, p []byte) (n int, err error)}",
-      "doc": "Sink is the transport port consumed by the generic Handler. Implementations\nMUST be safe for concurrent use by multiple goroutines and SHOULD assume\ntheir own concurrency model (mutex / lock-free / batched flush) so the\nHandler can stay encoder-agnostic. Sinks that need the severity level read\nit directly from r.Level — the port is intentionally kept narrow.\n",
+      "doc": "Sink is the transport port consumed by the generic Handler. Implementations\nMUST be safe for concurrent use by multiple goroutines and SHOULD assume\ntheir own concurrency model (mutex / lock-free / batched flush) so the\nHandler can stay encoder-agnostic. Sinks that need the severity level read\nit directly from r.Level — the port is intentionally kept narrow. The\nrecord is read-only: r.Attrs may share its array with the handler's\nbound attributes, which every later record carries too, so a Sink never\nwrites into it — an append reallocates, an assignment to an element\nwould corrupt every line after it.\n",
       "file": "core/observe/logger/gen_ports.go",
       "layer": "core",
       "family": "observe"
@@ -40628,6 +40653,18 @@
       },
       "doc": "SinkRequired is returned when NewHandler receives a nil Sink.\n",
       "file": "core/observe/logger/gen_codes.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger.SinkWantsAttrs",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/logger",
+      "name": "SinkWantsAttrs",
+      "spelled": "func(s Sink) bool",
+      "canonical": "func(s github.com/kitsunium/sdk/internal/core/observe/logger.Sink) bool",
+      "doc": "SinkWantsAttrs reports s's answer to AttrsRequester: true when s does not\nimplement it, so a Sink that says nothing is handed the merged\nattributes, as before. A decorator answers with it for the Sink it\nwraps, and a fan-out with the OR of its branches.\n",
+      "file": "core/observe/logger/sink_attrs.go",
       "layer": "core",
       "family": "observe"
     },
@@ -91703,6 +91740,19 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite.(*EncWriter).WantsAttrs",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite",
+      "name": "WantsAttrs",
+      "recv": "EncWriter",
+      "spelled": "func() bool",
+      "canonical": "func() bool",
+      "doc": "WantsAttrs answers corelogger.AttrsRequester for the downstream sink,\nwhich receives the record unchanged.\n",
+      "file": "service/observe/logger/middleware/encwrite/encwrite.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite.(*EncWriter).Write",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite",
@@ -92155,6 +92205,19 @@
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
       "doc": "Flush forwards the flush to every primary and the spill sink, aggregating\nany errors with errors.Join.\n",
+      "file": "service/observe/logger/middleware/tee/tee.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee.(*TeeSink).WantsAttrs",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee",
+      "name": "WantsAttrs",
+      "recv": "TeeSink",
+      "spelled": "func() bool",
+      "canonical": "func() bool",
+      "doc": "WantsAttrs answers corelogger.AttrsRequester: true when a primary or the\nspill sink reads RecordEvent.Attrs, since each receives the record.\n",
       "file": "service/observe/logger/middleware/tee/tee.go",
       "layer": "service",
       "family": "observe"

@@ -204,3 +204,13 @@ func Test_netSink_Write_Close_concurrent(t *testing.T) {
 		})
 	}
 }
+
+// TestNetSinkReadsOnlyTheBytes (#1016): the sink answers false to
+// corelogger.AttrsRequester — it sends the line alone — so a handler spares it the merged
+// attributes.
+func TestNetSinkReadsOnlyTheBytes(t *testing.T) {
+	t.Parallel()
+	if corelogger.SinkWantsAttrs(&netSink{}) {
+		t.Fatal("the sink asks for RecordEvent.Attrs, want false: it sends the line alone")
+	}
+}

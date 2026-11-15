@@ -50,6 +50,12 @@ func (s *sampleSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 	return 0, nil
 }
 
+// WantsAttrs answers corelogger.AttrsRequester for the downstream sink, which receives a kept record unchanged; the sampling reads only a counter (#1016).
+func (s *sampleSink) WantsAttrs() bool {
+	//: the record reaches the wrapped sink as it came.
+	return corelogger.SinkWantsAttrs(s.downstream)
+}
+
 // Flush forwards to the downstream sink so its own buffers settle.
 func (s *sampleSink) Flush(ctx context.Context) error {
 	//: delegate to the downstream sink — the sample wrapper has no buffers.

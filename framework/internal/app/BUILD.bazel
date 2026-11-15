@@ -81,6 +81,7 @@ go_library(
         "listener_compliance.go",
         "listener_interface.go",
         "logs.go",
+        "logs_compliance.go",
         "loop.go",
         "mail_plug.go",
         "mailer.go",

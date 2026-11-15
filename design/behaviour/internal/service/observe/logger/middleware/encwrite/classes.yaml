@@ -46,6 +46,7 @@ files:
       - NewEncWriter
       - deriveSubkey
       - (*EncWriter).Write
+      - (*EncWriter).WantsAttrs
       - (*EncWriter).sealFramed
       - (*EncWriter).sealTo
       - (*EncWriter).Flush
@@ -127,6 +128,9 @@ types:
         params: ctx context.Context, r corelogger.RecordEvent, p []byte
         recv: s *EncWriter
         results: n int, err error
+      - name: WantsAttrs
+        recv: s *EncWriter
+        results: bool
       - doc: |-
           sealFramed appends to dst the 4-byte length prefix and the box of p sealed
           under the per-sink subkey (nonce hidden in the box), then writes the box's

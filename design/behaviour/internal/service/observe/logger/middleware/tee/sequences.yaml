@@ -31,6 +31,21 @@ sequences:
             - return: n, nil
           when: accepted
       - return: 0, t.handleAllFailed(ctx, r, p, errors.Join(causes...))
+  - of: (*TeeSink).WantsAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TeeSink).WantsAttrs
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: t.spill != nil && corelogger.SinkWantsAttrs(t.spill)
+      - return: slices.ContainsFunc(t.primaries, corelogger.SinkWantsAttrs)
+        to: slices
   - of: (*TeeSink).fanOut
     participants:
       - id: caller

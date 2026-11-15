@@ -31,6 +31,7 @@ files:
       - fileSink
       - New
       - (*fileSink).Write
+      - (*fileSink).WantsAttrs
       - (*fileSink).WriteBatch
       - retained
       - wholeRecords
@@ -103,6 +104,12 @@ types:
         recv: s *fileSink
         results: n int, err error
       - doc: |-
+          WantsAttrs answers false to corelogger.AttrsRequester: it writes the encoder's bytes to its file and reads nothing else of the record but its level, so the
+          handler spares it the merged attributes (#1016).
+        name: WantsAttrs
+        recv: s *fileSink
+        results: bool
+      - doc: |-
           WriteBatch appends every payload to the file in ONE write, under the
           local mutex, and reports how many records landed whole (#807): the async
           middleware hands a backlog over in one call, and the write(2) per record
@@ -154,9 +161,14 @@ vars:
           	},
           }
     name: openRefusals
-  - doc: fileSink takes a whole backlog in one write (#807).
+  - grouped: true
     items:
-      - name: _
+      - doc: fileSink takes a whole backlog in one write (#807).
+        name: _
         type: corelogger.BatchSink
+        value: (*fileSink)(nil)
+      - doc: fileSink says whether it reads RecordEvent.Attrs (#1016).
+        name: _
+        type: corelogger.AttrsRequester
         value: (*fileSink)(nil)
     name: _

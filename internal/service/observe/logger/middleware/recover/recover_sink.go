@@ -82,6 +82,12 @@ func (s *recoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p [
 	return s.downstream.Write(ctx, rec, p)
 }
 
+// WantsAttrs answers corelogger.AttrsRequester for the guarded sink, which receives the record unchanged (#1016).
+func (s *recoverSink) WantsAttrs() bool {
+	//: the record reaches the wrapped sink as it came.
+	return corelogger.SinkWantsAttrs(s.downstream)
+}
+
 // Flush forwards to the downstream sink under panic recovery.
 func (s *recoverSink) Flush(ctx context.Context) (err error) {
 	//: defer the recovery so any panic in the downstream call lands here.

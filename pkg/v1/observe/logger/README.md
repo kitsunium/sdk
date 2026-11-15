@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/pkg/v1/observe/logger"
 ```
 
-Package logger — re-exports the chainable Builder API and the slice-overload LogAttrs entry point. Both are routed through the internal service implementation, which owns the recycler that holds the steady-state hot-path at one allocation per emit.
+Package logger — re-exports the chainable Builder API and the slice-overload LogAttrs entry point. Both are routed through the internal service implementation, which owns the recycler that holds the steady-state hot-path at one allocation per emit at most.
 
 Package logger — adds the opt-in caller annotation surface. WithCaller derives a Logger whose records carry a structured "source" attribute (file:line:function) resolved from the program counter the front-end already captures. It is additive: an unwrapped Logger emits no source field, so the frozen record shape is unchanged until a caller opts in.
 
@@ -30,7 +30,7 @@ Consumers import this package; internal/\* paths are compile-blocked outside the
 
 ### Goals
 
-  - One-allocation hot path. The chainable Build(lg, lv).Str(...). Send(...) builder is backed by a sync.Pool that recycles the builder and its attrs scratchpad, but the handler clones that scratchpad on every Send — so steady-state cost is exactly 1 heap allocation per emit, not 0. The variadic Info/Warn/... path costs the same 1 (its variadic slice). Prefer Build for ergonomics; it is not an allocation-free guarantee. Measured in BENCH.md and pinned by its design contract (allocsMin: 1 on Build, ADR 0165).
+  - One-allocation hot path. The chainable Build(lg, lv).Str(...). Send(...) builder is backed by a sync.Pool that recycles the builder and its attrs scratchpad, but the handler clones that scratchpad on every Send — so steady-state cost is exactly 1 heap allocation per emit, not 0. The variadic Info/Warn/... path costs the same 1 (its variadic slice). An emit with no attribute of its own allocates nothing, and neither does one to a Sink that reads only the bytes (AttrsRequester). Prefer Build for ergonomics; it is not an allocation-free guarantee. Measured in BENCH.md and pinned by its design contract (allocsMin: 1 on Build, ADR 0165).
   - Composable transport. A Logger is wired from a Sink (where bytes go) + an Encoder (how bytes are formatted). Fan-out, async, route, failover, sample, recover middleware compose around a Sink — bring your own topology.
   - Typed Attrs at the call site. 9 typed constructors (String, Int, Bool, Float64, Int64, Uint64, Duration, Time, Any) — no any-untyped key/value pairs that error at runtime.
   - Build-time version stamping. Version is the single ldflags injection point. FrameworkVersion() is added as "framework\_version" to every emitted record — set under go build -ldflags "-X .../logger.Version=…" or Bazel --stamp.
@@ -100,7 +100,7 @@ The gate applies the floor it is given, Info included; a dropped record is a suc
 
 ### Builder hot path
 
-[Build](#Build) returns a chainable, sync.Pool-backed [Builder](#Builder) whose steady-state per-call cost is one heap allocation per emit: the pool recycles the Builder and its attrs scratchpad, but the handler clones that scratchpad on every [Builder](#Builder).Send, so one slice escapes. Callers MUST NOT use a Builder after [Builder](#Builder).Send — it returns to the recycler.
+[Build](#Build) returns a chainable, sync.Pool-backed [Builder](#Builder) whose steady-state per-call cost is one heap allocation per emit: the pool recycles the Builder and its attrs scratchpad, but the handler clones that scratchpad on every [Builder](#Builder).Send, so one slice escapes — unless the Sink reads only the bytes ([AttrsRequester](#AttrsRequester)). Callers MUST NOT use a Builder after [Builder](#Builder).Send — it returns to the recycler.
 
 ```
 logger.Build(lg, logger.LevelInfo).
@@ -125,7 +125,7 @@ Three properties are worth knowing:
   - They are record FIELDS ([Record](#Record).TraceContext), not attributes, so [Logger](#Logger).WithGroup never renames them to "http.trace\_id" and a Sink can read the identity off the record instead of parsing it back out of a formatted line.
   - Both names are RESERVED at the top level. An attribute called "trace\_id" or "span\_id" renders as "attr.trace\_id" / "attr.span\_id", because two fields of one name let a decoder keep the caller's value as the line's correlation. It is renamed and never dropped, and a key under [Logger](#Logger).WithGroup already carries its prefix and is untouched. The whole "attr." namespace is reserved with them, so a key already inside it is prefixed again — otherwise the rename would not be one-to-one and two of your own keys could collide. To log somebody else's identifier, name it for what it is: logger.String("upstream\_trace\_id", id).
   - When no span is in scope NOTHING is emitted — not an empty value and not the all-zero identifier, both of which W3C Trace Context declares invalid. Most lines a service logs are outside a request, and an unjoinable trace\_id on all of them would make the field useless as a filter.
-  - It costs no extra allocation: the hot path stays at exactly one heap allocation per emit, with a span and without. The identifiers are hex-encoded straight into the encoder's buffer and never become a Go string. Measured in BENCH.md.
+  - It costs no extra allocation: an emit allocates as much with a span as without — one, the attrs copy, for a record with attributes of its own, none otherwise. The identifiers are hex-encoded straight into the encoder's buffer and never become a Go string. Measured in BENCH.md.
 
 [TraceContextFromContext](#TraceContextFromContext) is the adapter, exported so a caller wiring a Logger by hand can reuse it.
 
@@ -210,6 +210,8 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 - [func WithCaller\(lg Logger, skip int\) Logger](<#WithCaller>)
 - [func WithError\(err error\) \[\]Attr](<#WithError>)
 - [type Attr](<#Attr>)
+- [type AttrsRequester](<#AttrsRequester>)
+  - [func \(AttrsRequester\) WantsAttrs\(\) \(wants bool\)](<#AttrsRequester.WantsAttrs>)
 - [type BatchSink](<#BatchSink>)
   - [func \(BatchSink\) WriteBatch\(ctx context.Context, recs \[\]RecordEvent, payloads \[\]\[\]byte\) \(written int, err error\)](<#BatchSink.WriteBatch>)
 - [type Builder](<#Builder>)
@@ -550,7 +552,7 @@ Bool builds an Attr carrying a boolean value.
 func Build(lg Logger, lv Level) Builder
 ```
 
-Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool, so the steady-state per-call cost is one heap allocation per emit — the handler clones the accumulated attrs on Send, and that clone escapes. See BENCH.md.
+Build returns a chainable Builder bound to lg at the supplied level. Builders are recycled through a sync.Pool, so the steady-state per-call cost is one heap allocation per emit — the handler clones the accumulated attrs on Send, and that clone escapes, unless the Sink reads only the bytes (AttrsRequester). See BENCH.md.
 
 <a name="ConsoleStderr"></a>
 ## func [ConsoleStderr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
@@ -985,6 +987,34 @@ type Attr struct {
 	Value Value
 }
 ```
+
+<a name="AttrsRequester"></a>
+## type [AttrsRequester](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)
+
+AttrsRequester is the stable alias for the internal core.AttrsRequester port: a Sink that implements it and answers false writes the encoder's bytes and reads nothing of RecordEvent.Attrs, so the handler hands it the record's own attributes alone, neither merged with the bound ones nor copied (#1016).
+
+```go
+type AttrsRequester = corelogger.AttrsRequester
+```
+
+AttrsRequester is an alias of `github.com/kitsunium/sdk/internal/core/observe/logger.AttrsRequester`, declared as:
+
+```go
+type AttrsRequester interface {
+	// WantsAttrs reports whether records handed to this Sink must carry
+	// the bound attributes and the record's own in RecordEvent.Attrs.
+	WantsAttrs() (wants bool)
+}
+```
+
+<a name="AttrsRequester.WantsAttrs"></a>
+### func \(AttrsRequester\) [WantsAttrs](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/logger/gen_ports.go>)
+
+```go
+func (AttrsRequester) WantsAttrs() (wants bool)
+```
+
+WantsAttrs reports whether records handed to this Sink must carry the bound attributes and the record's own in RecordEvent.Attrs.
 
 <a name="BatchSink"></a>
 ## type [BatchSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/logger/gen_facade.go>)

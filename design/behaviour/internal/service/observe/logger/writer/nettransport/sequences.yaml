@@ -412,6 +412,9 @@ sequences:
             - return: 0, wrapWrite(serr, s.network, len(p))
           when: serr != nil
       - return: len(p), nil
+  - of: (*netSink).WantsAttrs
+    steps:
+      - return: "false"
   - of: (*netSink).WriteBatch
     participants:
       - id: caller

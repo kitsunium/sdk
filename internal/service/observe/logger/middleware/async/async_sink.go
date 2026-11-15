@@ -302,6 +302,12 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 	return n, err
 }
 
+// WantsAttrs answers corelogger.AttrsRequester for the downstream sink, which receives the record unchanged on the drainer (#1016).
+func (s *asyncSink) WantsAttrs() bool {
+	//: the record reaches the wrapped sink as it came.
+	return corelogger.SinkWantsAttrs(s.downstream)
+}
+
 // blockForSpace is the Block policy: it waits for the drainer to free a slot,
 // at most maxBlock on clk, and stops early when ctx ends or Close begins. The
 // timer is armed only here, on the saturated path — a Write that finds room

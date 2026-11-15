@@ -7,6 +7,7 @@ files:
       - fanoutSink
       - New
       - (*fanoutSink).Write
+      - (*fanoutSink).WantsAttrs
       - (*fanoutSink).Flush
       - (*fanoutSink).Close
     name: multi.go
@@ -20,6 +21,7 @@ imports:
   coremulti: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/multi
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi
@@ -44,6 +46,12 @@ types:
         params: ctx context.Context, r corelogger.RecordEvent, p []byte
         recv: s *fanoutSink
         results: n int, err error
+      - doc: |-
+          WantsAttrs answers corelogger.AttrsRequester: true when any branch reads
+          RecordEvent.Attrs, since every branch receives the record (#1016).
+        name: WantsAttrs
+        recv: s *fanoutSink
+        results: bool
       - doc: |-
           Flush forwards the call to every distinct branch and aggregates per-branch
           errors. A sink reused across multiple branch slots (V33) is flushed once.

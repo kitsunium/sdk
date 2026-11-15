@@ -18,6 +18,7 @@ files:
       - NewWithConfig
       - noopOnPanic
       - (*recoverSink).Write
+      - (*recoverSink).WantsAttrs
       - (*recoverSink).Flush
       - (*recoverSink).Close
     name: recover_sink.go
@@ -115,6 +116,10 @@ types:
         params: ctx context.Context, rec corelogger.RecordEvent, p []byte
         recv: s *recoverSink
         results: n int, err error
+      - doc: WantsAttrs answers corelogger.AttrsRequester for the guarded sink, which receives the record unchanged (#1016).
+        name: WantsAttrs
+        recv: s *recoverSink
+        results: bool
       - doc: Flush forwards to the downstream sink under panic recovery.
         name: Flush
         params: ctx context.Context

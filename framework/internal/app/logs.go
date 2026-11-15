@@ -44,6 +44,34 @@ var logLevels = rankOf([]string{"debug", "info", "warn", "error"})
 // receive is left as it was.
 type redactingEncoder struct{ logger.Encoder }
 
+// prefixEncoder is the SDK's PrefixEncoder sibling, which both its encoders
+// implement: the bound attributes rendered once, when they are bound, and
+// spliced into every line (kitsunium/sdk#1016).
+type prefixEncoder interface {
+	AppendAttrs(dst []byte, groups []string, attrs []logger.Attr) []byte
+	AppendWithPrefix(dst []byte, groups []string, prefix []byte, r logger.Record) []byte
+}
+
+// redactingPrefixEncoder is redactingEncoder over an encoder that renders
+// the bound attributes once: it redacts them once, when they are bound, and
+// the message and the record's own attributes on every line — so the
+// product's logger, bound to "app" and whatever product code binds, does not
+// render its bound set again on every line. Its lines are byte for byte
+// redactingEncoder's.
+type redactingPrefixEncoder struct {
+	redactingEncoder
+	prefix prefixEncoder
+}
+
+// redacting wraps enc for the terminal: as a PrefixEncoder when enc is one,
+// so the SDK's handler keeps rendering the bound attributes once.
+func redacting(enc logger.Encoder) logger.Encoder {
+	if p, ok := enc.(prefixEncoder); ok {
+		return redactingPrefixEncoder{redactingEncoder: redactingEncoder{enc}, prefix: p}
+	}
+	return redactingEncoder{enc}
+}
+
 // logRing is the sink that hands records to the hub.
 type logRing struct {
 	hub   *hub
@@ -71,7 +99,7 @@ func (a *App) productLog() logger.Logger {
 // writes to the terminal is redacted as the ring is (ADR 0006): its encoder
 // is the app's, wrapped.
 func (a *App) productLogger(sink logger.Sink, enc logger.Encoder, level logger.Level) logger.Logger {
-	enc = redactingEncoder{enc}
+	enc = redacting(enc)
 	var cfg logger.SinkConfig
 	if !a.hub.enabled {
 		cfg = logger.SinkConfig{Sink: sink, Encoder: enc, MinLevel: level}
@@ -88,16 +116,40 @@ func (a *App) productLogger(sink logger.Sink, enc logger.Encoder, level logger.L
 
 // Append writes r, redacted, through the wrapped encoder.
 func (e redactingEncoder) Append(dst []byte, groups []string, r logger.Record) []byte {
+	return e.Encoder.Append(dst, groups, redactRecord(groups, r))
+}
+
+// AppendAttrs renders attrs, redacted under groups, through the wrapped
+// encoder, for the handler to splice into every line.
+func (e redactingPrefixEncoder) AppendAttrs(dst []byte, groups []string, attrs []logger.Attr) []byte {
+	return e.prefix.AppendAttrs(dst, groups, redactAttrs(groups, attrs))
+}
+
+// AppendWithPrefix writes r, redacted, after prefix — bound attributes
+// AppendAttrs already redacted — through the wrapped encoder.
+func (e redactingPrefixEncoder) AppendWithPrefix(dst []byte, groups []string, prefix []byte, r logger.Record) []byte {
+	return e.prefix.AppendWithPrefix(dst, groups, prefix, redactRecord(groups, r))
+}
+
+// redactRecord is r with its message and attributes as the terminal may
+// write them.
+func redactRecord(groups []string, r logger.Record) logger.Record {
 	r.Message = redactor.Text(r.Message, terminalText)
 	if len(r.Attrs) > 0 {
-		prefix := strings.Join(groups, ".")
-		attrs := make([]logger.Attr, len(r.Attrs))
-		for i, at := range r.Attrs {
-			attrs[i] = redactAttr(prefix, at)
-		}
-		r.Attrs = attrs
+		r.Attrs = redactAttrs(groups, r.Attrs)
 	}
-	return e.Encoder.Append(dst, groups, r)
+	return r
+}
+
+// redactAttrs is attrs as the terminal may write them under groups, in a
+// new slice.
+func redactAttrs(groups []string, attrs []logger.Attr) []logger.Attr {
+	prefix := strings.Join(groups, ".")
+	out := make([]logger.Attr, len(attrs))
+	for i, at := range attrs {
+		out[i] = redactAttr(prefix, at)
+	}
+	return out
 }
 
 // redactAttr is one attribute as the terminal may write it. A name is judged

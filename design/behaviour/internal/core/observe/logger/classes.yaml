@@ -140,6 +140,9 @@ files:
       - AttrValue
     name: record.go
   - decls:
+      - SinkWantsAttrs
+    name: sink_attrs.go
+  - decls:
       - TraceIDLen
       - TraceIDKey
       - TraceContextValue
@@ -177,6 +180,9 @@ files:
       - Value.Any
     name: value.go
 functions:
+  - name: SinkWantsAttrs
+    params: s Sink
+    results: bool
   - name: NewValue
     params: v any
     results: Value

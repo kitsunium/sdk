@@ -50,6 +50,17 @@ sequences:
           when: r.Level < s.floor.Level()
       - return: s.inner.Write(ctx, r, p)
         to: s.inner.Write
+  - of: (*gateSink).WantsAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*gateSink).WantsAttrs
+        kind: self
+      - id: corelogger
+        kind: package
+    steps:
+      - return: corelogger.SinkWantsAttrs(s.inner)
+        to: corelogger
   - of: (*gateSink).WriteBatch
     participants:
       - id: caller

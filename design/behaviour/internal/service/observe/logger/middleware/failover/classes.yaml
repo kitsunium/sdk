@@ -22,6 +22,7 @@ files:
       - New
       - NewWithConfig
       - (*failoverSink).Write
+      - (*failoverSink).WantsAttrs
       - exhausted
       - (*failoverSink).writeCooled
       - (*failoverSink).attempt
@@ -54,6 +55,7 @@ imports:
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
   time: time
 package:
   docFile: doc.go
@@ -104,6 +106,13 @@ types:
         params: ctx context.Context, rec corelogger.RecordEvent, p []byte
         recv: s *failoverSink
         results: n int, err error
+      - doc: |-
+          WantsAttrs answers corelogger.AttrsRequester: true when any sink of the
+          chain reads RecordEvent.Attrs, since any of them may receive the record
+          (#1016).
+        name: WantsAttrs
+        recv: s *failoverSink
+        results: bool
       - doc: |-
           writeCooled is Write under a cooldown: a first pass in declaration order
           over the branches not cooling down, then — only when all of them failed — a

@@ -303,11 +303,45 @@ packages:
         name: AnyValue
         out:
           - type: Value
+      - doc: |-
+          SinkWantsAttrs reports s's answer to AttrsRequester: true when s does not
+          implement it, so a Sink that says nothing is handed the merged
+          attributes, as before. A decorator answers with it for the Sink it
+          wraps, and a fan-out with the OR of its branches.
+        in:
+          - name: s
+            type: Sink
+        name: SinkWantsAttrs
+        out:
+          - type: bool
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       level: github.com/kitsunium/sdk/internal/core/observe/logger/level
     path: github.com/kitsunium/sdk/internal/core/observe/logger
     ports:
+      - doc: |-
+          AttrsRequester is the sibling port (ADR 0039) of a Sink that reads
+          RecordEvent.Attrs. A handler asks its Sink once, at construction, and
+          copies the bound attributes and the record's own into one array — an
+          allocation an emit, for a record with attributes of its own — only when
+          the answer is true: a Sink that writes the encoder's bytes and nothing
+          else would be handed an array it never reads. A record with none of its
+          own carries the bound array itself, shared and read-only (Sink). A Sink
+          that answers false receives the record's own
+          attributes as the caller passed them, neither merged nor copied, and
+          MUST NOT read them: the caller may reuse them once the emit returns. A
+          Sink that does not implement it answers true (SinkWantsAttrs); a
+          decorator answers for the Sink it wraps, and a fan-out true when any
+          branch does.
+        methods:
+          - doc: |-
+              WantsAttrs reports whether records handed to this Sink must carry
+              the bound attributes and the record's own in RecordEvent.Attrs.
+            name: WantsAttrs
+            out:
+              - name: wants
+                type: bool
+        name: AttrsRequester
       - doc: |-
           BatchSink is the sibling port (ADR 0039) of a Sink that can deliver
           several records in one transport call — one write(2) for a file, one
@@ -560,7 +594,11 @@ packages:
           MUST be safe for concurrent use by multiple goroutines and SHOULD assume
           their own concurrency model (mutex / lock-free / batched flush) so the
           Handler can stay encoder-agnostic. Sinks that need the severity level read
-          it directly from r.Level — the port is intentionally kept narrow.
+          it directly from r.Level — the port is intentionally kept narrow. The
+          record is read-only: r.Attrs may share its array with the handler's
+          bound attributes, which every later record carries too, so a Sink never
+          writes into it — an append reallocates, an assignment to an element
+          would corrupt every line after it.
         methods:
           - doc: |-
               Write delivers the formatted byte payload p plus the originating record
@@ -930,8 +968,10 @@ packages:
       Package logger — declares the recycled event-record bucket consumed
       by the Builder API. Pulling RecordEvent values from a recycler.Pool
       removes the builder and scratchpad allocations from the hot path; the
-      handler still clones the accumulated attrs on every Send, so the
-      steady-state cost is ONE heap allocation per emit, not zero. Combined
+      handler still copies the accumulated attrs on every Send for a sink
+      that reads them, so the steady-state cost is ONE heap allocation per
+      emit, not zero — none for a sink that reads only the bytes
+      (corelogger.AttrsRequester). Combined
       with the kind-discriminated Value union the remaining per-call cost is
       dominated by the encoder + sink rather than GC pressure.
 
@@ -1762,7 +1802,7 @@ packages:
       Package logger — re-exports the chainable Builder API and the
       slice-overload LogAttrs entry point. Both are routed through the
       internal service implementation, which owns the recycler that holds
-      the steady-state hot-path at one allocation per emit.
+      the steady-state hot-path at one allocation per emit at most.
 
       Package logger — adds the opt-in caller annotation surface. WithCaller
       derives a Logger whose records carry a structured "source" attribute
@@ -1818,7 +1858,9 @@ packages:
           builder and its attrs scratchpad, but the handler clones that
           scratchpad on every Send — so steady-state cost is exactly 1
           heap allocation per emit, not 0. The variadic Info/Warn/... path
-          costs the same 1 (its variadic slice). Prefer Build for
+          costs the same 1 (its variadic slice). An emit with no attribute
+          of its own allocates nothing, and neither does one to a Sink that
+          reads only the bytes (AttrsRequester). Prefer Build for
           ergonomics; it is not an allocation-free guarantee. Measured in
           BENCH.md and pinned by its design contract (allocsMin: 1 on
           Build, ADR 0165).
@@ -1919,7 +1961,8 @@ packages:
       [Build] returns a chainable, sync.Pool-backed [Builder] whose
       steady-state per-call cost is one heap allocation per emit: the pool
       recycles the Builder and its attrs scratchpad, but the handler clones
-      that scratchpad on every [Builder].Send, so one slice escapes.
+      that scratchpad on every [Builder].Send, so one slice escapes — unless
+      the Sink reads only the bytes ([AttrsRequester]).
       Callers MUST NOT use a Builder after [Builder].Send — it returns to
       the recycler.
 
@@ -1966,8 +2009,9 @@ packages:
           Context declares invalid. Most lines a service logs are outside
           a request, and an unjoinable trace_id on all of them would make
           the field useless as a filter.
-        - It costs no extra allocation: the hot path stays at exactly one
-          heap allocation per emit, with a span and without. The
+        - It costs no extra allocation: an emit allocates as much with a
+          span as without — one, the attrs copy, for a record with
+          attributes of its own, none otherwise. The
           identifiers are hex-encoded straight into the encoder's buffer
           and never become a Go string. Measured in BENCH.md.
 
@@ -2056,7 +2100,8 @@ packages:
             Build returns a chainable Builder bound to lg at the supplied level.
             Builders are recycled through a sync.Pool, so the steady-state per-call
             cost is one heap allocation per emit — the handler clones the accumulated
-            attrs on Send, and that clone escapes. See BENCH.md.
+            attrs on Send, and that clone escapes, unless the Sink reads only the
+            bytes (AttrsRequester). See BENCH.md.
           forward: svclogger.Build
           in:
             - name: lg
@@ -2322,6 +2367,15 @@ packages:
               above one, instead of one Write each.
             name: BatchSink
             target: corelogger.BatchSink
+      - alias:
+          - doc: |-
+              AttrsRequester is the stable alias for the internal core.AttrsRequester
+              port: a Sink that implements it and answers false writes the encoder's
+              bytes and reads nothing of RecordEvent.Attrs, so the handler hands it
+              the record's own attributes alone, neither merged with the bound ones
+              nor copied (#1016).
+            name: AttrsRequester
+            target: corelogger.AttrsRequester
       - alias:
           - doc: |-
               DocumentExporter is the stable alias for the port that ships a batch of

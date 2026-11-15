@@ -496,13 +496,25 @@ json 32 bound         2975 – 3546         1110 – 1373             1
 **The rendering is gone; the growth that is left is the merged slice.** A
 bound attribute cost ~78 ns per emit on the base and costs ~25 ns now — what
 remains is `mergeAttrs`, the copy of the bound attributes into the record the
-SINK receives (route predicates and the memory sink read them), which #1016
-keeps by design as the one allocation of an emit. So the issue's bound — the 8-
-and 32-bound rows within 10 % of the 0-bound one — is **not met**: 8 bound is
-~1.8x, 32 bound ~3.6x the 0-bound row. Meeting it means not handing the sink
-the bound attributes, a change of what a sink sees. **The owner accepted the
-gap on 2026-11-03**: the sink keeps its copy of the bound attributes, and the
-bound stays unmet by that one allocation, by decision.
+SINK receives (route predicates and the memory sink read them). So the
+issue's bound — the 8- and 32-bound rows within 10 % of the 0-bound one — was
+**not met** by these figures: 8 bound is ~1.8x, 32 bound ~3.6x the 0-bound
+row. The bound is the issue's, unchanged, and #1016 stays open on it.
+
+**The copy is gone too (#1016, second change).** A record with no attribute of
+its own — the rows above — now carries the bound array itself, capped at its
+length (`h.attrs[:n:n]`): the array is immutable once bound and the record is
+read-only for the sink, so a sink's `append` reallocates and never writes into
+it (`TestASinkAppendingToTheSharedBoundAttrsLeavesThemIntact`, under the race
+detector, fails at "800 of 800 records shared the bound array with room past
+its length" and a data race when the cap is dropped). And a sink that reads
+only the bytes says so (`corelogger.AttrsRequester`, false on console, file,
+syslog, journald, nettransport and rotfile, forwarded by the decorators, ORed
+by the fan-outs), so a record WITH attributes of its own is not merged for it
+either. What still grows with the bound count is the splice of the prefix
+into the line, a `memmove` of its bytes. The rows above are the run before
+this change; the runner's interleaved A/B (`bench-ab.yml`, the `logger` suite)
+measures this one, and its figures replace them here.
 
 ## 7. The keyed sampler (#1017)
 

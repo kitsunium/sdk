@@ -149,6 +149,13 @@ func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 	return written, nil
 }
 
+// WantsAttrs answers false to corelogger.AttrsRequester: it frames the encoder's bytes and reads nothing else of the record but its level, so the
+// handler spares it the merged attributes (#1016).
+func (s *syslogSink) WantsAttrs() bool {
+	//: the bytes are the whole record to this sink.
+	return false
+}
+
 // Flush is a no-op for the syslog sink (UDP datagrams settle on send;
 // TCP delegates to the kernel buffer).
 func (s *syslogSink) Flush(ctx context.Context) error {

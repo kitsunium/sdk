@@ -21042,6 +21042,16 @@ sequences:
   - of: NewListener
     steps:
       - return: "&Listener{contract: contract, handler: handler}"
+  - of: redacting
+    steps:
+      - opt:
+          do:
+            - return: "redactingPrefixEncoder{redactingEncoder: redactingEncoder{enc}, prefix: p}"
+          init:
+            bind: p, ok
+            eval: enc.(prefixEncoder)
+          when: ok
+      - return: redactingEncoder{enc}
   - of: (*App).productLog
     steps:
       - opt:
@@ -21055,13 +21065,16 @@ sequences:
         kind: actor
       - id: (*App).productLogger
         kind: self
+      - id: redacting
+        kind: internal
       - id: logger
         kind: package
       - id: lg.With
         kind: value
     steps:
       - set: enc
-        value: redactingEncoder{enc}
+        to: redacting
+        value: redacting(enc)
       - var:
           name: cfg
           type: logger.SinkConfig
@@ -21092,38 +21105,79 @@ sequences:
         kind: actor
       - id: redactingEncoder.Append
         kind: self
-      - id: redactor.Text
-        kind: value
-      - id: strings
-        kind: stdlib
-      - id: redactAttr
-        kind: internal
       - id: e.Encoder.Append
         kind: value
+    steps:
+      - return: e.Encoder.Append(dst, groups, redactRecord(groups, r))
+        to: e.Encoder.Append
+  - of: redactingPrefixEncoder.AppendAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: redactingPrefixEncoder.AppendAttrs
+        kind: self
+      - id: e.prefix.AppendAttrs
+        kind: internal
+    steps:
+      - return: e.prefix.AppendAttrs(dst, groups, redactAttrs(groups, attrs))
+        to: e.prefix.AppendAttrs
+  - of: redactingPrefixEncoder.AppendWithPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: redactingPrefixEncoder.AppendWithPrefix
+        kind: self
+      - id: e.prefix.AppendWithPrefix
+        kind: internal
+    steps:
+      - return: e.prefix.AppendWithPrefix(dst, groups, prefix, redactRecord(groups, r))
+        to: e.prefix.AppendWithPrefix
+  - of: redactRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: redactRecord
+        kind: self
+      - id: redactor.Text
+        kind: value
+      - id: redactAttrs
+        kind: internal
     steps:
       - set: r.Message
         to: redactor.Text
         value: redactor.Text(r.Message, terminalText)
       - opt:
           do:
-            - bind: prefix
-              eval: strings.Join(groups, ".")
-              to: strings
-            - bind: attrs
-              eval: make([]logger.Attr, len(r.Attrs))
-            - loop:
-                do:
-                  - set: attrs[i]
-                    to: redactAttr
-                    value: redactAttr(prefix, at)
-                key: i
-                range: r.Attrs
-                value: at
             - set: r.Attrs
-              value: attrs
+              to: redactAttrs
+              value: redactAttrs(groups, r.Attrs)
           when: len(r.Attrs) > 0
-      - return: e.Encoder.Append(dst, groups, r)
-        to: e.Encoder.Append
+      - return: r
+  - of: redactAttrs
+    participants:
+      - id: caller
+        kind: actor
+      - id: redactAttrs
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: redactAttr
+        kind: internal
+    steps:
+      - bind: prefix
+        eval: strings.Join(groups, ".")
+        to: strings
+      - bind: out
+        eval: make([]logger.Attr, len(attrs))
+      - loop:
+          do:
+            - set: out[i]
+              to: redactAttr
+              value: redactAttr(prefix, at)
+          key: i
+          range: attrs
+          value: at
+      - return: out
   - of: redactAttr
     participants:
       - id: caller

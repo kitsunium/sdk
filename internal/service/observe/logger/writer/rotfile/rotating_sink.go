@@ -167,6 +167,13 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 	return s.writeLocked(p, errs.Int("level", int(r.Level)))
 }
 
+// WantsAttrs answers false to corelogger.AttrsRequester: it writes the encoder's bytes to its file and reads nothing else of the record but its level, so the
+// handler spares it the merged attributes (#1016).
+func (s *rotatingSink) WantsAttrs() bool {
+	//: the bytes are the whole record to this sink.
+	return false
+}
+
 // WriteBatch appends every payload to the active file in ONE write, under
 // the local mutex, rotating first when the batch would push the file past
 // MaxBytes — the threshold is checked once per batch, as a single record is

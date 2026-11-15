@@ -129,6 +129,13 @@ func (s *journaldSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 	return accepted, nil
 }
 
+// WantsAttrs answers false to corelogger.AttrsRequester: it sends the encoder's bytes as MESSAGE and reads nothing else of the record, so the
+// handler spares it the merged attributes (#1016).
+func (s *journaldSink) WantsAttrs() bool {
+	//: the bytes are the whole record to this sink.
+	return false
+}
+
 // Flush is a no-op: each record is sent synchronously as its own datagram, so
 // nothing is buffered on this side. It still honours cancellation.
 func (s *journaldSink) Flush(ctx context.Context) error {
