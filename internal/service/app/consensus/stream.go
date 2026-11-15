@@ -139,8 +139,7 @@ func (s *nodeStream) Append(ctx context.Context, records []corestream.RecordValu
 func (n *Node) proposeRecord(ctx context.Context, data []byte) (tok coreconsensus.TokenValue, known bool, err error) {
 	e := coreconsensus.EntryValue{Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data}
 	p := &proposal{entry: e, done: make(chan propResult, 1)}
-	r := n.submitProposal(ctx, p)
-	tok, err = r.tok, r.err
+	tok, _, err = n.submitProposal(ctx, p)
 	if err == nil {
 		return tok, true, nil
 	}
