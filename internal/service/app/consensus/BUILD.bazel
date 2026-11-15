@@ -2,6 +2,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 # gazelle:exclude consensus_bench_test.go
 # gazelle:exclude loopturn_bench_test.go
+# gazelle:exclude streamcommit_bench_test.go
 # gazelle:exclude turnencoding_bench_test.go
 # Reason: the bench lane of ADR 0152 D15/D16 (#911) is its own `manual`,
 # race-off target below, never part of consensus_test: its benchmarks write
@@ -9,7 +10,10 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 # lane is `make bench` (bench-consensus), TestGenerateBenchMD opt-in by name;
 # the leader's loop turn and a turn's bytes (#912, #1364) are its TURN and
 # ENC rows, and the A/B lane's `cturn` and `cenc` suites
-# (scripts/ci/bench-ab.conf) run their benchmarks base against head.
+# (scripts/ci/bench-ab.conf) run their benchmarks base against head; the
+# data lane's commit while a snapshot streams (#920, #1365) is its
+# `TCP/<device>/paced+stream` rows, and the A/B lane's `cstream` and
+# `cstream-scale` suites run its benchmark on the head.
 
 package(default_visibility = ["//internal/service:service_consumers"])
 
@@ -362,7 +366,9 @@ go_test(
 # production code alone, each self-contained: the generator, the hand-run
 # part it keeps (zzbenchmdkeep_internal_test.go), and the leader's loop turn
 # and a turn's bytes (loopturn_bench_test.go, turnencoding_bench_test.go,
-# #912, #1364), which the A/B lane also copies onto the base.
+# #912, #1364), which the A/B lane also copies onto the base; the commit
+# while a snapshot streams (streamcommit_bench_test.go, #920, #1365) builds
+# on the generator's helpers, and the lane leaves it off the base.
 go_test(
     name = "consensus_bench_test",
     size = "enormous",
@@ -370,6 +376,7 @@ go_test(
     srcs = [
         "consensus_bench_test.go",
         "loopturn_bench_test.go",
+        "streamcommit_bench_test.go",
         "turnencoding_bench_test.go",
         "zzbenchmdkeep_internal_test.go",
     ],
