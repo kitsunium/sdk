@@ -4034,26 +4034,47 @@ sequences:
         to: r.log.term
   - of: (*Raft).Status
     steps:
-      - bind: st
-        eval: |-
+      - return: |-
           StatusValue{
+          		SummaryValue: r.Summary(),
+          		Conf:         r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
+          	}
+  - of: (*Raft).Summary
+    steps:
+      - bind: s
+        eval: |-
+          SummaryValue{
           		Role: r.role, Term: r.term, Lead: r.lead, Commit: r.log.committed,
           		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
           		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
-          		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
           		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
           	}
       - opt:
           do:
-            - set: st.LeaderLast, st.Appended
+            - set: s.LeaderLast, s.Appended
               value: r.heard.last, r.heard.appended
           when: r.role != core.RoleLeader && r.heard.term == r.term && r.heard.from == r.lead
       - opt:
           do:
-            - set: st.HandedBy
+            - set: s.HandedBy
               value: r.campaignIssuer
           when: r.role == core.RoleLeader
-      - return: st
+      - return: s
+  - of: (*Raft).SameConf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).SameConf
+        kind: self
+      - id: r.conf
+        kind: internal
+    steps:
+      - bind: c
+        eval: r.conf()
+        to: r.conf
+      - return: |-
+          c.Index == m.Index && slices.Equal(c.Members, m.Members) &&
+          		slices.Equal(c.Retired, m.Retired) && slices.Equal(c.RetiredKeys, m.RetiredKeys)
   - of: (*Raft).Progress
     steps:
       - bind: pr

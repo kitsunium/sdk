@@ -7423,6 +7423,85 @@ after as many warm-up calls (ADR 0165), three runs alike:
   `TestPerfAllocsAppendMessage` with 30 000 allocations over the 30 000
   calls, and the change was reverted.
 
+## Amendment — the leader's loop turn is measured raw, and reads the step function without cloning a configuration (2026-11-15, #912, #1364)
+
+The amendment of 2026-11-12 left #912's second criterion "not measured
+here": `consensus_loop_turn_seconds` p99 at 1 000 proposals/s not worse than
+before, and the bytes allocated per batch divided by the follower count
+([#912](https://github.com/kitsunium/sdk/issues/912),
+[#1364](https://github.com/kitsunium/sdk/issues/1364)). This amendment
+measures it, states the two rules it is judged by, and lightens the turn
+that the measure found heavy.
+
+- **The measure.** The series' first bucket is 0.5 ms (D13's latency
+  buckets) and a turn of the leader lasts 2 to 40 µs at that rate, so a
+  p99 read on the histogram would be its first bound before and after any
+  change. A test `Meter` on the leader keeps every observation raw instead:
+  `BenchmarkLeaderLoopTurnAt1000PerSecond` (three and five nodes over
+  loopback mutual TLS, memory logs, one paced run of 5 s) and
+  `BenchmarkLeaderTurnEncoding` (a turn of 64 entries of 256 B to N
+  followers, through a `BatchSender` and through a transport without one,
+  which the driver still sends a frame per follower grown from nil, the
+  path before #912 byte for byte). Both files are self-contained, so they
+  build on the commits the A/B lane copies them onto. The bench lane's
+  generator writes their `TURN/followers=N` and `ENC/followers=N` rows into
+  `BENCH.md`, and copies the lane's verdicts committed under
+  `testdata/bench/`; `CONSENSUS_BENCH_ONLY=turn,enc,ab` rewrites those
+  sections alone.
+- **The two rules.** "Not worse than before" is a ratio of two commits on
+  one machine: the A/B lane's suite `cturn` runs base and head alternated,
+  twenty rounds or more, and holds when the high end of the 95 % interval of
+  the per-round ratio head over base of the p99 is at most 1.00, three
+  nodes and five apart. Its base is `ee1f48ba2` (main before lot L1), and
+  `bench/912-parent` for #1364: the parent of #912's commit, which does not
+  build since #832, with the one line of `stream.go` that makes it build,
+  in a file the turn never runs. The bytes are the suite `cenc`: shared
+  over per-follower at most 1/N, in the head, 0.114 at two followers and
+  0.058 at four.
+- **What the turn did.** `Raft.Status` clones both memberships at each call,
+  and the loop called it two to four times a turn for a role, a term, a
+  leader or a timing (`handleProposals`, `leadershipChanged`, `publish`,
+  the lease's `checkTurn` and the tick's reads): over half of the bench
+  cluster's allocated bytes, and a third of `MEM/propose`'s allocations
+  (amendment of 2026-11-12). `publish` built the status on the heap before
+  comparing it with the last, and every frame without entries (heartbeats,
+  the commit-only appends, the acknowledgements and votes that wait for a
+  write) grew from nil, 900 allocations for 200 frames.
+- **What it does now.** The step function gains two read-only accessors,
+  designed (`design/app/consensus.yaml`): `Summary`, the status without
+  `Conf` and `Committed` (`StatusValue` embeds the `SummaryValue` it
+  returns), and `SameConf`, whether a configuration the driver published
+  is the one in force, compared field by field without a clone; both are
+  budgets of 0 allocations in `design/sdk.yaml`. The loop reads `Summary`
+  wherever it reads no membership, the compiler holding it to that;
+  `publishConf` clones and publishes the configuration, through `Status`,
+  only once `SameConf` says it changed; `publish` compares the status on
+  the stack; a frame without entries is encoded in one buffer of
+  `wire.MessageHeaderLen`. A turn that changes nothing allocates nothing
+  in `publish` (`TestATurnThatChangesNothingPublishesWithoutAllocating`,
+  400 allocations for 200 turns through `Status`, mutation-checked).
+- **Safety.** Every change reads; none writes. `Summary` and `SameConf`
+  read the step function's fields on the goroutine that owns it, the loop,
+  where `Status` was called before, at the same points; the configuration
+  the driver passes to `SameConf` is a published value, never written again
+  (a new configuration is a new pointer), and `SameConf` keeps nothing of
+  it; the configuration published is still `Status`'s clone, which nothing
+  else holds. The persistence, the order of the entries, the term, the
+  vote, the write before an acknowledgement, and the bytes on the wire are
+  untouched (`TestAFrameWithoutEntriesIsEncodedInOneAllocation` compares
+  each frame with `AppendMessage`'s; the simulator's `simOptions.speaks`
+  passes).
+- **Measured, indicatively.** On a shared VM (AMD EPYC 7351P, 4 CPUs,
+  go1.27.4), eight alternated passes against `ee1f48ba2` (twelve for the
+  base): the p99 of a turn went from 34.6 to 30.1 µs at two followers and
+  from 40.7 to 35.0 µs at four, the median of the per-pass ratios 0.856
+  and 0.848, none above 0.931; the median turn from 3.98 to 2.19 µs; the
+  cluster's allocations per leader turn from 31.0 to 14.0 and from 37.0 to
+  16.8. The parent of #912, repaired, measured 34.4 and 40.9 µs. The
+  verdict is the lane's on its runner: the rules stay `report` until it
+  holds; should it not, the owner's rule of 2026-11-14 raises the bound to
+  the best the runner measured, with this trail.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7478,6 +7557,7 @@ after as many warm-up calls (ADR 0165), three runs alike:
 | #765 (b) | the owner's decision, 2026-11-01 | #603's guard keeps its two bets on the leader, the leader counted at any address and the compacted log's bet that a voter listed after it knows it as a voter, and says when a stopped voter's reach rests on one: `IsolationLeaderMoved` and `IsolationLeaderUnconfirmed` in `Raft.Isolated`, the health's `PeerLeaderMoved` and `PeerLeaderUnconfirmed`, the audit line's `isolated` for the leader's own move, a removal, a move and a transfer, and a Warn line for a hand-over with no entry; no admitted change refused, no format change, nothing persisted, no raft mutation (amendment of 2026-11-01, #765) |
 | #763 (c) | the owner's decision, 2026-11-01 | a member's `TruncateAndStaySilent` reads the configuration the cluster runs with from a live member, every other member its log names asked under the key the log pins, the newest answer judged, and is refused `RECOVER_REFUSED`, its log and silence condition untouched (the audit line is written first), when that configuration lists none of the kept members, no longer lists the node, or when no member answers; `QuarantineOptions`, `ClearQuarantineWith` and `AskMembership` added, a transport lane `laneMembership` (5) that an older member ends unanswered; no raft frame, payload or record change, nothing persisted, no protocol raise, no raft mutation (amendment of 2026-11-01, #763) |
 | #911 | bench lane, 2026-11-11 | `make bench` runs the consensus lane (`consensus_bench_test`, race off, `manual`) and writes `internal/service/app/consensus/BENCH.md`; D16's commit target is revised to 2 × the nearest RTT + 4 × the fsync p99, its throughput and failover targets confirmed, each on the `BENCH.md` row it rests on |
+| #912, #1364 | the leader's loop turn, 2026-11-15 | `BENCH.md`'s `TURN` rows keep the leader's turns raw through a test `Meter` and its `ENC` rows a turn's bytes on both paths; "not worse" is the A/B lane's `cturn`, the high end of the 95 % interval of head over base at most 1.00, against `ee1f48ba2` and the repaired parent of #912, and the bytes its `cenc`, at most 1/N; the loop reads the step function's `Summary` and asks `SameConf` instead of cloning both memberships through `Status` at each read, publishes a status it compared on the stack, and encodes a frame without entries at its length; read-only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #912, #1364) |
 
 ## raft-sql-poc (owner's prior Raft)
 

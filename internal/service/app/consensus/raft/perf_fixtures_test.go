@@ -117,3 +117,32 @@ func perfStepApp64(tb testing.TB) func() {
 		f.log.ents = kept
 	}
 }
+
+// perfSummarySink and perfSameConfSink keep each call's result, so that
+// the compiler drops neither fixture's call.
+var (
+	perfSummarySink  SummaryValue
+	perfSameConfSink bool
+)
+
+// perfSummary is the fixture of Summary: a leader of term 2 over three
+// voters, read as its event loop reads it at every turn (#912).
+func perfSummary(tb testing.TB) func() {
+	l := leaderOf(2, 0, nil, 0, false)
+	if s := l.Summary(); s.Role != core.RoleLeader || len(l.conf().Members) != 3 {
+		tb.Fatalf("setup: %+v over %d members", s, len(l.conf().Members))
+	}
+	return func() { perfSummarySink = l.Summary() }
+}
+
+// perfSameConf is the fixture of SameConf: a leader's loop asking whether
+// the configuration it published last is still the one in force, which it
+// is at every turn but those that change it (#912).
+func perfSameConf(tb testing.TB) func() {
+	l := leaderOf(2, 0, nil, 0, false)
+	published := l.Status().Conf
+	if !l.SameConf(&published) {
+		tb.Fatal("setup: the configuration Status returned is not the one in force")
+	}
+	return func() { perfSameConfSink = l.SameConf(&published) }
+}

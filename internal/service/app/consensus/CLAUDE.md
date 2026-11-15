@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-12T13:00:00Z -->
+<!-- updated: 2026-11-15T08:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -68,11 +68,12 @@ silence closed (`read_silence`).
 | fault points (D15, #1113) | `go test -run TestEveryFaultPoint .` (part of the unit lane): the real data directory behind `faultfs_internal_test.go`'s `faultFS`, the shim behind the one fault seam every write, sync, rename and removal of the log, the snapshot store, the stamp, the markers and the offline operations goes through (`diskFS`, `disk.go`; production is `osDisk`). Six top-level tests, one per scenario — an append batch across two rotations, a compaction dropping a segment, a cut published then retained, an install spooled then committed, a `Recover`, `TruncateAndStaySilent` — each run once to count its N operations, then at every k in 1..N with operation k failed (EIO, ENOSPC for a write) and the power cut at the end, and with the process stopped at k and the bytes written since each file's last sync kept, dropped or torn at 4 KiB pages; the directory reopened is judged by the package's oracles (not quarantined, no acknowledged entry, commit or snapshot lost, an interrupted offline operation completing when run again to the state a run without faults leaves, `Inspect` reading it). A directory entry is taken as durable once its call returns: the shim does not revert a rename or a removal a directory sync did not follow. Each scenario is sized to a few seconds under race, well inside a shard's 60 s; the #417 reorder of `writeBatch` fails the append scenario at operation 18 of 73 |
 | simulator soak | `CONSENSUS_SIM_SOAK=1 go test -run TestSimSoak ./raft/`; a seed replays with `CONSENSUS_SIM_SEED` |
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package, and on `raft/`'s `FuzzStep`, the step function under the simulator's invariants (#924); nightly in CI (`scripts/ci/consensus-fuzz.sh`, `FuzzStep` 10 minutes) |
-| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt` (`bazel test --config=alloc` it, or `go test -run 'TestALeaderTurnEncodes|TestApplied1Keeps' .` race off): `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go`, the leader turn's budget of #912 and applied1's of #1109 (`applied_alloc_internal_test.go`, with `appliedwait_internal_test.go`; `sendshared_alloc_internal_test.go`, with `sendshared_internal_test.go` for its helpers, the target's `-test.run` naming the gates) and the package's copy of `allocwindow_test.go`, nothing else of the suite |
+| alloc (race off) | `//internal/service/app/consensus:consensus_alloc_test` in `tools/alloc-lane-targets.txt` (`bazel test --config=alloc` it, or `go test -run 'TestALeaderTurnEncodes|TestATurnThatChangesNothing|TestAFrameWithoutEntries|TestApplied1Keeps' .` race off): `filelog_alloc_internal_test.go`, `receive_alloc_internal_test.go`, the leader turn's budgets of #912 and applied1's of #1109 (`applied_alloc_internal_test.go`, with `appliedwait_internal_test.go`; `sendshared_alloc_internal_test.go`, with `sendshared_internal_test.go` for its helpers; `publish_alloc_internal_test.go`, a turn's publication that changed nothing at 0 and a frame without entries at 1; the target's `-test.run` naming the gates) and the package's copy of `allocwindow_test.go`, nothing else of the suite |
 | alloc (D15) | `make test-alloc` (race off): `gen_perf_test.go` in `raft/` and in `wire/`, written by kit gen from `design/sdk.yaml`'s budgets over each package's `perf_fixtures_test.go` — the leader's `Step` on an append response (1) and the follower's on 64 entries (1, the entry slice: 65 before #1110 and left there until L1's audit), `AppendMessage`, `ParseMessage` and `ChainSum` (0) — and `TestTheRecordCodecAllocatesNothing` (`recordcodec_alloc_internal_test.go`, counted with `allocwindow_test.go`), the log record codec's 0; the bounds D15 revised are ADR 0152's amendment of 2026-11-12 (#921); `Propose` on three memory nodes is no budget — kit's 60 000 calls with the collector off hold some 2 GB — and is `BENCH.md`'s `MEM/propose` row |
 | bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`), `-bench BenchmarkApplied1` (`applied_bench_test.go`); numbers in `BENCH.md` |
 | dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate] [fdatasync\|rwfdsync]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922), G1's paired sync path row (`TestDMCryptSyncPathBench`, ADR 0190's shape, #923) and power cuts through LUKS, on ext4 or xfs; with `fallocate` or `rwfdsync` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`) or writing `RWF_DSYNC` (`CONSENSUS_SYNC_PATH=rwfdsync`), and with `rwfdsync` the power cuts too; results in `testdata/dmcrypt/RESULTS.md` |
-| bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`), keeping the hand-run part from `## Hand-run micro-benchmarks` on, which only its own commands refresh (`keepHandRun`, `zzbenchmdkeep_internal_test.go`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911) |
+| bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`), keeping the hand-run part from `## Hand-run micro-benchmarks` on, which only its own commands refresh (`keepHandRun`, `zzbenchmdkeep_internal_test.go`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911). #912's second criterion (#1364) is three of its sections: `TURN/followers=N`, the leader's loop turns at 1 000 proposals/s kept raw by a test `Meter` (`BenchmarkLeaderLoopTurnAt1000PerSecond`, `loopturn_bench_test.go`), `ENC/followers=N`, a turn's bytes shared against per follower (`BenchmarkLeaderTurnEncoding`, `turnencoding_bench_test.go`), and the A/B lane's verdicts on them, committed under `testdata/bench/` and copied; `CONSENSUS_BENCH_ONLY=turn,enc,ab` measures and rewrites those alone, in place (`benchSplice`) |
+| bench A/B | `scripts/ci/bench-ab.conf`'s suites `cturn` (the TURN rows, head over base, base `ee1f48ba2` or `-f base=bench/912-parent`) and `cenc` (the ENC rows, the head's shared over per-peer): `gh workflow run bench-ab.yml -R kitsunium/sdk -f suites=cturn,cenc -f rounds=40`; the two bench files are self-contained so the lane copies `loopturn_bench_test.go` onto the base, where `turnencoding_bench_test.go` does not build (no `batch` field) and is left out |
 
 Under Bazel `consensus_test` has 48 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
@@ -122,10 +123,13 @@ took 18 s there (2 s on a Linux workstation) and
 `TestHealthWarnsBeforeTheSnapshotLimit` 13 s, settling its cuts after each
 of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 
-`consensus_bench_test.go` is gazelle-excluded and compiled only into
-`consensus_bench_test` (rule 12): it uses the package's production code and
-none of its test files, so that target needs no other source, and it must
-stay so. Under `go test` it joins the package's binary, where its generator
+`consensus_bench_test.go`, `loopturn_bench_test.go` and
+`turnencoding_bench_test.go` are gazelle-excluded and compiled only into
+`consensus_bench_test` (rule 12), with `zzbenchmdkeep_internal_test.go`:
+each uses the package's production code and none of the suite's test
+files, so that target needs no other source, and it must stay so; the two
+bench files of #912 also compile alone on the commits the A/B lane copies
+them onto. Under `go test` it joins the package's binary, where its generator
 returns at once unless `-run` names it and its benchmarks run only under
 `-bench`. The fdatasyncs are timed through `fileLog.timedSync`, which only
 the lane sets. Its numbers are a host's, never a budget (D15): the verdicts
@@ -1149,8 +1153,9 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   turns, competing with the heartbeats for the loop whose turn length is
   the lease's drift budget, and `Status` carries no configuration. The
   loop publishes the configuration at the end of each turn that changed it
-  (`publishConf`, from `publish`, compared with `sameMembership` so an
-  unchanged one costs no allocation), `Membership()` reads that copy, and
+  (`publishConf`, from `publish`, asking raft's `SameConf` whether the
+  configuration in force is the one published, so an unchanged one is
+  neither cloned nor stored, #912), `Membership()` reads that copy, and
   `WatchMembership` pushes a clone of it to each watcher under Watch's
   contract — own channel, capacity one, latest value, closed on ctx or the
   loop's end (#915, `TestWatchMembershipDeliversEveryChange`,
@@ -1626,6 +1631,30 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   filter or delay through `Send`, which a promoted `SendShared` would
   bypass; a transport without it is sent `AppendMessage`'s frames as before
   (`TestATransportWithoutTheSiblingIsSentWholeFrames`).
+- Read raft's `Status` on the loop where no membership is read, publish a
+  configuration that did not change, build the published status on the
+  heap before comparing it, or grow a frame without entries from nil: the
+  leader's loop paid them at every turn (#912). `Status` clones both
+  memberships at each call, and the loop called it two to four times a
+  turn — `handleProposals`, `leadershipChanged`, `publish`, `checkTurn`
+  and the tick's reads — for a role, a term, a leader or a timing; the
+  clones were over a third of `MEM/propose`'s allocations (ADR 0152,
+  amendment of 2026-11-12) and half of the bench cluster's bytes. The loop
+  reads raft's `Summary`, `Status` without `Conf` and `Committed`, wherever
+  it reads no membership (the compiler holds it: a `SummaryValue` has
+  none); `publishConf` asks `SameConf` whether the configuration in force
+  is the one published, and clones it, through `Status`, only once it
+  changed; `publish` compares the status on the stack and moves only a
+  changed one to the heap; and `entrylessFrame` encodes a heartbeat, an
+  acknowledgement or a vote in one buffer of `wire.MessageHeaderLen`, the
+  same bytes. Only reads of raft, on the loop: nothing it decides, persists
+  or sends changes (`TestSummaryIsStatusWithoutItsMemberships`,
+  `TestSameConfIsTheComparisonWithStatusConf`,
+  `TestSameConfSeesAMembershipEntryAppended`, raft's
+  `TestPerfAllocsSummary` and `TestPerfAllocsSameConf` at 0,
+  `TestATurnThatChangesNothingPublishesWithoutAllocating`,
+  `TestAFrameWithoutEntriesIsEncodedInOneAllocation`; `BENCH.md`'s `TURN`
+  rows).
 - Hand the loop a `Barrier` through `exec`, or handle the Ready per read:
   each closure ran in its own turn and flushed its read alone, so N
   concurrent reads cost N heartbeat broadcasts (#1108). `Barrier` queues

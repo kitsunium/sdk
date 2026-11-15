@@ -72696,6 +72696,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SameConf",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "SameConf",
+      "recv": "Raft",
+      "spelled": "func(m *core.MembershipValue) bool",
+      "canonical": "func(m *github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue) bool",
+      "doc": "SameConf reports whether m is the configuration in force, Status's\nConf, compared as a value: the index of the entry that produced it,\nand its members, retired ids and retired keys in order. A driver that\npublished m clones the configuration again only once it changed\n(#912). It reads m and keeps nothing of it.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SetApplyLag",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -72808,6 +72821,19 @@
       "spelled": "func(seq uint64, index uint64, term uint64)",
       "canonical": "func(seq uint64, index uint64, term uint64)",
       "doc": "StorageDone reports that the write seq is durable through (index, term).\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Summary",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Summary",
+      "recv": "Raft",
+      "spelled": "func() SummaryValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus/raft.SummaryValue",
+      "doc": "Summary returns the step function's view without its two memberships:\nStatus's every other field, with no configuration cloned. The event\nloop reads it at every turn; Status clones both memberships at each\ncall (#912).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -73203,8 +73229,35 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "StatusValue",
-      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
-      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
+      "spelled": "struct{SummaryValue; Conf core.MembershipValue; Committed core.MembershipValue}",
+      "canonical": "struct{github.com/kitsunium/sdk/internal/service/app/consensus/raft.SummaryValue; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue}",
+      "fields": [
+        {
+          "name": "SummaryValue",
+          "embedded": true,
+          "type": "SummaryValue"
+        },
+        {
+          "name": "Conf",
+          "type": "core.MembershipValue"
+        },
+        {
+          "name": "Committed",
+          "type": "core.MembershipValue"
+        }
+      ],
+      "doc": "StatusValue is the step function's part of a node's status: its summary\nand its two memberships. It is a copy: its memberships are cloned, so the\ncaller may keep it.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.SummaryValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "SummaryValue",
+      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
+      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
       "fields": [
         {
           "name": "Role",
@@ -73247,14 +73300,6 @@
           "type": "core.AlarmID"
         },
         {
-          "name": "Conf",
-          "type": "core.MembershipValue"
-        },
-        {
-          "name": "Committed",
-          "type": "core.MembershipValue"
-        },
-        {
           "name": "Transfer",
           "type": "core.NodeID"
         },
@@ -73279,7 +73324,7 @@
           "doc": "Appended is, on a node that does not lead, the instant of the last\nappend with entries it took from the leader of this term, zero while\nit took none (#919).\n"
         }
       ],
-      "doc": "StatusValue is the step function's part of a node's status. It is a copy:\nits memberships are cloned, so the caller may keep it.\n",
+      "doc": "SummaryValue is the step function's view without its memberships: every\nfield of a StatusValue but Conf and Committed, which Summary returns\nwithout cloning a configuration (#912).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"

@@ -5814,6 +5814,28 @@ packages:
             out:
               - type: StatusValue
             recv: pointer
+          - doc: |-
+              Summary returns the step function's view without its two memberships:
+              Status's every other field, with no configuration cloned. The event
+              loop reads it at every turn; Status clones both memberships at each
+              call (#912).
+            name: Summary
+            out:
+              - type: SummaryValue
+            recv: pointer
+          - doc: |-
+              SameConf reports whether m is the configuration in force, Status's
+              Conf, compared as a value: the index of the entry that produced it,
+              and its members, retired ids and retired keys in order. A driver that
+              published m clones the configuration again only once it changed
+              (#912). It reads m and keeps nothing of it.
+            in:
+              - name: m
+                type: "*core.MembershipValue"
+            name: SameConf
+            out:
+              - type: bool
+            recv: pointer
           - doc: Progress returns the leader's match index of a peer.
             in:
               - name: id
@@ -5958,9 +5980,23 @@ packages:
         struct:
           unexported: true
       - doc: |-
-          StatusValue is the step function's part of a node's status. It is a copy:
-          its memberships are cloned, so the caller may keep it.
+          StatusValue is the step function's part of a node's status: its summary
+          and its two memberships. It is a copy: its memberships are cloned, so the
+          caller may keep it.
         name: StatusValue
+        struct:
+          fields:
+            - embedded: true
+              type: SummaryValue
+            - name: Conf
+              type: core.MembershipValue
+            - name: Committed
+              type: core.MembershipValue
+      - doc: |-
+          SummaryValue is the step function's view without its memberships: every
+          field of a StatusValue but Conf and Committed, which Summary returns
+          without cloning a configuration (#912).
+        name: SummaryValue
         struct:
           fields:
             - name: Role
@@ -5983,10 +6019,6 @@ packages:
               type: uint64
             - name: NoSpace
               type: core.AlarmID
-            - name: Conf
-              type: core.MembershipValue
-            - name: Committed
-              type: core.MembershipValue
             - name: Transfer
               type: core.NodeID
             - doc: |-

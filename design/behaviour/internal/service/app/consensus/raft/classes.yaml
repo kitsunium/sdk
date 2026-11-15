@@ -803,7 +803,10 @@ files:
       - (*Raft).EngineAt
       - (*Raft).TermAt
       - StatusValue
+      - SummaryValue
       - (*Raft).Status
+      - (*Raft).Summary
+      - (*Raft).SameConf
       - (*Raft).Progress
       - (*Raft).ReadRounds
       - (*Raft).LeaseValid
@@ -3352,6 +3355,13 @@ types:
       - name: Status
         recv: r *Raft
         results: StatusValue
+      - name: Summary
+        recv: r *Raft
+        results: SummaryValue
+      - name: SameConf
+        params: m *core.MembershipValue
+        recv: r *Raft
+        results: bool
       - name: Progress
         params: id core.NodeID
         recv: r *Raft
@@ -4201,6 +4211,16 @@ types:
         recv: r *Raft
     name: Raft
   - fields:
+      - name: ""
+        role: embedded
+        type: SummaryValue
+      - name: Conf
+        type: core.MembershipValue
+      - name: Committed
+        type: core.MembershipValue
+    kind: struct
+    name: StatusValue
+  - fields:
       - name: Role
         type: core.Role
       - name: Term
@@ -4221,10 +4241,6 @@ types:
         type: uint64
       - name: NoSpace
         type: core.AlarmID
-      - name: Conf
-        type: core.MembershipValue
-      - name: Committed
-        type: core.MembershipValue
       - name: Transfer
         type: core.NodeID
       - doc: |-
@@ -4252,7 +4268,7 @@ types:
         name: Appended
         type: time.Time
     kind: struct
-    name: StatusValue
+    name: SummaryValue
   - fields:
       - name: Timing
         type: core.TimingContractSpec

@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-12T12:00:00Z -->
+<!-- updated: 2026-11-15T08:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -28,7 +28,15 @@ the oldest append of a full window (1, the next append's entries cloned by
 `memLog.slice`) and a follower taking 64 entries (65, the entry slice and
 `ownCopy`'s copy of each payload). Each fixture drains the outbox and lets
 the log go in place, the driver's part, so the count is `Step`'s alone.
+`Summary` and `SameConf` have a budget of 0 each (#912): the driver's
+loop reads them at every turn, where `Status` clones both memberships.
 Both files are race off: the race suite's shards never see them.
+
+`Summary` is `Status` without its two memberships — `StatusValue` embeds
+the `SummaryValue` it returns — and `SameConf` compares the configuration
+in force with one the driver published, field by field, members in
+order, without cloning it (`summary_internal_test.go`, #912). Both only
+read, on the goroutine that owns the step function.
 
 `walkthrough_internal_test.go` is D15's datadriven reader (#1112),
 stdlib only: `TestDataDriven` runs every `testdata/*.txt`, each a list of

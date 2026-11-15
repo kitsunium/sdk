@@ -1,10 +1,15 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 # gazelle:exclude consensus_bench_test.go
+# gazelle:exclude loopturn_bench_test.go
+# gazelle:exclude turnencoding_bench_test.go
 # Reason: the bench lane of ADR 0152 D15/D16 (#911) is its own `manual`,
 # race-off target below, never part of consensus_test: its benchmarks write
 # real data directories and its generator rewrites BENCH.md. Rule 12: the
-# lane is `make bench` (bench-consensus), TestGenerateBenchMD opt-in by name.
+# lane is `make bench` (bench-consensus), TestGenerateBenchMD opt-in by name;
+# the leader's loop turn and a turn's bytes (#912, #1364) are its TURN and
+# ENC rows, and the A/B lane's `cturn` and `cenc` suites
+# (scripts/ci/bench-ab.conf) run their benchmarks base against head.
 
 package(default_visibility = ["//internal/service:service_consumers"])
 
@@ -198,6 +203,7 @@ go_test(
         "preflight_internal_test.go",
         "promoteadmission_internal_test.go",
         "protocol2_internal_test.go",
+        "publish_alloc_internal_test.go",
         "raisedlimit_internal_test.go",
         "readbatch_internal_test.go",
         "readctx_internal_test.go",
@@ -216,8 +222,6 @@ go_test(
         "runtimedir_unix_internal_test.go",
         "savesnapshotstall_internal_test.go",
         "sendshared_alloc_internal_test.go",
-        "sendshared_bench_test.go",
-        "sendshared_benchnode_test.go",
         "sendshared_internal_test.go",
         "silencedurable_internal_test.go",
         "silencelowered_internal_test.go",
@@ -315,9 +319,10 @@ go_test(
 
 # The allocation gates of the range read (filelog_alloc_internal_test.go,
 # #913), of the receive path (receive_alloc_internal_test.go, #1110), of
-# the leader turn (sendshared_alloc_internal_test.go, #912) and of applied1
-# (applied_alloc_internal_test.go, #1109), all //go:build !race, in their own
-# target so the race-off lane
+# the leader turn (sendshared_alloc_internal_test.go, #912, and
+# publish_alloc_internal_test.go, its publication and frames without
+# entries) and of applied1 (applied_alloc_internal_test.go, #1109), all
+# //go:build !race, in their own target so the race-off lane
 # (tools/alloc-lane-targets.txt) runs the gates and the window's negative
 # control, not the whole suite; under race it compiles to nothing it runs.
 # keep
@@ -328,14 +333,16 @@ go_test(
         "applied_alloc_internal_test.go",
         "appliedwait_internal_test.go",
         "filelog_alloc_internal_test.go",
+        "publish_alloc_internal_test.go",
         "receive_alloc_internal_test.go",
         "sendshared_alloc_internal_test.go",
         "sendshared_internal_test.go",
     ],
-    args = ["-test.run=^(TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice|TestACompactionThroughASegmentBoundaryCopiesNoEntries|TestAFollowerStepKeepsTheFramesPayloads|TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers|TestApplied1KeepsAResultWithoutAllocating|TestAllocWindowCountsARealAllocation)$$"],
+    args = ["-test.run=^(TestEntriesOfASyncedRunAllocateTheBufferAndTheSlice|TestACompactionThroughASegmentBoundaryCopiesNoEntries|TestAFollowerStepKeepsTheFramesPayloads|TestALeaderTurnEncodesItsEntriesOnceWhateverItsFollowers|TestATurnThatChangesNothingPublishesWithoutAllocating|TestAFrameWithoutEntriesIsEncodedInOneAllocation|TestApplied1KeepsAResultWithoutAllocating|TestAllocWindowCountsARealAllocation)$$"],
     embed = [":consensus"],
     deps = [
         "//internal/core/app/consensus",
+        "//internal/kernel/clock",
         "//internal/kernel/fs/flock",
         "//internal/service/app/consensus/raft",
         "//internal/service/app/consensus/wire",
@@ -346,14 +353,19 @@ go_test(
 # `bazel run` on it with -test.run=TestGenerateBenchMD, which writes BENCH.md
 # under $BUILD_WORKSPACE_DIRECTORY. `manual` keeps it out of
 # `bazel test //...`; race off, as the alloc lane, because the numbers are
-# the engine's and not the race detector's. The file uses the package's
-# production code alone, so it is its only source.
+# the engine's and not the race detector's. Its files use the package's
+# production code alone, each self-contained: the generator, the hand-run
+# part it keeps (zzbenchmdkeep_internal_test.go), and the leader's loop turn
+# and a turn's bytes (loopturn_bench_test.go, turnencoding_bench_test.go,
+# #912, #1364), which the A/B lane also copies onto the base.
 go_test(
     name = "consensus_bench_test",
     size = "enormous",
     timeout = "eternal",
     srcs = [
         "consensus_bench_test.go",
+        "loopturn_bench_test.go",
+        "turnencoding_bench_test.go",
         "zzbenchmdkeep_internal_test.go",
     ],
     args = ["-test.run=^$$"],
@@ -365,6 +377,8 @@ go_test(
     ],
     deps = [
         "//internal/core/app/consensus",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/otel",
         "//internal/kernel/errs",
         "//internal/service/app/consensus/wire",
     ],

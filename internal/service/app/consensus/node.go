@@ -1461,7 +1461,7 @@ func (n *Node) checkTurn(turn time.Time) {
 	if n.cfg.Reads != ReadLease {
 		return
 	}
-	t := n.r.Status().Timing
+	t := n.r.Summary().Timing
 	budget := time.Duration(float64(t.ElectionTimeoutMin) * t.MaxClockDrift)
 	if budget > 0 && d > budget {
 		n.longTurns.Add(1)
@@ -1485,7 +1485,7 @@ func (n *Node) checkTurn(turn time.Time) {
 // sender links get the same two maximum election timeouts as their bound
 // on read silence (#1116).
 func (n *Node) sweep() {
-	grace := 2 * n.r.Status().Timing.ElectionTimeoutMax
+	grace := 2 * n.r.Summary().Timing.ElectionTimeoutMax
 	if s, ok := n.cfg.Transport.(silenceBounder); ok {
 		// A peer silent that long while written to is behind a stream
 		// that died quietly (#1116).
@@ -1518,7 +1518,7 @@ func (n *Node) sweep() {
 // the quorum deposes the leader and leadershipChanged answers it. A read
 // its caller gave up on is dropped.
 func (n *Node) sweepReads(now time.Time) {
-	etMax := n.r.Status().Timing.ElectionTimeoutMax
+	etMax := n.r.Summary().Timing.ElectionTimeoutMax
 	for ctx, w := range n.reads {
 		switch {
 		case w.gone.Load():
@@ -1538,7 +1538,7 @@ func (n *Node) sweepReads(now time.Time) {
 // commit index when its grace ends is answered OUTCOME_UNKNOWN and its
 // pending bytes are released.
 func (n *Node) sweepWaiters(now time.Time, grace time.Duration) {
-	commit := n.r.Status().Commit
+	commit := n.r.Summary().Commit
 	n.am.Lock()
 	for idx, p := range n.waiters {
 		if idx > commit && !p.changedAt.IsZero() && now.Sub(p.changedAt) > grace {
@@ -1565,7 +1565,7 @@ func (n *Node) dropForward(ctx uint64) {
 // timers fire within a fifth of a heartbeat of their due time, and never
 // below a millisecond.
 func (n *Node) tickInterval() time.Duration {
-	return max(n.r.Status().Timing.HeartbeatInterval/5, time.Millisecond)
+	return max(n.r.Summary().Timing.HeartbeatInterval/5, time.Millisecond)
 }
 
 // handleReady drains every Ready raft has, in order, then reacts to a
@@ -1645,7 +1645,7 @@ func (n *Node) auditAppended(rd *raft.ReadyValue) {
 		if e.Kind == coreconsensus.EntryCommand || e.Kind == coreconsensus.EntrySessionCommand || e.Kind == coreconsensus.EntryNoOp || !e.Kind.Known() {
 			continue
 		}
-		if n.r.Status().Role != coreconsensus.RoleLeader {
+		if n.r.Summary().Role != coreconsensus.RoleLeader {
 			return
 		}
 		a, err := wire.ParseAdminAt(e.Version, e.Data)
@@ -1957,8 +1957,10 @@ func (n *Node) setMembership(rd *raft.ReadyValue) {
 }
 
 // leadershipChanged answers what a change of leader or term made unknown.
+// It runs at every turn and reads raft's summary, which clones no
+// configuration (#912).
 func (n *Node) leadershipChanged() {
-	st := n.r.Status()
+	st := n.r.Summary()
 	if st.Term == n.lastTerm && st.Lead == n.lastLead && st.Role == n.lastRole {
 		return
 	}
@@ -1990,7 +1992,7 @@ func (n *Node) leadershipChanged() {
 // endForwardTraces ends the traces of the forwards this node served while
 // it led, once st says it no longer does: a forward answered with a
 // position may never commit now.
-func (n *Node) endForwardTraces(st *raft.StatusValue) {
+func (n *Node) endForwardTraces(st *raft.SummaryValue) {
 	if st.Role != coreconsensus.RoleLeader && (len(n.traced.answers) > 0 || len(n.traced.open) > 0) {
 		n.traceEnd(notLeader(st.Lead))
 	}
@@ -1998,7 +2000,7 @@ func (n *Node) endForwardTraces(st *raft.StatusValue) {
 
 // restartPrefer starts the watch of the preferred nodes over with the
 // leadership st describes.
-func (n *Node) restartPrefer(st *raft.StatusValue) {
+func (n *Node) restartPrefer(st *raft.SummaryValue) {
 	n.prefer = preferWatch{}
 	if st.Role == coreconsensus.RoleLeader && st.HandedBy != 0 {
 		// A leadership a transfer handed over starts with the watch paused
@@ -2141,22 +2143,30 @@ func (n *Node) preferLeader(now time.Time, st *raft.StatusValue) bool {
 // publish stores the status a turn produced and wakes every watcher with
 // it, replacing a value the watcher has not read yet so a slow reader sees
 // the newest status, never a backlog; an unchanged status publishes nothing.
+// It runs at every turn and reads raft's summary, which clones no
+// configuration (#912).
 func (n *Node) publish() {
-	st := n.r.Status()
+	st := n.r.Summary()
 	n.am.Lock()
 	applied := n.applied
 	n.am.Unlock()
-	s := &coreconsensus.StatusValue{
+	cur := coreconsensus.StatusValue{
 		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,
 		Log: n.lineage(), Timing: st.Timing, NoSpace: st.NoSpace,
 		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
-	n.progress.noteApplied(s.Commit, s.Applied, n.clk.Now())
-	n.publishConf(&st.Conf)
+	n.progress.noteApplied(cur.Commit, cur.Applied, n.clk.Now())
+	n.publishConf()
 	old := n.status.Load()
-	if old != nil && *old == *s {
+	if old != nil && *old == cur {
 		return
 	}
+	// Only a status that changed is moved to the heap: the value built for
+	// the comparison stays on the loop's stack, so a turn that changes
+	// nothing allocates nothing here (#912). A published value is never
+	// written again: a new status is a new pointer.
+	s := new(coreconsensus.StatusValue)
+	*s = cur
 	n.status.Store(s)
 	n.observeStatus(old, s)
 	n.watchMu.Lock()
@@ -2176,12 +2186,14 @@ func (n *Node) publish() {
 // publishConf stores the configuration a turn ended with, when it differs
 // from the one last published, and wakes every membership watcher with a
 // copy of its own, replacing a value the watcher has not read yet (#915).
-// conf is the step function's clone, which nothing else holds.
-func (n *Node) publishConf(conf *coreconsensus.MembershipValue) {
-	if old := n.conf.Load(); old != nil && sameMembership(old, conf) {
+// raft compares the configuration in force with the one published, so a
+// turn that changed none clones none (#912); a change is published as
+// Status's clone, which nothing else holds.
+func (n *Node) publishConf() {
+	if old := n.conf.Load(); old != nil && n.r.SameConf(old) {
 		return
 	}
-	c := *conf
+	c := n.r.Status().Conf
 	n.conf.Store(&c)
 	n.watchMu.Lock()
 	for ch := range n.confWatchers {
@@ -2195,12 +2207,6 @@ func (n *Node) publishConf(conf *coreconsensus.MembershipValue) {
 		}
 	}
 	n.watchMu.Unlock()
-}
-
-// sameMembership reports whether a and b are the same configuration.
-func sameMembership(a, b *coreconsensus.MembershipValue) bool {
-	return a.Index == b.Index && slices.Equal(a.Members, b.Members) &&
-		slices.Equal(a.Retired, b.Retired) && slices.Equal(a.RetiredKeys, b.RetiredKeys)
 }
 
 type fetchDone struct {
@@ -2487,14 +2493,16 @@ func (n *Node) syncFor(reqs []storeReq) bool {
 }
 
 // completeWrite hands the loop the completion of a synced Ready with the
-// replies that waited on it; false when the node stopped first.
+// replies that waited on it; false when the node stopped first. Those
+// replies, acknowledgements and votes, carry no entries: each is encoded
+// at its exact length (entrylessFrame).
 func (n *Node) completeWrite(rd *raft.ReadyValue) bool {
 	d := storeDone{seq: rd.Seq}
 	if k := len(rd.Entries); k > 0 {
 		d.index, d.term = rd.Entries[k-1].Position.Index, rd.Entries[k-1].Position.Term
 	}
 	for _, m := range rd.AfterSync {
-		d.after = append(d.after, wire.AppendMessage(nil, &m))
+		d.after = append(d.after, entrylessFrame(&m))
 		d.to = append(d.to, m.To)
 	}
 	select {
