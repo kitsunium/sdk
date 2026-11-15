@@ -268,7 +268,12 @@ func (s *Server) registerLoopListeners(group *StreamGroup, lns []stdnet.Listener
 	//: one row and one bound listener each.
 	for _, ln := range lns {
 		addr := corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}
-		s.listeners = append(s.listeners, &boundListener{group: group.name, addr: addr, ln: ln})
+		bound := &boundListener{group: group.name, addr: addr, ln: ln}
+		//: bound by the group: the queue it sized, if it did.
+		if rep != nil {
+			bound.sized = rep.sized
+		}
+		s.listeners = append(s.listeners, bound)
 		//: a shard past the first: N rows would read as N addresses.
 		if shards == 0 {
 			continue

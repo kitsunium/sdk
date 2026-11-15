@@ -37,6 +37,7 @@ func startNativeEngine(group *StreamGroup, lns []stdnet.Listener, plan loopPlan)
 	}
 	value := group.loop
 	value.Backend = plan.backend
+	value.Capabilities = backlogCapabilities(value.Capabilities, group.limits.Backlog)
 	g, err := loop.Start(loop.Config{
 		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
 		IdleTimeout: loopIdle(group), Handler: group.loopChain, Busy: group.loopBusy, Listeners: handoff,
@@ -189,4 +190,25 @@ func closeHandoff(ls []loop.Listener) {
 	for _, l := range ls {
 		swallowErr(syscall.Close(l.FD))
 	}
+}
+
+// backlogCapabilities opts a group that set Backlog into uring-defer-taskrun
+// (#978): io_uring keeps single-shot accepts armed ahead, and on a ring that
+// runs its completions' task work cooperatively the kernel completes them
+// while the loop's thread is busy — up to 32 connections a ring off the
+// queue the backlog bounds, waiting for a loop that does not serve them yet.
+// Under DEFER_TASKRUN an armed accept runs only when the loop enters the
+// kernel to reap: a busy or held loop takes nothing, and the listen queue the
+// group sized is the only one. Where the kernel lacks it the row reports the
+// capability missing, the group's fault (ADR 0189); the operator's switch
+// still wins. Any other backend ignores the row. caps is returned unchanged,
+// or extended in a copy.
+func backlogCapabilities(caps []corenet.Capability, backlog int) []corenet.Capability {
+	//: no Backlog, or already opted into.
+	if backlog <= 0 || slices.Contains(caps, corenet.CapabilityURingDeferTaskrun) {
+		//: as given.
+		return caps
+	}
+	//: never the group's own slice.
+	return append(slices.Clone(caps), corenet.CapabilityURingDeferTaskrun)
 }

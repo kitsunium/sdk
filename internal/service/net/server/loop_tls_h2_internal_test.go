@@ -2,7 +2,8 @@
 // adapter offers h2 then http/1.1 by ALPN, the codec chosen by the preface on
 // the portable backend's lanes; one Routes+Bearer chain serves a Go h2 client
 // and an HTTP/1.1-only one; Protocols("h2") refuses a client offering
-// http/1.1 alone; a native backend is refused as for the http1 codec.
+// http/1.1 alone at the handshake with no_application_protocol; a native
+// backend is refused as for the http1 codec.
 package server
 
 import (
@@ -131,27 +132,36 @@ func TestLoopTLSH2_bothVersions(t *testing.T) {
 	}
 }
 
-// TestLoopTLSH2_protocols is #964's second criterion, as crypto/tls allows
-// it: Protocols("h2") on the h2 adapter offers h2 alone, and a client offering
-// h2 is served HTTP/2. A client offering http/1.1 alone completes the
-// handshake with no protocol — crypto/tls lets an http/1.1 client reach an
-// h2-only server so (Go issue 46310), as on an HTTP group — and its HTTP/1.1
-// request is answered 400 and closed; a client offering nothing the group
-// serves, http/1.1 alone excepted, fails the handshake with
-// no_application_protocol. The http1 adapter still refuses Protocols("h2")
-// with ProtocolsRefused naming h2.
+// TestLoopTLSH2_protocols is #964's second criterion: Protocols("h2") on the
+// h2 adapter offers h2 alone, a client offering h2 is served HTTP/2, and a
+// client offering http/1.1 alone fails the handshake with
+// no_application_protocol — crypto/tls would let it through with no protocol
+// (Go issue 46310), the listener refuses it (alpnStrict) —, as does one
+// offering only protocols the group does not serve. A client that offers no
+// ALPN at all is not refused by RFC 7301: it completes the handshake with no
+// protocol, and its HTTP/1.1 request is answered 400 and closed by the
+// preface sniff. The http1 adapter still refuses Protocols("h2") with
+// ProtocolsRefused naming h2.
 func TestLoopTLSH2_protocols(t *testing.T) {
 	hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
 	srv, addr := startTLSH2(t, hello, Protocols("h2"))
 	if got := srv.State().Listeners[0].ALPN; !slices.Equal(got, []string{"h2"}) {
 		t.Fatalf("State ALPN = %q, want [h2]", got)
 	}
-	c, err := tlsDial(t, addr, "http/1.1")
+	for _, offer := range [][]string{{"http/1.1"}, {"spdy/3", "http/1.0"}} {
+		if c, err := tlsDial(t, addr, offer...); err == nil || !strings.Contains(err.Error(), "no application protocol") {
+			if c != nil {
+				t.Fatalf("a client offering %q negotiated %q", offer, c.ConnectionState().NegotiatedProtocol)
+			}
+			t.Fatalf("a client offering %q: %v, want no_application_protocol", offer, err)
+		}
+	}
+	c, err := tlsDial(t, addr)
 	if err != nil {
-		t.Fatalf("crypto/tls's http/1.1 fallback: %v", err)
+		t.Fatalf("a client offering no ALPN: %v", err)
 	}
 	if p := c.ConnectionState().NegotiatedProtocol; p != "" {
-		t.Fatalf("negotiated %q with a client offering http/1.1 alone", p)
+		t.Fatalf("negotiated %q with a client offering no ALPN", p)
 	}
 	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: h\r\n\r\n")); err != nil {
 		t.Fatal(err)
@@ -167,15 +177,6 @@ func TestLoopTLSH2_protocols(t *testing.T) {
 	swallowErr(resp.Body.Close())
 	if resp.ProtoMajor != 2 {
 		t.Fatalf("served HTTP/%d, want 2", resp.ProtoMajor)
-	}
-	// The refusal itself, where crypto/tls makes no exception: a client
-	// offering only protocols the group does not serve fails the handshake
-	// with no_application_protocol (#964's amended criterion).
-	if c, err := tlsDial(t, addr, "spdy/3", "http/1.0"); err == nil || !strings.Contains(err.Error(), "no application protocol") {
-		if c != nil {
-			t.Fatalf("a client offering spdy/3 and http/1.0 negotiated %q", c.ConnectionState().NegotiatedProtocol)
-		}
-		t.Fatalf("a client offering spdy/3 and http/1.0: %v, want no_application_protocol", err)
 	}
 	refused := New()
 	t.Cleanup(func() { swallowErr(refused.Close()) })

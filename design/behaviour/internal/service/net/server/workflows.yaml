@@ -1,6 +1,18 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: sharesProtocol
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: slices.Contains(offered, p)
+          key: _
+          range: client
+          value: p
+      - return: "false"
   - of: wrapLoop
     steps:
       - bind: chain
@@ -45,6 +57,26 @@ workflows:
           value: slot
       - set: pl.compact
         value: pl.compact[:0]
+  - of: newAcceptGate
+    steps:
+      - bind: g
+        eval: "&acceptGate{}"
+      - set: g.changed.L
+        value: "&g.mu"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: g.lns
+                    value: append(g.lns, d)
+                init:
+                  bind: d, ok
+                  eval: ln.(deadlineListener)
+                when: ok
+          key: _
+          range: lns
+          value: ln
+      - return: g
   - of: (*Server).groupConnections
     steps:
       - lock:

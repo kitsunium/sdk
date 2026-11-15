@@ -84,7 +84,7 @@ func (l *connLimiter) releaseFor(c corenet.Conn) {
 // the engine closes it at once rather than gracefully.
 func markRefused(c corenet.Conn) {
 	//: only the engine's own wrapper carries the flag.
-	if pooled, ok := c.(*conn); ok {
+	if pooled, ok := pooledOf(c); ok {
 		pooled.refused = true
 	}
 }

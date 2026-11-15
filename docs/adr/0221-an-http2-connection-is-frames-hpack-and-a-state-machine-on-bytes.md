@@ -335,3 +335,46 @@ pairs; whether ten rounds still fit its 30 minutes is the runner's to say.
   BENCH.md). The tests frame HTTP/2 by hand because Go 1.27's `http.Transport`
   refuses a `:protocol` field before it chooses HTTP/2 (`validateHeaders`);
   `TestXConnectTransportRefusesProtocolField` fails once a release lets it through.
+
+## Amendment 2026-11-15 — the original criteria of #964, #966 and #967, held or brought to the nearest reachable
+
+The three issues were reopened because their criteria had been rewritten by the
+change that closed them. The owner's decisions of 2026-11-14: aim at the original
+criterion; declare it out of reach only after an adversarial challenge of three
+approaches at least, each tried or refuted on a primary source; then bring it to the
+nearest reachable, writing the trace down.
+
+- **An h2-only list refuses an http/1.1-only client at the handshake (#964, original
+  criterion held).** The amendment of 2026-11-10 said `Protocols("h2")` could not fail
+  that handshake, crypto/tls letting such a client through with no protocol (Go issue
+  46310, `negotiateALPN`). It can: `GetConfigForClient` sees the client's offer before
+  the negotiation, and the configuration it returns is the one `negotiateALPN` reads.
+  A listener whose list names h2 without http/1.1 answers an offer that names nothing
+  of the list with a configuration whose list is the empty name alone — no ClientHello
+  carries it (RFC 7301 §3.1), and it is not h2 —, and crypto/tls sends
+  no_application_protocol (RFC 7301 §3.2). The HTTP group's listeners and the TLS codec
+  group's do so (`alpnStrict`); a client that offers no ALPN completes the handshake,
+  as RFC 7301 leaves it, and is refused at its first request (400 on the codec, a close
+  on net/http). `TestLoopTLSH2_protocols`, `TestProtocols_h2AloneRefusesAtTheHandshake`.
+- **HTTP/2's error counts (#966).** The adapter's per-request cost is one atomic add:
+  `BenchmarkHTTP_Adapter` allocates 64 times a request with the per-version counter and
+  `CountError`, 64 without them and 64 for net/http alone, go1.27.4 (server BENCH.md,
+  edition 2026-11-15) — the original criterion held. A frame of a bad length counts
+  `frame_size` once on both engines. A header list past `MaxHeaderBytes` counts
+  `header_list` on the loop adapter; on net/http's engine the standard library answers
+  it 431 itself, with no `CountError` and nothing logged, and the only way to see it —
+  decoding every HPACK block a second time beside net/http's own — would break the
+  one-atomic-add criterion. Brought to the nearest reachable by the owner's rule of
+  2026-11-14: counted on the loop adapter, stated as not counted on net/http's engine.
+- **RFC 8441's client (#967).** The server holds the criterion; its Go client cannot:
+  `http.Transport` and the `ClientConn` Go 1.26 added both refuse a `:protocol` field
+  name before HTTP/2 is chosen (`validateHeaders`), and `golang.org/x/net/http2` is no
+  module `internal/` may require (ADR 0156). Brought to the nearest reachable by the
+  owner's rule of 2026-11-14: a client framing RFC 8441 by hand, and
+  `TestXConnectTransportRefusesProtocolField` failing, for both entry points, the day
+  the standard library lets the field through. The BENCH.md row of a 4 KiB message over
+  HTTP/2 the amendment of 2026-11-10 said missing has existed since the 2026-11-13
+  amendment (`XConnectLoopback/4096`).
+
+The challenges, the approaches tried and refuted with their sources, are in each
+issue's record of 2026-11-15.

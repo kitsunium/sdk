@@ -22,6 +22,20 @@ type plainConn struct {
 	stdnet.Conn
 }
 
+// readFromConn hides the connection's syscall.Conn and keeps its ReadFrom: the
+// path a bounded group's copy takes, through net's sendfile.
+type readFromConn struct {
+	plainConn
+	// from is the connection's own ReadFrom.
+	from io.ReaderFrom
+}
+
+// ReadFrom implements io.ReaderFrom.
+func (c readFromConn) ReadFrom(r io.Reader) (int64, error) {
+	//: the connection's.
+	return c.from.ReadFrom(r)
+}
+
 // benchFile writes the file a copy benchmark sends.
 func benchFile(b *testing.B) string {
 	b.Helper()
@@ -73,18 +87,27 @@ func benchCopyFile(b *testing.B, path string, wrap func(corenet.Conn) io.Writer,
 	readRounds(b, client, rounds)
 }
 
-// copyRounds copies the file at path to dst once a round, opening it each
-// time, until rounds closes.
+// copyRounds copies the file at path to dst once a round, until rounds
+// closes. The file is opened once and rewound each round, so what a round
+// allocates is the copy's own, the open's left out.
 func copyRounds(dst io.Writer, path string, rounds <-chan struct{}) error {
+	f, err := os.Open(path)
+	//: unreadable.
+	if err != nil {
+		//: reported by the client's short read.
+		return err
+	}
+	defer func() { discard(f.Close()) }()
+	//: a copy a round.
 	for range rounds {
-		f, err := os.Open(path)
-		if err != nil {
+		_, serr := f.Seek(0, io.SeekStart)
+		//: not rewound.
+		if serr != nil {
 			//: reported by the client's short read.
-			return err
+			return serr
 		}
-		_, cerr := io.Copy(dst, f)
-		discard(f.Close())
-		if cerr != nil {
+		//: the copy under measure.
+		if _, cerr := io.Copy(dst, f); cerr != nil {
 			//: reported by the client's short read.
 			return cerr
 		}
@@ -114,13 +137,22 @@ func readRounds(b *testing.B, client stdnet.Conn, rounds chan<- struct{}) {
 }
 
 // BenchmarkCopyFile measures io.Copy(c, f) of 64 MiB to a loopback peer through
-// a handler: sendfile since #970.
+// a handler: sendfile since #970, through os.File's own on a group with no
+// bound (the handed connection's syscall.Conn), through the connection's
+// ReadFrom and net's otherwise.
 func BenchmarkCopyFile(b *testing.B) {
 	path := benchFile(b)
-	b.Run("after_ReadFrom", func(b *testing.B) {
+	b.Run("after_syscallConn", func(b *testing.B) {
 		benchCopyFile(b, path, func(c corenet.Conn) io.Writer {
 			//: the connection as handed out.
 			return c
+		})
+	})
+	b.Run("after_ReadFrom", func(b *testing.B) {
+		benchCopyFile(b, path, func(c corenet.Conn) io.Writer {
+			from, _ := c.(io.ReaderFrom)
+			//: the connection's ReadFrom alone.
+			return readFromConn{plainConn: plainConn{Conn: c}, from: from}
 		})
 	})
 	b.Run("before_generic", func(b *testing.B) {

@@ -3,6 +3,7 @@ package server
 import (
 	"io"
 	stdnet "net"
+	"sync"
 	"syscall"
 	"time"
 
@@ -54,6 +55,12 @@ type conn struct {
 	// flood of refused peers that never send their FIN costs no goroutine
 	// lingering on each (ADR 0193 §D4).
 	refused bool
+	// rawMu guards raw, which a handler's two directions may ask for at once.
+	rawMu sync.Mutex
+	// raw is the socket's syscall.RawConn, asked of the socket on the first
+	// SyscallConn of the connection and kept for the next ones: the standard
+	// library's own allocates one each call (#970).
+	raw syscall.RawConn
 }
 
 // Read implements net.Conn, bounding this read before it starts.
@@ -297,4 +304,154 @@ func (c *conn) reset() {
 	//: unclosable, which is a descriptor leak per reuse.
 	c.hijacked = false
 	c.refused = false
+	//: the socket it described is gone.
+	c.raw = nil
+}
+
+// handed is the connection as its handler receives it (#970): the pooled conn,
+// or, when the group bounds neither reads nor writes and the socket is the
+// listener's own — no TLS, no PROXY header, no close tracker over it —, the
+// same conn seen as a rawView, which adds syscall.Conn.
+func (c *conn) handed() corenet.Conn {
+	_, plain := c.Conn.(syscall.Conn)
+	//: a layered socket, or a bound to keep per operation.
+	if !plain || c.bounded() {
+		//: the pooled conn.
+		return c
+	}
+	//: the socket's own descriptor reachable.
+	return (*rawView)(c)
+}
+
+// bounded reports whether the group bounds this connection's reads or writes:
+// a copy that reached the socket's descriptor directly would run under no
+// deadline of the group's.
+func (c *conn) bounded() bool {
+	//: any of the three.
+	return c.timeouts.Read.Duration() > 0 || c.timeouts.Idle.Duration() > 0 || c.timeouts.Write.Duration() > 0
+}
+
+// rawConn returns the socket's syscall.RawConn, asked once a connection.
+func (c *conn) rawConn() (syscall.RawConn, error) {
+	c.rawMu.Lock()
+	defer c.rawMu.Unlock()
+	//: asked already.
+	if c.raw != nil {
+		//: kept.
+		return c.raw, nil
+	}
+	sc, ok := c.Conn.(syscall.Conn)
+	//: handed only over such a socket: none left once the engine released
+	//: the connection, which a handler that kept it past its return meets.
+	if !ok {
+		//: what a closed socket's own answers through the standard library.
+		return nil, stdnet.ErrClosed
+	}
+	raw, err := sc.SyscallConn()
+	//: the socket's own refusal.
+	if err != nil {
+		//: as it is.
+		return nil, err
+	}
+	c.raw = raw
+	//: kept for the next.
+	return raw, nil
+}
+
+// rawView is the pooled conn a handler receives when its group bounds neither
+// reads nor writes and nothing is layered over the socket (#970): every
+// method is conn's, and SyscallConn adds syscall.Conn, the socket's own
+// RawConn. The standard library's zero-copy paths assert it on the writer and
+// the reader they are given — os.File.WriteTo's sendfile, os.File.ReadFrom's
+// splice — and then reach the socket's descriptor directly, with nothing
+// allocated once the connection's first copy asked for it. A group with a
+// bound hands out the conn itself, so its copies keep their deadline per step
+// through ReadFrom and WriteTo.
+type rawView conn
+
+// pooled is the conn rv views.
+func (rv *rawView) pooled() *conn {
+	//: the same memory.
+	return (*conn)(rv)
+}
+
+// SyscallConn implements syscall.Conn: the socket's RawConn.
+func (rv *rawView) SyscallConn() (syscall.RawConn, error) {
+	//: kept a connection.
+	return rv.pooled().rawConn()
+}
+
+// Read implements net.Conn as conn does.
+func (rv *rawView) Read(p []byte) (n int, err error) {
+	//: conn's.
+	return rv.pooled().Read(p)
+}
+
+// Write implements net.Conn as conn does.
+func (rv *rawView) Write(p []byte) (n int, err error) {
+	//: conn's.
+	return rv.pooled().Write(p)
+}
+
+// ReadFrom implements io.ReaderFrom as conn does.
+func (rv *rawView) ReadFrom(r io.Reader) (n int64, err error) {
+	//: conn's.
+	return rv.pooled().ReadFrom(r)
+}
+
+// WriteTo implements io.WriterTo as conn does.
+func (rv *rawView) WriteTo(w io.Writer) (n int64, err error) {
+	//: conn's.
+	return rv.pooled().WriteTo(w)
+}
+
+// Unwrap implements corenet.ConnUnwrapper as conn does.
+func (rv *rawView) Unwrap() stdnet.Conn {
+	//: conn's.
+	return rv.pooled().Unwrap()
+}
+
+// ID implements corenet.Conn.
+func (rv *rawView) ID() uint64 {
+	//: conn's.
+	return rv.pooled().ID()
+}
+
+// Group implements corenet.Conn.
+func (rv *rawView) Group() string {
+	//: conn's.
+	return rv.pooled().Group()
+}
+
+// Buffer implements corenet.Conn.
+func (rv *rawView) Buffer() []byte {
+	//: conn's.
+	return rv.pooled().Buffer()
+}
+
+// Close implements net.Conn as conn does.
+func (rv *rawView) Close() error {
+	//: conn's.
+	return rv.pooled().Close()
+}
+
+// pooledOf returns the engine's own conn behind c, as handed to a handler:
+// the conn itself or its rawView; false for a connection the engine did not
+// pool — a middleware's own type.
+func pooledOf(c corenet.Conn) (*conn, bool) {
+	//: by the view.
+	switch v := c.(type) {
+	//: the conn itself.
+	case *conn:
+		//: as it is.
+		return v, true
+	//: the conn seen with its socket.
+	case *rawView:
+		//: the same memory.
+		return v.pooled(), true
+	//: not the engine's.
+	default:
+		//: none.
+		return nil, false
+	}
 }

@@ -964,3 +964,28 @@ not measured. The row first exposed a defect: the request-body bound (#845, 1 Mi
 default) wrapped the CONNECT's body, which is the tunnel, and cut every WebSocket
 over HTTP/2 after 1 MiB of input — 255 messages of 4 KiB. A CONNECT is no longer
 bounded (`limitBody`, `TestXConnectBeyondTheBodyBound`).
+
+### Edition 2026-11-15 — #967's client, relevé selon la règle du propriétaire du 2026-11-14
+
+The issue's original criterion asked for "a Go client (http.Transport, Method CONNECT,
+Header :protocol websocket, Sec-WebSocket-Version 13)". The server holds every other
+part of it (200 and never 101, 1 000 masked text frames, the adversarial table over h2
+streams, the drain's 1001 then END_STREAM — `TestXConnect*`). The client is out of the
+standard library's reach in Go 1.27, each approach refuted on its source (go1.27.3 and
+go1.27.4 identical there):
+
+- `http.Transport` with `Header[":protocol"]`: `roundTrip` validates every field name of
+  an http or https request before HTTP/2 is chosen (`net/http/transport.go`,
+  `validateHeaders`), and `:` is no token character — "invalid header field name";
+- `Transport.NewClientConn` and `ClientConn.RoundTrip` (Go 1.26): the same validation
+  (`net/http/clientconn.go`);
+- another scheme to skip that validation: no HTTP/2 round tripper is registered for it
+  (`alternateRoundTripper`), `RegisterProtocol` takes only the caller's own;
+- `golang.org/x/net/http2`'s Transport, which sends `:protocol`: a module `internal/`
+  may not require (ADR 0156).
+
+The criterion is brought to the nearest reachable: a client framing RFC 8441 by hand
+with the standard library — the rows above and every test —, and
+`TestXConnectTransportRefusesProtocolField` failing, for both entry points, the day a
+Go release lets the field through, when the tests move to it. The challenge and its
+sources are in the issue's record of 2026-11-15 (ADR 0221, amendment of that day).

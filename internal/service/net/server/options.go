@@ -258,8 +258,17 @@ func UserTimeout(d time.Duration) GroupOption {
 // ListenerStateValue.Backlog, with a DegradedReason when the clamp bit. A
 // negative value fails Start with OptionValueInvalid. Both engines honour it,
 // the loop's accepted sockets sharing the listener's queue; Windows keeps the
-// platform's own and says so. A datagram group refuses it with
-// PacketOptionUnsupported.
+// platform's own and says so. No engine takes a connection off that queue
+// while it cannot serve it, so the depth set is the only one: the goroutine
+// engine serves each connection it accepts on a goroutine of its own, epoll
+// accepts on the thread that serves; io_uring runs the group's loop under
+// DEFER_TASKRUN (uring-defer-taskrun, reported missing in State where the
+// kernel lacks it), so an armed accept waits for the loop to reap; the
+// portable backend's acceptor accepts only while a lane waits — a TLS codec
+// group's keeps at most one in hand (#978). As a drain begins, the queue is
+// widened to the host's somaxconn: a peer the full queue refused retries
+// into it and is served, not dropped again; State still reports the depth
+// set. A datagram group refuses it with PacketOptionUnsupported.
 func Backlog(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order; the
 	//: value is judged at Start.

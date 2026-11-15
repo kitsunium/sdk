@@ -132,7 +132,8 @@ func (t *trackedConn) Unwrap() stdnet.Conn {
 // does not track closes.
 func hijackedTracker(c corenet.Conn) *trackedConn {
 	pooled, ok := c.(*conn)
-	//: only the engine's own wrapper carries the hijack flag.
+	//: only the engine's own wrapper carries the hijack flag; a rawView is
+	//: handed out over a plain socket alone, never over a tracker.
 	if !ok || !pooled.hijacked {
 		//: still the engine's connection, so its slot ends with the handler.
 		return nil
