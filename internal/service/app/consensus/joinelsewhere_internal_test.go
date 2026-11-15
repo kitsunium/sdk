@@ -151,7 +151,7 @@ func TestAJoinThroughALevelVoterIsForwarded(t *testing.T) {
 // admitted there.
 func TestATCPJoinerFollowsTheLeaderANotLeaderRefusalNames(t *testing.T) {
 	ca, cid, ns := newTCPCluster(t)
-	l := tcpLeader(t, ns)
+	l := tcpSettledLeader(t, ns)
 	x := &tcpNode{slot: "site-x"}
 	x.cert, x.spki = ca.issue(t, SAN(cid, x.slot), nil)
 	x.listen(t, ca)
