@@ -3,6 +3,7 @@ package singleflight
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,10 +18,10 @@ import (
 func (g *Group[K, V]) waiters(key K) int {
 	held := g.shardOf(key)
 	held.mu.Lock()
-	defer held.mu.Unlock()
-	//: an absent key has no waiters.
+	defer held.unlock()
+	//: an absent key, or a retired call still in the map, has no waiters.
 	entry, found := held.calls[key]
-	if !found {
+	if !found || entry.retired.Load() {
 		//: no call in flight for this key.
 		return 0
 	}
@@ -216,14 +217,15 @@ func TestAwaitPrefersAnAvailableResultOverACancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	entry := &call[int]{done: make(chan struct{}), cancel: func() {}, val: 9, retired: true}
+	entry := &call[string, int]{done: make(chan struct{}), cancel: func() {}, val: 9, key: "k"}
+	entry.retired.Store(true)
 	close(entry.done)
 
 	//: repeated because the defect this guards against is probabilistic —
 	//: one pass would be green half the time even with the branch removed.
 	for attempt := range 1000 {
 		entry.refs = 1
-		val, shared, err := group.shardOf("k").await(ctx, "k", entry, true)
+		val, shared, err := group.shardOf("k").await(ctx, entry, true)
 		if err != nil {
 			t.Fatalf("attempt %d returned %v, want the available result", attempt, err)
 		}
@@ -239,16 +241,16 @@ func TestAwaitPrefersAnAvailableResultOverACancelledContext(t *testing.T) {
 func TestPublishRetiresTheKeyBeforeWakingWaiters(t *testing.T) {
 	t.Parallel()
 	group := &Group[string, int]{}
-	entry := &call[int]{done: make(chan struct{}), cancel: func() {}, refs: 1}
+	entry := &call[string, int]{done: make(chan struct{}), cancel: func() {}, refs: 1, key: "k"}
 	held := group.shardOf("k")
-	held.calls = map[string]*call[int]{"k": entry}
+	held.calls = map[string]*call[string, int]{"k": entry}
 
-	held.publish("k", entry)
+	held.publish(entry)
 
 	if _, found := held.calls["k"]; found {
 		t.Fatal("publish left the key in the map — a newcomer could join a finished call")
 	}
-	if !entry.retired {
+	if !entry.retired.Load() {
 		t.Fatal("publish did not mark the call retired")
 	}
 	select {
@@ -266,28 +268,28 @@ func TestALosingLeaderCandidateIsCancelledAndNeverRuns(t *testing.T) {
 	t.Parallel()
 	group := &Group[string, int]{}
 	held := group.shardOf("k")
-	winner := &call[int]{done: make(chan struct{}), cancel: func() {}, refs: 1}
-	held.calls = map[string]*call[int]{"k": winner}
-	candidateCtx, cancel := context.WithCancel(context.Background())
-	candidate := &call[int]{done: make(chan struct{}), cancel: cancel, refs: 1}
+	winner := &call[string, int]{done: make(chan struct{}), cancel: func() {}, refs: 1, key: "k"}
+	held.calls = map[string]*call[string, int]{"k": winner}
 
-	got, inserted := held.insertOrJoin("k", candidate)
-	if inserted || got != winner {
-		t.Fatalf("insertOrJoin = (%p, %t), want the winner and false", got, inserted)
-	}
-	if winner.refs != 2 {
-		t.Fatalf("winner refs = %d, want 2: the loser must be counted in", winner.refs)
-	}
-
-	//: the same race through join: the winner is in the map before the
-	//: candidate is built, so fn must never run.
+	//: the candidate join would build, built the same way, and then settled
+	//: against a map the winner reached first.
+	candidate, candidateCtx := newCandidate[string, int](t.Context(), "k")
 	var ran atomic.Int64
-	entry, joined := held.join(candidateCtx, "k", func(context.Context) (int, error) {
+	entry, joined := held.settle(candidateCtx, candidate, hashOf("k"), func(context.Context) (int, error) {
 		ran.Add(1)
 		return 0, nil
 	})
 	if !joined || entry != winner {
-		t.Fatalf("join = (%p, %t), want the winner joined", entry, joined)
+		t.Fatalf("settle = (%p, %t), want the winner joined", entry, joined)
+	}
+	if winner.refs != 2 {
+		t.Fatalf("winner refs = %d, want 2: the loser must be counted in", winner.refs)
+	}
+	if err := candidateCtx.Err(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the losing candidate's context reads %v, want context.Canceled", err)
+	}
+	if held.calls["k"] != winner {
+		t.Fatal("the losing candidate replaced the winner in the map")
 	}
 	if ran.Load() != 0 {
 		t.Fatal("the losing candidate's fn ran")
@@ -317,5 +319,192 @@ func TestManyLeadersRacingOnOneKeyRunFnOnce(t *testing.T) {
 	wg.Wait()
 	if got := runs.Load(); got != 1 {
 		t.Fatalf("fn ran %d times for one key, want 1", got)
+	}
+}
+
+// TestPublishDoesNotWaitForAHeldLock pins the publication #1035 takes off the
+// lock: with the shard's mutex held elsewhere, publish still retires the call
+// and wakes its waiters, and queues the call so the holder removes its map
+// entry on its way out.
+//
+// Goroutine lifecycle: one, running publish, started here; it never blocks
+// (that is the claim), and the test waits for it before any assertion.
+func TestPublishDoesNotWaitForAHeldLock(t *testing.T) {
+	t.Parallel()
+	group := &Group[string, int]{}
+	held := group.shardOf("k")
+	entry := &call[string, int]{done: make(chan struct{}), cancel: func() {}, refs: 1, key: "k"}
+	held.calls = map[string]*call[string, int]{"k": entry}
+
+	held.mu.Lock()
+	published := make(chan struct{})
+	go func() {
+		held.publish(entry)
+		close(published)
+	}()
+	select {
+	case <-published:
+	case <-time.After(5 * time.Second):
+		held.mu.Unlock()
+		t.Fatal("publish waited for the shard's mutex")
+	}
+	select {
+	case <-entry.done:
+	default:
+		held.mu.Unlock()
+		t.Fatal("publish did not wake the waiters")
+	}
+	if !entry.retired.Load() {
+		held.mu.Unlock()
+		t.Fatal("publish did not mark the call retired")
+	}
+	if held.retired.Load() != entry {
+		held.mu.Unlock()
+		t.Fatal("publish did not queue the call for the lock's holder")
+	}
+
+	//: the holder leaves: the queued call's entry goes with it.
+	held.unlock()
+	if _, found := held.calls["k"]; found {
+		t.Fatal("the holder left the retired call's entry in the map")
+	}
+	if held.retired.Load() != nil {
+		t.Fatal("the holder left the queue undrained")
+	}
+	if entry.next != nil {
+		t.Fatal("a drained call is still linked")
+	}
+}
+
+// TestARetiredCallStillInTheMapIsNeitherJoinedNorCounted pins how a retired
+// call whose entry awaits removal reads: absent. A newcomer leads a fresh
+// call in its place, which the queued removal then leaves alone, and neither
+// InFlight nor the waiter count sees the retired one.
+func TestARetiredCallStillInTheMapIsNeitherJoinedNorCounted(t *testing.T) {
+	t.Parallel()
+	group := &Group[string, int]{}
+	held := group.shardOf("k")
+	finished := &call[string, int]{done: make(chan struct{}), cancel: func() {}, refs: 1, key: "k"}
+	finished.retired.Store(true)
+	held.calls = map[string]*call[string, int]{"k": finished}
+
+	if got := group.InFlight(); got != 0 {
+		t.Fatalf("InFlight() = %d with only a retired call in the map, want 0", got)
+	}
+	if got := group.waiters("k"); got != 0 {
+		t.Fatalf("waiters = %d on a retired call, want 0", got)
+	}
+
+	//: queued for removal, as publish leaves it when the lock was held.
+	held.retired.Store(finished)
+	candidate := &call[string, int]{done: make(chan struct{}), cancel: func() {}, refs: 1, key: "k"}
+	winner, inserted := held.insertOrJoin(candidate, hashOf("k"))
+	if !inserted || winner != candidate {
+		t.Fatalf("insertOrJoin = (%p, %t), want the newcomer to lead", winner, inserted)
+	}
+	if finished.refs != 1 {
+		t.Fatalf("the retired call's refs = %d, want 1: nobody may join it", finished.refs)
+	}
+	if held.calls["k"] != candidate {
+		t.Fatal("draining the retired call removed the newcomer's entry")
+	}
+	if held.retired.Load() != nil {
+		t.Fatal("the lock's holder left the queue undrained")
+	}
+	if got := group.InFlight(); got != 1 {
+		t.Fatalf("InFlight() = %d, want 1: the newcomer's call", got)
+	}
+}
+
+// TestAHotKeysFollowersJoinWithoutBuildingACandidate pins the first look:
+// once a call has gained a follower, its key is the shard's hot key, and a
+// later caller of that key joins the call in flight under the lock without
+// building a candidate — the winner's refs grow, and no candidate is ever
+// inserted in its place.
+func TestAHotKeysFollowersJoinWithoutBuildingACandidate(t *testing.T) {
+	t.Parallel()
+	group := &Group[string, int]{}
+	held := group.shardOf("k")
+	winner := &call[string, int]{done: make(chan struct{}), cancel: func() {}, refs: 1, key: "k"}
+	held.calls = map[string]*call[string, int]{"k": winner}
+
+	//: a first follower, through the candidate path, makes "k" hot.
+	candidate := &call[string, int]{done: make(chan struct{}), cancel: func() {}, refs: 1, key: "k"}
+	if got, inserted := held.insertOrJoin(candidate, hashOf("k")); inserted || got != winner {
+		t.Fatalf("insertOrJoin = (%p, %t), want the winner joined", got, inserted)
+	}
+	if held.hotHash.Load() != hashOf("k") {
+		t.Fatal("a call that gained a follower did not make its key hot")
+	}
+
+	//: a nil context would panic in newCandidate: the first look must not
+	//: reach it, so a nil one proves no candidate is built.
+	var ran atomic.Int64
+	var none context.Context
+	entry, joined := held.join(none, "k", hashOf("k"), func(context.Context) (int, error) {
+		ran.Add(1)
+		return 0, nil
+	})
+	if !joined || entry != winner {
+		t.Fatalf("join = (%p, %t), want the winner joined", entry, joined)
+	}
+	if winner.refs != 3 {
+		t.Fatalf("winner refs = %d, want 3", winner.refs)
+	}
+	if ran.Load() != 0 {
+		t.Fatal("a follower of the hot key ran fn")
+	}
+}
+
+// TestABurstOfCallsLeavesNothingBehind is the retention check of the queue
+// publish hands its removals to: after a burst of distinct, shared and
+// abandoned calls on ONE shard, where publish meets a held lock as often as
+// the scheduler allows, and then silence, the map is empty and nothing is
+// queued — the shard keeps no finished call, so no result, alive.
+//
+// Goroutine lifecycle: one per worker, started here and joined by wg.Wait
+// before any assertion; each returns after its last call. The goroutines the
+// calls ran fn on have published before the waiters they served returned,
+// and an abandoned call's publish takes no lock.
+func TestABurstOfCallsLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
+	var held shard[string, int]
+	gone, cancel := context.WithCancel(t.Context())
+	cancel()
+	const workers, calls int = 9, 1500
+
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Go(func() {
+			for at := range calls {
+				//: a third of the workers on keys of their own, a third on
+				//: keys they share, a third leaving at once.
+				key, ctx := strconv.Itoa(worker*calls+at), t.Context()
+				switch worker % 3 {
+				//: shared keys: the joiners' path.
+				case 1:
+					key = strconv.Itoa(at)
+				//: already cancelled: the abandonment path.
+				case 2:
+					ctx = gone
+				}
+				entry, joined := held.join(ctx, key, hashOf(key), func(context.Context) (int, error) { return at, nil })
+				_, _, err := held.await(ctx, entry, joined)
+				if err != nil && ctx != gone {
+					t.Errorf("Do(%q) = %v, want nil", key, err)
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	held.mu.Lock()
+	left, queued := len(held.calls), held.retired.Load()
+	held.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d entries left in the map after the burst, want 0", left)
+	}
+	if queued != nil {
+		t.Fatal("a retired call is still queued after the burst")
 	}
 }

@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-07T20:30:00Z -->
+<!-- updated: 2026-11-14T12:00:00Z -->
 # internal/kernel/concur/singleflight/
 
 ## Purpose
@@ -16,8 +16,8 @@ only failure of its own is a programming fault, which panics.
 
 | File | Surface |
 |---|---|
-| `singleflight.go` | `Group[K,V]` + `Do` / `Forget` / `InFlight`, its sixteen `shard`s, and the join/run/publish/await/abandon path |
-| `call.go` | `call[V]` — the in-flight record shared by every caller of one key — and `detached`, the root of its shared context (#813) |
+| `singleflight.go` | `Group[K,V]` + `Do` / `Forget` / `InFlight`, its sixteen `shard`s, and the join/settle/run/publish/await/abandon path with the shard's queue of retired calls |
+| `call.go` | `call[K,V]` — the in-flight record shared by every caller of one key — and `detached`, the root of its shared context (#813) |
 | `panic.go` | `PanicValue` — the panic carried out of the shared call into every waiter |
 
 `Group` has **no constructor**: its zero value is usable, as `sync.Mutex`,
@@ -41,7 +41,7 @@ leader's context with its cancellation removed — what
 - **A caller that abandons is a departure, not a kill.** It stops waiting and
   receives its OWN `ctx.Err()`. The call continues.
 - **The call is cancelled when the LAST caller leaves**, tracked by a refcount
-  under the group mutex. Nothing is computed for an audience of zero.
+  under the shard's mutex. Nothing is computed for an audience of zero.
 - **The shared call inherits the FIRST caller's context values and no caller's
   deadline.** A follower expecting its own request-scoped values (trace id,
   tenant) sees the leader's. That is not a bug to be fixed later; one execution
@@ -80,24 +80,48 @@ system and not a kernel primitive.
   the caller that led the call, true for one that joined. Useful for a metric;
   never for a decision, since it describes the past.
 - **Sixteen shards, each a map under its own mutex** (#1035). A key's shard is
-  the low bits of `maphash.Comparable` over a seed drawn once per process; the
-  array is fixed, so the zero `Group` still needs no constructor, and each
-  shard is padded to 64 bytes so two never share a cache line. Distinct keys
-  contend only when they hash to the same shard — under a miss storm a cache's
-  `Load` leads one call per missed key, and one group-wide mutex used to
-  serialise every leader. `InFlight` sums the shards one lock at a time;
-  `Forget`, `publish` and `abandon` lock one.
-- **The critical section holds the map and nothing else** (#1035). A follower
-  finds the call and counts itself in one acquisition (`joinExisting`). A
-  leader looks, builds its call record and derives its context with the lock
-  released, then takes it again to insert (`insertOrJoin`); a candidate that
-  lost the key to another leader in between cancels the context it built and
-  joins the winner, and its `fn` never runs
+  the low bits of `maphash.Comparable` over a seed drawn once per process;
+  the array is fixed, so the zero `Group` still needs no constructor. Each
+  shard is two cache lines: the mutex, the map and the queue of retired
+  calls on the first, the hot key's hash on the second (a `Group` is 2 KiB).
+  Distinct keys contend only when they hash to the same shard — under a miss
+  storm a cache's `Load` leads one call per missed key, and one group-wide
+  mutex used to serialise every leader. `InFlight` sums the shards one lock
+  at a time; `Forget` and `abandon` lock one.
+- **A caller blocks on the shard's mutex once, and the critical section
+  holds the map and nothing else** (#1035). A caller builds a candidate —
+  the call record and its context — with the lock released, then one
+  acquisition (`insertOrJoin`) inserts it or counts the caller in the call
+  already in flight; a candidate that lost the key cancels the context it
+  built and joins the winner, and its `fn` never runs
   (`TestALosingLeaderCandidateIsCancelledAndNeverRuns`). The `go` statement
   runs with no lock held.
-- **A served caller does not touch the shard's mutex.** `publish` retires the
-  entry under the lock before closing `done`, so the deduplicated path costs
-  exactly one mutex acquisition (the join).
+- **A hot key's followers build nothing.** A shard remembers the hash of the
+  latest key whose call gained a follower (`hotHash`, a number: it keeps no
+  call alive). A caller whose key hashes so looks first (`joinExisting`) and
+  joins in that one acquisition with no allocation; only a hot key's leader,
+  whose look found nothing, takes the lock twice. Without it every follower
+  built and discarded a candidate before reaching the lock, which delayed
+  it past the end of the call it would have joined: `Do_SharedKeyParallel`
+  ran `fn` 12 % more often (`BENCH.md`). The hint sits on its own cache line
+  and is written only when the hot key changes, so callers of keys nobody
+  shares read it from their own cache.
+- **`publish` never waits for the shard's mutex** (#1035). `retired` is an
+  atomic: `publish` sets it (`CompareAndSwap`, so it and the last
+  abandonment retire a call once), which a newcomer reads as the key's
+  absence — `insertOrJoin` replaces a retired entry, so a call arriving
+  after the publication starts a new call rather than joining a finished
+  one. The map entry is removed at once when `TryLock` succeeds; otherwise
+  the call is pushed on the shard's queue (`retired`, a lock-free stack
+  linked by `call.next`) and the holder removes it in `unlock`, which every
+  lock site uses: it drains before releasing, and looks again after, so a
+  call pushed between the two is drained by this holder or the next one. A
+  pusher whose `TryLock` failed tries once more after the push, for the
+  holder that had already looked. After a burst and silence the map is
+  empty and nothing is queued (`TestABurstOfCallsLeavesNothingBehind`).
+- **A served caller does not touch the shard's mutex.** The call is retired
+  before `done` is closed, so the deduplicated path costs at most one mutex
+  acquisition (the join).
 - **Cancellation preempts waiting, not delivery.** `await` re-checks `done`
   after `ctx.Done()` wins the select, because Go picks at random among ready
   cases and would otherwise discard an existing answer on a coin flip.
@@ -113,7 +137,7 @@ system and not a kernel primitive.
 - **The shared context's root lives in the call record** (#813). `detached`
   (`call.go`) answers as `context.WithoutCancel(leaderCtx)` does — the
   leader's values, no deadline, a nil `Done`, a nil `Err`, the same name —
-  and `join` builds `context.WithCancel(&candidate.base)`: a leading call
+  and `newCandidate` builds `context.WithCancel(&candidate.base)`: a leading call
   allocates 5 objects where it allocated 6, B/op unchanged (`BENCH.md`; the
   budget on `(*Group[...]).Do` in `design/sdk.yaml`, fixture
   `perfDoLeading`). It is faithful only because fn never sees the root: the
@@ -137,7 +161,13 @@ system and not a kernel primitive.
   `TestAbandonedLeaderDoesNotCondemnTheFollowers` fails on it.
 - Add error codes. `fn`'s error is passed through untouched; the only failure
   the package owns is a panic.
-- Hand `&call.base` to anything but the `context.WithCancel` in `join`. Asked
+- Release a shard's mutex with `mu.Unlock` directly. Every holder goes
+  through `unlock`, which removes the entries `publish` queued while the lock
+  was held; one that does not can leave a finished call — and its result —
+  in the map until the shard's next caller.
+- Keep a `*call` as the hot-key hint. A pointer would keep the last hot
+  call's result alive after the call ended; the hash keeps nothing.
+- Hand `&call.base` to anything but the `context.WithCancel` in `newCandidate`. Asked
   directly, the root answers the context package's private key with the
   leader's own cancel context when it has one, where `WithoutCancel` answers
   nil — so `context.Cause` over it would read the leader's cause.
