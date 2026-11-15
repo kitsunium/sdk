@@ -51,10 +51,24 @@ var spillPool = recycler.NewPool(func() *spillChunk { return new(spillChunk) })
 // partial payload — dst's spare capacity may have been written, which the
 // port's convention allows.
 //
+// A dst that holds the payload exactly leaves the stream unread at its end, and
+// the end is found by asking for ONE byte into probe — the decoder's own box
+// owns it, so asking costs nothing — and never by taking a 32 KiB spill chunk
+// for the question: a chunk the pool did not have (a collection, a goroutine
+// migrated to another P) was a 32 768-byte allocation in a call that decodes
+// into place, measured as the 1 B/op the sized rows still showed. A byte the
+// probe does find starts the first chunk. A nil probe is allocated, for the
+// callers that decode no box.
+//
 // max is an explicit parameter (production passes maxDecompressedBytes) so the
 // overflow path can be exercised against a small cap in tests without
 // materialising the production ceiling and without mutating shared state.
-func appendAllBounded(dst []byte, r io.Reader, max int64) (decoded []byte, overflow bool, err error) {
+func appendAllBounded(dst []byte, r io.Reader, probe *[1]byte, max int64) (decoded []byte, overflow bool, err error) {
+	//: a caller with no box to own the probe byte gets one of its own.
+	if probe == nil {
+		//: only the callers that decode no box reach this.
+		probe = new([1]byte)
+	}
 	//: the +1 is the whole detector, and it is also the one arithmetic here
 	//: that can wrap: at math.MaxInt64 it goes NEGATIVE and a valid stream
 	//: decodes to nothing with a nil error — measured once, as gzip
@@ -80,8 +94,8 @@ func appendAllBounded(dst []byte, r io.Reader, max int64) (decoded []byte, overf
 		decoded, overflow = settle(dst, filled, max)
 		return decoded, overflow, nil
 	}
-	//: dst is full and the stream goes on: spill, then grow once.
-	return spill(dst, filled, r, limit, max)
+	//: dst is full, or the limit is reached; spill settles which, then grows once.
+	return spill(dst, filled, &boundedRead{r: r, probe: probe, limit: limit, max: max})
 }
 
 // fillSpare reads r into out's spare capacity, never more than limit bytes
@@ -120,45 +134,54 @@ func fillSpare(out []byte, r io.Reader, limit int64) (filled []byte, done bool, 
 	return out, false, nil
 }
 
-// spill reads the rest of r into pooled chunks, then grows out once to its
-// final length and copies them in. A dst that held the payload exactly finds
-// io.EOF on its first chunk read and is returned as it is, unreallocated.
-func spill(dst, out []byte, r io.Reader, limit, max int64) (decoded []byte, overflow bool, err error) {
+// boundedRead is one appendAllBounded call's read: the source, the byte its end
+// is probed with, and the two widths of the bound.
+type boundedRead struct {
+	// r is the decoder being drained.
+	r io.Reader
+	// probe is the one byte the end of the stream is asked into.
+	probe *[1]byte
+	// limit is max plus the detector byte, saturated at math.MaxInt64.
+	limit int64
+	// max is the plaintext the caller agreed to hold.
+	max int64
+}
+
+// spill reads the rest of the stream into pooled chunks, then grows out once to
+// its final length and copies them in. A dst that held the payload exactly
+// finds the end with one byte asked into the probe, and is returned as it is,
+// unreallocated, having taken no chunk.
+func spill(dst, out []byte, br *boundedRead) (decoded []byte, overflow bool, err error) {
 	start := len(dst)
+	held := int64(len(out) - start)
+	//: the end of the stream, asked a byte at a time before any chunk is taken.
+	carried, ended, perr := probeEnd(br.r, br.probe, held < br.limit)
+	//: a fault while asking: dst goes back as it came, never a partial payload.
+	if perr != nil {
+		//: surfaced verbatim.
+		return dst, false, perr
+	}
+	//: the stream is over and dst holds all of it: nothing to spill.
+	if ended {
+		//: within the cap unless the detector byte is in.
+		decoded, overflow = settle(dst, out, br.max)
+		return decoded, overflow, nil
+	}
 	//: the chunk list lives on this frame for the first spillKeepChunks.
 	chunks := make([]*spillChunk, 0, spillKeepChunks)
 	spilled := 0
-	//: read chunk by chunk until the stream ends or the limit is reached.
-	for {
-		got := int64(len(out)-start) + int64(spilled)
-		//: the detector byte is in: more than max plaintext.
-		if got > max {
-			//: the chunks go back, dst as it came, never a partial payload.
-			releaseSpill(chunks)
-			return dst, true, nil
-		}
-		//: a full chunk, or none yet: take the next one.
-		if spilled == len(chunks)*spillChunkBytes {
-			chunks = append(chunks, spillPool.Get())
-		}
-		room := chunks[len(chunks)-1][spilled%spillChunkBytes:]
-		//: never read past the detector byte.
-		if left := limit - got; int64(len(room)) > left {
-			//: left is smaller than a chunk here, so it fits an int.
-			room = room[:left]
-		}
-		n, rerr := r.Read(room)
-		spilled += n
-		//: the stream is over: assemble.
-		if rerr == io.EOF {
-			break
-		}
-		//: a corrupt stream or a transport fault.
-		if rerr != nil {
-			//: the chunks go back, the fault verbatim, dst as it came.
-			releaseSpill(chunks)
-			return dst, false, rerr
-		}
+	//: the byte the probe found is the first of the first chunk.
+	if carried {
+		chunks = append(chunks, spillPool.Get())
+		chunks[0][0] = br.probe[0]
+		spilled = 1
+	}
+	chunks, spilled, overflow, err = fillChunks(br, chunks, spilled, held)
+	//: past the cap, or a fault: the chunks go back, dst as it came.
+	if overflow || err != nil {
+		//: never a partial payload.
+		releaseSpill(chunks)
+		return dst, overflow, err
 	}
 	//: one allocation of the final length — none at all for an exact fit,
 	//: exactly the payload when dst was nil, append's growth otherwise.
@@ -169,8 +192,86 @@ func spill(dst, out []byte, r io.Reader, limit, max int64) (decoded []byte, over
 	}
 	releaseSpill(chunks)
 	//: within the cap unless it read the detector byte.
-	decoded, overflow = settle(dst, out, max)
+	decoded, overflow = settle(dst, out, br.max)
 	return decoded, overflow, nil
+}
+
+// fillChunks reads the stream into chunks, which already hold spilled bytes,
+// until it ends, the limit is reached or it faults, held being the bytes dst
+// already holds past its prefix. It hands back the chunks and the bytes they
+// hold, and reports overflow when the detector byte is in, and the fault
+// verbatim. The list goes in and comes back rather than living in a struct
+// beside the caller's frame, which would move its backing array to the heap.
+func fillChunks(br *boundedRead, chunks []*spillChunk, spilled int, held int64) (filled []*spillChunk, total int, overflow bool, err error) {
+	//: read chunk by chunk until the stream ends or the limit is reached.
+	for {
+		got := held + int64(spilled)
+		//: the detector byte is in: more than max plaintext.
+		if got > br.max {
+			//: the caller returns dst, never a partial payload.
+			return chunks, spilled, true, nil
+		}
+		//: a full chunk, or none yet: take the next one.
+		if spilled == len(chunks)*spillChunkBytes {
+			chunks = append(chunks, spillPool.Get())
+		}
+		room := chunks[len(chunks)-1][spilled%spillChunkBytes:]
+		//: never read past the detector byte.
+		if left := br.limit - got; int64(len(room)) > left {
+			//: left is smaller than a chunk here, so it fits an int.
+			room = room[:left]
+		}
+		n, rerr := br.r.Read(room)
+		spilled += n
+		//: the stream is over: assemble.
+		if rerr == io.EOF {
+			//: the end, nothing more to read.
+			return chunks, spilled, false, nil
+		}
+		//: a corrupt stream or a transport fault.
+		if rerr != nil {
+			//: the fault verbatim.
+			return chunks, spilled, false, rerr
+		}
+	}
+}
+
+// probeEnd asks r for one byte into probe, and says what came back: carried,
+// that probe[0] is the stream's next byte; ended, that the stream is over with
+// nothing more to take; or a fault. A decoder that answers with no byte and no
+// error is asked again, as io.Reader permits. When room is false — the limit is
+// reached, so the detector byte is already in — nothing is asked: the loop in
+// spill judges the overflow.
+func probeEnd(r io.Reader, probe *[1]byte, room bool) (carried, ended bool, err error) {
+	//: the limit is reached; there is nothing to ask.
+	if !room {
+		//: neither a byte nor an end: the chunk loop settles it.
+		return false, false, nil
+	}
+	//: a reader may answer nothing, nil: ask again.
+	for {
+		n, rerr := r.Read(probe[:])
+		//: a byte: it opens the first chunk, even beside the end.
+		if n > 0 {
+			//: a fault beside a byte is the fault.
+			if rerr != nil && rerr != io.EOF {
+				//: surfaced verbatim.
+				return false, false, rerr
+			}
+			//: the byte is carried; the end, if it came, is found again by the loop.
+			return true, false, nil
+		}
+		//: no byte, and the stream is over.
+		if rerr == io.EOF {
+			//: the end, with nothing to carry.
+			return false, true, nil
+		}
+		//: a corrupt stream or a transport fault.
+		if rerr != nil {
+			//: surfaced verbatim.
+			return false, false, rerr
+		}
+	}
 }
 
 // settle reports overflow when out holds more than max bytes past dst, and

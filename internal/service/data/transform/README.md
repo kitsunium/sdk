@@ -57,4 +57,4 @@ this package allocated; the schemes here wrap a stdlib cause in them.
 |---|---|---|
 | `0.3.26.1` | `GzipFailed`  | `compress/gzip` returned an error (Compress or Decompress) |
 | `0.3.26.2` | `FlateFailed` | `compress/flate` returned an error (Compress or Decompress) |
-| `0.3.26.3` | `ZlibFailed`  | `compress/zlib` returned an error (Compress or Decompress), including a failed Adler-32 check |
+| `0.3.26.3` | `ZlibFailed`  | the zlib scheme failed (Compress or Decompress): `compress/zlib` or the envelope this package reads returned an error, including a failed Adler-32 check |

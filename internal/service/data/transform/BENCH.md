@@ -661,8 +661,8 @@ noise and was not.
    payload bigger, on every corpus, by construction.
 2. **Pass a `dst` with capacity** (§5, §12). Free 28–34 % on incompressible
    payloads when compressing; when decompressing, a `dst` whose spare capacity
-   holds the plaintext costs no allocation at all for gzip and flate, and the
-   4 bytes of zlib's Adler-32 digest for zlib.
+   holds the plaintext costs no allocation at all, for zlib too since the
+   envelope is read in this package (§12.1).
 3. **`BestSpeed` before `DefaultCompression`** (§6), unless a measurement on
    *your* corpus says otherwise. On this one it is 3.4× faster for the same
    ratio.
@@ -701,14 +701,12 @@ read through a `bytes.Reader` held in the pooled decoder's box instead of one
 | zlib text 64 KiB | 138 288 | 11 | 19 | **1** | 113 793 | 53 037 |
 
 The few bytes left at 64 KiB and 1 MiB are `sync.Pool` refills after a
-collection, averaged over `b.N`; the allocation gate
-(`TestDecompressIntoASizedDstAllocatesNothing`, alloc lane, the collector held
-off) counts **zero** for gzip and flate. **zlib keeps one allocation of 4
-bytes**: `compress/zlib`'s `Reset` builds a fresh Adler-32 digest
-(`adler32.New`) on every stream, a cost of the standard library's that no
-caller-side buffer can shed. Removing it means decoding the RFC 1950 envelope in
-this package over the pooled flate decoder; that is a change of decoder, not of
-tail, and is not made here.
+collection, averaged over `b.N` (§12.1 says where they come from and how the
+rows are now taken); the allocation gate (`TestDecompressIntoASizedDstAllocatesNothing`,
+alloc lane, the collector held off) counts **zero** for gzip and flate. The
+zlib rows above are the first measurement, which kept one allocation of 4 bytes
+(`compress/zlib`'s `Reset` builds an Adler-32 digest on every stream); §12.1
+removes it.
 
 **A nil `dst`** (`BenchmarkDecompress`): the payload is allocated once, at its
 size.
@@ -751,6 +749,136 @@ gets a result whose capacity is the payload's (64 B for 64 B), not
 **Output is unchanged.** Only the decompression tail moved; `Compress` and the
 three wire formats are untouched, so the 30 SHA-256 digests of §Method still
 hold (re-checked after kitsunium/sdk#900 changed the writer pools, §13).
+
+### 12.1 Zero bytes into a sized `dst`, zlib included (kitsunium/sdk#1102, reopened 2026-11-13)
+
+The issue asked for **0 allocs/op and 0 B/op** into a `dst` of sufficient
+capacity at 4 KiB and 64 KiB for all three schemes. The first fix measured zero
+allocations for gzip and flate, one for zlib, and 2 to 3 B/op on a few gzip and
+flate rows. Both are closed here.
+
+**zlib: the envelope is read in this package.** `compress/zlib`'s `Reset` ends
+in `z.digest = adler32.New()`, a `new(digest)` that escapes into an interface:
+one allocation per call that no buffer of the caller's can shed (memory profile
+at `-memprofilerate=1`: `hash/adler32.New` called from
+`compress/zlib.(*reader).Reset`, the only site on the zlib row). `zlibDecompressCore`
+now reads RFC 1950 §2.2 itself: the two header bytes (`zlibBody`: CM 8, CINFO
+of at most 7, a multiple of 31, an FDICT id accepted only when it is the empty
+dictionary's Adler-32, as `compress/zlib` does with a nil dictionary), the
+DEFLATE body through the pooled flate decoder `Decompress` already used, and the
+four trailer bytes read in place from the input where the decoder stopped
+(`zlibCheckTrailer`), against `adler32.Checksum` of the plaintext just appended
+to `dst`. Standard library only: `compress/flate`, `hash/adler32`,
+`encoding/binary`. The refusals are the standard library's own values
+(`zlib.ErrHeader`, `zlib.ErrDictionary`, `zlib.ErrChecksum`,
+`io.ErrUnexpectedEOF`), so `errors.Is` reads what it read; past the ceiling the
+trailer is not read, as before. The stream form (`NewReader`) keeps
+`compress/zlib`: it has a stream, not a buffer, and its digest is one allocation
+per stream, outside the issue's bound. `TestZlibEnvelopeAgreesWithTheStandardLibrary`
+holds eighteen valid and malformed frames to `compress/zlib` (same bytes, same
+error), and `FuzzDecompressBounded` now checks the engine against it on every
+input.
+
+**gzip and flate: the bytes were the harness's.** The benchmark harness forces a
+collection before each benchmark and `sync.Pool` is emptied by two collections,
+so the first timed call rebuilt a decoder of about 43 KB (`compress/flate`'s
+decompressor and its 32 KiB window, from `fillFlateBox`) and the loop was
+charged for it: 43 KB over 20 000 iterations is 2 B/op that no call makes. A
+process pays that once per P per two collections. `BenchmarkDecompress` and
+`BenchmarkDecompressSized` now decode once before `b.ResetTimer()`
+(`benchPrimeDecoder`); the allocation gate is the exact proof either way.
+
+`BenchmarkDecompress{,Sized}`, `-cpu=4 -benchtime=20000x`, one run on the VM
+(AMD EPYC 7351P, Go 1.27.4; indicative, the runner's A/B is the judge):
+
+| row (sized `dst`) | before: ns, B/op, allocs | after, primed | after, unprimed |
+|---|---|---|---|
+| gzip random 4 KiB | 1 249, 2, 0 | 1 244, **0**, 0 | 1 336, 2, 0 |
+| gzip text 64 KiB | 25 435, 3, 0 | 24 711, **0**, 0 | 25 691, 3, 0 |
+| flate random 4 KiB | 920, 2, 0 | 634, **0**, 0 | 660, 2, 0 |
+| flate text 64 KiB | 18 065, 0, 0 | 17 940, **0**, 0 | 18 681, 3, 0 |
+| zlib random 4 KiB | 2 607, 4, **1** | 2 598, **0**, **0** | 2 678, 0, 0 |
+| zlib text 4 KiB | 8 468, 4, **1** | 8 030, **0**, **0** | 8 579, 2, 0 |
+| zlib random 64 KiB | 34 182, 7, **1** | 34 014, **0**, **0** | 34 392, 0, 0 |
+| zlib text 64 KiB | 50 091, 7, **1** | 47 852, **0**, **0** | 47 842, 3, 0 |
+
+All 12 sized rows (three schemes, two corpora, 4 and 64 KiB) are 0 B/op and 0
+allocs/op primed (§12.2 says what the last byte of those rows was). A nil `dst` stays at 1.00 times the plaintext
+(4 100 to 4 119 B/op at 4 KiB, 65 576 to 65 735 at 64 KiB, one allocation, zlib
+included: it lost its digest). The unprimed column is what the loop reads when
+the pool is cold: the 2 to 3 B/op above, a decoder rebuilt once, not a cost per
+call. The zlib time is at parity (text 64 KiB 52.0 µs with `compress/zlib`, 50.0
+with the envelope in a throwaway rig; the table's pairs differ by the VM's
+noise).
+
+Designs tried for the zlib allocation, in a throwaway test over `origin/main`,
+random 4 KiB and text 64 KiB, sized `dst`:
+
+| design | ns/op (random 4 KiB / text 64 KiB) | B/op | allocs | verdict |
+|---|---:|---:|---:|---|
+| `compress/zlib` over the pooled box (the base) | 2 834 / 52 042 | 4 | 1 | the digest, from the library |
+| the envelope in this package, `adler32.Checksum` over the plaintext | 2 598 / 47 852 | 0 | 0 | **taken**: one pass, no state |
+| the envelope in this package, a pooled `hash.Hash32` fed by a reader wrapper | 2 620 / 49 952 | 0 | 0 | same result, a second pool and a wrapper in every read |
+| pool the digest `compress/zlib` builds | not possible | | | `Reset` makes a new one, none can be injected |
+| copy `compress/zlib` | not tried | | | the DEFLATE decoder must stay the standard library's |
+
+**Output is unchanged:** `Compress` and the wire formats are untouched, so the
+30 SHA-256 digests of §Method still hold.
+
+### 12.2 The last byte: finding the end of a stream a dst holds exactly (kitsunium/sdk#1102)
+
+§12.1's first measurement on the CI runner (AMD EPYC 9V74, 4 vCPUs, 20
+interleaved rounds) read 0 allocs everywhere and **1 B/op on three 64 KiB rows**
+(gzip text, flate random, zlib text), against a bound of 0. The same rows show
+it on the VM when repeated: 4 rounds of 160 at 64 KiB.
+
+**Not a decoder, not a collection.** The first hypothesis was a decoder rebuilt
+after a collection emptied its `sync.Pool`. Instrumenting the loop (a counter on
+the two constructors, `runtime.MemStats` read around the timed section) said
+otherwise, on every round that read 1 B/op: **0 decoders built, 0 collections,
+one allocation of exactly 32 768 bytes** (`TotalAlloc` delta 32 768, `Mallocs`
+delta 1). 32 768 is `spillChunkBytes`. A `dst` whose capacity is the payload
+exactly (the sized rows' own shape) fills in place and leaves the stream unread
+at its end; `spill` then took a chunk from `spillPool` to ask the decoder one
+question, whether the stream was over. A chunk the pool does not have is a new 32 KiB array; the likeliest way to
+miss is a goroutine preempted by sysmon after 10 ms of the loop and resumed on
+another P, whose private slot is empty, between taking a box and taking a chunk,
+a window as long as the decode (the allocation is measured, the preemption is
+the reading that fits). 32 768 B over 20 000 iterations
+is 1 B/op with 0 allocs/op (1 allocation in 20 000).
+
+**The fix.** The end is found by asking for one byte into `readerBox.probe`, a
+field of the box the call owns (`probeEnd`); a byte the probe does find is the
+first of the first chunk, and an end takes no chunk at all (an empty stream into
+a nil `dst` neither). No allocation, no pool, nothing retained.
+
+| gate | on the previous commit | here |
+|---|---|---|
+| `TestADstHoldingThePayloadExactlyFindsTheEndWithoutAChunk` (alloc lane: two collections, then one exact-fit decode) | 33 288 B allocated, fails | passes |
+| `BenchmarkDecompressSized`, 12 rows x 20 rounds, `-cpu=4 -benchtime=20000x`, VM | 4 rounds of 160 at 64 KiB read 1 B/op | 0 B/op and 0 allocs/op in all 240 rounds |
+
+**Across a collection** (`BenchmarkDecompressSizedAcrossGC`: two collections
+in the middle of the loop, timer stopped around them, so the pools are cold for
+the second half). A collection is a different cause, the decoder, and the
+chunk's share is visible in it:
+
+| design | 4 KiB rows B/op | 64 KiB rows B/op | retained between calls |
+|---|---:|---:|---|
+| previous commit (`sync.Pool`, a chunk to find the end) | 2 | 3 | what the pools keep until two collections |
+| the probe byte (taken) | 2 | 2 | the same |
+| the probe byte and a bounded keeper in front of the decoder pools: four slots, an atomic pointer each, no collection empties them (prototype, not taken) | **0** | **0** | up to four decoders of about 43 KB per scheme for the life of the process |
+
+2 B/op across a collection is the decoder rebuilt once (43 KB over 20 000
+iterations): a `sync.Pool` does this by design, once per P per two collections,
+and no collection runs inside the CI loop (0 over every instrumented round).
+The keeper takes it to 0 and was not taken: what it keeps is not only memory
+(about 43 KB per slot) but the last 32 KiB of plaintext each decoder's window
+holds, until the process ends instead of until two collections, in a process
+that may never collect again — a retention no caller of `Decompress` asked for,
+and one a scrub (32 KiB cleared per call, as much as a 4 KiB decode costs) would
+trade for time. If a decoder miss on a migrated goroutine ever shows in the
+runner's rows it is 2 B/op in one round, and the suite's answer is `-cpu=1`,
+which names no P to migrate between.
 
 ## 13. A level for gzip and flate (kitsunium/sdk#900)
 

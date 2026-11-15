@@ -189,7 +189,7 @@ func gzipDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge bo
 	//: return the decoder on every exit below.
 	defer releaseGzipReader(box)
 	//: drain the reader straight onto dst through the shared bounded helper.
-	out, overflow, derr := appendAllBounded(dst, box.rc, max)
+	out, overflow, derr := appendAllBounded(dst, box.rc, &box.probe, max)
 	//: fold a Close fault into the result so the reader error is never dropped.
 	if cerr := box.rc.Close(); cerr != nil && derr == nil {
 		//: a clean drain followed by a Close fault still fails decompression.

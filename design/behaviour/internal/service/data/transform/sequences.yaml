@@ -14,6 +14,11 @@ sequences:
       - id: spill
         kind: internal
     steps:
+      - opt:
+          do:
+            - set: probe
+              value: new([1]byte)
+          when: probe == nil
       - bind: limit
         eval: max
       - opt:
@@ -35,7 +40,7 @@ sequences:
               value: settle(dst, filled, max)
             - return: decoded, overflow, nil
           when: done
-      - return: spill(dst, filled, r, limit, max)
+      - return: "spill(dst, filled, &boundedRead{r: r, probe: probe, limit: limit, max: max})"
         to: spill
   - of: fillSpare
     participants:
@@ -85,63 +90,57 @@ sequences:
         kind: actor
       - id: spill
         kind: self
-      - id: releaseSpill
+      - id: probeEnd
         kind: internal
-      - id: r.Read
-        kind: value
-      - id: slices
-        kind: stdlib
       - id: settle
         kind: internal
+      - id: fillChunks
+        kind: internal
+      - id: releaseSpill
+        kind: internal
+      - id: slices
+        kind: stdlib
     steps:
       - bind: start
         eval: len(dst)
+      - bind: held
+        eval: int64(len(out) - start)
+      - bind: carried, ended, perr
+        eval: probeEnd(br.r, br.probe, held < br.limit)
+        to: probeEnd
+      - opt:
+          do:
+            - return: dst, false, perr
+          when: perr != nil
+      - opt:
+          do:
+            - set: decoded, overflow
+              to: settle
+              value: settle(dst, out, br.max)
+            - return: decoded, overflow, nil
+          when: ended
       - bind: chunks
         eval: make([]*spillChunk, 0, spillKeepChunks)
       - bind: spilled
         eval: "0"
-      - loop:
+      - opt:
           do:
-            - bind: got
-              eval: int64(len(out)-start) + int64(spilled)
-            - opt:
-                do:
-                  - eval: releaseSpill(chunks)
-                    to: releaseSpill
-                  - return: dst, true, nil
-                when: got > max
-            - opt:
-                do:
-                  - set: chunks
-                    value: append(chunks, spillPool.Get())
-                when: spilled == len(chunks)*spillChunkBytes
-            - bind: room
-              eval: chunks[len(chunks)-1][spilled%spillChunkBytes:]
-            - opt:
-                do:
-                  - set: room
-                    value: room[:left]
-                init:
-                  bind: left
-                  eval: limit - got
-                when: int64(len(room)) > left
-            - bind: n, rerr
-              eval: r.Read(room)
-              to: r.Read
-            - op: +=
-              set: spilled
-              value: "n"
-            - opt:
-                do:
-                  - break: true
-                when: rerr == io.EOF
-            - opt:
-                do:
-                  - eval: releaseSpill(chunks)
-                    to: releaseSpill
-                  - return: dst, false, rerr
-                when: rerr != nil
-          forever: true
+            - set: chunks
+              value: append(chunks, spillPool.Get())
+            - set: chunks[0][0]
+              value: br.probe[0]
+            - set: spilled
+              value: "1"
+          when: carried
+      - set: chunks, spilled, overflow, err
+        to: fillChunks
+        value: fillChunks(br, chunks, spilled, held)
+      - opt:
+          do:
+            - eval: releaseSpill(chunks)
+              to: releaseSpill
+            - return: dst, overflow, err
+          when: overflow || err != nil
       - set: out
         to: slices
         value: slices.Grow(out, spilled)
@@ -156,8 +155,90 @@ sequences:
         to: releaseSpill
       - set: decoded, overflow
         to: settle
-        value: settle(dst, out, max)
+        value: settle(dst, out, br.max)
       - return: decoded, overflow, nil
+  - of: fillChunks
+    participants:
+      - id: caller
+        kind: actor
+      - id: fillChunks
+        kind: self
+      - id: br.r.Read
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: got
+              eval: held + int64(spilled)
+            - opt:
+                do:
+                  - return: chunks, spilled, true, nil
+                when: got > br.max
+            - opt:
+                do:
+                  - set: chunks
+                    value: append(chunks, spillPool.Get())
+                when: spilled == len(chunks)*spillChunkBytes
+            - bind: room
+              eval: chunks[len(chunks)-1][spilled%spillChunkBytes:]
+            - opt:
+                do:
+                  - set: room
+                    value: room[:left]
+                init:
+                  bind: left
+                  eval: br.limit - got
+                when: int64(len(room)) > left
+            - bind: n, rerr
+              eval: br.r.Read(room)
+              to: br.r.Read
+            - op: +=
+              set: spilled
+              value: "n"
+            - opt:
+                do:
+                  - return: chunks, spilled, false, nil
+                when: rerr == io.EOF
+            - opt:
+                do:
+                  - return: chunks, spilled, false, rerr
+                when: rerr != nil
+          forever: true
+  - of: probeEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: probeEnd
+        kind: self
+      - id: r.Read
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: false, false, nil
+          when: "!room"
+      - loop:
+          do:
+            - bind: n, rerr
+              eval: r.Read(probe[:])
+              to: r.Read
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: false, false, rerr
+                      when: rerr != nil && rerr != io.EOF
+                  - return: true, false, nil
+                when: n > 0
+            - opt:
+                do:
+                  - return: false, true, nil
+                when: rerr == io.EOF
+            - opt:
+                do:
+                  - return: false, false, rerr
+                when: rerr != nil
+          forever: true
   - of: settle
     steps:
       - opt:
@@ -326,7 +407,7 @@ sequences:
       - defer: releaseFlateReader(box)
         to: releaseFlateReader
       - bind: out, overflow, derr
-        eval: appendAllBounded(dst, box.rc, max)
+        eval: appendAllBounded(dst, box.rc, &box.probe, max)
         to: appendAllBounded
       - opt:
           do:
@@ -505,7 +586,7 @@ sequences:
       - defer: releaseGzipReader(box)
         to: releaseGzipReader
       - bind: out, overflow, derr
-        eval: appendAllBounded(dst, box.rc, max)
+        eval: appendAllBounded(dst, box.rc, &box.probe, max)
         to: appendAllBounded
       - opt:
           do:
@@ -1028,26 +1109,6 @@ sequences:
     steps:
       - eval: flateReaderPool.Put(box)
         to: flateReaderPool.Put
-  - of: takeZlibReader
-    participants:
-      - id: caller
-        kind: actor
-      - id: takeZlibReader
-        kind: self
-      - id: zlibReaderPool.Get
-        kind: value
-      - id: held.in.Reset
-        kind: value
-      - id: fillZlibBox
-        kind: internal
-    steps:
-      - bind: held
-        eval: zlibReaderPool.Get()
-        to: zlibReaderPool.Get
-      - eval: held.in.Reset(src)
-        to: held.in.Reset
-      - return: fillZlibBox(held, &held.in)
-        to: fillZlibBox
   - of: takeZlibStream
     participants:
       - id: caller
@@ -1426,26 +1487,37 @@ sequences:
         kind: actor
       - id: zlibDecompressCore
         kind: self
-      - id: takeZlibReader
+      - id: zlibBody
         kind: internal
-      - id: releaseZlibReader
+      - id: takeFlateReader
+        kind: internal
+      - id: releaseFlateReader
         kind: internal
       - id: appendAllBounded
         kind: internal
       - id: box.rc.Close
         kind: value
+      - id: zlibCheckTrailer
+        kind: internal
     steps:
+      - bind: body, herr
+        eval: zlibBody(src)
+        to: zlibBody
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(herr, zlibWrap)
+          when: herr != nil
       - bind: box, rerr
-        eval: takeZlibReader(src)
-        to: takeZlibReader
+        eval: takeFlateReader(body)
+        to: takeFlateReader
       - opt:
           do:
             - return: dst, false, errs.Wrap(rerr, zlibWrap)
           when: rerr != nil
-      - defer: releaseZlibReader(box)
-        to: releaseZlibReader
+      - defer: releaseFlateReader(box)
+        to: releaseFlateReader
       - bind: out, overflow, derr
-        eval: appendAllBounded(dst, box.rc, max)
+        eval: appendAllBounded(dst, box.rc, &box.probe, max)
         to: appendAllBounded
       - opt:
           do:
@@ -1464,4 +1536,50 @@ sequences:
           do:
             - return: dst, true, nil
           when: overflow
+      - opt:
+          do:
+            - return: dst, false, errs.Wrap(terr, zlibWrap)
+          init:
+            bind: terr
+            eval: zlibCheckTrailer(body[len(body)-box.in.Len():], out[len(dst):])
+            to: zlibCheckTrailer
+          when: terr != nil
       - return: out, false, nil
+  - of: zlibBody
+    steps:
+      - opt:
+          do:
+            - return: nil, io.ErrUnexpectedEOF
+          when: len(src) < zlibHeaderLen
+      - bind: cmf, flg
+        eval: src[0], src[1]
+      - opt:
+          do:
+            - return: nil, zlib.ErrHeader
+          when: cmf&0x0f != zlibMethodDeflate || cmf>>4 > zlibMaxWindow || (uint16(cmf)<<8|uint16(flg))%31 != 0
+      - set: body
+        value: src[zlibHeaderLen:]
+      - opt:
+          do:
+            - return: body, nil
+          when: flg&zlibFlagDict == 0
+      - opt:
+          do:
+            - return: nil, io.ErrUnexpectedEOF
+          when: len(body) < zlibDictIDLen
+      - opt:
+          do:
+            - return: nil, zlib.ErrDictionary
+          when: binary.BigEndian.Uint32(body) != zlibEmptyDictID
+      - return: body[zlibDictIDLen:], nil
+  - of: zlibCheckTrailer
+    steps:
+      - opt:
+          do:
+            - return: io.ErrUnexpectedEOF
+          when: len(tail) < zlibTrailerLen
+      - opt:
+          do:
+            - return: zlib.ErrChecksum
+          when: binary.BigEndian.Uint32(tail) != adler32.Checksum(plain)
+      - return: nil
