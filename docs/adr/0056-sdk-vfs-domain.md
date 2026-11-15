@@ -4,7 +4,7 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — the first `FullFS` outside `internal/service/data/vfs`: an S3 bucket (`third-party/aws/vfs/s3`), whose `PutObject` is the atomic publication, no rename faked
-- **Amended**: 2026-11-02 — a publication's mode, the link shortcuts, a directory flush, and step 5 shared between the publications into one directory; 2026-11-03 — a batch published under one directory flush, `AtomicBatchWriter`; 2026-11-12 — the temporary's name in one allocation, and an idle directory flushed in place (see the dated sections at the end)
+- **Amended**: 2026-11-02 — a publication's mode, the link shortcuts, a directory flush, and step 5 shared between the publications into one directory; 2026-11-03 — a batch published under one directory flush, `AtomicBatchWriter`; 2026-11-12 — the temporary's name in one allocation, and an idle directory flushed in place; 2026-11-15 — a batch's file flushes in flight together, a window at a time (see the dated sections at the end)
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (refuse or clamp, never inert), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse where the mechanic does not exist), [ADR 0045](0045-sdk-session-domain.md) (the file store this domain generalises), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (a zero value must not be the dangerous one)
 
 ## Context
@@ -555,3 +555,56 @@ it. Both of the latter go; no step of the five moves, and no guarantee.
    stack — 19 measured on linux/amd64, 22 on CI's linux/386 runner, whose
    `os.Root` makes three more — by a race-off gate run by the alloc lane and
    `test-386` (`alloc_external_test.go`).
+
+## Amendment (2026-11-15): a batch's file flushes in flight together (kitsunium/sdk#827)
+
+The 2026-11-03 amendment left one thing on the table, in its third point:
+"flushing the temporaries concurrently, so the journal merges them, would
+buy more and is not done here: it reorders failures across files, and the
+prefix semantics above would need restating". Issue #827 asks for a batch of
+sixteen at 55 % of a `Publish` a message, and the serial design cannot reach
+it on any batch size: a message still pays its own file flush one after the
+other, and the batch of 256 already measured the asymptote, 57 to 60 %. This
+amendment replaces "is not done here", and restates nothing: the prefix
+semantics hold word for word.
+
+1. **A window at a time.** `WriteAtomicAll` on the disk engine runs its
+   batch in windows of sixteen files (`publishWindow`). In a window, each
+   file's temporary is created and written in the batch's order, and its
+   flush — `Sync`, then `Close` — starts on a goroutine of its own
+   (`kernel/concur/group`) as soon as it is written, so a window's flushes
+   are in flight together and overlap the writing of the files after them.
+   A journal commits concurrent flushes of one filesystem together (ext4's
+   jbd2 among them), so sixteen flushes cost a few device round trips
+   instead of sixteen. A window of one flushes on the caller's goroutine.
+2. **The renames stay in order, after every flush of the window has
+   returned**, and stop at the first file whose create, write, flush, close
+   or rename failed: that file's temporary and every later one of the window
+   are removed, and the next window does not begin. The failure reported is
+   the lowest index's, whatever order the flushes answered in; `published`
+   still counts the files renamed, from the first; the files after them keep
+   their previous bytes, no temporary of theirs surviving; the renamed ones
+   are flushed with their directories before the call returns. Each file is
+   still flushed once, before its own rename — the port's "flushes each file
+   before its rename" is unchanged, and so is its text. Step 5 is untouched:
+   one directory flush after the last rename into it, through the
+   directory's commit group.
+3. **What it costs.** A window holds sixteen descriptors and sixteen
+   goroutines blocked in `fsync(2)` at most, whatever the batch's size, and a
+   crash in the middle of one leaves up to sixteen orphaned `.vfs-*.tmp`
+   temporaries instead of one — the same kind of orphan, which the queue's
+   listings already ignore. The format on disk does not change. The memory
+   engine does not change. On darwin, whose `F_FULLFSYNC` the device may
+   serialise, the gain may be small; nothing gets slower.
+4. **Measured, indicatively**, on this VM (ext4 over a virtual disk, 4
+   CPUs): `PublishMany/file/16` at 0.40 to 0.99 ms a message against
+   `Publish/file/64`'s 3.1 ms — 0.13 to 0.32 of it, the two values two modes
+   of the journal's commits — where the serial design read 1.85 to 1.93 ms
+   (0.57 to 0.63); `WriteAtomicAll/os/256` at 0.32 to 0.36 ms a file
+   against 1.70 to 1.91. Writing the window first and flushing it all at
+   once read 0.83 to 1.00 ms a message, and running each file's create,
+   write and flush on its own goroutine 0.41 to 0.98 with a creation order
+   no longer the batch's: both were set aside. The figures of record are the
+   bench A/B lane's on the CI runner (rule `827-publishmany16-per-msg`).
+   `TestABatchFlushesAWindowAtOnceAndRenamesInOrder`,
+   `TestABatchWhoseKthFlushFailsPublishesTheFirstKAndNothingAfter`.

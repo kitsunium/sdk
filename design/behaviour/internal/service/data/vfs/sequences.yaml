@@ -1284,24 +1284,43 @@ sequences:
         kind: actor
       - id: publishAll
         kind: self
-      - id: stage
+      - id: stageWindow
         kind: internal
-      - id: path
-        kind: stdlib
+      - id: appendDirs
+        kind: internal
     steps:
       - var:
           name: dirs
           type: "[]string"
       - loop:
+          cond: start < len(files)
           do:
+            - bind: window
+              eval: files[start:min(start+publishWindow, len(files))]
+            - bind: renamed, stageErr
+              eval: stageWindow(ops, window, perm)
+              to: stageWindow
+            - set: dirs
+              to: appendDirs
+              value: appendDirs(dirs, window[:renamed])
             - opt:
                 do:
-                  - return: index, cmp.Or(syncDirs(ops, dirs), stageErr)
-                init:
-                  bind: stageErr
-                  eval: stage(ops, file.Name, file.Data, perm)
-                  to: stage
+                  - return: start + renamed, cmp.Or(syncDirs(ops, dirs), stageErr)
                 when: stageErr != nil
+          init: start := 0
+          post: start += publishWindow
+      - return: len(files), syncDirs(ops, dirs)
+  - of: appendDirs
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendDirs
+        kind: self
+      - id: path
+        kind: stdlib
+    steps:
+      - loop:
+          do:
             - opt:
                 do:
                   - set: dirs
@@ -1311,10 +1330,182 @@ sequences:
                   eval: path.Dir(file.Name)
                   to: path
                 when: "!slices.Contains(dirs, dir)"
-          key: index
+          key: _
           range: files
           value: file
-      - return: len(files), syncDirs(ops, dirs)
+      - return: dirs
+  - of: stageWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: stageWindow
+        kind: self
+      - id: writeWindow
+        kind: internal
+    steps:
+      - bind: temps, verdicts, writeErr
+        eval: writeWindow(ops, window, perm)
+        to: writeWindow
+      - loop:
+          do:
+            - var:
+                name: failure
+                type: error
+            - opt:
+                do:
+                  - set: failure
+                    value: verdicts[index]
+                when: verdicts != nil
+            - opt:
+                do:
+                  - set: failure
+                    value: ops.rename(temp.name, window[index].Name)
+                when: failure == nil
+            - opt:
+                do:
+                  - return: index, discardAll(ops, temps[index:], window[index].Name, failure)
+                when: failure != nil
+          key: index
+          range: temps
+          value: temp
+      - return: len(temps), writeErr
+  - of: writeWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeWindow
+        kind: self
+      - id: newWindowFlusher
+        kind: internal
+      - id: createTemp
+        kind: internal
+      - id: writeTemp
+        kind: internal
+      - id: flusher.start
+        kind: internal
+    steps:
+      - set: temps
+        value: make([]tempHandle, 0, len(window))
+      - bind: flusher
+        eval: newWindowFlusher(len(window))
+        to: newWindowFlusher
+      - defer: |-
+          func() {
+          		//: no flush failed: no verdict to read.
+          		if flusher.wait() == nil {
+          			verdicts = nil
+          		}
+          	}()
+      - loop:
+          do:
+            - bind: temp, createErr
+              eval: createTemp(ops, file.Name, perm)
+              to: createTemp
+            - opt:
+                do:
+                  - return: temps, flusher.verdicts, failPublish(createErr, kerrs.String("path", file.Name))
+                when: createErr != nil
+            - opt:
+                do:
+                  - return: temps, flusher.verdicts, discard(ops, temp.name, file.Name, writeErr)
+                init:
+                  bind: writeErr
+                  eval: writeTemp(temp.file, file.Data)
+                  to: writeTemp
+                when: writeErr != nil
+            - set: temps
+              value: append(temps, temp)
+            - eval: flusher.start(index, temp.file)
+              to: flusher.start
+          key: index
+          range: window
+          value: file
+      - return: temps, flusher.verdicts, nil
+  - of: newWindowFlusher
+    participants:
+      - id: caller
+        kind: actor
+      - id: newWindowFlusher
+        kind: self
+      - id: group
+        kind: package
+    steps:
+      - bind: flusher
+        eval: "windowFlusher{verdicts: make([]error, files)}"
+      - opt:
+          do:
+            - set: flusher.runner, _
+              to: group
+              value: group.New(context.Background(), files)
+          when: files > 1
+      - return: flusher
+  - of: windowFlusher.start
+    participants:
+      - id: caller
+        kind: actor
+      - id: windowFlusher.start
+        kind: self
+      - id: syncAndClose
+        kind: internal
+      - id: f.runner.Go
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: f.verdicts[index]
+              to: syncAndClose
+              value: syncAndClose(file)
+            - return: ""
+          when: f.runner == nil
+      - eval: |-
+          f.runner.Go(func(context.Context) error {
+          		f.verdicts[index] = syncAndClose(file)
+          		//: the group keeps the first to fail; its slot names which file.
+          		return f.verdicts[index]
+          	})
+        to: f.runner.Go
+  - of: windowFlusher.wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: windowFlusher.wait
+        kind: self
+      - id: cmp
+        kind: stdlib
+      - id: f.runner.Wait
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: cmp.Or(f.verdicts...)
+              to: cmp
+          when: f.runner == nil
+      - return: f.runner.Wait()
+        to: f.runner.Wait
+  - of: discardAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: discardAll
+        kind: self
+      - id: cmp
+        kind: stdlib
+      - id: failPublish
+        kind: internal
+    steps:
+      - var:
+          name: removeErr
+          type: error
+      - loop:
+          do:
+            - set: removeErr
+              to: cmp
+              value: cmp.Or(removeErr, ops.remove(temp.name))
+          key: _
+          range: temps
+          value: temp
+      - return: failPublish(cmp.Or(cause, removeErr), kerrs.String("path", name))
+        to: failPublish
   - of: syncDirs
     participants:
       - id: caller
@@ -1391,14 +1582,31 @@ sequences:
         kind: actor
       - id: writeAndSync
         kind: self
+      - id: writeTemp
+        kind: internal
+      - id: syncAndClose
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: writeErr
+          init:
+            bind: writeErr
+            eval: writeTemp(file, data)
+            to: writeTemp
+          when: writeErr != nil
+      - return: syncAndClose(file)
+        to: syncAndClose
+  - of: writeTemp
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeTemp
+        kind: self
       - id: file.Write
         kind: internal
       - id: cmp
         kind: stdlib
-      - id: file.Sync
-        kind: internal
-      - id: file.Close
-        kind: internal
     steps:
       - opt:
           do:
@@ -1409,6 +1617,20 @@ sequences:
             eval: file.Write(data)
             to: file.Write
           when: writeErr != nil
+      - return: nil
+  - of: syncAndClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: syncAndClose
+        kind: self
+      - id: file.Sync
+        kind: internal
+      - id: cmp
+        kind: stdlib
+      - id: file.Close
+        kind: internal
+    steps:
       - opt:
           do:
             - return: cmp.Or(syncErr, file.Close())

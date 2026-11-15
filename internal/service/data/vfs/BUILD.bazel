@@ -29,6 +29,7 @@ go_library(
         "//internal/core/data/vfs",
         "//internal/core/proc",
         "//internal/kernel/concur/commit",
+        "//internal/kernel/concur/group",
         "//internal/kernel/errs",
     ],
 )
@@ -54,6 +55,7 @@ go_test(
         "os_dirflush_internal_test.go",
         "os_external_test.go",
         "publish_internal_test.go",
+        "publish_window_internal_test.go",
         "tempname_internal_test.go",
         "torn_external_test.go",
         "vfs_bench_test.go",

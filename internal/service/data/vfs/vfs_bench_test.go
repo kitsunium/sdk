@@ -153,9 +153,10 @@ func BenchmarkWriteAtomic_Parallel(b *testing.B) {
 }
 
 // BenchmarkWriteAtomicAll measures a batch of n 256-byte files published in
-// one call into one directory (issue #827): n file flushes and ONE directory
-// flush, against WriteAtomic's two flushes per file. ns/file is the figure to
-// set beside BenchmarkWriteAtomic's ns/op.
+// one call into one directory (issue #827): n file flushes, a window of
+// sixteen in flight at once, and ONE directory flush, against WriteAtomic's
+// two flushes per file. ns/file is the figure to set beside
+// BenchmarkWriteAtomic's ns/op.
 func BenchmarkWriteAtomicAll(b *testing.B) {
 	builders := []struct {
 		name  string
@@ -165,7 +166,7 @@ func BenchmarkWriteAtomicAll(b *testing.B) {
 		{"os", newBenchOS},
 	}
 	for _, builder := range builders {
-		for _, n := range []int{1, 16} {
+		for _, n := range []int{1, 16, 256} {
 			b.Run(builder.name+"/"+strconv.Itoa(n), func(b *testing.B) {
 				batcher, ok := builder.build(b, 256).(corevfs.AtomicBatchWriter)
 				if !ok {
