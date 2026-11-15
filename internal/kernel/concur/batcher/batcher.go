@@ -260,7 +260,10 @@ func (b *Batcher[T]) Close(ctx context.Context) error {
 // join stops the batcher's goroutine and waits for it within ctx. When ctx
 // ends first it cancels the lifetime context — a Sink that honours its context
 // returns, and the goroutine exits after it — and returns ctx's error without
-// waiting further.
+// waiting further, provided the goroutine was inside a delivery when ctx
+// ended: that is read BEFORE the cancellation, because the cancellation is
+// what lets such a Sink return, and a goroutine it has already released would
+// otherwise read as idle — the verdict then a race between join and Sink (#1470).
 func (b *Batcher[T]) join(ctx context.Context) error {
 	//: no goroutine was started.
 	if !b.looping {
@@ -282,11 +285,14 @@ func (b *Batcher[T]) join(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 	}
-	//: ctx is over: no delivery of the goroutine's may start or go on.
+	//: ctx has ended: was the goroutine inside a delivery? Read before the
+	//: cancellation releases the Sink.
+	inDelivery := b.busy.Load()
+	//: no delivery of the goroutine's may start or go on.
 	b.lifeCancel()
 	//: idle, it sees stop at once — and a delivery it begins now gives up on
 	//: the cancelled context before reaching the Sink.
-	if !b.busy.Load() {
+	if !inDelivery && !b.busy.Load() {
 		<-b.done
 		//: joined.
 		return nil

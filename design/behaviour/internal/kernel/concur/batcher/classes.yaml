@@ -186,7 +186,10 @@ types:
           join stops the batcher's goroutine and waits for it within ctx. When ctx
           ends first it cancels the lifetime context — a Sink that honours its context
           returns, and the goroutine exits after it — and returns ctx's error without
-          waiting further.
+          waiting further, provided the goroutine was inside a delivery when ctx
+          ended: that is read BEFORE the cancellation, because the cancellation is
+          what lets such a Sink return, and a goroutine it has already released would
+          otherwise read as idle — the verdict then a race between join and Sink (#1470).
         name: join
         params: ctx context.Context
         recv: b *Batcher[T]
