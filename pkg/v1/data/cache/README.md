@@ -394,7 +394,7 @@ Fetch returns the value for key and whether it was present and unexpired. A hit 
 func (*Cache) Keys() iter.Seq[K]
 ```
 
-Keys yields the keys present and unexpired when the loop starts, in no particular order. They are copied under the read lock and yielded after it is released, so the loop's body may call the cache — Set, Delete, Fetch — without deadlocking; what the body changes is not seen by the loop. A walk is not a read: no entry is promoted and no counter moves. Each loop allocates one slice of the keys.
+Keys yields the keys present and unexpired when the loop starts, in no particular order. They are copied under the lock and yielded after it is released, so the loop's body may call the cache — Set, Delete, Fetch — without deadlocking; what the body changes is not seen by the loop. A walk is not a read: no entry is promoted and no counter moves. Each loop allocates one slice of the keys.
 
 <a name="Cache.Len"></a>
 ### func \(Cache\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/collections/cache/cache.go>)
