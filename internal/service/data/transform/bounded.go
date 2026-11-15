@@ -51,6 +51,12 @@ var spillPool = recycler.NewPool(func() *spillChunk { return new(spillChunk) })
 // partial payload — dst's spare capacity may have been written, which the
 // port's convention allows.
 //
+// The ceiling outranks the fault (ADR 0213, kitsunium/sdk#1432): a decoder
+// hands over the last bytes of a cut stream in the same return as its sticky
+// fault, so a read that brings the detector byte and a fault together is an
+// overflow, and the fault is not reported. A fault is reported only when the
+// stream gave no more than max bytes before it (see ceilingFirst).
+//
 // A dst that holds the payload exactly leaves the stream unread at its end, and
 // the end is found by asking for ONE byte into probe — the decoder's own box
 // owns it, so asking costs nothing — and never by taking a 32 KiB spill chunk
@@ -85,8 +91,9 @@ func appendAllBounded(dst []byte, r io.Reader, probe *[1]byte, max int64) (decod
 	filled, done, err := fillSpare(dst, r, limit)
 	//: a read fault is the caller's to wrap; dst goes back as it came.
 	if err != nil {
-		//: never a partial payload.
-		return dst, false, err
+		//: never a partial payload; the ceiling first if the fault came past it.
+		overflow, err = ceilingFirst(err, int64(len(filled)-len(dst)), max)
+		return dst, overflow, err
 	}
 	//: the stream ended inside dst's capacity.
 	if done {
@@ -96,6 +103,26 @@ func appendAllBounded(dst []byte, r io.Reader, probe *[1]byte, max int64) (decod
 	}
 	//: dst is full, or the limit is reached; spill settles which, then grows once.
 	return spill(dst, filled, &boundedRead{r: r, probe: probe, limit: limit, max: max})
+}
+
+// drainBox drains a boxed decoder onto dst under max, then closes it, and says
+// what the stream owed: an overflow, a fault, or the payload. The decoder's
+// Close reports the sticky fault of a cut stream, and a stream past the
+// ceiling is refused for its size whatever its end holds (kitsunium/sdk#1432),
+// so a Close fault is judged only when the stream stayed within max.
+func drainBox(dst []byte, box *readerBox, max int64) (decoded []byte, overflow bool, err error) {
+	decoded, overflow, err = appendAllBounded(dst, box.rc, &box.probe, max)
+	cerr := box.rc.Close()
+	//: past the ceiling: the size is the answer, and the decoder's Close fault is not judged.
+	if overflow {
+		//: no plaintext escapes an over-cap stream.
+		return dst, true, nil
+	}
+	//: a clean drain followed by a Close fault still fails decompression.
+	if err == nil {
+		err = cerr
+	}
+	return decoded, false, err
 }
 
 // fillSpare reads r into out's spare capacity, never more than limit bytes
@@ -158,8 +185,13 @@ func spill(dst, out []byte, br *boundedRead) (decoded []byte, overflow bool, err
 	carried, ended, perr := probeEnd(br.r, br.probe, held < br.limit)
 	//: a fault while asking: dst goes back as it came, never a partial payload.
 	if perr != nil {
-		//: surfaced verbatim.
-		return dst, false, perr
+		//: the byte that came beside the fault counts: it is the detector when dst
+		//: already held max.
+		if carried {
+			held++
+		}
+		overflow, perr = ceilingFirst(perr, held, br.max)
+		return dst, overflow, perr
 	}
 	//: the stream is over and dst holds all of it: nothing to spill.
 	if ended {
@@ -179,8 +211,9 @@ func spill(dst, out []byte, br *boundedRead) (decoded []byte, overflow bool, err
 	chunks, spilled, overflow, err = fillChunks(br, chunks, spilled, held)
 	//: past the cap, or a fault: the chunks go back, dst as it came.
 	if overflow || err != nil {
-		//: never a partial payload.
+		//: never a partial payload; the ceiling first if the fault came past it.
 		releaseSpill(chunks)
+		overflow, err = ceilingFirst(err, held+int64(spilled), br.max)
 		return dst, overflow, err
 	}
 	//: one allocation of the final length — none at all for an exact fit,
@@ -236,9 +269,23 @@ func fillChunks(br *boundedRead, chunks []*spillChunk, spilled int, held int64) 
 	}
 }
 
+// ceilingFirst orders the two refusals a read can owe (kitsunium/sdk#1432):
+// read is every byte the stream has handed over past dst's prefix, fault the
+// one that came with them. Past max the answer is the ceiling's — overflow, no
+// fault — because the plaintext a caller refused to hold is a size fact
+// whatever the rest of the stream holds; within max the fault stands.
+func ceilingFirst(fault error, read, max int64) (overflow bool, err error) {
+	//: more than max plaintext came out: the ceiling answers, not the cut.
+	if read > max {
+		//: nothing is malformed that the caller could have judged.
+		return true, nil
+	}
+	return false, fault
+}
+
 // probeEnd asks r for one byte into probe, and says what came back: carried,
-// that probe[0] is the stream's next byte; ended, that the stream is over with
-// nothing more to take; or a fault. A decoder that answers with no byte and no
+// that probe[0] is the stream's next byte (a fault beside it is returned with
+// it); ended, that the stream is over with nothing more to take; or a fault. A decoder that answers with no byte and no
 // error is asked again, as io.Reader permits. When room is false — the limit is
 // reached, so the detector byte is already in — nothing is asked: the loop in
 // spill judges the overflow.
@@ -253,10 +300,11 @@ func probeEnd(r io.Reader, probe *[1]byte, room bool) (carried, ended bool, err 
 		n, rerr := r.Read(probe[:])
 		//: a byte: it opens the first chunk, even beside the end.
 		if n > 0 {
-			//: a fault beside a byte is the fault.
+			//: a fault beside a byte is the fault, and the byte is carried with it:
+			//: spill decides whether the byte put the stream past the ceiling.
 			if rerr != nil && rerr != io.EOF {
 				//: surfaced verbatim.
-				return false, false, rerr
+				return true, false, rerr
 			}
 			//: the byte is carried; the end, if it came, is found again by the loop.
 			return true, false, nil

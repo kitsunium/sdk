@@ -40,6 +40,7 @@ go_test(
     srcs = [
         "allocwindow_test.go",
         "bounded_internal_test.go",
+        "ceiling_external_test.go",
         "conformance_external_test.go",
         "decompress_alloc_test.go",
         "decompress_gc_bench_test.go",

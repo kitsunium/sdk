@@ -9,6 +9,8 @@ sequences:
         kind: self
       - id: fillSpare
         kind: internal
+      - id: ceilingFirst
+        kind: internal
       - id: settle
         kind: internal
       - id: spill
@@ -31,7 +33,10 @@ sequences:
         to: fillSpare
       - opt:
           do:
-            - return: dst, false, err
+            - set: overflow, err
+              to: ceilingFirst
+              value: ceilingFirst(err, int64(len(filled)-len(dst)), max)
+            - return: dst, overflow, err
           when: err != nil
       - opt:
           do:
@@ -42,6 +47,33 @@ sequences:
           when: done
       - return: "spill(dst, filled, &boundedRead{r: r, probe: probe, limit: limit, max: max})"
         to: spill
+  - of: drainBox
+    participants:
+      - id: caller
+        kind: actor
+      - id: drainBox
+        kind: self
+      - id: appendAllBounded
+        kind: internal
+      - id: box.rc.Close
+        kind: value
+    steps:
+      - set: decoded, overflow, err
+        to: appendAllBounded
+        value: appendAllBounded(dst, box.rc, &box.probe, max)
+      - bind: cerr
+        eval: box.rc.Close()
+        to: box.rc.Close
+      - opt:
+          do:
+            - return: dst, true, nil
+          when: overflow
+      - opt:
+          do:
+            - set: err
+              value: cerr
+          when: err == nil
+      - return: decoded, false, err
   - of: fillSpare
     participants:
       - id: caller
@@ -92,6 +124,8 @@ sequences:
         kind: self
       - id: probeEnd
         kind: internal
+      - id: ceilingFirst
+        kind: internal
       - id: settle
         kind: internal
       - id: fillChunks
@@ -110,7 +144,15 @@ sequences:
         to: probeEnd
       - opt:
           do:
-            - return: dst, false, perr
+            - opt:
+                do:
+                  - op: ++
+                    set: held
+                when: carried
+            - set: overflow, perr
+              to: ceilingFirst
+              value: ceilingFirst(perr, held, br.max)
+            - return: dst, overflow, perr
           when: perr != nil
       - opt:
           do:
@@ -139,6 +181,9 @@ sequences:
           do:
             - eval: releaseSpill(chunks)
               to: releaseSpill
+            - set: overflow, err
+              to: ceilingFirst
+              value: ceilingFirst(err, held+int64(spilled), br.max)
             - return: dst, overflow, err
           when: overflow || err != nil
       - set: out
@@ -204,6 +249,13 @@ sequences:
                   - return: chunks, spilled, false, rerr
                 when: rerr != nil
           forever: true
+  - of: ceilingFirst
+    steps:
+      - opt:
+          do:
+            - return: true, nil
+          when: read > max
+      - return: false, fault
   - of: probeEnd
     participants:
       - id: caller
@@ -226,7 +278,7 @@ sequences:
                 do:
                   - opt:
                       do:
-                        - return: false, false, rerr
+                        - return: true, false, rerr
                       when: rerr != nil && rerr != io.EOF
                   - return: true, false, nil
                 when: n > 0
@@ -392,10 +444,8 @@ sequences:
         kind: internal
       - id: releaseFlateReader
         kind: internal
-      - id: appendAllBounded
+      - id: drainBox
         kind: internal
-      - id: box.rc.Close
-        kind: value
     steps:
       - bind: box, rerr
         eval: takeFlateReader(src)
@@ -407,17 +457,8 @@ sequences:
       - defer: releaseFlateReader(box)
         to: releaseFlateReader
       - bind: out, overflow, derr
-        eval: appendAllBounded(dst, box.rc, &box.probe, max)
-        to: appendAllBounded
-      - opt:
-          do:
-            - set: derr
-              value: cerr
-          init:
-            bind: cerr
-            eval: box.rc.Close()
-            to: box.rc.Close
-          when: cerr != nil && derr == nil
+        eval: drainBox(dst, box, max)
+        to: drainBox
       - opt:
           do:
             - return: dst, false, errs.Wrap(derr, flateWrap)
@@ -571,10 +612,8 @@ sequences:
         kind: internal
       - id: releaseGzipReader
         kind: internal
-      - id: appendAllBounded
+      - id: drainBox
         kind: internal
-      - id: box.rc.Close
-        kind: value
     steps:
       - bind: box, rerr
         eval: takeGzipReader(src)
@@ -586,17 +625,8 @@ sequences:
       - defer: releaseGzipReader(box)
         to: releaseGzipReader
       - bind: out, overflow, derr
-        eval: appendAllBounded(dst, box.rc, &box.probe, max)
-        to: appendAllBounded
-      - opt:
-          do:
-            - set: derr
-              value: cerr
-          init:
-            bind: cerr
-            eval: box.rc.Close()
-            to: box.rc.Close
-          when: cerr != nil && derr == nil
+        eval: drainBox(dst, box, max)
+        to: drainBox
       - opt:
           do:
             - return: dst, false, errs.Wrap(derr, gzipWrap)
@@ -1493,10 +1523,8 @@ sequences:
         kind: internal
       - id: releaseFlateReader
         kind: internal
-      - id: appendAllBounded
+      - id: drainBox
         kind: internal
-      - id: box.rc.Close
-        kind: value
       - id: zlibCheckTrailer
         kind: internal
     steps:
@@ -1517,17 +1545,8 @@ sequences:
       - defer: releaseFlateReader(box)
         to: releaseFlateReader
       - bind: out, overflow, derr
-        eval: appendAllBounded(dst, box.rc, &box.probe, max)
-        to: appendAllBounded
-      - opt:
-          do:
-            - set: derr
-              value: cerr
-          init:
-            bind: cerr
-            eval: box.rc.Close()
-            to: box.rc.Close
-          when: cerr != nil && derr == nil
+        eval: drainBox(dst, box, max)
+        to: drainBox
       - opt:
           do:
             - return: dst, false, errs.Wrap(derr, zlibWrap)
