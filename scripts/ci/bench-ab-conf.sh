@@ -89,7 +89,7 @@ check() {
     elif [ -n "${ids[$id]:-}" ]; then why="rule '$id' declared twice"
     elif [ -z "${suites[$suite]:-}" ]; then why="rule '$id' names no suite '$suite'"
     elif ! [[ "$kind" =~ ^(ab|ratio|diff|value|cross|delta)$ ]]; then why="kind '$kind' (ab, ratio, diff, value, cross or delta)"
-    elif ! [[ "$metric" =~ ^[A-Za-z%-]+/[A-Za-z]+$ ]]; then why="metric '$metric'"
+    elif ! [[ "$metric" =~ ^[A-Za-z0-9%-]+/[A-Za-z0-9]+$ ]]; then why="metric '$metric'"
     elif ! [[ "$row" =~ ^Benchmark[^[:space:]]+$ ]]; then why="row '$row'"
     elif [[ "$kind" =~ ^(ratio|diff|cross)$ ]] && ! [[ "$row2" =~ ^Benchmark[^[:space:]]+$ ]]; then why="a $kind rule needs a second row"
     elif [[ "$kind" =~ ^(ab|value|delta)$ ]] && [ "$row2" != - ]; then why="a $kind rule takes no second row"

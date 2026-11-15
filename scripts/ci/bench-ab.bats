@@ -76,14 +76,15 @@ judge() {
 
 @test "conf: every threshold is its issue's own, unamended" {
   # id kind metric op threshold issue — the acceptance of #1038, #1059, #808,
-  # #834, #811, #1016, #1035, #827, #840, #1034, #1102, #910 and #892 as their
-  # issues wrote it (the owner's reading of #808's denominator and #1059's
-  # Load_Hit included; #827's and #840's per-message bounds as sixteen
+  # #834, #811, #1016, #1035, #827, #840, #1034, #1102, #910, #892 and #912 as
+  # their issues wrote it (the owner's reading of #808's denominator and
+  # #1059's Load_Hit included; #827's and #840's per-message bounds as sixteen
   # messages' ns/op, 16 × 0.55 and 16 × 0.40; #1035's "unchanged within noise"
   # read as ±10 %, a reading to confirm with the owner; #1102's zero
   # allocations and its 1.5 x B/op bound; #910's four allocations fewer, a
   # delta of -4; #892's 10 % of the block form, a ratio of 1.10, and its two
-  # floor rows).
+  # floor rows; #912's loop-turn p99 "not worse than before", head over base
+  # at most 1.00, and its bytes "divided by the follower count", at most 1/N).
   expected="$(
     cat <<'EOF'
 1038-set-newkey ab ns/op <= 1.05 #1038
@@ -174,6 +175,10 @@ judge() {
 892-s2-random-decompress ratio ns/op <= 1.10 #892
 892-s2-random-floor ratio ns/op <= 1.10 #892
 892-s2-json-floor ratio ns/op <= 1.10 #892
+912-turn-p99-2followers ab p99-us/turn <= 1.00 #912
+912-turn-p99-4followers ab p99-us/turn <= 1.00 #912
+912-bytes-2followers ratio B/op <= 0.50 #912
+912-bytes-4followers ratio B/op <= 0.25 #912
 EOF
   )"
   actual="$(awk '$1 == "rule" { print $2, $4, $5, $8, $9, $10 }' "$CONF")"
@@ -209,6 +214,12 @@ EOF
   grep -q '^rule 910-form-small-allocs  *codec-promote delta allocs/op BenchmarkMarshalPromoted/form/small-4 *- <= -4 #910 report$' "$CONF"
   [ "$(awk '$1 == "rule" && $3 == "tstream" { print $4 }' "$CONF" | sort | uniq -c | tr -s ' ' | tr '\n' ' ')" = " 10 ratio " ]
   [ "$(awk '$1 == "step0" { print $2, $3, $4 }' "$CONF" | grep '^tstream ')" = 'tstream cpu ^BenchmarkStream$/^random$/^s2$/^decompress$' ]
+  # #912's turn rows run one paced run of 5 s an op on the 4 CPUs they are judged on, base against head;
+  # its bytes are two head rows, the base having no BatchSender.
+  grep -q '^suite cturn normal internal/service/app/consensus .*\^BenchmarkLeaderLoopTurnAt1000PerSecond\$ 1x 4 4 ubuntu-latest - internal/service/app/consensus/,internal/core/app/consensus/$' "$CONF"
+  grep -q '^rule 912-turn-p99-2followers  *cturn ab  *p99-us/turn BenchmarkLeaderLoopTurnAt1000PerSecond/followers=2-4 ' "$CONF"
+  grep -q '^rule 912-bytes-4followers  *cenc  ratio B/op  *BenchmarkLeaderTurnEncoding/shared/followers=4-4 BenchmarkLeaderTurnEncoding/perpeer/followers=4-4 ' "$CONF"
+  [ "$(awk '$1 == "step0" { print $2, $3, $4 }' "$CONF" | grep '^cturn ')" = 'cturn cpu -' ]
   # Every rule of the lane is a report rule: no threshold gates before its pull request makes it hold.
   [ "$(awk '$1 == "rule" { print $11 }' "$CONF" | sort -u)" = report ]
   # Every base is the commit the issues were audited at.
@@ -260,6 +271,38 @@ EOF
   run bash "$CI_DIR/bench-ab-conf.sh" check
   [ "$status" -eq 2 ]
   [[ "$output" == *"step0 of suite 's' declared twice"* ]]
+}
+
+@test "conf: a metric may carry digits, a statistic in a unit per what, and still names one per-what" {
+  fixture_conf "rule t s ab p99-us/turn BenchmarkA-4 - <= 1.00 #912 report" \
+    "rule u s value p50-us/turn BenchmarkA-4 - <= 5 #912 report" \
+    "rule v s ratio B/op BenchmarkA-4 BenchmarkB-4 <= 0.25 #912 report"
+  run bash "$CI_DIR/bench-ab-conf.sh" check
+  [ "$status" -eq 0 ]
+  run bash "$CI_DIR/bench-ab-conf.sh" rules s
+  [[ "$output" == *"$(printf 't\ts\tab\tp99-us/turn\tBenchmarkA-4')"* ]]
+  for bad in "p99-us" "p99-us/turn/op" "p99_us/turn" "p99-us/" "/turn"; do
+    fixture_conf "rule t s ab $bad BenchmarkA-4 - <= 1.00 #912 report"
+    run bash "$CI_DIR/bench-ab-conf.sh" check
+    [ "$status" -eq 2 ] || { echo "accepted metric $bad"; return 1; }
+    [[ "$output" == *"metric '$bad'"* ]]
+  done
+}
+
+@test "verdict: a metric a benchmark reports itself, digits in its unit, is read like ns/op" {
+  fixture_conf "rule turn s ab p99-us/turn BenchmarkTurn/followers=2-4 - <= 1.00 #912 gate" \
+    "rule worse s ab p99-us/turn BenchmarkTurn/followers=2-4 - <= 0.70 #912 report"
+  mkdir -p "$WORK/raw"
+  for r in $(seq 1 20); do
+    # 40 µs in the base, 30 µs in the head: 0.75 every round.
+    printf 'BenchmarkTurn/followers=2-4\t1\t5000000000 ns/op\t2.1 p50-us/turn\t40 p99-us/turn\n' >"$WORK/raw/base-$(printf '%03d' "$r").txt"
+    printf 'BenchmarkTurn/followers=2-4\t1\t5000000000 ns/op\t2.1 p50-us/turn\t30 p99-us/turn\n' >"$WORK/raw/head-$(printf '%03d' "$r").txt"
+  done
+  judge s
+  [ "$status" -eq 0 ]
+  [ "$(verdict_of turn)" = pass ]
+  [ "$(column_of turn 12)" = 0.75 ]
+  [ "$(verdict_of worse)" = fail ]
 }
 
 @test "conf: a suite measures a package of internal/, of pkg/v1/ or of a vendor module under third-party/, and a delta rule reads one row" {
@@ -328,23 +371,27 @@ EOF
   run bash "$CI_DIR/bench-ab-conf.sh" suite big
   [[ "$output" == *"SUITE_STEP0_PROFILES="$'\n'* ]]
   [[ "$output" == *"SUITE_STEP0_PATTERN="* ]]
-  # The shipped table asks for singleflight's profiles at both CPU counts, and #892's CPU profile of the s2 stream, and nobody else's.
+  # The shipped table asks for singleflight's profiles at both CPU counts, #892's CPU profile of the s2 stream,
+  # and #912's of the leader's loop turn over the suite's own rows, and nobody else's.
   unset BENCH_AB_CONF
   for suite in sflight sflight-8; do
     run bash "$CI_DIR/bench-ab-conf.sh" suite "$suite"
     [[ "$output" == *"SUITE_STEP0_PROFILES=mutex,block,cpu"* ]]
     [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkDo_DistinctKeysParallel(_OneShard)?$'* ]]
   done
-  [ "$(awk '$1 == "step0" { print $2 }' "$CONF" | tr '\n' ' ')" = "sflight sflight-8 tstream " ]
+  [ "$(awk '$1 == "step0" { print $2 }' "$CONF" | tr '\n' ' ')" = "sflight sflight-8 tstream cturn " ]
   run bash "$CI_DIR/bench-ab-conf.sh" suite tstream
   [[ "$output" == *"SUITE_STEP0_PROFILES=cpu"* ]]
   [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkStream$/^random$/^s2$/^decompress$'* ]]
+  run bash "$CI_DIR/bench-ab-conf.sh" suite cturn
+  [[ "$output" == *"SUITE_STEP0_PROFILES=cpu"* ]]
+  [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkLeaderLoopTurnAt1000PerSecond$'* ]]
 }
 
 @test "plan: a dispatch takes the suites it names, by name or by package, in one mode" {
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal all
   [ "$status" -eq 0 ]
-  [ "${lines[1]}" = "count=17" ]
+  [ "${lines[1]}" = "count=19" ]
   refute grep -q scale <<<"${lines[0]}"
   run bash "$CI_DIR/bench-ab-conf.sh" plan scale all
   [ "${lines[1]}" = "count=3" ]
@@ -353,6 +400,8 @@ EOF
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"queue","runner":"ubuntu-latest"},{"suite":"queue-publish","runner":"ubuntu-latest"},{"suite":"logger","runner":"ubuntu-latest"}]}' ]
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal internal/kernel/concur/singleflight
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"sflight","runner":"ubuntu-latest"},{"suite":"sflight-8","runner":"ubuntu-latest"}]}' ]
+  run bash "$CI_DIR/bench-ab-conf.sh" plan normal internal/service/app/consensus
+  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"},{"suite":"cenc","runner":"ubuntu-latest"}]}' ]
   run env BENCH_AB_RUNNER=big-box bash "$CI_DIR/bench-ab-conf.sh" plan normal kcache-par
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"kcache-par","runner":"big-box"}]}' ]
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal queue-scale
@@ -381,6 +430,13 @@ EOF
   printf '%s\n' internal/service/data/vfs/os_publish.go >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"queue-publish","runner":"ubuntu-latest"}]}' ]
+  # #912's: the driver and its step function run both suites, the consensus port the turn alone.
+  printf '%s\n' internal/service/app/consensus/raft/raft.go >"$WORK/changed"
+  run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
+  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"},{"suite":"cenc","runner":"ubuntu-latest"}]}' ]
+  printf '%s\n' internal/core/app/consensus/membership.go >"$WORK/changed"
+  run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
+  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"}]}' ]
   # Outside internal/: the domain's transform, the promoted codecs and the form engine under them, the vendor module and the port it streams through.
   for pair in internal/service/data/transform/gzip.go:transform pkg/v1/data/codec/codec.go:codec-promote \
     internal/service/data/codec/form/form.go:codec-promote third-party/transform/stream.go:tstream \
@@ -402,7 +458,7 @@ EOF
   [ "${lines[1]}" = "count=0" ]
   printf '%s\n' scripts/ci/bench-ab-run.sh >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
-  [ "${lines[1]}" = "count=17" ]
+  [ "${lines[1]}" = "count=19" ]
   run bash "$CI_DIR/bench-ab-conf.sh" plan scale changed "$WORK/changed"
   [ "$status" -eq 2 ]
 }
