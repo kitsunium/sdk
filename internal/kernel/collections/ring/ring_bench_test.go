@@ -31,7 +31,10 @@ func BenchmarkNew(b *testing.B) {
 // BenchmarkTryWrite_Happy measures the single-producer, non-saturated TryWrite
 // path. SPSC is honoured: exactly one goroutine writes. The ring is kept from
 // saturating by draining one slot every iteration, so each TryWrite lands on the
-// fast path (two atomic loads, one slot store, one atomic store). 0 allocs
+// fast path (its own cursor loaded, one slot store, one atomic store; head is
+// loaded only when the ring looks full). An iteration is a write and a read,
+// so two atomic stores: BenchmarkSCStorePair measures them alone,
+// BenchmarkPublishFloor the one no design can drop (#1034). 0 allocs
 // expected — the slot store reuses the backing array.
 func BenchmarkTryWrite_Happy(b *testing.B) {
 	q, err := New[int](1024)
@@ -58,8 +61,9 @@ func BenchmarkTryWrite_Happy(b *testing.B) {
 
 // BenchmarkTryRead_Happy measures the single-consumer, non-empty TryRead path.
 // SPSC is honoured: exactly one goroutine reads. The ring is replenished one
-// slot every iteration so each TryRead lands on the fast path (two atomic loads,
-// one slot load, one zero-store, one atomic store). 0 allocs expected.
+// slot every iteration so each TryRead lands on the fast path (its own cursor
+// and tail loaded — tail because each read empties the ring here —, one slot
+// load, one zero-store, one atomic store). 0 allocs expected.
 func BenchmarkTryRead_Happy(b *testing.B) {
 	q, err := New[int](1024)
 	if err != nil {
@@ -186,6 +190,83 @@ func BenchmarkSCStorePair(b *testing.B) {
 		//: what TryWrite publishes, then what TryRead releases.
 		words.tail.Store(i + 1)
 		words.head.Store(i + 1)
+	}
+}
+
+// publishFloor is not a queue: it is the least a write-then-read iteration can
+// do when the item a TryWrite stores must be readable by a TryRead on another
+// goroutine. The item is stored, then published by one atomic store — the
+// only publication the Go memory model offers, sequentially consistent, an
+// XCHG on amd64 —, and the reader loads that store before the item. The
+// reader releases nothing and clears nothing, so a writer could not tell a
+// full ring from a free one, nor Len an item read from one held: what a
+// design gives up to drop the reader's store, the floor gives up too (#1034).
+type publishFloor struct {
+	// slots holds the items, a power of two long.
+	slots []int
+	// mask is len(slots)-1.
+	mask uint64
+	// pub is the write cursor as published to the reader.
+	pub atomic.Uint64
+	// tail is the writer's cursor, head the reader's: one goroutine here.
+	tail, head uint64
+}
+
+// TryWrite stores item, then publishes it.
+func (f *publishFloor) TryWrite(item int) error {
+	f.slots[f.tail&f.mask] = item
+	f.tail++
+	//: the one store a written item cannot do without.
+	f.pub.Store(f.tail)
+	//: nothing refused: the floor checks no bound.
+	return nil
+}
+
+// TryRead returns the next published item, or Empty; it releases no slot.
+func (f *publishFloor) TryRead() (int, error) {
+	//: the load that pairs with TryWrite's store, before the item.
+	if f.head == f.pub.Load() {
+		//: nothing published yet.
+		return 0, Empty
+	}
+	item := f.slots[f.head&f.mask]
+	f.head++
+	//: the item, its slot never released.
+	return item, nil
+}
+
+// Capacity reports the storage, which nothing bounds here.
+func (f *publishFloor) Capacity() int {
+	//: the slots' count.
+	return len(f.slots)
+}
+
+// Len counts the items written and not read.
+func (f *publishFloor) Len() int {
+	//: one goroutine: the two cursors are its own.
+	return int(f.tail - f.head)
+}
+
+// BenchmarkPublishFloor is the floor of every design of the happy rows, this
+// ring's or another: TryRead_Happy's iteration — a write, then a read of it,
+// through Queue[int] — on publishFloor, which keeps only what no design can
+// drop, the item's publication by one atomic store the next read must see.
+// The A/B lane's ring suite measures it beside the rows without judging it: on
+// a box where it stays above 0.50 of the base's TryRead_Happy (0.52 on the
+// development VM), #1034's original bound is out of reach for any design;
+// below, only for a design that gives up the reader's store, and with it Len
+// and Full. SCStorePair is the floor of a design that keeps that store too.
+func BenchmarkPublishFloor(b *testing.B) {
+	var q Queue[int] = &publishFloor{slots: make([]int, 1024), mask: 1023}
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		//: the item written, then read back, as TryRead_Happy does.
+		if err := q.TryWrite(i); err != nil {
+			b.Fatalf("TryWrite: %v", err)
+		}
+		if _, err := q.TryRead(); err != nil {
+			b.Fatalf("TryRead: %v", err)
+		}
 	}
 }
 

@@ -207,3 +207,109 @@ Same box as the 2026-11-03 edition (AMD EPYC 7351P, Linux 6.12, go1.27.3,
 - **The bar this row can hold**: `TryWrite_Happy` and `TryRead_Happy` within
   10 % of `SCStorePair` on the same box; `SPSC_ProducerConsumer/size1024` at
   most 60 % of the pre-#1034 row, met (120.5 ns on 2026-11-03, 135.7 here).
+
+## Edition 2026-11-15 — #1034 — seuil relevé selon la règle du propriétaire du 2026-11-14
+
+**The original bound.** #1034's acceptance: "benchstat on the same box:
+TryWrite_Happy and TryRead_Happy ns/op at most 50 % of the committed row;
+SPSC_ProducerConsumer/size1024 at most 60 %" — the base `ee1f48ba2` measured
+beside the head. #1316 held the hand-off on the VM (38–43 %, the editions
+above); neither happy row moved.
+
+**The designs tried.** The owner's decision of 2026-11-14: challenge the
+algorithm without assembly — the cursors published once a group of operations,
+writes and reads in batches, a sequence number a slot, any design that does
+not pay two sequentially consistent stores an iteration. Each design below was
+built outside the repository as a copy of this ring changed in that one
+respect, run under `-race` where each check applies — a producer and a
+consumer moving 200 000 items, each read once and in order (not the design
+grouping both sides: its writer may leave its last items unpublished), and the
+three checks of `TestQueue_ContractAcrossGoroutines` —, and measured through
+`Queue[int]` as the rows are: a write then a read an iteration, 1024 slots, ns
+per iteration. The development VM: AMD EPYC 7351P (Zen 1), Linux 6.12,
+go1.27.4, one CPU pinned (`taskset`), six interleaved rounds of 200 ms a row,
+medians (`benchstat`); the base's rows and this ring's from their own test
+binaries, eight interleaved rounds of 300 ms — base `TryWrite_Happy` 21.09 ns
+and `TryRead_Happy` 21.25, this ring 21.47 and 21.54, `SCStorePair` 20.94,
+`PublishFloor` 10.95. Indicative: the VM is shared.
+
+| Design | ns an iteration (VM) | Against the base | The contract it breaks |
+|---|---|---|---|
+| Base `ee1f48ba2` | 21.1–21.3 | 1 | — |
+| This ring (#1316), kept | 21.3–21.5 | 1.00–1.02 | none: it is at `SCStorePair`, the floor of the contract |
+| Each side's own cursor in a plain field | 21.6–22.1 | 1.01–1.04 | none, and nothing saved: an atomic load is a plain `MOV` on amd64 |
+| The reader publishes `head` every 16 reads, and when it finds the ring empty | 11.7–11.9 | 0.55–0.56 | `Len` counts the items read and not yet released (5 after five writes and two reads, where the contract says 3); `TryWrite` answers `Full` with a slot read, so the async sink's `DropOldest` would lose the newest record |
+| Both sides every 16 operations, the writer at once when the reader has caught up | 12.7 (`TryWrite_Happy`'s shape), 21.7 (`TryRead_Happy`'s) | 0.59, 1.02 | the same, and the items written: a writer that goes idle leaves its last ones unreadable (one of three read); where every read is of the item just written, both stores remain |
+| A sequence number a slot (Vyukov's SPSC) | 21.4–21.6 | 1.01–1.02 | `Len`, which needs the cursors, and the capacity, rounded up to a power of two — for the same two stores, on the slot instead of the cursor |
+| The same, the cursors stored too for `Len` | 42.5–42.7 | 2.0 | the capacity only, at four stores an iteration |
+| A `TryWriteN` / `TryReadN` sibling, one store a call | 21.7 a batch of 1; an item 5.5, 2.6 and 2.4 in batches of 4, 16 and 64 | 1.02; an item 0.26, 0.12, 0.11 | none, but the rows are `TryWrite` and `TryRead`, which it leaves as they are, and no caller batches yet: not added |
+| `PublishFloor`: one store a write, nothing on the reader's side | 10.95–11.7 | 0.52–0.55 | `Len` and `Full`: the floor of every design whose written item the next read sees |
+| `SCStorePair`: two stores | 20.9 | 0.98–0.99 | none: the floor of every design that keeps the contract |
+| Two interface calls and nothing else | 4.4 | 0.21 | — |
+
+- **The contract needs two stores an iteration.** An item `TryWrite` returned
+  on must be readable by the next `TryRead`, on another goroutine or after the
+  caller told one; `Len` is a snapshot any goroutine may take, exact at every
+  cursor; `Full` means every slot is taken. The first needs the writer to
+  publish its item with an atomic store before it returns, the other two the
+  reader to release its slot with one before it returns: a plain field the
+  other side read would be a data race. Every `sync/atomic` store is
+  sequentially consistent, and on amd64 an `XCHG`. So is
+  `internal/runtime/atomic.StoreRel`: `atomic_amd64.s` jumps to `Store`, and
+  the compiler makes it an intrinsic on PPC64 only, an alias of `Store`
+  everywhere else. The 2026-11-11 edition is right that Go offers no
+  release-only store, wrong to suggest the runtime keeps a cheaper one on
+  amd64: there is none to reach. The floor of the contract is `SCStorePair`,
+  0.98–0.99 of the base on the VM, and this ring measures it.
+- **Dropping the reader's store** costs `Len` and `Full` as the table says, and
+  leaves the writer's store and the two interface calls: `PublishFloor`, 0.52
+  to 0.55 of the base on the VM. No design reaches 0.50 there.
+- **The writer's store cannot be grouped**: `TryRead_Happy` reads the item just
+  written, so a grouped publication either publishes every write anyway or
+  answers `Empty` with an item written.
+- **Batching inside one call** keeps the contract — a `TryWriteN` publishes its
+  items before it returns, a `TryReadN` releases its slots — and passes 0.50
+  an item from four items a batch; it does not move the rows. The async sink's
+  drainer, which takes up to `batchMax` records under one lock, is where it
+  would go.
+- **The hand-off.** A sequence number a slot hands a record over in ~28 ns
+  where this ring takes 89–144 (`SPSC_ProducerConsumer/size1024`'s shape, four
+  CPUs, eight rounds, noisy): the item and its flag share a line. With its
+  cursors stored too, for `Len`, it still takes about half this ring's time
+  (45–91 ns against 93–108, four CPUs pinned), and doubles the happy rows (2.0
+  × the base). No design tried holds the three bounds at once; this ring is
+  the contract-keeping design best on the happy rows, which none reaches.
+- **Step 0** (`go tool objdump`): the base's `TryWrite` and `TryRead` each
+  carry a `DIVQ` and an `XCHGQ`, this ring's an `XCHGQ` alone; the rows call
+  them through the interface, so their inlining (`-gcflags=-m=2`: `TryWrite`
+  inlinable, `TryRead` over the budget, at both commits) does not reach the
+  rows. `perf stat` is not available on the VM; the A/B lane records it on
+  the runner.
+
+**The runner.** [Run 43669032740](https://github.com/kitsunium/sdk/actions/runs/43669032740)
+of the A/B lane (`bench-ab.yml`): AMD EPYC 7763, 4 vCPUs, 20 interleaved
+rounds, this ring (main's, the one this edition keeps) against `ee1f48ba2`.
+
+| Rule | Row | Median | 95 % interval |
+|---|---|---|---|
+| `1034-trywrite-happy` | `TryWrite_Happy` head / base | 0.944 | 0.920 – 0.952 |
+| `1034-tryread-happy` | `TryRead_Happy` head / base | 0.941 | 0.937 – 0.945 |
+| `1034-spsc-1024` | `SPSC_ProducerConsumer/size1024` head / base | 0.762 | 0.753 – 0.773 |
+| `1034-floor-sc` | `SCStorePair` head / `TryWrite_Happy` base | 0.822 | 0.808 – 0.825 |
+| `1034-trywrite-allocs`, `1034-tryread-allocs` | allocs/op | 0 | 0 – 0 |
+
+In ns: base `TryWrite_Happy` 6.03 and `TryRead_Happy` 6.08, this ring 5.69 and
+5.72, `SCStorePair` 4.96. On that box the two stores alone are 0.81–0.82 of
+the base's row: no design that keeps the contract reaches 0.50 there either.
+
+**The new bounds.** Each is the high bound of the 95 % interval above, rounded
+up to the hundredth: `TryWrite_Happy` at most **0.96** of the base's row,
+`TryRead_Happy` at most **0.95**, `SPSC_ProducerConsumer/size1024` at most
+**0.78** (`scripts/ci/bench-ab.conf`, rules `1034-trywrite-happy`,
+`1034-tryread-happy`, `1034-spsc-1024`); allocations still at most 0, and
+`1034-floor-sc` now holds the contract's floor at 0.50 or more. The rules stay
+`report`: the bounds sit less than 1 % above one runner family's interval.
+
+« relevé selon la règle du propriétaire du 2026-11-14 » — no design that keeps
+the contract reaches the original bound, so each is raised to the best
+design's measure on the runner, this ring's, with this trail.

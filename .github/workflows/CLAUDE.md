@@ -354,11 +354,16 @@ Everything — the raw rounds, `base.txt`/`head.txt`, benchstat, step 0,
 verdict — is uploaded as `bench-ab-<suite>-<run_id>-<attempt>` even when a
 step failed.
 
-**Gate or report.** Every rule is `report` today: each issue is open, so its
-row does not hold yet, and a report row is judged and written but never fails
-the leg. The pull request that makes a row hold turns it to `gate` in the
-table — the threshold itself is never edited there, and `bench-ab.bats` pins
-every one to its issue. A dispatch with `enforce` gates every row for that run.
+**Gate or report.** Every rule is `report` today: a row that does not hold
+yet is judged and written but never fails the leg, and #1034's raised bounds
+stay `report` too, less than 1 % above the interval one runner family
+measured. The pull request that makes a row hold turns it to `gate` in the
+table — the threshold itself is never edited there but under the owner's rule
+of 2026-11-14: when no design that keeps the package's contract reaches it, it
+becomes the high bound of the best design's 95 % interval on the runner,
+rounded up to the hundredth, its trail in the package's `BENCH.md` (#1034's
+three). `bench-ab.bats` pins every one. A dispatch with `enforce` gates every
+row for that run.
 
 **Scale mode** (dispatch only, `mode=scale`): the suites `*-scale`, whose rows
 are the large ones — a row whose name ends in `_<n>M` or `_Scale`. The queue's
