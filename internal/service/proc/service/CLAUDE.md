@@ -116,7 +116,11 @@ kernel's `backoff`, the clock the kernel's.
   hands `connection` before the store to each `ExecStart=`; `finish` closes
   it, and `closeSubscriptions` — the last of the end — marks `ended`, which
   `Subscribe` reads. `NewUnit` keeps its own body: as a one-line wrapper it
-  would inline into the facade's forwarder past kit's budget.
+  would inline into the facade's forwarder past kit's budget. A context
+  already done is read (`ctx.Err()`) before `Start`: its `select` picks at
+  random between a closed `Done` and the unit's answer, and the instance
+  came back with a nil error (#1493); the start is posted unwaited, so the
+  instance still runs and ends.
 - **S0g — done** (the cgroup modes; ADR 0214's amendment of 2026-11-08).
   A `Config.Cgroup` that is a `CgroupUnit` sets `setGroupUnit`; `KillMode`'s
   zero resolves to control-group there. `beginStart` sets `flagPrepare`, so

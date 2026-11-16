@@ -48,6 +48,15 @@ func SpawnInstance(ctx context.Context, template *Config, instance string, conn 
 		//: the refusal.
 		return nil, err
 	}
+	//: the caller gave up already: its error, read before any answer of the
+	//: unit — Start's select picks at random between a Done already closed
+	//: and an answer, and would report a start (kitsunium/sdk#1493) —, the
+	//: start posted without a waiter, so the instance runs and ends.
+	if err = ctx.Err(); err != nil {
+		u.post(&event{kind: evStart})
+		//: the instance, and the caller's error.
+		return u, err
+	}
 	err = u.Start(ctx)
 	//: the caller gave up — maybe before the start was even posted: it is
 	//: posted again, a start joining a start, so the instance runs and ends.
