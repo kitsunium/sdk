@@ -52,22 +52,25 @@ Commit is `Propose` on the leader, from the proposal's due time to its return (c
 
 ## Commit while a snapshot streams (`BenchmarkTCPCommitStream`, #920, #1365)
 
-#920's third criterion (#1365): the data lane's commit p99 within 10 % of the no-stream baseline while a paced snapshot stream runs. Three voters over loopback mTLS, each on a data directory of the device as in `TCP/<device>/paced`, take 1 000 proposals/s of 256 B. Their state machine keeps no state: its snapshot is 10 s of the rate of pseudo-random bytes written on the fly, which the codec cannot shrink, cut once before the windows and never during them. One op is three windows of one cluster under one leader: A, 4 s with no stream; B, 8 s while a learner that joined on tmpfs (another host's disk in a deployment) is streamed that snapshot at `SnapshotStreamBytesPerSecond`, the stream in flight from B's first proposal to its last; A again, 4 s, once the learner is closed and removed. Each A follows 2 s of the same load, measured and dropped. **B / A** — B's p99 over the p99 of both A pooled — is the ratio #920 bounds: one cluster, so it never compares two runs, and the order A B A cancels a linear drift. B / `TCP/<device>/paced`, the ratio #1365 asks for, divides by that row of the same generation, another cluster at another time (measured again just before the op when this section is rewritten alone): printed against the same bound, for information. The rate is fixed before measuring at 8 MiB/s, the rate a hand-run bench missed the bound at. The leader's fdatasync, the collections and the scheduling delay of each window tell a disk, a collection or the scheduler apart from the stream. One op is one measure on this host: the verdict is the A/B lane's, below. Measured on AMD EPYC 7351P 16-Core Processor (7 cores, GOMAXPROCS 4), go1.27.4 linux/amd64, `perf/consensus-stream-pace` at `66d7e5552`, 2026-11-15T13:01:32Z.
+#920's third criterion (#1365): the data lane's commit p99 within 10 % of the no-stream baseline while a paced snapshot stream runs. Three voters over loopback mTLS, each on a data directory of the device as in `TCP/<device>/paced`, take 1 000 proposals/s of 256 B. Their state machine keeps no state: its snapshot is 10 s of the rate of pseudo-random bytes written on the fly, which the codec cannot shrink, cut once before the windows and never during them. One op is three windows of one cluster under one leader: A, 4 s with no stream; B, 8 s while a learner that joined on tmpfs (another host's disk in a deployment) is streamed that snapshot at `SnapshotStreamBytesPerSecond`, the stream in flight from B's first proposal to its last; A again, 4 s, once the learner is closed and removed. Each A follows 2 s of the same load, measured and dropped. **B / A** — B's p99 over the p99 of both A pooled — is the ratio #920 bounds: one cluster, so it never compares two runs, and the order A B A cancels a linear drift. B / `TCP/<device>/paced`, the ratio #1365 asks for, divides by that row of the same generation, another cluster at another time (measured again just before the op when this section is rewritten alone): printed against the same bound, for information. The rate is fixed before measuring at 8 MiB/s, the rate a hand-run bench missed the bound at. The leader's fdatasync, the collections and the scheduling delay of each window tell a disk, a collection or the scheduler apart from the stream. One op is one measure on this host: the verdict is the A/B lane's, below. Measured on AMD EPYC 7351P 16-Core Processor (8 cores, GOMAXPROCS 4), go1.27.4 linux/amd64, `docs/consensus-ab-verdicts` at `48e4cd30d`, 2026-11-16T10:01:14Z.
 
 | Row | Rate | Snapshot | Commits A / B | commit p99, A | commit p99, B | B / A, bound 1.10 | `TCP/<device>/paced` commit p99 | B / `TCP/<device>/paced`, bound 1.10 | fdatasync p99, A / B | GC cycles, A / B | sched p99, A / B | Stream through B |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `TCP/data-disk/paced+stream` | 8 MiB/s | 80.0 MiB | 8000 / 8000 | 15.745 ms | 16.119 ms | 1.024, met | 29.171 ms | 0.553, met | 5.268 / 5.254 ms | 4 / 3 | 197 / 197 µs | 8.05 MiB/s, 15.2 MiB left |
-| `TCP/tmpfs/paced+stream` | 8 MiB/s | 80.0 MiB | 8000 / 8000 | 2.489 ms | 2.918 ms | 1.172, **not met** | 2.318 ms | 1.259, **not met** | 0.002 / 0.002 ms | 4 / 4 | 82 / 82 µs | 8.02 MiB/s, 15.2 MiB left |
+| `TCP/data-disk/paced+stream` | 8 MiB/s | 80.0 MiB | 8000 / 8000 | 12.252 ms | 12.777 ms | 1.043, met | 9.493 ms | 1.346, **not met** | 1.841 / 2.031 ms | 4 / 4 | 115 / 164 µs | 8.07 MiB/s, 15.2 MiB left |
+| `TCP/tmpfs/paced+stream` | 8 MiB/s | 80.0 MiB | 8000 / 8000 | 1.451 ms | 1.531 ms | 1.056, met | 1.705 ms | 0.898, met | 0.001 / 0.001 ms | 4 / 4 | 57 / 57 µs | 8.00 MiB/s, 15.2 MiB left |
 
 The verdict is the A/B lane's (`.github/workflows/bench-ab.yml`, suite `cstream` of `scripts/ci/bench-ab.conf`): twenty rounds of the op on one runner, both rows the head's, and the rule holds when the high end of the 95 % interval of the per-round B / A meets 1.10, on `data-disk` and on `tmpfs` apart; `cstream-scale` publishes 2 and 32 MiB/s under the same bound, for information. Each verdict is the lane's `verdict.md`, committed under `testdata/bench/` as `<suite>-<base>.verdict.md`.
 
-No verdict is committed yet:
+From `testdata/bench/cstream-ee1f48ba2.verdict.md`:
 
-```sh
-gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f suites=cstream -f rounds=20
-gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f mode=scale -f suites=cstream-scale
-CONSENSUS_BENCH_ONLY=stream make bench-consensus   # once each verdict.md is committed
-```
+### bench A/B: cstream on AMD EPYC 9V45 96-Core Processor, 4 vCPUs
+
+20 rounds read from /home/runner/work/_temp/bench-ab/raw; 4 CPUs (the suite needs 4). A rule holds when the bound of the 95 % interval of its per-round values meets its threshold.
+
+| rule | issue | value | n | low | median | high | threshold | verdict | mode |
+|---|---|---|---|---|---|---|---|---|---|
+| 920-stream-8mib-tmpfs | #920 | p99-ms/commit BenchmarkTCPCommitStream/tmpfs/rate=8MiB/paced+stream-4 / BenchmarkTCPCommitStream/tmpfs/rate=8MiB/paced-4 | 20 | 1.00527 | 1.00801 | 1.01067 | <= 1.10 | pass | report |
+| 920-stream-8mib-disk | #920 | p99-ms/commit BenchmarkTCPCommitStream/data-disk/rate=8MiB/paced+stream-4 / BenchmarkTCPCommitStream/data-disk/rate=8MiB/paced-4 | 20 | 0.140203 | 0.990724 | 1.01796 | <= 1.10 | pass | report |
 
 ## `Propose` → applied, three in-process nodes over the memory doubles (`BenchmarkThreeNodePropose`)
 
@@ -108,13 +111,27 @@ Three memory nodes in a synctest bubble, every frame delayed by half its pair's 
 
 "Not worse than before" compares two commits, which one host's rows cannot: the A/B lane (`.github/workflows/bench-ab.yml`, suites `cturn` and `cenc` of `scripts/ci/bench-ab.conf`) runs the base's test binary, built with the head's `loopturn_bench_test.go`, and the head's alternated on one runner, twenty rounds or more, and a rule holds when the high end of the 95 % interval of its per-round values meets its threshold: `TURN`'s p99 head over base at most 1.00, `ENC`'s shared over per-peer at most 1/N. Two bases: `ee1f48ba2`, the suites' own, main before lot L1, and `bench/912-parent`, the parent of #912's commit with the one line of `stream.go` that makes it build. Each verdict is the lane's `verdict.md`, committed under `testdata/bench/` as `<suite>-<base>.verdict.md`.
 
-No verdict is committed yet:
+From `testdata/bench/cenc-ee1f48ba2.verdict.md`:
 
-```sh
-gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f suites=cturn,cenc -f rounds=40
-gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f suites=cturn -f base=bench/912-parent -f rounds=40
-CONSENSUS_BENCH_ONLY=ab make bench-consensus   # once each verdict.md is committed
-```
+### bench A/B: cenc on AMD EPYC 7763 64-Core Processor, 4 vCPUs
+
+20 rounds read from /home/runner/work/_temp/bench-ab/raw; 4 CPUs (the suite needs 1). A rule holds when the bound of the 95 % interval of its per-round values meets its threshold.
+
+| rule | issue | value | n | low | median | high | threshold | verdict | mode |
+|---|---|---|---|---|---|---|---|---|---|
+| 912-bytes-2followers | #912 | B/op BenchmarkLeaderTurnEncoding/shared/followers=2-4 / BenchmarkLeaderTurnEncoding/perpeer/followers=2-4 | 20 | 0.11387 | 0.11387 | 0.11387 | <= 0.50 | pass | report |
+| 912-bytes-4followers | #912 | B/op BenchmarkLeaderTurnEncoding/shared/followers=4-4 / BenchmarkLeaderTurnEncoding/perpeer/followers=4-4 | 20 | 0.0575959 | 0.0575959 | 0.0575959 | <= 0.25 | pass | report |
+
+From `testdata/bench/cturn-ee1f48ba2.verdict.md`:
+
+### bench A/B: cturn on AMD EPYC 7763 64-Core Processor, 4 vCPUs
+
+20 rounds read from /home/runner/work/_temp/bench-ab/raw; 4 CPUs (the suite needs 4). A rule holds when the bound of the 95 % interval of its per-round values meets its threshold.
+
+| rule | issue | value | n | low | median | high | threshold | verdict | mode |
+|---|---|---|---|---|---|---|---|---|---|
+| 912-turn-p99-2followers | #912 | p99-us/turn BenchmarkLeaderLoopTurnAt1000PerSecond/followers=2-4 head/base | 20 | 0.932952 | 0.958652 | 0.996603 | <= 1.00 | pass | report |
+| 912-turn-p99-4followers | #912 | p99-us/turn BenchmarkLeaderLoopTurnAt1000PerSecond/followers=4-4 head/base | 20 | 0.896538 | 0.904935 | 0.928084 | <= 1.00 | pass | report |
 
 ## D16's provisional targets on this host
 
