@@ -72,8 +72,8 @@ silence closed (`read_silence`).
 | alloc (D15) | `make test-alloc` (race off): `gen_perf_test.go` in `raft/` and in `wire/`, written by kit gen from `design/sdk.yaml`'s budgets over each package's `perf_fixtures_test.go` — the leader's `Step` on an append response (1) and the follower's on 64 entries (1, the entry slice: 65 before #1110 and left there until L1's audit), `AppendMessage`, `ParseMessage` and `ChainSum` (0) — and `TestTheRecordCodecAllocatesNothing` (`recordcodec_alloc_internal_test.go`, counted with `allocwindow_test.go`), the log record codec's 0; the bounds D15 revised are ADR 0152's amendment of 2026-11-12 (#921); `Propose` on three memory nodes is no budget — kit's 60 000 calls with the collector off hold some 2 GB — and is `BENCH.md`'s `MEM/propose` row |
 | bench | `go test -run '^$' -bench BenchmarkFileLogEntries -benchmem ./` (`filelog_bench_test.go`), `-bench BenchmarkApplied1` (`applied_bench_test.go`); numbers in `BENCH.md` |
 | dm-crypt | `testdata/dmcrypt/run.sh [iterations] [negative] [ext4\|xfs] [zerofill\|fallocate] [fdatasync\|rwfdsync]` (Docker, privileged): fsync latency, G1's preallocation row (`TestDMCryptPreallocBench`, #922), G1's paired sync path row (`TestDMCryptSyncPathBench`, ADR 0190's shape, #923) and power cuts through LUKS, on ext4 or xfs; with `fallocate` or `rwfdsync` the file log's suite and fuzz seeds run first on that filesystem, every log fallocated (`CONSENSUS_PREALLOCATE=fallocate`) or writing `RWF_DSYNC` (`CONSENSUS_SYNC_PATH=rwfdsync`), and with `rwfdsync` the power cuts too; results in `testdata/dmcrypt/RESULTS.md` |
-| bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`), keeping the hand-run part from `## Hand-run micro-benchmarks` on, which only its own commands refresh (`keepHandRun`, `zzbenchmdkeep_internal_test.go`), and failing before it measures anything when the existing `BENCH.md` cannot be read rather than writing over it as empty (`benchBefore`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911). #912's second criterion (#1364) is three of its sections: `TURN/followers=N`, the leader's loop turns at 1 000 proposals/s kept raw by a test `Meter` (`BenchmarkLeaderLoopTurnAt1000PerSecond`, `loopturn_bench_test.go`), `ENC/followers=N`, a turn's bytes shared against per follower (`BenchmarkLeaderTurnEncoding`, `turnencoding_bench_test.go`), and the A/B lane's verdicts on them, committed under `testdata/bench/` and copied; `CONSENSUS_BENCH_ONLY=turn,enc,ab` measures and rewrites those alone, in place (`benchSplice`) |
-| bench A/B | `scripts/ci/bench-ab.conf`'s suites `cturn` (the TURN rows, head over base, base `ee1f48ba2` or `-f base=bench/912-parent`) and `cenc` (the ENC rows, the head's shared over per-peer): `gh workflow run bench-ab.yml -R kitsunium/sdk -f suites=cturn,cenc -f rounds=40`; the two bench files are self-contained so the lane copies `loopturn_bench_test.go` onto the base, where `turnencoding_bench_test.go` does not build (no `batch` field) and is left out |
+| bench (D15, D16) | `make bench-consensus` (part of `make bench`): `bazel run` of the `manual`, race-off `consensus_bench_test`, whose `TestGenerateBenchMD` runs `BenchmarkSegmentedLogAppendSync`, `BenchmarkThreeNodePropose`, `BenchmarkTCPCommit` and the synctest simulator over the RTT matrix, and writes `BENCH.md` per device (`CONSENSUS_BENCH_DEVICES=name=dir,…`, else `.bench/consensus` and `/dev/shm`), keeping the hand-run part from `## Hand-run micro-benchmarks` on, which only its own commands refresh (`keepHandRun`, `zzbenchmdkeep_internal_test.go`), and failing before it measures anything when the existing `BENCH.md` cannot be read rather than writing over it as empty (`benchBefore`); `make profile-consensus WAVE=…` then `make benchstat-diff BEFORE=… AFTER=…` compare two waves (#911). #912's second criterion (#1364) is three of its sections: `TURN/followers=N`, the leader's loop turns at 1 000 proposals/s kept raw by a test `Meter` (`BenchmarkLeaderLoopTurnAt1000PerSecond`, `loopturn_bench_test.go`), `ENC/followers=N`, a turn's bytes shared against per follower (`BenchmarkLeaderTurnEncoding`, `turnencoding_bench_test.go`), and the A/B lane's verdicts on them, committed under `testdata/bench/` and copied; #920's third criterion (#1365) is the section `TCP/<device>/paced+stream`, the data lane's commit p99 while a snapshot stream paced at 8 MiB/s runs over the same cluster's with none — three windows of one cluster, A, B and A, a learner on tmpfs streamed a snapshot written on the fly by a machine that keeps no state, B / A the ratio bounded at 1.10 and B / `TCP/<device>/paced` printed beside it (`BenchmarkTCPCommitStream`, `streamcommit_bench_test.go`), with the lane's verdicts on it, `cstream-*.verdict.md`; `CONSENSUS_BENCH_ONLY=stream,turn,enc,ab` measures and rewrites those alone, in place (`benchSplice`), `stream` measuring `TCP/<device>/paced` again |
+| bench A/B | `scripts/ci/bench-ab.conf`'s suites `cturn` (the TURN rows, head over base, base `ee1f48ba2` or `-f base=bench/912-parent`) and `cenc` (the ENC rows, the head's shared over per-peer): `gh workflow run bench-ab.yml -R kitsunium/sdk -f suites=cturn,cenc -f rounds=40`; the two bench files are self-contained so the lane copies `loopturn_bench_test.go` onto the base, where `turnencoding_bench_test.go` does not build (no `batch` field) and is left out. `cstream` (#920, #1365: `BenchmarkTCPCommitStream` at 8 MiB/s on `data-disk` and `tmpfs`, `paced+stream` over `paced`, both the head's, at most 1.10) and `cstream-scale` (2 and 32 MiB/s, `-f mode=scale`): `gh workflow run bench-ab.yml -R kitsunium/sdk -f suites=cstream -f rounds=20`; `streamcommit_bench_test.go` builds on the generator and on the pacing, so the base leaves it out |
 
 Under Bazel `consensus_test` has 48 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
@@ -123,13 +123,14 @@ took 18 s there (2 s on a Linux workstation) and
 `TestHealthWarnsBeforeTheSnapshotLimit` 13 s, settling its cuts after each
 of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 
-`consensus_bench_test.go`, `loopturn_bench_test.go` and
-`turnencoding_bench_test.go` are gazelle-excluded and compiled only into
-`consensus_bench_test` (rule 12), with `zzbenchmdkeep_internal_test.go`:
-each uses the package's production code and none of the suite's test
-files, so that target needs no other source, and it must stay so; the two
-bench files of #912 also compile alone on the commits the A/B lane copies
-them onto. Under `go test` it joins the package's binary, where its generator
+`consensus_bench_test.go`, `loopturn_bench_test.go`,
+`streamcommit_bench_test.go` and `turnencoding_bench_test.go` are
+gazelle-excluded and compiled only into `consensus_bench_test` (rule 12),
+with `zzbenchmdkeep_internal_test.go`: each uses the package's production
+code and none of the suite's test files, so that target needs no other
+source, and it must stay so; the two bench files of #912 also compile alone
+on the commits the A/B lane copies them onto, and the stream's of #920
+builds on the generator's helpers, which no base has. Under `go test` it joins the package's binary, where its generator
 returns at once unless `-run` names it and its benchmarks run only under
 `-bench`. The fdatasyncs are timed through `fileLog.timedSync`, which only
 the lane sets. Its numbers are a host's, never a budget (D15): the verdicts
@@ -1482,7 +1483,10 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   how far a stream is, `consensus_snapshot_stream_bytes_per_second` how fast
   each one went (#920, `TestTwoLearnersAreStreamedOneAfterTheOther`,
   `TestAPacedStreamEndsInItsSizeOverItsRate`,
-  `TestThePacingWaitsOnTheInjectedClockOnly`).
+  `TestThePacingWaitsOnTheInjectedClockOnly`). What a paced stream costs the
+  data lane is `BENCH.md`'s `TCP/<device>/paced+stream` rows and the A/B
+  lane's `cstream` (#1365): measure it against a cluster that keeps no state
+  in its heap, or it measures that heap's collections instead.
 - Accept an offer of the snapshot this node is restoring: it was streamed
   again and committed over the file the restore reads (#610,
   `answerRestoring`, `TestAnOfferOfTheSnapshotBeingRestoredIsRefused`).

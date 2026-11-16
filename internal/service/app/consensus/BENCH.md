@@ -50,6 +50,25 @@ Commit is `Propose` on the leader, from the proposal's due time to its return (c
 | `TCP/xfs-loop/paced` | 1132 | 6.810 ms | 13.160 ms | 1.975 ms | 3.193 ms | 2.00 | 996 |
 | `TCP/xfs-loop/saturated` | 147555 | 30.888 ms | 55.301 ms | 3.860 ms | 14.048 ms | 2.00 | 129527 |
 
+## Commit while a snapshot streams (`BenchmarkTCPCommitStream`, #920, #1365)
+
+#920's third criterion (#1365): the data lane's commit p99 within 10 % of the no-stream baseline while a paced snapshot stream runs. Three voters over loopback mTLS, each on a data directory of the device as in `TCP/<device>/paced`, take 1 000 proposals/s of 256 B. Their state machine keeps no state: its snapshot is 10 s of the rate of pseudo-random bytes written on the fly, which the codec cannot shrink, cut once before the windows and never during them. One op is three windows of one cluster under one leader: A, 4 s with no stream; B, 8 s while a learner that joined on tmpfs (another host's disk in a deployment) is streamed that snapshot at `SnapshotStreamBytesPerSecond`, the stream in flight from B's first proposal to its last; A again, 4 s, once the learner is closed and removed. Each A follows 2 s of the same load, measured and dropped. **B / A** — B's p99 over the p99 of both A pooled — is the ratio #920 bounds: one cluster, so it never compares two runs, and the order A B A cancels a linear drift. B / `TCP/<device>/paced`, the ratio #1365 asks for, divides by that row of the same generation, another cluster at another time (measured again just before the op when this section is rewritten alone): printed against the same bound, for information. The rate is fixed before measuring at 8 MiB/s, the rate a hand-run bench missed the bound at. The leader's fdatasync, the collections and the scheduling delay of each window tell a disk, a collection or the scheduler apart from the stream. One op is one measure on this host: the verdict is the A/B lane's, below. Measured on AMD EPYC 7351P 16-Core Processor (7 cores, GOMAXPROCS 4), go1.27.4 linux/amd64, `perf/consensus-stream-pace` at `66d7e5552`, 2026-11-15T13:01:32Z.
+
+| Row | Rate | Snapshot | Commits A / B | commit p99, A | commit p99, B | B / A, bound 1.10 | `TCP/<device>/paced` commit p99 | B / `TCP/<device>/paced`, bound 1.10 | fdatasync p99, A / B | GC cycles, A / B | sched p99, A / B | Stream through B |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `TCP/data-disk/paced+stream` | 8 MiB/s | 80.0 MiB | 8000 / 8000 | 15.745 ms | 16.119 ms | 1.024, met | 29.171 ms | 0.553, met | 5.268 / 5.254 ms | 4 / 3 | 197 / 197 µs | 8.05 MiB/s, 15.2 MiB left |
+| `TCP/tmpfs/paced+stream` | 8 MiB/s | 80.0 MiB | 8000 / 8000 | 2.489 ms | 2.918 ms | 1.172, **not met** | 2.318 ms | 1.259, **not met** | 0.002 / 0.002 ms | 4 / 4 | 82 / 82 µs | 8.02 MiB/s, 15.2 MiB left |
+
+The verdict is the A/B lane's (`.github/workflows/bench-ab.yml`, suite `cstream` of `scripts/ci/bench-ab.conf`): twenty rounds of the op on one runner, both rows the head's, and the rule holds when the high end of the 95 % interval of the per-round B / A meets 1.10, on `data-disk` and on `tmpfs` apart; `cstream-scale` publishes 2 and 32 MiB/s under the same bound, for information. Each verdict is the lane's `verdict.md`, committed under `testdata/bench/` as `<suite>-<base>.verdict.md`.
+
+No verdict is committed yet:
+
+```sh
+gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f suites=cstream -f rounds=20
+gh workflow run bench-ab.yml -R kitsunium/sdk --ref <branch> -f mode=scale -f suites=cstream-scale
+CONSENSUS_BENCH_ONLY=stream make bench-consensus   # once each verdict.md is committed
+```
+
 ## `Propose` → applied, three in-process nodes over the memory doubles (`BenchmarkThreeNodePropose`)
 
 Allocations are counted over every goroutine of the three nodes. The row is no kit budget: kit's 60 000 calls with the collector off would hold some 2 GB on three nodes, so its allocs/op are compared here, wave to wave (D15's 4, ADR 0152's amendment of 2026-11-12, #921).
@@ -116,6 +135,7 @@ CONSENSUS_BENCH_ONLY=ab make bench-consensus   # once each verdict.md is committ
 make bench                       # every generator, this file included
 make bench-consensus             # this file alone
 CONSENSUS_BENCH_DEVICES=nvme=/mnt/nvme/bench,tmpfs=/dev/shm make bench-consensus
+CONSENSUS_BENCH_ONLY=stream make bench-consensus     # the paced+stream rows alone, in place, TCP/<device>/paced measured again (#920, #1365)
 CONSENSUS_BENCH_ONLY=turn,enc make bench-consensus   # the TURN and ENC rows alone, in place (#912, #1364)
 CONSENSUS_BENCH_ONLY=ab make bench-consensus         # the A/B verdicts committed under testdata/bench/, nothing measured
 make profile-consensus WAVE=before && make profile-consensus WAVE=after

@@ -7633,6 +7633,73 @@ that the measure found heavy.
   holds; should it not, the owner's rule of 2026-11-14 raises the bound to
   the best the runner measured, with this trail.
 
+## Amendment — a paced snapshot stream is measured against the same cluster's windows without one, at a rate fixed before measuring (2026-11-15, #920, #1365)
+
+[#920](https://github.com/kitsunium/sdk/issues/920) bounded the snapshot
+streams (`MaxSnapshotStreams`, `SnapshotStreamBytesPerSecond`, D14's table)
+and left its third criterion unmeasured: "the TCP lane shows commit p99 on
+the data lane within 10 % of the no-stream baseline while a paced stream
+runs". A hand-run bench measured it with memory logs and four nodes in one
+process holding a key-value state of 48 MiB and four snapshots: up to
+1.47 GB of heap, 319 ms of concurrent marking, and the bound missed in two
+runs of five at 8 MiB/s ([#1365](https://github.com/kitsunium/sdk/issues/1365)).
+It measured that heap's collections, not the stream. This amendment states
+the measure, the rate and the rule; the engine does not change.
+
+- **The measure.** `BenchmarkTCPCommitStream/<device>/rate=<R>MiB/{paced,paced+stream}`
+  (`streamcommit_bench_test.go`, in the bench lane's `manual` target): three
+  voters over loopback mutual TLS, each on a data directory of the device as
+  `TCP/<device>/paced`, take 1 000 proposals/s of 256 B. Their state machine
+  keeps no state, and its snapshot is 10 s of the rate of pseudo-random bytes
+  written on the fly, which the codec cannot shrink, cut once before the
+  windows (a load of 2 400 entries of 4 KiB passes `SnapshotEveryBytes`,
+  8 MiB, once; `SnapshotTrailing` 4) and never during them. One op is one
+  cluster under one leader: A, 4 s with no stream; B, 8 s while a learner
+  that joined on tmpfs — another host's disk in a deployment, whose writes
+  never compete with the voters' fdatasyncs — is streamed that snapshot at
+  `SnapshotStreamBytesPerSecond`, in flight from B's first proposal to its
+  last commit; A again, 4 s, once the learner is closed and removed. Each A
+  follows 2 s of the same load, measured and dropped: the load, the cut and
+  the removal leave transients a p99 of two pooled windows leans to.
+  `paced` is the p99 of both A pooled, 8 000 commits, `paced+stream` B's,
+  8 000. The op fails, and reports nothing, when the leadership moves (a
+  leader whose fdatasync stalls hands it over, #554), when a proposal fails,
+  or when the stream is not in flight through B. Each row also reports the
+  leader's fdatasync p99, the collections, their pause p99 and the
+  scheduling delay p99 of its window, which tell a disk, a collection or the
+  scheduler apart from the stream.
+- **The rate.** 8 MiB/s, fixed before any measure: the rate the hand-run
+  bench failed at, 32 times the data lane's 256 KiB/s of payload, some 6 % of
+  a 1 Gbit/s link. 2 and 32 MiB/s are published for the curve, not judged.
+- **The rule.** B / A, both rows of the head and of one cluster, never two
+  runs: the A/B lane's suite `cstream` runs the op twenty rounds on one
+  runner and holds when the high end of the 95 % interval of the per-round
+  ratio is at most 1.10, `data-disk` and `tmpfs` apart; `cstream-scale`
+  publishes 2 and 32 MiB/s under the same bound (`mode=scale`). Its rules
+  stay `report` until the runner's verdict holds; should it not, the
+  owner's rule of 2026-11-14 raises the bound to the best value the runner
+  measured, with this trail. `BENCH.md`'s `TCP/<device>/paced+stream` rows
+  print B / A and, as #1365 asks, B over the `TCP/<device>/paced` of the same
+  generation against the same bound, for information: another cluster at
+  another time, which mixes the drift of the disk and of the host with the
+  stream.
+- **Held in reserve.** The learner runs in the voters' process, its
+  receiving side on their CPUs, which a deployment does not do. It moves to
+  a process of its own, the test binary run again, only if the runner's
+  step 0 (the suite's CPU profile, and the windows' collections and
+  scheduling delays) leaves it a share of a ratio above the bound.
+- **Safety.** Test code only. The persistence, the order of the entries,
+  the term, the vote, the write before an acknowledgement and the bytes on
+  the wire are untouched; the pacing keeps its guarantees — the pin renewed
+  at every read and after every wait, the handle pinning the snapshot for
+  the whole transfer, a peer that waits for a stream held in raft's
+  snapshot state.
+- **Measured, indicatively.** On a shared VM (AMD EPYC 7351P, GOMAXPROCS 4,
+  go1.27.4), one op a pass at 8 MiB/s: B / A from 0.70 to 1.19 over five
+  passes on tmpfs (median 0.96), and from 1.02 to 1.28 over four on the
+  VM's disk (median 1.07), the stream at 8.0 MiB/s through B each time.
+  The verdict is the lane's on its runner.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7691,6 +7758,7 @@ that the measure found heavy.
 | #1422 | the owner's decision, 2026-11-14 | a node that cannot answer a JOIN at once — any but the leader and a voter level with it — refuses it `NOT_LEADER`, the leader's id and address in the reason, before the slot's rate and the authorizer, and the shipped joiners try the named leader next; no format change, no protocol raise, no raft mutation (amendment of 2026-11-14, #1422) |
 | #1447, #1440 | Raft lot L1, 2026-11-15 | a voter that does not know its leader's last index refuses a JOIN `NOT_LEADER`, the leader's address named only when known; a forward and its answer of an older term are handled at the receiver's term, so a forward that crossed a change of term is answered and no longer left to `OUTCOME_UNKNOWN`, the answer carrying the forward's term and never the receiver's later one, which raised the forwarder's past D5's live-leader refusal and broke D9 (b)'s lease (the safety review of #1457); no format change, no protocol raise, no raft mutation (amendment of 2026-11-15, #1447, #1440) |
 | #912, #1364 | the leader's loop turn, 2026-11-15 | `BENCH.md`'s `TURN` rows keep the leader's turns raw through a test `Meter` and its `ENC` rows a turn's bytes on both paths; "not worse" is the A/B lane's `cturn`, the high end of the 95 % interval of head over base at most 1.00, against `ee1f48ba2` and the repaired parent of #912, and the bytes its `cenc`, at most 1/N; the loop reads the step function's `Summary` and asks `SameConf` instead of cloning both memberships through `Status` at each read, publishes a status it compared on the stack, and encodes a frame without entries at its length; read-only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #912, #1364) |
+| #920, #1365 | the commit while a snapshot streams, 2026-11-15 | `BENCH.md`'s `TCP/<device>/paced+stream` rows measure the data lane's commit p99 while a stream paced at 8 MiB/s runs against the same cluster's windows without one — A, B, A under one leader, a machine that keeps no state, the learner on tmpfs —, and print B over `TCP/<device>/paced` beside it; the A/B lane's `cstream` holds when the high end of the 95 % interval of B / A is at most 1.10, `cstream-scale` publishes 2 and 32 MiB/s; test code only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #920, #1365) |
 
 ## raft-sql-poc (owner's prior Raft)
 
