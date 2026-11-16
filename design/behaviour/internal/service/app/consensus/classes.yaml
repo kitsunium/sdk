@@ -703,6 +703,12 @@ constants:
         value: "\"consensus_stopped\""
       - name: mJoinsRateLimited
         value: "\"consensus_joins_rate_limited_total\""
+      - name: mForwardsDropped
+        value: "\"consensus_forwards_dropped_total\""
+      - name: mForwardRuns
+        value: "\"consensus_forward_runs\""
+      - name: mForwardForgotten
+        value: "\"consensus_forward_answers_forgotten_total\""
       - name: mLogBytes
         value: "\"consensus_log_bytes\""
       - name: mLogQuota
@@ -1786,6 +1792,7 @@ files:
       - newSubEpoch
       - NewNode
       - newRaft
+      - forwardWindow
       - startStamp
       - refuseStamp
       - newNode
@@ -1908,6 +1915,7 @@ files:
   - decls:
       - dirHolder
       - silenceBounder
+      - resendWindower
       - joinReleaser
     name: node_interface.go
   - decls:
@@ -2006,6 +2014,7 @@ files:
       - (*Node).observeLogStats
       - (*Node).observeCerts
       - (*Node).observeLinkAborts
+      - (*Node).observeForwards
     name: observe.go
   - decls:
       - (*Node).ReadCommitted
@@ -2508,6 +2517,7 @@ files:
       - (*TCPTransport).PeerCertExpiry
       - (*TCPTransport).ReloadFailures
       - (*TCPTransport).maxFrameBytes
+      - (*TCPTransport).resendWindow
     name: tcp.go
   - decls:
       - _#3
@@ -2541,6 +2551,9 @@ files:
   - decls:
       - kernelTimedOut
     name: unacked.go
+  - decls:
+      - unackedLeg
+    name: unacked_leg_other.go
   - decls:
       - tcpUserTimeout
       - errTimedOut
@@ -3413,6 +3426,19 @@ functions:
     name: newRaft
     params: cfg Config
     results: "*Node, error"
+  - doc: |-
+      forwardWindow is how long the step function keeps the answer it gave a
+      forward (raft.Config.ForwardWindow, #1482): twice the resend window of a
+      transport that states one, so a copy the transport delivers while its
+      sender runs is answered from the table, the doubling left to what no
+      timeout bounds on this node — its reader, its inbox, its loop; 0, the
+      step function's own default, for any other transport. Saturated, never
+      wrapped; the step function bounds it. A later copy is neither proposed
+      nor answered: the step function's fence, not this window, keeps a copy
+      from being applied twice.
+    name: forwardWindow
+    params: t coreconsensus.Transport
+    results: time.Duration
   - doc: |-
       startStamp reads the stamp a node may start on, refusing a directory
       with a stop marker, one never stamped, one whose bootstrap is pending,
@@ -4677,6 +4703,15 @@ functions:
     name: kernelTimedOut
     params: err error
     results: bool
+  - doc: |-
+      unackedLeg is how long bytes a write handed the kernel may take to reach
+      the peer before the kernel aborts their connection: d, TCP_USER_TIMEOUT's
+      bound on Linux; the BSDs and illumos set none, and d stands for it there,
+      a copy delivered later being fenced by the step function, never applied
+      twice (resendWindow, #1482).
+    name: unackedLeg
+    params: d time.Duration
+    results: time.Duration
   - doc: |-
       boundUnacknowledged makes the kernel abort c once bytes written on it
       stay unacknowledged for d (TCP_USER_TIMEOUT): the next write then fails,
@@ -9102,8 +9137,9 @@ types:
           forever with none, and the entry stayed until the next change, a forward
           holding its payload and the retained Apply results (#590). A forward
           unanswered two maximum election timeouts after it was sent is answered
-          OUTCOME_UNKNOWN: the leader may have appended it, and a resend is only
-          deduplicated while the leader still remembers the first. What a caller
+          OUTCOME_UNKNOWN: the leader may have appended it, or have neither
+          proposed nor answered a copy its fence recognised (raft's fwdFence,
+          #1482). What a caller
           gave up on is dropped. Reads are swept by sweepReads. The transport's
           sender links get the same two maximum election timeouts as their bound
           on read silence (#1116).
@@ -9905,6 +9941,16 @@ types:
           counts them (#1116).
         name: observeLinkAborts
         params: o *obs
+        recv: n *Node
+      - doc: |-
+          observeForwards publishes the forwards this node neither proposed nor
+          answered, by reason, the forwarder runs its fence keeps a mark of (raft's
+          fwdFence, #1482) and the answers its table forgot at its bound before
+          their window ended: a run of drops of reason evicted names the fence's
+          last resort, a node with more than 65 536 runs in one term, and a copy of
+          an answer forgotten is a drop of reason copy.
+        name: observeForwards
+        params: st *raft.SummaryValue
         recv: n *Node
       - name: ReadCommitted
         params: ctx context.Context, from, to uint64, maxBytes int
@@ -10973,6 +11019,17 @@ types:
       	boundSilence(d time.Duration)
       }
   - doc: |-
+      resendWindower is a transport that states how long after a frame first
+      reached its peer it may deliver that frame again while its sender runs
+      (TCPTransport.resendWindow, #1482): the step function keeps a forward's
+      answer twice that long (forwardWindow).
+    kind: named
+    name: resendWindower
+    underlying: |-
+      interface {
+      	resendWindow() time.Duration
+      }
+  - doc: |-
       joinReleaser is a transport that keeps a JOIN answer's members admitted
       apart from the engine's configuration until the joiner is admitted
       (#552).
@@ -11323,6 +11380,14 @@ types:
       - name: seenTimedOut
         type: int64
       - name: seenSilenced
+        type: int64
+      - doc: |-
+          seenDrops are consensus_forwards_dropped_total's by reason, in the
+          order of fwdDropReasons; seenForgotten is
+          consensus_forward_answers_forgotten_total's.
+        name: seenDrops
+        type: "[3]int64"
+      - name: seenForgotten
         type: int64
     kind: struct
     methods:
@@ -12846,6 +12911,25 @@ types:
         name: maxFrameBytes
         recv: t *TCPTransport
         results: int
+      - doc: |-
+          resendWindow is how long after a frame first reached its peer this
+          transport, running, may deliver it again (#1482): sendBatch writes a
+          batch at most three times — on the link, on the link dialled again, on
+          the back link — each write under WriteTimeout and the dial under
+          HandshakeTimeout; the back link's write first waits for its lock, which
+          another write holds for at most its WriteTimeout (backLink.write); and
+          the bytes of a write that returned reach the peer within the bound
+          boundUnacknowledged sets, WriteTimeout on Linux, rounded up to the second
+          on macOS and Windows, none on the BSDs and illumos, where WriteTimeout
+          stands for it. 4 × WriteTimeout + HandshakeTimeout + that bound, 11 s
+          under the defaults; saturated, never wrapped. It counts this node's
+          configuration, a sender's own timeouts being unknown here, and a sender's
+          running time, a stopped sender resuming past it: the step function's
+          window is a precision only, its fence keeping any later copy from being
+          handled again.
+        name: resendWindow
+        recv: t *TCPTransport
+        results: time.Duration
       - doc: bindingOf is group's binding, created on its first callback; under mu.
         name: bindingOf
         params: group coreconsensus.GroupID
@@ -13346,6 +13430,11 @@ vars:
           an outage.
         name: latencyBuckets
         value: "[]float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}"
+      - doc: |-
+          fwdDropReasons are consensus_forwards_dropped_total's reasons, in the
+          order of raft.ForwardDropsValue's fields (#1482).
+        name: fwdDropReasons
+        value: "[3]string{\"copy\", \"restarted\", \"evicted\"}"
     name: peerGauges
   - grouped: true
     items:
@@ -13423,6 +13512,9 @@ vars:
     items:
       - name: _
         type: silenceBounder
+        value: (*TCPTransport)(nil)
+      - name: _
+        type: resendWindower
         value: (*TCPTransport)(nil)
       - name: _
         type: |-

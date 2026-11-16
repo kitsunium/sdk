@@ -13,11 +13,6 @@ import (
 // it answers with a code rather than an error, so a refusal costs no
 // allocation on the event loop.
 const (
-	// maxFwdAnswers bounds the answers a node keeps of the forwards it
-	// received. A duplicate is a frame a transport resent with
-	// its batch on a fresh connection, right behind its original (#377,
-	// #401): the newest answers are the ones kept, the oldest go first.
-	maxFwdAnswers int = 4096
 	// codeNotLeader refuses what only the leader of this term may do.
 	codeNotLeader errs.Code = core.CodeNotLeader
 	// codeChangePending refuses a membership change while another is not
@@ -1440,66 +1435,30 @@ func (r *Raft) activeMajorityWithout(m core.MembershipValue, cut core.NodeID) bo
 	return len(vs) > 0 && n >= len(vs)/2+1
 }
 
-// fwdKey names one submission: the follower that forwarded it and its
-// submission id, which never repeats across the follower's restarts (R7-23).
-// Two frames with one key are one submission delivered twice.
-type fwdKey struct {
-	from core.NodeID
-	ctx  uint64
-}
-
-// fwdAnswer is what a forward was answered: the position its entry was
-// appended at, or a refusal with its code and the leader hinted.
-type fwdAnswer struct {
-	reject  bool
-	code    errs.Code
-	hint    uint64
-	index   uint64
-	logTerm uint64
-	// commit is the leader's commit when it answered a session command:
-	// a position at or below it was committed (#918).
-	commit uint64
-}
-
-// fwdTable keeps the answers given to forwards, bounded by maxFwdAnswers,
-// the oldest evicted first. It outlives a term: a duplicate that arrives
-// after this node changed term, or led again, is still the submission it
-// answered, and replaying an old answer is harmless, the follower having
-// taken the first one (#401).
-type fwdTable struct {
-	byKey map[fwdKey]fwdAnswer
-	// order is a ring of the kept keys, oldest at next once it is full.
-	order []fwdKey
-	next  int
-}
-
-// lookup returns the answer kept for k.
-func (a *fwdTable) lookup(k fwdKey) (fwdAnswer, bool) {
-	v, ok := a.byKey[k]
-	return v, ok
-}
-
-// remember keeps v for k, evicting the oldest answer when limit are kept.
-func (a *fwdTable) remember(k fwdKey, v fwdAnswer, limit int) {
-	if a.byKey == nil {
-		a.byKey = map[fwdKey]fwdAnswer{}
-	}
-	if len(a.order) < limit {
-		a.order = append(a.order, k)
-	} else {
-		delete(a.byKey, a.order[a.next])
-		a.order[a.next] = k
-		a.next = (a.next + 1) % limit
-	}
-	a.byKey[k] = v
-}
-
 // handleForward answers a forward once per submission. A transport that
 // resends a batch on a fresh connection can deliver a forward twice (#377);
 // proposed twice, its command would be applied twice, the follower having
 // taken the first answer and dropped the second (#401). A forward already
 // answered, in this term or an earlier one, is answered again with the same
 // answer, position or refusal, and nothing is proposed.
+//
+// No copy is handled twice, whatever its delay (#1482): the 4 096 answers
+// kept, evicted oldest first, let a copy that came after 4 096 others be
+// appended again, or refused NOT_LEADER by a node that held it, and an
+// answer kept for a time let a copy from a sender stopped longer than that
+// be appended again. An answer is kept for the forward window, so a copy
+// within it gets it; past it, the fence (fwdFence) recognises the copy by
+// its submission id, under the highest its sender's run had handled here,
+// or by its term, at most this node's durable term at start, and the copy
+// is neither proposed nor answered: its forwarder, if it still waits,
+// answers OUTCOME_UNKNOWN after two maximum election timeouts; each is
+// counted by cause (countFwdDrop). A new forward is always handled: at the
+// table's bound, forwardCeiling answers, the oldest answer is forgotten for
+// it, whatever its age (the owner's decision of 2026-11-16), and counted
+// (Summary's ForwardForgotten). The mark the fence keeps is what makes that
+// safe, set for every forward handled, a refusal included: a copy of the
+// answer forgotten is refused by the fence, never proposed again, never
+// appended after its refusal.
 //
 // The answer carries the forward's term, never this node's later one. A
 // forward of an older term goes on here (stepTerm, #1440), and its answer,
@@ -1510,10 +1469,19 @@ func (a *fwdTable) remember(k fwdKey, v fwdAnswer, limit int) {
 // leader committed (D9 (b), R1-18: a refusal never moves a term).
 func (r *Raft) handleForward(m core.MessageValue) {
 	key := fwdKey{from: m.From, ctx: m.Context}
+	r.fwdAnswers.expire(r.forwardWindow())
 	a, ok := r.fwdAnswers.lookup(key)
+	if !ok && !r.fwdAdmits(&m) {
+		r.countFwdDrop(&m)
+		return
+	}
 	if !ok || r.mutated(mutForwardNoDedupe) {
 		a = r.answerForward(m)
-		r.fwdAnswers.remember(key, a, maxFwdAnswers)
+		if r.fwdAnswers.makeRoom(r.forwardCeiling()) {
+			r.fwdForgotten++
+		}
+		r.fwdAnswers.remember(key, a)
+		r.fwdFence.note(&m, maxFwdRuns, maxFwdRunsHard, r.term)
 	}
 	resp := core.MsgForwardResp
 	if m.Kind == core.MsgForwardAdmin {
@@ -1523,6 +1491,46 @@ func (r *Raft) handleForward(m core.MessageValue) {
 		Kind: resp, To: m.From, Context: m.Context, Term: m.Term,
 		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm, Commit: a.commit,
 	})
+}
+
+// countFwdDrop counts the forward m, which the fence turned away, neither
+// proposed nor answered, under its cause (Summary's ForwardDrops).
+func (r *Raft) countFwdDrop(m *core.MessageValue) {
+	run, _ := runOf(m)
+	if _, marked := r.fwdFence.marks[run]; marked {
+		r.fwdDrops.Copies++
+		return
+	}
+	if r.fwdFence.unmarked(m) == fwdRestarted {
+		r.fwdDrops.Restarted++
+		return
+	}
+	r.fwdDrops.Evicted++
+}
+
+// fwdAdmits reports whether the fence lets the forward m be handled, the
+// fence switched off only by the package's own tests, which run a node of
+// the release before it with Config.fwdUnfenced.
+func (r *Raft) fwdAdmits(m *core.MessageValue) bool {
+	return r.cfg.fwdUnfenced || r.fwdFence.admits(m)
+}
+
+// forwardWindow is how long a forward's answer is kept, on the table's
+// clock (Config.ForwardWindow), at most maxForwardWindow.
+func (r *Raft) forwardWindow() time.Duration {
+	if r.cfg.ForwardWindow > 0 {
+		return min(r.cfg.ForwardWindow, maxForwardWindow)
+	}
+	return defaultForwardWindow
+}
+
+// forwardCeiling is the most answers the table keeps, past which it forgets
+// the oldest: maxFwdAnswers, unless the package's own tests set another.
+func (r *Raft) forwardCeiling() int {
+	if r.cfg.fwdCeiling > 0 {
+		return r.cfg.fwdCeiling
+	}
+	return maxFwdAnswers
 }
 
 // answerForward proposes the one entry a follower forwarded and returns its

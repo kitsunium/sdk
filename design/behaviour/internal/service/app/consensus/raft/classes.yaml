@@ -1,6 +1,114 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - grouped: true
+    items:
+      - doc: "fwdAdmitted: the forward may be handled."
+        name: fwdAdmitted
+        type: fwdVerdict
+        value: iota
+      - doc: "fwdRestarted: its term is at most the one this node started at."
+        name: fwdRestarted
+      - doc: |-
+          fwdEvicted: its term is at most the highest of its node's marks the
+          fence forgot.
+        name: fwdEvicted
+      - doc: |-
+          maxFwdRuns is how many forwarder runs the fence keeps a mark of before
+          it forgets those of terms below this node's (fwdFence.evict). A mark
+          of the current term is kept past it: forgotten, its node's fence
+          would rise to the current term, and its node's next run would be
+          refused until the next election, which a healthy leader never calls
+          (#1482, the safety review of its fix C, D1).
+        name: maxFwdRuns
+        type: int
+        value: 1 << 12
+      - doc: |-
+          maxFwdRunsHard bounds the marks of the current term: past it, the run
+          handled least recently of the node that holds the most goes, and
+          that node's new runs wait for the next term. The marks are per lane,
+          about 32 768 restarts when each run forwards on both lanes; restarts
+          spread over several nodes fence each of them in turn, the most loaded
+          node changing as the counts level out (#1540).
+        name: maxFwdRunsHard
+        type: int
+        value: 1 << 16
+    name: fwdAdmitted
+  - doc: |-
+      The forwards a node received (#401, #1482). Two things are kept apart:
+      the answers given, which answer a copy of a forward for the forward
+      window, a precision; and the fence, which no time bounds and on which the
+      safety rests: a copy whose answer is gone is neither proposed nor refused
+      again, whatever its delay, across this node's restarts too.
+    grouped: true
+    items:
+      - doc: |-
+          maxFwdAnswers bounds the answers a node keeps of the forwards it
+          received, 152 MiB once that many are kept (152 B an answer, measured
+          on amd64). At the bound the oldest answer is forgotten, one for each
+          new answer kept, so no forward is ever dropped for room (the owner's
+          decision of 2026-11-16, #1482): the fence (fwdFence) refuses a copy of
+          the answer forgotten, its forwarder answering OUTCOME_UNKNOWN. Under
+          the default window the bound is reached at 47 662 forwards a second,
+          and a table holds what its load keeps: rate × window answers.
+        name: maxFwdAnswers
+        type: int
+        value: 1 << 20
+      - doc: |-
+          fwdBlock is how many answers one block of the table's queue holds:
+          the queue grows and shrinks by whole blocks, never by moving what it
+          keeps.
+        name: fwdBlock
+        type: int
+        value: "512"
+      - doc: |-
+          minFwdRebuild is how many answers the table's map must have held for
+          it to be rebuilt once a quarter of them is left: a map never gives
+          back the room it grew to.
+        name: minFwdRebuild
+        type: int
+        value: "4096"
+      - doc: |-
+          fwdRebuildStep is how many answers a rebuild moves to the new map per
+          Tick or forward, so no turn of the loop rebuilds a large map at once:
+          rebuilt in one turn, 75 000 answers took 23.5 ms, past a lease's
+          drift budget (#1482, review O4).
+        name: fwdRebuildStep
+        type: int
+        value: "1024"
+      - doc: |-
+          fwdExpireStep is the most answers one Tick or forward forgets at the
+          window's end: a node back from a pause ages a second of answers at
+          once, at 47 662 forwards a second as many, and an answer kept past
+          its window answers its copy as it did within it.
+        name: fwdExpireStep
+        type: int
+        value: "4096"
+      - doc: |-
+          defaultForwardWindow is the forward window when the driver gives
+          none (Config.ForwardWindow): twice the shipped TCP transport's
+          resend window under its defaults on Linux, 5 × 2 s + 1 s.
+        name: defaultForwardWindow
+        type: time.Duration
+        value: 22 * time.Second
+      - doc: |-
+          maxForwardWindow bounds the forward window whatever the driver gives:
+          the window is a precision, the fence keeps a copy past it from being
+          handled again, and a window that grew with an unbounded WriteTimeout
+          let a few forwards a second reach the table's bound (#1482, review
+          O2).
+        name: maxForwardWindow
+        type: time.Duration
+        value: 2 * time.Minute
+      - doc: |-
+          fwdClockStep is the most the table's clock moves between two
+          readings of the driver's clock: a longer gap is time this node did
+          not run, a paused machine or process, while the copies its peers
+          resent waited in its sockets.
+        name: fwdClockStep
+        type: time.Duration
+        value: time.Second
+    name: maxFwdAnswers
   - doc: The ways reach departs from the guard's count.
     grouped: true
     items:
@@ -65,14 +173,6 @@ constants:
       allocation on the event loop.
     grouped: true
     items:
-      - doc: |-
-          maxFwdAnswers bounds the answers a node keeps of the forwards it
-          received. A duplicate is a frame a transport resent with
-          its batch on a fresh connection, right behind its original (#377,
-          #401): the newest answers are the ones kept, the oldest go first.
-        name: maxFwdAnswers
-        type: int
-        value: "4096"
       - doc: codeNotLeader refuses what only the leader of this term may do.
         name: codeNotLeader
         type: errs.Code
@@ -111,7 +211,7 @@ constants:
         name: codeMisconfigured
         type: errs.Code
         value: core.CodeConsensusMisconfigured
-    name: maxFwdAnswers
+    name: codeNotLeader
   - doc: |-
       hintElectionTimeouts is how many maximum election timeouts a vouched-for
       leader stays admitted after its record or its last contact, with no
@@ -562,6 +662,40 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - fwdAdmitted
+      - fwdRun
+      - fwdMark
+      - fwdFence
+      - fwdVerdict
+      - runOf
+      - (*fwdFence).admits
+      - (*fwdFence).unmarked
+      - (*fwdFence).note
+      - (*fwdFence).evict
+      - (*fwdFence).crowded
+      - (*fwdFence).crowdedNode
+      - (*fwdFence).leastRecent
+      - (*fwdFence).forget
+    name: fwdfence.go
+  - decls:
+      - maxFwdAnswers
+      - fwdKey
+      - fwdAnswer
+      - fwdStamp
+      - fwdTable
+      - (*fwdTable).advance
+      - (*fwdTable).lookup
+      - (*fwdTable).kept
+      - (*fwdTable).full
+      - (*fwdTable).makeRoom
+      - (*fwdTable).remember
+      - (*fwdTable).forgetOldest
+      - (*fwdTable).keep
+      - (*fwdTable).stamp
+      - (*fwdTable).expire
+      - (*fwdTable).rebuildStep
+    name: fwdtable.go
+  - decls:
       - reachUndenied
       - IsolationStranded
       - reach
@@ -573,7 +707,7 @@ files:
       - (*Raft).isolation
     name: isolation.go
   - decls:
-      - maxFwdAnswers
+      - codeNotLeader
       - (*Raft).becomeLeader
       - (*Raft).appendAsLeader
       - (*Raft).tickLeader
@@ -644,12 +778,11 @@ files:
       - (*Raft).atProtocol3
       - (*Raft).activeMajority
       - (*Raft).activeMajorityWithout
-      - fwdKey
-      - fwdAnswer
-      - fwdTable
-      - (*fwdTable).lookup
-      - (*fwdTable).remember
       - (*Raft).handleForward
+      - (*Raft).countFwdDrop
+      - (*Raft).fwdAdmits
+      - (*Raft).forwardWindow
+      - (*Raft).forwardCeiling
       - (*Raft).answerForward
       - (*Raft).answerSessionForward
       - (*Raft).noteForwarded
@@ -804,6 +937,7 @@ files:
       - (*Raft).TermAt
       - StatusValue
       - SummaryValue
+      - ForwardDropsValue
       - (*Raft).Status
       - (*Raft).Summary
       - (*Raft).SameConf
@@ -931,6 +1065,10 @@ files:
       - (*Raft).endSilenceOnceDurable
     name: step.go
 functions:
+  - doc: runOf is the run of the forward m and its counter.
+    name: runOf
+    params: m *core.MessageValue
+    results: fwdRun, uint32
   - doc: |-
       announcementOf is the announcement every frame of a node speaking
       protocol version v carries: FlagProtocol2 from 2, FlagProtocol3 beside
@@ -1126,32 +1264,130 @@ package:
   purpose: "Package raft is the consensus engine's step function (ADR 0152 D15): a value with no goroutine, no I/O and no clock."
 types:
   - doc: |-
-      reach is how the guard counts a stale voter's vouchers, one bit each.
-      Its zero value is the guard's own count, the one every change is judged
-      by; a bit set counts one more voucher than the guard does, or takes one
-      bet less, to tell what a voter's isolation rests on, and decides nothing
-      (isolation).
-    kind: named
-    name: reach
-    underlying: uint8
-  - fields:
-      - doc: ID is the voter.
-        name: ID
+      fwdRun names one run of a forwarder on one lane: the node, the epoch its
+      run drew for the high 32 bits of its submission ids (R7-23), and whether
+      its forwards are administrative, which travel on the control lane while
+      commands travel on the data lane, each lane a connection of its own.
+    fields:
+      - name: from
         type: core.NodeID
-      - doc: |-
-          Flags are why: IsolationStranded, IsolationPinDenied,
-          IsolationLeaderMoved, IsolationLeaderUnconfirmed.
-        name: Flags
-        type: IsolationFlags
+      - name: epoch
+        type: uint32
+      - name: admin
+        type: bool
     kind: struct
-    name: IsolationValue
-  - kind: named
+    name: fwdRun
+  - doc: |-
+      fwdMark is what the fence knows of a run: the highest counter, the low 32
+      bits of a submission id, of a forward of the run this node handled, the
+      highest term such a forward carried, and when it was last handled, the
+      fence's count of the forwards it recorded then.
+    fields:
+      - name: high
+        type: uint32
+      - name: term
+        type: uint64
+      - name: used
+        type: uint64
+    kind: struct
+    name: fwdMark
+  - doc: |-
+      fwdFence is the safety of the deduplication (#1482): a forward this node
+      handled is never handled again, whatever the delay of its copy, its
+      answer kept or not. A forwarder draws its submission ids in the order it
+      sends them, a counter under its run's epoch, and a lane delivers them in
+      that order; every copy of a frame goes to the one node it was addressed
+      to. So a forward whose counter is not above the highest this node handled
+      of its run is a copy of one it handled — or one its lane delivered late,
+      behind a later one, which only a lane's change of connection does (a
+      write that failed, a link replaced at its age or its silence): either
+      is neither proposed nor answered, and its forwarder answers its caller
+      OUTCOME_UNKNOWN if it still waits.
+
+      A run the fence keeps no mark of is admitted only past two terms. The
+      first is start, the term of this node's durable hard state when it
+      started, and it rests on what a forwarder addresses: Node.forward sends a
+      forward to the leader its status names, stamped with that status's term,
+      and a node names a leader only once it heard an append or a heartbeat of
+      that leader's term, its leader forgotten at every change of term; so a
+      forward to this node always carries a term this node led, and a node
+      leads only a term durable before it leads. Every forward a previous run
+      of this node handled, answered or not, therefore carried a term at most
+      start — whether the answer left before a later term was durable or not
+      (TestAForwardToANodeCarriesATermItLed). The second is, per forwarder
+      node, the highest term of its marks the fence forgot.
+    fields:
+      - name: marks
+        type: map[fwdRun]fwdMark
+      - name: start
+        type: uint64
+      - name: nodes
+        type: map[core.NodeID]uint64
+      - name: used
+        type: uint64
+    kind: struct
     methods:
-      - name: Has
-        params: x IsolationFlags
-        recv: f IsolationFlags
+      - doc: |-
+          admits reports whether the forward m may be handled: its counter above
+          the highest handled of its run, or, for a run with no mark, its term past
+          the fence's terms.
+        name: admits
+        params: m *core.MessageValue
+        recv: f *fwdFence
         results: bool
-    name: IsolationFlags
+      - doc: unmarked is the verdict on the forward m, of a run with no mark.
+        name: unmarked
+        params: m *core.MessageValue
+        recv: f *fwdFence
+        results: fwdVerdict
+      - doc: |-
+          note records that the forward m was handled. A run new to the fence
+          first makes room past soft marks: evict, at the term current.
+        name: note
+        params: m *core.MessageValue, soft, hard int, current uint64
+        recv: f *fwdFence
+      - doc: |-
+          evict brings the marks under soft, forgetting those of a term below
+          current, the oldest term first and, within a term, the one handled least
+          recently; the marks of the current term stay, so that no node's fence
+          rises to the current term and refuses a run of it, until hard marks are
+          kept: then the mark handled least recently of the node that holds the
+          most goes, the lowest node on a tie. Each mark forgotten raises its
+          node's fence to the mark's term, so that run's copies stay refused. The
+          choices are the same whatever the map's order: no two marks share a
+          count of use.
+        name: evict
+        params: soft, hard int, current uint64
+        recv: f *fwdFence
+      - doc: |-
+          crowded is the mark handled least recently of the node that holds the
+          most marks, the lowest node on a tie.
+        name: crowded
+        recv: f *fwdFence
+        results: fwdRun
+      - doc: crowdedNode is the node that holds the most marks, the lowest on a tie.
+        name: crowdedNode
+        recv: f *fwdFence
+        results: core.NodeID
+      - doc: |-
+          leastRecent is node's mark handled least recently: no two marks share a
+          count of use.
+        name: leastRecent
+        params: node core.NodeID
+        recv: f *fwdFence
+        results: fwdRun
+      - doc: |-
+          forget drops run's mark and raises its node's fence to the mark's term:
+          every forward of the run carried a term at most that one.
+        name: forget
+        params: run fwdRun
+        recv: f *fwdFence
+    name: fwdFence
+  - doc: |-
+      fwdVerdict is what the fence says of a forward of a run it keeps no mark
+      of.
+    kind: named
+    name: fwdVerdict
     underlying: uint8
   - doc: |-
       fwdKey names one submission: the follower that forwarded it and its
@@ -1185,32 +1421,156 @@ types:
         type: uint64
     kind: struct
     name: fwdAnswer
+  - doc: fwdStamp is a kept answer's key and the table's clock when it was given.
+    fields:
+      - name: key
+        type: fwdKey
+      - name: at
+        type: time.Duration
+    kind: struct
+    name: fwdStamp
   - doc: |-
-      fwdTable keeps the answers given to forwards, bounded by maxFwdAnswers,
-      the oldest evicted first. It outlives a term: a duplicate that arrives
-      after this node changed term, or led again, is still the submission it
-      answered, and replaying an old answer is harmless, the follower having
-      taken the first one (#401).
+      fwdTable keeps the answers given to forwards for the forward window, on
+      its own clock, and at most a bound of them, the oldest forgotten first
+      (#1482). It outlives a term:
+      a duplicate that arrives after this node changed term, or led again, is
+      still the submission it answered, and replaying an old answer is
+      harmless, the follower having taken the first one (#401). It is volatile,
+      and forgetting an answer is safe: the fence (fwdFence) keeps a copy that
+      comes later from being handled again.
     fields:
       - name: byKey
         type: map[fwdKey]fwdAnswer
-      - doc: order is a ring of the kept keys, oldest at next once it is full.
-        name: order
-        type: "[]fwdKey"
-      - name: next
+      - doc: |-
+          next, while not nil, is the map being rebuilt a step at a time: it
+          takes every new answer, and those of byKey are moved into it, the
+          youngest first, until none is left (rebuildStep).
+        name: next
+        type: map[fwdKey]fwdAnswer
+      - doc: |-
+          blocks hold the kept keys in the order they were answered, each with
+          the clock it was answered at, from blocks[0][head] on; every block
+          but the last holds fwdBlock of them.
+        name: blocks
+        type: "[][]fwdStamp"
+      - name: head
         type: int
+      - doc: |-
+          front is the sequence number of the oldest kept answer, the count of
+          answers forgotten so far; size is how many are kept.
+        name: front
+        type: uint64
+      - name: size
+        type: int
+      - doc: |-
+          moveAt, while next is not nil, bounds the answers of byKey not moved
+          yet: those of sequence number from front up to it.
+        name: moveAt
+        type: uint64
+      - doc: peak is the most answers kept since the map was last rebuilt.
+        name: peak
+        type: int
+      - doc: |-
+          clock is the time this node ran since it started, as the driver's
+          clock read at each Step and Tick tells it; seen is the latest
+          reading.
+        name: clock
+        type: time.Duration
+      - name: seen
+        type: time.Time
     kind: struct
     methods:
+      - doc: |-
+          advance moves the table's clock to now, a gap longer than step counted as
+          step, and a reading earlier than the latest not at all, so the clock
+          never runs faster than the driver's.
+        name: advance
+        params: now time.Time, step time.Duration
+        recv: a *fwdTable
       - doc: lookup returns the answer kept for k.
         name: lookup
         params: k fwdKey
         recv: a *fwdTable
         results: fwdAnswer, bool
-      - doc: remember keeps v for k, evicting the oldest answer when limit are kept.
+      - doc: kept is how many answers the table keeps.
+        name: kept
+        recv: a *fwdTable
+        results: int
+      - doc: full reports whether limit answers are kept.
+        name: full
+        params: limit int
+        recv: a *fwdTable
+        results: bool
+      - doc: |-
+          makeRoom forgets the oldest answer kept, whatever its age, when limit
+          answers are kept, and reports whether it did: called before each answer
+          remembered, it forgets one answer for one kept, never more.
+        name: makeRoom
+        params: limit int
+        recv: a *fwdTable
+        results: bool
+      - doc: remember keeps v for k at the table's clock; makeRoom bounds the table.
         name: remember
-        params: k fwdKey, v fwdAnswer, limit int
+        params: k fwdKey, v fwdAnswer
+        recv: a *fwdTable
+      - doc: forgetOldest forgets the oldest answer kept, whatever its age.
+        name: forgetOldest
+        recv: a *fwdTable
+      - doc: |-
+          keep queues k's stamp at the table's clock and returns the map its
+          answer goes in: the one being rebuilt while there is one.
+        name: keep
+        params: k fwdKey
+        recv: a *fwdTable
+        results: map[fwdKey]fwdAnswer
+      - doc: stamp is the kept answer of sequence number s, front <= s < front+size.
+        name: stamp
+        params: s uint64
+        recv: a *fwdTable
+        results: fwdStamp
+      - doc: |-
+          expire forgets the answers kept for window or longer, the oldest first
+          and fwdExpireStep at most, then moves the map's rebuild a step on.
+        name: expire
+        params: window time.Duration
+        recv: a *fwdTable
+      - doc: |-
+          rebuildStep gives the map's room back, fwdRebuildStep answers per call:
+          once the map held minFwdRebuild answers and a quarter of its peak is
+          left, a new map takes every new answer and the old one's are moved into
+          it, the youngest first since the oldest expire first; once none is left
+          the old map goes.
+        name: rebuildStep
         recv: a *fwdTable
     name: fwdTable
+  - doc: |-
+      reach is how the guard counts a stale voter's vouchers, one bit each.
+      Its zero value is the guard's own count, the one every change is judged
+      by; a bit set counts one more voucher than the guard does, or takes one
+      bet less, to tell what a voter's isolation rests on, and decides nothing
+      (isolation).
+    kind: named
+    name: reach
+    underlying: uint8
+  - fields:
+      - doc: ID is the voter.
+        name: ID
+        type: core.NodeID
+      - doc: |-
+          Flags are why: IsolationStranded, IsolationPinDenied,
+          IsolationLeaderMoved, IsolationLeaderUnconfirmed.
+        name: Flags
+        type: IsolationFlags
+    kind: struct
+    name: IsolationValue
+  - kind: named
+    methods:
+      - name: Has
+        params: x IsolationFlags
+        recv: f IsolationFlags
+        results: bool
+    name: IsolationFlags
+    underlying: uint8
   - doc: |-
       memLog is the step function's view of the log: the snapshot base and every
       entry after it. The driver loads it at start and trims it after each
@@ -1564,6 +1924,23 @@ types:
           leader appended and has not committed yet; 0 does not bound them.
         name: MaxForwardBytes
         type: int64
+      - doc: |-
+          ForwardWindow is how long a forward's answer is kept after it was
+          given: a copy of the forward that arrives within it is answered with
+          that answer (#401, #1482). The driver passes twice its transport's
+          resend window, the longest after a frame first reached this node that
+          the transport may deliver it again; 0 keeps them 22 s, twice the
+          shipped TCP transport's under its defaults on Linux, and no window
+          exceeds 2 minutes. It runs on the clock Step and Tick read, a gap of
+          more than a second counted as one: time this node did not run ages
+          no answer. At most 2^20 answers are kept, the oldest forgotten first,
+          whatever its age, for each new forward past them, so none is dropped
+          for room: a copy of an answer forgotten is neither proposed nor
+          answered, as one past the window. The window is a precision only: a
+          copy that comes after it, however late, even after this node
+          restarted, is neither proposed nor answered again.
+        name: ForwardWindow
+        type: time.Duration
       - doc: mut is set by the package's own tests only.
         name: mut
         type: mutation
@@ -1579,6 +1956,18 @@ types:
           shown to be the safety on its own (#918); the mutations' type is
           full.
         name: sessionUnchecked
+        type: bool
+      - doc: |-
+          fwdCeiling, set by the package's own tests alone, is the bound on
+          the forward answers kept in place of maxFwdAnswers (#1482).
+        name: fwdCeiling
+        type: int
+      - doc: |-
+          fwdUnfenced, set by the package's own tests alone, switches the
+          forward fence off (fwdFence): the node handles a forward whose answer
+          it forgot as the release before #1482's did, so the fence is shown to
+          be the safety on its own; the mutations' type is full.
+        name: fwdUnfenced
         type: bool
     kind: struct
     name: Config
@@ -1892,11 +2281,21 @@ types:
       - name: fwdTerm
         type: uint64
       - doc: |-
-          fwdAnswers are the answers given to the latest forwards, whatever
-          their term, so a forward delivered twice is answered twice and
-          proposed once (#401).
+          fwdAnswers are the answers given to the forwards of the forward
+          window, whatever their term, so a forward delivered twice within it
+          is answered twice and proposed once (#401, #1482); fwdFence keeps
+          any later copy from being handled again.
         name: fwdAnswers
         type: fwdTable
+      - name: fwdFence
+        type: fwdFence
+      - doc: |-
+          fwdDrops counts the forwards neither proposed nor answered, by cause;
+          fwdForgotten the answers fwdAnswers forgot at its bound.
+        name: fwdDrops
+        type: ForwardDropsValue
+      - name: fwdForgotten
+        type: uint64
       - name: id
         type: core.NodeID
       - name: term
@@ -2770,6 +3169,24 @@ types:
           answered, in this term or an earlier one, is answered again with the same
           answer, position or refusal, and nothing is proposed.
 
+          No copy is handled twice, whatever its delay (#1482): the 4 096 answers
+          kept, evicted oldest first, let a copy that came after 4 096 others be
+          appended again, or refused NOT_LEADER by a node that held it, and an
+          answer kept for a time let a copy from a sender stopped longer than that
+          be appended again. An answer is kept for the forward window, so a copy
+          within it gets it; past it, the fence (fwdFence) recognises the copy by
+          its submission id, under the highest its sender's run had handled here,
+          or by its term, at most this node's durable term at start, and the copy
+          is neither proposed nor answered: its forwarder, if it still waits,
+          answers OUTCOME_UNKNOWN after two maximum election timeouts; each is
+          counted by cause (countFwdDrop). A new forward is always handled: at the
+          table's bound, forwardCeiling answers, the oldest answer is forgotten for
+          it, whatever its age (the owner's decision of 2026-11-16), and counted
+          (Summary's ForwardForgotten). The mark the fence keeps is what makes that
+          safe, set for every forward handled, a refusal included: a copy of the
+          answer forgotten is refused by the fence, never proposed again, never
+          appended after its refusal.
+
           The answer carries the forward's term, never this node's later one. A
           forward of an older term goes on here (stepTerm, #1440), and its answer,
           stamped with this node's term, raised the forwarder's: a follower that
@@ -2780,6 +3197,32 @@ types:
         name: handleForward
         params: m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          countFwdDrop counts the forward m, which the fence turned away, neither
+          proposed nor answered, under its cause (Summary's ForwardDrops).
+        name: countFwdDrop
+        params: m *core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          fwdAdmits reports whether the fence lets the forward m be handled, the
+          fence switched off only by the package's own tests, which run a node of
+          the release before it with Config.fwdUnfenced.
+        name: fwdAdmits
+        params: m *core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          forwardWindow is how long a forward's answer is kept, on the table's
+          clock (Config.ForwardWindow), at most maxForwardWindow.
+        name: forwardWindow
+        recv: r *Raft
+        results: time.Duration
+      - doc: |-
+          forwardCeiling is the most answers the table keeps, past which it forgets
+          the oldest: maxFwdAnswers, unless the package's own tests set another.
+        name: forwardCeiling
+        recv: r *Raft
+        results: int
       - doc: |-
           answerForward proposes the one entry a follower forwarded and returns its
           position or a refusal. The entry is copied out of the frame first, and a
@@ -4283,8 +4726,46 @@ types:
           it took none (#919).
         name: Appended
         type: time.Time
+      - doc: |-
+          ForwardDrops counts, since this node started, the forwards it neither
+          proposed nor answered, by cause, each answered OUTCOME_UNKNOWN by its
+          forwarder if it still waited (#1482, consensus_forwards_dropped_total).
+        name: ForwardDrops
+        type: ForwardDropsValue
+      - doc: |-
+          ForwardRuns is how many forwarder runs the fence keeps a mark of
+          (#1482, consensus_forward_runs).
+        name: ForwardRuns
+        type: int
+      - doc: |-
+          ForwardForgotten counts, since this node started, the answers it
+          forgot at its bound of 2^20 before their forward window ended, the
+          oldest first, so that every new forward is handled: a copy of one is
+          neither proposed nor answered, counted among ForwardDrops' Copies,
+          and its forwarder answers OUTCOME_UNKNOWN (#1482,
+          consensus_forward_answers_forgotten_total).
+        name: ForwardForgotten
+        type: uint64
     kind: struct
     name: SummaryValue
+  - fields:
+      - doc: |-
+          Copies are forwards whose run had a later one handled here: a copy of
+          one handled, or one its connection delivered behind a later one.
+        name: Copies
+        type: uint64
+      - doc: |-
+          Restarted are forwards of a run with no mark, of a term at most the
+          one this node started at.
+        name: Restarted
+        type: uint64
+      - doc: |-
+          Evicted are forwards of a run with no mark, of a term at most the
+          highest of its node's marks the fence forgot.
+        name: Evicted
+        type: uint64
+    kind: struct
+    name: ForwardDropsValue
   - fields:
       - name: Timing
         type: core.TimingContractSpec

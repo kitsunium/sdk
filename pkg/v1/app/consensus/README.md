@@ -19,6 +19,8 @@ tok, result, err := node.Propose(ctx, command)
 
 NOT\_LEADER means the proposal was certainly NOT appended and is safe to retry. OUTCOME\_UNKNOWN means it was appended, or possibly delivered, and the answer was lost: it may still commit. Read the state through Barrier and decide, or carry a per-key revision in the command, because a replayed compare-and-swap is not harmless under ABA (D6, R1-04).
 
+A proposal made on a follower travels to the leader as a forward, and once every member runs this version no forward is applied twice, whatever the delay of a copy of it, even across a restart (#1482). To keep that, the node a forward went to declines a frame it may have handled already, and the proposal meets OUTCOME\_UNKNOWN in three cases: a copy that arrives after the forward window, when the first answer was lost; a forward its connection delivered behind a later one, when that connection was replaced; and any forward still sent to a leader that restarted, until the next election. Two bounds add their own, and neither drops a new forward: the leader keeps at most 2^20 answers, and past them forgets the oldest, whatever its age, so a copy of a forward whose answer went before the window ended, when the first answer was lost, meets OUTCOME\_UNKNOWN too, which only a load above 47 662 forwards a second under the defaults reaches; and, past 65 536 marks of the current term (runs per lane: about 32 768 restarts when each run forwards on both lanes), the least recent mark of the node holding the most goes, and that node's new runs wait for the next term; restarts spread over several nodes fence each of them in turn (#1540). The bound of 2^20 answers, about 152 MiB and 280 MiB at most under churn, holds per Raft group: a multi node with several groups adds them. None of them is a refusal, true or false: the entry may or may not have been appended. Handle it as any OUTCOME\_UNKNOWN: read the state through Barrier before a Propose is made again, and retry a ProposeSession with the same arguments. The forwards declined are counted by reason in consensus\_forwards\_dropped\_total, and the answers forgotten at the bound in consensus\_forward\_answers\_forgotten\_total.
+
 ### Exactly once, through a client session
 
 A command without a natural key — an event appended, a counter moved — is retried through a client session instead (ADR 0241). Once the cluster version is 4, a client opens a session it names with 16 random bytes, Node.OpenSession, then submits each command under the next sequence, Node.ProposeSession, and retries it after OUTCOME\_UNKNOWN with the same session, sequence and command, through any node: the state machine applies it once, and the retry is answered with the first one's token. The same sequence with another command is SESSION\_DIGEST\_MISMATCH. The cluster keeps 1024 sessions, the one used least recently evicted first, and a command of a session evicted, or of a sequence below its last, is SESSION\_EXPIRED: read the state through Barrier, then open a new session.
@@ -1112,7 +1114,7 @@ Code `0.2.57.2` · reason `NOT_LEADER` · public "This node is not the leader; t
 var OutcomeUnknown *errs.Error
 ```
 
-The sentinels a caller matches with errors.Is or errs.HasCode.
+OutcomeUnknown is returned when a proposal may or may not have been committed: it was appended, or possibly delivered, and its answer was lost. Never retry a Propose blindly, read the state through Barrier first; retry a ProposeSession with the same arguments, which applies it once (ADR 0241). A proposal made on a follower, which forwards it to the leader, also meets it when the node the forward went to declines a frame it may have handled already (#1482): a copy that arrives after the forward window, a forward its connection delivered behind a later one when that connection was replaced, and any forward still sent to a leader that restarted, until the next election. So does a copy of a forward whose answer the leader forgot at its bound of 2^20 answers, the oldest first, before the window ended (a load above 47 662 forwards a second under the defaults), and, past 65 536 marks of the current term (runs per lane: about 32 768 restarts when each run forwards on both lanes), the least recent mark of the node holding the most goes, and that node's new runs wait for the next term; restarts spread over several nodes fence each of them in turn (#1540). No forward is dropped for room. The bound of 2^20 answers, about 152 MiB and 280 MiB at most under churn, holds per Raft group: a multi node with several groups adds them. None of them is a refusal, true or false. Once every member runs this version, no forward is applied twice.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.OutcomeUnknown`.
 
@@ -3459,7 +3461,7 @@ Promote makes a caught-up learner a voter (D8).
 func (*Node) Propose(ctx context.Context, data []byte) (coreconsensus.TokenValue, any, error)
 ```
 
-Propose replicates data and returns, once the entry is applied locally, its token and the value Apply returned. NOT\_LEADER means certainly not appended; OUTCOME\_UNKNOWN means it may still commit: read the state through Barrier before deciding, never retry blindly (D6, R1-04).
+Propose replicates data and returns, once the entry is applied locally, its token and the value Apply returned. NOT\_LEADER means certainly not appended; OUTCOME\_UNKNOWN means it may still commit: read the state through Barrier before deciding, never retry blindly (D6, R1-04). A proposal this node forwards to the leader also meets OUTCOME\_UNKNOWN, never a false NOT\_LEADER, when the node it went to declines a frame it may have handled already: a late copy, a forward overtaken on a replaced connection, a forward to a leader that restarted, until the next election (#1482).
 
 <a name="Node.ProposeSession"></a>
 ### func \(Node\) [ProposeSession](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/session.go>)
@@ -3468,7 +3470,7 @@ Propose replicates data and returns, once the entry is applied locally, its toke
 func (*Node) ProposeSession(ctx context.Context, s coreconsensus.SessionID, seq uint64, data []byte) (coreconsensus.TokenValue, any, error)
 ```
 
-ProposeSession replicates data as command seq of the open session s and returns, once it is applied, its token and the value Apply returned: the state machine applies it at most once, whatever the retries. A retry after OUTCOME\_UNKNOWN, with the same arguments, through any node, is answered with the first one's token and, while this node holds it, its value (ADR 0241). SESSION\_DIGEST\_MISMATCH and SESSION\_EXPIRED apply nothing.
+ProposeSession replicates data as command seq of the open session s and returns, once it is applied, its token and the value Apply returned: the state machine applies it at most once, whatever the retries. A retry after OUTCOME\_UNKNOWN, with the same arguments, through any node, is answered with the first one's token and, while this node holds it, its value (ADR 0241), the OUTCOME\_UNKNOWN of a forward its leader declined included (#1482). SESSION\_DIGEST\_MISMATCH and SESSION\_EXPIRED apply nothing.
 
 <a name="Node.ProposeTimingContract"></a>
 ### func \(Node\) [ProposeTimingContract](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -3965,7 +3967,11 @@ type Replicated interface {
 	// Propose replicates data and returns, once the entry is applied
 	// locally, its lineage-scoped token and the value Apply returned.
 	// NOT_LEADER means certainly not appended; OUTCOME_UNKNOWN means it may
-	// still commit, and the caller must read the state before deciding.
+	// still commit, and the caller must read the state before deciding. A
+	// proposal a follower forwards also meets OUTCOME_UNKNOWN, never a false
+	// NOT_LEADER, when the node it went to declines a frame it may have
+	// handled already: a late copy, a forward overtaken on a replaced
+	// connection, a forward to a leader that restarted (#1482).
 	Propose(ctx context.Context, data []byte) (TokenValue, any, error)
 	// Status returns the node's view after its last turn.
 	Status() StatusValue
@@ -3995,7 +4001,7 @@ Barrier returns once the local state machine reflects every write committed befo
 func (Replicated) Propose(ctx context.Context, data []byte) (TokenValue, any, error)
 ```
 
-Propose replicates data and returns, once the entry is applied locally, its lineage-scoped token and the value Apply returned. NOT\_LEADER means certainly not appended; OUTCOME\_UNKNOWN means it may still commit, and the caller must read the state before deciding.
+Propose replicates data and returns, once the entry is applied locally, its lineage-scoped token and the value Apply returned. NOT\_LEADER means certainly not appended; OUTCOME\_UNKNOWN means it may still commit, and the caller must read the state before deciding. A proposal a follower forwards also meets OUTCOME\_UNKNOWN, never a false NOT\_LEADER, when the node it went to declines a frame it may have handled already: a late copy, a forward overtaken on a replaced connection, a forward to a leader that restarted (#1482).
 
 <a name="Replicated.Status"></a>
 ### func \(Replicated\) [Status](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
@@ -4145,7 +4151,9 @@ type SessionProposer interface {
 	// session and sequence with other data is SESSION_DIGEST_MISMATCH, a
 	// session not open or a sequence below the last one is
 	// SESSION_EXPIRED, and neither appends anything once the first one is
-	// committed. OUTCOME_UNKNOWN is retried with the same arguments.
+	// committed. OUTCOME_UNKNOWN is retried with the same arguments, the one
+	// a forward meets when the node it went to declines a frame it may have
+	// handled already included (#1482).
 	ProposeSession(ctx context.Context, s SessionID, seq uint64, data []byte) (TokenValue, any, error)
 }
 ```
@@ -4166,7 +4174,7 @@ OpenSession opens session s, a random identifier the client draws once. Opening 
 func (SessionProposer) ProposeSession(ctx context.Context, s SessionID, seq uint64, data []byte) (TokenValue, any, error)
 ```
 
-ProposeSession replicates data as command seq of session s, seq from 1 and increasing, and returns, once it is applied, its token and the value Apply returned. A retry of the same session, sequence and data is answered with the first one's token, applying nothing again, and with its value while the node still holds it, nil otherwise. The same session and sequence with other data is SESSION\_DIGEST\_MISMATCH, a session not open or a sequence below the last one is SESSION\_EXPIRED, and neither appends anything once the first one is committed. OUTCOME\_UNKNOWN is retried with the same arguments.
+ProposeSession replicates data as command seq of session s, seq from 1 and increasing, and returns, once it is applied, its token and the value Apply returned. A retry of the same session, sequence and data is answered with the first one's token, applying nothing again, and with its value while the node still holds it, nil otherwise. The same session and sequence with other data is SESSION\_DIGEST\_MISMATCH, a session not open or a sequence below the last one is SESSION\_EXPIRED, and neither appends anything once the first one is committed. OUTCOME\_UNKNOWN is retried with the same arguments, the one a forward meets when the node it went to declines a frame it may have handled already included (#1482).
 
 <a name="SessionValue"></a>
 ## type [SessionValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)

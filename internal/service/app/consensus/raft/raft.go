@@ -137,6 +137,21 @@ type Config struct {
 	// MaxForwardBytes bounds the payload bytes of forwarded commands this
 	// leader appended and has not committed yet; 0 does not bound them.
 	MaxForwardBytes int64
+	// ForwardWindow is how long a forward's answer is kept after it was
+	// given: a copy of the forward that arrives within it is answered with
+	// that answer (#401, #1482). The driver passes twice its transport's
+	// resend window, the longest after a frame first reached this node that
+	// the transport may deliver it again; 0 keeps them 22 s, twice the
+	// shipped TCP transport's under its defaults on Linux, and no window
+	// exceeds 2 minutes. It runs on the clock Step and Tick read, a gap of
+	// more than a second counted as one: time this node did not run ages
+	// no answer. At most 2^20 answers are kept, the oldest forgotten first,
+	// whatever its age, for each new forward past them, so none is dropped
+	// for room: a copy of an answer forgotten is neither proposed nor
+	// answered, as one past the window. The window is a precision only: a
+	// copy that comes after it, however late, even after this node
+	// restarted, is neither proposed nor answered again.
+	ForwardWindow time.Duration
 	// mut is set by the package's own tests only.
 	mut mutation
 	// speaks, when not 0, is the protocol version this node speaks in place
@@ -148,6 +163,14 @@ type Config struct {
 	// shown to be the safety on its own (#918); the mutations' type is
 	// full.
 	sessionUnchecked bool
+	// fwdCeiling, set by the package's own tests alone, is the bound on
+	// the forward answers kept in place of maxFwdAnswers (#1482).
+	fwdCeiling int
+	// fwdUnfenced, set by the package's own tests alone, switches the
+	// forward fence off (fwdFence): the node handles a forward whose answer
+	// it forgot as the release before #1482's did, so the fence is shown to
+	// be the safety on its own; the mutations' type is full.
+	fwdUnfenced bool
 }
 
 // fwdEntry is one forwarded command a leader appended.
@@ -420,10 +443,16 @@ type Raft struct {
 	fwd      []fwdEntry
 	fwdBytes int64
 	fwdTerm  uint64
-	// fwdAnswers are the answers given to the latest forwards, whatever
-	// their term, so a forward delivered twice is answered twice and
-	// proposed once (#401).
+	// fwdAnswers are the answers given to the forwards of the forward
+	// window, whatever their term, so a forward delivered twice within it
+	// is answered twice and proposed once (#401, #1482); fwdFence keeps
+	// any later copy from being handled again.
 	fwdAnswers fwdTable
+	fwdFence   fwdFence
+	// fwdDrops counts the forwards neither proposed nor answered, by cause;
+	// fwdForgotten the answers fwdAnswers forgot at its bound.
+	fwdDrops     ForwardDropsValue
+	fwdForgotten uint64
 
 	id   core.NodeID
 	term uint64
@@ -590,6 +619,10 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 		votes:  map[core.NodeID]bool{},
 		timing: cfg.Timing,
 		now:    st.Now,
+		// The table's clock starts at the start instant, and the fence
+		// admits no forward of a term this node's previous runs handled.
+		fwdAnswers: fwdTable{seen: st.Now},
+		fwdFence:   fwdFence{start: st.HardState.Term},
 	}
 	sm := st.Snapshot
 	node.log = memLog{snapIndex: sm.Position.Index, snapTerm: sm.Position.Term, snapChain: sm.ChainTip}
@@ -720,6 +753,8 @@ func (r *Raft) raiseSilenceOverSnapshot() {
 // Tick advances the timers to now.
 func (r *Raft) Tick(now time.Time) {
 	r.now = now
+	r.fwdAnswers.advance(now, fwdClockStep)
+	r.fwdAnswers.expire(r.forwardWindow())
 	r.endHintOnTimeout(now)
 	r.noteUnreached(now)
 	if r.role == core.RoleLeader {
@@ -936,6 +971,34 @@ type SummaryValue struct {
 	// append with entries it took from the leader of this term, zero while
 	// it took none (#919).
 	Appended time.Time
+	// ForwardDrops counts, since this node started, the forwards it neither
+	// proposed nor answered, by cause, each answered OUTCOME_UNKNOWN by its
+	// forwarder if it still waited (#1482, consensus_forwards_dropped_total).
+	ForwardDrops ForwardDropsValue
+	// ForwardRuns is how many forwarder runs the fence keeps a mark of
+	// (#1482, consensus_forward_runs).
+	ForwardRuns int
+	// ForwardForgotten counts, since this node started, the answers it
+	// forgot at its bound of 2^20 before their forward window ended, the
+	// oldest first, so that every new forward is handled: a copy of one is
+	// neither proposed nor answered, counted among ForwardDrops' Copies,
+	// and its forwarder answers OUTCOME_UNKNOWN (#1482,
+	// consensus_forward_answers_forgotten_total).
+	ForwardForgotten uint64
+}
+
+// ForwardDropsValue counts the forwards a node neither proposed nor
+// answered, by cause (#1482).
+type ForwardDropsValue struct {
+	// Copies are forwards whose run had a later one handled here: a copy of
+	// one handled, or one its connection delivered behind a later one.
+	Copies uint64
+	// Restarted are forwards of a run with no mark, of a term at most the
+	// one this node started at.
+	Restarted uint64
+	// Evicted are forwards of a run with no mark, of a term at most the
+	// highest of its node's marks the fence forgot.
+	Evicted uint64
 }
 
 // Status returns the step function's view.
@@ -956,6 +1019,7 @@ func (r *Raft) Summary() SummaryValue {
 		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
 		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
+		ForwardDrops: r.fwdDrops, ForwardRuns: len(r.fwdFence.marks), ForwardForgotten: r.fwdForgotten,
 	}
 	if r.role != core.RoleLeader && r.heard.term == r.term && r.heard.from == r.lead {
 		s.LeaderLast, s.Appended = r.heard.last, r.heard.appended

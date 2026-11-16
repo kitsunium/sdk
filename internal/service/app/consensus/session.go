@@ -35,8 +35,9 @@ func (n *Node) OpenSession(ctx context.Context, s coreconsensus.SessionID) error
 // the state machine applies it at most once, whatever the retries. A
 // retry after OUTCOME_UNKNOWN, with the same arguments, through any node,
 // is answered with the first one's token and, while this node holds it,
-// its value (ADR 0241). SESSION_DIGEST_MISMATCH and SESSION_EXPIRED apply
-// nothing.
+// its value (ADR 0241), the OUTCOME_UNKNOWN of a forward its leader
+// declined included (#1482). SESSION_DIGEST_MISMATCH and SESSION_EXPIRED
+// apply nothing.
 func (n *Node) ProposeSession(ctx context.Context, s coreconsensus.SessionID, seq uint64, data []byte) (coreconsensus.TokenValue, any, error) {
 	if seq == 0 {
 		// Sequence 0 is the opening's, never a command's.

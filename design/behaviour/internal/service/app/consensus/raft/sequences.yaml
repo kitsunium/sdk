@@ -30,6 +30,281 @@ sequences:
         to: fmt
       - return: s.String()
         to: s.String
+  - of: runOf
+    steps:
+      - return: "fwdRun{from: m.From, epoch: uint32(m.Context >> 32), admin: m.Kind == core.MsgForwardAdmin}, uint32(m.Context)"
+  - of: (*fwdFence).admits
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fwdFence).admits
+        kind: self
+      - id: runOf
+        kind: internal
+    steps:
+      - bind: run, n
+        eval: runOf(m)
+        to: runOf
+      - opt:
+          do:
+            - return: n > k.high
+          init:
+            bind: k, ok
+            eval: f.marks[run]
+          when: ok
+      - return: m.Term > f.start && m.Term > f.nodes[m.From]
+  - of: (*fwdFence).unmarked
+    steps:
+      - switch:
+          cases:
+            - case: m.Term <= f.start
+              do:
+                - return: fwdRestarted
+            - case: m.Term <= f.nodes[m.From]
+              do:
+                - return: fwdEvicted
+            - default: true
+              do:
+                - return: fwdAdmitted
+  - of: (*fwdFence).note
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fwdFence).note
+        kind: self
+      - id: runOf
+        kind: internal
+      - id: f.evict
+        kind: internal
+    steps:
+      - bind: run, n
+        eval: runOf(m)
+        to: runOf
+      - bind: k, ok
+        eval: f.marks[run]
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: f.marks
+                    value: map[fwdRun]fwdMark{}
+                when: f.marks == nil
+            - opt:
+                do:
+                  - eval: f.evict(soft, hard, current)
+                    to: f.evict
+                when: len(f.marks) >= soft
+          when: "!ok"
+      - op: ++
+        set: f.used
+      - set: f.marks[run]
+        value: "fwdMark{high: max(k.high, n), term: max(k.term, m.Term), used: f.used}"
+  - of: (*fwdFence).evict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fwdFence).evict
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: f.forget
+        kind: internal
+    steps:
+      - var:
+          name: old
+          type: "[]fwdRun"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: old
+                    value: append(old, run)
+                when: k.term < current
+          key: run
+          range: f.marks
+          value: k
+      - eval: |-
+          slices.SortFunc(old, func(a, b fwdRun) int {
+          		ka, kb := f.marks[a], f.marks[b]
+          		if c := cmp.Compare(ka.term, kb.term); c != 0 {
+          			return c
+          		}
+          		return cmp.Compare(ka.used, kb.used)
+          	})
+        to: slices
+      - loop:
+          do:
+            - eval: f.forget(run)
+              to: f.forget
+          key: _
+          range: old[:min(len(old), len(f.marks)-soft+1)]
+          value: run
+      - opt:
+          do:
+            - eval: f.forget(f.crowded())
+              to: f.forget
+          when: len(f.marks) >= hard
+  - of: (*fwdFence).crowded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fwdFence).crowded
+        kind: self
+      - id: f.leastRecent
+        kind: internal
+    steps:
+      - return: f.leastRecent(f.crowdedNode())
+        to: f.leastRecent
+  - of: (*fwdFence).forget
+    steps:
+      - bind: k
+        eval: f.marks[run]
+      - eval: delete(f.marks, run)
+      - opt:
+          do:
+            - set: f.nodes
+              value: map[core.NodeID]uint64{}
+          when: f.nodes == nil
+      - set: f.nodes[run.from]
+        value: max(f.nodes[run.from], k.term)
+  - of: (*fwdTable).advance
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!now.After(a.seen)"
+      - opt:
+          do:
+            - op: +=
+              set: a.clock
+              value: min(now.Sub(a.seen), step)
+          when: "!a.seen.IsZero()"
+      - set: a.seen
+        value: now
+  - of: (*fwdTable).lookup
+    steps:
+      - opt:
+          do:
+            - return: v, true
+          init:
+            bind: v, ok
+            eval: a.next[k]
+          when: ok
+      - bind: v, ok
+        eval: a.byKey[k]
+      - return: v, ok
+  - of: (*fwdTable).kept
+    steps:
+      - return: a.size
+  - of: (*fwdTable).full
+    steps:
+      - return: a.size >= limit
+  - of: (*fwdTable).makeRoom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fwdTable).makeRoom
+        kind: self
+      - id: a.forgetOldest
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: a.size == 0 || !a.full(limit)
+      - eval: a.forgetOldest()
+        to: a.forgetOldest
+      - return: "true"
+  - of: (*fwdTable).remember
+    steps:
+      - set: a.keep(k)[k]
+        value: v
+  - of: (*fwdTable).forgetOldest
+    steps:
+      - bind: st
+        eval: a.blocks[0][a.head]
+      - eval: delete(a.byKey, st.key)
+      - eval: delete(a.next, st.key)
+      - set: a.blocks[0][a.head]
+        value: fwdStamp{}
+      - op: ++
+        set: a.head
+      - op: ++
+        set: a.front
+      - op: "--"
+        set: a.size
+      - opt:
+          do:
+            - set: a.blocks[0]
+              value: nil
+            - set: a.blocks
+              value: a.blocks[1:]
+            - set: a.head
+              value: "0"
+          when: a.head == fwdBlock
+  - of: (*fwdTable).keep
+    steps:
+      - opt:
+          do:
+            - set: a.blocks
+              value: append(a.blocks, make([]fwdStamp, 0, fwdBlock))
+          init:
+            bind: "n"
+            eval: len(a.blocks)
+          when: n == 0 || len(a.blocks[n-1]) == fwdBlock
+      - bind: last
+        eval: len(a.blocks) - 1
+      - set: a.blocks[last]
+        value: "append(a.blocks[last], fwdStamp{key: k, at: a.clock})"
+      - op: ++
+        set: a.size
+      - set: a.peak
+        value: max(a.peak, a.size)
+      - switch:
+          cases:
+            - case: a.next != nil
+              do:
+                - return: a.next
+            - case: a.byKey == nil
+              do:
+                - set: a.byKey
+                  value: map[fwdKey]fwdAnswer{}
+      - return: a.byKey
+  - of: (*fwdTable).stamp
+    steps:
+      - bind: p
+        eval: a.head + int(s-a.front)
+      - return: a.blocks[p/fwdBlock][p%fwdBlock]
+  - of: (*fwdTable).expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fwdTable).expire
+        kind: self
+      - id: a.forgetOldest
+        kind: internal
+      - id: a.rebuildStep
+        kind: internal
+    steps:
+      - loop:
+          cond: a.size > 0 && n < fwdExpireStep
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: a.clock-a.blocks[0][a.head].at < window
+            - eval: a.forgetOldest()
+              to: a.forgetOldest
+          init: n := 0
+          post: n++
+      - opt:
+          do:
+            - eval: clear(a.blocks)
+            - set: a.blocks, a.head
+              value: a.blocks[:0], 0
+          when: a.size == 0
+      - eval: a.rebuildStep()
+        to: a.rebuildStep
   - of: IsolationFlags.Has
     steps:
       - return: f&x == x
@@ -1837,59 +2112,54 @@ sequences:
           range: vs
           value: id
       - return: len(vs) > 0 && n >= len(vs)/2+1
-  - of: (*fwdTable).lookup
-    steps:
-      - bind: v, ok
-        eval: a.byKey[k]
-      - return: v, ok
-  - of: (*fwdTable).remember
-    steps:
-      - opt:
-          do:
-            - set: a.byKey
-              value: map[fwdKey]fwdAnswer{}
-          when: a.byKey == nil
-      - alt:
-          - do:
-              - set: a.order
-                value: append(a.order, k)
-            when: len(a.order) < limit
-          - do:
-              - eval: delete(a.byKey, a.order[a.next])
-              - set: a.order[a.next]
-                value: k
-              - set: a.next
-                value: (a.next + 1) % limit
-            else: true
-      - set: a.byKey[k]
-        value: v
   - of: (*Raft).handleForward
     participants:
       - id: caller
         kind: actor
       - id: (*Raft).handleForward
         kind: self
+      - id: r.fwdAnswers.expire
+        kind: internal
       - id: r.fwdAnswers.lookup
+        kind: internal
+      - id: r.countFwdDrop
         kind: internal
       - id: r.answerForward
         kind: internal
       - id: r.fwdAnswers.remember
+        kind: internal
+      - id: r.fwdFence.note
         kind: internal
       - id: r.send
         kind: internal
     steps:
       - bind: key
         eval: "fwdKey{from: m.From, ctx: m.Context}"
+      - eval: r.fwdAnswers.expire(r.forwardWindow())
+        to: r.fwdAnswers.expire
       - bind: a, ok
         eval: r.fwdAnswers.lookup(key)
         to: r.fwdAnswers.lookup
       - opt:
           do:
+            - eval: r.countFwdDrop(&m)
+              to: r.countFwdDrop
+            - return: ""
+          when: "!ok && !r.fwdAdmits(&m)"
+      - opt:
+          do:
             - set: a
               to: r.answerForward
               value: r.answerForward(m)
-            - eval: r.fwdAnswers.remember(key, a, maxFwdAnswers)
+            - opt:
+                do:
+                  - op: ++
+                    set: r.fwdForgotten
+                when: r.fwdAnswers.makeRoom(r.forwardCeiling())
+            - eval: r.fwdAnswers.remember(key, a)
               to: r.fwdAnswers.remember
+            - eval: r.fwdFence.note(&m, maxFwdRuns, maxFwdRunsHard, r.term)
+              to: r.fwdFence.note
           when: "!ok || r.mutated(mutForwardNoDedupe)"
       - bind: resp
         eval: core.MsgForwardResp
@@ -1904,6 +2174,52 @@ sequences:
           		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm, Commit: a.commit,
           	})
         to: r.send
+  - of: (*Raft).countFwdDrop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).countFwdDrop
+        kind: self
+      - id: runOf
+        kind: internal
+    steps:
+      - bind: run, _
+        eval: runOf(m)
+        to: runOf
+      - opt:
+          do:
+            - op: ++
+              set: r.fwdDrops.Copies
+            - return: ""
+          init:
+            bind: _, marked
+            eval: r.fwdFence.marks[run]
+          when: marked
+      - opt:
+          do:
+            - op: ++
+              set: r.fwdDrops.Restarted
+            - return: ""
+          when: r.fwdFence.unmarked(m) == fwdRestarted
+      - op: ++
+        set: r.fwdDrops.Evicted
+  - of: (*Raft).fwdAdmits
+    steps:
+      - return: r.cfg.fwdUnfenced || r.fwdFence.admits(m)
+  - of: (*Raft).forwardWindow
+    steps:
+      - opt:
+          do:
+            - return: min(r.cfg.ForwardWindow, maxForwardWindow)
+          when: r.cfg.ForwardWindow > 0
+      - return: defaultForwardWindow
+  - of: (*Raft).forwardCeiling
+    steps:
+      - opt:
+          do:
+            - return: r.cfg.fwdCeiling
+          when: r.cfg.fwdCeiling > 0
+      - return: maxFwdAnswers
   - of: (*Raft).answerForward
     participants:
       - id: caller
@@ -3612,6 +3928,10 @@ sequences:
           		votes:  map[core.NodeID]bool{},
           		timing: cfg.Timing,
           		now:    st.Now,
+          		// The table's clock starts at the start instant, and the fence
+          		// admits no forward of a term this node's previous runs handled.
+          		fwdAnswers: fwdTable{seen: st.Now},
+          		fwdFence:   fwdFence{start: st.HardState.Term},
           	}
       - bind: sm
         eval: st.Snapshot
@@ -3763,6 +4083,10 @@ sequences:
         kind: actor
       - id: (*Raft).Tick
         kind: self
+      - id: r.fwdAnswers.advance
+        kind: internal
+      - id: r.fwdAnswers.expire
+        kind: internal
       - id: r.endHintOnTimeout
         kind: internal
       - id: r.noteUnreached
@@ -3780,6 +4104,10 @@ sequences:
     steps:
       - set: r.now
         value: now
+      - eval: r.fwdAnswers.advance(now, fwdClockStep)
+        to: r.fwdAnswers.advance
+      - eval: r.fwdAnswers.expire(r.forwardWindow())
+        to: r.fwdAnswers.expire
       - eval: r.endHintOnTimeout(now)
         to: r.endHintOnTimeout
       - eval: r.noteUnreached(now)
@@ -4048,6 +4376,7 @@ sequences:
           		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
           		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
           		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
+          		ForwardDrops: r.fwdDrops, ForwardRuns: len(r.fwdFence.marks), ForwardForgotten: r.fwdForgotten,
           	}
       - opt:
           do:
@@ -5266,6 +5595,8 @@ sequences:
         kind: actor
       - id: (*Raft).Step
         kind: self
+      - id: r.fwdAnswers.advance
+        kind: internal
       - id: r.stepLeader
         kind: internal
       - id: r.stepCandidate
@@ -5275,6 +5606,8 @@ sequences:
     steps:
       - set: r.now
         value: now
+      - eval: r.fwdAnswers.advance(now, fwdClockStep)
+        to: r.fwdAnswers.advance
       - opt:
           do:
             - return: ""

@@ -1,6 +1,93 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: (*fwdFence).crowdedNode
+    steps:
+      - bind: count
+        eval: map[core.NodeID]int{}
+      - loop:
+          do:
+            - op: ++
+              set: count[run.from]
+          key: run
+          range: f.marks
+      - var:
+          name: node
+          type: core.NodeID
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: node
+                    value: id
+                when: c > count[node] || (c == count[node] && id < node)
+          key: id
+          range: count
+          value: c
+      - return: node
+  - of: (*fwdFence).leastRecent
+    steps:
+      - var:
+          name: out
+          type: fwdRun
+      - var:
+          name: at
+          type: uint64
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out, at
+                    value: run, k.used
+                when: run.from == node && (at == 0 || k.used < at)
+          key: run
+          range: f.marks
+          value: k
+      - return: out
+  - of: (*fwdTable).rebuildStep
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: a.peak < minFwdRebuild || a.size > a.peak/4
+            - set: a.next
+              value: make(map[fwdKey]fwdAnswer, min(a.size, fwdRebuildStep))
+            - set: a.moveAt
+              value: a.front + uint64(a.size)
+          when: a.next == nil
+      - bind: lo
+        eval: max(a.front, a.moveAt-min(a.moveAt, uint64(fwdRebuildStep)))
+      - loop:
+          cond: s < a.moveAt
+          do:
+            - bind: k
+              eval: a.stamp(s).key
+            - opt:
+                do:
+                  - continue: true
+                init:
+                  bind: _, moved
+                  eval: a.next[k]
+                when: moved
+            - opt:
+                do:
+                  - set: a.next[k]
+                    value: v
+                init:
+                  bind: v, ok
+                  eval: a.byKey[k]
+                when: ok
+          init: s := lo
+          post: s++
+      - set: a.moveAt
+        value: lo
+      - opt:
+          do:
+            - set: a.byKey, a.next, a.peak
+              value: a.next, nil, a.size
+          when: a.moveAt <= a.front
   - of: (*Raft).quorumActive
     steps:
       - bind: "n"

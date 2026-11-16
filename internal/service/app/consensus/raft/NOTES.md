@@ -14,6 +14,17 @@ upgrades it (`TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`).
 asynchronous, the entries handed by index read back from the disk model
 and a restart loading the committed commands past `recent` without their
 payloads, as the driver does (`TestSimBoundedApply*`, #663, #664).
+`simOptions.fwdLate` delivers a forward's copy up to that long after its
+original instead of a millisecond, to the same run of its node only, as a
+connection dies with its node, unless `simOptions.fwdAcross` lets it reach
+a run that restarted since; `simOptions.fwdWindow` is every node's
+`ForwardWindow`, and `simOptions.fwdUnfenced` switches every node's forward
+fence off, as the release before #1482's ran
+(`TestForwardedWritesWithLateCopiesAreAppliedOnce`, copies up to nine
+seconds late; `TestForwardedLateCopiesPastTheWindowAreFenced` and
+`TestForwardedLateCopiesInAMixedClusterAreFenced`, answers kept 50 ms and
+copies across restarts, the second with nodes of protocols 2 and 3; their
+control `TestForwardedLateCopiesPastTheWindowAreCaught`, the fence off).
 
 `perf_fixtures_test.go` (`//go:build !race`) holds the fixtures of
 `Step`'s two budgets in `design/sdk.yaml` (ADR 0152 D15, #921), which kit
@@ -221,11 +232,132 @@ under coverage before touching `shard_count`.
 - Propose a forward each time it is delivered: the TCP transport resends a
   batch whose write failed on a reused connection (#377), so a frame can
   arrive twice. `handleForward` keeps its answers by `(From, Context)` —
-  the submission id never repeats, R7-23 — in a ring of `maxFwdAnswers`
-  that outlives a term, and answers a duplicate with the recorded answer,
-  position or refusal, never proposing it again (#401, `mutForwardNoDedupe`,
+  the submission id never repeats, R7-23 — in a table that outlives a
+  term, and answers a duplicate with the recorded answer, position or
+  refusal, never proposing it again (#401, `mutForwardNoDedupe`,
   `TestForwardedWritesUnderDuplicationAreAppliedOnce`). Every other kind
   is idempotent under duplication, which that scenario exercises.
+- Drop a new forward at the forward answers' table's bound, or handle one
+  there without the fence's mark, or bound that table by a count of
+  answers alone. Its 4 096 answers, shared by every sender and
+  evicted oldest first, made a copy that came after 4 096 others a new
+  submission: appended a second time, by the leader that had appended it
+  or by a leader of a later term, or refused `NOT_LEADER` by a node that
+  held it in its log (#1482, observation O1 of the safety review of
+  #1478). The table (`fwdtable.go`) keeps an answer for
+  `Config.ForwardWindow`, twice the transport's resend window, 22 s by
+  default and 2 minutes at most, on a clock of its own: the driver's as
+  `Step` and `Tick` read it, a gap of more than `fwdClockStep` (1 s)
+  counted as one, so a node that did not run — a paused machine or
+  process — ages no answer while the copies its peers resent wait in its
+  sockets. Its bound is `maxFwdAnswers`, 2^20, the memory's only: at it
+  `makeRoom` forgets the oldest answer, whatever its age, one for each new
+  answer kept, and the forward is handled and marked. As first written a
+  ceiling of 2^18 took no new forward, neither proposed nor answered — the
+  owner's decision of 2026-11-15, taken when the table bore the safety —
+  and capped the forwards at 11 915 a second under the defaults, 20.6 % of
+  15 000 a second dropped (the safety review of fix C, O2). The fence's
+  mark, set for every forward handled, a refusal included, is what keeps
+  a copy of a forgotten answer or refusal from being handled again, so the
+  owner decided on 2026-11-16 that no forward is dropped for room; a
+  handling at the bound without the mark (the review's M3) answered a
+  refusal and appended its copy at the model's first seed. Measured on
+  amd64, 152 B an answer, 152 MiB at the bound, 280 MiB at most under
+  churn at its rate; a table holds rate × window answers and reaches the
+  bound past 47 662 forwards a second under the default window; at 60 000
+  a second the answers forgotten were 17.5 s old at the youngest, past the
+  TCP transport's 11 s resend window, and no forward was dropped at any
+  rate. The answers past the window go `fwdExpireStep` (4 096) a call at
+  most: a table at its bound aged after a pause drains in turns of a few
+  milliseconds, never at once. The queue grows and shrinks by
+  blocks of 512, and the map, which never gives its room back, is rebuilt
+  once a quarter of a peak of 4 096 or more is left, 1 024 answers moved
+  per `Tick` or forward, the youngest first: rebuilt in one turn, 75 000
+  answers took 23.5 ms, past a lease's drift budget (review O4)
+  (`TestACopyAfterManyOtherForwardsIsNotAppendedAgain`, red on `main` too,
+  `TestAnOlderTermCopyAfterManyOtherForwardsIsNotAppendedAgain` and
+  `TestAnOlderTermCopyAfterManyOtherForwardsIsNotRefused`, red on #1478,
+  each with 8 192 other answers over eight seconds;
+  `TestForwardAnswersAreBounded`, red on fix C's second version, which a
+  fence that answers at the bound without the mark, one that drops the
+  mark of the answer it forgets and a table that forgets its most recent
+  answer each fail; `TestAForwardAnswerIsKeptTheWholeWindow`,
+  `TestAPausedNodeKeepsItsForwardAnswers`,
+  `TestARebuildKeepsEveryLiveAnswerAStepAtATime`, which the review's
+  mutation M1, a rebuild that copies the wrong region, fails;
+  `TestForwardedWritesWithLateCopiesAreAppliedOnce`).
+- Rest the deduplication on that table's memory, or on any time. A sender
+  stopped mid-batch — SIGSTOP, a frozen cgroup, a paused machine — resumes
+  past its write deadline and writes the batch again: the copy of a
+  forward reached the TCP transport's peer 25.1 s after its original, past
+  the first fix's 18 s, and at a light load it was appended a second time,
+  or appended after a refusal `NOT_LEADER` once its receiver led (the
+  safety review of #1482, D1); a restarted node, its table empty, met it
+  too (D1 (c)). The fence (`fwdFence`) needs neither: a forwarder draws its
+  submission ids in the order it sends them, a counter under its run's
+  random epoch (R7-23), each lane delivers in order — commands on the data
+  lane, administrative forwards on the control lane, a mark each — and
+  every copy goes to the one node addressed. So a forward of a run whose
+  counter is not above the highest this node handled is a copy, or one
+  its lane delivered behind a later one, which only a lane's change of
+  connection does (a write that failed, a link replaced at its age or its
+  silence). A run with no mark is admitted only past two terms. The first
+  is the term of the node's durable hard state when it started, and it
+  rests on an invariant of the forwarder, not on when an answer leaves (a
+  refusal given in the turn after a change of term leaves before that
+  term is durable): a forward to a node always carries a term that node
+  led. `Node.forward` stamps the term and the leader of one status, and a
+  node names a leader only on that leader's append or heartbeat of its
+  term, its leader forgotten at every change of term (`becomeFollower`,
+  `campaign`); a node leads only a term durable before it leads, so every
+  forward a previous run handled carried a term at most the one the next
+  run starts at (the safety review of fix C, O1;
+  `TestAForwardToANodeCarriesATermItLed`,
+  `TestARefusalBeforeItsTermIsDurableIsNeverFollowedByAnAppend`). The
+  second is, per forwarder node, the highest term of its marks the fence
+  forgot. What the fence turns away is neither proposed nor answered, and
+  its forwarder, if it still waits, answers `OUTCOME_UNKNOWN`: after a
+  restart that is every forward of a term up to the start's, so a leader
+  that restarts answers nothing of what was sent to it until the next
+  election.
+- Forget a mark of the current term below `maxFwdRunsHard`, or choose the
+  mark to forget by its node. Past `maxFwdRuns` (4 096) marks the fence
+  forgot the mark of the lowest term, at a tie the lowest node's, and its
+  term rose to it: past 4 096 runs forwarding in one term — a follower in a
+  crash loop, a fleet of learners redeployed under a leader that stays —
+  a live forwarder that never restarted and every new run, the first
+  administrative forward of any run included, went to `OUTCOME_UNKNOWN`
+  until an election a healthy leader never calls (the safety review of fix
+  C, D1, `TestManyRunsInATermLockNoForwarderOut`, red on fix C's first
+  version). Past `maxFwdRuns` the fence now forgets the marks of a term
+  below its own only, the oldest term first and within it the run handled
+  least recently, each raising its own node's fence to the mark's term,
+  never a run of the current term (`TestTheFenceForgetsOlderTermsFirstAndTheLeastRecent`).
+  The marks of the current term are kept up to `maxFwdRunsHard` (65 536,
+  5 MiB at 80 B a mark with the map's room, measured): past it, the last
+  resort, the run handled least recently of the node holding the most
+  marks goes, and that node's new runs wait for the next term; the 65 536
+  are runs per lane, about 32 768 restarts when each run forwards on both
+  lanes, and restarts spread over several nodes fence each of them in turn
+  as the most loaded node changes (#1540,
+  `TestTheFenceLastResortFencesOnlyTheCrowdedNode`). Every forward
+  neither proposed nor answered is counted by cause in `Summary`'s
+  `ForwardDrops` — copy, restarted, evicted —, the marks in
+  `ForwardRuns` and the answers forgotten at the table's bound in
+  `ForwardForgotten`, which the driver publishes as
+  `consensus_forwards_dropped_total`, `consensus_forward_runs` and
+  `consensus_forward_answers_forgotten_total`
+  (`TestForwardDropsAreCountedByCause`). Nothing crosses the wire: no
+  frame change, no raise, a forwarder of any release fenced the same
+  (`TestALateCopyAtALowRateIsAppendedOnce`,
+  `TestALateCopyOfARefusedForwardIsNeverAppended`, the review's annex A,
+  red on #1482's first fix; `TestARestartedNodeNeverHandlesALateCopyAgain`
+  and `TestAForwardIsFencedOnItsOwnLane`, red on `main` too;
+  `TestForwardedLateCopiesPastTheWindowAreFenced`,
+  `TestForwardedLateCopiesInAMixedClusterAreFenced` and their control; the
+  consensus package's `TestAStalledSendersLateCopyIsAppendedOnce`; no
+  mutation, the type is full: `Config.fwdUnfenced`, a test-only switch,
+  runs a node of the release before it).
 - Let a silent node campaign, on its election timer or a TimeoutNow: its
   candidacy is a vote for itself, and the silence grants none. Elected with
   one other grant while the leader was down, it overwrote the acknowledged
@@ -626,9 +758,10 @@ under coverage before touching `shard_count`.
   type is full).
 - Drop a forward, or the answer to one, as an older term's message
   (`stepTerm`, `forwardKind`): both belong to the submission id, not to a
-  term. A refusal says the entry was never appended and a position
-  resolves when its index is applied, whatever the term the receiver moved
-  to; dropped, the forward that crossed a change of term was never answered
+  term. A refusal says the entry was never appended — no copy is handled
+  again, whatever its delay (the fence, #1482) — and a
+  position resolves when its index is applied, whatever the term the
+  receiver moved to; dropped, the forward that crossed a change of term was never answered
   and the answer that did was never read, and the follower's sweep answered
   OUTCOME_UNKNOWN for an entry the leader had refused, or committed. A
   leader that hands over for its stalled apply sends its TimeoutNow beside

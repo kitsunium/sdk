@@ -7702,6 +7702,269 @@ the measure, the rate and the rule; the engine does not change.
   VM's disk (median 1.07), the stream at 8.0 MiB/s through B each time.
   The verdict is the lane's on its runner.
 
+## Amendment — a forward's answer is kept for the transport's resend window, not for 4 096 answers (2026-11-15, #1482)
+
+D6's submission identity lets the leader answer a forward delivered twice
+with its first answer, and propose it once
+([#401](https://github.com/kitsunium/sdk/issues/401)). The answers were
+kept in a ring of 4 096, shared by every sender, the oldest evicted first,
+and volatile. A transport delivers a forward again when it resends a batch
+its peer had partly read, seconds after the first copy at most; a copy that
+came after 4 096 other answers was a new submission, appended a second time
+by the leader that had appended it, and, since the amendment above handles a
+forward of an older term at the receiver's term, by a leader of a later
+term, or refused `NOT_LEADER` by a node that held it in its log, a refusal
+D6 reads as "never appended"
+([#1482](https://github.com/kitsunium/sdk/issues/1482), observation O1 of
+the safety review of #1478). That amendment's "both under the same
+deduplication of the submission id (#401)" held only while the ring kept
+the answer. The owner decided, on 2026-11-15, to bound the answers by time,
+at least the transport's resend window, rather than by a count.
+
+- **The window.** The step function keeps an answer for
+  `raft.Config.ForwardWindow` after it gave it, whatever the term, and
+  answers every copy within it from the table. The node passes twice the
+  resend window its transport states: the shipped TCP transport's is
+  4 × `WriteTimeout` + `HandshakeTimeout` + the kernel's bound on
+  unacknowledged bytes, 11 s under the defaults, since a batch is written
+  at most three times — on the link, on the link dialled again after a
+  write that failed, on the back link — each write under `WriteTimeout`,
+  the dial under `HandshakeTimeout`, the back link's write after a wait
+  for its lock of a `WriteTimeout` at most, and a write's bytes reach the
+  peer within that bound or the kernel aborts the connection:
+  `WriteTimeout` on Linux, rounded up to the second on macOS and Windows,
+  none on the BSDs and illumos, where `WriteTimeout` stands for it. The
+  doubling is for what no timeout bounds on the receiving node, its
+  reader, its inbox and its event loop. A transport that states no window
+  gets the default, 22 s, and no window exceeds 2 minutes. The window
+  counts the receiving node's configuration and the sender's running
+  time: it is a precision, never the safety (the amendment below).
+- **The clock.** The window runs on the clock the step function already
+  receives, the driver's reading at each `Step` and `Tick`, with one
+  change: a gap of more than one second between two readings counts as
+  one second. A node that did not run — a paused machine, a stopped
+  process — ages no answer while the copies its peers resent wait in its
+  sockets, and steps them on waking with its clock minutes later.
+- **The bound.** The table keeps at most 2^20 answers, and at the bound it
+  forgets the oldest, whatever its age, one for each new answer it keeps:
+  no forward is ever dropped for room (the owner's decision of 2026-11-16,
+  in the amendment below, which corrects this bullet: as first written, a
+  table at a ceiling of 2^18 forgot nothing before the window ended and
+  took no new forward, neither proposed nor answered, which capped the
+  forwards at 11 915 a second under the defaults and dropped 20.6 % of
+  15 000 a second). The bound's cost and its measure are the amendment
+  below's. The table's map, which never gives its room back, is rebuilt
+  once a quarter of its peak is left, a thousand answers per turn of the
+  loop: rebuilt in one turn, 75 000 answers took 23.5 ms, past a lease's
+  drift budget; the answers past the window go 4 096 a turn at most.
+- **Past the window.** An answer the window passed is forgotten. The
+  shipped transport delivers a copy later than the window: on every
+  platform when its sender is stopped mid-batch — SIGSTOP, a frozen
+  cgroup, a paused machine — for longer, since it resumes past its write
+  deadline and writes the batch again (25.1 s after the original, measured
+  at the defaults), and on the BSDs and illumos, which bound no
+  connection's unacknowledged bytes, when a partition outlasts it. Such a
+  copy is never a new submission: the fence of the amendment below
+  neither proposes nor answers it.
+- **A restart.** The table is volatile, and a restarted node can meet a
+  copy of a frame its previous run answered: a sender stopped while the
+  node restarted dials the new run when it resumes. The fence of the
+  amendment below handles no such copy.
+- **No frame changes, no protocol raise, no raft mutation** (the type is
+  full: the paused node's check takes the table's clock step as its
+  argument). A node of this version and one of the previous release keep
+  their own tables; nothing crosses the wire.
+- **Tests.** raft's `TestACopyAfterManyOtherForwardsIsNotAppendedAgain`
+  (red on `main` and on #1478: appended a second time at index 8 195),
+  `TestAnOlderTermCopyAfterManyOtherForwardsIsNotAppendedAgain` (red on
+  #1478: appended again at the leader of term 4) and
+  `TestAnOlderTermCopyAfterManyOtherForwardsIsNotRefused` (red on #1478:
+  refused `NOT_LEADER` while the command sat at 2/2), each with 8 192
+  other answers over eight seconds between a forward and its copy;
+  `TestForwardAnswersAreBounded` (the bound, as the amendment below
+  corrects it), `TestAForwardAnswerIsKeptTheWholeWindow`,
+  `TestAPausedNodeKeepsItsForwardAnswers`,
+  `TestForwardedWritesWithLateCopiesAreAppliedOnce` (the simulator, a
+  forward's copy up to nine seconds late across partitions, crashes and
+  changes of leader) and its control
+  `TestForwardedLateCopiesPastTheWindowAreCaught` (answers kept 50 ms: a
+  command applied twice); the consensus package's
+  `TestTheForwardWindowIsTwiceTheTransportsResendWindow`.
+
+## Amendment — no copy of a forward is handled twice, whatever its delay (2026-11-15, #1482)
+
+The safety review of the amendment above found that the window it keeps an
+answer for is counted on the sender's running time (D1): a sender stopped
+mid-batch — SIGSTOP, a frozen cgroup, a paused machine; D9 counts them
+among the failures — resumes past its write deadline and writes the whole
+batch again, and the copy of a forward reached its peer 25.1 s after the
+original under the defaults. At a light load the release before that
+amendment still held the answer (4 096 newer ones had not come); with the
+window alone, a copy later than 18 s was appended a second time, or
+appended once its receiver led after that receiver had refused it
+`NOT_LEADER`, a refusal D6 reads as "never appended"; and a receiver that
+restarted meanwhile met the copy with an empty table. The owner decided, on
+2026-11-15, on the definitive fix: no late copy is ever applied twice,
+under the existing version rule. Of the ways weighed — an acknowledgement
+the forward carries of the sender's lowest pending submission, which needs
+a field of the frame, an order of the sender's runs kept on disk, and still
+a fence for the receiver's restarts; client sessions of ADR 0241 opened
+implicitly, which record no refusal, let a late copy of an evicted
+session's opening open it again for a command's copy, scan the
+uncommitted tail at each forward and share `MaxSessions` with the
+clients; a transport that never writes a forward twice, which protects no
+other transport; a replicated record of each forward, which needs a raise
+the frame's full flags byte does not allow — the one taken needs nothing on
+the wire: the acknowledgement is the order of the sender's submission ids.
+
+- **The fence.** A forwarder draws its submission ids in the order it
+  sends them, a counter under its run's random epoch (R7-23, unchanged
+  since the first release), each lane delivers in order — commands on the
+  data lane, administrative forwards on the control lane — and every copy
+  of a frame goes to the one node it was addressed to. The step function
+  keeps, per run of a forwarder and per lane, the highest counter it
+  handled: a forward not above it is a copy, or one its lane delivered
+  behind a later one, which only a lane's change of connection does — a
+  write that failed, a link replaced at its age or its silence —, and
+  it is neither proposed nor answered, whatever its delay. Its forwarder,
+  if it still waits, answers its caller `OUTCOME_UNKNOWN` after two
+  maximum election timeouts.
+- **A restart.** A run the fence keeps no mark of is admitted only past
+  the term of the node's durable hard state when it started: every forward
+  a previous run of the node handled carried a term at most that one. What
+  holds this is an invariant of the forwarder, not when an answer leaves —
+  a refusal given in the turn after a change of term leaves before that
+  term is durable (the safety review of this fix, 2026-11-16, O1): a
+  forward to a node always carries a term that node led. A forwarder
+  stamps the term and the leader of one status, a node names a leader only
+  on that leader's append or heartbeat of its own term, its leader
+  forgotten at every change of term, and a leader leads only a term durable
+  before it leads. A node that restarted therefore
+  handles no forward of a term up to the one it started at: forwards sent
+  to a leader that restarted are answered by nobody until the next
+  election, `OUTCOME_UNKNOWN` to their callers, where a `NOT_LEADER` could
+  have been false. `RestoreSnapshot` and `RestoreBackup` start another
+  cluster, which the old one's members do not reach.
+- **Memory, without a lockout.** The fence keeps a mark per run of a
+  forwarder and per lane, 80 bytes with its map's room, measured. As first
+  written it kept 4 096 and, past them, forgot the mark of the lowest term,
+  at a tie the lowest node's, its term rising to the forgotten mark's: past
+  4 096 runs forwarding in one term — a follower in a crash loop, a fleet
+  of learners redeployed under a leader that stays — a live forwarder and
+  every new run went to `OUTCOME_UNKNOWN` until an election a healthy
+  leader never calls (the same review, D1). Past 4 096 marks the fence now
+  forgets only marks of a term below its node's own, the oldest term first
+  and within it the run handled least recently, each raising the fence of
+  its own forwarder node to the mark's term; the marks of the current term
+  are kept up to 65 536, 5 MiB, and past them, the last resort, the run
+  handled least recently of the node holding the most marks goes, and
+  that node's new runs wait for the next term. The 65 536 are marks of the
+  current term, one per run and lane, so about 32 768 restarts when each
+  run forwards on both lanes; and the node that waits is not the same for
+  long: restarts spread over several nodes fence each of them in turn, as
+  the counts level out, until the next election, which a healthy leader
+  does not call (the safety review of the third version, O1, tracked in
+  #1540, `needs-decision`: a leader that opens a new term at the last
+  resort bounds it by construction, a documented limit alone does not; the
+  wording is the documented limit's, applied now). A forwarder that died
+  leaves its mark until a later term, never its answers: the window
+  forgets those.
+- **Observed.** Every forward neither proposed nor answered is counted,
+  `consensus_forwards_dropped_total` by reason — `copy`, `restarted`,
+  `evicted` —, the marks kept are `consensus_forward_runs`, and the
+  answers forgotten at the table's bound before their window ended are
+  `consensus_forward_answers_forgotten_total`.
+- **What stays.** The window of the amendment above is a precision, a copy
+  within it answered as its original was; it is bounded to 2 minutes,
+  which a `WriteTimeout` without a bound grew without one.
+- **No ceiling on the forwards, a bound on the memory.** As first written
+  the table kept a ceiling of 2^18 answers younger than the window and,
+  at it, took no new forward, neither proposed nor answered, as the owner
+  decided on 2026-11-15 while the table bore the safety: an `OVERLOADED`
+  refusal forgotten would have let its copy append a command its caller
+  was told was refused. The fence took that over — it marks every forward
+  handled, a refusal included, and a copy of an answer or a refusal
+  forgotten is not above its run's mark — and the ceiling only capped the
+  forwards at 2^18 over the window, 11 915 a second under the defaults,
+  2 184 at the 2-minute window, dropping 20.6 % of 15 000 a second and
+  60.3 % of 30 000 (the safety review of this fix, O2; its random model
+  of a receiver over a network that reorders, duplicates and delays without
+  bound stayed safe when the table forgot its oldest answer, and failed at
+  its first seed when a forward was answered at the ceiling without the
+  mark). Owner decision (2026-11-16): the ceiling no longer serves safety;
+  remove it, or raise it as high as possible, so that no forward is
+  dropped under load, the memory staying bounded, forgetting the oldest
+  answer fitting. So the table keeps at most 2^20 answers and, at that
+  bound, forgets its oldest, whatever its age, one for each new answer it
+  keeps, the forward always handled and marked. The bound is the memory's
+  only: 152 bytes an answer measured on amd64, 152 MiB at the bound and
+  280 MiB at most while a load just under it churns, per Raft group (a
+  `multi` node with several groups adds them), and a
+  table holds what its load keeps, rate × window answers, so it reaches the
+  bound only past 47 662 forwards a second held for the default window
+  (8 738 at 2 minutes). Its cost is a copy that comes after its answer was
+  forgotten, when the first answer was lost: neither proposed nor
+  answered, its forwarder answering `OUTCOME_UNKNOWN` — never a second
+  append, never an append after a refusal. Measured on the table and the
+  fence as the loop drives them, one forward a turn and a tick every
+  20 ms: no forward dropped at 15 000, 30 000 or 60 000 a second, nothing
+  forgotten at the first two under the default window, the answers
+  forgotten at 60 000 a second 17.5 s old at the youngest, past the TCP
+  transport's 11 s resend window (69.9 s and 35.0 s old at 15 000 and
+  30 000 a second under the 2-minute window); the worst turn 3.6 ms, the
+  map's growth, under a lease's 10 ms drift budget at 1 s × 0.01. One
+  answer goes for one kept, and the answers past the window go 4 096 a
+  turn at most, so no turn forgets a large table at once: a table at its
+  bound aged after a pause drained in turns of 2.6 ms at worst.
+- **No frame change, no protocol raise.** Nothing crosses the wire: a
+  forwarder of any release is fenced the same, and a node of the previous
+  release keeps its own table, so the guarantee holds once every member
+  runs this one.
+- **Tests.** raft's `TestALateCopyAtALowRateIsAppendedOnce` and
+  `TestALateCopyOfARefusedForwardIsNeverAppended` (the review's annex A,
+  copies 10 s to 10 minutes late at a forward a second: red on the
+  amendment above, the command appended at 2 and 24, 26, 33, 63, 603, or
+  refused and then appended at 22, 24, 31, 61),
+  `TestARestartedNodeNeverHandlesALateCopyAgain` (red on `main` too:
+  refused `NOT_LEADER` while the command sat in the log, and appended
+  again by the leader of the next term), `TestAForwardIsFencedOnItsOwnLane`,
+  `TestManyRunsInATermLockNoForwarderOut` (the review's D1, red on this
+  fix's first version: a live forwarder lost 10 of its 10 forwards over ten
+  minutes, three new runs refused),
+  `TestTheFenceForgetsOlderTermsFirstAndTheLeastRecent`,
+  `TestTheFenceLastResortFencesOnlyTheCrowdedNode`,
+  `TestAForwardToANodeCarriesATermItLed` and
+  `TestARefusalBeforeItsTermIsDurableIsNeverFollowedByAnAppend` (O1),
+  `TestForwardDropsAreCountedByCause`,
+  `TestForwardAnswersAreBounded` (at the bound a new forward is handled,
+  a refusal among them, the oldest answer forgotten and its copy fenced;
+  red on this fix's second version, the forward at the bound neither
+  answered nor appended; it fails a fence that answers at the bound
+  without the mark, one that drops the mark of the answer it forgets, and
+  a table that forgets its most recent answer instead),
+  `TestARebuildKeepsEveryLiveAnswerAStepAtATime` (the review's M1, and the
+  answers past the window 4 096 a turn at most),
+  `TestForwardedLateCopiesPastTheWindowAreFenced` and
+  `TestForwardedLateCopiesInAMixedClusterAreFenced` (the simulator, answers
+  kept 50 ms, copies across restarts, nodes of protocols 2 and 3) and their
+  control `TestForwardedLateCopiesPastTheWindowAreCaught` (the fence off: a
+  command applied twice); the consensus package's
+  `TestAStalledSendersLateCopyIsAppendedOnce` (two TCP transports and a
+  step function, the sender stopped 14 s mid-write past a window of 12 s:
+  red on the amendment above, the command appended twice), and
+  `TestTheForwardDropsArePublishedByReason`.
+- **Known limits, tracked in #1540** (the safety review of the third
+  version found no path that handles a forward twice; these touch liveness
+  or measurement only). O2: the random model of the second version's
+  review saw no mark eviction at the default bounds ("0 evictions seen");
+  run with the bounds lowered it passes 3 000 seeds with 26 365 and 13 848
+  evictions, and the bounds are not yet tunable by a test-only `Config`
+  field. O3: past 4 096 marks of the current term every new run walks the
+  marks up to three times, a cost paid per new run and not per forward,
+  not measured against the lease's drift budget. O5: a random 32-bit epoch
+  equal to a kept mark's refuses the new run until its counter passes the
+  old high, at most 65 536 / 2^32 per restart: negligible, liveness only.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7761,6 +8024,7 @@ the measure, the rate and the rule; the engine does not change.
 | #1447, #1440 | Raft lot L1, 2026-11-15 | a voter that does not know its leader's last index refuses a JOIN `NOT_LEADER`, the leader's address named only when known; a forward and its answer of an older term are handled at the receiver's term, so a forward that crossed a change of term is answered and no longer left to `OUTCOME_UNKNOWN`, the answer carrying the forward's term and never the receiver's later one, which raised the forwarder's past D5's live-leader refusal and broke D9 (b)'s lease (the safety review of #1457); no format change, no protocol raise, no raft mutation (amendment of 2026-11-15, #1447, #1440) |
 | #912, #1364 | the leader's loop turn, 2026-11-15 | `BENCH.md`'s `TURN` rows keep the leader's turns raw through a test `Meter` and its `ENC` rows a turn's bytes on both paths; "not worse" is the A/B lane's `cturn`, the high end of the 95 % interval of head over base at most 1.00, against `ee1f48ba2` and the repaired parent of #912, and the bytes its `cenc`, at most 1/N; the loop reads the step function's `Summary` and asks `SameConf` instead of cloning both memberships through `Status` at each read, publishes a status it compared on the stack, and encodes a frame without entries at its length; read-only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #912, #1364) |
 | #920, #1365 | the commit while a snapshot streams, 2026-11-15 | `BENCH.md`'s `TCP/<device>/paced+stream` rows measure the data lane's commit p99 while a stream paced at 8 MiB/s runs against the same cluster's windows without one — A, B, A under one leader, a machine that keeps no state, the learner on tmpfs —, and print B over `TCP/<device>/paced` beside it; the A/B lane's `cstream` holds when the high end of the 95 % interval of B / A is at most 1.10, `cstream-scale` publishes 2 and 32 MiB/s; test code only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #920, #1365) |
+| #1482 | the owner's decisions, 2026-11-15 and 2026-11-16 | a forward is handled once, whatever the delay of its copy: the step function fences forwards by the order of their submission ids, per run of a forwarder and per lane, forgetting a mark of its current term only past 65 536 marks (runs per lane, about 32 768 restarts when each forwards on both lanes) and then the least recent of the node holding the most, whose new runs wait for the next term, restarts spread over several nodes fencing each of them in turn (#1540, `needs-decision`), and a node handles no forward of a term up to its durable term at start, every forward to a node carrying a term it led; the forwards turned away counted by reason; what the fence turns away is neither proposed nor answered (`OUTCOME_UNKNOWN`); a forward's answer is kept for twice the transport's resend window (22 s by default, 2 minutes at most) on the step function's clock, a gap of more than a second counted as one, at most 2^20 answers per Raft group, the oldest forgotten for each new one past them, whatever its age, so no forward is dropped for room and a copy of an answer forgotten is fenced (the owner's decision of 2026-11-16, which removed the first version's ceiling of 2^18, past which a new forward was neither proposed nor answered), the map rebuilt and the expired answers forgotten a step at a time; the 4 096 answers evicted oldest first had let a late copy be appended twice or refused `NOT_LEADER`, and an answer kept for a time let a stopped sender's copy be appended again; no format change, no protocol raise, no raft mutation (amendments of 2026-11-15, #1482, corrected 2026-11-16) |
 
 ## raft-sql-poc (owner's prior Raft)
 

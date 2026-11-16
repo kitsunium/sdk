@@ -951,23 +951,92 @@ func TestADuplicatedForwardReplaysItsRefusal(t *testing.T) {
 	}
 }
 
-// The answers kept are bounded: past maxFwdAnswers the oldest is evicted
-// first, the newest kept.
+// The answers kept are bounded, and the bound never drops a forward: at it,
+// a new forward is handled and the oldest answer is forgotten for it,
+// whatever its age, one for one (the owner's decision of 2026-11-16,
+// #1482). The fence's mark, set for every forward handled, a refusal
+// included, is what makes that safe: a copy of an answer forgotten is
+// neither proposed nor answered, never appended twice, never appended after
+// its refusal, and its forwarder answers OUTCOME_UNKNOWN. The answers
+// forgotten are of node 2's run and the forwards handled at the bound of
+// node 3's, so a fence that dropped the mark of the answer it forgot, or
+// one that marked nothing at the bound, would append a copy again.
 func TestForwardAnswersAreBounded(t *testing.T) {
-	f := newTest(2, testState{term: 1}, 0, false)
-	const extra = 5
-	for ctx := uint64(1); ctx <= uint64(maxFwdAnswers+extra); ctx++ {
-		f.Step(t0, forwardCmd(1, ctx, 1))
-	}
-	tab := &f.fwdAnswers
-	if len(tab.byKey) != maxFwdAnswers || len(tab.order) != maxFwdAnswers {
-		t.Fatalf("kept %d answers in a ring of %d, bound %d", len(tab.byKey), len(tab.order), maxFwdAnswers)
-	}
-	for ctx := uint64(1); ctx <= uint64(maxFwdAnswers+extra); ctx++ {
-		_, kept := tab.lookup(fwdKey{from: 2, ctx: ctx})
-		if kept != (ctx > extra) {
-			t.Fatalf("answer %d kept %v", ctx, kept)
+	r := leaderOf(2, 0, nil, 0, false)
+	const bound = 4
+	r.cfg.fwdCeiling, r.cfg.ForwardWindow = bound, 500*time.Millisecond
+	first := map[fwdKey]core.MessageValue{}
+	keyOf := func(m core.MessageValue) fwdKey { return fwdKey{from: m.From, ctx: m.Context} }
+	handle := func(m core.MessageValue, refuse bool) {
+		t.Helper()
+		r.SetOverloaded(refuse)
+		as, n := stepForward(r, m)
+		r.SetOverloaded(false)
+		if len(as) != 1 || as[0].Reject != refuse || n != map[bool]uint64{false: 1, true: 0}[refuse] {
+			t.Fatalf("forward %d/%x, at %d answers kept: answered %+v, %d appended, want one answer (refused %v)", m.From, m.Context, r.fwdAnswers.kept(), as, n, refuse)
 		}
+		first[keyOf(m)] = as[0]
+	}
+	var forgotten, kept []core.MessageValue
+	for c := uint32(1); c <= bound; c++ {
+		m := liveForward(2, 1, c, 2)
+		handle(m, false)
+		forgotten = append(forgotten, m)
+	}
+	// At the bound: node 3's forwards are handled, one refused, and each
+	// forgets the oldest answer kept.
+	for c := uint32(1); c <= bound+1; c++ {
+		m := liveForward(3, 1, c, 2)
+		handle(m, c == 1)
+		if c == 1 {
+			forgotten = append(forgotten, m)
+		} else {
+			kept = append(kept, m)
+		}
+		if r.fwdAnswers.kept() != bound {
+			t.Fatalf("at the bound: %d answers kept, want %d", r.fwdAnswers.kept(), bound)
+		}
+	}
+	if st := r.Summary(); st.ForwardForgotten != bound+1 || st.ForwardDrops != (ForwardDropsValue{}) {
+		t.Fatalf("at the bound: %d answers forgotten, drops %+v, want %d and none", st.ForwardForgotten, st.ForwardDrops, bound+1)
+	}
+	type tc struct {
+		name string
+		m    core.MessageValue
+		kept bool
+	}
+	runCase := func(t *testing.T, x tc) {
+		t.Helper()
+		as, n := stepForward(r, x.m)
+		switch {
+		case n != 0:
+			t.Fatalf("%s: the copy of %d/%x was appended again", x.name, x.m.From, x.m.Context)
+		case x.kept && (len(as) != 1 || !reflect.DeepEqual(as[0], first[keyOf(x.m)])):
+			t.Fatalf("%s: the copy of %d/%x answered %+v, want its answer %+v", x.name, x.m.From, x.m.Context, as, first[keyOf(x.m)])
+		case !x.kept && len(as) != 0:
+			t.Fatalf("%s: the copy of %d/%x answered %+v, want no answer", x.name, x.m.From, x.m.Context, as)
+		}
+	}
+	var cases []tc
+	for _, m := range kept {
+		cases = append(cases, tc{"an answer kept answers its copy", m, true})
+	}
+	for _, m := range forgotten {
+		cases = append(cases, tc{"the copy of an answer forgotten is fenced", m, false})
+	}
+	for _, x := range cases {
+		runCase(t, x)
+	}
+	if st := r.Summary(); st.ForwardDrops != (ForwardDropsValue{Copies: uint64(len(forgotten))}) {
+		t.Fatalf("the copies fenced: drops %+v, want %d copies", st.ForwardDrops, len(forgotten))
+	}
+	// The window passes, tick by tick: the answers age out without a forward.
+	for range 6 {
+		r.Tick(r.now.Add(100 * time.Millisecond))
+		r.Ready()
+	}
+	if r.role != core.RoleLeader || r.fwdAnswers.kept() != 0 || len(r.fwdAnswers.byKey) != 0 {
+		t.Fatalf("after the window: role %v, %d answers kept (%d in the map)", r.role, r.fwdAnswers.kept(), len(r.fwdAnswers.byKey))
 	}
 }
 

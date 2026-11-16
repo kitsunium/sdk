@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -478,6 +479,7 @@ func newRaft(cfg Config) (*Node, error) {
 		CanVote: n.canVote, MaxChainRefusals: maxChainRefusals, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
 		MaxApplyLagBytes: cfg.MaxApplyLagBytes, SilentTerm: silentTerm, SilentIndex: silentIndex,
 		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
+		ForwardWindow: forwardWindow(cfg.Transport),
 	}, &start)
 	n.publish()
 	if err := n.bindTransport(); err != nil {
@@ -489,6 +491,27 @@ func newRaft(cfg Config) (*Node, error) {
 	go n.applyLoop()
 	go n.loop()
 	return n, nil
+}
+
+// forwardWindow is how long the step function keeps the answer it gave a
+// forward (raft.Config.ForwardWindow, #1482): twice the resend window of a
+// transport that states one, so a copy the transport delivers while its
+// sender runs is answered from the table, the doubling left to what no
+// timeout bounds on this node — its reader, its inbox, its loop; 0, the
+// step function's own default, for any other transport. Saturated, never
+// wrapped; the step function bounds it. A later copy is neither proposed
+// nor answered: the step function's fence, not this window, keeps a copy
+// from being applied twice.
+func forwardWindow(t coreconsensus.Transport) time.Duration {
+	w, ok := t.(resendWindower)
+	if !ok {
+		return 0
+	}
+	d := w.resendWindow()
+	if d > math.MaxInt64/2 {
+		return math.MaxInt64
+	}
+	return 2 * d
 }
 
 // startStamp reads the stamp a node may start on, refusing a directory
@@ -1479,8 +1502,9 @@ func (n *Node) checkTurn(turn time.Time) {
 // forever with none, and the entry stayed until the next change, a forward
 // holding its payload and the retained Apply results (#590). A forward
 // unanswered two maximum election timeouts after it was sent is answered
-// OUTCOME_UNKNOWN: the leader may have appended it, and a resend is only
-// deduplicated while the leader still remembers the first. What a caller
+// OUTCOME_UNKNOWN: the leader may have appended it, or have neither
+// proposed nor answered a copy its fence recognised (raft's fwdFence,
+// #1482). What a caller
 // gave up on is dropped. Reads are swept by sweepReads. The transport's
 // sender links get the same two maximum election timeouts as their bound
 // on read silence (#1116).
