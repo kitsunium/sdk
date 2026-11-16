@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-08T00:00:00Z -->
+<!-- updated: 2026-11-15T00:00:00Z -->
 # internal/service/proc/exec
 
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
@@ -34,7 +34,7 @@ process that already exists.
 | `exec_windows.go`, `handle_windows.go`, `joblimits_windows.go`, `cgroup_placement_windows.go`, `ctrlevent_windows.go` | `windows` | the CreateProcess backend: stdio, a console process group for `Setpgid`, rlimits through a Job Object the child is assigned to while suspended (§A confined Windows child is created suspended); the Unix-only fields refused with `UnsupportedPlatform` |
 | `handle_pidfd_linux.go` / `handle_procfd_windows.go` / `handle_nopidfd_unix.go` | `linux` (not mips) / `windows` / other `unix` | the `ProcessHandle` sibling port (#928) on the Start handle: `Handle` duplicates the pidfd (`F_DUPFD_CLOEXEC`) or the process HANDLE (`DuplicateHandle`) the runtime holds (`os.Process.WithHandle`); `SignalHandle` is `pidfd_send_signal` (424, cited) — ESRCH once reaped, never a pid; `UnsupportedPlatform` elsewhere |
 | `open.go`, `open_linux.go` / `open_windows.go` / `open_other.go`, `foreign_wait.go` | all / `linux` (not mips) / `windows` / rest | `Open(pid)` (#928): a `foreign` handle on a process not spawned here — the pidfd `os.FindProcess` opens (its absence classified by one `pidfd_open`, 434: ESRCH is gone, else `HANDLE_UNAVAILABLE`), a HANDLE `OpenProcess` gives (terminate, synchronize, query); Signal/SignalGroup/SignalHandle through it, Stop watching it (`ppoll` slices / `WaitForSingleObject` slices), Wait and WaitContext refused with `WAIT_FAILED` wrapping ECHILD |
-| `attach.go`, `attach_handle.go`, `attach_linux.go` / `attach_bsd.go` / `attach_other.go`, `pidfile.go`, `pidfile_linux.go` / `pidfile_bsd.go` | all, `linux` (not mips) or darwin and the BSDs / `linux` (not mips) / darwin and the BSDs / rest | `Attach` and `AttachPIDFile` (#729): `adopted` — a non-blocking pidfd in the runtime's poller on Linux (`PIDFD_NONBLOCK`, or `fcntl` before 5.10), two kqueue `EVFILT_PROC` knotes on darwin and the BSDs (`attach_bsd.go`) —, its `Wait` returning `STATUS_UNKNOWN` at the end; the methods both share (`attach_handle.go`); `pidWalk`, the PID file read one component at a time from `/` through a held directory (`heldDir`: O_PATH and `/proc/self/fd` on Linux, `os.Root` elsewhere), its trust; the bounds from `/proc` on Linux, from the kernel's process record (`proc/internal/bsdabi`) elsewhere; `UNSUPPORTED_PLATFORM` on illumos, Solaris and Windows |
+| `attach.go`, `attach_handle.go`, `attach_linux.go` / `attach_bsd.go` / `attach_other.go`, `pidfile.go`, `pidfile_linux.go` / `pidfile_bsd.go` | all, `linux` (not mips) or darwin and the BSDs / `linux` (not mips) / darwin and the BSDs / rest | `Attach` and `AttachPIDFile` (#729): `adopted` — a non-blocking pidfd in the runtime's poller on Linux (`PIDFD_NONBLOCK`, or `fcntl` before 5.10), two kqueue `EVFILT_PROC` knotes on darwin and the BSDs (`attach_bsd.go`) —, its `Wait` returning `STATUS_UNKNOWN` at the end; the methods both share (`attach_handle.go`); `pidWalk`, the PID file read one component at a time from `/` through a held directory (`heldDir`: O_PATH and `/proc/self/fd` on Linux, `os.Root` elsewhere), its trust; the bounds from `/proc` on Linux, from the kernel's process record (`proc/internal/bsdabi`) elsewhere, each read awaited valid (`record_bsd.go`, #1453); `UNSUPPORTED_PLATFORM` on illumos, Solaris and Windows |
 | `scheduling.go`, `scheduling_linux.go` / `scheduling_freebsd.go` / `scheduling_other.go` | all / `linux` / `freebsd` / rest | `Spec.Scheduling` (#940): `checkScheduling` (an undefined policy or class, or an I/O level past 7, is `INVALID_SPEC`; what the platform cannot apply `UNSUPPORTED_PLATFORM`, before the spawn), `applyScheduling` post-start beside `Nice` — `sched_setscheduler` and `ioprio_set` on Linux, `rtprio(RTP_SET)` for FIFO/RR/Idle on FreeBSD |
 | `reclaim.go`, `reclaim_linux.go` / `reclaim_other.go` | all, `linux` / rest | `Reclaim` (#738, S0h): a child this process spawned before an execve, held again — a pidfd and the `childwait` claim, so `Wait` reads its real status; a pid gone, reaped or another process's is `ADOPTION_REFUSED`, below 1 `INVALID_SPEC`; `UnsupportedPlatform` elsewhere |
 | `pty_supported.go`, `pty_linux.go` / `pty_darwin.go` / `pty_freebsd.go` / `pty_openbsd.go`, `pty_unsupported.go` / `pty_unsupported_unix.go` | `linux \|\| darwin \|\| freebsd \|\| openbsd`, per kernel / the rest | `StdioPTY` (#934): `openPTY` per kernel (`/dev/ptmx` + `TIOCSPTLCK`/`TIOCGPTN`; `/dev/ptmx` + `TIOCPTYGRANT`/`UNLK`/`GNAME`; `posix_openpt` + `TIOCGPTN`; `/dev/ptm` + `PTMGET`), `buildPTYStdio` (the slave as fd 0–2, the master kept for `TTY`), the `Terminal` sibling port (`TTY`, `Resize` = `TIOCSWINSZ`, `Size` = `TIOCGWINSZ`, every ioctl through `SyscallConn().Control` so the master stays in the poller); `checkPTY` refuses elsewhere |
@@ -364,12 +364,26 @@ END observed, without a status it cannot read.
   line that lets the pending signal go unacted is not identified: reading
   `kpsignal2`, `execsigs` and `execve_runproc`, a process-directed signal
   stays in `p_sigpend`.
-- **Attach inside that window.** A users bound compares the start read before
-  the knotes with the one read after; on NetBSD a process inside its execve
-  reads with none, so an adoption that straddles the end of its execve is
-  refused with ESRCH ("the pid changed hands"). Not changed here: it needs
-  `bsdabi` to say when the record states no start (`p_uvalid`), a change of
-  its designed surface.
+- **Attach inside that window** (#1453, ADR 0219 amended 2026-11-15). A users
+  bound compares the start read before the knotes with the one read after, and
+  each read is awaited valid (`record_bsd.go`, `recordSource.await`):
+  `bsdabi.ProcRecord` reports `p_uvalid` (NetBSD and OpenBSD; true on FreeBSD,
+  DragonFly and darwin, whose records state no such thing), and a record not
+  valid yet is read again every `recordPoll` (5 ms) on the injected clock —
+  `clock.System` from `Attach` and `AttachPIDFile` —, `recordWait` (1 s) of
+  pauses at most. Between two reads a knote registered and dropped
+  (`probeKnote`) tells a zombie, whose record is never valid, from a process
+  inside its execve: the kernels refuse a knote on a zombie, so it ends the
+  wait at once with `SIGNAL_FAILED` (ESRCH), the verdict the knotes gave
+  before. A record still not valid past the bound is `ADOPTION_REFUSED`
+  (`why`, `bound_ms`): the users could not be read, and nothing is adopted
+  unverified. An invalid record's start is never compared: before #1453, two
+  reads both inside an execve compared 0 with 0. `recordSource` is the seam:
+  `kernelRecords()` in production, a scripted read in
+  `record_bsd_internal_test.go` (`TestRecordAwaitRereadsWithinTheBound` on a
+  clock that never sleeps, `TestAttachRereadsARecordNotValidYet` on a real
+  child whose records read invalid before the knotes, after them, or past the
+  bound).
 - **Their PID file walk** is the same `pidWalk` over `os.Root` directories
   (`pidfile_bsd.go`): `openat` `O_NOFOLLOW`, `fstatat`, `readlinkat`, a
   descent proven by device and inode; the file examined by `fstatat`, opened

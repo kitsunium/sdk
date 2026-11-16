@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-11-07
-- **Amended**: 2026-11-08 — §Amendment: adoption on darwin and the BSDs (#729); §Amendment: the notify listener on FreeBSD (#730)
+- **Amended**: 2026-11-08 — §Amendment: adoption on darwin and the BSDs (#729); §Amendment: the notify listener on FreeBSD (#730); 2026-11-15 — §Amendment: a process record not valid yet is read again, within a bound (#1453)
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0016](0016-sdk-process-supervision-domain.md) (five codes, `0.2.6.31`–`0.2.6.35`, `AttachValue`, `DescriptorsValue`, `Spec.PIDEnv`), [ADR 0018](0018-sdk-cross-platform-portability.md) (the platform rows of adoption, the notify transport and `PIDEnv`)
 - **Related**: [ADR 0214](0214-a-service-unit-is-one-actor-over-a-pure-reducer.md) (the service engine these feed: S0c, S0d, S0f, S0h), [ADR 0217](0217-a-spawn-gives-the-child-only-what-it-names-and-waits-a-bounded-time.md) (`ProcessHandle`, `exec.Open`, the sealed descriptor table), [ADR 0093](0093-a-sweep-takes-the-zombie-never-the-status.md) (who collects a status), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md)
@@ -263,3 +263,45 @@ and DragonFly keep the typed refusal the issue gives them.
    hundred cycles without a leak) — run on the e2e-cross FreeBSD 15.0 lane.
    The acceptance of a real process descriptor is not tested: the stdlib does
    not reach `pdfork(2)`.
+
+## Amendment — 2026-11-15: a process record not valid yet is read again, within a bound (#1453)
+
+Item 3 of the amendment of 2026-11-08 compared the start times of two reads of
+the process record. On NetBSD a read can carry none: `execve(2)` holds
+`p_reflock` as a writer from `execve_loadvm` to the end of `execve_runproc`
+(`kern_exec.c`), `sysctl_doeproc` reads a process whose `p_reflock` it cannot
+take as a reader as a zombie (`kern_proc.c`), and `fill_kproc2` then leaves
+`p_uvalid`, `p_ustart_sec` and `p_ustart_usec` at zero, the pid and the users
+filled. A users bound that straddled the end of the target's execve was refused
+with ESRCH ("the pid changed hands") although the process was alive and the
+caller's, and two reads both inside it compared 0 with 0.
+
+1. **The record says when it is valid.** `proc/internal/bsdabi.ProcRecord`
+   returns `valid`: the record's `p_uvalid` on NetBSD (offset 448) and OpenBSD
+   (400), an `int64` just before `p_ustart_sec`, and a start of 0 when it is 0.
+   OpenBSD's `FILL_KPROC` clears it for a zombie alone. FreeBSD, DragonFly and
+   darwin have no such field, and `valid` is true there: nothing changes for
+   them.
+2. **A record not valid yet is read again.** Both reads of a users bound — the
+   one before the knotes and the one after — are awaited valid: read again
+   every 5 ms on the injected clock (`clock.System` from `Attach` and
+   `AttachPIDFile`), one second of pauses at most. Only a valid record's start
+   is compared and only its users are checked.
+3. **A zombie is told from an execve.** Between two reads a knote registered
+   and dropped asks the kernel whether a live process still holds the pid:
+   NetBSD's `filt_procattach` finds it through `proc_find`, which skips a
+   zombie, and OpenBSD's refuses `PS_EXITING`. A refusal ends the wait at once
+   with the knotes' own verdict — `SIGNAL_FAILED` wrapping ESRCH for a process
+   gone, `HANDLE_UNAVAILABLE` for one this process may not watch —, the one an
+   adoption of a zombie already received.
+4. **Past the bound, the process is refused.** A record still not valid after
+   one second is `ADOPTION_REFUSED` (`why`, `bound_ms`): its users could not be
+   read, and a bound nobody checked is not one. No new code: the sentinel is
+   the one a users bound already refuses with.
+5. **Never run.** The authoring host is Linux. What ran is the decoding of
+   `p_uvalid` from header-built records (`bsdabi`), the wait over scripted
+   records on a clock that never sleeps (ran here by a temporary Linux build
+   of the same code), and the compilation and `go vet` of every target, tests
+   included. The adoption of a real child whose records are scripted invalid
+   before the knotes, after them, or past the bound runs on the e2e-cross
+   lanes: macOS, FreeBSD, OpenBSD and NetBSD.

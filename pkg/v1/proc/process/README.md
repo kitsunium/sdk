@@ -829,7 +829,7 @@ Attach adopts a running process this one did not spawn, held through a pidfd on 
 func AttachPIDFile(ctx context.Context, path string, want AttachScope) (proc Process, err error)
 ```
 
-AttachPIDFile reads the PID file at path safely — absolute, walked without a symbolic link at its end, a regular file holding one PID, else PIDFileRefused — and adopts the process it names as Attach does. A file another user could have written or redirected is trusted only through want: the process must lie in its cgroup and run as one of its users, and a want that bounds nothing is AdoptionRefused. Linux, darwin and the BSDs; off Linux a cgroup bound is AdoptionRefused, as there is no cgroup to check.
+AttachPIDFile reads the PID file at path safely — absolute, walked without a symbolic link at its end, a regular file holding one PID, else PIDFileRefused — and adopts the process it names as Attach does. A file another user could have written or redirected is trusted only through want: the process must lie in its cgroup and run as one of its users, and a want that bounds nothing is AdoptionRefused. Linux, darwin and the BSDs; off Linux a cgroup bound is AdoptionRefused, as there is no cgroup to check, and a users bound waits up to a second for a process caught in its execve(2).
 
 <a name="Build"></a>
 ## func [Build](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/process/gen_facade.go>)
