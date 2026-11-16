@@ -357,6 +357,50 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+# An awk that stops reading at its program's `exit`, as gawk does, in front of the real one: it feeds
+# the program a line at a time and, once the program is gone, leaves the rest of its input unread and
+# closes it. A program that never exits is fed to the end. Only the readers' (`-v name=…`) go
+# through it; `records`' own awk reads a file.
+early_exit_awk() {
+  local real
+  real="$(command -v awk)"
+  mkdir -p "$WORK/bin"
+  cat >"$WORK/bin/awk" <<EOF
+#!/usr/bin/env bash
+case " \$* " in *" name="*) ;; *) exec "$real" "\$@" ;; esac
+exec 3>&1
+coproc A { exec "$real" "\$@" >&3; }
+n=0
+while IFS= read -r line; do
+  kill -0 "\$A_PID" 2>/dev/null || exit 0
+  printf '%s\n' "\$line" >&"\${A[1]}" 2>/dev/null || exit 0
+  n=\$((n + 1))
+  [ "\$n" -gt 5 ] || sleep 0.05
+done
+kill -0 "\$A_PID" 2>/dev/null || exit 0
+exec {A[1]}>&-
+wait "\$A_PID"
+EOF
+  chmod +x "$WORK/bin/awk"
+}
+
+@test "conf: a reader whose awk stops at its match does not kill the table's producer with SIGPIPE (#1498)" {
+  fixture_conf "step0 s cpu -"
+  # More than a pipe buffer (64 KiB) of suite records after the match: the producer is still writing
+  # when the reader has gone.
+  local i
+  for i in $(seq 1 3000); do
+    echo "suite pad$i normal internal/x $SHA0 ^Benchmark 100x 4 1 ubuntu-latest - internal/x/"
+  done >>"$BENCH_AB_CONF"
+  [ "$(awk '$1 == "suite"' "$BENCH_AB_CONF" | wc -c)" -gt 65536 ]
+  early_exit_awk
+  run env PATH="$WORK/bin:$PATH" bash "$CI_DIR/bench-ab-conf.sh" suite s
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SUITE_NAME=s"* ]]
+  [[ "$output" == *"SUITE_STEP0_PROFILES=cpu"* ]]
+}
+
 @test "conf: a suite's step0 record reaches the leg: its profiles and the rows they run over, the suite's own when -" {
   fixture_conf "step0 s mutex,block,cpu -" "step0 p cpu ^BenchmarkP\$"
   run bash "$CI_DIR/bench-ab-conf.sh" suite s

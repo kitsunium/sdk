@@ -309,7 +309,7 @@ vendor_consumers() {
   fi
   while IFS=$'\t' read -r dir module version; do
     case "$dir" in third-party/* | framework/connectors/*) ;; *) continue ;; esac
-    pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '/\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; exit }')"
+    pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '!done && /\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; done = 1 }')"
     [ -n "$pkg" ] || continue
     n=$((n + 1))
     if ! consume "vendor$n" v0.19.7 "github.com/kitsunium/sdk/$pkg" "$module@$version"; then
@@ -527,7 +527,7 @@ manifest() {
   while IFS= read -r dir; do
     [ -z "$dir" ] && continue
     version="$(jq -r --arg d "$dir" '.modules[] | select(.dir == $d) | .version' "$MANIFEST")"
-    pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '/\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; exit }')"
+    pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '!done && /\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; done = 1 }')"
     n=$((n + 1))
     if ! consume "family$n" v0.19.7 "github.com/kitsunium/sdk/$pkg" "github.com/kitsunium/sdk/$dir@$version"; then
       echo "proxy-rehearsal: pinned to v0.19.7, adding $dir@$version did not build:" >&2
@@ -597,7 +597,7 @@ manifest() {
   dir="$(head -n1 <<<"$families")"
   if awk '$0 == "pkg/v1/errs" { f = 1 } END { exit !f }' <<<"$families"; then dir=pkg/v1/errs; fi
   version="$(jq -r --arg d "$dir" '.modules[] | select(.dir == $d) | .version' "$MANIFEST")"
-  pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '/\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; exit }')"
+  pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '!done && /\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; done = 1 }')"
   if ! legacy_pkg legacy "github.com/kitsunium/sdk/$pkg" "github.com/kitsunium/sdk/$dir@$version"; then
     echo "proxy-rehearsal: on …/pkg v0.17.0, 'go get …/$dir@$version' did not build:" >&2
     sed 's/^/  /' "$WORK/legacy.log" >&2
@@ -614,7 +614,7 @@ manifest() {
   # the floor must meet the ambiguous import the floor exists to prevent.
   dir="$(head -n1 <<<"$families")"
   module="$(jq -r --arg d "$dir" '.modules[] | select(.dir == $d) | .module' "$MANIFEST")"
-  pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '/\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; exit }')"
+  pkg="$(git -C "$here/../.." ls-tree -r --name-only "$REF" -- "$dir" | awk -F/ '!done && /\.go$/ && !/_test\.go$/ { sub(/\/[^\/]*$/, ""); print; done = 1 }')"
   src="$WORK/src/control"
   mkdir -p "$src"
   git -C "$here/../.." archive "$REF" "$dir" | tar -x -C "$src"
