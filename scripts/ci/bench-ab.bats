@@ -84,7 +84,10 @@ judge() {
   # allocations and its 1.5 x B/op bound; #910's four allocations fewer, a
   # delta of -4; #892's 10 % of the block form, a ratio of 1.10, and its two
   # floor rows; #912's loop-turn p99 "not worse than before", head over base
-  # at most 1.00, and its bytes "divided by the follower count", at most 1/N).
+  # at most 1.00, and its bytes "divided by the follower count", at most 1/N;
+  # #920's commit p99 "within 10 % of the no-stream baseline while a paced
+  # stream runs", B over A at most 1.10, at the rate it is judged at and, for
+  # information, at 2 and 32 MiB/s).
   expected="$(
     cat <<'EOF'
 1038-set-newkey ab ns/op <= 1.05 #1038
@@ -179,6 +182,12 @@ judge() {
 912-turn-p99-4followers ab p99-us/turn <= 1.00 #912
 912-bytes-2followers ratio B/op <= 0.50 #912
 912-bytes-4followers ratio B/op <= 0.25 #912
+920-stream-8mib-tmpfs ratio p99-ms/commit <= 1.10 #920
+920-stream-8mib-disk ratio p99-ms/commit <= 1.10 #920
+920-stream-2mib-tmpfs ratio p99-ms/commit <= 1.10 #920
+920-stream-32mib-tmpfs ratio p99-ms/commit <= 1.10 #920
+920-stream-2mib-disk ratio p99-ms/commit <= 1.10 #920
+920-stream-32mib-disk ratio p99-ms/commit <= 1.10 #920
 EOF
   )"
   actual="$(awk '$1 == "rule" { print $2, $4, $5, $8, $9, $10 }' "$CONF")"
@@ -220,6 +229,20 @@ EOF
   grep -q '^rule 912-turn-p99-2followers  *cturn ab  *p99-us/turn BenchmarkLeaderLoopTurnAt1000PerSecond/followers=2-4 ' "$CONF"
   grep -q '^rule 912-bytes-4followers  *cenc  ratio B/op  *BenchmarkLeaderTurnEncoding/shared/followers=4-4 BenchmarkLeaderTurnEncoding/perpeer/followers=4-4 ' "$CONF"
   [ "$(awk '$1 == "step0" { print $2, $3, $4 }' "$CONF" | grep '^cturn ')" = 'cturn cpu -' ]
+  # #920's two rows are one op's, both the head's (the base has no pacing): four levels deep, the
+  # fourth left open by the suite's three-level expression, 8 MiB/s judged and 2 and 32 MiB/s on
+  # dispatch; each rule divides a device's and a rate's paced+stream by the same device's and rate's
+  # paced, and reads a rate its suite runs.
+  grep -q '^suite cstream  *normal internal/service/app/consensus .*\^BenchmarkTCPCommitStream\$/\^(data-disk|tmpfs)\$/\^rate=8MiB\$ 1x 4 4 ubuntu-latest - internal/service/app/consensus/,internal/core/app/consensus/$' "$CONF"
+  grep -q '^suite cstream-scale scale  *internal/service/app/consensus .*\^BenchmarkTCPCommitStream\$/\^(data-disk|tmpfs)\$/\^rate=(2|32)MiB\$ 1x 4 4 ubuntu-latest - -$' "$CONF"
+  grep -q '^rule 920-stream-8mib-tmpfs  *cstream  *ratio p99-ms/commit BenchmarkTCPCommitStream/tmpfs/rate=8MiB/paced+stream-4  *BenchmarkTCPCommitStream/tmpfs/rate=8MiB/paced-4 ' "$CONF"
+  [ "$(awk '$1 == "rule" && $3 ~ /^cstream/ { print $4, $5 }' "$CONF" | sort | uniq -c | tr -s ' ' | tr '\n' ' ')" = " 6 ratio p99-ms/commit " ]
+  while read -r id suite row row2; do
+    [ "$row2" = "${row%/paced+stream-4}/paced-4" ] || { echo "$id divides $row by $row2"; return 1; }
+    rate="${row#BenchmarkTCPCommitStream/*/rate=}" rate="${rate%%MiB/*}"
+    case "$suite:$rate" in cstream:8 | cstream-scale:2 | cstream-scale:32) ;; *) echo "$id reads rate $rate, which $suite does not run"; return 1 ;; esac
+  done < <(awk '$1 == "rule" && $3 ~ /^cstream/ { print $2, $3, $6, $7 }' "$CONF")
+  [ "$(awk '$1 == "step0" { print $2, $3, $4 }' "$CONF" | grep '^cstream ')" = 'cstream cpu -' ]
   # Every rule of the lane is a report rule: no threshold gates before its pull request makes it hold.
   [ "$(awk '$1 == "rule" { print $11 }' "$CONF" | sort -u)" = report ]
   # Every base is the commit the issues were audited at.
@@ -303,6 +326,28 @@ EOF
   [ "$(verdict_of turn)" = pass ]
   [ "$(column_of turn 12)" = 0.75 ]
   [ "$(verdict_of worse)" = fail ]
+}
+
+@test "verdict: one op's two rows, four levels deep and a '+' in a name, are a ratio of the head like any other" {
+  fixture_conf "rule tmp s ratio p99-ms/commit BenchmarkS/tmpfs/rate=8MiB/paced+stream-4 BenchmarkS/tmpfs/rate=8MiB/paced-4 <= 1.10 #920 gate" \
+    "rule dsk s ratio p99-ms/commit BenchmarkS/data-disk/rate=8MiB/paced+stream-4 BenchmarkS/data-disk/rate=8MiB/paced-4 <= 1.10 #920 report"
+  mkdir -p "$WORK/raw"
+  for r in $(seq 1 20); do
+    # The base carries neither row: the file does not build there. B over A, 1.05 on tmpfs and 1.25 on the disk.
+    printf 'PASS\n' >"$WORK/raw/base-$(printf '%03d' "$r").txt"
+    {
+      printf 'BenchmarkS/tmpfs/rate=8MiB/paced-4\t1\t100 ns/op\t8000 commits/op\t2.000 p99-ms/commit\n'
+      printf 'BenchmarkS/tmpfs/rate=8MiB/paced+stream-4\t1\t100 ns/op\t8000 commits/op\t2.100 p99-ms/commit\n'
+      printf 'BenchmarkS/data-disk/rate=8MiB/paced-4\t1\t100 ns/op\t8000 commits/op\t10.00 p99-ms/commit\n'
+      printf 'BenchmarkS/data-disk/rate=8MiB/paced+stream-4\t1\t100 ns/op\t8000 commits/op\t12.50 p99-ms/commit\n'
+    } >"$WORK/raw/head-$(printf '%03d' "$r").txt"
+  done
+  judge s
+  [ "$status" -eq 0 ]
+  [ "$(verdict_of tmp)" = pass ]
+  [ "$(column_of tmp 12)" = 1.05 ]
+  [ "$(verdict_of dsk)" = fail ]
+  [ "$(column_of dsk 12)" = 1.25 ]
 }
 
 @test "conf: a suite measures a package of internal/, of pkg/v1/ or of a vendor module under third-party/, and a delta rule reads one row" {
@@ -416,36 +461,46 @@ EOF
   [[ "$output" == *"SUITE_STEP0_PROFILES="$'\n'* ]]
   [[ "$output" == *"SUITE_STEP0_PATTERN="* ]]
   # The shipped table asks for singleflight's profiles at both CPU counts, #892's CPU profile of the s2 stream,
-  # and #912's of the leader's loop turn over the suite's own rows, and nobody else's.
+  # #912's of the leader's loop turn and #920's of the commit while a snapshot streams, each over the
+  # suite's own rows, and nobody else's.
   unset BENCH_AB_CONF
   for suite in sflight sflight-8; do
     run bash "$CI_DIR/bench-ab-conf.sh" suite "$suite"
     [[ "$output" == *"SUITE_STEP0_PROFILES=mutex,block,cpu"* ]]
     [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkDo_DistinctKeysParallel(_OneShard)?$'* ]]
   done
-  [ "$(awk '$1 == "step0" { print $2 }' "$CONF" | tr '\n' ' ')" = "sflight sflight-8 tstream cturn " ]
+  [ "$(awk '$1 == "step0" { print $2 }' "$CONF" | tr '\n' ' ')" = "sflight sflight-8 tstream cturn cstream " ]
   run bash "$CI_DIR/bench-ab-conf.sh" suite tstream
   [[ "$output" == *"SUITE_STEP0_PROFILES=cpu"* ]]
   [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkStream$/^random$/^s2$/^decompress$'* ]]
   run bash "$CI_DIR/bench-ab-conf.sh" suite cturn
   [[ "$output" == *"SUITE_STEP0_PROFILES=cpu"* ]]
   [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkLeaderLoopTurnAt1000PerSecond$'* ]]
+  run bash "$CI_DIR/bench-ab-conf.sh" suite cstream
+  [[ "$output" == *"SUITE_STEP0_PROFILES=cpu"* ]]
+  [[ "$output" == *'SUITE_STEP0_PATTERN=^BenchmarkTCPCommitStream$/^(data-disk|tmpfs)$/^rate=8MiB$'* ]]
+  run bash "$CI_DIR/bench-ab-conf.sh" suite cstream-scale
+  [[ "$output" == *"SUITE_STEP0_PROFILES="$'\n'* ]]
+  [[ "$output" == *"SUITE_ROUNDS=10"* ]]
 }
 
 @test "plan: a dispatch takes the suites it names, by name or by package, in one mode" {
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal all
   [ "$status" -eq 0 ]
-  [ "${lines[1]}" = "count=19" ]
+  [ "${lines[1]}" = "count=20" ]
   refute grep -q scale <<<"${lines[0]}"
   run bash "$CI_DIR/bench-ab-conf.sh" plan scale all
-  [ "${lines[1]}" = "count=3" ]
+  [ "${lines[1]}" = "count=4" ]
   [[ "${lines[0]}" == *'"suite":"queue-scale"'* ]]
+  [[ "${lines[0]}" == *'"suite":"cstream-scale"'* ]]
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal internal/service/data/queue/,logger
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"queue","runner":"ubuntu-latest"},{"suite":"queue-publish","runner":"ubuntu-latest"},{"suite":"logger","runner":"ubuntu-latest"}]}' ]
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal internal/kernel/concur/singleflight
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"sflight","runner":"ubuntu-latest"},{"suite":"sflight-8","runner":"ubuntu-latest"}]}' ]
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal internal/service/app/consensus
-  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"},{"suite":"cenc","runner":"ubuntu-latest"}]}' ]
+  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"},{"suite":"cenc","runner":"ubuntu-latest"},{"suite":"cstream","runner":"ubuntu-latest"}]}' ]
+  run bash "$CI_DIR/bench-ab-conf.sh" plan scale internal/service/app/consensus
+  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cstream-scale","runner":"ubuntu-latest"}]}' ]
   run env BENCH_AB_RUNNER=big-box bash "$CI_DIR/bench-ab-conf.sh" plan normal kcache-par
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"kcache-par","runner":"big-box"}]}' ]
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal queue-scale
@@ -474,13 +529,18 @@ EOF
   printf '%s\n' internal/service/data/vfs/os_publish.go >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
   [ "${lines[0]}" = 'matrix={"include":[{"suite":"queue-publish","runner":"ubuntu-latest"}]}' ]
-  # #912's: the driver and its step function run both suites, the consensus port the turn alone.
+  # #912's and #920's: the driver and its step function run the three suites, the consensus port the
+  # turn and the stream; the stream's scale suite never runs on a pull request.
   printf '%s\n' internal/service/app/consensus/raft/raft.go >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
-  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"},{"suite":"cenc","runner":"ubuntu-latest"}]}' ]
+  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"},{"suite":"cenc","runner":"ubuntu-latest"},{"suite":"cstream","runner":"ubuntu-latest"}]}' ]
   printf '%s\n' internal/core/app/consensus/membership.go >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
-  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"}]}' ]
+  [ "${lines[0]}" = 'matrix={"include":[{"suite":"cturn","runner":"ubuntu-latest"},{"suite":"cstream","runner":"ubuntu-latest"}]}' ]
+  printf '%s\n' internal/service/app/consensus/node_pace.go >"$WORK/changed"
+  run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
+  [[ "${lines[0]}" == *'"suite":"cstream"'* ]]
+  refute grep -q cstream-scale <<<"${lines[0]}"
   # Outside internal/: the domain's transform, the promoted codecs and the form engine under them, the vendor module and the port it streams through.
   for pair in internal/service/data/transform/gzip.go:transform pkg/v1/data/codec/codec.go:codec-promote \
     internal/service/data/codec/form/form.go:codec-promote third-party/transform/stream.go:tstream \
@@ -502,7 +562,7 @@ EOF
   [ "${lines[1]}" = "count=0" ]
   printf '%s\n' scripts/ci/bench-ab-run.sh >"$WORK/changed"
   run bash "$CI_DIR/bench-ab-conf.sh" plan normal changed "$WORK/changed"
-  [ "${lines[1]}" = "count=19" ]
+  [ "${lines[1]}" = "count=20" ]
   run bash "$CI_DIR/bench-ab-conf.sh" plan scale changed "$WORK/changed"
   [ "$status" -eq 2 ]
 }
