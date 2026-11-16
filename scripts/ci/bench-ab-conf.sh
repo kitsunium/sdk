@@ -125,13 +125,13 @@ check() {
 
 # field <name> — the suite's record, without its line number; empty when absent.
 suite_record() {
-  records suite | awk -v name="$1" '$2 == name { $1 = ""; sub(/^ /, ""); print; exit }'
+  records suite | awk -v name="$1" '!done && $2 == name { $1 = ""; sub(/^ /, ""); print; done = 1 }'
 }
 
 # step0_record <name> — the suite's `step0` record as `PROFILES PATTERN`;
 # empty when the suite records no profile.
 step0_record() {
-  records step0 | awk -v name="$1" '$2 == name { print $3, $4; exit }'
+  records step0 | awk -v name="$1" '!done && $2 == name { print $3, $4; done = 1 }'
 }
 
 suite() {

@@ -298,7 +298,7 @@ plan() {
   : >"$tmp/modules"
   local mod modpath
   while IFS= read -r mod; do
-    modpath="$(git -C "$root" show "$eval_sha:${mod#./}go.mod" 2>/dev/null | awk '$1 == "module" { print $2; exit }')" || modpath=""
+    modpath="$(git -C "$root" show "$eval_sha:${mod#./}go.mod" 2>/dev/null | awk '!done && $1 == "module" { print $2; done = 1 }')" || modpath=""
     if [ -z "$modpath" ]; then
       answer fallback "the module at '$mod' names no module path"
       return 0
@@ -489,7 +489,7 @@ affected() {
   : >"$tmp/list"
   local mod modpath prog owner rel deps bad
   for mod in $modules; do
-    modpath="$(awk '$1 == "module" { print $2; exit }' "$root/$mod/go.mod")"
+    modpath="$(awk '!done && $1 == "module" { print $2; done = 1 }' "$root/$mod/go.mod")"
     if [ -z "$modpath" ]; then
       echo "scope: $mod/go.mod names no module" >&2
       return 1
