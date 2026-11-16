@@ -232,6 +232,48 @@ func TestCore_writeOrderAndStale(t *testing.T) {
 	}
 }
 
+// TestCore_releaseKeepsTheDirtyList pins that a slot released inside a batch
+// leaves every other slot the batch dirtied to be flushed at its end: a
+// connection answered, then a slot dirtied after it failing — a peer's reset
+// —, which epoll, kqueue and io_uring on process descriptors release at once.
+// The answer leaves at the batch's end, and the next one's too. The list was
+// a link in the slot, and the release cut it there: every slot behind kept
+// its listing flag, no later markDirty listed it again, so its output never
+// left and its close never finished — an h2c connection answered and closed
+// by the drain's GOAWAY held the drain to its deadline (#1385).
+func TestCore_releaseKeepsTheDirtyList(t *testing.T) {
+	t.Parallel()
+	h := &scriptH{}
+	lp, r, d := newTestLoop(h, corenet.LoopValue{}, 0)
+	kept := accept(t, r)
+	failed := accept(t, r)
+	if err := lp.Write(h.opens[0], []byte("answer")); err != nil {
+		t.Fatal(err)
+	}
+	if err := lp.Close(h.opens[1]); err != nil {
+		t.Fatal(err)
+	}
+	r.fail(failed, rErrno, 1)
+	h.OnBatchEnd(lp)
+	lp.endBatch()
+	if got := d.sent[kept]; got == nil || got.String() != "answer" {
+		t.Fatalf("the answer of the slot dirtied before the released one: sent %v, want %q", got, "answer")
+	}
+	if err := lp.Write(h.opens[0], []byte(" next")); err != nil {
+		t.Fatal(err)
+	}
+	if err := lp.Close(h.opens[0]); err != nil {
+		t.Fatal(err)
+	}
+	lp.endBatch()
+	if got := d.sent[kept].String(); got != "answer next" {
+		t.Fatalf("the next batch sent %q, want %q", got, "answer next")
+	}
+	if len(d.closed) != 2 || d.closed[1] != kept {
+		t.Fatalf("closed %v, want the failed slot %d then the kept one %d", d.closed, failed, kept)
+	}
+}
+
 // TestCore_outputCap pins LoopOutputFull and that nothing is copied.
 func TestCore_outputCap(t *testing.T) {
 	t.Parallel()

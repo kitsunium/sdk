@@ -9,6 +9,7 @@
 - **Deciders**: SDK maintainers, owner
 - **Amended 2026-11-10** (#856): a loop group's `Shards(0)` binds one SO_REUSEPORT listener per loop; each is taken by its one loop's rings (§D3's taker is the loop that owns the shard), and a loop whose watchdog gave up closes its own shards. A partial drain of a reuseport group stays `tcp_migrate_req=1`'s (§D3).
 - **Amended 2026-11-14** (#1385), in two sections at the end: the drain looks at the established connections once `OnBatchEnd` has returned, a closing connection reads nothing more, its output is settled whichever path it left by, and the drain's close lingers — the writing side shut after the output, the descriptor closed at the peer's end or after 500 ms —; and io_uring's take arms a round of up to 1 024 accepts and reads the queue again at once, its take over at the first empty read. §D3 is unchanged.
+- **Amended 2026-11-15** (#1385, after #1460), in a section at the end: io_uring's take hands its listener back at the empty read that follows its last round, once every accept of the rounds completed as it was submitted, as epoll's and kqueue's `EAGAIN` do — §D3's rule 2 as written; and a batch's list of slots to flush is a slice, which a slot released inside the batch no longer cuts.
 - **Amends**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   §D1 (the drain a loop group shares with the server) and §D5 (the loop
   count); [ADR 0187](0187-the-handler-type-chooses-the-engine.md) §D9
@@ -332,3 +333,55 @@ on `main` before this change (the tests name them):
   SETTINGS RFC 9113 §3.4 makes the first frame, drain or no drain — and its
   close refused the rest at the batch's `flush`.
   `TestLoopHandler_aWorkersAnswerInTheDrainingBatchFollowsItsOutput`.
+
+## Amendment 2026-11-15 (#1385, after #1460): a take hands its listener back on its last read
+
+The first amendment of 2026-11-14 ended io_uring's take at the read that
+follows a round, and handed the listener back once the round's completions
+came back — at the next batch's reap — on that read alone: the queue was not
+read again before the close. What arrived in between — the rest of the
+batch, the wait and the next reap — met the close. §D4's window is the
+kernel's only between a taker's last read and the close that follows it;
+there it was a batch and more, and grew with the load. On the `bazel` job
+after #1460 (`TestDrain_arrivalsAcrossTheDrain/h2c/auto`, three loops of one
+ring on io_uring, the race detector) four connections whose dial had
+returned 70 to 230 ms before the close were reset by it, unread. Reproduced
+on Linux 6.12, three loops on two loaded CPUs, the life of each connection
+traced: the last ring's round read the queue empty, its completions were
+reaped in the next batch 35 ms later, and the listener closed with 86
+connections queued, three of the test's clients among them, none read.
+
+- Rounds are submitted and the queue read right after each, up to
+  `queueTakeBatch` a batch: an accept on a queue that holds a connection
+  completes as it is submitted, so an empty read is the take's `EAGAIN`.
+  When the CQ holds a completion for every accept the rounds armed, none
+  waits on the listener, and the ring hands it back at that read, the last
+  before the close, as `EAGAIN` is on epoll and kqueue; the rounds'
+  connections open as the next batch reaps them, and a loop stops only once
+  it reaped every accept it armed. Accepts left waiting — another ring took
+  their connection — are cancelled, and the queue is read again once they
+  came back, never judged on a read made before.
+- Reaping each round before the next read instead kept the take going under
+  the test's probe, which dials back to back: the reap of a round outlasted
+  the gap between two dials, the queue never read empty, and the take ran
+  into `Shutdown`'s deadline. A read right after the submission is as close
+  to the kernel's accepts as epoll's.
+- §D3's rule 2 holds as written, "until the queue reads empty with none in
+  flight"; the window the first amendment of 2026-11-14 named, "the rest of
+  the batch and the next one's reap", is withdrawn: §D4's window is the
+  kernel's on io_uring too.
+- Found by the same test on epoll, and fixed with it: the list of slots a
+  batch flushes at its end was a link in each slot, and a slot released
+  inside the batch cut it — epoll, kqueue and io_uring on process
+  descriptors release a slot as it fails, on a peer's reset seen in the
+  batch. Every slot behind kept its mark, so no later write listed it
+  again: its answer never left and its close never finished. An h2c
+  connection answered, then closed by the drain's GOAWAY behind a reset one,
+  held `Shutdown` to its deadline, five runs in eighty under load. The list
+  is a slice, as the compaction list already was for that reason.
+- Tests: `TestConformance_drainClosesOnItsLastRead` — one loop of one ring
+  held at every batch end once the drain is asked for, a burst of
+  connections dialled between two batches until a dial is refused, every
+  one served; on the code before, io_uring reset the third burst's 40, every
+  run. `TestCore_releaseKeepsTheDirtyList` — the answer of a slot listed
+  behind a released one leaves at the batch's end; before, it never did.

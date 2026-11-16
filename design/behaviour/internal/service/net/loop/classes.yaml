@@ -2271,8 +2271,8 @@ files:
       - (*uRing).cancelAccept
       - (*uRing).takeQueues
       - (*uRing).takeQueue
+      - (*uRing).takeRounds
       - (*uRing).waiting
-      - (*uRing).tookAll
       - (*uRing).armTake
       - (*uLoop).queuesTaken
       - (*uRing).used
@@ -2429,6 +2429,7 @@ files:
       - (*uring).wait
       - (*uring).ready
       - (*uring).reap
+      - (*uring).completed
       - (*uring).overflowed
       - (*uring).flushOverflow
       - (*uring).setupBuffers
@@ -3643,9 +3644,6 @@ types:
         type: int32
       - name: lruNext
         type: int32
-      - doc: dirtyNext links the ring's dirty list.
-        name: dirtyNext
-        type: int32
       - doc: |-
           zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
           send of it zero-copy, zcHold none for now — zcPend is at its bound —
@@ -3749,9 +3747,14 @@ types:
         type: int32
       - name: lruTail
         type: int32
-      - doc: dirtyHead starts the list of slots to flush at the end of the batch.
-        name: dirtyHead
-        type: int32
+      - doc: |-
+          dirty lists the slots to flush at the end of the batch, each once
+          (fDirty). A slice, not a link in the slot, as compact is: a slot
+          released inside the batch is reset whole, and a link cut the list
+          there — every slot behind kept its fDirty, so no later markDirty listed
+          it again, and its output never left nor its close finished (#1385).
+        name: dirty
+        type: "[]int32"
       - doc: |-
           compact lists the slots whose spill's head was consumed in the batch,
           compacted at its end. A slice, not a link in the slot: a slot released
@@ -3863,7 +3866,11 @@ types:
         recv: r *ring
       - doc: |-
           flushDirty sends every dirty slot's output and finishes the closes it
-          waited for. It runs once OnBatchEnd has returned.
+          waited for. It runs once OnBatchEnd has returned. A slot released in the
+          batch and still listed is settled as what it holds now: free, it has
+          nothing to settle; taken again, its new connection is, and a settle only
+          sends what was written and finishes a close or a peer's end, each of which
+          listed the slot already.
         name: flushDirty
         recv: r *ring
       - doc: |-
@@ -6141,16 +6148,12 @@ types:
       - doc: |-
           queueDone is, per listener, that the ring took its share of the
           listener's queue as the group drains and handed it back (plan P6);
-          queueCancel that a cancel of its accepts is in flight; queueEmptied
-          that the queue read empty right after a round of its accepts ran, which
-          ends the ring's take once they came back (#1385). take is takeOff for a
-          ring that takes nothing more: the watchdog drained it before the group
-          did, or an accept failed during the take.
+          queueCancel that a cancel of its accepts is in flight. take is takeOff
+          for a ring that takes nothing more: the watchdog drained it before the
+          group did, or an accept failed during the take.
         name: queueDone
         type: "[]bool"
       - name: queueCancel
-        type: "[]bool"
-      - name: queueEmptied
         type: "[]bool"
       - name: take
         type: uint8
@@ -6337,12 +6340,15 @@ types:
           that completed as its cancel crossed it is served like any other —, it
           arms as many single-shot accepts as the queue holds (TCP_INFO), up to
           queueTakeBatch a batch as epoll and kqueue take, within the room above the
-          reserve, submits them, and reads the queue again once they ran: empty
-          there, the ring's take is over, as epoll's is at its first EAGAIN. It
-          hands the listener back to the group's set once the queue read empty and
-          none of its accepts is in flight; the last ring closes it. An accept left
-          waiting on an empty queue, because another ring took the connection, is
-          cancelled again.
+          reserve, submits them and reads the queue again, round after round: an
+          accept on a queue that holds a connection completes as it is submitted, so
+          an empty read is the take's EAGAIN. When every accept of the rounds
+          completed so, none waits on the listener, and the ring hands it back to
+          the group's set at that read, its last before the close, as epoll does;
+          the last taker closes it, and the rounds' connections are opened as the
+          next batch reaps them. An accept left waiting on an empty queue, because
+          another ring took the connection, is cancelled, and the queue read again
+          once it came back.
 
           Read a batch after the round instead, the queue was never empty under
           arrivals once a batch outlasted the gap between two of them, and
@@ -6350,31 +6356,38 @@ types:
           budget with the queue at its backlog, and the close reset connections
           queued half a second before it (#1385). acceptDepth bounds the accepts a
           serving ring keeps waiting, never what the take arms for a queue it
-          counted.
+          counted. Handed back a batch after an empty read, on that read, the
+          listener closed on what arrived in between — the rest of the batch, the
+          wait and the next reap, 70 to 230 ms on a loaded runner —, reset unread
+          (#1385, after #1460).
         name: takeQueues
         recv: rr *uRing
-      - doc: takeQueue is takeQueues' step on listener i, fd.
+      - doc: |-
+          takeQueue is takeQueues' step on listener i, fd: once no accept of the
+          ring is in flight on it, rounds of accepts, each submitted and the queue
+          read right after it, until a read finds it empty — the listener handed
+          back at that read when every accept completed as it was submitted — or
+          until the batch's share of queueTakeBatch is armed.
         name: takeQueue
         params: i, fd int
         recv: rr *uRing
       - doc: |-
+          takeRounds arms and submits rounds of accepts on listener i, fd, each as
+          many as the queue holds, and reports whether a read found the queue
+          empty, or the take over, before the batch's share was armed or the room
+          ran out.
+        name: takeRounds
+        params: i, fd int
+        recv: rr *uRing
+        results: bool
+      - doc: |-
           waiting is how many connections listener i, fd, holds for the ring's
-          take: none for a ring the watchdog drained, whose accept failed, past its
-          budget, or whose queue read empty after its last round — it takes nothing
-          more.
+          take: none for a ring the watchdog drained, whose accept failed, or past
+          its budget — it takes nothing more.
         name: waiting
         params: i, fd int
         recv: rr *uRing
         results: int
-      - doc: |-
-          tookAll submits the take's round and reports whether listener fd's queue
-          reads empty once it ran: a single-shot accept on a queue that holds a
-          connection completes as it is submitted, so what the queue holds then
-          arrived during the submission, or was left to an accept still in flight.
-        name: tookAll
-        params: fd int
-        recv: rr *uRing
-        results: bool
       - doc: |-
           armTake arms n single-shot accepts on listener i, fd, for the drain's take,
           and says how many the SQ had room for.
@@ -7303,7 +7316,9 @@ types:
         results: bool
       - doc: |-
           queuesTaken reports whether every ring of the loop handed every listener
-          back.
+          back and reaped every accept it armed: the take hands a listener back with
+          its last round's accepts completed, not yet reaped, and the loop stops
+          only once their connections are open.
         name: queuesTaken
         recv: ul *uLoop
         results: bool
@@ -7952,6 +7967,13 @@ types:
       - doc: reap calls fn for up to max completions and advances the head past them.
         name: reap
         params: max int, fn func(c *cqe)
+        recv: u *uring
+        results: int
+      - doc: |-
+          completed is how many completions the CQ holds for ud, not yet reaped. One
+          the kernel held back on an overflow is not counted.
+        name: completed
+        params: ud uint64
         recv: u *uring
         results: int
       - doc: |-
