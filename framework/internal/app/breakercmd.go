@@ -88,7 +88,7 @@ func (a *App) breakerData() (vfs.FullFS, error) {
 
 // listBreakers prints each port a breaker guards, and whether an operator
 // isolated it; a mark it cannot read is said, and fails the command.
-func (a *App) listBreakers(fsys vfs.FullFS, stdout, stderr io.Writer) int {
+func (a *App) listBreakers(fsys fs.FS, stdout, stderr io.Writer) int {
 	status := 0
 	for _, b := range a.breakers() {
 		_, err := fs.Stat(fsys, b.mark)

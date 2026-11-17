@@ -371,7 +371,7 @@ functions:
       "can this be read as a counter" and "can this counter be advanced" are the
       same question asked of the same bytes.
     name: readFence
-    params: file fenceFile, path string
+    params: file io.ReaderAt, path string
     results: fence uint64, err error
   - doc: |-
       writeFence records fence in file and forces it to the medium.
