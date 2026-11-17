@@ -87,7 +87,8 @@ judge() {
   # at most 1.00, and its bytes "divided by the follower count", at most 1/N;
   # #920's commit p99 "within 10 % of the no-stream baseline while a paced
   # stream runs", B over A at most 1.10, at the rate it is judged at and, for
-  # information, at 2 and 32 MiB/s).
+  # information, at 2 and 32 MiB/s); #834's three bounds applied to W-TinyLFU too, the owner's rule
+  # of 2026-11-14, point 3).
   expected="$(
     cat <<'EOF'
 1038-set-newkey ab ns/op <= 1.05 #1038
@@ -96,6 +97,9 @@ judge() {
 834-fetch-hit-s3fifo diff ns/op <= 15 #834
 834-zipf-s1.0-cap10 diff hit/op >= 0.05 #834
 834-scan-cap10 diff hit/op >= 0.10 #834
+834-fetch-hit-tinylfu diff ns/op <= 15 #834
+834-tinylfu-zipf-s1.0-cap10 diff hit/op >= 0.05 #834
+834-tinylfu-scan-cap10 diff hit/op >= 0.10 #834
 808-striped-parallel ratio ns/op <= 2 #808
 1059-fetch-hit ab ns/op <= 1.10 #1059
 1059-load-hit ab ns/op <= 1.10 #1059
@@ -200,7 +204,10 @@ EOF
   grep -q '^rule 808-striped-parallel .* BenchmarkStriped_Fetch_Parallel-8 *BenchmarkFetch_Hit ' "$CONF"
   grep -q '^rule 808-shards8-parallel .* BenchmarkFetch_Parallel/stripes=8-8 *BenchmarkFetch_Hit ' "$CONF"
   grep -q '^rule 811-depth-ns .* BenchmarkReceiveBacklog/file/depth1000-4 *BenchmarkReceiveBacklog/file/depth10-4 ' "$CONF"
-  grep -q '^rule 834-scan-cap10 .* BenchmarkHitRatio_Scan/s3fifo/cap10%-4 *BenchmarkHitRatio_Scan/lru/cap10%-4 ' "$CONF"
+  grep -q '^rule 834-scan-cap10 .* BenchmarkHitRatio/s3fifo/scan/cap10%-4 *BenchmarkHitRatio/lru/scan/cap10%-4 ' "$CONF"
+  grep -q '^rule 834-tinylfu-scan-cap10 .* BenchmarkHitRatio/tinylfu/scan/cap10%-4 *BenchmarkHitRatio/lru/scan/cap10%-4 ' "$CONF"
+  # #834's protocol: every hit-ratio row four levels deep, the two judged cells, 100 million accesses.
+  grep -q '^suite kcache-policy .*\^BenchmarkHitRatio\$/\^(lru|s3fifo|tinylfu)\$/\^(zipf-s1.0|scan)\$/\^cap10%\$ 100000000x ' "$CONF"
   # Step 1 of #1035 alone is a row only the head has, judged against the base's own: a cross rule.
   grep -q '^rule 1035-step1-oneshard .* cross .* BenchmarkDo_DistinctKeysParallel_OneShard-4 *BenchmarkDo_DistinctKeysParallel-4 ' "$CONF"
   grep -q '^rule 1035-step1-oneshard-8 .* cross .* BenchmarkDo_DistinctKeysParallel_OneShard-8 *BenchmarkDo_DistinctKeysParallel-8 ' "$CONF"
@@ -243,8 +250,10 @@ EOF
     case "$suite:$rate" in cstream:8 | cstream-scale:2 | cstream-scale:32) ;; *) echo "$id reads rate $rate, which $suite does not run"; return 1 ;; esac
   done < <(awk '$1 == "rule" && $3 ~ /^cstream/ { print $2, $3, $6, $7 }' "$CONF")
   [ "$(awk '$1 == "step0" { print $2, $3, $4 }' "$CONF" | grep '^cstream ')" = 'cstream cpu -' ]
-  # Every rule of the lane is a report rule: no threshold gates before its pull request makes it hold.
-  [ "$(awk '$1 == "rule" { print $11 }' "$CONF" | sort -u)" = report ]
+  # A rule gates once its pull request makes it hold, and only then: #834's two S3-FIFO hit
+  # ratios, the same on every run; every other rule reports.
+  [ "$(awk '$1 == "rule" && $11 == "gate" { print $2 }' "$CONF" | tr '\n' ' ')" = "834-zipf-s1.0-cap10 834-scan-cap10 " ]
+  [ "$(awk '$1 == "rule" && $11 != "gate" { print $11 }' "$CONF" | sort -u)" = report ]
   # Every base is the commit the issues were audited at.
   [ "$(awk '$1 == "suite" { print $5 }' "$CONF" | sort -u)" = "ee1f48ba23cb193b13a91222a027326d91093811" ]
 }

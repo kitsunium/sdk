@@ -130,6 +130,11 @@ lane's scale mode; at about 1.5 GB they never run on a shared machine.
 
 ### Hit ratio — S3-FIFO against LRU (#834)
 
+> Superseded by the section of 2026-11-15 below: these figures came from a
+> trace of 2 million accesses replayed in a loop and a run of a few million,
+> which the design review of #834 found to measure the loop and the warm-up as
+> much as the policies.
+
 A million keys drawn from a Zipf law (`s` 0.8, 1.0, 1.2), a cache of 1 % or
 10 % of them, warmed with twice its capacity; `hit/op` is the share of reads
 answered (a miss is followed by the `Set` a read-through cache makes). The
@@ -170,6 +175,137 @@ this implementation gives +3.9 and +5.8. The hit itself costs the same
 (`Fetch_Hit_S3FIFO` against `Fetch_Hit`, within the +15 ns the issue allows); an
 insert at capacity costs more (`Set_AtCapacity_S3FIFO`, the probation walk and
 the ghost's hash). W-TinyLFU, the issue's second step, is not built.
+
+### #834 (2026-11-15): 100 million accesses a cell, S3-FIFO's shares, and W-TinyLFU
+
+**The bound** (the issue's acceptance, unchanged): S3-FIFO at least 5
+hit-ratio points above LRU on `zipf-s1.0/cap10%` and at least 10 on the scan
+case, `Fetch_Hit` under S3-FIFO within +15 ns of LRU. The owner's rule of
+2026-11-14 holds W-TinyLFU, the issue's "then", to the same three bounds.
+
+**The protocol** (the review's §4, `BenchmarkHitRatio`): a million keys; each
+cell's accesses drawn on the fly from `math/rand/v2`'s PCG of fixed seed
+through Vose's alias table — one 64-bit draw an access, nothing replayed —,
+after a warm-up of twice the capacity; **100 million measured accesses a
+cell**, `-benchtime=100000000x`; every row `BenchmarkHitRatio/<policy>/<workload>/cap<share>%`.
+The cells: Zipf `s` 0.8, 1.0 and 1.2 at 1 % and 10 % of the keys; `scan`,
+Zipf `s` = 1.0 phases of four capacities between sweeps of two capacities of
+keys never seen before, the Zipf accesses counted (166 cycles); and, against
+fitting a policy to Zipf, `loop` — a cycle over six fifths of the capacity,
+LRU's worst case — and `shift` — Zipf `s` = 1.0 whose ranks move a tenth of
+the keys every 10 million accesses. A hit ratio on a fixed trace is
+deterministic: the development VM's figure is the runner's. S3-FIFO's ghost
+hashes with a seed of its own, but no 64-bit collision among its quarter of a
+bound changes a decision; W-TinyLFU's sketch takes its seed per process, and
+its figures move by hundredths of a point between runs.
+
+**What the cells give** (hit ratio in %; the LFU optimum is the share of the
+accesses the C most popular keys take, H_C(s)/H_N(s) — no policy that does not
+know the future does better on the independent reference model —, C/L on the
+loop, and the per-epoch optimum on `shift`):
+
+| Cell | LRU | S3-FIFO, L6's shares | **S3-FIFO** | **W-TinyLFU** | LFU optimum |
+|---|---|---|---|---|---|
+| zipf-s0.8/cap1% | 23.19 | 33.93 | 35.26 | 34.71 | 36.24 |
+| zipf-s0.8/cap10% | 48.71 | 56.87 | 58.95 | 58.76 | 60.91 |
+| zipf-s1.0/cap1% | 58.52 | 66.28 | 67.30 | 67.05 | 68.00 |
+| **zipf-s1.0/cap10%** | **77.94** | 82.06 | **83.06** | **82.99** | 84.00 |
+| zipf-s1.2/cap1% | 87.53 | 90.24 | 90.67 | 90.60 | 90.96 |
+| zipf-s1.2/cap10% | 94.97 | 95.96 | 96.17 | 96.15 | 96.50 |
+| **scan/cap10%** | **72.02** | 82.55 | **82.97** | **82.31** | 84.00 |
+| loop/cap10% | 0.00 | 23.04 | 70.40 | 82.47 | 83.33 |
+| shift/cap10% | 77.77 | 80.88 | 80.02 | 78.31 | 84.00 |
+
+Measured with this package's benchmark on the development VM (go1.27.4, AMD
+EPYC 7351P); the "L6's shares" column is the simulator below, whose LRU and
+S3-FIFO give the package's `hit/op` to the fourth digit on every cell
+compared.
+
+**The verdict on the bound**:
+
+| Rule | Policy | Cell | Δ against LRU | Bound |
+|---|---|---|---|---|
+| `834-zipf-s1.0-cap10` | S3-FIFO | zipf-s1.0/cap10% | **+5.12** | ≥ +5 — holds |
+| `834-scan-cap10` | S3-FIFO | scan/cap10% | **+10.95** | ≥ +10 — holds |
+| `834-tinylfu-zipf-s1.0-cap10` | W-TinyLFU | zipf-s1.0/cap10% | **+5.01 to +5.09** over seven seeds | ≥ +5 — holds, by hundredths |
+| `834-tinylfu-scan-cap10` | W-TinyLFU | scan/cap10% | **+10.22 to +10.44** over seven seeds | ≥ +10 — holds |
+
+The S3-FIFO rows do not move from run to run, so they gate in the A/B lane;
+the W-TinyLFU rows report. Other trace seeds give S3-FIFO +5.12 and +5.13,
++10.95 and +10.95; a warm-up of twenty capacities instead of two, +5.18.
+
+**The designs tried** — S3-FIFO first, the policy the bound names (design A of
+the review: its parameters swept, then every published or reasonable
+variant), on 100 million accesses a cell, with a simulator written for the
+purpose (one array a field, ~20 ns an access):
+
+| S3-FIFO variant | zipf-s1.0/10% | scan | loop | shift |
+|---|---|---|---|---|
+| L6: small a tenth, ghost the bound, two-bit counter (the paper's) | 82.06 | 82.55 | 23.04 | 80.88 |
+| promotion at two hits (libCacheSim's `move-to-main-threshold=2`) | 82.11 | 82.20 | | |
+| ghost 0.9 of the bound (the paper's, libCacheSim's) | 82.13 | 82.55 | | |
+| ghost 2, 3, 4 × the bound | 81.50, 81.02, 80.62 | 82.56, 82.13, 82.12 | | |
+| small a twentieth / a fifth | 82.32 / 81.51 | 82.77 / 82.04 | | |
+| counter of 3 or 4 bits (caps 7, 15) / of 1 bit | 82.23, 82.26 / 81.49 | 82.67, 82.69 / 82.13 | | |
+| counter kept on promotion; ghost re-admission with one hit | 82.06; 81.56 | 82.55; 82.32 | | |
+| main's clock halving the counter instead of decrementing it | 81.90 | 82.43 | | |
+| the ghost forgetting a re-admitted key; a promotion evicting from a full main (the paper's line 25) | 82.06; 82.06 | 82.55; 82.55 | | |
+| libCacheSim's defaults together | 82.19 | 82.65 | | |
+| small a twentieth, 4 bits, ghost a half / a quarter / a tenth / none | 82.87 / 83.08 / 83.18 / 83.08 | 82.91 / 82.96 / 82.98 / 82.79 | 68.94 / 68.94 / 0 / 0 | 79.30 / 78.81 / 77.78 / 75.26 |
+| small a fiftieth, 4 bits, ghost 0.3 | 83.18 | 83.07 | 70.40 | 78.84 |
+| small a twentieth, 2 bits, ghost a quarter | 82.91 | | 68.94 | 80.23 |
+| small a thirty-third, 2 bits, ghost a quarter / 0.3 | 83.01 / 82.96 | 82.93 / 82.91 | 69.90 | 80.10 / 80.34 |
+| small a fiftieth, 2 bits, ghost 0.3 | 83.01 | 82.95 | 70.40 | 80.28 |
+| **small a fiftieth, 2 bits, ghost a quarter — kept** | **83.06** | **82.97** | **70.40** | **80.02** |
+
+Why: with a tenth in probation and a ghost as long as the bound, a key of the
+long tail that comes back once by chance within a few hundred thousand
+accesses is admitted into main, where it holds a slot the C most popular keys
+need. A fiftieth in probation (a key must be hit within ~12 000 accesses to
+be promoted) and a ghost of a quarter (back within ~150 000) admit fewer such
+keys; the two-bit counter of the paper is kept, because more bits keep old
+favourites through a change of popularity (`shift`: 78.81 with four bits,
+80.23 with two). The choice is made on every cell: the kept shares gain on
+all six Zipf cells, the scan and the loop (23 → 70), and lose 0.86 point on
+`shift` — popularity that moves needs the longer memory the larger ghost
+gave. It is the variant with the widest margin on the bound among those
+that do not fall below L6's S3-FIFO on any guard cell by more than a point.
+
+| W-TinyLFU variant (window 1 %, protected four fifths) | zipf-s1.0/10% | scan | shift |
+|---|---|---|---|
+| Caffeine's: no doorkeeper, counters halved every 10 × the bound | 82.45 | 81.33 | 78.31 |
+| aged every 20 × / 40 × the bound | 82.77 / 82.36 | 81.91 / 82.07 | |
+| window 0.5 % / 2 % | 82.56 / 82.44 | 81.34 / 81.35 | |
+| conservative update; a sketch twice as wide | 82.50; 82.42 | 81.19; 81.24 | |
+| Caffeine's hill climber on the window | 82.13 | 81.37 | |
+| a candidate needs an estimate of 2 / 3 | 82.81 / 83.00 | 81.85 / 81.62 | |
+| the review's design B: a doorkeeper (8 bits a sample, 4 hashes) | 82.72 | 82.09 | |
+| doorkeeper, aged every 20 × | 83.06 | 82.30 | 72.83 |
+| doorkeeper, a candidate needs 3 | 83.18 | 82.32 | 77.65 |
+| **doorkeeper (4 bits a sample, 3 hashes), a candidate needs 2 — kept** | **83.01** | **82.46** | **78.26** |
+
+Without the doorkeeper, every key a scan writes reaches the counters and the
+aging comes sooner; a probation entry whose count has aged to 0 then loses
+its slot to a key seen once. The doorkeeper takes a key's first use in a
+period, so a key used once is estimated at 1, and a candidate must reach 2 —
+seen twice — and beat the victim to enter main. A longer aging or a higher
+minimum buys Zipf hundredths and loses `shift` below LRU.
+
+**What it costs.** S3-FIFO's hit still sets a counter — inlined in `fetch`
+now —, and its insert at capacity walks probation and hashes for the ghost
+(`Set_AtCapacity_S3FIFO`). W-TinyLFU's hit counts its key in the sketch, four
+four-bit counters in one cache line, off the hash the entry keeps; its insert
+hashes the key once and may settle one contest (`Set_AtCapacity_TinyLFU`).
+Indicative only, on the shared VM (-cpu=1, its quietest rounds): `Fetch_Hit`
+~49 ns, `Fetch_Hit_S3FIFO` ~46–49 ns, `Fetch_Hit_TinyLFU` ~64–67 ns — +16 ns
+on that Zen 1 core, where an isolated sketch count is ~12 ns; the runner's
+Zen 4 measured `Fetch_Hit` at 28 ns and `Fetch_Hit_S3FIFO` at 22 ns
+(2026-11-14). The verdict on the +15 ns is the A/B lane's
+(`834-fetch-hit-s3fifo`, `834-fetch-hit-tinylfu`). Memory: the node stays
+64 bytes for a string key and a word value (W-TinyLFU's period byte and
+32-bit hash took its padding); W-TinyLFU adds 8 bytes of counters and about
+5 of doorkeeper an entry of the bound, S3-FIFO a quarter of the bound in
+ghost hashes.
 
 ### Expiry sweep (#1038, #1059)
 

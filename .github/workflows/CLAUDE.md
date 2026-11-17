@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-15T00:00:00Z -->
+<!-- updated: 2026-11-15T12:00:00Z -->
 # .github/workflows/
 
 ## Purpose
@@ -245,7 +245,10 @@ file system and memory balloon decide its numbers. The table is
 `-test.bench` expression, `-test.benchtime`, `-test.cpu`, the CPUs a rule needs,
 the runner, the base commit the issues cite — `ee1f48ba2` for all of them) and its
 **rules**, one a threshold row, each naming its issue; a `step0` record names the
-profiles a suite wants recorded. The suites: `kcache*` (#1038, #834, #808),
+profiles a suite wants recorded. The suites: `kcache*` (#1038, #834, #808;
+`kcache-policy` is #834's protocol — 100 million accesses a cell, the trace
+drawn on the fly from a PCG of fixed seed, the two judged cells under LRU,
+S3-FIFO and W-TinyLFU, every row four levels deep),
 `dcache*` (#1059, #808), `dcache-bulk` (#840: `FetchMany_16` per key, 16 × 0.40,
 and its million-entry row in `dcache-scale`), `queue` and `queue-scale` (#811),
 `queue-publish` (#827: `PublishMany/file/16` per message, 16 × 0.55; vfs's
@@ -354,7 +357,7 @@ Everything — the raw rounds, `base.txt`/`head.txt`, benchstat, step 0,
 verdict — is uploaded as `bench-ab-<suite>-<run_id>-<attempt>` even when a
 step failed.
 
-**Gate or report.** Every rule is `report` today: a row that does not hold
+**Gate or report.** Every rule is `report` today but two: a row that does not hold
 yet is judged and written but never fails the leg, and #1034's raised bounds
 stay `report` too, less than 1 % above the interval one runner family
 measured. The pull request that makes a row hold turns it to `gate` in the
@@ -362,8 +365,10 @@ table — the threshold itself is never edited there but under the owner's rule
 of 2026-11-14: when no design that keeps the package's contract reaches it, it
 becomes the high bound of the best design's 95 % interval on the runner,
 rounded up to the hundredth, its trail in the package's `BENCH.md` (#1034's
-three). `bench-ab.bats` pins every one. A dispatch with `enforce` gates every
-row for that run.
+three). `bench-ab.bats` pins every one. Two rows gate today, #834's S3-FIFO hit ratios
+(`834-zipf-s1.0-cap10`, `834-scan-cap10`): a ratio of hits on a fixed trace is
+the same on every run and every machine, so the rounds repeat one value. A
+dispatch with `enforce` gates every row for that run.
 
 **Scale mode** (dispatch only, `mode=scale`): the suites `*-scale`, whose rows
 are the large ones — a row whose name ends in `_<n>M` or `_Scale`. The queue's
