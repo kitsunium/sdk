@@ -44,6 +44,8 @@ go_test(
         "cache_internal_test.go",
         "deadline_internal_test.go",
         "expire_external_test.go",
+        "fetchmany_external_test.go",
+        "fetchmany_internal_test.go",
         "gen_api_test.go",
         "keys_external_test.go",
         "policy_bench_test.go",

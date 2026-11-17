@@ -16,7 +16,7 @@ type queueID uint8
 // deadline.
 //
 // The layout is a budget (#1038): for a string key and a word-sized value the
-// node is 58 bytes, so it lands in the 64-byte size class — one class, and one
+// node is 62 bytes, so it lands in the 64-byte size class — one class, and one
 // cache line, since the runtime places an object of that class on a 64-byte
 // boundary. A time.Time deadline (24 bytes) and a heap handle (8) had taken it
 // to 80 bytes, two lines, and every insertion paid the larger class.
@@ -34,6 +34,11 @@ type entry[K comparable, V any] struct {
 	// weight is what the entry counts against MaxWeight: WeightOf's answer,
 	// or 1 without one.
 	weight int32
+	// batch is the FetchMany that last recorded a hit of the entry, numbered
+	// by UnlockedMap.batch: a key one batch names twice is read once (#840).
+	// It takes four of the six bytes the fields above left as padding, so the
+	// node keeps its size class.
+	batch uint32
 	// freq counts the hits since admission or the last demotion, capped at
 	// maxFreq (S3-FIFO only).
 	freq uint8

@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-13T12:00:00Z -->
+<!-- updated: 2026-11-15T12:00:00Z -->
 # internal/kernel/collections/cache/
 
 ## Purpose
@@ -15,9 +15,9 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
 | File | Surface |
 |---|---|
 | `cache.go` | `Cache[K,V]` + `NewCache` + `Fetch`/`Set`/`SetTTL`/`Delete`/`Expire`/`Keys`/`Len`/`Purge`/`Stats` — a `sync.Mutex` around an `UnlockedMap`, OnEvict drained after the unlock |
-| `unlocked.go` | `UnlockedMap[K,V]` + `NewUnlockedMap` — the cache without its lock (#1038, for #1059): the lookup, the write path, the deadlines, the sweep and the eviction loop every `Cache` call runs; `Deadline`, the read of an entry's deadline (#1059) |
+| `unlocked.go` | `UnlockedMap[K,V]` + `NewUnlockedMap` — the cache without its lock (#1038, for #1059): the lookup, the write path, the deadlines, the sweep and the eviction loop every `Cache` call runs; `Deadline`, the read of an entry's deadline (#1059); `FetchMany`, the batched read the cache domain's `FetchMany` stands on (#840) |
 | `deadline.go` | `deadlineHeap[K,V]` — the expiry heap: 4-ary, `int64` deadlines inline, each entry's slot its cell plus one |
-| `entry.go` | `entry[K,V]` — intrusive list node, with its deadline, its heap slot, its weight and its S3-FIFO counter: 64 bytes for a string key and a word-sized value |
+| `entry.go` | `entry[K,V]` — intrusive list node, with its deadline, its heap slot, its weight, the number of the last batch that read it (#840) and its S3-FIFO counter: 62 bytes for a string key and a word-sized value, in the 64-byte class |
 | `list.go` | `entryList[K,V]` — the intrusive doubly-linked list each queue is, with its count and summed weight |
 | `s3fifo.go` | admission, the hit record and the victim walk of both policies (`admit`, `touch`, `evictOne`, the S3-FIFO small/main walk) |
 | `ghost.go` | `ghostSet[K]` — S3-FIFO's ghost: a bounded FIFO of key hashes (`hash/maphash.Comparable`) |
@@ -57,13 +57,32 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
   one call deep and sets up no eviction list, and only a miss leaves for
   `missed`. `Cache`'s own path is unchanged.
 - **The node is 64 bytes** (#1038). For a string key and a word-sized value
-  the entry is 58 bytes: the 64-byte size class, one cache line. A deadline
+  the entry is 62 bytes — 58 until #840's batch mark took four bytes of its
+  padding: the 64-byte size class, one cache line. A deadline
   is an `int64` of nanoseconds since the cache's epoch — the clock's reading
   at the first deadline — taken by `time.Time.Sub`, so on the monotonic
   readings when both carry one, as `Before` compared them; a sum past the
   `int64` range (a TTL of centuries) is held at its maximum. An entry has a
   deadline when its heap slot is set, so a deadline of 0 is a deadline.
   `Test_entry_size` holds the budget.
+- **A batched read, `UnlockedMap.FetchMany(keys, refs)`** (#840, ADR 0025
+  amended 2026-11-15). It appends one reference a key — the entry's own value,
+  nil for a miss —, read as `Fetch` reads it with three differences, each a
+  cost `Fetch` pays once a key: the clock is read once a batch, at the first
+  entry that carries a deadline (`TestUnlockedMapFetchManyReadsTheClockOnce`);
+  a chunk of sixteen lookups (`lookupChunk`) is issued before any entry is
+  read, so the map's cache misses overlap, and nothing is called on a hit's
+  path; and a key the batch names twice is read once — the entry records the
+  batch's number (`entry.batch`, `UnlockedMap.batch`), its later positions get
+  the same reference without a relink or a count
+  (`TestUnlockedMapFetchManyReadsARepeatOnce`). The count wraps after 2^32
+  batches by clearing every mark first (`Test_UnlockedMap_nextBatch`). An
+  entry past its deadline is reaped as `Fetch` reaps it, its later positions
+  of the chunk looked up again, and `OnEvict` runs at the end of the call
+  (`TestUnlockedMapFetchManyReapsWhatExpired`). A reference is valid until
+  the next call into the map, to be read and never written through: the
+  caller holds the lock the map is serialised under. `refs` grows only when
+  its capacity is short, so a caller with stack room allocates nothing.
 - **Expiry: lazy, plus a sweep the CALLER drives** (#1038). An expired entry is
   reaped by the next `Fetch` of its key, by a capacity eviction, or by
   `Expire()`. Every entry carrying a deadline sits in an expiry heap

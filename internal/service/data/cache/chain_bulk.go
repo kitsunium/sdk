@@ -9,6 +9,18 @@ import (
 	corecache "github.com/kitsunium/sdk/internal/core/data/cache"
 )
 
+// linearRepeats is the longest batch firstOf searches for repeats by
+// comparing keys: past it, a map finds them.
+const linearRepeats int = 32
+
+// chainBatch is a chain's FetchMany in progress: its keys, and the answers
+// their positions are written to.
+type chainBatch[V any] struct {
+	keys   []string
+	values []V
+	found  []bool
+}
+
 // Expire sweeps every tier that implements [corecache.Expirer], far to near,
 // and reports the total of removals — an entry expired in two tiers counts
 // twice, as InvalidateTag counts it (#1059). A tier without the sibling is
@@ -35,49 +47,66 @@ func (c *chainStore[V]) Expire(ctx context.Context) (removed int, err error) {
 	return removed, errors.Join(failures...)
 }
 
-// FetchMany reads near to far with the missing set shrinking (#840): each
-// tier gets ONE pass, over the keys no nearer tier held, and the hits of a far
-// tier are promoted into every nearer one as a batch, under the same write
-// guard a single promotion takes (#460). A broken tier stops the walk, as it
-// stops Fetch's.
-func (c *chainStore[V]) FetchMany(ctx context.Context, keys []string) (map[string]V, error) {
+// FetchMany appends to values and found one answer for every key of keys, in
+// order, reading near to far with the missing keys shrinking (#840): each tier
+// gets ONE pass, over the keys no nearer tier held, and the hits of a far tier
+// are promoted into every nearer one as a batch, under the same write guard a
+// single promotion takes (#460). A key named twice is read once, and every
+// position naming it answered. A broken tier stops the walk, as it stops
+// Fetch's, and nothing is appended.
+func (c *chainStore[V]) FetchMany(ctx context.Context, keys []string, values []V, found []bool) ([]V, []bool, error) {
 	// read before any tier is: a write announced after this read makes the
 	// promotion of what the walk finds stale.
 	seen := c.generation.Load()
-	found := make(map[string]V, len(keys))
-	missing := distinct(keys)
+	values, answers := extend(values, len(keys))
+	found, hits := extend(found, len(keys))
+	batch := chainBatch[V]{keys: keys, values: answers, found: hits}
+	first := firstOf(keys)
+	missing := make([]int, 0, len(keys))
+	//: each key once, at its first position.
+	for at, from := range first {
+		//: a repeat is answered from its first position at the end.
+		if from == at {
+			missing = append(missing, at)
+		}
+	}
 	//: near to far, until every key is found or the tiers run out.
 	for position, level := range c.tiers {
 		//: nothing left to look for.
 		if len(missing) == 0 {
 			break
 		}
-		hits, still, fetchErr := fetchPass(ctx, position, level, missing)
+		promote, still, fetchErr := batch.pass(ctx, position, level, missing)
 		//: a broken tier: serving what lies behind it would be a staler answer.
 		if fetchErr != nil {
-			//: the tier failure, naming its position.
-			return nil, fetchErr
-		}
-		//: the values, and the promotion of this tier's hits.
-		for key, entry := range hits {
-			found[key] = entry.Value
+			clear(answers)
+			clear(hits)
+			//: the tier failure, naming its position; nothing appended.
+			return values[:len(values)-len(keys)], found[:len(found)-len(keys)], fetchErr
 		}
 		//: the nearest tier has nothing nearer to fill.
-		if position > 0 && len(hits) > 0 {
-			c.promoteMany(ctx, hits, position, seen)
+		if len(promote) > 0 {
+			c.promoteMany(ctx, promote, position, seen)
 		}
 		missing = still
 	}
+	//: a repeated key answers what its first position answered.
+	for at, from := range first {
+		answers[at], hits[at] = answers[from], hits[from]
+	}
 	//: the hits of every tier.
-	return found, nil
+	return values, found, nil
 }
 
-// fetchPass is one tier's pass over the missing keys: the entries it holds,
-// and the keys it does not.
-func fetchPass[V any](ctx context.Context, position int, level tier[V], missing []string) (hits map[string]corecache.EntryValue[V], still []string, err error) {
-	hits = make(map[string]corecache.EntryValue[V], len(missing))
+// pass is one tier's pass over the missing positions: the value of each key
+// the tier holds written at its position, the entries a nearer tier must be
+// given (none from the nearest), and the positions the tier does not hold,
+// which reuse missing's array.
+func (b *chainBatch[V]) pass(ctx context.Context, position int, level tier[V], missing []int) (promote map[string]corecache.EntryValue[V], still []int, err error) {
+	still = missing[:0]
 	//: one FetchEntry per missing key, on this tier only.
-	for _, key := range missing {
+	for _, at := range missing {
+		key := b.keys[at]
 		stored, ok, fetchErr := level.entry.FetchEntry(ctx, key)
 		//: a broken tier stops the pass.
 		if fetchErr != nil {
@@ -86,13 +115,21 @@ func fetchPass[V any](ctx context.Context, position int, level tier[V], missing 
 		}
 		//: further out, maybe.
 		if !ok {
-			still = append(still, key)
+			still = append(still, at)
 			continue
 		}
-		hits[key] = stored
+		b.values[at], b.found[at] = stored.Value, true
+		//: a far hit is promoted into every nearer tier.
+		if position > 0 {
+			//: built on the first.
+			if promote == nil {
+				promote = make(map[string]corecache.EntryValue[V], len(missing))
+			}
+			promote[key] = stored
+		}
 	}
 	//: this tier's answer.
-	return hits, still, nil
+	return promote, still, nil
 }
 
 // promoteMany writes a far tier's hits into every nearer tier, as promote
@@ -248,19 +285,38 @@ func (c *chainStore[V]) releaseRefresh(key string) {
 	delete(c.refreshing, key)
 }
 
-// distinct returns keys without duplicates, in their first order.
-func distinct(keys []string) []string {
-	seen := make(map[string]struct{}, len(keys))
-	out := make([]string, 0, len(keys))
-	//: the first occurrence of each.
-	for _, key := range keys {
-		//: a repeat.
-		if _, dup := seen[key]; dup {
+// firstOf returns, for every position of keys, the position at which its key
+// first appears: its own for a first occurrence.
+func firstOf(keys []string) []int {
+	first := make([]int, len(keys))
+	//: a short batch: a repeat is found by comparing it to the keys before it.
+	if len(keys) <= linearRepeats {
+		//: each position, against the earlier ones.
+		for at, key := range keys {
+			first[at] = at
+			//: the earliest equal key, if any.
+			for before := range at {
+				//: a repeat of an earlier key.
+				if keys[before] == key {
+					first[at] = first[before]
+					break
+				}
+			}
+		}
+		//: every position's first.
+		return first
+	}
+	firstAt := make(map[string]int, len(keys))
+	//: one map entry per distinct key.
+	for at, key := range keys {
+		//: a repeat: its first position.
+		if from, seen := firstAt[key]; seen {
+			first[at] = from
 			continue
 		}
-		seen[key] = struct{}{}
-		out = append(out, key)
+		firstAt[key] = at
+		first[at] = at
 	}
-	//: the keys, once each.
-	return out
+	//: every position's first.
+	return first
 }

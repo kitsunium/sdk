@@ -192,16 +192,85 @@ BenchmarkExpire_10kDeadIn100k-8           	      21	  11121788 ns/op	 4559747 B/
 ```
 
 - **`FetchMany_16`** (~4.5 µs for 16 keys, ~280 ns a key, 4 allocations — the
-  result map) is NOT below a single `Fetch_Hit` per key on the memory store:
-  #840 asked for 40 %, and a lock round trip is not where a memory hit spends
-  its time — the map lookup, the relink and the result map are. The batch pays
-  where a key costs a round trip: a remote tier, or the chain below.
+  result map FetchMany returned until #840) was NOT below a single `Fetch_Hit`
+  per key on the memory store, where #840 asked for 40 %. The diagnosis
+  written here then — "a lock round trip is not where a memory hit spends its
+  time" — was half wrong: the batch still read the clock, called the
+  primitive and built a map once a key. The section #840 below measures what
+  replaced it.
 - **`Expire_10kDeadIn100k`** sweeps 10 000 dead entries among 100 000 in
   ~11 ms (~1.1 µs each: the heap pop, the list unlink, the map delete and the
   tag-index unlink); the 90 000 live ones are never visited.
 - **`Load_MissParallel`** (every `Load` a new key, 8 stripes) is the miss storm
   #1035 took the singleflight group's lock off: ~4.1 µs at 8 goroutines
   against ~5.9 µs at one.
+
+### #840 (2026-11-15): a batch answers by position, in one read of the primitive
+
+The owner kept #840's bound — `FetchMany` of 16 keys, per key, at most 40 %
+of `Fetch_Hit` on the memory store — rather than the price stated above. The
+rule is `840-fetchmany16-per-key` of `scripts/ci/bench-ab.conf`
+(`FetchMany_16 / Fetch_Hit ≤ 6.4`, both rows the head's, suite `dcache-bulk`)
+and, at a million entries, `840-fetchmany16-1m` (`FetchMany_16_1M /
+Fetch_Hit_1M ≤ 6.4`, suite `dcache-scale`). Before this change the runner read
+**25.5** (EPYC 9V74, 20 interleaved rounds, high end of the interval 25.63:
+`FetchMany_16` 1 923 ns, `Fetch_Hit` 75.4 ns, at #1059's head).
+
+**Step 0, at both commits** (the shared VM, go1.27.4, `-cpu=4`). At #1059's
+head, the CPU profile of `FetchMany_16` gave 34 % to `time.Now` — the
+primitive's `Fetch`, called once a key, read the clock for every key with a
+deadline —, 17 % to `NewMap` and 15 % to `mallocgc` for the 1 240 B result
+map, and 17 % to `mapaccess2_faststr`, the primitive's lookup and the result
+map's duplicate check; `-gcflags=-m=2` showed `UnlockedMap.Fetch` (cost 310)
+and `sinceEpoch` (cost 122) not inlined, so every key paid two calls, and the
+stripe's `fetchInto` a deferred unlock. Here, the profile gives 40 % to the
+map lookups, 15 % to the chunk's own loop, 12 % to the relinks, 11 % to the
+one clock read, 12 % to writing the answers and nothing to the allocator or
+the collector; `UnlockedMap.FetchMany` (cost 370) and its `readChunk` (239)
+are not inlined — one call a batch and one a chunk —, the relink and the
+S3-FIFO count are inlined into `readChunk`, and the stack arrays of the batch
+do not escape.
+
+**The designs tried**, prototypes on the VM (four interleaved rounds of
+400 000 batches, `-cpu=4`; `Fetch_Hit` ~130 ns, so 40 % is 52 ns a key):
+
+| Design | ns a key | ÷ `Fetch_Hit` | allocs/op |
+|---|---|---|---|
+| the map, a primitive `Fetch` a key (#1059's head) | 196.0 | 1.51 | 4 |
+| the map, one batched read of the primitive (one lock, one clock read) | 116.3 | 0.89 | 4 |
+| answers by position, a primitive `Fetch` a key | 123.6 | 0.95 | 0 |
+| answers by position in slices the call allocates | 64.2 | 0.49 | 2 |
+| answers by position in the caller's slices, one batched read, a callback a hit | 53.1 | 0.41 | 0 |
+| the same, a chunk's lookups issued before any entry is read | 45.8 | 0.35 | 0 |
+| the same, the primitive handing back references, no call on a hit's path (**kept**) | 43.0 | 0.33 | 0 |
+
+The map alone costs more than the bound: its allocation, two more hashes a
+key and the collection they bring stay above 0.40 whatever the read costs, so
+`FetchMany` stopped returning one (ADR 0049, amended 2026-11-15) — no store
+outside this package implemented the sibling. The clock read once a key costs
+as much as the map. A key named twice is still read once: the primitive marks
+an entry with the number of the batch that read it, four bytes in the node's
+padding (ADR 0025, amended 2026-11-15). At a reduced scale — 262 144 entries
+read in a uniform random order, a few tens of megabytes — references beat a
+callback (323–340 against ~400 ns a key: a hit's path calls nothing, so more
+entries are read at once), and reading each key's first byte before the lock
+(`warmKeys`) takes 387 to 353 ns a key, where the 1 024-key row does not move
+(43.6 ns either way, six rounds).
+
+**The change, measured on the VM** (six rounds alternating the two commits'
+binaries, 2 000 000 iterations, `-cpu=4`): `FetchMany_16` 3 159 → 683 ns
+(197 → 43 ns a key, 1 240 → 0 B/op, 4 → 0 allocs/op), `Fetch_Hit` unchanged
+(133 and 134 ns); the ratio per round 4.56 to 5.47, mean 5.13 — 0.32 a key.
+The kernel's `Set_NewKey`, `Fetch_Hit` and `Fetch_HitWithTTL` do not move
+(the node keeps its 64-byte class). The verdict is the runner's, the high end
+of the interval against 6.4; on the runner a clock read costs more of a hit
+than here (the kernel's `Fetch_HitWithTTL` − `Fetch_Hit`, 51.8 ns, on a Xeon
+6975P-C), and the batch pays one in sixteen. `FetchMany_16_1M`
+(`siblings_scale_bench_test.go`) reads its sixteen keys out of
+`Fetch_Hit_1M`'s store, in its order, and runs in the lane's scale mode only.
+At scale a key costs its cache misses, and a batch saves only what it
+overlaps of them: at 262 144 entries the VM puts a key near 0.44 of a hit
+(407 against 917 ns, three rounds), and the runner's row decides that rule.
 
 ### The chain (#1121)
 

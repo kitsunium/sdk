@@ -215,6 +215,13 @@
 # budget: kit's gate counts 60 000 calls, and each pays two fsyncs.
 //internal/service/data/vfs:vfs_test
 
+# internal/service/data/cache — the batch read (kitsunium/sdk#840,
+# fetchmany_alloc_external_test.go, //go:build !race): a FetchMany of at most
+# 64 keys into the slices of the batch before allocates nothing, on one stripe
+# and on eight — the primitive's references on the stripe's stack, no map —,
+# where the map it returned before cost four allocations a call.
+//internal/service/data/cache:cache_test
+
 # BEGIN kit gen from design/sdk.yaml: the packages whose budgets name a fixture,
 # whose gen_perf_test.go runs race off here alone. DO NOT EDIT to the line
 # below: kit gen writes it from the design.
