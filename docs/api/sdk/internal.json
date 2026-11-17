@@ -4029,6 +4029,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol5",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "FlagProtocol5",
+      "spelled": "MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "4",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagNoLease",
+      "doc": "FlagProtocol5 marks a frame from a node that speaks protocol version\n5, which sets FlagProtocol2, FlagProtocol3 and FlagProtocol4 beside\nit. The byte has no bit left, so it shares FlagNoLease's, which every\nrelease reads on a MsgReadIndex alone: a node of protocol 5 sets it\non every other kind, and on a read only as FlagNoLease. Its value is\nFlagNoLease's, so a switch that names both does not compile. A node\nof protocol 5 answers an append or a heartbeat of an older term from\na leader whose frame carries it at that term, and from any other at\nthe term after that one, its own term in LogTerm (#1472); a node of\nprotocol 4 or below ignores it, and a leader refuses to raise the\ncluster version to 5 while a member's last frame of the term lacks\nit.\n",
+      "file": "core/app/consensus/message.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagTrace",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -72511,14 +72525,27 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.Protocol5",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Protocol5",
+      "spelled": "uint32",
+      "canonical": "uint32",
+      "value": "5",
+      "doc": "Protocol5 is the protocol version from which a node answers an append\nor a heartbeat of an older term with its own term in LogTerm, at that\nterm when the leader announces it (FlagProtocol5) and at the term after\nit otherwise, and never takes a later term from an answer but the\nrefusal of its own request or campaign (#1472). A node below it answers\nolder-term traffic at its own term, as every release before did.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ProtocolMax",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "ProtocolMax",
       "spelled": "uint32",
       "canonical": "uint32",
-      "value": "4",
-      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\nVersion 2 adds the snapshot metadata's checksum, the admin payload's\nOrigin and the log identity's AdoptedFrom, each written only once the\ncommitted cluster version is 2 (lot S3). Version 3 adds the retired keys\nof the configuration, written only once it is 3 (#648). Version 4 adds\nthe leader's last index to every heartbeat, which a follower reads\nbeside FlagProtocol4 at any cluster version (#919), the trace context of\na forward (#1115), and the client sessions, their entry kind and the\nmetadata that records them (#918), those two written only once the\ncommitted cluster version is 4.\n",
+      "value": "5",
+      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\nVersion 2 adds the snapshot metadata's checksum, the admin payload's\nOrigin and the log identity's AdoptedFrom, each written only once the\ncommitted cluster version is 2 (lot S3). Version 3 adds the retired keys\nof the configuration, written only once it is 3 (#648). Version 4 adds\nthe leader's last index to every heartbeat, which a follower reads\nbeside FlagProtocol4 at any cluster version (#919), the trace context of\na forward (#1115), and the client sessions, their entry kind and the\nmetadata that records them (#918), those two written only once the\ncommitted cluster version is 4. Version 5 changes no format: a node of 5\nanswers an append or a heartbeat of an older term, its own term in\nLogTerm, at that term to a leader that announces 5 (FlagProtocol5),\nwhich steps down at LogTerm as a pre-candidate refused its PreVote does,\nand at the term after it to a leader of a previous release, which steps\ndown there (#1472).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"

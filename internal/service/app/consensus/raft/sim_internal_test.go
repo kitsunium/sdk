@@ -151,8 +151,10 @@ type simOptions struct {
 	// keeping its log and starting with no table.
 	snapLoss float64
 	// speaks, per node, is the protocol version it runs in place of
-	// ProtocolMax: a node of a previous release in a mixed cluster. Read at
-	// each start, so a restart after a change upgrades the node.
+	// ProtocolMax: a node of a previous release in a mixed cluster, which
+	// below protocol 5 also answers older-term traffic and reads a later
+	// term's answers as every release before #1472 (answersAsBefore). Read
+	// at each start, so a restart after a change upgrades the node.
 	speaks map[core.NodeID]uint32
 	// applyLag, when not 0, is every node's MaxApplyLagBytes: apply is then
 	// asynchronous, an item every few milliseconds, the entries handed by

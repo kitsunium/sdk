@@ -358,6 +358,10 @@ var ddFlags = []struct {
 	{"truncated", core.FlagTruncated},
 	{"p2", core.FlagProtocol2},
 	{"p3", core.FlagProtocol3},
+	{"p4", core.FlagProtocol4},
+	// p5 is no-lease's bit, which announces protocol 5 on every kind but a
+	// read (#1472).
+	{"p5", core.FlagProtocol5},
 }
 
 // step hands a node a message written in the script: type= and from= name
@@ -591,12 +595,17 @@ func fmtMsg(m core.MessageValue) string {
 		fmt.Fprintf(&b, " issuer=%d transfer-term=%d", m.TransferIssuer, m.TransferTerm)
 	}
 	// Every frame of this build announces protocols 2 and 3: only another
-	// announcement is printed.
+	// announcement is printed. The later ones are not printed, and
+	// FlagNoLease's bit, protocol 5's announcement on any other kind, is
+	// printed on a read alone.
 	if p := m.Flags & (core.FlagProtocol2 | core.FlagProtocol3); p != core.FlagProtocol2|core.FlagProtocol3 {
 		b.WriteString(" announces=" + [...]string{"none", "p2", "p3"}[p>>4])
 	}
 	var flags []string
 	for _, x := range ddFlags[:4] {
+		if x.f == core.FlagNoLease && m.Kind != core.MsgReadIndex {
+			continue
+		}
 		if m.Flags&x.f != 0 {
 			flags = append(flags, x.name)
 		}

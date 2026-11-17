@@ -393,6 +393,15 @@ The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol4`.
 
+<a name="FlagProtocol5"></a>
+```go
+const FlagProtocol5 coreconsensus.MessageFlags = 4
+```
+
+FlagProtocol5 marks a frame from a node that speaks protocol version 5. It shares FlagNoLease's bit, the flags byte having no other, and its value: a switch that names both does not compile.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol5`.
+
 <a name="FlagTrace"></a>
 ```go
 const FlagTrace coreconsensus.MessageFlags = 128

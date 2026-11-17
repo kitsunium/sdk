@@ -30,8 +30,9 @@ func (r *Raft) Step(now time.Time, m core.MessageValue) {
 
 // stepTerm reconciles m's term with this node's before anything else reads
 // m: a higher term makes it a follower, unless the message is one a higher
-// term must not impose; an older term is answered so its sender steps down,
-// but for a forward and its answer, which go on at this node's term.
+// term must not impose, an answer above all (#1472); an older term is
+// answered so its sender steps down, but for a forward and its answer,
+// which go on at this node's term.
 // It reports whether m goes on to be handled at this node's term.
 func (r *Raft) stepTerm(now time.Time, m core.MessageValue) bool {
 	switch {
@@ -64,8 +65,63 @@ func (r *Raft) stepHigherTerm(now time.Time, m core.MessageValue) bool {
 		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && r.refuseForLiveLeader(now, m)) {
 		return false
 	}
-	r.adoptTerm(m)
-	return true
+	if r.answersAsBefore() || termRequestKind(m.Kind) {
+		r.adoptTerm(m)
+		return true
+	}
+	return r.stepLaterAnswer(m)
+}
+
+// termRequestKind reports whether a message of kind k, of a later term than
+// its receiver's, is read at that term (#1472): an append or a heartbeat
+// of that term's leader, which the receiver follows, a vote request past
+// D5's live-leader refusal, and a PreVote, whose prospective term moves
+// nothing. The list is closed: every other kind — an answer, which stays at
+// its request's term, a read or a forward, which a node sends its leader at
+// its own term, and any kind this list does not name — never moves a term
+// (stepLaterAnswer).
+func termRequestKind(k core.MessageKind) bool {
+	switch k {
+	case core.MsgApp, core.MsgHeartbeat, core.MsgVote, core.MsgPreVote:
+		return true
+	default:
+		return false
+	}
+}
+
+// stepLaterAnswer reads a message of a later term than this node's that is
+// no request of that term (termRequestKind): an answer, which a node of a
+// previous release sends to older-term traffic at its own term, or a kind
+// no release sends past its receiver's term. Its term is taken only by the
+// two nodes that hold no lease promise to a live leader, from the refusal
+// of their own request: a pre-candidate refused the PreVote of its
+// campaign, which is outside its vote window, and a leader refused its
+// append or heartbeat, which acknowledged no round of a later leader
+// (#1472). Taken by any other, that term came with no vote and no leader,
+// past D5's live-leader refusal: a follower that had just heard its live
+// leader granted the next vote of the term, and a lease read on that
+// leader missed a write the new leader committed (D9 (b)). A granted
+// PreVote's prospective term moves nothing; a refused one ends the
+// campaign that asked, lost (D13) at the refuser's term — this release's
+// in LogTerm, a previous release's in Term, past this node's either way —
+// and never below the term it asked for; a refused append or heartbeat
+// steps a leader down at the refuser's term, a previous release's (R1-18).
+// Any other is dropped. It reports whether m goes on.
+func (r *Raft) stepLaterAnswer(m core.MessageValue) bool {
+	switch {
+	case m.Kind == core.MsgPreVoteResp && !m.Reject:
+		return true
+	case m.Kind == core.MsgPreVoteResp && r.role == core.RolePreCandidate:
+		r.preVotesLost++
+		r.becomeFollower(max(m.Term, m.LogTerm), 0)
+	case m.Kind == core.MsgAppResp && r.role == core.RoleLeader:
+		r.becomeFollower(m.Term, 0)
+	default:
+		// An answer to a campaign or a leadership this node no longer
+		// runs, a read or a forward no release sends past its receiver's
+		// term, or a kind termRequestKind does not name.
+	}
+	return false
 }
 
 // forwardKind reports whether k is a forwarded proposal or the answer to
@@ -81,7 +137,10 @@ func forwardKind(k core.MessageKind) bool {
 
 // adoptTerm makes this node a follower at m's higher term, following its
 // sender when m comes from a leader. A PreVote, and the granted answer to
-// one, carry a prospective term and move nothing.
+// one, carry a prospective term and move nothing. Any other kind than
+// termRequestKind's reaches it only on a node below protocol 5, which reads
+// older-term traffic as every release before #1472 (answersAsBefore);
+// stepLaterAnswer reads it otherwise.
 func (r *Raft) adoptTerm(m core.MessageValue) {
 	switch {
 	case m.Kind == core.MsgPreVote:
@@ -101,13 +160,68 @@ func (r *Raft) adoptTerm(m core.MessageValue) {
 }
 
 // answerOlderTerm tells the sender of an older term's append, heartbeat or
-// PreVote of the current term; anything else of an older term is dropped
-// unanswered.
+// PreVote that this node is past that term; anything else of an older term
+// is dropped unanswered. The refusal stays at the request's term, its
+// refuser's in LogTerm, which only the leader of that request and the
+// pre-candidate of that PreVote read (#1472): stamped with the refuser's
+// term, it raised the term of whoever read it, the leader that sent the
+// request or the follower it had become since, with no vote and no
+// leader, and that node then granted the next vote of the term past D5's
+// live-leader refusal (D9 (b); R1-18, a refusal never moves a term). A
+// leader of a previous release, which reads no LogTerm, is refused at the
+// term after its request's (refuseOlderLeader).
 func (r *Raft) answerOlderTerm(m core.MessageValue) {
+	if r.answersAsBefore() {
+		r.answerOlderTermAsBefore(m)
+		return
+	}
 	switch m.Kind {
 	case core.MsgApp, core.MsgHeartbeat:
-		// A leader of an older term learns of ours, so that it steps
-		// down and a PreVote round decides (R1-18).
+		r.refuseOlderLeader(m)
+	case core.MsgPreVote:
+		r.send(core.MessageValue{Kind: core.MsgPreVoteResp, To: m.From, Term: m.Term, LogTerm: r.term, Reject: true})
+	default:
+		// Nothing else of an older term needs an answer.
+	}
+}
+
+// refuseOlderLeader answers an append or a heartbeat of an older term, from
+// the leader of that term: NOT_LEADER, the refusal of the term and not of
+// the log, this node's term in LogTerm, so that the leader steps down and a
+// PreVote round decides (R1-18). A leader that announces protocol 5 is
+// refused at the request's term and steps down at LogTerm (stepLeader). A
+// leader of a previous release reads Term alone: refused at its own term,
+// it read the refusal as one of its log and counted it as contact, so
+// CheckQuorum never deposed it while another member acknowledged it, and
+// this node stayed out for as long (#1472, O1). It is refused at the term
+// after its request's, which it steps down at as at any later term: the
+// one term past the request's that raises no other reader, since a node
+// still at the request's term led it and so acknowledged no round of a
+// later leader (D9 (b)), and a node past it, which may have, finds the
+// refusal of its own term or an older one. This node's term raised a node
+// that had led the request's term and since followed a live leader, past
+// D5's live-leader refusal (D0).
+func (r *Raft) refuseOlderLeader(m core.MessageValue) {
+	refusal := core.MessageValue{Kind: core.MsgAppResp, To: m.From, Term: m.Term, LogTerm: r.term, Reject: true, Code: codeNotLeader}
+	if !announcesProtocol5(m) {
+		refusal.Term, refusal.Index = m.Term+1, m.Index
+	}
+	r.send(refusal)
+}
+
+// announcesProtocol5 reports whether m, of any kind but a read, carries the
+// whole announcement of a node of protocol 5 (FlagProtocol5 beside the
+// three before it).
+func announcesProtocol5(m core.MessageValue) bool {
+	return m.Kind != core.MsgReadIndex && m.Flags&announcements[Protocol5] == announcements[Protocol5]
+}
+
+// answerOlderTermAsBefore is answerOlderTerm as every release before #1472
+// answered, at this node's term, for a node below protocol 5, which the
+// package's own tests run as one (termFromAnswers, speaks).
+func (r *Raft) answerOlderTermAsBefore(m core.MessageValue) {
+	switch m.Kind {
+	case core.MsgApp, core.MsgHeartbeat:
 		r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Reject: true, Index: m.Index})
 	case core.MsgPreVote:
 		r.send(core.MessageValue{Kind: core.MsgPreVoteResp, To: m.From, Term: r.term, Reject: true})
