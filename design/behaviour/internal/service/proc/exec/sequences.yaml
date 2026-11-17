@@ -2347,7 +2347,13 @@ sequences:
         kind: self
       - id: h.signalGroupAllowGone
         kind: internal
-      - id: h.awaitExit
+      - id: h.clk.NewTimer
+        kind: value
+      - id: window.Stop
+        kind: value
+      - id: h.awaitExitBy
+        kind: internal
+      - id: h.awaitGroupGone
         kind: internal
       - id: h.killUntilReaped
         kind: internal
@@ -2362,16 +2368,69 @@ sequences:
           when: err != nil
       - opt:
           do:
+            - bind: window
+              eval: h.clk.NewTimer(grace)
+              to: h.clk.NewTimer
+            - defer: window.Stop()
+              to: window.Stop
             - bind: settled, gracefulErr
-              eval: h.awaitExit(ctx, grace)
-              to: h.awaitExit
+              eval: h.awaitExitBy(ctx, window.C())
+              to: h.awaitExitBy
             - opt:
                 do:
                   - return: gracefulErr
+                when: settled && (gracefulErr != nil || !h.setpgid)
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: gErr
+                      init:
+                        bind: gone, gErr
+                        eval: h.awaitGroupGone(ctx, window.C())
+                        to: h.awaitGroupGone
+                      when: gone || gErr != nil
                 when: settled
           when: grace > 0
       - return: h.killUntilReaped(ctx)
         to: h.killUntilReaped
+  - of: (*handle).awaitGroupGone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).awaitGroupGone
+        kind: self
+      - id: h.clk.NewTimer
+        kind: value
+      - id: poll.Stop
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: true, nil
+                when: h.groupEmpty()
+            - bind: poll
+              eval: h.clk.NewTimer(lingerPoll)
+              to: h.clk.NewTimer
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - eval: poll.Stop()
+                        to: poll.Stop
+                      - return: true, ctx.Err()
+                  - comm: <-deadline
+                    do:
+                      - eval: poll.Stop()
+                        to: poll.Stop
+                      - return: false, nil
+                  - comm: <-poll.C()
+          forever: true
+  - of: (*handle).groupEmpty
+    steps:
+      - return: h.kill(-h.pgid, 0) != nil
   - of: (*handle).killUntilReaped
     participants:
       - id: caller
@@ -2509,20 +2568,31 @@ sequences:
         kind: actor
       - id: (*handle).awaitExit
         kind: self
-      - id: h.reapInBackground
-        kind: internal
       - id: h.clk.NewTimer
         kind: value
       - id: timer.Stop
         kind: value
+      - id: h.awaitExitBy
+        kind: internal
     steps:
-      - go: h.reapInBackground()
-        to: h.reapInBackground
       - bind: timer
         eval: h.clk.NewTimer(grace)
         to: h.clk.NewTimer
       - defer: timer.Stop()
         to: timer.Stop
+      - return: h.awaitExitBy(ctx, timer.C())
+        to: h.awaitExitBy
+  - of: (*handle).awaitExitBy
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).awaitExitBy
+        kind: self
+      - id: h.reapInBackground
+        kind: internal
+    steps:
+      - go: h.reapInBackground()
+        to: h.reapInBackground
       - select:
           cases:
             - comm: <-h.done
@@ -2531,7 +2601,7 @@ sequences:
             - comm: <-ctx.Done()
               do:
                 - return: true, ctx.Err()
-            - comm: <-timer.C()
+            - comm: <-deadline
               do:
                 - return: false, nil
   - of: (*handle).reapInBackground

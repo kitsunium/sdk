@@ -42,7 +42,7 @@ process that already exists.
 | `env.go` / `samevariable_other.go` | all / `!unix && !windows` | `EnvAllow` / `EnvDeny` (#935): pure filters over `KEY=value` entries, parent order kept, a repeated key keeping its last value at its last place, names compared by `sameVariable` (case-insensitive on Windows); `dedupEnv`, the spawn's own copy of `Spec.Env`: each name once, in linear time (§Spawn semantics); `envKey`, a leading `=` part of the name (Windows' `=C:=C:\dir`) |
 | `lookpath.go` | `unix \|\| windows` | `resolveSpec`: a bare `Spec.Path` searched in the CHILD's PATH (Spec.Env's, else the parent's), os/exec's rules — first executable wins, a relative match is `exec.ErrDot`, none is `exec.ErrNotFound`, both wrapped in `SpawnFailed`; argv[0] keeps the name as written |
 | `lookpath_unix.go` / `lookpath_windows.go` | per OS | the candidate spellings (PATHEXT on Windows), what "executable" means (an execute bit / the extension), and how variable names compare (case-insensitive on Windows: `sameVariable`, and `variableKey`, the form two names of one variable share, the fold classes `strings.EqualFold` compares by) |
-| `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, the SIGKILL escalation resent until the reap (`killUntilReaped`, §Stop), once-only reap through `collectExit` (claim first, own wait, `Reclaim` on ECHILD — it takes a `waiter`, the process's own wait and nothing else; `releaser` adds the handle release an aborted spawn needs), exit translation (`exitValue`), stdio-copier join |
+| `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, the grace window shared by the leader and a private group that outlives it (`awaitExitBy`, `awaitGroupGone`, `groupEmpty`, §Stop), the SIGKILL escalation resent until the reap (`killUntilReaped`, §Stop), once-only reap through `collectExit` (claim first, own wait, `Reclaim` on ECHILD — it takes a `waiter`, the process's own wait and nothing else; `releaser` adds the handle release an aborted spawn needs), exit translation (`exitValue`), stdio-copier join |
 | `stdio.go` | `unix \|\| windows` | `buildStdio`: wires `Spec.Stdio` (inherit/null/capture) to `ProcAttr.Files`; capture pipes + copier goroutines joined by `Wait` (100% delivery, no leak) within `Spec.DrainGrace` after the exit (`drainBounded`, #1088) |
 | `trampoline_unix.go` | `unix` | the re-exec trampoline (`installTrampoline`, `childHandshakeFD`) — see below |
 | `handshake_unix.go` | `unix` | the parent side of the trampoline's status pipe and `handshakeError` (status byte → sentinel); an `S` report is a sandbox step's (`sandboxFailure`) |
@@ -141,6 +141,29 @@ returns `nil` once the group is gone, `ctx.Err()` if cancelled first, or
 A group that vanished (`ESRCH`) at any phase is treated as success. The reap runs
 under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 `close(done)`.
+
+**The grace is the group's (#1517).** With a private group (`Setpgid`, or
+`StdioPTY`'s session), the leader's reap does not end the window: `Stop` and
+`awaitGroupGone` share one timer (`awaitExitBy`), and once the leader is
+reaped the members get the rest of it — `kill(-pgid, 0)` every `lingerPoll`
+(10 ms, on the handle's clock) until `groupEmpty` (anything but success:
+ESRCH, or EPERM — nothing this process may signal, darwin's answer for a
+group of zombies) or the window closes, and a group still answering then gets
+the SIGKILL escalation. It used to wait for the leader alone, so a leader that
+honoured `sig` let `Stop` — and `Run` cancelled on a `Setpgid` child — return
+with a member that ignored it still running. Without a private group nothing
+is probed (`-pid` would be the supervisor's group). The pgid cannot be reused
+while the probe answers — POSIX keeps a group ID while the group has a member,
+a zombie included —, so the only residue is the instant between a probe and
+the SIGKILL, the same the escalation's first SIGKILL to a reaped leader's group
+carries. A zombie counts as a member on Linux and the BSDs: a group whose
+members died with the leader waits for init's reap, milliseconds. Windows is
+unchanged: `TerminateProcess` reaches the leader alone. ADR 0217 §Amendment
+2026-11-17. `Test_handle_StopKillsAGroupThatOutlivesItsLeader` (killed at the
+window's end; not cut short inside it; no wait for a group that honours `sig`),
+`Test_handle_StopNeverProbesAGroupItDoesNotOwn` and
+`TestRunCancelledKillsAGroupThatOutlivesItsLeader` pin it; the first and the
+last fail against the leader-only wait.
 
 **The SIGKILL is resent until the reap.** NetBSD up to 10.1 discards a signal
 posted to a process still inside `execve` (PR kern/58091, fixed in 10.2 and

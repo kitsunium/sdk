@@ -507,6 +507,140 @@ func Test_handle_Stop(t *testing.T) {
 	}
 }
 
+// startLingeringMember spawns, in a private group, a leader that honours
+// SIGTERM beside a member it forked that ignores it — the shape of #1517,
+// `(trap "" TERM; sleep 30) & wait` — and returns the handle with the member's
+// pid once the member's trap is in place.
+func startLingeringMember(t *testing.T, member string) (h *handle, memberPID int) {
+	t.Helper()
+	dir := t.TempDir()
+	trapped := filepath.Join(dir, "trapped")
+	pidFile := filepath.Join(dir, "member.pid")
+	h = startChildAfter(t,
+		"(trap '' TERM; : > '"+trapped+"'; "+member+") & echo $! > '"+pidFile+"'; wait",
+		trapped)
+	//: the shell writes the pid once the fork returned; the marker came after it.
+	awaitMarker(t, pidFile, "the shell never recorded its member's pid")
+	return h, readPID(t, pidFile)
+}
+
+// readPID reads the decimal pid a shell wrote to path, waiting for the newline
+// that ends the write.
+func readPID(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil && strings.HasSuffix(string(raw), "\n") {
+			pid, perr := strconv.Atoi(strings.TrimSpace(string(raw)))
+			if perr != nil {
+				t.Fatalf("pid file %q: %v", raw, perr)
+			}
+			return pid
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pid file %s never completed (%v)", path, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// awaitGone reports whether pid stops answering kill(pid, 0) within limit. A
+// member SIGKILLed after its leader was reaped is an orphan, a zombie until
+// init reaps it, so ESRCH comes a few milliseconds after the kill; a member
+// nothing killed answers for the whole limit.
+func awaitGone(pid int, limit time.Duration) bool {
+	deadline := time.Now().Add(limit)
+	for {
+		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Test_handle_StopKillsAGroupThatOutlivesItsLeader pins #1517: the grace window
+// is the GROUP's. Stop sent SIGTERM to the whole group and then waited for the
+// leader alone; a leader that honoured it was reaped within grace, Stop
+// returned without escalating, and a member that ignored SIGTERM lived on. The
+// member must be gone once Stop returns — dead of the SIGKILL that follows the
+// window — while a member that exits on its own within the window gets the
+// rest of it, and a group already empty costs no wait.
+//
+// MUTATION-CHECKED: with Stop returning on the leader's reap, the first row
+// fails — the member answers kill(pid, 0) for its whole 30 seconds.
+func Test_handle_StopKillsAGroupThatOutlivesItsLeader(t *testing.T) {
+	t.Parallel()
+	t.Run("a member that ignores SIGTERM is killed when the window closes", func(t *testing.T) {
+		t.Parallel()
+		h, member := startLingeringMember(t, "sleep 30")
+		if err := h.Stop(t.Context(), 300*time.Millisecond, coreproc.Signal(syscall.SIGTERM)); err != nil {
+			t.Fatalf("Stop = %v, want nil", err)
+		}
+		if !awaitGone(member, 5*time.Second) {
+			t.Fatalf("member %d of the private group survived Stop", member)
+		}
+	})
+	t.Run("a member gets the rest of the window to exit on its own", func(t *testing.T) {
+		t.Parallel()
+		finished := filepath.Join(t.TempDir(), "finished")
+		h, member := startLingeringMember(t, "sleep 1; : > '"+finished+"'")
+		if err := h.Stop(t.Context(), 20*time.Second, coreproc.Signal(syscall.SIGTERM)); err != nil {
+			t.Fatalf("Stop = %v, want nil", err)
+		}
+		//: Stop returned on the group emptying, not on a SIGKILL that cut it short.
+		if _, err := os.Stat(finished); err != nil {
+			t.Fatalf("the member was cut short: %v", err)
+		}
+		if !awaitGone(member, 5*time.Second) {
+			t.Fatalf("member %d still answers after Stop", member)
+		}
+	})
+	t.Run("a group that honours SIGTERM returns without waiting the window", func(t *testing.T) {
+		t.Parallel()
+		forked := filepath.Join(t.TempDir(), "forked")
+		h := startChildAfter(t, "sleep 30 & : > '"+forked+"'; wait", forked)
+		const grace = 30 * time.Second
+		began := time.Now()
+		if err := h.Stop(t.Context(), grace, coreproc.Signal(syscall.SIGTERM)); err != nil {
+			t.Fatalf("Stop = %v, want nil", err)
+		}
+		if took := time.Since(began); took > 5*time.Second {
+			t.Errorf("Stop took %v on a group that honoured SIGTERM, want far less than its %v grace", took, grace)
+		}
+	})
+}
+
+// Test_handle_StopNeverProbesAGroupItDoesNotOwn pins the other side of #1517:
+// without Setpgid there is no private group, and -pid would address the
+// supervisor's own group, so Stop's watch after the leader's reap never runs —
+// every kill(2) it makes names the leader's pid, never a negative target.
+func Test_handle_StopNeverProbesAGroupItDoesNotOwn(t *testing.T) {
+	t.Parallel()
+	h := startChild(t, false, shellOnlyWait(t))
+	var mu sync.Mutex
+	var targets []int
+	h.kill = func(pid int, sig syscall.Signal) error {
+		mu.Lock()
+		targets = append(targets, pid)
+		mu.Unlock()
+		return syscall.Kill(pid, sig)
+	}
+	if err := h.Stop(t.Context(), 5*time.Second, coreproc.Signal(syscall.SIGTERM)); err != nil {
+		t.Fatalf("Stop = %v, want nil", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, target := range targets {
+		if target <= 0 {
+			t.Errorf("kill(%d, …): Stop addressed a group it does not own (targets %v)", target, targets)
+		}
+	}
+}
+
 // startZombieLeader spawns a group leader that exits at once and returns once
 // it is a zombie this process has not reaped: the state darwin's kill(2)
 // refuses with EPERM when the escalation reaches it.

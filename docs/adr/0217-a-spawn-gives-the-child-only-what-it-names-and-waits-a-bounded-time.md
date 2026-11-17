@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
-- **Amended**: 2026-11-08 — §Amendment: the sandbox (#728, S2); §Amendment: a sticky tmpfs (#728, S2 wired into `proc/service`); 2026-11-11 — §Amendment: `Usage` by value (#1136); §Amendment: SIGINT reaches a group as CTRL_BREAK (#933); §Amendment: `StdioPTY` on OpenBSD (#934)
+- **Amended**: 2026-11-08 — §Amendment: the sandbox (#728, S2); §Amendment: a sticky tmpfs (#728, S2 wired into `proc/service`); 2026-11-11 — §Amendment: `Usage` by value (#1136); §Amendment: SIGINT reaches a group as CTRL_BREAK (#933); §Amendment: `StdioPTY` on OpenBSD (#934); 2026-11-17 — §Amendment: `Stop`'s grace is the group's (#1517)
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0016](0016-sdk-process-supervision-domain.md) (three codes, `0.2.6.24`–`0.2.6.26`, and three sibling ports of `Process`), [ADR 0018](0018-sdk-cross-platform-portability.md) (the platform rows of the new `proc/exec` primitives)
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (sibling ports), [ADR 0093](0093-a-sweep-takes-the-zombie-never-the-status.md) (who collects a status), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (measured contracts)
@@ -337,7 +337,52 @@ libc's `ioctl` (`syscallInternal` in `syscall/syscall_openbsd.go`, Go issue
    the package's doc: `TestSupportedIsTheEnginesAnswer` refused the row that
    still said ❌ while the engine answered on the `bsd` lane.
 
+## Amendment 2026-11-17 — `Stop`'s grace is the group's (#1517)
+
+`Stop` sent `sig` to the whole private group, then waited for the LEADER
+alone. A leader that honoured `sig` was reaped inside the grace window, `Stop`
+returned without its escalation, and a member that ignored `sig` — a
+`(trap '' TERM; sleep 30) &` beside a shell that `wait`s — outlived the stop.
+The same held for `Run` cancelled on a `Setpgid` child, since it stops through
+`Stop`. The escalation's own comment already said a private group can outlive
+its leader; only the graceful path forgot it.
+
+1. **The window covers the group.** With a private group (`Setpgid`, or
+   `StdioPTY`'s session), a leader reaped inside the window leaves its members
+   the rest of it: `kill(-pgid, 0)` every 10 ms on the handle's clock, until
+   the group answers nothing (`ESRCH`, or `EPERM`: no member this process may
+   signal — darwin's answer for a group of zombies) or the window closes. A
+   group still answering then gets the SIGKILL escalation it would have had
+   with a lingering leader. A group already empty costs one probe and no wait.
+2. **Never a group the handle does not own.** Without a private group there is
+   no probe and no group signal: `-pid` would address the supervisor's own
+   group. Unchanged.
+3. **The pgid is still the group's while it answers.** POSIX does not reuse a
+   process ID as a group ID while a group of that ID has a member, a zombie
+   awaiting its reaper included. The residue is the instant between a probe
+   that answered and the SIGKILL after it, in which the group could empty and
+   the number go to a new leader — which needs the kernel to cycle through
+   every pid in that instant; the escalation's first SIGKILL to a reaped
+   leader's group carries the same residue, and has since it was written.
+4. **A zombie counts.** Linux and the BSDs answer a group of zombies as
+   present, so a group whose members died with the leader waits for init to
+   reap them — milliseconds. A supervisor that is a subreaper and reaps
+   nothing keeps them until the window closes, and the SIGKILL that follows is
+   a no-op on them.
+5. **Windows is unchanged.** Its escalation is `TerminateProcess` on the leader
+   alone; the members of a console process group are not killed there, on the
+   graceful path or the escalation, and nothing this amendment adds reaches
+   them. A Job Object is the Windows means to kill a tree; it is not the
+   handle's today.
+6. **Proof.** `Test_handle_StopKillsAGroupThatOutlivesItsLeader` (the member
+   SIGKILLed when the window closes; a member finishing inside the window not
+   cut short; a group that honours `sig` returning at once),
+   `Test_handle_StopNeverProbesAGroupItDoesNotOwn`, and
+   `TestRunCancelledKillsAGroupThatOutlivesItsLeader` through `Run`. The first
+   and the last fail against the previous `Stop`, the member alive for its 30
+   seconds.
+
 ## References
 
-- Issues #928, #929, #931, #933, #934, #935, #940, #943, #1088, #1089, #1090, #1091; #728, #738, #933, #934, #1136 (amendments)
+- Issues #928, #929, #931, #933, #934, #935, #940, #943, #1088, #1089, #1090, #1091; #728, #738, #933, #934, #1136, #1517 (amendments)
 - `internal/service/proc/exec/CLAUDE.md`, `BENCH.md`; `internal/service/proc/childwait/BENCH.md`
