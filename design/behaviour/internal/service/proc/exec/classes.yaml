@@ -1428,7 +1428,9 @@ files:
       - (*handle).Signal
       - (*handle).SignalGroup
       - (*handle).Stop
+      - (*handle).awaitGrace
       - (*handle).awaitGroupGone
+      - (*handle).awaitLingerPoll
       - (*handle).groupEmpty
       - (*handle).killUntilReaped
       - (*handle).awaitKill
@@ -3624,6 +3626,17 @@ types:
         recv: h *handle
         results: error
       - doc: |-
+          awaitGrace runs Stop's graceful window: grace for the leader's exit and,
+          with a private group, what is left of it for the members the leader leaves
+          behind (awaitGroupGone). settled reports a terminal outcome — the group
+          gone (err nil) or ctx cancelled (err is ctx's error); false means the
+          window closed on a leader or a member still running, and the caller must
+          escalate.
+        name: awaitGrace
+        params: ctx context.Context, grace time.Duration
+        recv: h *handle
+        results: settled bool, err error
+      - doc: |-
           awaitGroupGone watches a private group whose leader is reaped until it
           empties, ctx ends, or deadline delivers: kill(-pgid, 0) every lingerPoll on
           the handle's clock (groupEmpty). gone reports a group with nothing left this
@@ -3641,6 +3654,15 @@ types:
         params: ctx context.Context, deadline <-chan time.Time
         recv: h *handle
         results: gone bool, err error
+      - doc: |-
+          awaitLingerPoll waits one lingerPoll on the handle's clock before the next
+          probe of a group whose leader is reaped. over reports the end of the watch:
+          ctx cancelled (err is ctx's error) or deadline delivered (err nil); false
+          means the interval closed and the group is due another probe.
+        name: awaitLingerPoll
+        params: ctx context.Context, deadline <-chan time.Time
+        recv: h *handle
+        results: over bool, err error
       - doc: |-
           groupEmpty reports whether the private group holds nothing this process may
           signal: kill(-pgid, 0) answers anything but success. ESRCH is a group gone;
@@ -3741,9 +3763,9 @@ types:
         results: settled bool, err error
       - doc: |-
           awaitExitBy is awaitExit on a window the caller owns: it returns when the
-          process is reaped, ctx is cancelled, or deadline delivers. Stop hands it the
-          timer it then watches the group on, so the leader and the group share one
-          grace window.
+          process is reaped, ctx is cancelled, or deadline delivers. awaitGrace hands
+          it the timer it then watches the group on, so the leader and the group share
+          one grace window.
 
           Goroutine lifecycle: it launches reapInBackground, which drives the once-only
           Wait and returns as soon as the reap completes (closing h.done). The goroutine
