@@ -146,9 +146,12 @@ under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 `StdioPTY`'s session), the leader's reap does not end the window: `awaitGrace` runs one
 timer for both — `awaitExitBy` for the leader, then `awaitGroupGone` — and once
 the leader is reaped the members get the rest of it — `kill(-pgid, 0)` every `lingerPoll`
-(10 ms, on the handle's clock) until `groupEmpty` (anything but success:
-ESRCH, or EPERM — nothing this process may signal, darwin's answer for a
-group of zombies) or the window closes, and a group still answering then gets
+(10 ms, on the handle's clock) until `groupEmpty` (ESRCH, and only ESRCH:
+an EPERM on Linux and the BSDs is a live member this process may not signal,
+which ends in STOP_FAILED after the escalation, never in a false "stopped";
+darwin's EPERM for a group of zombies turns to ESRCH as init reaps them, and
+the escalation's `zombieGroupRefused` covers a window that closes first) or
+the window closes, and a group still answering then gets
 the SIGKILL escalation. It used to wait for the leader alone, so a leader that
 honoured `sig` let `Stop` — and `Run` cancelled on a `Setpgid` child — return
 with a member that ignored it still running. Without a private group nothing
@@ -161,7 +164,9 @@ members died with the leader waits for init's reap, milliseconds. Windows is
 unchanged: `TerminateProcess` reaches the leader alone. ADR 0217 §Amendment
 2026-11-17. `Test_handle_StopKillsAGroupThatOutlivesItsLeader` (killed at the
 window's end; not cut short inside it; no wait for a group that honours `sig`),
-`Test_handle_StopNeverProbesAGroupItDoesNotOwn` and
+`Test_handle_StopNeverProbesAGroupItDoesNotOwn`,
+`Test_handle_StopFailsOnAGroupItMayNotSignal`,
+`Test_handle_StopReturnsAtOnceOnAGroupThatHonoursSIGTERM` and
 `TestRunCancelledKillsAGroupThatOutlivesItsLeader` pin it; the first and the
 last fail against the leader-only wait.
 

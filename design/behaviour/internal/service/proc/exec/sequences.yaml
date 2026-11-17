@@ -2458,8 +2458,16 @@ sequences:
               do:
                 - return: false, nil
   - of: (*handle).groupEmpty
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*handle).groupEmpty
+        kind: self
+      - id: errors
+        kind: stdlib
     steps:
-      - return: h.kill(-h.pgid, 0) != nil
+      - return: errors.Is(h.kill(-h.pgid, 0), syscall.ESRCH)
+        to: errors
   - of: (*handle).killUntilReaped
     participants:
       - id: caller

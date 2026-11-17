@@ -3639,8 +3639,8 @@ types:
       - doc: |-
           awaitGroupGone watches a private group whose leader is reaped until it
           empties, ctx ends, or deadline delivers: kill(-pgid, 0) every lingerPoll on
-          the handle's clock (groupEmpty). gone reports a group with nothing left this
-          process may signal; false with a nil err means the window closed with a
+          the handle's clock (groupEmpty). gone reports a group whose probe answered
+          ESRCH; false with a nil err means the window closed with a
           member still answering, and the caller must escalate.
 
           The pgid is still this group's while the probe answers: POSIX does not
@@ -3664,14 +3664,22 @@ types:
         recv: h *handle
         results: over bool, err error
       - doc: |-
-          groupEmpty reports whether the private group holds nothing this process may
-          signal: kill(-pgid, 0) answers anything but success. ESRCH is a group gone;
-          EPERM is a group with no member this process may signal — darwin's answer
-          for a group of zombies (zombieGroupRefused), or a member that changed its
-          credentials, which no SIGKILL of this process would reach either. A success
-          is a member, alive or a zombie awaiting its reaper: Linux and the BSDs count
-          zombies, and init reaps an orphan within milliseconds, so such a group
-          empties well inside a window.
+          groupEmpty reports whether the private group is gone: kill(-pgid, 0)
+          answers ESRCH, on every kernel. Any other answer is a group still there:
+
+            - success is a member, alive or a zombie awaiting its reaper — Linux and
+              the BSDs count zombies, and init reaps an orphan within milliseconds;
+            - EPERM on Linux and the BSDs is a live member this process may not
+              signal (it changed its credentials). It is not gone, and Stop must not
+              say it stopped: the window runs out and the escalation, refused too,
+              reports STOP_FAILED;
+            - EPERM on darwin is also XNU's answer for a group holding only zombies
+              (zombieGroupRefused). No darwin-only reading is needed here: those
+              zombies are orphans init reaps within milliseconds, so the answer turns
+              to ESRCH long before the window closes, while a live member keeps it
+              EPERM — and should the window close first, the escalation's
+              zombieGroupRefused, which watches the group drain (groupDrains), tells
+              the two apart before any STOP_FAILED.
         name: groupEmpty
         recv: h *handle
         results: bool
