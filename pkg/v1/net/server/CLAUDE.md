@@ -42,6 +42,9 @@ in the dimension that motivated the domain, whatever else it gained.
 | `Option`, `GroupOption` | what `New` takes, and what `Server.Group` / `Server.PacketGroup` take |
 | `WithDrainTimeout` | server option |
 | `DrainSignal` | the shutdown signal a handler holding a connection open watches |
+| `DrainContext` | `DrainSignal` as a context, for a wait that takes one — a long poll — and must end as the drain starts |
+| `Bearer`, `AuthOf`, `BearerVerifier`, `AuthValue` | the Bearer middleware of an HTTP group, on the http1 chain's verifier port: 401 and `WWW-Authenticate: Bearer` without a verified token, the verifier's subject and claims read back with `AuthOf` |
+| `LoopbackHost` | the middleware of a server bound to the loopback that answers 403 a `Host` naming anything else (DNS rebinding) |
 | `ListenFailed` … `ConnLimitReached` | sentinels |
 | `Group.HandleLoop` | serves a plaintext group on the loop engine (ADR 0186, §D9 step 11): io_uring or epoll on Linux, the portable backend elsewhere; TLS, `Use` and every option given — its zero value included — that neither the engine nor the handler honours are refused at `Start` (ADR 0187 §D2). `TestHandleLoopServesInPublic` serves one with this package alone |
 | `Group.UseLoop`, `LoopMiddleware`, `LoopLayer`, `NewLoopLayer`, `LoopLayered`, `LoopStarter`, `OptionLoopMiddleware`, `LoopMiddlewareInvalid` | loop middlewares (ADR 0191 §D2): a layer embeds `LoopLayer`, Start checks it forwards every callback through a probe chain, a goroutine group refuses `UseLoop`; `LoopStarter.OnStart(lanes)` before any callback, `Loops` lanes on every backend |

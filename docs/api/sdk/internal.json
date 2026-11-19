@@ -87835,6 +87835,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.AuthOf",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "AuthOf",
+      "spelled": "func(ctx context.Context) (corenet.HTTP1AuthValue, bool)",
+      "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue, bool)",
+      "doc": "AuthOf returns the auth Bearer's verifier set on the request ctx belongs to,\nand false when no Bearer middleware authenticated it.\n",
+      "file": "service/net/server/bearer.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/server.Backlog",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/net/server",
@@ -87871,6 +87883,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.Bearer",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "Bearer",
+      "spelled": "func(v corenet.HTTP1BearerVerifier) (corenet.Middleware[http.Handler], error)",
+      "canonical": "func(v github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier) (github.com/kitsunium/sdk/internal/core/net.Middleware[net/http.Handler], error)",
+      "doc": "Bearer returns the authenticating middleware of a net/http group, the port the\nhttp1 chain's Bearer link calls: a request must carry \"Authorization: Bearer\n<token>\" that v verifies, or is answered 401 with WWW-Authenticate: Bearer and\ngoes no further. What v sets on the auth — the subject, the claims — reaches\nthe handler through AuthOf. The scheme matches case-insensitively, the token is\nwhat follows its spaces. A route that needs no token is mounted outside the\nmiddleware. A nil v is refused with corenet.HTTP1Misconfigured.\n",
+      "file": "service/net/server/bearer.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/server.CORS",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/net/server",
@@ -87891,6 +87915,18 @@
       "canonical": "func(v github.com/kitsunium/sdk/internal/core/net.CompressValue) (func(net/http.Handler) net/http.Handler, error)",
       "doc": "Compress returns a middleware for a Group.HandleHTTP handler that answers in\ngzip what a client's Accept-Encoding admits (#853): the response is buffered\nuntil v.MinBytes is reached or the handler flushes or ends, so a small body\nstays identity, and then chosen on its status and Content-Type, an allowlist.\nIt never compresses a response without a body (HEAD, 1xx, 204, 304), one with\na Content-Encoding or Content-Range, a text/event-stream, a type outside the\nlist or one marked Cache-Control: no-transform, which is a handler's own way\nto refuse. Every response of an allowlisted type carries Vary:\nAccept-Encoding; a strong ETag on a compressed answer is weakened. Flush\nreaches the client through the gzip stream, so a flushed response stays live.\nA level or minimum out of range is CompressInvalid.\n",
       "file": "service/net/server/compress.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.DrainContext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "DrainContext",
+      "spelled": "func(ctx context.Context) (context.Context, context.CancelFunc)",
+      "canonical": "func(ctx context.Context) (context.Context, context.CancelFunc)",
+      "doc": "DrainContext returns a context derived from ctx that is also cancelled when\nthe server serving this request begins draining, and its cancel function,\nwhich the caller must call. It is DrainSignal for a wait that takes a context\n— a long poll on a queue, a blocking receive — so the wait ends as the drain\nstarts instead of holding the drain open until its budget expires. On a\ncontext that carries no drain signal it is context.WithCancel(ctx).\n\nGoroutine lifecycle: one per call on a context that carries a drain signal,\nended when the drain starts or the returned context ends, whichever is first.\n",
+      "file": "service/net/server/drain_context.go",
       "layer": "service",
       "family": "net"
     },
@@ -87999,6 +88035,18 @@
       "canonical": "func(v github.com/kitsunium/sdk/internal/core/net.LoopValue) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
       "doc": "Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops\nand rings, and its per-connection and pressure bounds. It is judged at Start,\nonce the group's handler is known: a group served by HandleLoop runs on it,\nand a group served by Handle, HandleFunc or HandleHTTP refuses it with\nLoopOptionUnsupported, whichever order the declarations came in. A group with\nno handler fails with HandlerMissing instead, and one given a second handler\nwith HandlerAlreadySet. A datagram group refuses it with LoopOptionUnsupported\ntoo. A group served by HandleLoop without it runs on the zero LoopValue.\n",
       "file": "service/net/server/options.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.LoopbackHost",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "LoopbackHost",
+      "spelled": "func() corenet.Middleware[http.Handler]",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/net.Middleware[net/http.Handler]",
+      "doc": "LoopbackHost returns the middleware of a net/http group that serves only on\nthe loopback: a request whose Host does not name it — localhost, an address\nof 127.0.0.0/8 or ::1, with or without a port — is answered 403 and goes no\nfurther. A listener bound to 127.0.0.1 is still reached by a browser through a\nname an attacker's DNS points there (DNS rebinding), and that request carries\nthe attacker's name as its Host; this is the check that refuses it.\n",
+      "file": "service/net/server/loopback.go",
       "layer": "service",
       "family": "net"
     },
