@@ -15,6 +15,107 @@ sequences:
             - return: clock.System
           when: c.Clock == nil
       - return: c.Clock
+  - of: IdleStop
+    participants:
+      - id: caller
+        kind: actor
+      - id: IdleStop
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: cfg.Clock.NewTicker
+        kind: value
+      - id: watchIdle
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, nil, idleMisconfigured("Idle")
+          when: cfg.Idle == nil
+      - opt:
+          do:
+            - return: nil, nil, idleMisconfigured("Grace")
+          when: cfg.Grace <= 0
+      - opt:
+          do:
+            - set: cfg.Clock
+              value: clock.System
+          when: cfg.Clock == nil
+      - opt:
+          do:
+            - set: cfg.Every
+              value: max(cfg.Grace/idleEveryShare, minIdleEvery)
+          when: cfg.Every <= 0
+      - bind: derived, cancel
+        eval: context.WithCancelCause(ctx)
+        to: context
+      - bind: ticker
+        eval: cfg.Clock.NewTicker(cfg.Every)
+        to: cfg.Clock.NewTicker
+      - go: watchIdle(derived, cancel, ticker, cfg)
+        to: watchIdle
+      - return: derived, func() { cancel(context.Canceled) }, nil
+  - of: watchIdle
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchIdle
+        kind: self
+      - id: ticker.Stop
+        kind: value
+      - id: cfg.Clock.Now
+        kind: value
+    steps:
+      - defer: ticker.Stop()
+        to: ticker.Stop
+      - var:
+          name: since
+          type: time.Time
+      - loop:
+          do:
+            - alt:
+                - do:
+                    - set: since
+                      value: time.Time{}
+                  when: "!cfg.Idle()"
+                - do:
+                    - bind: now
+                      eval: cfg.Clock.Now()
+                      to: cfg.Clock.Now
+                    - opt:
+                        do:
+                          - set: since
+                            value: now
+                        when: since.IsZero()
+                    - opt:
+                        do:
+                          - eval: cancel(corelc.IdleReached)
+                          - return: ""
+                        when: now.Sub(since) >= cfg.Grace
+                  else: true
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: ""
+                  - comm: _, ok := <-ticker.C()
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!ok"
+          forever: true
+  - of: idleMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: idleMisconfigured
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: kerrs.Wrap(corelc.IdleMisconfigured, kerrs.WrapParams{}, kerrs.String("field", field))
+        to: kerrs
   - of: New
     steps:
       - return: |-

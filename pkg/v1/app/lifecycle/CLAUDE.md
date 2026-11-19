@@ -30,6 +30,8 @@ stop. Stdlib-only → dep-light; cross-OS portable.
 | `SupervisionEvent` / `SupervisionPhase` + `SupervisionRunStarted` … `SupervisionStopped`, `SupervisionGaveUp` | what the observer is told |
 | `DefaultRestartBase` / `DefaultRestartMax` / `DefaultHealthyRun` | 1s / 1m / 1m — the clamps of a zero `Backoff` and a non-positive `HealthyAfter` |
 | `RunPanicked` / `SupervisorMisconfigured` / `SupervisorRunning` / `SupervisorGaveUp` | supervisor sentinels (`0.3.49.6`–`0.3.49.9`) |
+| `IdleStop(ctx, cfg)` / `IdleConfig` | a context also cancelled once `cfg.Idle` has answered true for `cfg.Grace` (`Every` a tenth of it by default, on `Clock`), its cause `IdleReached`; the context a process gives `Run` to end on its own when nothing uses it |
+| `IdleMisconfigured` / `IdleReached` | idle-stop sentinels (`0.3.49.10`, `0.3.49.11`): no probe or no positive grace; the cause of an idle stop |
 
 ## Conventions
 
