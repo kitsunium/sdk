@@ -101,17 +101,21 @@ func TestNewValidatorRefuses(t *testing.T) {
 		cfg    jsonschema.Config
 		code   errs.Code
 	}{
-		"not JSON":            {`{"type":`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
-		"not a schema":        {`42`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
-		"wrong keyword shape": {`{"minLength":-1}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
-		"lookahead pattern":   {`{"pattern":"(?=a)"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
-		"draft-07":            {`{"$schema":"http://json-schema.org/draft-07/schema#"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
-		"$dynamicRef":         {`{"$dynamicRef":"#x"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
-		"unevaluated":         {`{"unevaluatedProperties":false}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
-		"content":             {`{"contentMediaType":"application/json"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
-		"remote ref":          {`{"$ref":"https://example.com/schema.json"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaRefUnresolved},
-		"missing pointer":     {`{"$ref":"#/$defs/none"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaRefUnresolved},
-		"unknown format":      {`{}`, jsonschema.Config{AssertFormats: []string{"hostname"}}, corejsonschema.CodeJSONSchemaFormatUnknown},
+		"not JSON":             {`{"type":`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"not a schema":         {`42`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"wrong keyword shape":  {`{"minLength":-1}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"lookahead pattern":    {`{"pattern":"(?=a)"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"unknown type name":    {`{"type":"thing"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"unknown type in list": {`{"type":["string","thing"]}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"repeated type":        {`{"type":["string","string"]}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"empty type list":      {`{"type":[]}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"draft-07":             {`{"$schema":"http://json-schema.org/draft-07/schema#"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
+		"$dynamicRef":          {`{"$dynamicRef":"#x"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
+		"unevaluated":          {`{"unevaluatedProperties":false}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
+		"content":              {`{"contentMediaType":"application/json"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
+		"remote ref":           {`{"$ref":"https://example.com/schema.json"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaRefUnresolved},
+		"missing pointer":      {`{"$ref":"#/$defs/none"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaRefUnresolved},
+		"unknown format":       {`{}`, jsonschema.Config{AssertFormats: []string{"hostname"}}, corejsonschema.CodeJSONSchemaFormatUnknown},
 	}
 	for name, tc := range cases {
 		if _, err := jsonschema.NewValidator([]byte(tc.schema), tc.cfg); !errs.HasCode(err, tc.code) {
