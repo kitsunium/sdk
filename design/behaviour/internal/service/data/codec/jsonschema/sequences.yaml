@@ -1707,6 +1707,23 @@ sequences:
           do:
             - return: nil, err
           when: err != nil
+      - opt:
+          do:
+            - return: nil, keywordInvalid("type")
+          when: len(names) == 0
+      - bind: seen
+        eval: make(map[string]bool, len(names))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, keywordInvalid("type")
+                when: "!typeNames[name] || seen[name]"
+            - set: seen[name]
+              value: "true"
+          key: _
+          range: names
+          value: name
       - return: |-
           func(e *eval, v *value, path string) bool {
           		for _, name := range names {

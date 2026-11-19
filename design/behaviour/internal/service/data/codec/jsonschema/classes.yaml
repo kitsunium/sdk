@@ -143,6 +143,7 @@ files:
       - applicatorBuilder2
       - keywordInvalid
       - typeMatches
+      - typeNames
       - buildType
       - stringList
       - buildEnum
@@ -407,7 +408,10 @@ functions:
     name: typeMatches
     params: v *value, name string
     results: bool
-  - doc: "buildType compiles \"type\": a name or an array of names."
+  - doc: |-
+      buildType compiles "type": a name or an array of names, each one of the
+      seven types, none twice and at least one; anything else is the schema's
+      mistake, refused here rather than failing every document.
     name: buildType
     params: k keyword
     results: check, error
@@ -821,3 +825,12 @@ vars:
           		"contentEncoding": true, "contentMediaType": true, "contentSchema": true,
           	}
     name: schemaKeywords
+  - doc: typeNames are the seven names "type" may hold (2020-12 Validation §6.1.1).
+    items:
+      - name: typeNames
+        value: |-
+          map[string]bool{
+          	"null": true, "boolean": true, "object": true, "array": true,
+          	"number": true, "string": true, "integer": true,
+          }
+    name: typeNames
