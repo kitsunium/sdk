@@ -40,7 +40,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `scheduler` | app | Five-field POSIX cron and fixed intervals, with DST, missed deadlines and overlap decided — skip, allow or replace — and a starting deadline past which a late fire expires | 0041, 0184 |
 | `statemachine` | app | Entities moved by events, timers, deadlines and guards over the caller's store, on an agenda rather than a sweep | 0120 |
 | `resilience` | app | Retry, circuit breaker, keyed rate limit, bulkhead, timeout, fallback, hedging, and the published backoff curve; a retry budget shared by retry and hedge, and the delay a failure imposes (`RetryAfter`); a breaker that opens on a rate of failures or slow calls over a sliding window, and says where it stands (`BreakerState`); a bulkhead and a limiter that wait a bounded time, three jitters, and the SRE book's adaptive client-side throttle | 0026, 0031, 0103, 0184 |
-| `lifecycle` | app | Ordered start and reverse stop with a per-component budget, and the supervisor that restarts a loop — and gives up past an Erlang restart intensity | 0050, 0112, 0184 |
+| `lifecycle` | app | Ordered start and reverse stop with a per-component budget, and the supervisor that restarts a loop — and gives up past an Erlang restart intensity; a context that ends once the application has been idle for a grace | 0050, 0112, 0184 |
 | `health` | app | Startup, readiness and liveness as three types, every wait bounded, and the loopback readiness probe | 0060, 0072, 0131 |
 | `consensus` | app | A write is committed when a majority holds it on disk: a Raft with PreVote and CheckQuorum always on, snapshots, single-server membership through learners, a segmented log that classifies every hole before it repairs one, an mTLS transport pinned by SPKI, several groups on one transport routed by the group each frame names, a node presented as a replicated `stream` (offset = log index), exactly-once commands through client sessions | 0152, 0174, 0241, 0244 |
 | `lock` | app | Named exclusive leases over one process or one machine, with fencing tokens and the guarantee that is not made said out loud | 0052, 0081, 0082, 0083, 0084, 0086 |
@@ -210,7 +210,7 @@ internal/
                              backoff curve, an alias of kernel/backoff's;
                            lifecycle — ordered engine + per-component stop
                              budget + opt-in signal/sd_notify Run + the
-                             supervisor;
+                             supervisor + the idle stop;
                            health — check registry + per-check timeouts +
                              drain latch + HTTP handler + the loopback Ask;
                            consensus — the Raft engine (step function in

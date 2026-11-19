@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "config.go",
         "doc.go",
+        "idle.go",
         "lifecycle.go",
         "run.go",
         "start.go",
@@ -46,6 +47,7 @@ go_test(
     srcs = [
         "gen_api_test.go",
         "harness_external_test.go",
+        "idle_external_test.go",
         "nosleep_external_test.go",
         "run_external_test.go",
         "run_unix_external_test.go",
