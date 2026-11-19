@@ -81,13 +81,16 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Adopt\(names ...string\) GroupOption](<#Adopt>)
+- [func AuthOf\(ctx context.Context\) \(AuthValue, bool\)](<#AuthOf>)
 - [func Backlog\(n int\) GroupOption](<#Backlog>)
 - [func BatchReplies\(\) GroupOption](<#BatchReplies>)
 - [func BatchSize\(n int\) GroupOption](<#BatchSize>)
+- [func Bearer\(v BearerVerifier\) \(HTTPMiddleware, error\)](<#Bearer>)
 - [func CORS\(cfg CORSValue\) \(HTTPMiddleware, error\)](<#CORS>)
 - [func Chain\(h Handler, middlewares ...Middleware\) Handler](<#Chain>)
 - [func ChainPacket\(h PacketHandler, middlewares ...PacketMiddleware\) PacketHandler](<#ChainPacket>)
 - [func Compress\(v corenet.CompressValue\) \(func\(http.Handler\) http.Handler, error\)](<#Compress>)
+- [func DrainContext\(ctx context.Context\) \(context.Context, context.CancelFunc\)](<#DrainContext>)
 - [func DrainSignal\(ctx context.Context\) \<-chan struct{}](<#DrainSignal>)
 - [func Engine\(e EngineValue\) GroupOption](<#Engine>)
 - [func HTTP2\(v HTTP2Limits\) GroupOption](<#HTTP2>)
@@ -96,6 +99,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func KeepAlive\(d time.Duration\) GroupOption](<#KeepAlive>)
 - [func Listen\(network string, addr string\) GroupOption](<#Listen>)
 - [func Loop\(v LoopValue\) GroupOption](<#Loop>)
+- [func LoopbackHost\(\) HTTPMiddleware](<#LoopbackHost>)
 - [func MaxBodyBytes\(n int64\) GroupOption](<#MaxBodyBytes>)
 - [func MaxConns\(n int\) GroupOption](<#MaxConns>)
 - [func MaxHeaderBytes\(n int\) GroupOption](<#MaxHeaderBytes>)
@@ -123,6 +127,14 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func WithDrainTimeout\(d time.Duration\) Option](<#WithDrainTimeout>)
 - [func WithLogger\(l corelogger.Logger\) Option](<#WithLogger>)
 - [func WriteTimeout\(d time.Duration\) GroupOption](<#WriteTimeout>)
+- [type AuthValue](<#AuthValue>)
+  - [func \(\*AuthValue\) Claims\(\) uint64](<#AuthValue.Claims>)
+  - [func \(\*AuthValue\) Reset\(\)](<#AuthValue.Reset>)
+  - [func \(\*AuthValue\) SetClaims\(c uint64\)](<#AuthValue.SetClaims>)
+  - [func \(\*AuthValue\) SetSubject\(b \[\]byte\) bool](<#AuthValue.SetSubject>)
+  - [func \(\*AuthValue\) Subject\(\) \[\]byte](<#AuthValue.Subject>)
+- [type BearerVerifier](<#BearerVerifier>)
+  - [func \(BearerVerifier\) VerifyBearer\(token \[\]byte, auth \*HTTP1AuthValue\) bool](<#BearerVerifier.VerifyBearer>)
 - [type CORSValue](<#CORSValue>)
 - [type Capability](<#Capability>)
 - [type CapabilityValue](<#CapabilityValue>)
@@ -1442,6 +1454,15 @@ Socket activation is what makes a zero-downtime restart possible: the supervisor
 
 A named socket the supervisor did not pass is SocketAdoptFailed, never a silent fallback to binding: a service that quietly binds its own port has lost exactly the property activation exists to provide. The same holds on Windows, which has no socket activation at all: Start fails there with SocketAdoptFailed, whose cause field names UNSUPPORTED\_PLATFORM.
 
+<a name="AuthOf"></a>
+## func [AuthOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func AuthOf(ctx context.Context) (AuthValue, bool)
+```
+
+AuthOf returns the auth the Bearer middleware set on this request's context.
+
 <a name="Backlog"></a>
 ## func [Backlog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1468,6 +1489,15 @@ func BatchSize(n int) GroupOption
 ```
 
 BatchSize sets how many datagrams one read attempts to collect. One disables batching; zero selects the platform default. Where the platform cannot batch, State reports the degradation rather than hiding it.
+
+<a name="Bearer"></a>
+## func [Bearer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Bearer(v BearerVerifier) (HTTPMiddleware, error)
+```
+
+Bearer returns the middleware that answers 401 with WWW-Authenticate: Bearer a request whose Bearer token v does not verify; AuthOf reads what v set.
 
 <a name="CORS"></a>
 ## func [CORS](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1506,6 +1536,15 @@ func Compress(v corenet.CompressValue) (func(http.Handler) http.Handler, error)
 ```
 
 Compress returns a middleware for a Group.HandleHTTP handler that answers in gzip what the client admits, for an allowlist of types and bodies of at least v.MinBytes, Flush reaching the client through the gzip stream. It never compresses a text/event-stream, an already encoded body or a response marked Cache-Control: no-transform. A value out of range is CompressInvalid.
+
+<a name="DrainContext"></a>
+## func [DrainContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func DrainContext(ctx context.Context) (context.Context, context.CancelFunc)
+```
+
+DrainContext returns a context also cancelled when the server begins draining, for a wait that takes a context rather than a channel.
 
 <a name="DrainSignal"></a>
 ## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1588,6 +1627,15 @@ func Loop(v LoopValue) GroupOption
 ```
 
 Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops and rings, and its per-connection and pressure bounds. It is judged at Start, once the group's handler is known: a group served by HandleLoop runs on it, and a group served by Handle, HandleFunc or HandleHTTP refuses it with LoopOptionUnsupported, whichever order the declarations came in. A group with no handler fails with HandlerMissing instead, and one given a second handler with HandlerAlreadySet. A datagram group refuses it with LoopOptionUnsupported too. A group served by HandleLoop without it runs on the zero LoopValue.
+
+<a name="LoopbackHost"></a>
+## func [LoopbackHost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func LoopbackHost() HTTPMiddleware
+```
+
+LoopbackHost returns the middleware that answers 403 a request whose Host is not the loopback, the DNS-rebinding guard of a server bound to 127.0.0.1.
 
 <a name="MaxBodyBytes"></a>
 ## func [MaxBodyBytes](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1849,6 +1897,94 @@ func WriteTimeout(d time.Duration) GroupOption
 ```
 
 WriteTimeout bounds one write to the peer, refreshed per write.
+
+<a name="AuthValue"></a>
+## type [AuthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+AuthValue is what a BearerVerifier sets, a subject and the claims.
+
+```go
+type AuthValue = corenet.HTTP1AuthValue
+```
+
+AuthValue is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue`, declared as:
+
+```go
+type AuthValue struct{}
+```
+
+<a name="AuthValue.Claims"></a>
+### func \(AuthValue\) [Claims](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http1_auth.go>)
+
+```go
+func (*AuthValue) Claims() uint64
+```
+
+Claims returns the claims.
+
+<a name="AuthValue.Reset"></a>
+### func \(AuthValue\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http1_auth.go>)
+
+```go
+func (*AuthValue) Reset()
+```
+
+Reset clears the subject and the claims.
+
+<a name="AuthValue.SetClaims"></a>
+### func \(AuthValue\) [SetClaims](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http1_auth.go>)
+
+```go
+func (*AuthValue) SetClaims(c uint64)
+```
+
+SetClaims sets the claims.
+
+<a name="AuthValue.SetSubject"></a>
+### func \(AuthValue\) [SetSubject](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http1_auth.go>)
+
+```go
+func (*AuthValue) SetSubject(b []byte) bool
+```
+
+SetSubject copies b into the value and reports true, or leaves the value as it is and reports false when b is longer than HTTP1MaxSubject.
+
+<a name="AuthValue.Subject"></a>
+### func \(AuthValue\) [Subject](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/http1_auth.go>)
+
+```go
+func (*AuthValue) Subject() []byte
+```
+
+Subject returns the subject, aliasing the value: valid while the value is, and empty when none was set.
+
+<a name="BearerVerifier"></a>
+## type [BearerVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+BearerVerifier verifies a Bearer token and sets the subject and the claims.
+
+```go
+type BearerVerifier = corenet.HTTP1BearerVerifier
+```
+
+BearerVerifier is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier`, declared as:
+
+```go
+type BearerVerifier interface {
+	// VerifyBearer reports whether token, the credentials after "Bearer ", is
+	// valid, and fills auth when it is.
+	VerifyBearer(token []byte, auth *HTTP1AuthValue) bool
+}
+```
+
+<a name="BearerVerifier.VerifyBearer"></a>
+### func \(BearerVerifier\) [VerifyBearer](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (BearerVerifier) VerifyBearer(token []byte, auth *HTTP1AuthValue) bool
+```
+
+VerifyBearer reports whether token, the credentials after "Bearer ", is valid, and fills auth when it is.
 
 <a name="CORSValue"></a>
 ## type [CORSValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
