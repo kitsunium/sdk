@@ -7,7 +7,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 
 ## Contents
 
-The ADRs are listed once, in [`INDEX.md`](adr/INDEX.md) — one row per ADR:
+The ADRs are listed once, in `adr/INDEX.md` — one row per ADR:
 file, decision, status — which `scripts/pre-commit/check-domain-docs.sh`
 checks against the files on disk (ADR 0251). No `CLAUDE.md` repeats that
 list: every agent session loads these files whole, and three copies of it
