@@ -7,9 +7,10 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
 
 ## Contents
 
-The ADRs are listed once, in `INDEX.md` — one row per ADR:
-file, decision, status — which `scripts/pre-commit/check-domain-docs.sh`
-checks against the files on disk (ADR 0251). No `CLAUDE.md` repeats that
+The ADRs are listed once, in `INDEX.md` — one row per ADR: file, decision,
+status (ADR 0251). `scripts/pre-commit/check-domain-docs.sh` checks only that
+every ADR number on disk appears there exactly once, and no other; the
+Decision and Status columns are kept up to date by hand. No `CLAUDE.md` repeats that
 list: every agent session loads these files whole, and three copies of it
 cost ~400 KB per session. To find the ADR behind a rule, search the ADRs
 (a docs search tool where the session has one, else `grep -l` over
@@ -44,8 +45,9 @@ cost ~400 KB per session. To find the ADR behind a rule, search the ADRs
   0154` naming that file, and its text stays unedited as the record. This is
   the same rule as `docs/CLAUDE.md` §ADR conventions.
 - **A path in an ADR is the path of its time** (ADR 0155 §Consequences). When
-  a package moves, its `CLAUDE.md`, the enforcement artefacts and the index
-  (`INDEX.md`) follow it; an ADR's body does not. Only its `Status` and
+  a package moves, its `CLAUDE.md` and the enforcement artefacts follow it,
+  and the rows of `INDEX.md` that name its path are updated where they stand
+  (the index itself stays at `docs/adr/INDEX.md`); an ADR's body does not. Only its `Status` and
   `Amended by` lines may be re-pointed — at the current home of a rule an
   incident ADR handed to a package, or at the record that amended it — and
   what changed lands in a new ADR, never in the old one's body.

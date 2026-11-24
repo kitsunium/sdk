@@ -286,7 +286,16 @@ check_adr_index "docs/adr/INDEX.md" '^\| `[0-9]{4}' "the index table"
 # somebody remembered, and three copies of one are two to keep in step.
 for f in "$doc" docs/CLAUDE.md docs/adr/CLAUDE.md; do
 	[ -f "$f" ] || continue
-	rows="$(grep -nE '^\| `(adr/)?[0-9]{4}-|^- ADR [0-9]{4} ' "$f" || true)"
+	# grep's status 1 is "no row", the answer wanted; anything above it is a
+	# read that failed, and a guard that cannot read the file cannot answer,
+	# so it stops instead of passing on an empty result.
+	status=0
+	rows="$(grep -nE '^\| `(adr/)?[0-9]{4}-|^- ADR [0-9]{4} ' "$f")" || status=$?
+	if [ "$status" -gt 1 ]; then
+		echo "✗ $f: could not be read (grep exit $status) — cannot tell whether it" >&2
+		echo "  holds ADR index rows (ADR 0251)." >&2
+		exit 1
+	fi
 	if [ -n "$rows" ]; then
 		echo "✗ $f: holds ADR index rows — the ADRs are listed once, in" >&2
 		echo "  docs/adr/INDEX.md (ADR 0251). Move the row there and delete it here:" >&2

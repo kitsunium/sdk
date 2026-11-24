@@ -7,9 +7,10 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 
 ## Contents
 
-The ADRs are listed once, in `adr/INDEX.md` — one row per ADR:
-file, decision, status — which `scripts/pre-commit/check-domain-docs.sh`
-checks against the files on disk (ADR 0251). No `CLAUDE.md` repeats that
+The ADRs are listed once, in `adr/INDEX.md` — one row per ADR: file,
+decision, status (ADR 0251). `scripts/pre-commit/check-domain-docs.sh` checks
+only that every ADR number on disk appears there exactly once, and no other;
+the Decision and Status columns are kept up to date by hand. No `CLAUDE.md` repeats that
 list: every agent session loads these files whole, and three copies of it
 cost ~400 KB per session. To find the ADR behind a rule, search the ADRs
 (a docs search tool where the session has one, else `grep -l` over
@@ -25,7 +26,7 @@ The rest of `docs/` is listed under §Subtree.
 - Standard sections, in this order: Context, Decision, Consequences / Semantics, Breaking changes, Alternatives considered and/or Why not …, Deferred, References. This is the same list as `docs/adr/CLAUDE.md` §Conventions — keep the two in step. Both forms are in use: ADRs 0093 to 0138, 0141 and 0142, and many older ones, have an `## Alternatives considered` section, some with `### Why not …` headings under it; ADRs 0139 and 0140, and many older ones, have a `## Why not …` section. This line named "Why not …" alone after that file listed both, and an automated review read the omission as a rule and flagged the heading.
 - Immutable after merge. Supersede via a new ADR that references the old one (e.g. ADR 0005 supersedes ADR 0002 §Registry; ADR 0006 amends ADR 0005 §Registry).
 - The cross-cutting principles are ADR 0154's numbered list (the charter); a principle changes only by an ADR amending 0154.
-- A path in an ADR is the path of its time (ADR 0155): a moved package takes its `CLAUDE.md`, the enforcement artefacts and the ADR index (`adr/INDEX.md`) with it, never an ADR's body; only an older ADR's `Status` and `Amended by` lines are re-pointed. Same rule as `docs/adr/CLAUDE.md` §Conventions.
+- A path in an ADR is the path of its time (ADR 0155): a moved package takes its `CLAUDE.md` and the enforcement artefacts with it, never an ADR's body, and the rows of `adr/INDEX.md` that name its path are updated where they stand (the index stays at `docs/adr/INDEX.md`); only an older ADR's `Status` and `Amended by` lines are re-pointed. Same rule as `docs/adr/CLAUDE.md` §Conventions.
 - An incident ADR — a defect found, reproduced and fixed — is folded, then superseded (ADR 0154 §2): its rule goes into the `CLAUDE.md` of the package or script it protects, under `## Rules from ADR NNNN`, its `Status` becomes `Superseded by 0154` naming that file, and its text stays as the record. Same rule as `docs/adr/CLAUDE.md` §Conventions.
 
 ## Registry coupling

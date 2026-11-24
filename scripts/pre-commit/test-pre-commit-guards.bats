@@ -205,6 +205,22 @@ mkdocroot() {
   [[ "$output" == *"docs/CLAUDE.md: holds ADR index rows"* ]]
 }
 
+# A former host the guard cannot read is a guard that cannot answer: before,
+# `grep … || true` read the failure as "no row" and passed. root reads any
+# file whatever its mode, so the case needs an unprivileged user.
+@test "domain-docs: a former host that cannot be read stops the guard" {
+  [ "$(id -u)" -ne 0 ] || skip "root reads a file whatever its mode"
+  mkdocroot '│                  security/authz' security/authz
+  echo '# docs/' >docs/CLAUDE.md
+  chmod 000 docs/CLAUDE.md
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+  chmod 644 docs/CLAUDE.md
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docs/CLAUDE.md: could not be read"* ]]
+}
+
 @test "domain-docs: an ADR missing from docs/adr/INDEX.md is named" {
   mkdocroot '│                  security/authz' security/authz
   echo '# ADR 0002' >docs/adr/0002-fixture.md
