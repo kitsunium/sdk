@@ -24,11 +24,15 @@
 #      under a short Purpose paragraph, one row each, so the check is a
 #      repeated row; the paragraph is still checked for a domain bolded twice,
 #      should prose ever grow back into it;
-#   3. the three ADR indexes (docs/adr/CLAUDE.md, docs/CLAUDE.md and this
-#      file's Reference list) name exactly the ADRs on disk, once each. A
-#      duplicated index row is what a re-run of a half-failed insertion script
-#      leaves behind, and it happened here: the queue row was written twice and
-#      neither copy was wrong, so nothing looked broken.
+#   3. the ADR index, docs/adr/INDEX.md, names exactly the ADRs on disk, once
+#      each. A duplicated index row is what a re-run of a half-failed
+#      insertion script leaves behind, and it happened here: the queue row was
+#      written twice and neither copy was wrong, so nothing looked broken.
+#      Until ADR 0251 there were three indexes — docs/adr/CLAUDE.md's Contents
+#      table, docs/CLAUDE.md's, and this file's Reference list — loaded whole
+#      by every agent session; they were folded into INDEX.md, and an index
+#      row in any of those three files is now refused, so a branch cut before
+#      that change cannot bring a list back through a union merge.
 #
 # It deliberately does NOT require every core package to have a row:
 # `writer` and `logger/level` are parts of a domain rather than domains, and
@@ -273,9 +277,20 @@ check_adr_index() {
 	fi
 }
 
-check_adr_index "docs/adr/CLAUDE.md" '^\| `[0-9]{4}' "the Contents table"
-check_adr_index "$doc"               '^- ADR [0-9]{4}' "the Reference list"
-# The THIRD index. It was not checked, and it had silently lost 23 of the 74
-# ADRs on disk — including every one written since 0061. An index nothing
-# verifies is a list of the ADRs somebody remembered.
-check_adr_index "docs/CLAUDE.md"     '^\| `adr/[0-9]{4}' "the Contents table"
+[ -f docs/adr/INDEX.md ] || { echo "✗ docs/adr/INDEX.md missing — it is the one ADR index (ADR 0251)." >&2; exit 1; }
+check_adr_index "docs/adr/INDEX.md" '^\| `[0-9]{4}' "the index table"
+
+# The three former indexes stay out of the CLAUDE.md files every session loads
+# (ADR 0251). One of docs/CLAUDE.md's was unchecked once and had silently lost
+# 23 of the 74 ADRs on disk: an index nothing verifies is a list of the ADRs
+# somebody remembered, and three copies of one are two to keep in step.
+for f in "$doc" docs/CLAUDE.md docs/adr/CLAUDE.md; do
+	[ -f "$f" ] || continue
+	rows="$(grep -nE '^\| `(adr/)?[0-9]{4}-|^- ADR [0-9]{4} ' "$f" || true)"
+	if [ -n "$rows" ]; then
+		echo "✗ $f: holds ADR index rows — the ADRs are listed once, in" >&2
+		echo "  docs/adr/INDEX.md (ADR 0251). Move the row there and delete it here:" >&2
+		printf '%s\n' "$rows" | cut -c1-120 | sed 's/^/    /' >&2
+		exit 1
+	fi
+done
