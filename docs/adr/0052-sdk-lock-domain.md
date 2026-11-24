@@ -4,6 +4,8 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a policy's zero value is a safe default or an explicit refusal — the rule this domain is shaped by), [ADR 0018](0018-sdk-cross-platform-portability.md) (build bar + runtime bar, uniform `UnsupportedPlatform`), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0025](0025-sdk-cache-kernel.md) (the `clock` primitive every TTL here is asserted through), [ADR 0045](0045-sdk-session-domain.md) (the `flock` + platform-refusal precedent this follows), [ADR 0041](0041-sdk-scheduler-domain.md) (the no-wall-clock-wait AST audit this reuses)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

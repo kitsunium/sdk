@@ -4,6 +4,8 @@
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0003](0003-sdk-codec-package.md) (universal codec contract), [ADR 0036](0036-sdk-codec-form-urlencoded.md) (the other web form encoding), [ADR 0031](0031-policy-zero-values-are-never-inert.md), [ADR 0035](0035-pp-range-ownership-enforcement.md) (the range this claims)
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

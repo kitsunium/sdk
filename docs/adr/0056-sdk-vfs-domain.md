@@ -6,6 +6,8 @@
 - **Amended by**: [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — the first `FullFS` outside `internal/service/data/vfs`: an S3 bucket (`third-party/aws/vfs/s3`), whose `PutObject` is the atomic publication, no rename faked
 - **Amended**: 2026-11-02 — a publication's mode, the link shortcuts, a directory flush, and step 5 shared between the publications into one directory; 2026-11-03 — a batch published under one directory flush, `AtomicBatchWriter`; 2026-11-12 — the temporary's name in one allocation, and an idle directory flushed in place; 2026-11-15 — a batch's file flushes in flight together, a window at a time (see the dated sections at the end)
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (refuse or clamp, never inert), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse where the mechanic does not exist), [ADR 0045](0045-sdk-session-domain.md) (the file store this domain generalises), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (a zero value must not be the dangerous one)
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

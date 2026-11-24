@@ -4,6 +4,8 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0050](0050-sdk-lifecycle-domain.md) (`lifecycle`, whose drain this reports), [ADR 0043](0043-drain-is-a-signal-not-a-cancellation.md) (draining is announced), [ADR 0031](0031-policy-zero-values-are-never-inert.md), [ADR 0018](0018-sdk-cross-platform-portability.md)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

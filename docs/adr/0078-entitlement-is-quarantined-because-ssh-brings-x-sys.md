@@ -4,6 +4,8 @@
 - **Date**: 2026-09-12
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0022](0022-sdk-codec-hcl.md) (the first quarantine), [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (its mechanism, corrected — and the method used here), [ADR 0012](0012-logger-writer-registry.md) (the vendor-writer quarantine policy), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a refusal is not a degradation), [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (the versement that precedes this one)
+- **Area**: third-party
+- **Need**: decision
 
 ## Context
 

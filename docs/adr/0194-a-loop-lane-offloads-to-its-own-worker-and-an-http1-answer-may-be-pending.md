@@ -12,6 +12,8 @@
   §D4 (`LoopIO.Post`, `LoopConnRef` and its generation),
   [ADR 0191](0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md)
   (lanes, the chain walked by `Next`)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

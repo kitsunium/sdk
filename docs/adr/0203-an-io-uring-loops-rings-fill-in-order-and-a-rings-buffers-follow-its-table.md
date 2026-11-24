@@ -14,6 +14,8 @@
   §D5 (the ring formula), [ADR 0200](0200-an-io-uring-close-is-a-shutdown-alone-and-the-accept-watchdog-judges-a-listener.md)
   (the watchdog judges a listener), [ADR 0202](0202-a-loop-batch-pays-its-fixed-cost-once-and-a-grouped-wait-starts-on-the-request-rate.md)
   (a batch's fixed cost)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

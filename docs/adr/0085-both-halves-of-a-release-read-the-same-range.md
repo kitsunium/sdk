@@ -5,6 +5,8 @@
 **Deciders**: kitsunium maintainers
 **Amends**: ADR 0007 §2 (the `Release-bump` trailer is no longer read from the merge commit *only*)
 **Related**: ADR 0009 (detached release commit — why the baseline is the tag's first parent)
+- **Area**: release
+- **Need**: constraint
 
 ## Context
 

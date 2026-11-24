@@ -5,6 +5,8 @@
 - **Amended**: 2026-11-02 — four of the deferred items resolved (see the dated section at the end): a retrying root transactor over a `Transient` classifier, migration checksums for statement-built steps, a statement budget, read-only transactions routed to a read replica; and a statement observer under the pool
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0012](0012-logger-writer-registry.md) (vendor connectors live in `third-party/`), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values clamp or refuse, never sit inert), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows a sibling, never a method), [ADR 0050](0050-sdk-lifecycle-domain.md) (cleanup runs on a detached context), [ADR 0016](0016-sdk-process-supervision-domain.md) / [ADR 0026](0026-sdk-resilience-domain.md) / [ADR 0041](0041-sdk-scheduler-domain.md) (no-registry precedents), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse rather than approximate)
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md) §D2 (`BUILTIN\Users` is now in the table), §D3 (one mask becomes three), §D3c (two ACE shapes become eight) and §Consequences (the claim that Windows has no `0777|sticky` equivalent). Its §Deferred items 1 and 3 are CLOSED here; items 2 and 4 are re-argued and made PERMANENT.
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) §D6 (the Unix table this one now matches), [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) §D3 (the chain rule, which asks the other question), [ADR 0018](0018-sdk-cross-platform-portability.md) (the `x/sys` ban and the lazy-DLL discipline that answers it)
+- **Area**: data
+- **Need**: incident
 
 ## Context
 

@@ -7,6 +7,8 @@
 **Supersedes**: none
 **Superseded by**: ADR 0005 (§Registry — dotted-quad codes replace the flat 1xxx-4xxx scheme)
 **Related**: ADR 0001 (multi-module layout), ADR 0005 (dotted-quad error codes), plan `sdk-errs-package-migration`
+- **Area**: errs
+- **Need**: decision
 
 ## Context
 

@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0024](0024-sdk-id-domain.md) (the `id` domain and its `Scheme` registry), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0035](0035-pp-range-ownership-enforcement.md) (the `0.3.39` block these use)
 - **Extends**: ADR 0024 §Registry — adds three schemes and one documented exception to it
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

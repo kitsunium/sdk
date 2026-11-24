@@ -6,6 +6,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0016](0016-sdk-process-supervision-domain.md) (five codes, `0.2.6.31`–`0.2.6.35`, `AttachValue`, `DescriptorsValue`, `Spec.PIDEnv`), [ADR 0018](0018-sdk-cross-platform-portability.md) (the platform rows of adoption, the notify transport and `PIDEnv`)
 - **Related**: [ADR 0214](0214-a-service-unit-is-one-actor-over-a-pure-reducer.md) (the service engine these feed: S0c, S0d, S0f, S0h), [ADR 0217](0217-a-spawn-gives-the-child-only-what-it-names-and-waits-a-bounded-time.md) (`ProcessHandle`, `exec.Open`, the sealed descriptor table), [ADR 0093](0093-a-sweep-takes-the-zombie-never-the-status.md) (who collects a status), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md)
+- **Area**: proc
+- **Need**: decision
 
 ## Context
 

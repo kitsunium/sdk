@@ -4,6 +4,8 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0030](0030-stdout-is-a-protocol-channel.md) (no SDK default writes to `os.Stdout` — the rule that decides where the help goes), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal — the rule the leaf/group trichotomy comes from), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings; func ports satisfy it structurally), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published concrete shape may change while v0, out loud), [ADR 0056](0056-sdk-vfs-domain.md) (the "take the stdlib contract unchanged" precedent this copies), [ADR 0028](0028-sdk-config-domain.md) + [ADR 0061](0061-sdk-config-schema.md) (the configuration domain this feeds and does not duplicate), [ADR 0050](0050-sdk-lifecycle-domain.md) (ordered start/stop and opt-in signals — what this domain refuses to re-own), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (`WithExitCode` / `ExitCodeOf`, the exit-status convention this uses rather than replaces)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

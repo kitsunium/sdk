@@ -6,6 +6,8 @@
 - **Amended by**: [ADR 0211](0211-the-data-ports-vendor-adapters-valkey-jetstream-s3-and-sqs.md) — the distributed backend this ADR defers to `third-party/`: a Valkey store implementing the four ports (`third-party/db/redis/cache`), the far tier of a chain, its cross-replica fill lease unfenced and said so; [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) §8 — `singleflight`'s shared context, the same one, keeps the root `context.WithoutCancel(leaderCtx)` built in the call record, one allocation fewer (#813)
 - **Amends**: [ADR 0025](0025-sdk-cache-kernel.md) — which placed `Cache[K,V]` in the kernel and left it there. That placement stands; this ADR adds a layer above it rather than moving it.
 - **Related**: [ADR 0010](0010-kernel-recycler-primitive.md) (kernel-primitive precedent), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published shape may change while v0), [ADR 0045](0045-sdk-session-domain.md) / [ADR 0046](0046-sdk-validation-domain.md) (the two most recent core siblings, and the no-registry precedent)
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

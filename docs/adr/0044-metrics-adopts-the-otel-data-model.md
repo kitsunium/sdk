@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0027](0027-sdk-metrics-domain.md) (the metrics domain this reshapes), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (sibling interfaces), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published shape may change while v0), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0041](0041-sdk-scheduler-domain.md) (func ports), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (exporter destinations)
 - **Amends**: ADR 0027 §Decision 1 (the port's shape) and §Deferred
+- **Area**: observe
+- **Need**: decision
 
 ## Context
 

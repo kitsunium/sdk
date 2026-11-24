@@ -1,5 +1,8 @@
 # ADR 0010 — Kernel object-recycling primitive
 
+- Area: kernel
+- Need: decision
+
 ## Status
 
 Accepted

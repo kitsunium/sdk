@@ -4,6 +4,8 @@
 - **Date**: 2026-09-14
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) (whose §Deferred this closes), [ADR 0007](0007-sdk-release-and-versioning.md) (bump semantics and the unsmugglable trailer), [ADR 0009](0009-pkg-public-module-resolvability.md) (the detached release commit, the `major` refusal), [ADR 0004](0004-sdk-bazel-build-system.md) (`bazel-ci.yml` is the gating lane)
+- **Area**: build
+- **Need**: convention
 
 ## Context
 

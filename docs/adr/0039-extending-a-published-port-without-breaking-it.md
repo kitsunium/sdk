@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0025](0025-sdk-cache-kernel.md) (`kernel/cache`, whose `Config` publishes `Clock`), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0009](0009-pkg-public-module-resolvability.md) / [ADR 0017](0017-pkg-bare-module-path.md) (what "published" means here)
 - **Reverses**: the `Do NOT` in `internal/kernel/clock/CLAUDE.md` that said "Add `Sleep`, `After`, `NewTimer` here — no"
+- **Area**: design
+- **Need**: constraint
 
 ## Context
 

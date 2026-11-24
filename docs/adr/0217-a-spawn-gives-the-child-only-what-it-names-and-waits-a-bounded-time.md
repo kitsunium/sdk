@@ -6,6 +6,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0016](0016-sdk-process-supervision-domain.md) (three codes, `0.2.6.24`–`0.2.6.26`, and three sibling ports of `Process`), [ADR 0018](0018-sdk-cross-platform-portability.md) (the platform rows of the new `proc/exec` primitives)
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (sibling ports), [ADR 0093](0093-a-sweep-takes-the-zombie-never-the-status.md) (who collects a status), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (measured contracts)
+- **Area**: proc
+- **Need**: decision
 
 ## Context
 

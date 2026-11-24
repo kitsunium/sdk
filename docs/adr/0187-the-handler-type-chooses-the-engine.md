@@ -31,6 +31,8 @@
   [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md)
   (design first), [ADR 0174](0174-a-tls-identity-is-checked-on-every-handshake-and-reloaded-in-place.md)
   (`PreHandshake`)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

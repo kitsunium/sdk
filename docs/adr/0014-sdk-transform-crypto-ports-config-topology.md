@@ -10,6 +10,8 @@
   - ADR 0012 — adds `logger.FromConfig` + the `ConfigDecoder` writer-extension hook, and widens the logger-middleware purpose to admit a **transform-the-bytes** category (encrypt-at-rest, fan-out/spill) beside route / sample / fan-out / failover;
   - ADR 0013 — admits three new intra-domain crypto ports (`MAC`, `Agreement`, `StreamSealer`), the `KeyEnvelope` / `KeyTree` compositions, the streaming-AEAD wire freeze, and the `pkg/v1/hash` non-oracle public-digest verification carve-out;
   - the ADR 0005 §Registry allocation table — new blocks `0.1.5.*` (kernel/batcher), `0.2.5.*` (core/transform), `0.2.4.15`–`0.2.4.19` (core/crypto extension), service `0x1c`–`0x1f`, and `1.1.0.4` (pkg/v1/logger).
+- **Area**: crypto
+- **Need**: decision
 
 ## Context
 

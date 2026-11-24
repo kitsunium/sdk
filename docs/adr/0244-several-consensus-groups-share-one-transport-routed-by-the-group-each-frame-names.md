@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) D11 ("a v2 that multiplexes groups on one `Transport` changes no wire format": true of every frame, not of the snapshot offer, see D2) and its *Deferred* item "Multi-group (v2)", which this record opens
 - **Related**: [ADR 0220](0220-a-consensus-frame-of-version-2-is-routed-by-a-compact-header-chosen-per-connection.md) (proposed: the compact v2 header; its gate D7.3 needs this routing, and D5's coalesced heartbeat is a kind on that header), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the frozen `Transport` grows by siblings), [ADR 0174](0174-a-tls-identity-is-checked-on-every-handshake-and-reloaded-in-place.md) (the admission a key is held to), kitsunium/sdk#1334 (a guard on `Bind`, kept out), #812 (the extracted log primitive D7 hosts), #820, #552
+- **Area**: consensus
+- **Need**: decision
 
 ## Context
 

@@ -4,6 +4,8 @@
 - **Date**: 2026-11-03
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0067](0067-metrics-instrument-description.md) (the description, and the deferral this ADR resolves), [ADR 0044](0044-metrics-adopts-the-otel-data-model.md) (the data model), [ADR 0048](0048-sdk-metrics-otlp-json.md) (the OTLP/JSON wire), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a sibling port), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (refuse rather than accept an inert call)
+- **Area**: observe
+- **Need**: decision
 
 ## Context
 

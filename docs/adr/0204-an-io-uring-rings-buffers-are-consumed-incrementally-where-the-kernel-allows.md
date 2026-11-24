@@ -12,6 +12,8 @@
   (incremental consumption, deferred there, is built)
 - **Related**: [ADR 0203](0203-an-io-uring-loops-rings-fill-in-order-and-a-rings-buffers-follow-its-table.md)
   §D2 (a ring's buffers follow its table; the group slack)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

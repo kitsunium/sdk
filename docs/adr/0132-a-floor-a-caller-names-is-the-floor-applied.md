@@ -4,6 +4,8 @@
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0012](0012-logger-writer-registry.md) (the writer configuration and its `MinLevel`), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the frozen `Sink` port)
+- **Area**: app
+- **Need**: constraint
 
 ## Context
 

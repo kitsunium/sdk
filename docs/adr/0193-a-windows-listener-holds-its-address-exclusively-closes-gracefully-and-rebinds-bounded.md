@@ -9,6 +9,8 @@
 - **Related**: [ADR 0029](0029-sdk-net-domain.md) (the server engine),
   [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the backoff), [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md)
   (State says what the server runs with)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

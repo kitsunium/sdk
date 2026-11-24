@@ -13,6 +13,8 @@
   (the SQL engine, its `rev` column),
   [ADR 0143](0143-a-document-keeps-its-versions-in-its-own-write.md)
   (a replacement makes a version), kitsunium/sdk#1055, #958, #996
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

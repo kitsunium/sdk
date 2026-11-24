@@ -19,6 +19,8 @@
   values), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md)
   (siblings), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md)
   (the injected clock), kitsunium/sdk#482
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

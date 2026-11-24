@@ -4,6 +4,8 @@
 - **Date**: 2026-09-26
 - **Deciders**: kitsunium maintainers
 - **Related**: [ADR 0008](0008-readme-from-code-generation.md) (READMEs are generated from the doc comments this checks), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (the facade aliases its types, which is the cause), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) (a gate is a name CI says out loud)
+- **Area**: docs
+- **Need**: constraint
 
 ## Context
 

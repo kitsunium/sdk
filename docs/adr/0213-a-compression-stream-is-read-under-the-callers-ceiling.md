@@ -14,6 +14,8 @@
   (a published port grows by a sibling interface), [ADR 0031](0031-policy-zero-values-are-never-inert.md)
   (a ceiling is refused or honoured, never widened), ADR 0066 D4 and D5 (the
   vendor schemes' ceiling and bomb code), [kitsunium/sdk#892](https://github.com/kitsunium/sdk/issues/892)
+- **Area**: data
+- **Need**: constraint
 
 ## Context
 

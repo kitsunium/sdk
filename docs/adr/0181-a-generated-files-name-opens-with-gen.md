@@ -14,6 +14,8 @@
   - ADR 0168 (`decl_gen.go`, `stubs_gen.go`);
   - ADR 0180 §5, which kept the product's file names (`*_gen.go`) as they
     were.
+- **Area**: design
+- **Need**: convention
 
 ## Context
 

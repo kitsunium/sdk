@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0024 (Phase-B wave), ADR 0016 (proc — the no-registry core-sibling precedent), ADR 0005/0006 (error codes), ADR 0011 (clock)
 - **Amends**: covered by the ADR 0024 Phase-B purpose-statement widening
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

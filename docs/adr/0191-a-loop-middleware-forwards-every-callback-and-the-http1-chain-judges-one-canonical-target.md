@@ -19,6 +19,8 @@
 - **Related**: [ADR 0029](0029-sdk-net-domain.md) D4 (`Middleware[H]` and
   `Chain`), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md)
   (the allocation budgets), [ADR 0031](0031-policy-zero-values-are-never-inert.md)
+- **Area**: net
+- **Need**: constraint
 
 ## Context
 

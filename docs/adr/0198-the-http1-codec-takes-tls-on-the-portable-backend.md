@@ -11,6 +11,8 @@
 - **Deciders**: SDK maintainers, owner
 - **Implements**: ADR 0187 §D5; amends [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   §D2 and §D3, as ADR 0187 §D5 announced
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

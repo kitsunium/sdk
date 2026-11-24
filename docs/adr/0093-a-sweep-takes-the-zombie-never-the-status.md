@@ -4,6 +4,8 @@
 - **Date**: 2026-09-24
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0016](0016-sdk-process-supervision-domain.md) (the `proc` domain, whose `Process` and `Reaper` ports this reconciles), [ADR 0018](0018-sdk-cross-platform-portability.md) (why the mechanism must be stdlib `syscall` on every Unix)
+- **Area**: proc
+- **Need**: incident
 
 ## Context
 

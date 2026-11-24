@@ -5,6 +5,8 @@
 **Deciders**: kitsunium maintainers
 **Applies**: ADR 0039 (a published port is extended by a sibling, never by widening) and ADR 0040 §4 (the v0 licence does not cover interfaces)
 **Related**: ADR 0079 (the entitlement split that made `Identity` a port)
+- **Area**: framework
+- **Need**: constraint
 
 ## Context
 

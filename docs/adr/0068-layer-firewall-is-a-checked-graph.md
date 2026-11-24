@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0004](0004-sdk-bazel-build-system.md) (Bazel, and the firewall it put on visibility), [ADR 0001](0001-sdk-go-multimodule-layout.md) (the four layers)
 - **Amends**: [ADR 0004](0004-sdk-bazel-build-system.md) §Layer firewall — the *mechanism*, not the direction
+- **Area**: build
+- **Need**: constraint
 
 ## Context
 

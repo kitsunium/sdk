@@ -6,6 +6,8 @@
 - **Amends**: nothing published; a new kernel package, `internal/kernel/concur/commit`, code block `0.1.4.*`.
 - **Amended**: 2026-11-12 — an idle `Do` whose context can never end flushes on its caller's goroutine (see the dated section at the end)
 - **Related**: [ADR 0049](0049-cache-becomes-a-domain.md) (`singleflight`, the kernel primitive this one sits beside), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (no inert zero), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (adopters grow by siblings), [ADR 0054](0054-sdk-queue-domain.md) and [ADR 0056](0056-sdk-vfs-domain.md) (the durable writes that would adopt it), [issue 803](https://github.com/kitsunium/sdk/issues/803)
+- **Area**: kernel
+- **Need**: decision
 
 ## Context
 

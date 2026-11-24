@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0062](0062-logger-trace-correlation.md) — what happens when a caller's attribute spells one of the two keys it introduced
 - **Related**: [ADR 0051](0051-sdk-trace-domain.md) (the span context this correlates to), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the SDK decides rather than leaving the dangerous outcome to chance)
+- **Area**: observe
+- **Need**: constraint
 
 ## Context
 

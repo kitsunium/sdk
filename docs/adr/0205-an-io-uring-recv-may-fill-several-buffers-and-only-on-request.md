@@ -11,6 +11,8 @@
 - **Related**: [ADR 0203](0203-an-io-uring-loops-rings-fill-in-order-and-a-rings-buffers-follow-its-table.md)
   §D2 (groups and slack), [ADR 0204](0204-an-io-uring-rings-buffers-are-consumed-incrementally-where-the-kernel-allows.md)
   (incremental consumption, the default)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

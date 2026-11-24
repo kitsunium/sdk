@@ -13,6 +13,8 @@
   §D7 (pointer-free control, mapped payloads), [ADR 0189](0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md)
   (`uring-pbuf-inc` stays class B), ADR 0200 (the same benchmark's close and
   watchdog)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

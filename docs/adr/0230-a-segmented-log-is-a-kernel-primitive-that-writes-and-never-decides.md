@@ -6,6 +6,8 @@
 - **Amended**: 2026-11-12 for the stream's compaction (#824), below.
 - **Amends**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (the kernel holds what the domains were rewriting — here before a second domain rewrote it) and the rule of `internal/kernel/fs/CLAUDE.md` (a member of the family that writes). One new kernel package, `internal/kernel/fs/seglog` (`0.1.8.*`).
 - **Related**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) D4, D16 and R8/R9 (the consensus file log this is extracted from), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (where a code is declared), issues [#820](https://github.com/kitsunium/sdk/issues/820) (this primitive), [#890](https://github.com/kitsunium/sdk/issues/890) (the `data/stream` program), [#821](https://github.com/kitsunium/sdk/issues/821) (its file engine, the first caller)
+- **Area**: kernel
+- **Need**: decision
 
 ## Context
 

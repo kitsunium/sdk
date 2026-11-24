@@ -4,6 +4,8 @@
 - **Date**: 2026-09-13
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0076](0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md) (the `vcs` domain, whose §Deferred this closes), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is never an inert policy), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence, and why it is not used here)
+- **Area**: framework
+- **Need**: incident
 
 ## Context
 

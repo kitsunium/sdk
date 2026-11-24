@@ -4,6 +4,8 @@
 - **Date**: 2026-11-12
 - **Deciders**: SDK maintainers (kitsunium/sdk#918, lot L1)
 - **Related**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) (D6 the outcome of a proposal, D7 the snapshot metadata, D18 the protocol versions; its Deferred "Client sessions"), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a sibling port, never a wider one), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) (the design first)
+- **Area**: consensus
+- **Need**: decision
 
 ## Context
 

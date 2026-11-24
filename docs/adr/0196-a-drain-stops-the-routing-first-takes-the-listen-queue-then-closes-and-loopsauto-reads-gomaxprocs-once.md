@@ -17,6 +17,8 @@
 - **Related**: [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md)
   (readiness built from `State`), [ADR 0190](0190-a-merge-gate-judges-the-ratio-of-two-engines-measured-side-by-side.md)
   (the paired measure P6's gate reads)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

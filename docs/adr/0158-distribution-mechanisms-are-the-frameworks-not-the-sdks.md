@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0076](0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md) (the `vcs` domain), [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (`selfupdate`), [ADR 0079](0079-the-entitlement-split-x-sys-was-never-in-the-mechanism.md) (`entitlement`'s core, service and facade, and its ssh identity), [ADR 0080](0080-the-gate-decides-and-performs-nothing.md) (`gate`), [ADR 0100](0100-a-program-reads-what-it-was-built-from-and-asks-git-only-about-a-working-tree.md) (`git.Head` — `process.Build` and `process.Self` stay), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (what the framework holds, and its connectors), [ADR 0150](0150-a-release-names-its-tag-keys-rotate-and-a-replacement-answers-before-it-stands.md) (`selfupdate`'s options)
 - **Related**: [ADR 0078](0078-entitlement-is-quarantined-because-ssh-brings-x-sys.md), [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md), [ADR 0091](0091-a-single-trust-anchor-is-a-key-with-no-way-out.md), [ADR 0092](0092-a-possession-proof-that-cannot-name-the-key-it-is-about.md), [ADR 0144](0144-illumos-and-solaris-supervise-on-their-own-kernels-word.md) (the domains as they were decided), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (no distribution family), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) / [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (`semver`), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (codes keep their values)
+- **Area**: framework
+- **Need**: decision
 
 ## Context
 

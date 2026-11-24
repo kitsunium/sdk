@@ -13,6 +13,8 @@
   [ADR 0030](0030-stdout-is-a-protocol-channel.md),
   [ADR 0031](0031-policy-zero-values-are-never-inert.md),
   [ADR 0040](0040-changing-a-published-shape-while-v0.md)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

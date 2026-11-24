@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0047](0047-sdk-net-websocket.md) §D7 — the default origin rule, not the rest of the handshake
 - **Related**: [ADR 0029](0029-sdk-net-domain.md) (the net domain), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (refuse where any SDK-chosen answer would be arbitrary)
+- **Area**: net
+- **Need**: constraint
 
 ## Context
 

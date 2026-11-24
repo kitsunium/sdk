@@ -5,6 +5,8 @@
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0018](0018-sdk-cross-platform-portability.md) (both bars cover two more GOOS: `illumos` and `solaris`)
 - **Related**: [ADR 0016](0016-sdk-process-supervision-domain.md) (the proc domain; `golang.org/x/sys` is banned), [ADR 0093](0093-a-sweep-takes-the-zombie-never-the-status.md) (a sweep hands a claimed child's status over), [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (a test compiles where its package does), [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md) (the lanes loop over the module census)
+- **Area**: platform
+- **Need**: decision
 
 ## Context
 

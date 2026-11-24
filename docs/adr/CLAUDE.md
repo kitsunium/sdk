@@ -225,7 +225,7 @@ Architecture Decision Records. Each ADR captures one cross-cutting decision (lay
   window is the one wrong answer**: the branch that already holds the lower
   number would then collide with it, and a number is cited from ADR headers,
   package docs and source comments long before it merges.
-- Header block: **Status**, **Date**, **Deciders**, plus **Supersedes** / **Superseded by** / **Amends** / **Amended by** / **Closes** / **Related** where they apply.
+- Header block: **Status**, **Date**, **Deciders**, plus **Supersedes** / **Superseded by** / **Amends** / **Amended by** / **Closes** / **Related** where they apply, and since 2026-11 an **Area** (one word of `docs/adr/areas.txt`, the ADR's main family or cross-cutting area) and a **Need** (`decision` a choice between options, `constraint` a rule to follow, `incident` a defect and the rule it produced, `convention` process or tooling, `record` history with no active effect).
 - Standard sections, in this order: **Context**, **Decision**, **Consequences / Semantics**, **Breaking changes**, **Alternatives considered** and/or **Why not <option>**, **Deferred**, **References**. This is the same list as `docs/CLAUDE.md` §ADR conventions — keep the two in step; when they disagree, the two are both wrong until they agree.
 - A standard section with nothing to say says so rather than being dropped — `Breaking changes` → "None. `<domain>` is a new domain in this change set" is the house form (ADR 0026/0027/0028). A missing heading reads as an oversight; an explicit "None" reads as a decision.
 - **The principles are ADR 0154's numbered list.** A domain ADR that departs

@@ -6,6 +6,8 @@
 **Amended**: 2026-11-04 — §Amendment (kitsunium/sdk#941): the verdict and roadmap tables restated as the backends that shipped, the capability matrix held to them by a test, the OOM bias refused off Linux before the spawn
 **Related**: ADR 0016 (process-supervision domain — the source of platform-specific calls),
 ADR 0004 (Bazel visibility / Linux CI lane), ADR 0005 (dotted-quad error codes — the `UnsupportedPlatform` sentinel)
+- **Area**: platform
+- **Need**: decision
 
 ## Context
 

@@ -4,6 +4,8 @@
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0018](0018-sdk-cross-platform-portability.md) (the two portability bars this tightens), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) (a gate is what CI runs and says)
+- **Area**: platform
+- **Need**: convention
 
 ## Context
 
