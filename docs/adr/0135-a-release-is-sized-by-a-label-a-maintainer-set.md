@@ -5,6 +5,8 @@
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0007](0007-sdk-release-and-versioning.md) §2 (row 4 and the paragraph under the table — the channel that sizes a minor), [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) (what is read over the range: a label instead of a trailer; the range itself is unchanged), [ADR 0089](0089-a-file-that-cannot-cut-a-release-cannot-size-one.md) (§Deferred, first item — closed without the repository setting it proposed)
 - **Related**: [ADR 0009](0009-pkg-public-module-resolvability.md) (the detached release commit), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) (the suites run in CI)
+- **Area**: release
+- **Need**: decision
 
 ## Context
 

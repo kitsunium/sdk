@@ -5,6 +5,8 @@
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0004](0004-sdk-bazel-build-system.md) (the four govulncheck jobs it retired with the old pipeline come back, outside Bazel), [ADR 0008](0008-readme-from-code-generation.md) (its step 6 — govulncheck on the gomarkdoc binary — no longer runs, and never covered SDK code)
 - **Related**: [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md) (the modules scanned are the census), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) (a gate is a name CI says out loud)
+- **Area**: build
+- **Need**: convention
 
 ## Context
 

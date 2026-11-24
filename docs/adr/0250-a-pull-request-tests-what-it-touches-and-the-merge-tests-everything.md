@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers; the owner's priority of 2026-11-14 ("une PR qui ne touche qu'un paquet ne fait plus tourner toute la CI")
 - **Amends**: rule 12 of the root `CLAUDE.md` ("every test runs on every platform CI can execute, at full size": on a pull request, every test the change can reach; everything on the merge queue, `main`, the nightly run and a manual run); the rules of [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md) as `scripts/CLAUDE.md` keeps them (a lane that skips names what it skips: here, on every run, in the job summary)
 - **Related**: [ADR 0004](0004-sdk-bazel-build-system.md) (Bazel, the one Linux gate), [ADR 0018](0018-sdk-cross-platform-portability.md) (the build and runtime bars), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) (a suite nothing runs is not a suite), [ADR 0094](0094-a-test-compiles-where-its-package-does.md), [ADR 0095](0095-windows-runs-every-test-and-gates.md), [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md), [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md)
+- **Area**: build
+- **Need**: decision
 
 ## Context
 

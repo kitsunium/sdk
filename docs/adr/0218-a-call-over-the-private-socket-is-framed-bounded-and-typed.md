@@ -4,6 +4,8 @@
 - **Date**: 2026-11-07
 - **Deciders**: SDK maintainers (kitsunium/sdk#930, lot L4)
 - **Related**: [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the socket a call rides), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (the core at the engine's path, the codes there), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the two frozen ports), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (no bound has a default), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (what a call costs, measured), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) (the design first)
+- **Area**: proc
+- **Need**: decision
 
 ## Context
 

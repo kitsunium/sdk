@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0111](0111-a-mail-spool-retries-on-a-backoff-and-resends-only-after-a-crash.md) — D2, where a mail's identifier comes from and the rule it keeps; D4, what a repeated identifier meets; D5, how the observer's order is kept
 - **Related**: [ADR 0064](0064-sdk-mail-domain.md) (the mail domain and its dot-atom grammar), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code), [kitsunium/sdk#254](https://github.com/kitsunium/sdk/issues/254) (the tracking issue), kitsunium/platform ADR 0004 (the need)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

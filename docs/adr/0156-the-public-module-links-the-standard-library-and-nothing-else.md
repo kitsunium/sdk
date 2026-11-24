@@ -6,6 +6,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0003](0003-sdk-codec-package.md) §M2–§M4 (YAML, TOML, CBOR and MessagePack over libraries, and the "30-dependency soft ceiling"), [ADR 0021](0021-sdk-codec-bson.md) (BSON over `mongo-driver/bson`, and the library-backed precedent it cites), [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (`golang.org/x/mod/semver`), [ADR 0100](0100-a-program-reads-what-it-was-built-from-and-asks-git-only-about-a-working-tree.md) (`golang.org/x/mod/module`)
 - **Related**: [ADR 0012](0012-logger-writer-registry.md) (why `pkg` must stay dependency-light), [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (measure what a dependency introduces), [ADR 0063](0063-sdk-i18n-domain.md) (a named subset, everything else refused by name), [ADR 0134](0134-a-program-links-the-codecs-it-imports.md) (one facade per format), [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (principles 5, 16, 24), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) (the module `yaml-full` lives in), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (`kernel/semver`)
+- **Area**: build
+- **Need**: constraint
 
 ## Context
 

@@ -25,6 +25,8 @@
 - **Amended**: 2026-11-03 for kitsunium/sdk#1051 — a batch may rest gzipped
   (`Config.Compress`, `SendEncoded`): see the second *Amendment* section; and
   for kitsunium/sdk#867 — the logs signal (`NewLogExporter`): the third.
+- **Area**: observe
+- **Need**: decision
 
 ## Context
 

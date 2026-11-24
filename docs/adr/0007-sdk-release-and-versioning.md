@@ -7,6 +7,8 @@
 **Supersedes**: —
 **Amends**: ADR 0001 §Negative (release ritual partially addressed)
 **Related**: ADR 0004 (Bazel as build SOT), ADR 0005 (dotted-quad error codes)
+- **Area**: release
+- **Need**: decision
 
 ## Context
 

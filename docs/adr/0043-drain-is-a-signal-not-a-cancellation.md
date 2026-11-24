@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0029](0029-sdk-net-domain.md) §shutdown — the documented outcome of shutting down with a long-lived request in flight
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md), [ADR 0018](0018-sdk-cross-platform-portability.md)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

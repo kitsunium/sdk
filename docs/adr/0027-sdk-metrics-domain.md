@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0024 (Phase-B wave), ADR 0012 (writer registry — the exporter-registry model), ADR 0011 (snapshot), ADR 0005/0006 (codes)
 - **Amends**: covered by the ADR 0024 Phase-B purpose-statement widening
+- **Area**: observe
+- **Need**: decision
 
 ## Context
 

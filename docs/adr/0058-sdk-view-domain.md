@@ -4,6 +4,8 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal — both halves are used here), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0033](0033-consumer-rule-enforcement.md) (`tools/sdkguard`, where the consumer-side ban on the raw conversion belongs), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (no SDK default writes to a stream), [ADR 0043](0043-drain-is-a-signal-not-a-cancellation.md) (a response that must be allowed to finish), [ADR 0046](0046-sdk-validation-domain.md) (a message names the rule and never the value), [ADR 0010](0010-kernel-recycler-primitive.md) (`recycler.CappedPool`), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (Public/Private/Fields)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

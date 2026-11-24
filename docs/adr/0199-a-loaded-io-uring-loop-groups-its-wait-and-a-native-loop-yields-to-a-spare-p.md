@@ -13,6 +13,8 @@
   is unchanged: `uring-min-timeout` stays class B, D3 says why
 - **Related**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   §D5 (`LoopValue`)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

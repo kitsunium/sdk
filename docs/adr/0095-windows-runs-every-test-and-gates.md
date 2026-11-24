@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0094](0094-a-test-compiles-where-its-package-does.md) — Decision 5's Windows inventory and §Deferred "Windows at runtime" are superseded: the Windows lane gates; [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md) §1 — the canonical root is cleaned into the OS's form, and its single `EvalSymlinks` becomes two
 - **Related**: [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (the inventory this closes — its §Deferred "Windows at runtime", and Decision 5's Windows half), [ADR 0018](0018-sdk-cross-platform-portability.md) (the `UnsupportedPlatform` floor), [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md) / [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) (the DACL reader reused — and where the queue parts from ADR 0084 §D5), [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (the Windows replacement step), [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md) (the root spelling)
+- **Area**: platform
+- **Need**: record
 
 ## Context
 

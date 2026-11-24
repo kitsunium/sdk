@@ -1,0 +1,20 @@
+# Area vocabulary for the ADR header (`- Area:`); ADR 0155 families first, then cross-cutting areas.
+# One Area per ADR (its main one). kernel covers clock, concur and collections.
+errs
+kernel
+crypto
+security
+net
+proc
+observe
+data
+app
+consensus
+framework
+third-party
+design
+build
+release
+platform
+docs
+process

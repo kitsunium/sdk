@@ -4,6 +4,8 @@
 - **Date**: 2026-09-14
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings, never by widening — the rule this publication makes binding on five more interfaces), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published concrete shape while v0), [ADR 0025](0025-sdk-cache-kernel.md) (the precedent: a kernel primitive published through `pkg/v1` aliases), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (what a public alias may point at), [ADR 0017](0017-pkg-bare-module-path.md) (the public module), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the non-positive-period refusal this port carries)
+- **Area**: design
+- **Need**: constraint
 
 ## Context
 

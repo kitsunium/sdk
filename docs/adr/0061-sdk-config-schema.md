@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0028](0028-sdk-config-domain.md) (the `config` domain this extends — no new domain, no new `PP` range), [ADR 0046](0046-sdk-validation-domain.md) (the constraint engine this FEEDS from, and does not duplicate), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal — used three times here), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port is not widened — `Validator` is neither widened nor bypassed), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence used, and named), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (codes and range ownership)
 - **Amends**: nothing. `config` is ADR 0028's 10th core sibling and stays exactly where it was; this ADR adds a second entry point beside `Load`, and three serials to a block `core/config` already owns
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

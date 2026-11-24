@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0013 (crypto domain), ADR 0016 / ADR 0026 / ADR 0029 (no-registry core siblings), ADR 0030 (the zero value must not be the dangerous one), ADR 0031 (clamp or refuse, never inert), ADR 0035 (PP-range ownership), ADR 0039 (a published port is extended by a sibling), ADR 0022 / ADR 0034 (the `third-party` quarantine rule)
 - **Amends**: `internal/core/CLAUDE.md` §Purpose — a 13th core sibling
+- **Area**: security
+- **Need**: decision
 
 ## Context
 

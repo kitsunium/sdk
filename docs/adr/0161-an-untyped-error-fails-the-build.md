@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0002](0002-sdk-errors-package.md) (the ban it rests on gains its enforcement), [ADR 0033](0033-consumer-rule-enforcement.md) (SDK002 stays a convention for consumers; the SDK's own tree gets an invariant)
 - **Related**: [ADR 0005](0005-sdk-error-codes-dotted-quad.md), [ADR 0019](0019-pkg-errs-public-construction.md) (the ban's premise, restated), [ADR 0020](0020-errs-audit-dual-reason-derivation.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the audits that do exist), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework's sentinels), [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (principles 6 and 26), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (where codes are declared)
+- **Area**: errs
+- **Need**: constraint
 
 ## Context
 

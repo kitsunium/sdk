@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0006](0006-sdk-error-code-registry-extension.md) (the ring's layout and its MPSC sibling), [ADR 0010](0010-kernel-recycler-primitive.md) (`buffer`'s size classes), [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) (`batcher`'s lifetime context and background delivery), [ADR 0049](0049-cache-becomes-a-domain.md) (`singleflight`'s shared context keeps its root in the call record), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) §2 and §4 (the ring's multi-producer mode delivered; `pool` published). Two new kernel packages, `internal/kernel/concur/pool` (`0.1.6.*`) and `internal/kernel/concur/sema` (`0.1.7.*`).
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a refusal, never a park), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published interface grows by a sibling), [ADR 0072](0072-health-bounds-every-wait-it-owns.md) (every wait bounded), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (the allocation budgets), [ADR 0207](0207-concurrent-callers-share-one-flush-and-each-gets-its-verdict.md) (`commit`, the primitive beside these), issues [#804](https://github.com/kitsunium/sdk/issues/804), [#805](https://github.com/kitsunium/sdk/issues/805), [#810](https://github.com/kitsunium/sdk/issues/810), [#812](https://github.com/kitsunium/sdk/issues/812), [#817](https://github.com/kitsunium/sdk/issues/817), [#1034](https://github.com/kitsunium/sdk/issues/1034), [#1040](https://github.com/kitsunium/sdk/issues/1040), [#813](https://github.com/kitsunium/sdk/issues/813)
+- **Area**: kernel
+- **Need**: decision
 
 ## Context
 

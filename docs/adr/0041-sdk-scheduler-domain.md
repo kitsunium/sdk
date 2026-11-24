@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (`clock.Waiter` / `ManualClock` — the thing that makes this domain testable), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0016](0016-sdk-process-supervision-domain.md) / [ADR 0026](0026-sdk-resilience-domain.md) (the no-registry core-sibling precedents), [ADR 0018](0018-sdk-cross-platform-portability.md) (what is guaranteed on 8 GOOS), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (a zero value must not be the dangerous one), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (published concrete shapes), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (codes and range ownership)
 - **Amends**: `internal/core`'s purpose statement — `scheduler` is its 12th sibling
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

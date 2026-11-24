@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0044](0044-metrics-adopts-the-otel-data-model.md) (the data model this encodes, §Decision 9 in particular), [ADR 0027](0027-sdk-metrics-domain.md) (the domain), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (what a registered exporter may write to), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp vs refuse), [ADR 0026](0026-sdk-resilience-domain.md) (the retry policy this does not reimplement), [ADR 0018](0018-sdk-cross-platform-portability.md) (stdlib-only)
 - **Closes**: ADR 0044 §Deferred — "The OTLP exporter itself"
+- **Area**: observe
+- **Need**: decision
 
 ## Context
 

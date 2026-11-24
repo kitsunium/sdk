@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal — the trap this domain has two of), [ADR 0028](0028-sdk-config-domain.md) (`config.Validator`, the contract this domain feeds), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port is extended by a sibling, never by widening — satisfied here structurally), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (published concrete shapes), [ADR 0041](0041-sdk-scheduler-domain.md) (the FUNC-port precedent), [ADR 0016](0016-sdk-process-supervision-domain.md) / [ADR 0026](0026-sdk-resilience-domain.md) / [ADR 0029](0029-sdk-net-domain.md) / [ADR 0042](0042-sdk-token-domain.md) (the no-registry core-sibling precedents), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (codes and range ownership), [ADR 0019](0019-pkg-errs-public-construction.md) (the third-party Major range a consumer-written constraint uses)
 - **Amends**: `internal/core`'s purpose statement — `validation` is its 15th sibling
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

@@ -12,6 +12,8 @@
   (a gate at the merge: how a ratio gate is measured and judged)
 - **Related**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md),
   [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md)
+- **Area**: build
+- **Need**: decision
 
 ## Context
 

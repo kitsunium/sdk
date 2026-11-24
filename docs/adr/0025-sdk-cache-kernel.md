@@ -4,6 +4,8 @@
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0010 (recycler), ADR 0011 (snapshot), ADR 0006 (ring) — the kernel-primitive precedents; ADR 0024 (Phase-B wave)
+- **Area**: kernel
+- **Need**: decision
 
 > **Amendment (2026-09-09, [ADR 0049](0049-cache-becomes-a-domain.md)).** The
 > placement decided below stands: `Cache[K,V]` remains a kernel primitive and

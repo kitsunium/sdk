@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers (the owner's decision: stage 7, the last, of "kit regenerates the Go SDK from its design, and generates the docs and the most performant code possible")
 - **Amends**: [ADR 0168](0168-a-declaration-is-the-designs-and-a-body-is-the-codes.md) — §Deferred's first item closed: kit measures the project's inline set, not only the functions the design names; [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) — `make regen` gains a sibling that needs no clean tree
 - **Related**: [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (what the compiler decides is measured), [ADR 0166](0166-a-facade-is-the-designs-and-a-forwarders-form-is-measured.md) (a forwarder's form is measured), [ADR 0167](0167-a-doc-comment-is-the-designs-and-a-readme-is-written-from-docs-api.md)
+- **Area**: design
+- **Need**: decision
 
 ## Context
 

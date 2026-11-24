@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0045](0045-sdk-session-domain.md) — the file store's locking, not the domain
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) (the same syscall, the same call, one domain over), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (`Clock` / `Waiter` / `Timed`), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published shape changing while v0), [ADR 0031](0031-policy-zero-values-are-never-inert.md)
+- **Area**: security
+- **Need**: incident
 
 ## Context
 

@@ -7,6 +7,8 @@
 **Supersedes**: —
 **Amends**: ADR 0009 (fixes the module *path*, not just the published `go.mod` form), ADR 0007 (tag shape `pkg/<major>/vX.Y.Z` → bare `pkg/vX.Y.Z` for the v0/v1 module), ADR 0001 (public module path `pkg/v1` → `pkg`)
 **Related**: ADR 0004 (Bazel visibility enforces layering, independent of the module boundary)
+- **Area**: build
+- **Need**: decision
 
 ## Context
 

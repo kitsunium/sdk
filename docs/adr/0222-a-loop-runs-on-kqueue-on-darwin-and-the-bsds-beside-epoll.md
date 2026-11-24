@@ -4,6 +4,8 @@
 - **Date**: 2026-11-11
 - **Deciders**: SDK maintainers (kitsunium/sdk#976, lot L2)
 - **Related**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md) (§D5 deferred kqueue; this ADR resolves it), [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md) (the lattice and min(code, environment)), [ADR 0189](0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md) (rows, classes, staged probes), [ADR 0196](0196-a-drain-stops-the-routing-first-takes-the-listen-queue-then-closes-and-loopsauto-reads-gomaxprocs-once.md) (the drain's take), [ADR 0190](0190-a-merge-gate-judges-the-ratio-of-two-engines-measured-side-by-side.md) (the paired gate), [ADR 0018](0018-sdk-cross-platform-portability.md) (constants cited, no `x/sys`, `UnsupportedPlatform`)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

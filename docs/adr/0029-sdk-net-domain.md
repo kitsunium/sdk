@@ -14,6 +14,8 @@
   (metrics), ADR 0028 (config — typed load), ADR 0013 (crypto — the redacting
   `Key` precedent), ADR 0005/0006 (error codes)
 - **Amends**: widens the `internal/core` purpose statement with an 11th sibling
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

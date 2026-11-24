@@ -7,6 +7,8 @@
 **Supersedes**: —
 **Amends**: ADR 0007 (release now also cuts `internal/<mod>/vX.Y.Z` resolution tags)
 **Related**: ADR 0001 (5-module layout), ADR 0007 (release workflow + versioning)
+- **Area**: release
+- **Need**: constraint
 
 ## Context
 

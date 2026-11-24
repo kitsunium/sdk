@@ -6,6 +6,8 @@
 - **Amended by**: [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) §As built — `pathchain` has three consumers: `lock`, `ipc` (the components above a private socket's directory, each judged by the directory holding it — `PATH_UNSAFE`) and `session` (the components of its file store's `Dir`, under this record's rule — `PATH_REDIRECTED`), each with a policy of its own
 - **Amends**: [ADR 0082](0082-the-lock-path-is-a-file-never-a-link-to-one.md) §Deferred — both of its first two items are closed here, one by prevention and one by detection, and the ADR says which is which
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) (the domain), [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) §D5 (the directory rule, and the shared-group arrangement it deliberately accepts), [ADR 0018](0018-sdk-cross-platform-portability.md) (the build bar and the `x/sys` ban), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (a new primitive goes in the layer that owns it), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code allocation)
+- **Area**: app
+- **Need**: incident
 
 ## Context
 

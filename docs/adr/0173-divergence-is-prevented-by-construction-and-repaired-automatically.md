@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Depends on**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) (the consensus domain whose state this ADR protects)
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (siblings), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code range shared with ADR 0152)
+- **Area**: consensus
+- **Need**: decision
 
 ## Context
 

@@ -5,6 +5,8 @@
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (the build bar's loop covers every module, not the six it named)
 - **Related**: [ADR 0001](0001-sdk-go-multimodule-layout.md) (five modules in `go.work`, auxiliary ones outside it), [ADR 0018](0018-sdk-cross-platform-portability.md) (the build and runtime bars), [ADR 0136](0136-every-module-is-scanned-for-the-vulnerabilities-it-reaches.md) (the vulnerability scan loops over the same census)
+- **Area**: build
+- **Need**: convention
 
 ## Context
 

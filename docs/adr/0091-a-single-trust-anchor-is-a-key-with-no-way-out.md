@@ -5,6 +5,8 @@
 **Deciders**: kitsunium maintainers
 **Amends**: ADR 0079 §trust model (the anchor is a list, not a key)
 **Related**: ADR 0031 (a zero value is never inert — the clamp half is used here), ADR 0078 (the quarantine the identity port answers)
+- **Area**: framework
+- **Need**: constraint
 
 ## Context
 

@@ -11,6 +11,8 @@
   is v0 ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
 - **Deciders**: SDK maintainers, owner
 - **Implements**: ADR 0187 §D6, §D7 and the datagram half of §D4
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

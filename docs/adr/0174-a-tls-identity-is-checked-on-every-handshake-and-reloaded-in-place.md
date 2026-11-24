@@ -6,6 +6,8 @@
 - **Deciders**: SDK maintainers
 - **Depends on**: [ADR 0029](0029-sdk-net-domain.md) (`net/server`, stream groups), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (siblings)
 - **Related**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) (the first consumer of both siblings)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

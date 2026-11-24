@@ -6,6 +6,8 @@
 **Supersedes**: —
 **Amends**: ADR 0002 (the error model is now consumer-constructable, not only consumer-inspectable), ADR 0005 (reserves a Major range for third-party codes)
 **Related**: ADR 0017 (the public module these symbols ship in), ADR 0004 (Bazel visibility keeps the concrete `*Error` type internal)
+- **Area**: errs
+- **Need**: decision
 
 ## Context
 
