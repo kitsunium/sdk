@@ -875,8 +875,8 @@ vars:
         name: castagnoli
         value: crc32.MakeTable(crc32.Castagnoli)
       - doc: |-
-          le is the image's byte order: every integer of an image is
+          byteOrder is the image's byte order: every integer of an image is
           little-endian, whatever the platform's.
-        name: le
+        name: byteOrder
         value: binary.LittleEndian
     name: castagnoli

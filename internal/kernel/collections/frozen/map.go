@@ -121,7 +121,7 @@ func NewStringMap[V Integer](keys []string, values []V) (*StringMap[V], error) {
 		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
 		same: func(i, j int) bool { return keys[i] == keys[j] },
 		write: func(i int, rec, blob []byte, off uint32) uint32 {
-			le.PutUint32(rec, off)
+			byteOrder.PutUint32(rec, off)
 			at := head(blob, keys[i], s.head())
 			storew(blob[at:], s.vw, uint64(values[i]))
 			return at + uint32(s.vw)
@@ -199,8 +199,8 @@ func NewDict(keys, values []string) (*Dict, error) {
 		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
 		same: func(i, j int) bool { return keys[i] == keys[j] },
 		write: func(i int, rec, blob []byte, off uint32) uint32 {
-			le.PutUint32(rec, off)
-			le.PutUint32(blob[width4:], uint32(len(values[i])))
+			byteOrder.PutUint32(rec, off)
+			byteOrder.PutUint32(blob[width4:], uint32(len(values[i])))
 			at := head(blob, keys[i], dictShape.head())
 			return at + uint32(copy(blob[at:], values[i]))
 		},
@@ -282,6 +282,6 @@ func (t *table) appendTo(b []byte, s shape) []byte {
 // head writes a string entry's key length and bytes at blob, returning the
 // offset past the key.
 func head(blob []byte, key string, hs uint32) uint32 {
-	le.PutUint32(blob, uint32(len(key)))
+	byteOrder.PutUint32(blob, uint32(len(key)))
 	return hs + uint32(copy(blob[hs:], key))
 }

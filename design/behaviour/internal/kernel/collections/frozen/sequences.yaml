@@ -11,7 +11,7 @@ sequences:
         kind: internal
       - id: layoutOf
         kind: internal
-      - id: le.PutUint32
+      - id: byteOrder.PutUint32
         kind: value
       - id: t.view
         kind: internal
@@ -49,8 +49,8 @@ sequences:
       - eval: copy(image[headerSize:], p.pilots)
       - loop:
           do:
-            - eval: le.PutUint32(image[l.remap+4*uint64(i):], x)
-              to: le.PutUint32
+            - eval: byteOrder.PutUint32(image[l.remap+4*uint64(i):], x)
+              to: byteOrder.PutUint32
           key: i
           range: p.remap
           value: x
@@ -262,11 +262,11 @@ sequences:
         kind: actor
       - id: load
         kind: self
-      - id: le.Uint16
+      - id: byteOrder.Uint16
         kind: value
       - id: sizes
         kind: internal
-      - id: le.Uint64
+      - id: byteOrder.Uint64
         kind: value
       - id: layoutOf
         kind: internal
@@ -288,14 +288,14 @@ sequences:
       - opt:
           do:
             - return: table{}, corrupt("header checksum")
-          when: crc32.Checksum(h[:headerSealed], castagnoli) != le.Uint32(h[headerSealed:])
+          when: crc32.Checksum(h[:headerSealed], castagnoli) != byteOrder.Uint32(h[headerSealed:])
       - opt:
           do:
             - return: table{}, origin(ImageVersion, errs.Int64("version", int64(v)))
           init:
             bind: v
-            eval: le.Uint16(h[4:])
-            to: le.Uint16
+            eval: byteOrder.Uint16(h[4:])
+            to: byteOrder.Uint16
           when: v != version
       - bind: got
         eval: "shape{kind: h[6], kw: h[7], vw: h[8], signs: h[9]}"
@@ -306,9 +306,9 @@ sequences:
       - opt:
           do:
             - return: table{}, corrupt("reserved bytes")
-          when: le.Uint16(h[10:]) != 0 || le.Uint64(h[52:]) != 0
+          when: byteOrder.Uint16(h[10:]) != 0 || byteOrder.Uint64(h[52:]) != 0
       - bind: t
-        eval: "table{n: le.Uint32(h[12:]), nb: le.Uint32(h[16:]), m: le.Uint32(h[20:]), seed: le.Uint64(h[24:]), shape: got}"
+        eval: "table{n: byteOrder.Uint32(h[12:]), nb: byteOrder.Uint32(h[16:]), m: byteOrder.Uint32(h[20:]), seed: byteOrder.Uint64(h[24:]), shape: got}"
       - opt:
           do:
             - return: table{}, err
@@ -318,8 +318,8 @@ sequences:
             to: sizes
           when: err != nil
       - bind: blob
-        eval: le.Uint64(h[32:])
-        to: le.Uint64
+        eval: byteOrder.Uint64(h[32:])
+        to: byteOrder.Uint64
       - opt:
           do:
             - return: table{}, corrupt("blob size")
@@ -330,7 +330,7 @@ sequences:
       - opt:
           do:
             - return: table{}, corrupt("image size")
-          when: l.size != uint64(len(image)) || le.Uint64(h[40:]) != l.size
+          when: l.size != uint64(len(image)) || byteOrder.Uint64(h[40:]) != l.size
       - eval: t.view(image, l)
         to: t.view
       - opt:
@@ -338,7 +338,7 @@ sequences:
             - opt:
                 do:
                   - return: table{}, corrupt("body checksum")
-                when: crc32.Checksum(image[headerSize:], castagnoli) != le.Uint32(h[48:])
+                when: crc32.Checksum(image[headerSize:], castagnoli) != byteOrder.Uint32(h[48:])
             - opt:
                 do:
                   - return: table{}, err
@@ -395,7 +395,7 @@ sequences:
                 do:
                   - return: corrupt("remapped slot")
                     to: corrupt
-                when: le.Uint32(t.remap[4*uint64(i):]) >= t.n
+                when: byteOrder.Uint32(t.remap[4*uint64(i):]) >= t.n
           init: i := uint32(0)
           post: i++
       - loop:
@@ -653,7 +653,7 @@ sequences:
           		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
           		same: func(i, j int) bool { return keys[i] == keys[j] },
           		write: func(i int, rec, blob []byte, off uint32) uint32 {
-          			le.PutUint32(rec, off)
+          			byteOrder.PutUint32(rec, off)
           			at := head(blob, keys[i], s.head())
           			storew(blob[at:], s.vw, uint64(values[i]))
           			return at + uint32(s.vw)
@@ -774,8 +774,8 @@ sequences:
           		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
           		same: func(i, j int) bool { return keys[i] == keys[j] },
           		write: func(i int, rec, blob []byte, off uint32) uint32 {
-          			le.PutUint32(rec, off)
-          			le.PutUint32(blob[width4:], uint32(len(values[i])))
+          			byteOrder.PutUint32(rec, off)
+          			byteOrder.PutUint32(blob[width4:], uint32(len(values[i])))
           			at := head(blob, keys[i], dictShape.head())
           			return at + uint32(copy(blob[at:], values[i]))
           		},
@@ -922,11 +922,11 @@ sequences:
         kind: actor
       - id: head
         kind: self
-      - id: le.PutUint32
+      - id: byteOrder.PutUint32
         kind: value
     steps:
-      - eval: le.PutUint32(blob, uint32(len(key)))
-        to: le.PutUint32
+      - eval: byteOrder.PutUint32(blob, uint32(len(key)))
+        to: byteOrder.PutUint32
       - return: hs + uint32(copy(blob[hs:], key))
   - of: seedAt
     participants:
@@ -1430,21 +1430,21 @@ sequences:
         kind: actor
       - id: loadw
         kind: self
-      - id: le.Uint64
+      - id: byteOrder.Uint64
         kind: value
     steps:
       - switch:
           cases:
             - case: width8
               do:
-                - return: le.Uint64(b)
-                  to: le.Uint64
+                - return: byteOrder.Uint64(b)
+                  to: byteOrder.Uint64
             - case: width4
               do:
-                - return: uint64(le.Uint32(b))
+                - return: uint64(byteOrder.Uint32(b))
             - case: width2
               do:
-                - return: uint64(le.Uint16(b))
+                - return: uint64(byteOrder.Uint16(b))
             - default: true
               do:
                 - return: uint64(b[0])
@@ -1455,27 +1455,27 @@ sequences:
         kind: actor
       - id: storew
         kind: self
-      - id: le.PutUint64
+      - id: byteOrder.PutUint64
         kind: value
-      - id: le.PutUint32
+      - id: byteOrder.PutUint32
         kind: value
-      - id: le.PutUint16
+      - id: byteOrder.PutUint16
         kind: value
     steps:
       - switch:
           cases:
             - case: width8
               do:
-                - eval: le.PutUint64(b, v)
-                  to: le.PutUint64
+                - eval: byteOrder.PutUint64(b, v)
+                  to: byteOrder.PutUint64
             - case: width4
               do:
-                - eval: le.PutUint32(b, uint32(v))
-                  to: le.PutUint32
+                - eval: byteOrder.PutUint32(b, uint32(v))
+                  to: byteOrder.PutUint32
             - case: width2
               do:
-                - eval: le.PutUint16(b, uint16(v))
-                  to: le.PutUint16
+                - eval: byteOrder.PutUint16(b, uint16(v))
+                  to: byteOrder.PutUint16
             - default: true
               do:
                 - set: b[0]
@@ -1496,7 +1496,7 @@ sequences:
         kind: self
       - id: slotOf
         kind: internal
-      - id: le.Uint32
+      - id: byteOrder.Uint32
         kind: value
     steps:
       - bind: x
@@ -1505,8 +1505,8 @@ sequences:
       - opt:
           do:
             - set: x
-              to: le.Uint32
-              value: le.Uint32(t.remap[4*uint64(x-t.n):])
+              to: byteOrder.Uint32
+              value: byteOrder.Uint32(t.remap[4*uint64(x-t.n):])
           when: x >= t.n
       - return: x
   - of: (*table).findInt
@@ -1610,11 +1610,11 @@ sequences:
         kind: actor
       - id: (*table).entry
         kind: self
-      - id: le.Uint32
+      - id: byteOrder.Uint32
         kind: value
     steps:
-      - return: le.Uint32(t.recs[4*uint64(x):])
-        to: le.Uint32
+      - return: byteOrder.Uint32(t.recs[4*uint64(x):])
+        to: byteOrder.Uint32
   - of: (*table).stringKey
     steps:
       - bind: at
@@ -1680,37 +1680,37 @@ sequences:
         kind: actor
       - id: writeHeader
         kind: self
-      - id: le.PutUint16
+      - id: byteOrder.PutUint16
         kind: value
-      - id: le.PutUint32
+      - id: byteOrder.PutUint32
         kind: value
-      - id: le.PutUint64
+      - id: byteOrder.PutUint64
         kind: value
     steps:
       - bind: h
         eval: image[:headerSize]
       - eval: clear(h)
       - eval: copy(h, magic)
-      - eval: le.PutUint16(h[4:], version)
-        to: le.PutUint16
+      - eval: byteOrder.PutUint16(h[4:], version)
+        to: byteOrder.PutUint16
       - set: h[6], h[7], h[8], h[9]
         value: t.shape.kind, t.shape.kw, t.shape.vw, t.shape.signs
-      - eval: le.PutUint32(h[12:], t.n)
-        to: le.PutUint32
-      - eval: le.PutUint32(h[16:], t.nb)
-        to: le.PutUint32
-      - eval: le.PutUint32(h[20:], t.m)
-        to: le.PutUint32
-      - eval: le.PutUint64(h[24:], t.seed)
-        to: le.PutUint64
-      - eval: le.PutUint64(h[32:], uint64(len(t.blob)))
-        to: le.PutUint64
-      - eval: le.PutUint64(h[40:], uint64(len(image)))
-        to: le.PutUint64
-      - eval: le.PutUint32(h[48:], crc32.Checksum(image[headerSize:], castagnoli))
-        to: le.PutUint32
-      - eval: le.PutUint32(h[headerSealed:], crc32.Checksum(h[:headerSealed], castagnoli))
-        to: le.PutUint32
+      - eval: byteOrder.PutUint32(h[12:], t.n)
+        to: byteOrder.PutUint32
+      - eval: byteOrder.PutUint32(h[16:], t.nb)
+        to: byteOrder.PutUint32
+      - eval: byteOrder.PutUint32(h[20:], t.m)
+        to: byteOrder.PutUint32
+      - eval: byteOrder.PutUint64(h[24:], t.seed)
+        to: byteOrder.PutUint64
+      - eval: byteOrder.PutUint64(h[32:], uint64(len(t.blob)))
+        to: byteOrder.PutUint64
+      - eval: byteOrder.PutUint64(h[40:], uint64(len(image)))
+        to: byteOrder.PutUint64
+      - eval: byteOrder.PutUint32(h[48:], crc32.Checksum(image[headerSize:], castagnoli))
+        to: byteOrder.PutUint32
+      - eval: byteOrder.PutUint32(h[headerSealed:], crc32.Checksum(h[:headerSealed], castagnoli))
+        to: byteOrder.PutUint32
   - of: (*table).view
     participants:
       - id: caller

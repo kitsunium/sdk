@@ -45,9 +45,9 @@ const (
 var (
 	// castagnoli is CRC32C's table, which the platform's instruction computes.
 	castagnoli = crc32.MakeTable(crc32.Castagnoli)
-	// le is the image's byte order: every integer of an image is
+	// byteOrder is the image's byte order: every integer of an image is
 	// little-endian, whatever the platform's.
-	le = binary.LittleEndian
+	byteOrder = binary.LittleEndian
 )
 
 // shape is what a table holds: its kind, the widths of its integer keys and
@@ -99,11 +99,11 @@ type table struct {
 func loadw(b []byte, w byte) uint64 {
 	switch w {
 	case width8:
-		return le.Uint64(b)
+		return byteOrder.Uint64(b)
 	case width4:
-		return uint64(le.Uint32(b))
+		return uint64(byteOrder.Uint32(b))
 	case width2:
-		return uint64(le.Uint16(b))
+		return uint64(byteOrder.Uint16(b))
 	default:
 		return uint64(b[0])
 	}
@@ -113,11 +113,11 @@ func loadw(b []byte, w byte) uint64 {
 func storew(b []byte, w byte, v uint64) {
 	switch w {
 	case width8:
-		le.PutUint64(b, v)
+		byteOrder.PutUint64(b, v)
 	case width4:
-		le.PutUint32(b, uint32(v))
+		byteOrder.PutUint32(b, uint32(v))
 	case width2:
-		le.PutUint16(b, uint16(v))
+		byteOrder.PutUint16(b, uint16(v))
 	default:
 		b[0] = byte(v)
 	}
@@ -136,7 +136,7 @@ func mask(w byte) uint64 {
 func (t *table) slot(h uint64) uint32 {
 	x := slotOf(h, t.pilots[below(h, t.nb)], t.m)
 	if x >= t.n {
-		x = le.Uint32(t.remap[4*uint64(x-t.n):])
+		x = byteOrder.Uint32(t.remap[4*uint64(x-t.n):])
 	}
 	return x
 }
@@ -186,7 +186,7 @@ func (t *table) intValue(r uint64) uint64 {
 }
 
 // entry is the blob offset of slot x's string entry.
-func (t *table) entry(x uint32) uint32 { return le.Uint32(t.recs[4*uint64(x):]) }
+func (t *table) entry(x uint32) uint32 { return byteOrder.Uint32(t.recs[4*uint64(x):]) }
 
 // stringKey is the key of the string entry at off.
 func (t *table) stringKey(off uint32) string {
@@ -241,16 +241,16 @@ func writeHeader(image []byte, t *table) {
 	h := image[:headerSize]
 	clear(h)
 	copy(h, magic)
-	le.PutUint16(h[4:], version)
+	byteOrder.PutUint16(h[4:], version)
 	h[6], h[7], h[8], h[9] = t.shape.kind, t.shape.kw, t.shape.vw, t.shape.signs
-	le.PutUint32(h[12:], t.n)
-	le.PutUint32(h[16:], t.nb)
-	le.PutUint32(h[20:], t.m)
-	le.PutUint64(h[24:], t.seed)
-	le.PutUint64(h[32:], uint64(len(t.blob)))
-	le.PutUint64(h[40:], uint64(len(image)))
-	le.PutUint32(h[48:], crc32.Checksum(image[headerSize:], castagnoli))
-	le.PutUint32(h[headerSealed:], crc32.Checksum(h[:headerSealed], castagnoli))
+	byteOrder.PutUint32(h[12:], t.n)
+	byteOrder.PutUint32(h[16:], t.nb)
+	byteOrder.PutUint32(h[20:], t.m)
+	byteOrder.PutUint64(h[24:], t.seed)
+	byteOrder.PutUint64(h[32:], uint64(len(t.blob)))
+	byteOrder.PutUint64(h[40:], uint64(len(image)))
+	byteOrder.PutUint32(h[48:], crc32.Checksum(image[headerSize:], castagnoli))
+	byteOrder.PutUint32(h[headerSealed:], crc32.Checksum(h[:headerSealed], castagnoli))
 }
 
 // view points t's sections into image, whose header says the layout l.

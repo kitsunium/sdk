@@ -47,7 +47,7 @@ func build(s shape, ks keySet) (table, error) {
 	image := make([]byte, l.size)
 	copy(image[headerSize:], p.pilots)
 	for i, x := range p.remap {
-		le.PutUint32(image[l.remap+4*uint64(i):], x)
+		byteOrder.PutUint32(image[l.remap+4*uint64(i):], x)
 	}
 	at := make([]uint32, n)
 	for i, x := range p.pos {

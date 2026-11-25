@@ -41,34 +41,34 @@ func load(image []byte, want shape, check Check) (table, error) {
 	if string(h[:4]) != magic {
 		return table{}, corrupt("magic")
 	}
-	if crc32.Checksum(h[:headerSealed], castagnoli) != le.Uint32(h[headerSealed:]) {
+	if crc32.Checksum(h[:headerSealed], castagnoli) != byteOrder.Uint32(h[headerSealed:]) {
 		return table{}, corrupt("header checksum")
 	}
-	if v := le.Uint16(h[4:]); v != version {
+	if v := byteOrder.Uint16(h[4:]); v != version {
 		return table{}, origin(ImageVersion, errs.Int64("version", int64(v)))
 	}
 	got := shape{kind: h[6], kw: h[7], vw: h[8], signs: h[9]}
 	if got != want {
 		return table{}, origin(ImageShape, errs.Int64("kind", int64(got.kind)), errs.Int64("key_width", int64(got.kw)), errs.Int64("value_width", int64(got.vw)), errs.Int64("signs", int64(got.signs)))
 	}
-	if le.Uint16(h[10:]) != 0 || le.Uint64(h[52:]) != 0 {
+	if byteOrder.Uint16(h[10:]) != 0 || byteOrder.Uint64(h[52:]) != 0 {
 		return table{}, corrupt("reserved bytes")
 	}
-	t := table{n: le.Uint32(h[12:]), nb: le.Uint32(h[16:]), m: le.Uint32(h[20:]), seed: le.Uint64(h[24:]), shape: got}
+	t := table{n: byteOrder.Uint32(h[12:]), nb: byteOrder.Uint32(h[16:]), m: byteOrder.Uint32(h[20:]), seed: byteOrder.Uint64(h[24:]), shape: got}
 	if err := sizes(&t); err != nil {
 		return table{}, err
 	}
-	blob := le.Uint64(h[32:])
+	blob := byteOrder.Uint64(h[32:])
 	if blob > math.MaxUint32 {
 		return table{}, corrupt("blob size")
 	}
 	l := layoutOf(got, t.n, t.nb, t.m, blob)
-	if l.size != uint64(len(image)) || le.Uint64(h[40:]) != l.size {
+	if l.size != uint64(len(image)) || byteOrder.Uint64(h[40:]) != l.size {
 		return table{}, corrupt("image size")
 	}
 	t.view(image, l)
 	if check == CheckAll {
-		if crc32.Checksum(image[headerSize:], castagnoli) != le.Uint32(h[48:]) {
+		if crc32.Checksum(image[headerSize:], castagnoli) != byteOrder.Uint32(h[48:]) {
 			return table{}, corrupt("body checksum")
 		}
 		if err := t.verify(); err != nil {
@@ -98,7 +98,7 @@ func sizes(t *table) error {
 // also proves no two records hold one key.
 func (t *table) verify() error {
 	for i := uint32(0); i < t.m-t.n; i++ {
-		if le.Uint32(t.remap[4*uint64(i):]) >= t.n {
+		if byteOrder.Uint32(t.remap[4*uint64(i):]) >= t.n {
 			return corrupt("remapped slot")
 		}
 	}
