@@ -6,9 +6,11 @@ import (
 	"io"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/sqlite"
+	"github.com/kitsunium/sdk/pkg/v1/clock"
 )
 
 // The product testdata/former was written by (ADR 0180 step 5): a release
@@ -16,6 +18,32 @@ import (
 // directory and a kit.privacy service. The declarations below are the ones
 // that wrote it; a test that opens the fixture declares the same product, so
 // that what it reads back is what the former release kept.
+
+// formerEra is the instant the products that open a former release's
+// fixture run at: just after the last fixture was written (2026-10-18), well
+// before the trash of any of them is due (c-bob's, 30 days after, from
+// 2026-11-17). On the system clock, the first start after a fixture's trash
+// falls due purges c-bob, and every test that reads the fixture back as it
+// was fails from that day on.
+var formerEra = time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+
+// formerClock is the system clock moved back to formerEra when the test
+// binary started: it still moves and still waits, so the product's sweepers,
+// deliveries and retries run as they do in production, but a fixture never
+// ages past what its dump records.
+type formerClock struct {
+	clock.Timed
+	back time.Duration
+}
+
+// atFormerEra is the clock the products that open a fixture run on.
+var atFormerEra = formerClock{Timed: clock.System, back: time.Since(formerEra)}
+
+// Now is the system instant moved back to formerEra.
+func (c formerClock) Now() time.Time { return time.Now().Add(-c.back) }
+
+// Since is the duration elapsed from t to Now on this clock.
+func (c formerClock) Since(t time.Time) time.Duration { return c.Now().Sub(t) }
 
 // atelierCase is a person's case: sealed where it rests, its note's former
 // values kept, its versions and its trash kept.
@@ -86,7 +114,7 @@ func newAtelier(t *testing.T, dir string, onSQLite, wait bool) *atelier {
 	a.forget = svc.Command("forget", func(ctx context.Context, w atelierWho) (app.Erasure, error) {
 		return app.Erase(ctx, "the person asked", w.ID)
 	})
-	opts := []app.AppOption{app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard)}
+	opts := []app.AppOption{app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard), app.Clock(atFormerEra)}
 	if onSQLite {
 		opts = append(opts, app.Database("main", sqlite.Engine(), app.Keeps(app.Privacy, svc)))
 	}
