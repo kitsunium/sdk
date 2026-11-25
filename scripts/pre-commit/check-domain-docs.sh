@@ -34,6 +34,10 @@
 #      row in any of those three files is now refused, so a branch cut before
 #      that change cannot bring a list back through a union merge.
 #
+# A fourth part is a report, not an invariant: every CLAUDE.md over the size
+# ADR 0253 sets it (200 lines; 40 000 characters below the root) is counted
+# and the largest are named, and the guard still exits 0.
+#
 # It deliberately does NOT require every core package to have a row:
 # `writer` and `logger/level` are parts of a domain rather than domains, and
 # inventing a rule about which is which is how a guard starts lying.
@@ -303,3 +307,37 @@ for f in "$doc" docs/CLAUDE.md docs/adr/CLAUDE.md; do
 		exit 1
 	fi
 done
+
+# --- 4. the size of every CLAUDE.md, reported and not gated (ADR 0253) -------
+
+# A CLAUDE.md is loaded whole: the root at every session start, another one
+# when an agent first reads a file under it, and the second is truncated past
+# 40 000 characters, so its end goes unread. ADR 0253 sets each file a 200-line
+# target and a subdirectory one a 40 000-character ceiling, and moves the
+# reference half of an oversized file to NOTES.md beside it. Most files are
+# still over (they are split file by file), so this prints a line and never
+# fails. Bytes are counted, not characters: they are never fewer, so a file
+# under 40 000 bytes is under 40 000 characters whatever its alphabet. A
+# vendored or generated tree (.git, node_modules, a bazel-* output link) is
+# not walked: find does not follow a symbolic link.
+sizes="$(find . -name CLAUDE.md -type f \
+		! -path './.git/*' ! -path '*/node_modules/*' -exec wc -lc {} + \
+	| awk '$3 != "total" { sub(/^\.\//, "", $3); print $1, $2, $3 }')"
+report="$(printf '%s\n' "$sizes" | awk '
+	NF == 3 {
+		over = ($1 > 200) || ($3 != "CLAUDE.md" && $2 > 40000)
+		if ($1 > 200) lines++
+		if ($3 != "CLAUDE.md" && $2 > 40000) bytes++
+		if (over) print $2, $1, $3
+	}
+	END { printf "#%d %d\n", lines, bytes }
+')"
+counts="$(printf '%s\n' "$report" | sed -n 's/^#//p')"
+lines_over="${counts% *}"
+bytes_over="${counts#* }"
+if [ "$lines_over" -gt 0 ] || [ "$bytes_over" -gt 0 ]; then
+	echo "ℹ CLAUDE.md size (ADR 0253, reported, not a gate): $lines_over over 200 lines," \
+		"$bytes_over below the root over 40000 bytes. Largest:"
+	printf '%s\n' "$report" | grep -v '^#' | sort -rn | head -5 \
+		| awk '{ printf "    %s — %d lines, %d bytes\n", $3, $2, $1 }'
+fi

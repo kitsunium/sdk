@@ -532,6 +532,14 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
   // place on a consumer-onboarding page. Source is now the dedicated
   // /workspace/docs/getting-started.md file.
   const sections = await extractClaudeMdSections(claudeMd);
+  //: ADR 0253 keeps a CLAUDE.md to what an agent must know before editing
+  //: and moves its reference half, under the same H2 titles, to NOTES.md
+  //: beside it: a section both files hold is published whole, CLAUDE.md's
+  //: part first. A release cut before that split has no NOTES.md.
+  const notes = await extractClaudeMdSections(join(sourceRoot, "NOTES.md"));
+  for (const [title, body] of Object.entries(notes)) {
+    sections[title] = sections[title] ? `${sections[title]}\n\n${body}` : body;
+  }
   const pageMap = [["concepts", "Architecture at a glance"]];
   for (const [slug, sectionTitle] of pageMap) {
     const body = sections[sectionTitle];
