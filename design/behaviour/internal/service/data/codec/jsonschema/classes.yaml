@@ -36,6 +36,10 @@ constants:
         name: maxBoundDecimals
         type: int
         value: "6"
+      - doc: integerType occupies the low bit; the remaining bits correspond to JSON kinds.
+        name: integerType
+        type: typeSet
+        value: "1"
     name: violationCode
   - doc: The six JSON kinds.
     grouped: true
@@ -136,13 +140,14 @@ files:
       - violationCode
       - keyword
       - builder
+      - typeSet
       - builderFor
       - validationBuilder
       - validationBuilder2
       - applicatorBuilder
       - applicatorBuilder2
       - keywordInvalid
-      - typeMatches
+      - schemaType
       - buildType
       - stringList
       - buildEnum
@@ -403,11 +408,11 @@ functions:
     name: keywordInvalid
     params: kw string
     results: error
-  - doc: typeMatches reports whether v is of the JSON Schema type name.
-    name: typeMatches
-    params: v *value, name string
-    results: bool
-  - doc: "buildType compiles \"type\": a name or an array of names."
+  - doc: schemaType maps each allowed name to its own bit, or zero for an unknown name.
+    name: schemaType
+    params: name string
+    results: typeSet
+  - doc: "buildType compiles \"type\": a name or a nonempty array of unique names."
     name: buildType
     params: k keyword
     results: check, error
@@ -746,6 +751,10 @@ types:
     kind: named
     name: builder
     underlying: func(k keyword) (check, error)
+  - doc: typeSet holds the compiled alternatives of a "type" keyword.
+    kind: named
+    name: typeSet
+    underlying: uint8
   - doc: kind is a JSON value's kind.
     kind: named
     name: kind
