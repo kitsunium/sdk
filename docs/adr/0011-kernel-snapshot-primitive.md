@@ -2,6 +2,8 @@
 
 - Area: kernel
 - Need: decision
+- Status: Accepted
+- Date: 2026-05-25
 
 ## Status
 
