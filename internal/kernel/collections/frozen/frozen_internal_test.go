@@ -38,13 +38,13 @@ func TestTableHoldsNoPointerPerKey(t *testing.T) {
 func TestBuildRefusesWhatAnImageCannotAddress(t *testing.T) {
 	t.Parallel()
 	never := func(uint64, int) uint64 { t.Fatal("hashed a refused build"); return 0 }
-	_, err := build(shape{kind: kindText}, 1, math.MaxUint32+1, never, nil, nil)
+	_, err := build(shape{kind: kindText}, keySet{n: 1, blob: math.MaxUint32 + 1, hash: never})
 	if !errs.HasCode(err, CodeTooLarge) {
 		t.Fatalf("a blob past 4 GiB: %v", err)
 	}
 	//: an int of 32 bits cannot even name that many keys.
 	if keys := uint64(maxKeys) + 1; keys <= math.MaxInt {
-		_, err = build(shape{kind: kindInts, kw: 8, vw: 8}, int(keys), 0, never, nil, nil)
+		_, err = build(shape{kind: kindInts, kw: 8, vw: 8}, keySet{n: int(keys), hash: never})
 		if !errs.HasCode(err, CodeTooLarge) {
 			t.Fatalf("more keys than slots: %v", err)
 		}
@@ -53,8 +53,11 @@ func TestBuildRefusesWhatAnImageCannotAddress(t *testing.T) {
 
 func TestEveryHashCollidingIsUnsolved(t *testing.T) {
 	t.Parallel()
-	_, err := build(shape{kind: kindInts, kw: 8, vw: 8}, 4,
-		0, func(uint64, int) uint64 { return 42 }, func(int, int) bool { return false }, nil)
+	_, err := build(shape{kind: kindInts, kw: 8, vw: 8}, keySet{
+		n:    4,
+		hash: func(uint64, int) uint64 { return 42 },
+		same: func(int, int) bool { return false },
+	})
 	if !errs.HasCode(err, CodeUnsolved) {
 		t.Fatalf("four keys of one hash under every seed: %v", err)
 	}

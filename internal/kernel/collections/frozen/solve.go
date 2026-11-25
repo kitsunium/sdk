@@ -1,27 +1,31 @@
 package frozen
 
+import "slices"
+
 // The shape of the hash function a build searches for.
 const (
 	// keysPerBucket is λ, the mean bucket size: one pilot byte serves this many
 	// keys, so the pilots cost 1/λ byte a key. Three is where the search with
 	// eviction stays linear at the table's load.
-	keysPerBucket = 3
+	keysPerBucket uint32 = 3
 	// loadPercent is α: the table has n·100/α slots, the slots past n being
 	// remapped onto the holes below it, so a pilot search never needs the last
 	// free slot of a full table. Measured on a million keys, 99 spent half the
 	// build evicting; 97 costs 0.12 byte a key of remap and builds in two
 	// thirds of the time, and lower buys nothing more.
-	loadPercent = 97
+	loadPercent uint64 = 97
 	// pilots is the number of pilot values a bucket can take: one byte.
-	pilots = 256
+	pilots int = 256
 	// attempts bounds the seeds a build tries before it gives up; with a hash
 	// of 64 bits a second seed is already rare.
-	attempts = 8
+	attempts int = 8
 	// recentEvicted is how many buckets placed by eviction are not evicted
 	// again at once, which breaks the two-bucket cycles eviction can fall in.
-	recentEvicted = 16
+	recentEvicted int = 16
 	// evictionsPerKey bounds the evictions of one seed, n times this.
-	evictionsPerKey = 32
+	evictionsPerKey int = 32
+	// percent is what loadPercent is out of.
+	percent uint64 = 100
 )
 
 // plan is a solved hash function over n keys: the seed, the pilots, the remap of
@@ -75,6 +79,8 @@ func solve(n int, hash func(seed uint64, i int) uint64, same func(i, j int) bool
 			return s.finish(seed), -1, true
 		case duplicate:
 			return plan{}, d, false
+		case reseed:
+			//: the next seed of the sequence.
 		}
 	}
 	return plan{}, -1, false
@@ -101,7 +107,7 @@ type search struct {
 func newSearch(hs []uint64) *search {
 	n := uint32(len(hs))
 	nb := (n + keysPerBucket - 1) / keysPerBucket
-	m := uint32((uint64(n)*100 + loadPercent - 1) / loadPercent)
+	m := uint32((uint64(n)*percent + loadPercent - 1) / loadPercent)
 	s := &search{
 		hs: hs, n: n, m: m, nb: nb,
 		start: make([]uint32, nb+1), keys: make([]uint32, n), bh: make([]uint64, n),
@@ -134,20 +140,8 @@ func (s *search) bucket(b uint32) []uint64 { return s.bh[s.start[b]:s.start[b+1]
 // run places every bucket, the largest first, evicting when a bucket finds no
 // free pilot.
 func (s *search) run(same func(i, j int) bool) (verdict, int) {
-	//: two keys of one hash share every slot under every pilot: equal keys are
-	//: a duplicate, different ones need another seed.
-	for b := range s.nb {
-		lo, hi := s.start[b], s.start[b+1]
-		for i := lo + 1; i < hi; i++ {
-			for j := lo; j < i; j++ {
-				if s.bh[i] == s.bh[j] {
-					if same(int(s.keys[i]), int(s.keys[j])) {
-						return duplicate, int(s.keys[i])
-					}
-					return reseed, -1
-				}
-			}
-		}
+	if v, d := s.collisions(same); v != solved {
+		return v, d
 	}
 	order := s.bySize()
 	budget := int(s.n) * evictionsPerKey
@@ -163,6 +157,25 @@ func (s *search) run(same func(i, j int) bool) (verdict, int) {
 				return reseed, -1
 			}
 			budget--
+		}
+	}
+	return solved, -1
+}
+
+// collisions finds two keys of one hash, which share every slot under every
+// pilot: equal keys are a duplicate, different ones need another seed.
+func (s *search) collisions(same func(i, j int) bool) (verdict, int) {
+	for b := range s.nb {
+		lo, hi := s.start[b], s.start[b+1]
+		for i := lo + 1; i < hi; i++ {
+			k := slices.Index(s.bh[lo:i], s.bh[i])
+			if k < 0 {
+				continue
+			}
+			if same(int(s.keys[i]), int(s.keys[lo+uint32(k)])) {
+				return duplicate, int(s.keys[i])
+			}
+			return reseed, -1
 		}
 	}
 	return solved, -1
@@ -198,10 +211,8 @@ func (s *search) slots(b uint32, p byte) bool {
 	s.buf = s.buf[:0]
 	for _, h := range s.bucket(b) {
 		x := slotOf(h, p, s.m)
-		for _, y := range s.buf {
-			if x == y {
-				return false
-			}
+		if slices.Contains(s.buf, x) {
+			return false
 		}
 		s.buf = append(s.buf, x)
 	}

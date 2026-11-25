@@ -6,7 +6,8 @@ constants:
       counted in a uint32.
     items:
       - name: maxKeys
-        value: math.MaxUint32 / 100 * loadPercent
+        type: uint64
+        value: math.MaxUint32 / percent * loadPercent
     name: maxKeys
   - doc: |-
       The odd multipliers the hashes and the slot function fold with. Any odd
@@ -52,6 +53,7 @@ constants:
           keys, so the pilots cost 1/λ byte a key. Three is where the search with
           eviction stays linear at the table's load.
         name: keysPerBucket
+        type: uint32
         value: "3"
       - doc: |-
           loadPercent is α: the table has n·100/α slots, the slots past n being
@@ -60,23 +62,32 @@ constants:
           build evicting; 97 costs 0.12 byte a key of remap and builds in two
           thirds of the time, and lower buys nothing more.
         name: loadPercent
+        type: uint64
         value: "97"
       - doc: "pilots is the number of pilot values a bucket can take: one byte."
         name: pilots
+        type: int
         value: "256"
       - doc: |-
           attempts bounds the seeds a build tries before it gives up; with a hash
           of 64 bits a second seed is already rare.
         name: attempts
+        type: int
         value: "8"
       - doc: |-
           recentEvicted is how many buckets placed by eviction are not evicted
           again at once, which breaks the two-bucket cycles eviction can fall in.
         name: recentEvicted
+        type: int
         value: "16"
       - doc: evictionsPerKey bounds the evictions of one seed, n times this.
         name: evictionsPerKey
+        type: int
         value: "32"
+      - doc: percent is what loadPercent is out of.
+        name: percent
+        type: uint64
+        value: "100"
     name: keysPerBucket
   - grouped: true
     items:
@@ -90,7 +101,8 @@ constants:
         name: duplicate
     name: solved
   - doc: |-
-      The image's fixed header, little-endian, CRC32C over its first 60 bytes:
+      The image's fixed header, little-endian, its CRC-32C over the bytes before
+      headerSealed, where the CRC itself is stored:
 
       	0  magic "KFZN"     12 keys     24 seed       48 body CRC32C
       	4  version          16 buckets  32 blob size  52 reserved, zero
@@ -107,12 +119,32 @@ constants:
     grouped: true
     items:
       - name: headerSize
+        type: uint64
         value: "64"
+      - name: headerSealed
+        type: uint64
+        value: "60"
       - name: version
+        type: uint16
         value: "1"
       - name: magic
         value: "\"KFZN\""
     name: headerSize
+  - doc: |-
+      The widths, in bytes, an integer is stored at: a key, a value, a length or
+      an offset.
+    grouped: true
+    items:
+      - name: width8
+        type: byte
+        value: "8"
+      - name: width4
+        type: byte
+        value: "4"
+      - name: width2
+        type: byte
+        value: "2"
+    name: width8
   - doc: The kinds of table, the shape's first byte.
     grouped: true
     items:
@@ -133,6 +165,7 @@ files:
   - decls:
       - maxKeys
       - writer
+      - keySet
       - build
       - widthOf
       - signs
@@ -204,6 +237,7 @@ files:
       - newSearch
       - (*search).bucket
       - (*search).run
+      - (*search).collisions
       - (*search).bySize
       - (*search).slots
       - (*search).take
@@ -216,9 +250,9 @@ files:
     name: solve.go
   - decls:
       - headerSize
+      - width8
       - kindInts
       - castagnoli
-      - le
       - shape
       - shape.stride
       - shape.head
@@ -246,11 +280,10 @@ files:
     name: view.go
 functions:
   - doc: |-
-      build solves the hash function of n keys and writes the image of shape s:
-      hash and same as solve takes them, blob the blob's size in bytes, write each
-      key's record, in slot order so the blob is in the records' order.
+      build solves the hash function of ks's keys and writes the image of shape
+      s, each key's record in slot order so the blob is in the records' order.
     name: build
-    params: s shape, n int, blob uint64, hash func(seed uint64, i int) uint64, same func(i, j int) bool, write writer
+    params: s shape, ks keySet
     results: table, error
   - doc: |-
       widthOf is T's size in bytes and whether it is signed, found by shifting a
@@ -293,11 +326,14 @@ functions:
     name: hashInt
     params: seed, k uint64
     results: uint64
-  - doc: load64 reads s[i:i+8] little-endian; the compiler merges the byte loads.
+  - doc: |-
+      load64 reads s[i:i+8] little-endian. The one slice of eight bytes is the
+      only bounds check: the compiler then knows every index below it is in range,
+      and merges the byte loads into one.
     name: load64
     params: s string, i int
     results: uint64
-  - doc: load32 reads s[i:i+4] little-endian.
+  - doc: load32 reads s[i:i+4] little-endian, with load64's one bounds check.
     name: load32
     params: s string, i int
     results: uint64
@@ -432,6 +468,7 @@ imports:
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   iter: iter
   math: math
+  slices: slices
   unsafe: unsafe
 package:
   docFile: doc.go
@@ -445,6 +482,23 @@ types:
     kind: named
     name: writer
     underlying: func(i int, rec, blob []byte, off uint32) uint32
+  - doc: |-
+      keySet is what a build is given: n keys, hashed under a seed by hash and
+      compared by same as solve takes them, the blob's size in bytes, and the
+      writer of each key's record.
+    fields:
+      - name: "n"
+        type: int
+      - name: blob
+        type: uint64
+      - name: hash
+        type: func(seed uint64, i int) uint64
+      - name: same
+        type: func(i, j int) bool
+      - name: write
+        type: writer
+    kind: struct
+    name: keySet
   - kind: named
     name: Check
     underlying: uint8
@@ -592,6 +646,13 @@ types:
           run places every bucket, the largest first, evicting when a bucket finds no
           free pilot.
         name: run
+        params: same func(i, j int) bool
+        recv: s *search
+        results: verdict, int
+      - doc: |-
+          collisions finds two keys of one hash, which share every slot under every
+          pilot: equal keys are a duplicate, different ones need another seed.
+        name: collisions
         params: same func(i, j int) bool
         recv: s *search
         results: verdict, int
@@ -808,13 +869,14 @@ vars:
       - name: dictShape
         value: "shape{kind: kindText}"
     name: dictShape
-  - doc: castagnoli is CRC32C's table, which the platform's instruction computes.
+  - grouped: true
     items:
-      - name: castagnoli
+      - doc: castagnoli is CRC32C's table, which the platform's instruction computes.
+        name: castagnoli
         value: crc32.MakeTable(crc32.Castagnoli)
-    name: castagnoli
-  - doc: le is the image's byte order.
-    items:
-      - name: le
+      - doc: |-
+          le is the image's byte order: every integer of an image is
+          little-endian, whatever the platform's.
+        name: le
         value: binary.LittleEndian
-    name: le
+    name: castagnoli

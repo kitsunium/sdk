@@ -33,14 +33,16 @@ func NewMap[K, V Integer](keys []K, values []V) (*Map[K, V], error) {
 	}
 	s := mapShape[K, V]()
 	kmask := mask(s.kw)
-	t, err := build(s, len(keys), 0,
-		func(seed uint64, i int) uint64 { return hashInt(seed, uint64(keys[i])&kmask) },
-		func(i, j int) bool { return keys[i] == keys[j] },
-		func(i int, rec, _ []byte, _ uint32) uint32 {
+	t, err := build(s, keySet{
+		n:    len(keys),
+		hash: func(seed uint64, i int) uint64 { return hashInt(seed, uint64(keys[i])&kmask) },
+		same: func(i, j int) bool { return keys[i] == keys[j] },
+		write: func(i int, rec, _ []byte, _ uint32) uint32 {
 			storew(rec, s.kw, uint64(keys[i]))
 			storew(rec[s.kw:], s.vw, uint64(values[i]))
 			return 0
-		})
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -114,15 +116,17 @@ func NewStringMap[V Integer](keys []string, values []V) (*StringMap[V], error) {
 		return nil, err
 	}
 	s := stringMapShape[V]()
-	t, err := build(s, len(keys), totalLen(keys, nil)+uint64(len(keys))*uint64(s.head()+uint32(s.vw)),
-		func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
-		func(i, j int) bool { return keys[i] == keys[j] },
-		func(i int, rec, blob []byte, off uint32) uint32 {
+	t, err := build(s, keySet{
+		n: len(keys), blob: totalLen(keys, nil) + uint64(len(keys))*uint64(s.head()+uint32(s.vw)),
+		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
+		same: func(i, j int) bool { return keys[i] == keys[j] },
+		write: func(i int, rec, blob []byte, off uint32) uint32 {
 			le.PutUint32(rec, off)
 			at := head(blob, keys[i], s.head())
 			storew(blob[at:], s.vw, uint64(values[i]))
 			return at + uint32(s.vw)
-		})
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -190,15 +194,17 @@ func NewDict(keys, values []string) (*Dict, error) {
 	if err := lengths(len(keys), len(values)); err != nil {
 		return nil, err
 	}
-	t, err := build(dictShape, len(keys), totalLen(keys, values)+uint64(len(keys))*uint64(dictShape.head()),
-		func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
-		func(i, j int) bool { return keys[i] == keys[j] },
-		func(i int, rec, blob []byte, off uint32) uint32 {
+	t, err := build(dictShape, keySet{
+		n: len(keys), blob: totalLen(keys, values) + uint64(len(keys))*uint64(dictShape.head()),
+		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
+		same: func(i, j int) bool { return keys[i] == keys[j] },
+		write: func(i int, rec, blob []byte, off uint32) uint32 {
 			le.PutUint32(rec, off)
-			le.PutUint32(blob[4:], uint32(len(values[i])))
+			le.PutUint32(blob[width4:], uint32(len(values[i])))
 			at := head(blob, keys[i], dictShape.head())
 			return at + uint32(copy(blob[at:], values[i]))
-		})
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -265,8 +271,9 @@ func totalLen(keys, values []string) uint64 {
 func (t *table) appendTo(b []byte, s shape) []byte {
 	if t.image == nil {
 		e := make([]byte, headerSize)
-		empty := table{shape: s}
-		writeHeader(e, &empty)
+		empty := new(table)
+		empty.shape = s
+		writeHeader(e, empty)
 		return append(b, e...)
 	}
 	return append(b, t.image...)

@@ -34,14 +34,14 @@ func corrupt(why string) error {
 // load reads image as a table of shape want, verifying it under check; the
 // table reads image in place, so the caller keeps it alive and unchanged.
 func load(image []byte, want shape, check Check) (table, error) {
-	if len(image) < headerSize {
+	if uint64(len(image)) < headerSize {
 		return table{}, corrupt("shorter than the header")
 	}
 	h := image[:headerSize]
 	if string(h[:4]) != magic {
 		return table{}, corrupt("magic")
 	}
-	if crc32.Checksum(h[:60], castagnoli) != le.Uint32(h[60:]) {
+	if crc32.Checksum(h[:headerSealed], castagnoli) != le.Uint32(h[headerSealed:]) {
 		return table{}, corrupt("header checksum")
 	}
 	if v := le.Uint16(h[4:]); v != version {
@@ -133,7 +133,7 @@ func (t *table) checkEntry(off uint32) (string, bool) {
 	}
 	end := uint64(off) + hs + load32(t.blob, int(off))
 	if t.shape.kind == kindText {
-		end += load32(t.blob, int(off)+4)
+		end += load32(t.blob, int(off)+int(width4))
 	} else {
 		end += uint64(t.shape.vw)
 	}

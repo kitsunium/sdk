@@ -5,7 +5,8 @@ import (
 	"hash/crc32"
 )
 
-// The image's fixed header, little-endian, CRC32C over its first 60 bytes:
+// The image's fixed header, little-endian, its CRC-32C over the bytes before
+// headerSealed, where the CRC itself is stored:
 //
 //	0  magic "KFZN"     12 keys     24 seed       48 body CRC32C
 //	4  version          16 buckets  32 blob size  52 reserved, zero
@@ -20,9 +21,18 @@ import (
 // table's is the uint32 offset of its entry in the blob: the key's length as
 // a uint32, a Dict's value length too, then the key's bytes and the value's.
 const (
-	headerSize = 64
-	version    = 1
-	magic      = "KFZN"
+	headerSize   uint64 = 64
+	headerSealed uint64 = 60
+	version      uint16 = 1
+	magic               = "KFZN"
+)
+
+// The widths, in bytes, an integer is stored at: a key, a value, a length or
+// an offset.
+const (
+	width8 byte = 8
+	width4 byte = 4
+	width2 byte = 2
 )
 
 // The kinds of table, the shape's first byte.
@@ -32,11 +42,13 @@ const (
 	kindText    byte = 3 // string keys, string values
 )
 
-// castagnoli is CRC32C's table, which the platform's instruction computes.
-var castagnoli = crc32.MakeTable(crc32.Castagnoli)
-
-// le is the image's byte order.
-var le = binary.LittleEndian
+var (
+	// castagnoli is CRC32C's table, which the platform's instruction computes.
+	castagnoli = crc32.MakeTable(crc32.Castagnoli)
+	// le is the image's byte order: every integer of an image is
+	// little-endian, whatever the platform's.
+	le = binary.LittleEndian
+)
 
 // shape is what a table holds: its kind, the widths of its integer keys and
 // values in bytes (0 for strings), and whether each is signed.
@@ -52,16 +64,16 @@ func (s shape) stride() uint32 {
 	if s.kind == kindInts {
 		return uint32(s.kw) + uint32(s.vw)
 	}
-	return 4
+	return uint32(width4)
 }
 
 // head is the size of a string entry's head: the key's length and, in a Dict,
 // the value's.
 func (s shape) head() uint32 {
 	if s.kind == kindText {
-		return 8
+		return uint32(width4 + width4)
 	}
-	return 4
+	return uint32(width4)
 }
 
 // table is a built or loaded image, read in place: every section is a slice of
@@ -86,11 +98,11 @@ type table struct {
 // loadw reads a w-byte little-endian integer at b[0:w], zero-extended.
 func loadw(b []byte, w byte) uint64 {
 	switch w {
-	case 8:
+	case width8:
 		return le.Uint64(b)
-	case 4:
+	case width4:
 		return uint64(le.Uint32(b))
-	case 2:
+	case width2:
 		return uint64(le.Uint16(b))
 	default:
 		return uint64(b[0])
@@ -100,11 +112,11 @@ func loadw(b []byte, w byte) uint64 {
 // storew writes the low w bytes of v at b[0:w].
 func storew(b []byte, w byte, v uint64) {
 	switch w {
-	case 8:
+	case width8:
 		le.PutUint64(b, v)
-	case 4:
+	case width4:
 		le.PutUint32(b, uint32(v))
-	case 2:
+	case width2:
 		le.PutUint16(b, uint16(v))
 	default:
 		b[0] = byte(v)
@@ -113,10 +125,10 @@ func storew(b []byte, w byte, v uint64) {
 
 // mask is the low w bytes set.
 func mask(w byte) uint64 {
-	if w >= 8 {
+	if w >= width8 {
 		return ^uint64(0)
 	}
-	return 1<<(8*uint64(w)) - 1
+	return 1<<(uint64(width8)*uint64(w)) - 1
 }
 
 // slot is the slot of the key whose hash is h: its bucket's pilot, then the
@@ -186,11 +198,11 @@ func (t *table) stringKey(off uint32) string {
 func (t *table) entryValue(off uint32) uint64 {
 	at := int(off + t.shape.head() + uint32(load32(t.blob, int(off))))
 	switch t.shape.vw {
-	case 8:
+	case width8:
 		return load64(t.blob, at)
-	case 4:
+	case width4:
 		return load32(t.blob, at)
-	case 2:
+	case width2:
 		return uint64(t.blob[at]) | uint64(t.blob[at+1])<<8
 	default:
 		return uint64(t.blob[at])
@@ -199,8 +211,8 @@ func (t *table) entryValue(off uint32) uint64 {
 
 // textValue is the string value of the Dict entry at off, after its key.
 func (t *table) textValue(off uint32) string {
-	at := off + 8 + uint32(load32(t.blob, int(off)))
-	return t.blob[at : at+uint32(load32(t.blob, int(off)+4))]
+	at := off + t.shape.head() + uint32(load32(t.blob, int(off)))
+	return t.blob[at : at+uint32(load32(t.blob, int(off)+int(width4)))]
 }
 
 // layout is where an image's sections start, and its size, computed in 64
@@ -238,7 +250,7 @@ func writeHeader(image []byte, t *table) {
 	le.PutUint64(h[32:], uint64(len(t.blob)))
 	le.PutUint64(h[40:], uint64(len(image)))
 	le.PutUint32(h[48:], crc32.Checksum(image[headerSize:], castagnoli))
-	le.PutUint32(h[60:], crc32.Checksum(h[:60], castagnoli))
+	le.PutUint32(h[headerSealed:], crc32.Checksum(h[:headerSealed], castagnoli))
 }
 
 // view points t's sections into image, whose header says the layout l.

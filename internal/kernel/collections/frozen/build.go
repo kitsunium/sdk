@@ -8,20 +8,31 @@ import (
 
 // maxKeys is the most keys a table holds: its slots, n·100/α of them, are
 // counted in a uint32.
-const maxKeys = math.MaxUint32 / 100 * loadPercent
+const maxKeys uint64 = math.MaxUint32 / percent * loadPercent
 
 // writer fills the record of key i at rec and its blob bytes at blob, and
 // returns how many blob bytes it wrote.
 type writer func(i int, rec, blob []byte, off uint32) uint32
 
-// build solves the hash function of n keys and writes the image of shape s:
-// hash and same as solve takes them, blob the blob's size in bytes, write each
-// key's record, in slot order so the blob is in the records' order.
-func build(s shape, n int, blob uint64, hash func(seed uint64, i int) uint64, same func(i, j int) bool, write writer) (table, error) {
+// keySet is what a build is given: n keys, hashed under a seed by hash and
+// compared by same as solve takes them, the blob's size in bytes, and the
+// writer of each key's record.
+type keySet struct {
+	n     int
+	blob  uint64
+	hash  func(seed uint64, i int) uint64
+	same  func(i, j int) bool
+	write writer
+}
+
+// build solves the hash function of ks's keys and writes the image of shape
+// s, each key's record in slot order so the blob is in the records' order.
+func build(s shape, ks keySet) (table, error) {
+	n, blob, write := ks.n, ks.blob, ks.write
 	if uint64(n) > maxKeys || blob > math.MaxUint32 {
 		return table{}, origin(TooLarge, errs.Int64("keys", int64(n)), errs.Int64("blob", int64(min(blob, math.MaxInt64))))
 	}
-	p, dup, ok := solve(n, hash, same)
+	p, dup, ok := solve(n, ks.hash, ks.same)
 	if !ok {
 		if dup >= 0 {
 			return table{}, origin(DuplicateKey, errs.Int64("index", int64(dup)))

@@ -10,8 +10,5 @@ import "unsafe"
 // contract makes the caller keep its bytes unchanged for as long as the table
 // lives.
 func stringOf(b []byte) string {
-	if len(b) == 0 {
-		return ""
-	}
 	return unsafe.String(unsafe.SliceData(b), len(b))
 }

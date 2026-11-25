@@ -40,17 +40,19 @@ func hashInt(seed, k uint64) uint64 {
 	return k ^ k>>31
 }
 
-// load64 reads s[i:i+8] little-endian; the compiler merges the byte loads.
+// load64 reads s[i:i+8] little-endian. The one slice of eight bytes is the
+// only bounds check: the compiler then knows every index below it is in range,
+// and merges the byte loads into one.
 func load64(s string, i int) uint64 {
-	_ = s[i+7]
-	return uint64(s[i]) | uint64(s[i+1])<<8 | uint64(s[i+2])<<16 | uint64(s[i+3])<<24 |
-		uint64(s[i+4])<<32 | uint64(s[i+5])<<40 | uint64(s[i+6])<<48 | uint64(s[i+7])<<56
+	w := s[i : i+int(width8)]
+	return uint64(w[0]) | uint64(w[1])<<8 | uint64(w[2])<<16 | uint64(w[3])<<24 |
+		uint64(w[4])<<32 | uint64(w[5])<<40 | uint64(w[6])<<48 | uint64(w[7])<<56
 }
 
-// load32 reads s[i:i+4] little-endian.
+// load32 reads s[i:i+4] little-endian, with load64's one bounds check.
 func load32(s string, i int) uint64 {
-	_ = s[i+3]
-	return uint64(s[i]) | uint64(s[i+1])<<8 | uint64(s[i+2])<<16 | uint64(s[i+3])<<24
+	w := s[i : i+int(width4)]
+	return uint64(w[0]) | uint64(w[1])<<8 | uint64(w[2])<<16 | uint64(w[3])<<24
 }
 
 // hashString hashes a string key under seed: sixteen bytes per folded
@@ -65,10 +67,10 @@ func hashString(seed uint64, s string) uint64 {
 	}
 	var a, b uint64
 	switch n := len(s); {
-	case n >= 8:
-		a, b = load64(s, 0), load64(s, n-8)
-	case n >= 4:
-		a, b = load32(s, 0), load32(s, n-4)
+	case n >= int(width8):
+		a, b = load64(s, 0), load64(s, n-int(width8))
+	case n >= int(width4):
+		a, b = load32(s, 0), load32(s, n-int(width4))
 	case n > 0:
 		a = uint64(s[0])<<16 | uint64(s[n>>1])<<8 | uint64(s[n-1])
 	}

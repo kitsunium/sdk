@@ -18,12 +18,14 @@ sequences:
       - id: writeHeader
         kind: internal
     steps:
+      - bind: n, blob, write
+        eval: ks.n, ks.blob, ks.write
       - opt:
           do:
             - return: table{}, origin(TooLarge, errs.Int64("keys", int64(n)), errs.Int64("blob", int64(min(blob, math.MaxInt64))))
           when: uint64(n) > maxKeys || blob > math.MaxUint32
       - bind: p, dup, ok
-        eval: solve(n, hash, same)
+        eval: solve(n, ks.hash, ks.same)
         to: solve
       - opt:
           do:
@@ -182,16 +184,16 @@ sequences:
       - return: k ^ k>>31
   - of: load64
     steps:
-      - set: _
-        value: s[i+7]
+      - bind: w
+        eval: "s[i : i+int(width8)]"
       - return: |-
-          uint64(s[i]) | uint64(s[i+1])<<8 | uint64(s[i+2])<<16 | uint64(s[i+3])<<24 |
-          		uint64(s[i+4])<<32 | uint64(s[i+5])<<40 | uint64(s[i+6])<<48 | uint64(s[i+7])<<56
+          uint64(w[0]) | uint64(w[1])<<8 | uint64(w[2])<<16 | uint64(w[3])<<24 |
+          		uint64(w[4])<<32 | uint64(w[5])<<40 | uint64(w[6])<<48 | uint64(w[7])<<56
   - of: load32
     steps:
-      - set: _
-        value: s[i+3]
-      - return: uint64(s[i]) | uint64(s[i+1])<<8 | uint64(s[i+2])<<16 | uint64(s[i+3])<<24
+      - bind: w
+        eval: "s[i : i+int(width4)]"
+      - return: uint64(w[0]) | uint64(w[1])<<8 | uint64(w[2])<<16 | uint64(w[3])<<24
   - of: hashString
     participants:
       - id: caller
@@ -215,14 +217,14 @@ sequences:
         stmt: var a, b uint64
       - switch:
           cases:
-            - case: n >= 8
+            - case: n >= int(width8)
               do:
                 - set: a, b
-                  value: load64(s, 0), load64(s, n-8)
-            - case: n >= 4
+                  value: load64(s, 0), load64(s, n-int(width8))
+            - case: n >= int(width4)
               do:
                 - set: a, b
-                  value: load32(s, 0), load32(s, n-4)
+                  value: load32(s, 0), load32(s, n-int(width4))
             - case: n > 0
               do:
                 - set: a
@@ -276,7 +278,7 @@ sequences:
       - opt:
           do:
             - return: table{}, corrupt("shorter than the header")
-          when: len(image) < headerSize
+          when: uint64(len(image)) < headerSize
       - bind: h
         eval: image[:headerSize]
       - opt:
@@ -286,7 +288,7 @@ sequences:
       - opt:
           do:
             - return: table{}, corrupt("header checksum")
-          when: crc32.Checksum(h[:60], castagnoli) != le.Uint32(h[60:])
+          when: crc32.Checksum(h[:headerSealed], castagnoli) != le.Uint32(h[headerSealed:])
       - opt:
           do:
             - return: table{}, origin(ImageVersion, errs.Int64("version", int64(v)))
@@ -459,7 +461,7 @@ sequences:
               - op: +=
                 set: end
                 to: load32
-                value: load32(t.blob, int(off)+4)
+                value: load32(t.blob, int(off)+int(width4))
             when: t.shape.kind == kindText
           - do:
               - op: +=
@@ -516,14 +518,16 @@ sequences:
         to: mask
       - bind: t, err
         eval: |-
-          build(s, len(keys), 0,
-          		func(seed uint64, i int) uint64 { return hashInt(seed, uint64(keys[i])&kmask) },
-          		func(i, j int) bool { return keys[i] == keys[j] },
-          		func(i int, rec, _ []byte, _ uint32) uint32 {
+          build(s, keySet{
+          		n:    len(keys),
+          		hash: func(seed uint64, i int) uint64 { return hashInt(seed, uint64(keys[i])&kmask) },
+          		same: func(i, j int) bool { return keys[i] == keys[j] },
+          		write: func(i int, rec, _ []byte, _ uint32) uint32 {
           			storew(rec, s.kw, uint64(keys[i]))
           			storew(rec[s.kw:], s.vw, uint64(values[i]))
           			return 0
-          		})
+          		},
+          	})
         to: build
       - opt:
           do:
@@ -644,15 +648,17 @@ sequences:
         to: stringMapShape
       - bind: t, err
         eval: |-
-          build(s, len(keys), totalLen(keys, nil)+uint64(len(keys))*uint64(s.head()+uint32(s.vw)),
-          		func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
-          		func(i, j int) bool { return keys[i] == keys[j] },
-          		func(i int, rec, blob []byte, off uint32) uint32 {
+          build(s, keySet{
+          		n: len(keys), blob: totalLen(keys, nil) + uint64(len(keys))*uint64(s.head()+uint32(s.vw)),
+          		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
+          		same: func(i, j int) bool { return keys[i] == keys[j] },
+          		write: func(i int, rec, blob []byte, off uint32) uint32 {
           			le.PutUint32(rec, off)
           			at := head(blob, keys[i], s.head())
           			storew(blob[at:], s.vw, uint64(values[i]))
           			return at + uint32(s.vw)
-          		})
+          		},
+          	})
         to: build
       - opt:
           do:
@@ -763,15 +769,17 @@ sequences:
           when: err != nil
       - bind: t, err
         eval: |-
-          build(dictShape, len(keys), totalLen(keys, values)+uint64(len(keys))*uint64(dictShape.head()),
-          		func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
-          		func(i, j int) bool { return keys[i] == keys[j] },
-          		func(i int, rec, blob []byte, off uint32) uint32 {
+          build(dictShape, keySet{
+          		n: len(keys), blob: totalLen(keys, values) + uint64(len(keys))*uint64(dictShape.head()),
+          		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
+          		same: func(i, j int) bool { return keys[i] == keys[j] },
+          		write: func(i int, rec, blob []byte, off uint32) uint32 {
           			le.PutUint32(rec, off)
-          			le.PutUint32(blob[4:], uint32(len(values[i])))
+          			le.PutUint32(blob[width4:], uint32(len(values[i])))
           			at := head(blob, keys[i], dictShape.head())
           			return at + uint32(copy(blob[at:], values[i]))
-          		})
+          		},
+          	})
         to: build
       - opt:
           do:
@@ -900,8 +908,10 @@ sequences:
             - bind: e
               eval: make([]byte, headerSize)
             - bind: empty
-              eval: "table{shape: s}"
-            - eval: writeHeader(e, &empty)
+              eval: new(table)
+            - set: empty.shape
+              value: s
+            - eval: writeHeader(e, empty)
               to: writeHeader
             - return: append(b, e...)
           when: t.image == nil
@@ -973,6 +983,7 @@ sequences:
                   - case: duplicate
                     do:
                       - return: plan{}, d, false
+                  - case: reseed
                 init:
                   bind: v, d
                   eval: s.run(same)
@@ -995,7 +1006,7 @@ sequences:
       - bind: nb
         eval: (n + keysPerBucket - 1) / keysPerBucket
       - bind: m
-        eval: uint32((uint64(n)*100 + loadPercent - 1) / loadPercent)
+        eval: uint32((uint64(n)*percent + loadPercent - 1) / loadPercent)
       - bind: s
         eval: |-
           &search{
@@ -1050,33 +1061,19 @@ sequences:
         kind: actor
       - id: (*search).run
         kind: self
+      - id: s.collisions
+        kind: internal
       - id: s.bySize
         kind: internal
     steps:
-      - loop:
+      - opt:
           do:
-            - bind: lo, hi
-              eval: s.start[b], s.start[b+1]
-            - loop:
-                cond: i < hi
-                do:
-                  - loop:
-                      cond: j < i
-                      do:
-                        - opt:
-                            do:
-                              - opt:
-                                  do:
-                                    - return: duplicate, int(s.keys[i])
-                                  when: same(int(s.keys[i]), int(s.keys[j]))
-                              - return: reseed, -1
-                            when: s.bh[i] == s.bh[j]
-                      init: j := lo
-                      post: j++
-                init: i := lo + 1
-                post: i++
-          key: b
-          range: s.nb
+            - return: v, d
+          init:
+            bind: v, d
+            eval: s.collisions(same)
+            to: s.collisions
+          when: v != solved
       - bind: order
         eval: s.bySize()
         to: s.bySize
@@ -1106,6 +1103,39 @@ sequences:
           key: _
           range: order
           value: b
+      - return: solved, -1
+  - of: (*search).collisions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*search).collisions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: lo, hi
+              eval: s.start[b], s.start[b+1]
+            - loop:
+                cond: i < hi
+                do:
+                  - bind: k
+                    eval: slices.Index(s.bh[lo:i], s.bh[i])
+                    to: slices
+                  - opt:
+                      do:
+                        - continue: true
+                      when: k < 0
+                  - opt:
+                      do:
+                        - return: duplicate, int(s.keys[i])
+                      when: same(int(s.keys[i]), int(s.keys[lo+uint32(k)]))
+                  - return: reseed, -1
+                init: i := lo + 1
+                post: i++
+          key: b
+          range: s.nb
       - return: solved, -1
   - of: (*search).bySize
     steps:
@@ -1164,15 +1194,10 @@ sequences:
             - bind: x
               eval: slotOf(h, p, s.m)
               to: slotOf
-            - loop:
+            - opt:
                 do:
-                  - opt:
-                      do:
-                        - return: "false"
-                      when: x == y
-                key: _
-                range: s.buf
-                value: "y"
+                  - return: "false"
+                when: slices.Contains(s.buf, x)
             - set: s.buf
               value: append(s.buf, x)
           key: _
@@ -1391,14 +1416,14 @@ sequences:
           do:
             - return: uint32(s.kw) + uint32(s.vw)
           when: s.kind == kindInts
-      - return: "4"
+      - return: uint32(width4)
   - of: shape.head
     steps:
       - opt:
           do:
-            - return: "8"
+            - return: uint32(width4 + width4)
           when: s.kind == kindText
-      - return: "4"
+      - return: uint32(width4)
   - of: loadw
     participants:
       - id: caller
@@ -1410,14 +1435,14 @@ sequences:
     steps:
       - switch:
           cases:
-            - case: "8"
+            - case: width8
               do:
                 - return: le.Uint64(b)
                   to: le.Uint64
-            - case: "4"
+            - case: width4
               do:
                 - return: uint64(le.Uint32(b))
-            - case: "2"
+            - case: width2
               do:
                 - return: uint64(le.Uint16(b))
             - default: true
@@ -1439,15 +1464,15 @@ sequences:
     steps:
       - switch:
           cases:
-            - case: "8"
+            - case: width8
               do:
                 - eval: le.PutUint64(b, v)
                   to: le.PutUint64
-            - case: "4"
+            - case: width4
               do:
                 - eval: le.PutUint32(b, uint32(v))
                   to: le.PutUint32
-            - case: "2"
+            - case: width2
               do:
                 - eval: le.PutUint16(b, uint16(v))
                   to: le.PutUint16
@@ -1461,8 +1486,8 @@ sequences:
       - opt:
           do:
             - return: ^uint64(0)
-          when: w >= 8
-      - return: 1<<(8*uint64(w)) - 1
+          when: w >= width8
+      - return: 1<<(uint64(width8)*uint64(w)) - 1
   - of: (*table).slot
     participants:
       - id: caller
@@ -1610,15 +1635,15 @@ sequences:
         eval: int(off + t.shape.head() + uint32(load32(t.blob, int(off))))
       - switch:
           cases:
-            - case: "8"
+            - case: width8
               do:
                 - return: load64(t.blob, at)
                   to: load64
-            - case: "4"
+            - case: width4
               do:
                 - return: load32(t.blob, at)
                   to: load32
-            - case: "2"
+            - case: width2
               do:
                 - return: uint64(t.blob[at]) | uint64(t.blob[at+1])<<8
             - default: true
@@ -1628,8 +1653,8 @@ sequences:
   - of: (*table).textValue
     steps:
       - bind: at
-        eval: off + 8 + uint32(load32(t.blob, int(off)))
-      - return: "t.blob[at : at+uint32(load32(t.blob, int(off)+4))]"
+        eval: off + t.shape.head() + uint32(load32(t.blob, int(off)))
+      - return: "t.blob[at : at+uint32(load32(t.blob, int(off)+int(width4)))]"
   - of: pad4
     steps:
       - return: (x + 3) &^ 3
@@ -1684,7 +1709,7 @@ sequences:
         to: le.PutUint64
       - eval: le.PutUint32(h[48:], crc32.Checksum(image[headerSize:], castagnoli))
         to: le.PutUint32
-      - eval: le.PutUint32(h[60:], crc32.Checksum(h[:60], castagnoli))
+      - eval: le.PutUint32(h[headerSealed:], crc32.Checksum(h[:headerSealed], castagnoli))
         to: le.PutUint32
   - of: (*table).view
     participants:
@@ -1727,9 +1752,5 @@ sequences:
       - id: unsafe
         kind: stdlib
     steps:
-      - opt:
-          do:
-            - return: "\"\""
-          when: len(b) == 0
       - return: unsafe.String(unsafe.SliceData(b), len(b))
         to: unsafe
