@@ -96,32 +96,86 @@ func TestViolationsNeverQuoteTheDocument(t *testing.T) {
 // TestNewValidatorRefuses pins the refusals, each with its code.
 func TestNewValidatorRefuses(t *testing.T) {
 	t.Parallel()
-	cases := map[string]struct {
+	type testCase struct {
 		schema string
 		cfg    jsonschema.Config
 		code   errs.Code
-	}{
-		"not JSON":            {`{"type":`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
-		"not a schema":        {`42`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
-		"wrong keyword shape": {`{"minLength":-1}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
-		"lookahead pattern":   {`{"pattern":"(?=a)"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
-		"draft-07":            {`{"$schema":"http://json-schema.org/draft-07/schema#"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
-		"$dynamicRef":         {`{"$dynamicRef":"#x"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
-		"unevaluated":         {`{"unevaluatedProperties":false}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
-		"content":             {`{"contentMediaType":"application/json"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
-		"remote ref":          {`{"$ref":"https://example.com/schema.json"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaRefUnresolved},
-		"missing pointer":     {`{"$ref":"#/$defs/none"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaRefUnresolved},
-		"unknown format":      {`{}`, jsonschema.Config{AssertFormats: []string{"hostname"}}, corejsonschema.CodeJSONSchemaFormatUnknown},
+	}
+	cases := map[string]testCase{
+		"not JSON":             {`{"type":`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"not a schema":         {`42`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"wrong keyword shape":  {`{"minLength":-1}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"unknown type":         {`{"type":"thing"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"unknown array type":   {`{"type":["string","thing"]}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"wrong type case":      {`{"type":"String"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"empty type array":     {`{"type":[]}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"duplicate type":       {`{"type":["string","null","string"]}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"non-string type item": {`{"type":["string",1]}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"non-string type":      {`{"type":null}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"lookahead pattern":    {`{"pattern":"(?=a)"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaSchemaInvalid},
+		"draft-07":             {`{"$schema":"http://json-schema.org/draft-07/schema#"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
+		"$dynamicRef":          {`{"$dynamicRef":"#x"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
+		"unevaluated":          {`{"unevaluatedProperties":false}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
+		"content":              {`{"contentMediaType":"application/json"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaKeywordRefused},
+		"remote ref":           {`{"$ref":"https://example.com/schema.json"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaRefUnresolved},
+		"missing pointer":      {`{"$ref":"#/$defs/none"}`, jsonschema.Config{}, corejsonschema.CodeJSONSchemaRefUnresolved},
+		"unknown format":       {`{}`, jsonschema.Config{AssertFormats: []string{"hostname"}}, corejsonschema.CodeJSONSchemaFormatUnknown},
+	}
+	runCase := func(t *testing.T, tc testCase) {
+		t.Helper()
+		if _, err := jsonschema.NewValidator([]byte(tc.schema), tc.cfg); !errs.HasCode(err, tc.code) {
+			t.Fatalf("NewValidator: %v, want %v", err, tc.code)
+		}
 	}
 	for name, tc := range cases {
-		if _, err := jsonschema.NewValidator([]byte(tc.schema), tc.cfg); !errs.HasCode(err, tc.code) {
-			t.Fatalf("%s: %v, want %v", name, err, tc.code)
-		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 	registered := jsonschema.Config{Resources: map[string][]byte{"https://example.com/schema.json": []byte(`{"type":"string"}`)}}
 	v := mustValidator(t, `{"$ref":"https://example.com/schema.json"}`, registered)
 	if report, _ := v.Validate([]byte(`1`), 16); report.OK() {
 		t.Fatal("a registered resource was not applied")
+	}
+}
+
+// TestTypeAlternatives checks single names, unions and the integer subset of number.
+func TestTypeAlternatives(t *testing.T) {
+	t.Parallel()
+	type testCase struct {
+		schema   string
+		document string
+		valid    bool
+	}
+	cases := map[string]testCase{
+		"null":               {`{"type":"null"}`, `null`, true},
+		"boolean":            {`{"type":"boolean"}`, `false`, true},
+		"object":             {`{"type":"object"}`, `{}`, true},
+		"array":              {`{"type":"array"}`, `[]`, true},
+		"number":             {`{"type":"number"}`, `1.5`, true},
+		"integer":            {`{"type":"integer"}`, `1.0`, true},
+		"fraction":           {`{"type":"integer"}`, `1.5`, false},
+		"numeric string":     {`{"type":"integer"}`, `"1"`, false},
+		"string":             {`{"type":"string"}`, `"word"`, true},
+		"one-element array":  {`{"type":["string"]}`, `"word"`, true},
+		"second alternative": {`{"type":["string","null"]}`, `null`, true},
+		"no alternative":     {`{"type":["string","null"]}`, `false`, false},
+		"number and integer": {`{"type":["integer","number"]}`, `1.5`, true},
+	}
+	runCase := func(t *testing.T, tc testCase) {
+		t.Helper()
+		v := mustValidator(t, tc.schema, jsonschema.Config{})
+		report, err := v.Validate([]byte(tc.document), 32)
+		if err != nil || report.OK() != tc.valid {
+			t.Fatalf("Validate: %v, %v, want valid=%t", report, err, tc.valid)
+		}
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
 	}
 }
 
