@@ -40,6 +40,13 @@ constants:
         type: int
         value: 256 << 10
     name: replyQueue
+  - doc: |-
+      bearerScheme is the Authorization scheme Bearer reads, compared
+      case-insensitively.
+    items:
+      - name: bearerScheme
+        value: "\"bearer\""
+    name: bearerScheme
   - grouped: true
     items:
       - doc: contentSniffBytes is how much http.DetectContentType reads.
@@ -1084,6 +1091,14 @@ files:
       - portableSink.flush
     name: batch_portable.go
   - decls:
+      - bearerScheme
+      - authKey
+      - Bearer
+      - AuthOf
+      - bearerOf
+      - bearerMisconfigured
+    name: bearer.go
+  - decls:
       - bufferControl
       - socketBuffers
       - bufferSpec
@@ -1191,6 +1206,9 @@ files:
     name: datagram_source_linux.go
   - decls: []
     name: doc.go
+  - decls:
+      - DrainContext
+    name: drain_context.go
   - decls:
       - (*StreamGroup).reconcileName
       - (*StreamGroup).engineRefusal
@@ -1621,6 +1639,10 @@ files:
       - (*StreamGroup).handshakeBound
       - handshake
     name: loop_tls.go
+  - decls:
+      - LoopbackHost
+      - isLoopbackHost
+    name: loopback.go
   - decls:
       - MetricConnsActive
       - unitConn
@@ -2196,6 +2218,22 @@ functions:
     name: newSlots
     params: count, size int
     results: "[]datagram"
+  - name: Bearer
+    params: v corenet.HTTP1BearerVerifier
+    results: corenet.Middleware[http.Handler], error
+  - name: AuthOf
+    params: ctx context.Context
+    results: corenet.HTTP1AuthValue, bool
+  - doc: |-
+      bearerOf returns the token of an "Authorization: Bearer <token>" value, and
+      false when the value names another scheme or no token.
+    name: bearerOf
+    params: field string
+    results: string, bool
+  - doc: bearerMisconfigured names what the middleware refused.
+    name: bearerMisconfigured
+    params: what string
+    results: error
   - doc: |-
       bufferControl sets the socket buffers a group asked for, before bind
       (#973): SO_RCVBUF and SO_SNDBUF, for each that is above zero. A listener's
@@ -2323,6 +2361,9 @@ functions:
       syscall. It feeds the degradation reported by State.
     name: batchAvailable
     results: bool
+  - name: DrainContext
+    params: ctx context.Context
+    results: context.Context, context.CancelFunc
   - doc: clip bounds s to n bytes.
     name: clip
     params: s string, n int
@@ -3074,6 +3115,12 @@ functions:
       completed: a failed or stalled negotiation closes c, recorded by log.
     name: handshake
     params: c stdnet.Conn, d time.Duration, log *errorLogWriter
+    results: bool
+  - name: LoopbackHost
+    results: corenet.Middleware[http.Handler]
+  - doc: isLoopbackHost reports whether a Host field names the loopback.
+    name: isLoopbackHost
+    params: host string
     results: bool
   - doc: |-
       metricInstruments are the instruments RegisterMetrics creates, in the order
@@ -4054,6 +4101,9 @@ types:
         name: flush
         recv: portableSink
     name: portableSink
+  - doc: authKey is the context key Bearer stores a verified request's auth under.
+    kind: struct
+    name: authKey
   - doc: |-
       compressSettings are one Compress middleware's resolved configuration, and
       the gzip writers it recycles.

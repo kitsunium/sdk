@@ -1715,6 +1715,31 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.AuthOf",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "AuthOf",
+      "spelled": "func(ctx context.Context) (AuthValue, bool)",
+      "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/pkg/v1/net/server.AuthValue, bool)",
+      "doc": "AuthOf returns the auth the Bearer middleware set on this request's context.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.AuthValue",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "AuthValue",
+      "spelled": "corenet.HTTP1AuthValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue",
+      "doc": "AuthValue is what a BearerVerifier sets, a subject and the claims.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Backlog",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1746,6 +1771,31 @@
       "spelled": "func(n int) GroupOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
       "doc": "BatchSize sets how many datagrams one read attempts to collect. One disables\nbatching; zero selects the platform default. Where the platform cannot batch,\nState reports the degradation rather than hiding it.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Bearer",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "Bearer",
+      "spelled": "func(v BearerVerifier) (HTTPMiddleware, error)",
+      "canonical": "func(v github.com/kitsunium/sdk/pkg/v1/net/server.BearerVerifier) (github.com/kitsunium/sdk/pkg/v1/net/server.HTTPMiddleware, error)",
+      "doc": "Bearer returns the middleware that answers 401 with WWW-Authenticate: Bearer a\nrequest whose Bearer token v does not verify; AuthOf reads what v set.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.BearerVerifier",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "BearerVerifier",
+      "spelled": "corenet.HTTP1BearerVerifier",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier",
+      "doc": "BearerVerifier verifies a Bearer token and sets the subject and the claims.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -2177,6 +2227,18 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.DatagramStateValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/net.DatagramStateValue",
       "doc": "DatagramState counts what the batched datagram paths drop: messages cut\nshort, GSO sends refused for their size, queued replies that did not leave.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.DrainContext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "DrainContext",
+      "spelled": "func(ctx context.Context) (context.Context, context.CancelFunc)",
+      "canonical": "func(ctx context.Context) (context.Context, context.CancelFunc)",
+      "doc": "DrainContext returns a context also cancelled when the server begins\ndraining, for a wait that takes a context rather than a channel.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -3300,6 +3362,18 @@
         "public": "The operation was called outside its loop"
       },
       "doc": "LoopWrongThread reports, under loopdebug, a loop operation off the loop's thread.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopbackHost",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopbackHost",
+      "spelled": "func() HTTPMiddleware",
+      "canonical": "func() github.com/kitsunium/sdk/pkg/v1/net/server.HTTPMiddleware",
+      "doc": "LoopbackHost returns the middleware that answers 403 a request whose Host is\nnot the loopback, the DNS-rebinding guard of a server bound to 127.0.0.1.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

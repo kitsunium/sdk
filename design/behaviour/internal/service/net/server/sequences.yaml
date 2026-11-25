@@ -687,6 +687,61 @@ sequences:
       - return: w.pin.send(b, to, source)
         to: w.pin.send
   - of: portableSink.flush
+  - of: Bearer
+    steps:
+      - opt:
+          do:
+            - return: nil, bearerMisconfigured("verifier")
+          when: v == nil
+      - return: |-
+          func(next http.Handler) http.Handler {
+          		//: the verifier is shared; each request gets an auth of its own.
+          		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+          			var auth corenet.HTTP1AuthValue
+          			tok, ok := bearerOf(r.Header.Get("Authorization"))
+          			//: no token, or one the verifier refuses: 401, and no further.
+          			if !ok || !v.VerifyBearer([]byte(tok), &auth) {
+          				w.Header().Set("WWW-Authenticate", "Bearer")
+          				w.WriteHeader(http.StatusUnauthorized)
+          				//: refused.
+          				return
+          			}
+          			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authKey{}, auth)))
+          		})
+          	}, nil
+  - of: AuthOf
+    steps:
+      - bind: auth, ok
+        eval: ctx.Value(authKey{}).(corenet.HTTP1AuthValue)
+      - return: auth, ok
+  - of: bearerOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: bearerOf
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: len(field) <= len(bearerScheme) || !strings.EqualFold(field[:len(bearerScheme)], bearerScheme) || field[len(bearerScheme)] != ' '
+      - bind: tok
+        eval: strings.TrimLeft(field[len(bearerScheme):], " ")
+        to: strings
+      - return: tok, tok != ""
+  - of: bearerMisconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: bearerMisconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corenet.HTTP1Misconfigured, errs.WrapParams{}, errs.String("link", "Bearer"), errs.String("option", what))
+        to: errs
   - of: bufferControl
     participants:
       - id: caller
@@ -2128,6 +2183,36 @@ sequences:
   - of: batchAvailable
     steps:
       - return: "true"
+  - of: DrainContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: DrainContext
+        kind: self
+      - id: corenet
+        kind: package
+      - id: context
+        kind: stdlib
+    steps:
+      - bind: drain
+        eval: corenet.DrainSignal(ctx)
+        to: corenet
+      - bind: derived, cancel
+        eval: context.WithCancel(ctx)
+        to: context
+      - opt:
+          do:
+            - return: derived, cancel
+          when: drain == nil
+      - go: |-
+          func() {
+          		select {
+          		case <-drain:
+          			cancel()
+          		case <-derived.Done():
+          		}
+          	}()
+      - return: derived, cancel
   - of: (*StreamGroup).reconcileName
     participants:
       - id: caller
@@ -9678,6 +9763,62 @@ sequences:
             to: tc.HandshakeContext
           when: err != nil
       - return: "true"
+  - of: LoopbackHost
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopbackHost
+        kind: self
+      - id: http
+        kind: stdlib
+    steps:
+      - return:
+          closure:
+            params: next http.Handler
+            results: http.Handler
+            steps:
+              - return: |-
+                  http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                  			//: a name or an address outside the loopback: refused.
+                  			if !isLoopbackHost(r.Host) {
+                  				w.WriteHeader(http.StatusForbidden)
+                  				//: refused.
+                  				return
+                  			}
+                  			next.ServeHTTP(w, r)
+                  		})
+                to: http
+  - of: isLoopbackHost
+    participants:
+      - id: caller
+        kind: actor
+      - id: isLoopbackHost
+        kind: self
+      - id: stdnet
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - set: host
+              value: h
+          init:
+            bind: h, _, err
+            eval: stdnet.SplitHostPort(host)
+            to: stdnet
+          when: err == nil
+      - set: host
+        to: strings
+        value: strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+      - opt:
+          do:
+            - return: "true"
+          when: strings.EqualFold(host, "localhost")
+      - bind: ip
+        eval: stdnet.ParseIP(host)
+        to: stdnet
+      - return: ip != nil && ip.IsLoopback()
   - of: metricInstruments
     participants:
       - id: caller

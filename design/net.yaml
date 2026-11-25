@@ -8001,6 +8001,58 @@ packages:
         out:
           - type: HTTPRateKeyValue
       - doc: |-
+          Bearer returns the authenticating middleware of a net/http group, the port the
+          http1 chain's Bearer link calls: a request must carry "Authorization: Bearer
+          <token>" that v verifies, or is answered 401 with WWW-Authenticate: Bearer and
+          goes no further. What v sets on the auth — the subject, the claims — reaches
+          the handler through AuthOf. The scheme matches case-insensitively, the token is
+          what follows its spaces. A route that needs no token is mounted outside the
+          middleware. A nil v is refused with corenet.HTTP1Misconfigured.
+        in:
+          - name: v
+            type: corenet.HTTP1BearerVerifier
+        name: Bearer
+        out:
+          - type: corenet.Middleware[http.Handler]
+          - type: error
+      - doc: |-
+          AuthOf returns the auth Bearer's verifier set on the request ctx belongs to,
+          and false when no Bearer middleware authenticated it.
+        in:
+          - name: ctx
+            type: context.Context
+        name: AuthOf
+        out:
+          - type: corenet.HTTP1AuthValue
+          - type: bool
+      - doc: |-
+          LoopbackHost returns the middleware of a net/http group that serves only on
+          the loopback: a request whose Host does not name it — localhost, an address
+          of 127.0.0.0/8 or ::1, with or without a port — is answered 403 and goes no
+          further. A listener bound to 127.0.0.1 is still reached by a browser through a
+          name an attacker's DNS points there (DNS rebinding), and that request carries
+          the attacker's name as its Host; this is the check that refuses it.
+        name: LoopbackHost
+        out:
+          - type: corenet.Middleware[http.Handler]
+      - doc: |-
+          DrainContext returns a context derived from ctx that is also cancelled when
+          the server serving this request begins draining, and its cancel function,
+          which the caller must call. It is DrainSignal for a wait that takes a context
+          — a long poll on a queue, a blocking receive — so the wait ends as the drain
+          starts instead of holding the drain open until its budget expires. On a
+          context that carries no drain signal it is context.WithCancel(ctx).
+
+          Goroutine lifecycle: one per call on a context that carries a drain signal,
+          ended when the drain starts or the returned context ends, whichever is first.
+        in:
+          - name: ctx
+            type: context.Context
+        name: DrainContext
+        out:
+          - type: context.Context
+          - type: context.CancelFunc
+      - doc: |-
           CORS returns the cross-origin middleware of a net/http group: a preflight —
           OPTIONS with Origin and Access-Control-Request-Method — is answered 204 with the
           policy's fields and goes no further, and every other request gets the policy's
@@ -11723,6 +11775,55 @@ packages:
           name: RateKeyHeader
           out:
             - type: HTTPRateKeyValue
+      - alias:
+          - doc: BearerVerifier verifies a Bearer token and sets the subject and the claims.
+            name: BearerVerifier
+            target: corenet.HTTP1BearerVerifier
+          - doc: AuthValue is what a BearerVerifier sets, a subject and the claims.
+            name: AuthValue
+            target: corenet.HTTP1AuthValue
+      - func:
+          doc: |-
+            Bearer returns the middleware that answers 401 with WWW-Authenticate: Bearer a
+            request whose Bearer token v does not verify; AuthOf reads what v set.
+          forward: svcserver.Bearer
+          in:
+            - name: v
+              type: BearerVerifier
+          name: Bearer
+          out:
+            - type: HTTPMiddleware
+            - type: error
+      - func:
+          doc: AuthOf returns the auth the Bearer middleware set on this request's context.
+          forward: svcserver.AuthOf
+          in:
+            - name: ctx
+              type: context.Context
+          name: AuthOf
+          out:
+            - type: AuthValue
+            - type: bool
+      - func:
+          doc: |-
+            LoopbackHost returns the middleware that answers 403 a request whose Host is
+            not the loopback, the DNS-rebinding guard of a server bound to 127.0.0.1.
+          forward: svcserver.LoopbackHost
+          name: LoopbackHost
+          out:
+            - type: HTTPMiddleware
+      - func:
+          doc: |-
+            DrainContext returns a context also cancelled when the server begins
+            draining, for a wait that takes a context rather than a channel.
+          forward: svcserver.DrainContext
+          in:
+            - name: ctx
+              type: context.Context
+          name: DrainContext
+          out:
+            - type: context.Context
+            - type: context.CancelFunc
       - alias:
           - doc: |-
               CORSValue is a cross-origin policy: exact origins, methods, fields,
