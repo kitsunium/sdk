@@ -105,6 +105,34 @@ codes:
     const: CodeTooLarge
     hex: "0x00_01_08_08"
     package: internal/kernel/fs/seglog
+  - code: "0.1.9.1"
+    const: CodeDuplicateKey
+    hex: "0x00_01_09_01"
+    package: internal/kernel/collections/frozen
+  - code: "0.1.9.2"
+    const: CodeLengthMismatch
+    hex: "0x00_01_09_02"
+    package: internal/kernel/collections/frozen
+  - code: "0.1.9.3"
+    const: CodeTooLarge
+    hex: "0x00_01_09_03"
+    package: internal/kernel/collections/frozen
+  - code: "0.1.9.4"
+    const: CodeUnsolved
+    hex: "0x00_01_09_04"
+    package: internal/kernel/collections/frozen
+  - code: "0.1.9.5"
+    const: CodeImageCorrupt
+    hex: "0x00_01_09_05"
+    package: internal/kernel/collections/frozen
+  - code: "0.1.9.6"
+    const: CodeImageVersion
+    hex: "0x00_01_09_06"
+    package: internal/kernel/collections/frozen
+  - code: "0.1.9.7"
+    const: CodeImageShape
+    hex: "0x00_01_09_07"
+    package: internal/kernel/collections/frozen
   - code: "0.2.2.1"
     const: CodeDuplicateRegistration
     hex: "0x00_02_02_01"

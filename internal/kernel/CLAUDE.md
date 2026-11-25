@@ -17,7 +17,7 @@ directory holds no Go code — it is a prefix, not a package — and carries a
 internal/kernel/
 ├── errs/  clock/  backoff/  semver/  plugin/  swar/  jsonenc/     the root: no family describes them
 ├── concur/        batcher, buffer, commit, group, pool, recycler, sema, singleflight, snapshot, worker
-├── collections/   cache, heap, ring
+├── collections/   cache, frozen, heap, ring
 └── fs/            flock, pathchain, seglog, winacl
 ```
 
@@ -48,11 +48,12 @@ internal/kernel/
 | `concur/snapshot/` | generic `Value[T]` copy-on-write container (ADR 0011); published as `pkg/v1/concur/snapshot` | (none — never returns errors) |
 | `concur/worker/` | generic goroutine-lifecycle daemon (`LoopDaemon`, `Start`/`Every`/`Stop`); `Every` ticks on an injectable clock (`WithClock`) and can end with its owner (`WithDone`); published as `pkg/v1/concur/worker` | (none — emits no codes) |
 
-### `collections/` — generic containers: values kept in an order, within a bound, or within a bound and an age (see `collections/CLAUDE.md`)
+### `collections/` — generic containers: values kept in an order, within a bound, within a bound and an age, or fixed once built (see `collections/CLAUDE.md`)
 
 | Package | Purpose | Code range |
 |---|---|---|
 | `collections/cache/` | generic `Cache[K,V]` LRU + TTL cache (ADR 0025); reuses `clock` for testable expiry | (none — `Fetch` returns `(V, bool)`) |
+| `collections/frozen/` | read-only `Map[K, V]` (integers), `StringMap[V]` and `Dict` (strings) over a minimal perfect hash (one-byte pilots, PTHash/PtrHash style), each table its own versioned, CRC-32C sealed binary image — `AppendBinary`/`MarshalBinary`, and loaders that read the caller's bytes in place under `CheckHeader` or `CheckAll` (ADR 0252); `Get` allocates nothing; not published | `0.1.9.*` (DUPLICATE_KEY / LENGTH_MISMATCH / TOO_LARGE / UNSOLVED / IMAGE_CORRUPT / IMAGE_VERSION / IMAGE_SHAPE) |
 | `collections/heap/` | generic `Heap[T]` binary heap ordered by a caller-supplied comparison; published as `pkg/v1/collections/heap` | (none — `Pop`/`Peek` return `(T, bool)`; a nil comparison panics) |
 | `collections/ring/` | SPSC lock-free bounded queue (ADR 0006), its cursors on their own cache lines, and its MPSC sibling `NewMulti` / `MultiQueue` (ADR 0159 §2, ADR 0216); published as `pkg/v1/collections/ring` | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
 
@@ -163,6 +164,16 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   until it is migrated, gated on the two fuzzers agreeing. It is the one `fs/`
   member that writes, and it decides nothing: damage is refused unchanged and
   what it means is the caller's.
+- `frozen` admitted on rule 1 (ADR 0252): stdlib-only — `hash/crc32`,
+  `encoding/binary`, `math/bits` and one `unsafe.String` — and its signatures
+  name keys, values, bytes and a verification level, no symbol, series or
+  configuration. It ships with no consumer in the tree, which is stated
+  rather than dressed up: Chronos' symbol tables and index and the
+  configuration caches are what it was written for, and ADR 0025 admitted
+  `cache` the same way. Written clean-room from the PTHash and PtrHash papers,
+  measured against `cnfgo`'s `FrozenMap` through its public API only, in a
+  module outside the SDK (`BENCH.md`). No file is mapped here: the caller owns
+  the bytes and their lifetime.
 - `group` and `heap` admitted on **rule 1 alone**, which is the only
   admission criterion there has ever been: stdlib-only AND generic. Each is
   domain-neutral down to its signatures — `Go`/`Wait`/`Collect` with no `Job` or
@@ -234,6 +245,7 @@ The root:
 `collections/` — see `internal/kernel/collections/CLAUDE.md` (the family: a container of values, generic in its element):
 
 - `collections/cache/` — see `internal/kernel/collections/cache/CLAUDE.md`
+- `collections/frozen/` — see `internal/kernel/collections/frozen/CLAUDE.md` (read-only maps over a minimal perfect hash, each its own image — the layout, the tag array that makes a miss cheap, and the one `unsafe`, ADR 0252)
 - `collections/heap/` — see `internal/kernel/collections/heap/CLAUDE.md` (generic priority queue — and the measured cost of `container/heap`'s interface)
 - `collections/ring/` — see `internal/kernel/collections/ring/CLAUDE.md`
 

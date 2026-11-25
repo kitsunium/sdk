@@ -129,6 +129,7 @@ filegroup(
         "//internal/core/security/session:audit_srcs",
         "//internal/core/security/token:audit_srcs",
         "//internal/kernel/clock:audit_srcs",
+        "//internal/kernel/collections/frozen:audit_srcs",
         "//internal/kernel/collections/ring:audit_srcs",
         "//internal/kernel/concur/batcher:audit_srcs",
         "//internal/kernel/concur/buffer:audit_srcs",

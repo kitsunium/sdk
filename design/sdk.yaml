@@ -193,6 +193,9 @@ codes:
     - range: 0.1.8
       owner: internal/kernel/fs/seglog
       note: ADR 0230, the segmented log (#820)
+    - range: 0.1.9
+      owner: internal/kernel/collections/frozen
+      note: ADR 0252, the frozen maps
     - range: 0.2.2
       owner: internal/core/data/codec
     - range: 0.2.3
@@ -614,6 +617,17 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/heap.(*IndexedHeap[...]).Remove
     allocs: 0
     fixture: IndexedRemove
+  # A frozen table's lookup reads its image in place, hit or miss, and
+  # allocates nothing — a Dict's value is a view of the image (ADR 0252).
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/frozen.(*Map[...]).Get
+    allocs: 0
+    fixture: MapGet
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/frozen.(*StringMap[...]).Get
+    allocs: 0
+    fixture: StringMapGet
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/collections/frozen.(*Dict).Get
+    allocs: 0
+    fixture: DictGet
   # A version comparison, and every other reading, allocates nothing (ADR
   # 0156 §4).
   - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.IsValid

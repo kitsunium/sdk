@@ -63,7 +63,7 @@ internal/
 │                  concur/{batcher, buffer, commit, group, pool,
 │                          recycler, sema, singleflight, snapshot,
 │                          worker},
-│                  collections/{cache, heap, ring},
+│                  collections/{cache, frozen, heap, ring},
 │                  fs/{flock, pathchain, seglog, winacl}
 ├── core/          domain interfaces + domain values — each package by its path
 │                  crypto, crypto/key/jwk, net, net/http2,
@@ -718,5 +718,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0241 — a client session applies a command once, whatever its retries, accepted on 2026-11-12 (kitsunium/sdk#918): `SessionProposer` (`OpenSession`, `ProposeSession`) beside the frozen `Replicated`, `EntrySessionCommand` and `FlagProtocol4` at protocol version 4, a replicated session table folded at commit and at apply and recorded in the snapshot metadata of version 4, `MaxSessions` 1024 evicted least recently used, `SESSION_DIGEST_MISMATCH` `0.2.57.26` and `SESSION_EXPIRED` `0.2.57.27`; resolves ADR 0152's Deferred client sessions — `docs/adr/0241-a-client-session-applies-a-command-once-whatever-its-retries.md`
 - ADR 0244 — several consensus groups share one transport, routed by the group each frame names, D1–D4 accepted on 2026-11-11 (kitsunium/sdk#925), D5–D7 (coalescing, quiescing, a shared log) proposed — `docs/adr/0244-several-consensus-groups-share-one-transport-routed-by-the-group-each-frame-names.md`
 - ADR 0250 — a pull request tests what it touches, and the merge tests everything, proposed on 2026-11-15: `scripts/ci/scope.sh` scopes a pull request — target-determinator (pinned by version and SHA-256) for the `bazel` job, `go list` per GOOS for the 386, SIMD, garble and `e2e-cross.yml` lanes — and falls back to everything on the build's definition, the workflow, an unknown path or any failure; the merge queue, `main`, the nightly run and a manual run test everything; a lane skips only on an explicit `skip`, said in a `scope-summary` job; an optional Bazel remote cache, read-only on a pull request; amends rule 12 — `docs/adr/0250-a-pull-request-tests-what-it-touches-and-the-merge-tests-everything.md`
+- ADR 0252 — a frozen map is a minimal perfect hash, read in place from its image, proposed on 2026-11-25: `kernel/collections/frozen` (`0.1.9.*`) — `Map`, `StringMap`, `Dict` over one-byte pilots and a tag byte a key, each table its own versioned CRC-32C image loaded without a copy (`CheckHeader`, `CheckAll`), `Get` allocation-free; clean-room, measured against cnfgo — `docs/adr/0252-a-frozen-map-is-a-minimal-perfect-hash-read-in-place-from-its-image.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
