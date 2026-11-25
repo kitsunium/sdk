@@ -195,6 +195,34 @@ mkdocroot() {
   [[ "$output" == *"CLAUDE.md: holds ADR index rows"* ]]
 }
 
+# ADR 0253 sets a CLAUDE.md a 200-line target and a subdirectory one a
+# 40 000-character ceiling. The guard reports a file over either and still
+# passes: most files are over, and are brought under one change at a time.
+@test "domain-docs: an oversized CLAUDE.md is reported, and the guard passes" {
+  mkdocroot '│                  security/authz' security/authz
+  mkdir -p deep
+  awk 'BEGIN { for (i = 0; i < 201; i++) print "line" }' >deep/CLAUDE.md
+  mkdir -p wide
+  awk 'BEGIN { for (i = 0; i < 5; i++) printf "%9000s\n", "x" }' >wide/CLAUDE.md
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 over 200 lines, 1 below the root over 40000 bytes"* ]]
+  [[ "$output" == *"deep/CLAUDE.md — 201 lines"* ]]
+  [[ "$output" == *"wide/CLAUDE.md — 5 lines, 45005 bytes"* ]]
+}
+
+# A tree whose every CLAUDE.md is within its size says nothing about sizes.
+@test "domain-docs: no size line when every CLAUDE.md is within its size" {
+  mkdocroot '│                  security/authz' security/authz
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"CLAUDE.md size"* ]]
+}
+
 @test "domain-docs: a docs/CLAUDE.md Contents row is refused too" {
   mkdocroot '│                  security/authz' security/authz
   echo '| `adr/0001-fixture.md` | fixture |' >docs/CLAUDE.md

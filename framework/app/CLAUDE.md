@@ -6,7 +6,8 @@ it. It is package `app` — the word of what a product builds, never the
 tool's name (ADR 0180): `framework/kit` until ADR 0180 step 3, which left no
 alias there, `kittest` now `apptest`. Every name here is a type alias, a typed constant or variable, or a
 forwarder over `framework/internal/app`, which holds the implementation and
-its `CLAUDE.md` (the files, the rules, the invariants, the error codes).
+its `CLAUDE.md` (the rules, the invariants) and `NOTES.md` (the files,
+the invariants in full, the error codes — ADR 0253).
 Nothing is implemented here: a change of behaviour is made there.
 
 ## Contents

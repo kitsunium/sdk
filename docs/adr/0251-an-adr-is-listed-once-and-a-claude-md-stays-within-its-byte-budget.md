@@ -6,6 +6,7 @@
 - **Area**: docs
 - **Need**: decision
 - **Amends**: [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) §Consequences ("the three ADR indexes … keep every superseded ADR listed"; "the digest of what each ADR decided stays in `docs/adr/CLAUDE.md`"), and rule 11 of the root `CLAUDE.md` (the three indexes `check-domain-docs.sh` holds to the disk)
+- **Amended by**: [ADR 0253](0253-a-claude-md-holds-what-to-obey-and-its-reference-moves-to-notes-md.md) (§Decision 3: a 200-line target and a 40 000-character ceiling below the root replace the byte budgets)
 - **Related**: [ADR 0008](0008-readme-from-code-generation.md) and [ADR 0138](0138-a-doc-link-resolves-or-it-is-not-written.md) (principle 28: documentation is generated or checked, never trusted), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (a path in an ADR is the path of its time; the index follows a moved package)
 
 ## Context
