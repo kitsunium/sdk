@@ -220,6 +220,7 @@
 # below: kit gen writes it from the design.
 //internal/core/data/codec/scratch:scratch_test
 //internal/kernel/clock:clock_test
+//internal/kernel/collections/frozen:frozen_test
 //internal/kernel/collections/heap:heap_test
 //internal/kernel/collections/ring:ring_test
 //internal/kernel/concur/buffer:buffer_test

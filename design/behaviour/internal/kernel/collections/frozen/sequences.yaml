@@ -1,0 +1,1756 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: build
+    participants:
+      - id: caller
+        kind: actor
+      - id: build
+        kind: self
+      - id: solve
+        kind: internal
+      - id: layoutOf
+        kind: internal
+      - id: byteOrder.PutUint32
+        kind: value
+      - id: t.view
+        kind: internal
+      - id: writeHeader
+        kind: internal
+    steps:
+      - bind: n, blob, write
+        eval: ks.n, ks.blob, ks.write
+      - opt:
+          do:
+            - return: table{}, origin(TooLarge, errs.Int64("keys", int64(n)), errs.Int64("blob", int64(min(blob, math.MaxInt64))))
+          when: uint64(n) > maxKeys || blob > math.MaxUint32
+      - bind: p, dup, ok
+        eval: solve(n, ks.hash, ks.same)
+        to: solve
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: table{}, origin(DuplicateKey, errs.Int64("index", int64(dup)))
+                when: dup >= 0
+            - return: table{}, origin(Unsolved, errs.Int64("keys", int64(n)))
+          when: "!ok"
+      - bind: t
+        eval: "table{seed: p.seed, n: p.n, nb: p.nb, m: p.m, shape: s}"
+      - bind: l
+        eval: layoutOf(s, p.n, p.nb, p.m, blob)
+        to: layoutOf
+      - opt:
+          do:
+            - return: table{}, origin(TooLarge, errs.Int64("keys", int64(n)), errs.Int64("blob", int64(blob)))
+          when: l.size > math.MaxInt
+      - bind: image
+        eval: make([]byte, l.size)
+      - eval: copy(image[headerSize:], p.pilots)
+      - loop:
+          do:
+            - eval: byteOrder.PutUint32(image[l.remap+4*uint64(i):], x)
+              to: byteOrder.PutUint32
+          key: i
+          range: p.remap
+          value: x
+      - bind: at
+        eval: make([]uint32, n)
+      - loop:
+          do:
+            - set: at[x]
+              value: uint32(i)
+          key: i
+          range: p.pos
+          value: x
+      - bind: stride
+        eval: uint64(s.stride())
+      - bind: body
+        eval: image[l.blob:]
+      - bind: "off"
+        eval: uint32(0)
+      - loop:
+          do:
+            - bind: rec
+              eval: image[l.recs+uint64(x)*stride:]
+            - op: +=
+              set: "off"
+              value: write(int(i), rec[:stride], body[off:], off)
+            - set: image[l.tags+uint64(x)]
+              value: byte(p.hs[i])
+          key: x
+          range: at
+          value: i
+      - eval: t.view(image, l)
+        to: t.view
+      - eval: writeHeader(image, &t)
+        to: writeHeader
+      - return: t, nil
+  - of: widthOf
+    steps:
+      - var:
+          name: "n"
+          type: byte
+      - loop:
+          cond: one != 0
+          do:
+            - op: ++
+              set: "n"
+          init: one := T(1)
+          post: one <<= 1
+      - var:
+          name: zero
+          type: T
+      - return: n / 8, zero-1 < zero
+  - of: signs
+    steps:
+      - var:
+          name: s
+          type: byte
+      - opt:
+          do:
+            - op: "|="
+              set: s
+              value: "1"
+          when: key
+      - opt:
+          do:
+            - op: "|="
+              set: s
+              value: "2"
+          when: value
+      - return: s
+  - of: lengths
+    participants:
+      - id: caller
+        kind: actor
+      - id: lengths
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: keys == values
+      - return: origin(LengthMismatch, errs.Int64("keys", int64(keys)), errs.Int64("values", int64(values)))
+        to: origin
+  - of: origin
+    participants:
+      - id: caller
+        kind: actor
+      - id: origin
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+        to: errs
+  - of: fold
+    participants:
+      - id: caller
+        kind: actor
+      - id: fold
+        kind: self
+      - id: bits
+        kind: stdlib
+    steps:
+      - bind: hi, lo
+        eval: bits.Mul64(a, b)
+        to: bits
+      - return: hi ^ lo
+  - of: below
+    participants:
+      - id: caller
+        kind: actor
+      - id: below
+        kind: self
+      - id: bits
+        kind: stdlib
+    steps:
+      - bind: hi, _
+        eval: bits.Mul64(x, uint64(n))
+        to: bits
+      - return: uint32(hi)
+  - of: hashInt
+    steps:
+      - op: ^=
+        set: k
+        value: seed
+      - set: k
+        value: (k ^ k>>30) * 0xBF58476D1CE4E5B9
+      - set: k
+        value: (k ^ k>>27) * 0x94D049BB133111EB
+      - return: k ^ k>>31
+  - of: load64
+    steps:
+      - bind: w
+        eval: "s[i : i+int(width8)]"
+      - return: |-
+          uint64(w[0]) | uint64(w[1])<<8 | uint64(w[2])<<16 | uint64(w[3])<<24 |
+          		uint64(w[4])<<32 | uint64(w[5])<<40 | uint64(w[6])<<48 | uint64(w[7])<<56
+  - of: load32
+    steps:
+      - bind: w
+        eval: "s[i : i+int(width4)]"
+      - return: uint64(w[0]) | uint64(w[1])<<8 | uint64(w[2])<<16 | uint64(w[3])<<24
+  - of: hashString
+    participants:
+      - id: caller
+        kind: actor
+      - id: hashString
+        kind: self
+      - id: fold
+        kind: internal
+    steps:
+      - bind: h
+        eval: seed ^ uint64(len(s))*mulA
+      - loop:
+          cond: len(s) > 16
+          do:
+            - set: h
+              to: fold
+              value: fold(load64(s, 0)^h^mulB, load64(s, 8)^mulC)
+            - set: s
+              value: s[16:]
+      - leaf: a var of several names, or of no type
+        stmt: var a, b uint64
+      - switch:
+          cases:
+            - case: n >= int(width8)
+              do:
+                - set: a, b
+                  value: load64(s, 0), load64(s, n-int(width8))
+            - case: n >= int(width4)
+              do:
+                - set: a, b
+                  value: load32(s, 0), load32(s, n-int(width4))
+            - case: n > 0
+              do:
+                - set: a
+                  value: uint64(s[0])<<16 | uint64(s[n>>1])<<8 | uint64(s[n-1])
+          init:
+            bind: "n"
+            eval: len(s)
+      - return: fold(a^h^mulB, b^mulC^h)
+        to: fold
+  - of: slotOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: slotOf
+        kind: self
+      - id: below
+        kind: internal
+    steps:
+      - return: below((h^(uint64(p)+1)*mulC)*mulA, m)
+        to: below
+  - of: corrupt
+    participants:
+      - id: caller
+        kind: actor
+      - id: corrupt
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - return: origin(ImageCorrupt, errs.String("why", why))
+        to: origin
+  - of: load
+    participants:
+      - id: caller
+        kind: actor
+      - id: load
+        kind: self
+      - id: byteOrder.Uint16
+        kind: value
+      - id: sizes
+        kind: internal
+      - id: byteOrder.Uint64
+        kind: value
+      - id: layoutOf
+        kind: internal
+      - id: t.view
+        kind: internal
+      - id: t.verify
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: table{}, corrupt("shorter than the header")
+          when: uint64(len(image)) < headerSize
+      - bind: h
+        eval: image[:headerSize]
+      - opt:
+          do:
+            - return: table{}, corrupt("magic")
+          when: string(h[:4]) != magic
+      - opt:
+          do:
+            - return: table{}, corrupt("header checksum")
+          when: crc32.Checksum(h[:headerSealed], castagnoli) != byteOrder.Uint32(h[headerSealed:])
+      - opt:
+          do:
+            - return: table{}, origin(ImageVersion, errs.Int64("version", int64(v)))
+          init:
+            bind: v
+            eval: byteOrder.Uint16(h[4:])
+            to: byteOrder.Uint16
+          when: v != version
+      - bind: got
+        eval: "shape{kind: h[6], kw: h[7], vw: h[8], signs: h[9]}"
+      - opt:
+          do:
+            - return: table{}, origin(ImageShape, errs.Int64("kind", int64(got.kind)), errs.Int64("key_width", int64(got.kw)), errs.Int64("value_width", int64(got.vw)), errs.Int64("signs", int64(got.signs)))
+          when: got != want
+      - opt:
+          do:
+            - return: table{}, corrupt("reserved bytes")
+          when: byteOrder.Uint16(h[10:]) != 0 || byteOrder.Uint64(h[52:]) != 0
+      - bind: t
+        eval: "table{n: byteOrder.Uint32(h[12:]), nb: byteOrder.Uint32(h[16:]), m: byteOrder.Uint32(h[20:]), seed: byteOrder.Uint64(h[24:]), shape: got}"
+      - opt:
+          do:
+            - return: table{}, err
+          init:
+            bind: err
+            eval: sizes(&t)
+            to: sizes
+          when: err != nil
+      - bind: blob
+        eval: byteOrder.Uint64(h[32:])
+        to: byteOrder.Uint64
+      - opt:
+          do:
+            - return: table{}, corrupt("blob size")
+          when: blob > math.MaxUint32
+      - bind: l
+        eval: layoutOf(got, t.n, t.nb, t.m, blob)
+        to: layoutOf
+      - opt:
+          do:
+            - return: table{}, corrupt("image size")
+          when: l.size != uint64(len(image)) || byteOrder.Uint64(h[40:]) != l.size
+      - eval: t.view(image, l)
+        to: t.view
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: table{}, corrupt("body checksum")
+                when: crc32.Checksum(image[headerSize:], castagnoli) != byteOrder.Uint32(h[48:])
+            - opt:
+                do:
+                  - return: table{}, err
+                init:
+                  bind: err
+                  eval: t.verify()
+                  to: t.verify
+                when: err != nil
+          when: check == CheckAll
+      - return: t, nil
+  - of: sizes
+    participants:
+      - id: caller
+        kind: actor
+      - id: sizes
+        kind: self
+      - id: corrupt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: corrupt("an empty table with buckets or slots")
+                    to: corrupt
+                when: t.nb != 0 || t.m != 0
+            - return: nil
+          when: t.n == 0
+      - opt:
+          do:
+            - return: corrupt("bucket or slot count")
+              to: corrupt
+          when: t.nb == 0 || t.m < t.n || uint64(t.n) > maxKeys
+      - return: nil
+  - of: (*table).verify
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).verify
+        kind: self
+      - id: corrupt
+        kind: internal
+      - id: hashInt
+        kind: internal
+      - id: t.checkEntry
+        kind: internal
+      - id: hashString
+        kind: internal
+    steps:
+      - loop:
+          cond: i < t.m-t.n
+          do:
+            - opt:
+                do:
+                  - return: corrupt("remapped slot")
+                    to: corrupt
+                when: byteOrder.Uint32(t.remap[4*uint64(i):]) >= t.n
+          init: i := uint32(0)
+          post: i++
+      - loop:
+          do:
+            - var:
+                name: h
+                type: uint64
+            - alt:
+                - do:
+                    - set: h
+                      to: hashInt
+                      value: hashInt(t.seed, t.intKey(uint64(x)*uint64(t.stride)))
+                  when: t.shape.kind == kindInts
+                - do:
+                    - bind: k, ok
+                      eval: t.checkEntry(t.entry(x))
+                      to: t.checkEntry
+                    - opt:
+                        do:
+                          - return: corrupt("string entry past the blob")
+                            to: corrupt
+                        when: "!ok"
+                    - set: h
+                      to: hashString
+                      value: hashString(t.seed, k)
+                  else: true
+            - opt:
+                do:
+                  - return: corrupt("tag")
+                    to: corrupt
+                when: t.tags[x] != byte(h)
+            - opt:
+                do:
+                  - return: corrupt("record out of its slot")
+                    to: corrupt
+                when: t.slot(h) != x
+          key: x
+          range: t.n
+      - return: nil
+  - of: (*table).checkEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).checkEntry
+        kind: self
+      - id: load32
+        kind: internal
+      - id: t.stringKey
+        kind: internal
+    steps:
+      - bind: blob
+        eval: uint64(len(t.blob))
+      - bind: hs
+        eval: uint64(t.shape.head())
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: uint64(off)+hs > blob
+      - bind: end
+        eval: uint64(off) + hs + load32(t.blob, int(off))
+      - alt:
+          - do:
+              - op: +=
+                set: end
+                to: load32
+                value: load32(t.blob, int(off)+int(width4))
+            when: t.shape.kind == kindText
+          - do:
+              - op: +=
+                set: end
+                value: uint64(t.shape.vw)
+            else: true
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: end > blob
+      - return: t.stringKey(off), true
+        to: t.stringKey
+  - of: mapShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: mapShape
+        kind: self
+      - id: widthOf
+        kind: internal
+    steps:
+      - bind: kw, ks
+        eval: widthOf[K]()
+        to: widthOf
+      - bind: vw, vs
+        eval: widthOf[V]()
+        to: widthOf
+      - return: "shape{kind: kindInts, kw: kw, vw: vw, signs: signs(ks, vs)}"
+  - of: NewMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewMap
+        kind: self
+      - id: lengths
+        kind: internal
+      - id: mask
+        kind: internal
+      - id: build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: lengths(len(keys), len(values))
+            to: lengths
+          when: err != nil
+      - bind: s
+        eval: mapShape[K, V]()
+      - bind: kmask
+        eval: mask(s.kw)
+        to: mask
+      - bind: t, err
+        eval: |-
+          build(s, keySet{
+          		n:    len(keys),
+          		hash: func(seed uint64, i int) uint64 { return hashInt(seed, uint64(keys[i])&kmask) },
+          		same: func(i, j int) bool { return keys[i] == keys[j] },
+          		write: func(i int, rec, _ []byte, _ uint32) uint32 {
+          			storew(rec, s.kw, uint64(keys[i]))
+          			storew(rec[s.kw:], s.vw, uint64(values[i]))
+          			return 0
+          		},
+          	})
+        to: build
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&Map[K, V]{t: t}, nil"
+  - of: LoadMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoadMap
+        kind: self
+      - id: load
+        kind: internal
+    steps:
+      - bind: t, err
+        eval: load(image, mapShape[K, V](), check)
+        to: load
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&Map[K, V]{t: t}, nil"
+  - of: (*Map).Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Map).Get
+        kind: self
+      - id: m.t.findInt
+        kind: internal
+    steps:
+      - bind: r, ok
+        eval: m.t.findInt(uint64(key))
+        to: m.t.findInt
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok"
+      - return: V(m.t.intValue(r)), true
+  - of: (*Map).Len
+    steps:
+      - return: int(m.t.n)
+  - of: (*Map).All
+    steps:
+      - return:
+          closure:
+            params: yield func(K, V) bool
+            steps:
+              - loop:
+                  do:
+                    - bind: r
+                      eval: uint64(x) * uint64(m.t.stride)
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yield(K(m.t.intKey(r)), V(m.t.intValue(r)))"
+                  key: x
+                  range: m.t.n
+  - of: (*Map).AppendBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Map).AppendBinary
+        kind: self
+      - id: m.t.appendTo
+        kind: internal
+    steps:
+      - return: m.t.appendTo(b, mapShape[K, V]()), nil
+        to: m.t.appendTo
+  - of: (*Map).MarshalBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Map).MarshalBinary
+        kind: self
+      - id: m.t.appendTo
+        kind: internal
+    steps:
+      - return: m.t.appendTo(nil, mapShape[K, V]()), nil
+        to: m.t.appendTo
+  - of: stringMapShape
+    participants:
+      - id: caller
+        kind: actor
+      - id: stringMapShape
+        kind: self
+      - id: widthOf
+        kind: internal
+    steps:
+      - bind: vw, vs
+        eval: widthOf[V]()
+        to: widthOf
+      - return: "shape{kind: kindStrings, vw: vw, signs: signs(false, vs)}"
+  - of: NewStringMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewStringMap
+        kind: self
+      - id: lengths
+        kind: internal
+      - id: stringMapShape
+        kind: internal
+      - id: build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: lengths(len(keys), len(values))
+            to: lengths
+          when: err != nil
+      - bind: s
+        eval: stringMapShape[V]()
+        to: stringMapShape
+      - bind: t, err
+        eval: |-
+          build(s, keySet{
+          		n: len(keys), blob: totalLen(keys, nil) + uint64(len(keys))*uint64(s.head()+uint32(s.vw)),
+          		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
+          		same: func(i, j int) bool { return keys[i] == keys[j] },
+          		write: func(i int, rec, blob []byte, off uint32) uint32 {
+          			byteOrder.PutUint32(rec, off)
+          			at := head(blob, keys[i], s.head())
+          			storew(blob[at:], s.vw, uint64(values[i]))
+          			return at + uint32(s.vw)
+          		},
+          	})
+        to: build
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&StringMap[V]{t: t}, nil"
+  - of: LoadStringMap
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoadStringMap
+        kind: self
+      - id: load
+        kind: internal
+    steps:
+      - bind: t, err
+        eval: load(image, stringMapShape[V](), check)
+        to: load
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&StringMap[V]{t: t}, nil"
+  - of: (*StringMap).Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StringMap).Get
+        kind: self
+      - id: m.t.findString
+        kind: internal
+    steps:
+      - bind: off, ok
+        eval: m.t.findString(key)
+        to: m.t.findString
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok"
+      - return: V(m.t.entryValue(off)), true
+  - of: (*StringMap).Len
+    steps:
+      - return: int(m.t.n)
+  - of: (*StringMap).All
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StringMap).All
+        kind: self
+      - id: m.t.entry
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(string, V) bool
+            steps:
+              - loop:
+                  do:
+                    - bind: "off"
+                      eval: m.t.entry(x)
+                      to: m.t.entry
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yield(m.t.stringKey(off), V(m.t.entryValue(off)))"
+                  key: x
+                  range: m.t.n
+  - of: (*StringMap).AppendBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StringMap).AppendBinary
+        kind: self
+      - id: m.t.appendTo
+        kind: internal
+    steps:
+      - return: m.t.appendTo(b, stringMapShape[V]()), nil
+        to: m.t.appendTo
+  - of: (*StringMap).MarshalBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StringMap).MarshalBinary
+        kind: self
+      - id: m.t.appendTo
+        kind: internal
+    steps:
+      - return: m.t.appendTo(nil, stringMapShape[V]()), nil
+        to: m.t.appendTo
+  - of: NewDict
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewDict
+        kind: self
+      - id: lengths
+        kind: internal
+      - id: build
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: lengths(len(keys), len(values))
+            to: lengths
+          when: err != nil
+      - bind: t, err
+        eval: |-
+          build(dictShape, keySet{
+          		n: len(keys), blob: totalLen(keys, values) + uint64(len(keys))*uint64(dictShape.head()),
+          		hash: func(seed uint64, i int) uint64 { return hashString(seed, keys[i]) },
+          		same: func(i, j int) bool { return keys[i] == keys[j] },
+          		write: func(i int, rec, blob []byte, off uint32) uint32 {
+          			byteOrder.PutUint32(rec, off)
+          			byteOrder.PutUint32(blob[width4:], uint32(len(values[i])))
+          			at := head(blob, keys[i], dictShape.head())
+          			return at + uint32(copy(blob[at:], values[i]))
+          		},
+          	})
+        to: build
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&Dict{t: t}, nil"
+  - of: LoadDict
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoadDict
+        kind: self
+      - id: load
+        kind: internal
+    steps:
+      - bind: t, err
+        eval: load(image, dictShape, check)
+        to: load
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - return: "&Dict{t: t}, nil"
+  - of: (*Dict).Get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Dict).Get
+        kind: self
+      - id: d.t.findString
+        kind: internal
+      - id: d.t.textValue
+        kind: internal
+    steps:
+      - bind: r, ok
+        eval: d.t.findString(key)
+        to: d.t.findString
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!ok"
+      - return: d.t.textValue(r), true
+        to: d.t.textValue
+  - of: (*Dict).Len
+    steps:
+      - return: int(d.t.n)
+  - of: (*Dict).All
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Dict).All
+        kind: self
+      - id: d.t.entry
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: yield func(string, string) bool
+            steps:
+              - loop:
+                  do:
+                    - bind: "off"
+                      eval: d.t.entry(x)
+                      to: d.t.entry
+                    - opt:
+                        do:
+                          - return: ""
+                        when: "!yield(d.t.stringKey(off), d.t.textValue(off))"
+                  key: x
+                  range: d.t.n
+  - of: (*Dict).AppendBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Dict).AppendBinary
+        kind: self
+      - id: d.t.appendTo
+        kind: internal
+    steps:
+      - return: d.t.appendTo(b, dictShape), nil
+        to: d.t.appendTo
+  - of: (*Dict).MarshalBinary
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Dict).MarshalBinary
+        kind: self
+      - id: d.t.appendTo
+        kind: internal
+    steps:
+      - return: d.t.appendTo(nil, dictShape), nil
+        to: d.t.appendTo
+  - of: totalLen
+    steps:
+      - var:
+          name: "n"
+          type: uint64
+      - loop:
+          do:
+            - op: +=
+              set: "n"
+              value: uint64(len(k))
+          key: _
+          range: keys
+          value: k
+      - loop:
+          do:
+            - op: +=
+              set: "n"
+              value: uint64(len(v))
+          key: _
+          range: values
+          value: v
+      - return: "n"
+  - of: (*table).appendTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).appendTo
+        kind: self
+      - id: writeHeader
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: e
+              eval: make([]byte, headerSize)
+            - bind: empty
+              eval: new(table)
+            - set: empty.shape
+              value: s
+            - eval: writeHeader(e, empty)
+              to: writeHeader
+            - return: append(b, e...)
+          when: t.image == nil
+      - return: append(b, t.image...)
+  - of: head
+    participants:
+      - id: caller
+        kind: actor
+      - id: head
+        kind: self
+      - id: byteOrder.PutUint32
+        kind: value
+    steps:
+      - eval: byteOrder.PutUint32(blob, uint32(len(key)))
+        to: byteOrder.PutUint32
+      - return: hs + uint32(copy(blob[hs:], key))
+  - of: seedAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: seedAt
+        kind: self
+      - id: fold
+        kind: internal
+    steps:
+      - return: fold(uint64(a)+mulB, mulC)
+        to: fold
+  - of: solve
+    participants:
+      - id: caller
+        kind: actor
+      - id: solve
+        kind: self
+      - id: seedAt
+        kind: internal
+      - id: newSearch
+        kind: internal
+      - id: s.run
+        kind: internal
+      - id: s.finish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: plan{}, -1, true
+          when: n == 0
+      - bind: hs
+        eval: make([]uint64, n)
+      - loop:
+          do:
+            - bind: seed
+              eval: seedAt(a)
+              to: seedAt
+            - loop:
+                do:
+                  - set: hs[i]
+                    value: hash(seed, i)
+                key: i
+                range: hs
+            - bind: s
+              eval: newSearch(hs)
+              to: newSearch
+            - switch:
+                cases:
+                  - case: solved
+                    do:
+                      - return: s.finish(seed), -1, true
+                        to: s.finish
+                  - case: duplicate
+                    do:
+                      - return: plan{}, d, false
+                  - case: reseed
+                init:
+                  bind: v, d
+                  eval: s.run(same)
+                  to: s.run
+                "on": v
+          key: a
+          range: attempts
+      - return: plan{}, -1, false
+  - of: newSearch
+    participants:
+      - id: caller
+        kind: actor
+      - id: newSearch
+        kind: self
+      - id: below
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: uint32(len(hs))
+      - bind: nb
+        eval: (n + keysPerBucket - 1) / keysPerBucket
+      - bind: m
+        eval: uint32((uint64(n)*percent + loadPercent - 1) / loadPercent)
+      - bind: s
+        eval: |-
+          &search{
+          		hs: hs, n: n, m: m, nb: nb,
+          		start: make([]uint32, nb+1), keys: make([]uint32, n), bh: make([]uint64, n),
+          		owner: make([]uint32, m), taken: make([]uint64, (m+63)/64), pilot: make([]byte, nb),
+          	}
+      - loop:
+          do:
+            - op: ++
+              set: s.start[below(h, nb)+1]
+          key: _
+          range: hs
+          value: h
+      - loop:
+          do:
+            - op: +=
+              set: s.start[b+1]
+              value: s.start[b]
+          key: b
+          range: nb
+      - bind: fill
+        eval: make([]uint32, nb)
+      - eval: copy(fill, s.start[:nb])
+      - loop:
+          do:
+            - bind: b
+              eval: below(h, nb)
+              to: below
+            - set: s.keys[fill[b]]
+              value: uint32(i)
+            - set: s.bh[fill[b]]
+              value: h
+            - op: ++
+              set: fill[b]
+          key: i
+          range: hs
+          value: h
+      - loop:
+          do:
+            - set: s.recent[i]
+              value: ^uint32(0)
+          key: i
+          range: s.recent
+      - return: s
+  - of: (*search).bucket
+    steps:
+      - return: s.bh[s.start[b]:s.start[b+1]]
+  - of: (*search).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*search).run
+        kind: self
+      - id: s.collisions
+        kind: internal
+      - id: s.bySize
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: v, d
+          init:
+            bind: v, d
+            eval: s.collisions(same)
+            to: s.collisions
+          when: v != solved
+      - bind: order
+        eval: s.bySize()
+        to: s.bySize
+      - bind: budget
+        eval: int(s.n) * evictionsPerKey
+      - loop:
+          do:
+            - set: s.stack
+              value: append(s.stack[:0], b)
+            - loop:
+                cond: len(s.stack) > 0
+                do:
+                  - bind: c
+                    eval: s.stack[len(s.stack)-1]
+                  - set: s.stack
+                    value: s.stack[:len(s.stack)-1]
+                  - opt:
+                      do:
+                        - continue: true
+                      when: s.placeFree(c)
+                  - opt:
+                      do:
+                        - return: reseed, -1
+                      when: budget == 0 || !s.placeEvicting(c)
+                  - op: "--"
+                    set: budget
+          key: _
+          range: order
+          value: b
+      - return: solved, -1
+  - of: (*search).collisions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*search).collisions
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: lo, hi
+              eval: s.start[b], s.start[b+1]
+            - loop:
+                cond: i < hi
+                do:
+                  - bind: k
+                    eval: slices.Index(s.bh[lo:i], s.bh[i])
+                    to: slices
+                  - opt:
+                      do:
+                        - continue: true
+                      when: k < 0
+                  - opt:
+                      do:
+                        - return: duplicate, int(s.keys[i])
+                      when: same(int(s.keys[i]), int(s.keys[lo+uint32(k)]))
+                  - return: reseed, -1
+                init: i := lo + 1
+                post: i++
+          key: b
+          range: s.nb
+      - return: solved, -1
+  - of: (*search).bySize
+    steps:
+      - bind: largest
+        eval: uint32(0)
+      - loop:
+          do:
+            - set: largest
+              value: max(largest, s.start[b+1]-s.start[b])
+          key: b
+          range: s.nb
+      - bind: at
+        eval: make([]uint32, largest+2)
+      - loop:
+          do:
+            - op: ++
+              set: at[largest-(s.start[b+1]-s.start[b])+1]
+          key: b
+          range: s.nb
+      - loop:
+          cond: i < uint32(len(at))
+          do:
+            - op: +=
+              set: at[i]
+              value: at[i-1]
+          init: i := uint32(1)
+          post: i++
+      - bind: nonEmpty
+        eval: at[largest]
+      - bind: order
+        eval: make([]uint32, s.nb)
+      - loop:
+          do:
+            - bind: k
+              eval: largest - (s.start[b+1] - s.start[b])
+            - set: order[at[k]]
+              value: b
+            - op: ++
+              set: at[k]
+          key: b
+          range: s.nb
+      - return: order[:nonEmpty]
+  - of: (*search).slots
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*search).slots
+        kind: self
+      - id: slotOf
+        kind: internal
+    steps:
+      - set: s.buf
+        value: s.buf[:0]
+      - loop:
+          do:
+            - bind: x
+              eval: slotOf(h, p, s.m)
+              to: slotOf
+            - opt:
+                do:
+                  - return: "false"
+                when: slices.Contains(s.buf, x)
+            - set: s.buf
+              value: append(s.buf, x)
+          key: _
+          range: s.bucket(b)
+          value: h
+      - return: "true"
+  - of: (*search).take
+    steps:
+      - set: s.pilot[b]
+        value: p
+      - loop:
+          do:
+            - set: s.owner[x]
+              value: b + 1
+            - op: "|="
+              set: s.taken[x/64]
+              value: 1 << (x % 64)
+          key: _
+          range: s.buf
+          value: x
+  - of: (*search).free
+    steps:
+      - set: s.owner[x]
+        value: "0"
+      - op: "&^="
+        set: s.taken[x/64]
+        value: 1 << (x % 64)
+  - of: (*search).placeFree
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*search).placeFree
+        kind: self
+      - id: s.bucket
+        kind: internal
+      - id: slotOf
+        kind: internal
+      - id: s.take
+        kind: internal
+    steps:
+      - bind: hs
+        eval: s.bucket(b)
+        to: s.bucket
+      - loop:
+          do:
+            - bind: free
+              eval: "true"
+            - loop:
+                do:
+                  - bind: x
+                    eval: slotOf(h, byte(p), s.m)
+                    to: slotOf
+                  - opt:
+                      do:
+                        - set: free
+                          value: "false"
+                        - break: true
+                      when: s.taken[x/64]&(1<<(x%64)) != 0
+                key: _
+                range: hs
+                value: h
+            - opt:
+                do:
+                  - eval: s.take(b, byte(p))
+                    to: s.take
+                  - return: "true"
+                when: free && s.slots(b, byte(p))
+          key: p
+          range: pilots
+      - return: "false"
+  - of: (*search).placeEvicting
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*search).placeEvicting
+        kind: self
+      - id: s.cost
+        kind: internal
+      - id: s.slots
+        kind: internal
+      - id: s.evict
+        kind: internal
+      - id: s.take
+        kind: internal
+    steps:
+      - bind: best, bestCost
+        eval: "-1, ^uint64(0)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!s.slots(b, byte(p))"
+            - bind: cost, ok
+              eval: s.cost()
+              to: s.cost
+            - opt:
+                do:
+                  - set: best, bestCost
+                    value: p, cost
+                when: ok && cost < bestCost
+          key: p
+          range: pilots
+      - opt:
+          do:
+            - return: "false"
+          when: best < 0
+      - eval: s.slots(b, byte(best))
+        to: s.slots
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: s.evict(o - 1)
+                    to: s.evict
+                init:
+                  bind: o
+                  eval: s.owner[x]
+                when: o != 0
+          key: _
+          range: s.buf
+          value: x
+      - eval: s.slots(b, byte(best))
+        to: s.slots
+      - eval: s.take(b, byte(best))
+        to: s.take
+      - set: s.recent[s.next]
+        value: b
+      - set: s.next
+        value: (s.next + 1) % recentEvicted
+      - return: "true"
+  - of: (*search).evict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*search).evict
+        kind: self
+      - id: slotOf
+        kind: internal
+      - id: s.free
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: x
+              eval: slotOf(h, s.pilot[c], s.m)
+              to: slotOf
+            - opt:
+                do:
+                  - eval: s.free(x)
+                    to: s.free
+                when: s.owner[x] == c+1
+          key: _
+          range: s.bucket(c)
+          value: h
+      - set: s.stack
+        value: append(s.stack, c)
+  - of: (*search).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*search).finish
+        kind: self
+      - id: slotOf
+        kind: internal
+    steps:
+      - bind: p
+        eval: |-
+          plan{
+          		seed: seed, n: s.n, nb: s.nb, m: s.m, pilots: s.pilot, hs: s.hs,
+          		remap: make([]uint32, s.m-s.n), pos: make([]uint32, s.n),
+          	}
+      - bind: hole
+        eval: uint32(0)
+      - loop:
+          cond: x < s.m
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: s.owner[x] == 0
+            - loop:
+                cond: s.owner[hole] != 0
+                do:
+                  - op: ++
+                    set: hole
+            - set: p.remap[x-s.n]
+              value: hole
+            - op: ++
+              set: hole
+          init: x := s.n
+          post: x++
+      - loop:
+          do:
+            - loop:
+                cond: j < s.start[b+1]
+                do:
+                  - bind: x
+                    eval: slotOf(s.bh[j], s.pilot[b], s.m)
+                    to: slotOf
+                  - opt:
+                      do:
+                        - set: x
+                          value: p.remap[x-s.n]
+                      when: x >= s.n
+                  - set: p.pos[s.keys[j]]
+                    value: x
+                init: j := s.start[b]
+                post: j++
+          key: b
+          range: s.nb
+      - return: p
+  - of: shape.stride
+    steps:
+      - opt:
+          do:
+            - return: uint32(s.kw) + uint32(s.vw)
+          when: s.kind == kindInts
+      - return: uint32(width4)
+  - of: shape.head
+    steps:
+      - opt:
+          do:
+            - return: uint32(width4 + width4)
+          when: s.kind == kindText
+      - return: uint32(width4)
+  - of: loadw
+    participants:
+      - id: caller
+        kind: actor
+      - id: loadw
+        kind: self
+      - id: byteOrder.Uint64
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: width8
+              do:
+                - return: byteOrder.Uint64(b)
+                  to: byteOrder.Uint64
+            - case: width4
+              do:
+                - return: uint64(byteOrder.Uint32(b))
+            - case: width2
+              do:
+                - return: uint64(byteOrder.Uint16(b))
+            - default: true
+              do:
+                - return: uint64(b[0])
+          "on": w
+  - of: storew
+    participants:
+      - id: caller
+        kind: actor
+      - id: storew
+        kind: self
+      - id: byteOrder.PutUint64
+        kind: value
+      - id: byteOrder.PutUint32
+        kind: value
+      - id: byteOrder.PutUint16
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: width8
+              do:
+                - eval: byteOrder.PutUint64(b, v)
+                  to: byteOrder.PutUint64
+            - case: width4
+              do:
+                - eval: byteOrder.PutUint32(b, uint32(v))
+                  to: byteOrder.PutUint32
+            - case: width2
+              do:
+                - eval: byteOrder.PutUint16(b, uint16(v))
+                  to: byteOrder.PutUint16
+            - default: true
+              do:
+                - set: b[0]
+                  value: byte(v)
+          "on": w
+  - of: mask
+    steps:
+      - opt:
+          do:
+            - return: ^uint64(0)
+          when: w >= width8
+      - return: 1<<(uint64(width8)*uint64(w)) - 1
+  - of: (*table).slot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).slot
+        kind: self
+      - id: slotOf
+        kind: internal
+      - id: byteOrder.Uint32
+        kind: value
+    steps:
+      - bind: x
+        eval: slotOf(h, t.pilots[below(h, t.nb)], t.m)
+        to: slotOf
+      - opt:
+          do:
+            - set: x
+              to: byteOrder.Uint32
+              value: byteOrder.Uint32(t.remap[4*uint64(x-t.n):])
+          when: x >= t.n
+      - return: x
+  - of: (*table).findInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).findInt
+        kind: self
+      - id: hashInt
+        kind: internal
+      - id: t.slot
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: t.n == 0
+      - op: "&="
+        set: k
+        value: t.kmask
+      - bind: h
+        eval: hashInt(t.seed, k)
+        to: hashInt
+      - bind: x
+        eval: t.slot(h)
+        to: t.slot
+      - opt:
+          do:
+            - return: 0, false
+          when: t.tags[x] != byte(h)
+      - bind: r
+        eval: uint64(x) * uint64(t.stride)
+      - return: r, loadw(t.recs[r:], t.shape.kw) == k
+  - of: (*table).findString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).findString
+        kind: self
+      - id: hashString
+        kind: internal
+      - id: t.slot
+        kind: internal
+      - id: t.entry
+        kind: internal
+      - id: t.shape.head
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: t.n == 0
+      - bind: h
+        eval: hashString(t.seed, k)
+        to: hashString
+      - bind: x
+        eval: t.slot(h)
+        to: t.slot
+      - opt:
+          do:
+            - return: 0, false
+          when: t.tags[x] != byte(h)
+      - bind: "off"
+        eval: t.entry(x)
+        to: t.entry
+      - bind: e
+        eval: t.blob[off:]
+      - opt:
+          do:
+            - return: 0, false
+          when: load32(e, 0) != uint64(len(k))
+      - bind: hs
+        eval: t.shape.head()
+        to: t.shape.head
+      - return: off, e[hs:hs+uint32(len(k))] == k
+  - of: (*table).intKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).intKey
+        kind: self
+      - id: loadw
+        kind: internal
+    steps:
+      - return: loadw(t.recs[r:], t.shape.kw)
+        to: loadw
+  - of: (*table).intValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).intValue
+        kind: self
+      - id: loadw
+        kind: internal
+    steps:
+      - return: loadw(t.recs[r+uint64(t.shape.kw):], t.shape.vw)
+        to: loadw
+  - of: (*table).entry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).entry
+        kind: self
+      - id: byteOrder.Uint32
+        kind: value
+    steps:
+      - return: byteOrder.Uint32(t.recs[4*uint64(x):])
+        to: byteOrder.Uint32
+  - of: (*table).stringKey
+    steps:
+      - bind: at
+        eval: off + t.shape.head()
+      - return: "t.blob[at : at+uint32(load32(t.blob, int(off)))]"
+  - of: (*table).entryValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).entryValue
+        kind: self
+      - id: load64
+        kind: internal
+      - id: load32
+        kind: internal
+    steps:
+      - bind: at
+        eval: int(off + t.shape.head() + uint32(load32(t.blob, int(off))))
+      - switch:
+          cases:
+            - case: width8
+              do:
+                - return: load64(t.blob, at)
+                  to: load64
+            - case: width4
+              do:
+                - return: load32(t.blob, at)
+                  to: load32
+            - case: width2
+              do:
+                - return: uint64(t.blob[at]) | uint64(t.blob[at+1])<<8
+            - default: true
+              do:
+                - return: uint64(t.blob[at])
+          "on": t.shape.vw
+  - of: (*table).textValue
+    steps:
+      - bind: at
+        eval: off + t.shape.head() + uint32(load32(t.blob, int(off)))
+      - return: "t.blob[at : at+uint32(load32(t.blob, int(off)+int(width4)))]"
+  - of: pad4
+    steps:
+      - return: (x + 3) &^ 3
+  - of: layoutOf
+    steps:
+      - var:
+          name: l
+          type: layout
+      - set: l.tags
+        value: headerSize + pad4(uint64(nb))
+      - set: l.remap
+        value: l.tags + pad4(uint64(n))
+      - set: l.recs
+        value: l.remap + 4*(uint64(m)-uint64(n))
+      - set: l.blob
+        value: l.recs + uint64(n)*uint64(s.stride())
+      - set: l.size
+        value: l.blob + blob
+      - return: l
+  - of: writeHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeHeader
+        kind: self
+      - id: byteOrder.PutUint16
+        kind: value
+      - id: byteOrder.PutUint32
+        kind: value
+      - id: byteOrder.PutUint64
+        kind: value
+    steps:
+      - bind: h
+        eval: image[:headerSize]
+      - eval: clear(h)
+      - eval: copy(h, magic)
+      - eval: byteOrder.PutUint16(h[4:], version)
+        to: byteOrder.PutUint16
+      - set: h[6], h[7], h[8], h[9]
+        value: t.shape.kind, t.shape.kw, t.shape.vw, t.shape.signs
+      - eval: byteOrder.PutUint32(h[12:], t.n)
+        to: byteOrder.PutUint32
+      - eval: byteOrder.PutUint32(h[16:], t.nb)
+        to: byteOrder.PutUint32
+      - eval: byteOrder.PutUint32(h[20:], t.m)
+        to: byteOrder.PutUint32
+      - eval: byteOrder.PutUint64(h[24:], t.seed)
+        to: byteOrder.PutUint64
+      - eval: byteOrder.PutUint64(h[32:], uint64(len(t.blob)))
+        to: byteOrder.PutUint64
+      - eval: byteOrder.PutUint64(h[40:], uint64(len(image)))
+        to: byteOrder.PutUint64
+      - eval: byteOrder.PutUint32(h[48:], crc32.Checksum(image[headerSize:], castagnoli))
+        to: byteOrder.PutUint32
+      - eval: byteOrder.PutUint32(h[headerSealed:], crc32.Checksum(h[:headerSealed], castagnoli))
+        to: byteOrder.PutUint32
+  - of: (*table).view
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*table).view
+        kind: self
+      - id: stringOf
+        kind: internal
+      - id: t.shape.stride
+        kind: internal
+      - id: mask
+        kind: internal
+    steps:
+      - set: t.image
+        value: image
+      - set: t.pilots
+        value: "image[headerSize : headerSize+uint64(t.nb)]"
+      - set: t.tags
+        value: "image[l.tags : l.tags+uint64(t.n)]"
+      - set: t.remap
+        value: image[l.remap:l.recs]
+      - set: t.recs
+        value: image[l.recs:l.blob]
+      - set: t.blob
+        to: stringOf
+        value: stringOf(image[l.blob:l.size])
+      - set: t.stride
+        to: t.shape.stride
+        value: t.shape.stride()
+      - set: t.kmask
+        to: mask
+        value: mask(t.shape.kw)
+  - of: stringOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: stringOf
+        kind: self
+      - id: unsafe
+        kind: stdlib
+    steps:
+      - return: unsafe.String(unsafe.SliceData(b), len(b))
+        to: unsafe

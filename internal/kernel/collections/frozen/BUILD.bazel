@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "frozen",
+    srcs = [
+        "build.go",
+        "doc.go",
+        "gen_codes.go",
+        "hash.go",
+        "load.go",
+        "map.go",
+        "solve.go",
+        "table.go",
+        "view.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/collections/frozen",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":frozen",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "frozen_test",
+    srcs = [
+        "frozen_bench_test.go",
+        "frozen_external_test.go",
+        "frozen_internal_test.go",
+        "fuzz_external_test.go",
+        "gen_api_test.go",
+        "gen_perf_test.go",
+        "perf_fixtures_test.go",
+    ],
+    embed = [":frozen"],
+    deps = ["//internal/kernel/errs"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -1,0 +1,51 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*search).cost
+    steps:
+      - var:
+          name: cost
+          type: uint64
+      - loop:
+          do:
+            - bind: o
+              eval: s.owner[x]
+            - opt:
+                do:
+                  - continue: true
+                when: o == 0
+            - bind: counted
+              eval: "false"
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: counted
+                          value: "true"
+                        - break: true
+                      when: s.owner[y] == o
+                key: _
+                range: s.buf[:i]
+                value: "y"
+            - opt:
+                do:
+                  - continue: true
+                when: counted
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: 0, false
+                      when: r == o-1
+                key: _
+                range: s.recent
+                value: r
+            - bind: size
+              eval: uint64(s.start[o] - s.start[o-1])
+            - op: +=
+              set: cost
+              value: size * size
+          key: i
+          range: s.buf
+          value: x
+      - return: cost, true

@@ -469,6 +469,425 @@ packages:
             name: K
           - constraint: any
             name: V
+  - codes:
+      - const:
+          - doc: CodeDuplicateKey identifies a build given the same key twice.
+            name: CodeDuplicateKey
+            note: "range: 0.1.9.0 - 0.1.9.255"
+            value: "0x00_01_09_01"
+        type: errs.Code
+      - const:
+          - doc: CodeLengthMismatch identifies a build given more keys than values or more values than keys.
+            name: CodeLengthMismatch
+            value: "0x00_01_09_02"
+        type: errs.Code
+      - const:
+          - doc: CodeTooLarge identifies a build past what an image addresses.
+            name: CodeTooLarge
+            value: "0x00_01_09_03"
+        type: errs.Code
+      - const:
+          - doc: CodeUnsolved identifies a key set no seed of the fixed sequence hashed without a collision.
+            name: CodeUnsolved
+            value: "0x00_01_09_04"
+        type: errs.Code
+      - const:
+          - doc: CodeImageCorrupt identifies bytes that are not a sound image.
+            name: CodeImageCorrupt
+            value: "0x00_01_09_05"
+        type: errs.Code
+      - const:
+          - doc: CodeImageVersion identifies an image of a layout this build does not read.
+            name: CodeImageVersion
+            value: "0x00_01_09_06"
+        type: errs.Code
+      - const:
+          - doc: CodeImageShape identifies an image of other key or value types than the ones it is loaded as.
+            name: CodeImageShape
+            value: "0x00_01_09_07"
+        type: errs.Code
+    constants:
+      - blockDoc: ""
+        doc: |-
+          CheckHeader verifies the header alone — its magic, CRC-32C, version,
+          shape, and that its sizes add up to the image's length — in constant
+          time. It is for bytes the caller wrote itself and kept intact: a body
+          damaged after the header was sealed is not detected, and a Get on it may
+          return a wrong answer or panic.
+        name: CheckHeader
+        type: Check
+        value: "0"
+      - blockDoc: ""
+        doc: |-
+          CheckAll verifies the header, then the body's CRC-32C, every remapped
+          slot, every string's bounds, every tag, and that every key leads back to
+          its own slot — in time linear in the image. A table loaded under it
+          never panics and finds every key it holds: it is the mode for bytes from
+          anywhere else.
+        name: CheckAll
+        type: Check
+        value: "1"
+    doc: |-
+      Package frozen provides read-only maps built once from a known key set and
+      read in place: Map (integer keys, integer values), StringMap (string keys,
+      integer values) and Dict (string keys, string values). A kernel primitive:
+      stdlib-only, and generic down to its signatures — keys, values and bytes.
+
+      # The hash function
+
+      A build searches for a minimal perfect hash function over its keys, in the
+      manner of PTHash and PtrHash: the keys fall into buckets of about three, the
+      largest bucket first, and each bucket is given the one-byte pilot that sends
+      all of its keys to free slots, evicting a cheaper bucket when no pilot finds
+      them free. The table has n·100/97 slots; the few keys that land past n are
+      remapped onto the holes below it. n keys take exactly n records, with no
+      empty one.
+
+      A lookup hashes the key, reads its bucket's pilot (a third of a byte a key,
+      which stays in cache), computes the slot, and reads the slot's tag — a byte
+      of the key's hash — before anything else, so an absent key is almost always
+      refused without touching a record. A present key then costs one record
+      read for an integer table, and the offset and one blob read for a string
+      table. Nothing is allocated, and a table is safe for concurrent use: it is
+      never written once built.
+
+      # The image
+
+      A table IS its image: one byte slice laid out as the image format says, read
+      in place with encoding/binary. A table of any size therefore holds the same
+      handful of pointers and nothing the collector scans. AppendBinary and
+      MarshalBinary write the image; LoadMap, LoadStringMap and LoadDict read one
+      without copying it, so the bytes the caller passes are the table's for as
+      long as the table lives — the caller keeps them alive and unchanged. No file
+      is mapped here: the kernel is stdlib-only and every platform's, and the
+      caller decides where the bytes come from.
+
+      The image is little-endian and versioned: a 64-byte header (magic, version,
+      the key and value types' shape, the counts, the seed, the sizes, a CRC-32C
+      of the body and one of the header), then the pilots, the tags, the remap,
+      the records and the blob. A build is a function of its key set alone — the
+      seeds are a fixed sequence and the buckets are placed in a fixed order —
+      so one set always writes the same bytes, whatever the order it was given in.
+
+      # Keys and values
+
+      Integer keys and values are any integer type, held at their own width; an
+      image records the widths and the signs, and loading one as other types is
+      refused. Floats are not keys: NaN equals nothing, and a frozen table would
+      have to choose between refusing it and holding a key no Get finds.
+    functions:
+      - doc: |-
+          NewMap builds a Map holding values[i] under keys[i]. It refuses keys and
+          values of different lengths (LengthMismatch), a key given twice
+          (DuplicateKey, naming the second index), and more keys than an image
+          addresses (TooLarge). Neither slice is kept.
+        in:
+          - name: keys
+            type: "[]K"
+          - name: values
+            type: "[]V"
+        name: NewMap
+        out:
+          - type: "*Map[K, V]"
+          - type: error
+        typeParams:
+          - name: K
+          - constraint: Integer
+            name: V
+      - doc: |-
+          LoadMap reads image as a Map[K, V], in place and verified under check: the
+          map reads image for as long as it lives, so the caller keeps it alive and
+          unchanged. It refuses bytes that are not an image (ImageCorrupt), a
+          layout of another version (ImageVersion), and an image of other key or
+          value types (ImageShape).
+        in:
+          - name: image
+            type: "[]byte"
+          - name: check
+            type: Check
+        name: LoadMap
+        out:
+          - type: "*Map[K, V]"
+          - type: error
+        typeParams:
+          - name: K
+          - constraint: Integer
+            name: V
+      - doc: |-
+          NewStringMap builds a StringMap holding values[i] under keys[i], refusing
+          what NewMap refuses; the keys' bytes are copied into the image, and the
+          slices are not kept.
+        in:
+          - name: keys
+            type: "[]string"
+          - name: values
+            type: "[]V"
+        name: NewStringMap
+        out:
+          - type: "*StringMap[V]"
+          - type: error
+        typeParams:
+          - constraint: Integer
+            name: V
+      - doc: |-
+          LoadStringMap reads image as a StringMap[V], in place and verified under
+          check, on LoadMap's terms.
+        in:
+          - name: image
+            type: "[]byte"
+          - name: check
+            type: Check
+        name: LoadStringMap
+        out:
+          - type: "*StringMap[V]"
+          - type: error
+        typeParams:
+          - constraint: Integer
+            name: V
+      - doc: |-
+          NewDict builds a Dict holding values[i] under keys[i], refusing what
+          NewMap refuses; the keys' and values' bytes are copied into the image.
+        in:
+          - name: keys
+            type: "[]string"
+          - name: values
+            type: "[]string"
+        name: NewDict
+        out:
+          - type: "*Dict"
+          - type: error
+      - doc: |-
+          LoadDict reads image as a Dict, in place and verified under check, on
+          LoadMap's terms.
+        in:
+          - name: image
+            type: "[]byte"
+          - name: check
+            type: Check
+        name: LoadDict
+        out:
+          - type: "*Dict"
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/kernel/collections/frozen
+    sentinels:
+      - var:
+          - code: CodeDuplicateKey
+            doc: |-
+              DuplicateKey is returned by a build given the same key twice; its index
+              field is the second occurrence's.
+            name: DuplicateKey
+            private: "internal/kernel/collections/frozen: two equal keys in one build"
+            public: A key was given twice
+            reason: DUPLICATE_KEY
+          - code: CodeLengthMismatch
+            doc: |-
+              LengthMismatch is returned by a build whose keys and values differ in
+              length; its fields give both.
+            name: LengthMismatch
+            private: "internal/kernel/collections/frozen: keys and values of different lengths"
+            public: The keys and the values differ in number
+            reason: LENGTH_MISMATCH
+          - code: CodeTooLarge
+            doc: |-
+              TooLarge is returned by a build of more keys than an image addresses
+              (its slots are counted in 32 bits), of a blob past 4 GiB, or of an image
+              larger than an int holds.
+            name: TooLarge
+            private: "internal/kernel/collections/frozen: more keys or bytes than an image addresses"
+            public: The table is too large for one image
+            reason: TOO_LARGE
+          - code: CodeUnsolved
+            doc: |-
+              Unsolved is returned by a build whose key set every seed of the fixed
+              sequence hashed with two keys on one 64-bit hash, or placed past its
+              eviction budget: a key set built to defeat the hash, never a random one.
+            name: Unsolved
+            private: "internal/kernel/collections/frozen: no seed of the sequence gave a perfect hash function"
+            public: No hash function was found for the keys
+            reason: UNSOLVED
+          - code: CodeImageCorrupt
+            doc: |-
+              ImageCorrupt is returned by a load of bytes that are not a sound image:
+              short, a bad magic or checksum, sizes that do not add up, or — under
+              CheckAll — a body whose records do not hold. Its why field says which.
+            name: ImageCorrupt
+            private: "internal/kernel/collections/frozen: bytes that are not a sound image"
+            public: The image is corrupt
+            reason: IMAGE_CORRUPT
+          - code: CodeImageVersion
+            doc: |-
+              ImageVersion is returned by a load of an image whose header holds and
+              whose layout version this build does not read.
+            name: ImageVersion
+            private: "internal/kernel/collections/frozen: an image of a layout version this build does not read"
+            public: The image is of an unsupported version
+            reason: IMAGE_VERSION
+          - code: CodeImageShape
+            doc: |-
+              ImageShape is returned by a load of an image whose kind, key or value
+              widths or signs are not the types it is loaded as; its fields give the
+              image's.
+            name: ImageShape
+            private: "internal/kernel/collections/frozen: an image of other key or value types"
+            public: The image holds other key or value types
+            reason: IMAGE_SHAPE
+    types:
+      - doc: |-
+          Check is how much of an image a load verifies before the table reads it
+          in place.
+        name: Check
+        underlying: uint8
+      - doc: |-
+          Dict is a read-only map from string keys to string values, built by
+          NewDict or loaded by LoadDict. The zero value is an empty Dict. Safe for
+          concurrent use.
+        methods:
+          - doc: |-
+              Get returns the value held under key and whether the dict holds key. The
+              value is a view of the image: it costs no allocation.
+            in:
+              - name: key
+                type: string
+            name: Get
+            out:
+              - type: string
+              - type: bool
+            recv: pointer
+          - doc: Len reports how many keys the dict holds.
+            name: Len
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              All yields every key and its value in slot order, which is the image's
+              and no other.
+            name: All
+            out:
+              - type: iter.Seq2[string, string]
+            recv: pointer
+          - doc: AppendBinary appends the dict's image to b.
+            in:
+              - name: b
+                type: "[]byte"
+            name: AppendBinary
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - doc: MarshalBinary returns a copy of the dict's image.
+            name: MarshalBinary
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+        name: Dict
+        struct:
+          unexported: true
+      - doc: |-
+          Integer is the constraint on an integer key or value: any integer type,
+          held in the image at its own width.
+        interface:
+          embeds:
+            - ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+        name: Integer
+      - doc: |-
+          Map is a read-only map from integer keys to integer values, built by
+          NewMap or loaded by LoadMap. Each key and its value are one record of the
+          image, so a present key costs one read past its tag. The zero value is an
+          empty Map. Safe for concurrent use.
+        methods:
+          - doc: Get returns the value held under key and whether the map holds key.
+            in:
+              - name: key
+                type: K
+            name: Get
+            out:
+              - type: V
+              - type: bool
+            recv: pointer
+          - doc: Len reports how many keys the map holds.
+            name: Len
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              All yields every key and its value in slot order, which is the image's
+              and no other.
+            name: All
+            out:
+              - type: iter.Seq2[K, V]
+            recv: pointer
+          - doc: AppendBinary appends the map's image to b.
+            in:
+              - name: b
+                type: "[]byte"
+            name: AppendBinary
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - doc: MarshalBinary returns a copy of the map's image.
+            name: MarshalBinary
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+        name: Map
+        struct:
+          unexported: true
+        typeParams:
+          - name: K
+          - constraint: Integer
+            name: V
+      - doc: |-
+          StringMap is a read-only map from string keys to integer values — a
+          symbol table — built by NewStringMap or loaded by LoadStringMap. The zero
+          value is an empty StringMap. Safe for concurrent use.
+        methods:
+          - doc: Get returns the value held under key and whether the map holds key.
+            in:
+              - name: key
+                type: string
+            name: Get
+            out:
+              - type: V
+              - type: bool
+            recv: pointer
+          - doc: Len reports how many keys the map holds.
+            name: Len
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              All yields every key and its value in slot order, which is the image's
+              and no other.
+            name: All
+            out:
+              - type: iter.Seq2[string, V]
+            recv: pointer
+          - doc: AppendBinary appends the map's image to b.
+            in:
+              - name: b
+                type: "[]byte"
+            name: AppendBinary
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - doc: MarshalBinary returns a copy of the map's image.
+            name: MarshalBinary
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+        name: StringMap
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: Integer
+            name: V
   - doc: |-
       Package heap provides Heap[T], a binary heap ordered by a comparison
       function the caller supplies. It is a kernel primitive: stdlib-only, and
