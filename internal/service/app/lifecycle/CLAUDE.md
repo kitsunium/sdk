@@ -27,6 +27,7 @@ raises the core's.
 | `run.go` | `RunConfig`, `Run`, `waitForStop`, `announce` — opt-in signals + sd_notify |
 | `supervise.go` | `Supervisor`, `NewSupervisor`, `Start` / `Stop` / `Component` / `Check`, the supervision loop (`supervise`, `recordEnd` — the early ends within `Within` —, `giveUpOn`, `once` — panic recovery — `wait`, `emit`, `wayOut`) |
 | `supervise_config.go` | `SupervisorConfig` (`Clock`, `Observe`, `Backoff`, `HealthyAfter`, `GiveUpAfter`), `GiveUpValue{Restarts, Within}`, `DefaultRestartBase` / `DefaultRestartMax` / `DefaultHealthyRun`, the refusals (`validateSupervisor`, `validateGiveUp`) and the clamps |
+| `idle.go` | `IdleConfig` (`Idle`, `Grace`, `Every`, `Clock`), `IdleStop`, `watchIdle`: one goroutine asks the probe at once and on each tick of the configured clock, counts the grace from the first idle answer, starts it again on a busy one, and cancels the derived context with `IdleReached` as its cause; a nil probe or a grace that is not positive is `IdleMisconfigured` naming the field |
 | `supervise_event.go` | `SupervisionPhase` (five, `SupervisionGaveUp` the last), `SupervisionEventValue` |
 
 ## How the partial-start cleanup is guaranteed

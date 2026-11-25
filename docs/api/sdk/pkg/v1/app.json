@@ -6689,6 +6689,67 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.IdleConfig",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
+      "name": "IdleConfig",
+      "spelled": "svclc.IdleConfig",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/lifecycle.IdleConfig",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.IdleConfig",
+      "doc": "IdleConfig is the public alias for an idle stop's settings: Idle, Grace,\nEvery, Clock.\n",
+      "file": "lifecycle/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.IdleMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
+      "name": "IdleMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.IdleMisconfigured",
+      "code": {
+        "value": "0.3.49.10",
+        "reason": "IDLE_MISCONFIGURED",
+        "public": "The idle stop cannot run as configured"
+      },
+      "doc": "IdleMisconfigured refuses an idle stop without a probe or a positive grace.\n",
+      "file": "lifecycle/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.IdleReached",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
+      "name": "IdleReached",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.IdleReached",
+      "code": {
+        "value": "0.3.49.11",
+        "reason": "IDLE_REACHED",
+        "public": "The application stopped after being idle for its grace period"
+      },
+      "doc": "IdleReached is the cause of a context IdleStop cancelled after its grace\nof idleness.\n",
+      "file": "lifecycle/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.IdleStop",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
+      "name": "IdleStop",
+      "spelled": "func(ctx context.Context, cfg IdleConfig) (context.Context, context.CancelFunc, error)",
+      "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/pkg/v1/app/lifecycle.IdleConfig) (context.Context, context.CancelFunc, error)",
+      "doc": "IdleStop returns a context also cancelled, with IdleReached as its cause,\nonce cfg.Idle has answered true for cfg.Grace — the context to give Run\nfor a process that ends on its own when nothing uses it.\n",
+      "file": "lifecycle/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.InvalidComponent",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",

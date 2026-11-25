@@ -17,6 +17,20 @@ constants:
         type: time.Duration
         value: 30 * time.Second
     name: DefaultStopTimeout
+  - doc: minIdleEvery is the shortest interval IdleStop asks its probe at.
+    items:
+      - name: minIdleEvery
+        type: time.Duration
+        value: time.Millisecond
+    name: minIdleEvery
+  - doc: |-
+      idleEveryShare is the share of the grace IdleStop checks at when
+      IdleConfig.Every is not positive.
+    items:
+      - name: idleEveryShare
+        type: time.Duration
+        value: "10"
+    name: idleEveryShare
   - doc: |-
       fixedAggregateParts is how many errors a failed Start's aggregate carries
       before the per-component unwind failures: the SDK's verdict, the
@@ -92,6 +106,14 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - minIdleEvery
+      - idleEveryShare
+      - IdleConfig
+      - IdleStop
+      - watchIdle
+      - idleMisconfigured
+    name: idle.go
+  - decls:
       - lifecycle
       - New
       - (*lifecycle).Add
@@ -156,6 +178,18 @@ files:
       - SupervisionEventValue
     name: supervise_event.go
 functions:
+  - name: IdleStop
+    params: ctx context.Context, cfg IdleConfig
+    results: context.Context, context.CancelFunc, error
+  - doc: |-
+      watchIdle asks cfg.Idle at once and on every tick, and cancels with
+      IdleReached once it has answered true for the whole grace.
+    name: watchIdle
+    params: ctx context.Context, cancel context.CancelCauseFunc, ticker clock.Ticker, cfg IdleConfig
+  - doc: idleMisconfigured names the field IdleStop refused.
+    name: idleMisconfigured
+    params: field string
+    results: error
   - name: New
     params: cfg Config
     results: corelc.Lifecycle
@@ -297,6 +331,30 @@ types:
         recv: c Config
         results: clock.Timed
     name: Config
+  - fields:
+      - doc: |-
+          Idle reports whether the application is idle now. It is called on the
+          watcher's goroutine, one call at a time, and must be short. Required.
+        name: Idle
+        type: func() bool
+      - doc: |-
+          Grace is how long Idle must keep answering true before the stop.
+          Required, positive.
+        name: Grace
+        type: time.Duration
+      - doc: |-
+          Every is how often Idle is asked. Not positive means a tenth of Grace,
+          and never less than a millisecond; the stop comes at most Every after
+          the grace has elapsed.
+        name: Every
+        type: time.Duration
+      - doc: |-
+          Clock is the time source the checks run on. Nil means clock.System; a
+          clock.ManualClock drives a test without a sleep.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    name: IdleConfig
   - doc: |-
       lifecycle is the concrete core/app/lifecycle.Lifecycle. It is unexported: there
       is one canonical ordering discipline, so a registry would be

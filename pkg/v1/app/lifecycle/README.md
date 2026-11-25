@@ -79,12 +79,14 @@ A component that PANICS is recovered and reported as [ComponentPanicked](#Compon
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func IdleStop\(ctx context.Context, cfg IdleConfig\) \(context.Context, context.CancelFunc, error\)](<#IdleStop>)
 - [func New\(cfg Config\) Lifecycle](<#New>)
 - [func NewSupervisor\(name string, run func\(ctx context.Context\) error, cfg SupervisorConfig\) \(\*Supervisor, error\)](<#NewSupervisor>)
 - [func Run\(ctx context.Context, lc Lifecycle, cfg RunConfig\) error](<#Run>)
 - [type Component](<#Component>)
 - [type Config](<#Config>)
 - [type GiveUp](<#GiveUp>)
+- [type IdleConfig](<#IdleConfig>)
 - [type Lifecycle](<#Lifecycle>)
   - [func \(Lifecycle\) Add\(component ComponentValue\) error](<#Lifecycle.Add>)
   - [func \(Lifecycle\) Start\(ctx context.Context\) error](<#Lifecycle.Start>)
@@ -235,6 +237,28 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/lifecycle.Duplicate
 
 Code `0.2.19.2` · reason `DUPLICATE_COMPONENT` · public "A component is already registered under that name"
 
+<a name="IdleMisconfigured"></a>
+```go
+var IdleMisconfigured *errs.Error
+```
+
+IdleMisconfigured refuses an idle stop without a probe or a positive grace.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/lifecycle.IdleMisconfigured`.
+
+Code `0.3.49.10` · reason `IDLE_MISCONFIGURED` · public "The idle stop cannot run as configured"
+
+<a name="IdleReached"></a>
+```go
+var IdleReached *errs.Error
+```
+
+IdleReached is the cause of a context IdleStop cancelled after its grace of idleness.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/lifecycle.IdleReached`.
+
+Code `0.3.49.11` · reason `IDLE_REACHED` · public "The application stopped after being idle for its grace period"
+
 <a name="InvalidComponent"></a>
 ```go
 var InvalidComponent *errs.Error
@@ -355,6 +379,15 @@ UnwindFailed marks a failure DURING the cleanup of a partial start. It travels a
 Initialised with `github.com/kitsunium/sdk/internal/core/app/lifecycle.UnwindFailed`.
 
 Code `0.3.49.4` · reason `UNWIND_FAILED` · public "Cleaning up after a failed start did not complete cleanly"
+
+<a name="IdleStop"></a>
+## func [IdleStop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
+
+```go
+func IdleStop(ctx context.Context, cfg IdleConfig) (context.Context, context.CancelFunc, error)
+```
+
+IdleStop returns a context also cancelled, with IdleReached as its cause, once cfg.Idle has answered true for cfg.Grace — the context to give Run for a process that ends on its own when nothing uses it.
 
 <a name="New"></a>
 ## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
@@ -477,6 +510,35 @@ type GiveUp struct {
 	Restarts int
 	// Within is the span the early ends are counted over.
 	Within   time.Duration
+}
+```
+
+<a name="IdleConfig"></a>
+## type [IdleConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
+
+IdleConfig is the public alias for an idle stop's settings: Idle, Grace, Every, Clock.
+
+```go
+type IdleConfig = svclc.IdleConfig
+```
+
+IdleConfig is an alias of `github.com/kitsunium/sdk/internal/service/app/lifecycle.IdleConfig`, declared as:
+
+```go
+type IdleConfig struct {
+	// Idle reports whether the application is idle now. It is called on the
+	// watcher's goroutine, one call at a time, and must be short. Required.
+	Idle  func() bool
+	// Grace is how long Idle must keep answering true before the stop.
+	// Required, positive.
+	Grace time.Duration
+	// Every is how often Idle is asked. Not positive means a tenth of Grace,
+	// and never less than a millisecond; the stop comes at most Every after
+	// the grace has elapsed.
+	Every time.Duration
+	// Clock is the time source the checks run on. Nil means clock.System; a
+	// clock.ManualClock drives a test without a sleep.
+	Clock clock.Timed
 }
 ```
 

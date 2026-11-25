@@ -108,6 +108,20 @@ packages:
             name: CodeSupervisorGaveUp
             value: "0x00_03_31_09"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeIdleMisconfigured identifies an IdleStop refused at construction: no
+              probe, or a grace that is not positive.
+            name: CodeIdleMisconfigured
+            value: "0x00_03_31_0A"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeIdleReached identifies the cause of a context IdleStop cancelled: its
+              probe answered idle for the whole grace.
+            name: CodeIdleReached
+            value: "0x00_03_31_0B"
+        type: errs.Code
     constants:
       - doc: PhaseStart reports a call to a component's [Start].
         name: PhaseStart
@@ -359,6 +373,22 @@ packages:
             private: "service/app/lifecycle: the supervised function ended early more often than GiveUpAfter allows; the fields name the supervisor, the bound and the last run's error"
             public: The supervised function kept failing and the supervisor gave up
             reason: SUPERVISOR_GAVE_UP
+          - code: CodeIdleMisconfigured
+            doc: IdleMisconfigured refuses an idle stop that could never decide.
+            exit: CONFIG
+            name: IdleMisconfigured
+            private: "service/app/lifecycle: IdleStop needs an Idle probe and a positive Grace; the field names which is wrong"
+            public: The idle stop cannot run as configured
+            reason: IDLE_MISCONFIGURED
+          - code: CodeIdleReached
+            doc: |-
+              IdleReached is the cause, as context.Cause reads it, of a context
+              IdleStop cancelled because its probe answered idle for the whole grace —
+              how a caller tells an idle stop from its parent's cancellation.
+            name: IdleReached
+            private: "service/app/lifecycle: the probe answered idle for the whole grace; the context was cancelled with this cause"
+            public: The application stopped after being idle for its grace period
+            reason: IDLE_REACHED
     types:
       - doc: |-
           Start brings one component up. It MUST honour ctx: the [Lifecycle] passes
@@ -644,6 +674,37 @@ packages:
         out:
           - type: "*Supervisor"
           - type: error
+      - doc: |-
+          IdleStop returns a context derived from ctx that is also cancelled, with
+          IdleReached as its cause, once cfg.Idle has answered true at every check
+          for cfg.Grace; a false answer starts the count again. The first check is
+          made at once, so an application idle from its start stops one grace later.
+          The CancelFunc must be called. A nil Idle or a Grace that is not positive
+          is refused with IdleMisconfigured.
+
+          It is how a process that serves while it has clients — a per-user daemon,
+          a broker for the sessions of one machine — ends on its own when the last
+          one leaves: give the context to Run.
+
+          	ctx, stop, err := lifecycle.IdleStop(ctx, lifecycle.IdleConfig{
+          		Idle:  func() bool { return clients.Count() == 0 },
+          		Grace: 30 * time.Second,
+          	})
+          	defer stop()
+          	err = lifecycle.Run(ctx, app, lifecycle.RunConfig{})
+
+          Goroutine lifecycle: one per call, ended when the idle grace elapses or the
+          returned context ends, whichever is first.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: IdleConfig
+        name: IdleStop
+        out:
+          - type: context.Context
+          - type: context.CancelFunc
+          - type: error
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle
@@ -838,6 +899,33 @@ packages:
                 as a supervisor always has.
               name: GiveUpAfter
               type: GiveUpValue
+      - doc: |-
+          IdleConfig tunes [IdleStop]: what idle means, for how long, how often it is
+          asked and on which clock.
+        name: IdleConfig
+        struct:
+          fields:
+            - doc: |-
+                Idle reports whether the application is idle now. It is called on the
+                watcher's goroutine, one call at a time, and must be short. Required.
+              name: Idle
+              type: func() bool
+            - doc: |-
+                Grace is how long Idle must keep answering true before the stop.
+                Required, positive.
+              name: Grace
+              type: time.Duration
+            - doc: |-
+                Every is how often Idle is asked. Not positive means a tenth of Grace,
+                and never less than a millisecond; the stop comes at most Every after
+                the grace has elapsed.
+              name: Every
+              type: time.Duration
+            - doc: |-
+                Clock is the time source the checks run on. Nil means clock.System; a
+                clock.ManualClock drives a test without a sleep.
+              name: Clock
+              type: clock.Timed
       - doc: |-
           GiveUpValue is a restart intensity, Erlang's: a supervisor gives up when
           its function ends early more than Restarts times within any span of
@@ -1176,6 +1264,12 @@ packages:
             target: svclc.SupervisorConfig
       - alias:
           - doc: |-
+              IdleConfig is the public alias for an idle stop's settings: Idle, Grace,
+              Every, Clock.
+            name: IdleConfig
+            target: svclc.IdleConfig
+      - alias:
+          - doc: |-
               GiveUp is the public alias for a supervisor's restart intensity: give up
               after more than Restarts early ends within Within.
             name: GiveUp
@@ -1268,6 +1362,16 @@ packages:
             name: SupervisorGaveUp
             reexport: corelc.SupervisorGaveUp
             type: "*errs.Error"
+          - doc: IdleMisconfigured refuses an idle stop without a probe or a positive grace.
+            name: IdleMisconfigured
+            reexport: corelc.IdleMisconfigured
+            type: "*errs.Error"
+          - doc: |-
+              IdleReached is the cause of a context IdleStop cancelled after its grace
+              of idleness.
+            name: IdleReached
+            reexport: corelc.IdleReached
+            type: "*errs.Error"
       - func:
           doc: |-
             New returns a Lifecycle. It cannot fail: a nil cfg.Clock falls back to the
@@ -1313,6 +1417,22 @@ packages:
           name: NewSupervisor
           out:
             - type: "*Supervisor"
+            - type: error
+      - func:
+          doc: |-
+            IdleStop returns a context also cancelled, with IdleReached as its cause,
+            once cfg.Idle has answered true for cfg.Grace — the context to give Run
+            for a process that ends on its own when nothing uses it.
+          forward: svclc.IdleStop
+          in:
+            - name: ctx
+              type: context.Context
+            - name: cfg
+              type: IdleConfig
+          name: IdleStop
+          out:
+            - type: context.Context
+            - type: context.CancelFunc
             - type: error
     imports:
       corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle

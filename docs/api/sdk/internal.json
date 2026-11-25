@@ -9825,6 +9825,38 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.CodeIdleMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/lifecycle",
+      "name": "CodeIdleMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "209162",
+      "code": {
+        "value": "0.3.49.10"
+      },
+      "doc": "CodeIdleMisconfigured identifies an IdleStop refused at construction: no\nprobe, or a grace that is not positive.\n",
+      "file": "core/app/lifecycle/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.CodeIdleReached",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/lifecycle",
+      "name": "CodeIdleReached",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "209163",
+      "code": {
+        "value": "0.3.49.11"
+      },
+      "doc": "CodeIdleReached identifies the cause of a context IdleStop cancelled: its\nprobe answered idle for the whole grace.\n",
+      "file": "core/app/lifecycle/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.CodeInvalidComponent",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/lifecycle",
@@ -10059,6 +10091,40 @@
         "public": "A component is already registered under that name"
       },
       "doc": "DuplicateComponent is returned by Add when the name is already taken.\nNames are how a transition and an error identify a component, so two\ncomponents sharing one would make every report ambiguous.\n",
+      "file": "core/app/lifecycle/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.IdleMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/lifecycle",
+      "name": "IdleMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.49.10",
+        "reason": "IDLE_MISCONFIGURED",
+        "public": "The idle stop cannot run as configured"
+      },
+      "doc": "IdleMisconfigured refuses an idle stop that could never decide.\n",
+      "file": "core/app/lifecycle/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.IdleReached",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/lifecycle",
+      "name": "IdleReached",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.49.11",
+        "reason": "IDLE_REACHED",
+        "public": "The application stopped after being idle for its grace period"
+      },
+      "doc": "IdleReached is the cause, as context.Cause reads it, of a context\nIdleStop cancelled because its probe answered idle for the whole grace —\nhow a caller tells an idle stop from its parent's cancellation.\n",
       "file": "core/app/lifecycle/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -75419,6 +75485,52 @@
       ],
       "doc": "GiveUpValue is a restart intensity, Erlang's: a supervisor gives up when\nits function ends early more than Restarts times within any span of\nWithin on the supervisor's clock. The (Restarts+1)-th early end inside\nWithin is not restarted: the supervision ends, its observer hears\nSupervisionGaveUp, and Supervisor.Check reports SupervisorGaveUp, so\nthe level above — a liveness probe, an orchestrator — decides what\nhappens next instead of a loop that cannot succeed restarting forever.\n\nThe zero value never gives up. Restarts zero with a positive Within\ngives up at the first early end. A negative field, and a positive\nRestarts without a positive Within, are refused by NewSupervisor with\nSupervisorMisconfigured: a bound with no span is no bound.\n",
       "file": "service/app/lifecycle/supervise_config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.IdleConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/lifecycle",
+      "name": "IdleConfig",
+      "spelled": "struct{Idle func() bool; Grace time.Duration; Every time.Duration; Clock clock.Timed}",
+      "canonical": "struct{Idle func() bool; Grace time.Duration; Every time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed}",
+      "fields": [
+        {
+          "name": "Idle",
+          "type": "func() bool",
+          "doc": "Idle reports whether the application is idle now. It is called on the\nwatcher's goroutine, one call at a time, and must be short. Required.\n"
+        },
+        {
+          "name": "Grace",
+          "type": "time.Duration",
+          "doc": "Grace is how long Idle must keep answering true before the stop.\nRequired, positive.\n"
+        },
+        {
+          "name": "Every",
+          "type": "time.Duration",
+          "doc": "Every is how often Idle is asked. Not positive means a tenth of Grace,\nand never less than a millisecond; the stop comes at most Every after\nthe grace has elapsed.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock is the time source the checks run on. Nil means clock.System; a\nclock.ManualClock drives a test without a sleep.\n"
+        }
+      ],
+      "doc": "IdleConfig tunes [IdleStop]: what idle means, for how long, how often it is\nasked and on which clock.\n",
+      "file": "service/app/lifecycle/idle.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.IdleStop",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/lifecycle",
+      "name": "IdleStop",
+      "spelled": "func(ctx context.Context, cfg IdleConfig) (context.Context, context.CancelFunc, error)",
+      "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/internal/service/app/lifecycle.IdleConfig) (context.Context, context.CancelFunc, error)",
+      "doc": "IdleStop returns a context derived from ctx that is also cancelled, with\nIdleReached as its cause, once cfg.Idle has answered true at every check\nfor cfg.Grace; a false answer starts the count again. The first check is\nmade at once, so an application idle from its start stops one grace later.\nThe CancelFunc must be called. A nil Idle or a Grace that is not positive\nis refused with IdleMisconfigured.\n\nIt is how a process that serves while it has clients — a per-user daemon,\na broker for the sessions of one machine — ends on its own when the last\none leaves: give the context to Run.\n\n\tctx, stop, err := lifecycle.IdleStop(ctx, lifecycle.IdleConfig{\n\t\tIdle:  func() bool { return clients.Count() == 0 },\n\t\tGrace: 30 * time.Second,\n\t})\n\tdefer stop()\n\terr = lifecycle.Run(ctx, app, lifecycle.RunConfig{})\n\nGoroutine lifecycle: one per call, ended when the idle grace elapses or the\nreturned context ends, whichever is first.\n",
+      "file": "service/app/lifecycle/idle.go",
       "layer": "service",
       "family": "app"
     },
