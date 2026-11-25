@@ -1,10 +1,10 @@
 # ADR 0091 — a single trust anchor is a key with no way out
 
-**Status**: Accepted; implemented in `framework/internal/service/entitlement/anchors.go` (in the framework since [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md)).
-**Date**: 2026-09-16
-**Deciders**: kitsunium maintainers
-**Amends**: ADR 0079 §trust model (the anchor is a list, not a key)
-**Related**: ADR 0031 (a zero value is never inert — the clamp half is used here), ADR 0078 (the quarantine the identity port answers)
+- **Status**: Accepted; implemented in `framework/internal/service/entitlement/anchors.go` (in the framework since [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md)).
+- **Date**: 2026-09-16
+- **Deciders**: kitsunium maintainers
+- **Amends**: ADR 0079 §trust model (the anchor is a list, not a key)
+- **Related**: ADR 0031 (a zero value is never inert — the clamp half is used here), ADR 0078 (the quarantine the identity port answers)
 - **Area**: framework
 - **Need**: constraint
 

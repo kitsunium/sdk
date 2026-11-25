@@ -1,12 +1,12 @@
 # ADR 0017 — Public module is the bare `pkg`, not `pkg/v1` (Go forbids the `/v1` suffix)
 
-**Status**: Accepted
-**Amended by**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) — the public module is the repository root, `github.com/kitsunium/sdk`, its tag `vX.Y.Z`; the import paths `…/pkg/v1/*` are unchanged, and the bare `…/pkg` is a module of the past whose tags stay; [ADR 0171](0171-a-module-per-family-and-a-version-is-never-reused.md) — the public surface becomes one module per family under `pkg/v1/`; `…/pkg` stays retired
-**Date**: 2026-06-14
-**Deciders**: kitsunium maintainers
-**Supersedes**: —
-**Amends**: ADR 0009 (fixes the module *path*, not just the published `go.mod` form), ADR 0007 (tag shape `pkg/<major>/vX.Y.Z` → bare `pkg/vX.Y.Z` for the v0/v1 module), ADR 0001 (public module path `pkg/v1` → `pkg`)
-**Related**: ADR 0004 (Bazel visibility enforces layering, independent of the module boundary)
+- **Status**: Accepted
+- **Amended by**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) — the public module is the repository root, `github.com/kitsunium/sdk`, its tag `vX.Y.Z`; the import paths `…/pkg/v1/*` are unchanged, and the bare `…/pkg` is a module of the past whose tags stay; [ADR 0171](0171-a-module-per-family-and-a-version-is-never-reused.md) — the public surface becomes one module per family under `pkg/v1/`; `…/pkg` stays retired
+- **Date**: 2026-06-14
+- **Deciders**: kitsunium maintainers
+- **Supersedes**: —
+- **Amends**: ADR 0009 (fixes the module *path*, not just the published `go.mod` form), ADR 0007 (tag shape `pkg/<major>/vX.Y.Z` → bare `pkg/vX.Y.Z` for the v0/v1 module), ADR 0001 (public module path `pkg/v1` → `pkg`)
+- **Related**: ADR 0004 (Bazel visibility enforces layering, independent of the module boundary)
 - **Area**: build
 - **Need**: decision
 

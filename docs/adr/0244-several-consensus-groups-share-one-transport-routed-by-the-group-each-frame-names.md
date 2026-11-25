@@ -1,6 +1,6 @@
 # ADR 0244 — several consensus groups share one transport, routed by the group each frame names, and coalescing and quiescing are specified before they are built
 
-- **Status**: D1 to D4 Accepted on 2026-11-11 for [kitsunium/sdk#925](https://github.com/kitsunium/sdk/issues/925), decided autonomously and revisable while v0 ([ADR 0040](0040-changing-a-published-shape-while-v0.md)), and built. D5 to D7 Proposed: no coalescing, quiescing or shared-store code lands until the owner accepts them, and each lands behind the protocol version D5 names.
+- **Status**: Accepted (D1 to D4 Accepted on 2026-11-11 for [kitsunium/sdk#925](https://github.com/kitsunium/sdk/issues/925), decided autonomously and revisable while v0 ([ADR 0040](0040-changing-a-published-shape-while-v0.md)), and built. D5 to D7 Proposed: no coalescing, quiescing or shared-store code lands until the owner accepts them, and each lands behind the protocol version D5 names.)
 - **Date**: 2026-11-11
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) D11 ("a v2 that multiplexes groups on one `Transport` changes no wire format": true of every frame, not of the snapshot offer, see D2) and its *Deferred* item "Multi-group (v2)", which this record opens
