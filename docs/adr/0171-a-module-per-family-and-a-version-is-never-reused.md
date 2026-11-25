@@ -6,6 +6,8 @@
 - **Amends**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) (§1 the SDK is one module; §3 tombstones; §4 what a release computes and tags), [ADR 0007](0007-sdk-release-and-versioning.md) (§1 the tag shapes; §2 the size is per module; §4 what a release tags), [ADR 0009](0009-pkg-public-module-resolvability.md) (resolvability is checked per module, and a version is checked against the proxy before it is cut), [ADR 0017](0017-pkg-bare-module-path.md) (the public surface is one module per family under `pkg/v1/`, not the bare `…/pkg`), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (§9 a connector is a module released on its own), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (§1 the rule holds for each family module), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) (§3 a vendor module is tagged at its own version, only when it changed)
 - **Closes**: #295 (a vendor module tagged although it did not change), and the scope question of #220 (a test file cuts no release)
 - **Related**: [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) / [ADR 0089](0089-a-file-that-cannot-cut-a-release-cannot-size-one.md) / [ADR 0135](0135-a-release-is-sized-by-a-label-a-maintainer-set.md) (range, scope and size, now per module), [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md) (the census), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) / [ADR 0169](0169-the-sdk-is-rebuilt-from-its-design-in-a-copy-and-a-generation-is-held-to-the-whole-inline-set.md) (kit writes the SDK from `design/`)
+- **Area**: build
+- **Need**: decision
 
 ## Context
 

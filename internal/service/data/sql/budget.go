@@ -86,11 +86,12 @@ func (b stmtBudget) verdict(cut context.Context, operation string, err error) er
 }
 
 // statementRunner is what a bounded statement runs on: a pool or a
-// transaction, both of which database/sql gives the same four methods.
+// transaction, both of which database/sql gives the same methods. It names the
+// three the budget dispatches — exec, query, prepare — and no more: a single
+// row is read through query, so QueryRowContext is the concrete types' own.
 type statementRunner interface {
 	ExecContext(ctx context.Context, query string, args ...any) (stdsql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*stdsql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *stdsql.Row
 	PrepareContext(ctx context.Context, query string) (*stdsql.Stmt, error)
 }
 

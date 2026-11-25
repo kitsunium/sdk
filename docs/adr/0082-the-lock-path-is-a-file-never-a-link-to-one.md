@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0052](0052-sdk-lock-domain.md) §D6 (the lock directory's permission rule was the whole of the file locker's answer to substitution; it is not), [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) §Deferred (the reparse-point item, deferred there on an explicit "both sides or not at all", is closed here on both sides)
 - **Related**: [ADR 0018](0018-sdk-cross-platform-portability.md) (the build-tag split, the runtime bar, the `x/sys` ban), [ADR 0056](0056-sdk-vfs-domain.md) (`PathEscaped`: a symlink at a path the SDK owns already has a verdict of its own), [ADR 0054](0054-sdk-queue-domain.md) (`QueueDirectoryUnusable` with `why=symlink`, the same refusal one domain over), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code allocation)
+- **Area**: app
+- **Need**: constraint
 
 ## Context
 

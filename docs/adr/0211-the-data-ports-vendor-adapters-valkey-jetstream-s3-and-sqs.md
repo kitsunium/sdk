@@ -20,6 +20,8 @@
   (a vendor module requires `internal` only); kitsunium/sdk#829, #989, #990,
   #991, #1130; #984 (the go-redis module named by its vendor), #985 (the
   importable conformance suites), #988 (the scheduled vendor lane)
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

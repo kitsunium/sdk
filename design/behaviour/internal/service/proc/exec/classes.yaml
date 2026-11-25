@@ -165,6 +165,15 @@ constants:
         value: "100"
     name: drainPoll
   - doc: |-
+      lingerPoll is how often Stop probes a private group whose leader was reaped
+      inside the grace window (awaitGroupGone): the members get the rest of the
+      window, and a group already empty costs one kill(-pgid, 0) and no wait.
+    items:
+      - name: lingerPoll
+        type: time.Duration
+        value: 10 * time.Millisecond
+    name: lingerPoll
+  - doc: |-
       defaultHandshakeFD is the fallback descriptor for the trampoline status pipe
       when no fd number was passed (a spawn with no ExtraFiles): the pipe follows the
       three std streams at fd 3. With ExtraFiles present the parent appends the pipe
@@ -1404,6 +1413,7 @@ files:
       - signalledCode
       - killResendInterval
       - drainPoll
+      - lingerPoll
       - handle
       - newHandle
       - (*handle).groupTarget
@@ -1418,12 +1428,17 @@ files:
       - (*handle).Signal
       - (*handle).SignalGroup
       - (*handle).Stop
+      - (*handle).awaitGrace
+      - (*handle).awaitGroupGone
+      - (*handle).awaitLingerPoll
+      - (*handle).groupEmpty
       - (*handle).killUntilReaped
       - (*handle).awaitKill
       - (*handle).signalGroupAllowGone
       - (*handle).zombieGroupRefused
       - (*handle).groupDrains
       - (*handle).awaitExit
+      - (*handle).awaitExitBy
       - (*handle).reapInBackground
       - exitValueFrom
       - exitValue
@@ -3597,15 +3612,77 @@ types:
       - doc: |-
           Stop terminates the process group gracefully: it signals the whole group with
           sig, waits up to grace for exit, then escalates to SIGKILL on the group —
-          at once when grace is not positive. It returns nil once the group has
-          exited, ctx's error if cancelled first, or StopFailed if the group survives
-          the SIGKILL escalation. The escalation sends SIGKILL again every
+          at once when grace is not positive. The grace applies to the GROUP, not to
+          the leader alone: with a private group (Setpgid), a leader reaped within the
+          window leaves the members the rest of it (awaitGroupGone), and a group that
+          still answers when it closes gets the SIGKILL too — a member that ignores
+          sig no longer outlives a leader that honoured it. It returns nil once the
+          group has exited, ctx's error if cancelled first, or StopFailed if the group
+          survives the SIGKILL escalation. The escalation sends SIGKILL again every
           killResendInterval until the leader is reaped (killUntilReaped), so a
           SIGKILL the kernel discarded does not leave Stop waiting for ever.
         name: Stop
         params: ctx context.Context, grace time.Duration, sig coreproc.Signal
         recv: h *handle
         results: error
+      - doc: |-
+          awaitGrace runs Stop's graceful window: grace for the leader's exit and,
+          with a private group, what is left of it for the members the leader leaves
+          behind (awaitGroupGone). settled reports a terminal outcome — the group
+          gone (err nil) or ctx cancelled (err is ctx's error); false means the
+          window closed on a leader or a member still running, and the caller must
+          escalate.
+        name: awaitGrace
+        params: ctx context.Context, grace time.Duration
+        recv: h *handle
+        results: settled bool, err error
+      - doc: |-
+          awaitGroupGone watches a private group whose leader is reaped until it
+          empties, ctx ends, or deadline delivers: kill(-pgid, 0) every lingerPoll on
+          the handle's clock (groupEmpty). gone reports a group whose probe answered
+          ESRCH; false with a nil err means the window closed with a
+          member still answering, and the caller must escalate.
+
+          The pgid is still this group's while the probe answers: POSIX does not
+          reuse a process ID as a process group ID while a group of that ID has a
+          member, and a lingering member — a zombie awaiting its reaper included — is
+          one. Only between a probe that answered and the SIGKILL that follows could
+          the group empty and the number be taken by a new group leader, which needs
+          the kernel to cycle through every pid in that window: the same residue the
+          escalation's first SIGKILL to a reaped leader's group already carries.
+        name: awaitGroupGone
+        params: ctx context.Context, deadline <-chan time.Time
+        recv: h *handle
+        results: gone bool, err error
+      - doc: |-
+          awaitLingerPoll waits one lingerPoll on the handle's clock before the next
+          probe of a group whose leader is reaped. over reports the end of the watch:
+          ctx cancelled (err is ctx's error) or deadline delivered (err nil); false
+          means the interval closed and the group is due another probe.
+        name: awaitLingerPoll
+        params: ctx context.Context, deadline <-chan time.Time
+        recv: h *handle
+        results: over bool, err error
+      - doc: |-
+          groupEmpty reports whether the private group is gone: kill(-pgid, 0)
+          answers ESRCH, on every kernel. Any other answer is a group still there:
+
+            - success is a member, alive or a zombie awaiting its reaper — Linux and
+              the BSDs count zombies, and init reaps an orphan within milliseconds;
+            - EPERM on Linux and the BSDs is a live member this process may not
+              signal (it changed its credentials). It is not gone, and Stop must not
+              say it stopped: the window runs out and the escalation, refused too,
+              reports STOP_FAILED;
+            - EPERM on darwin is also XNU's answer for a group holding only zombies
+              (zombieGroupRefused). No darwin-only reading is needed here: those
+              zombies are orphans init reaps within milliseconds, so the answer turns
+              to ESRCH long before the window closes, while a live member keeps it
+              EPERM — and should the window close first, the escalation's
+              zombieGroupRefused, which watches the group drain (groupDrains), tells
+              the two apart before any STOP_FAILED.
+        name: groupEmpty
+        recv: h *handle
+        results: bool
       - doc: |-
           killUntilReaped sends SIGKILL to the group and waits for the leader's reap,
           sending SIGKILL again every killResendInterval on the handle's clock until
@@ -3688,13 +3765,22 @@ types:
           timer fires. settled reports whether a terminal outcome was reached; when
           false the caller must escalate. A non-positive grace closes the window at
           once.
+        name: awaitExit
+        params: ctx context.Context, grace time.Duration
+        recv: h *handle
+        results: settled bool, err error
+      - doc: |-
+          awaitExitBy is awaitExit on a window the caller owns: it returns when the
+          process is reaped, ctx is cancelled, or deadline delivers. awaitGrace hands
+          it the timer it then watches the group on, so the leader and the group share
+          one grace window.
 
           Goroutine lifecycle: it launches reapInBackground, which drives the once-only
           Wait and returns as soon as the reap completes (closing h.done). The goroutine
           cannot outlive the process: it blocks only inside os.Process.Wait, which
           returns when the child is reaped, so no leak survives this call.
-        name: awaitExit
-        params: ctx context.Context, grace time.Duration
+        name: awaitExitBy
+        params: ctx context.Context, deadline <-chan time.Time
         recv: h *handle
         results: settled bool, err error
       - doc: |-

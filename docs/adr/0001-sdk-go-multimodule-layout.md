@@ -1,8 +1,10 @@
 # ADR 0001 — SDK Go Multi-Module Layout
 
-**Status**: Accepted; **the module split superseded by [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md)** — the SDK is one module, `github.com/kitsunium/sdk`; the four layers stand, as its directories
-**Date**: 2026-04-19
-**Deciders**: @kodflow
+- **Status**: Accepted; **the module split superseded by [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md)** — the SDK is one module, `github.com/kitsunium/sdk`; the four layers stand, as its directories
+- **Date**: 2026-04-19
+- **Deciders**: @kodflow
+- **Area**: build
+- **Need**: decision
 
 ## Context
 

@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0052](0052-sdk-lock-domain.md) §D8 (Windows was refused at construction; it is now implemented, and §D7's measurement gains its opposite number)
 - **Related**: [ADR 0018](0018-sdk-cross-platform-portability.md) (build bar + runtime bar, the uniform `UnsupportedPlatform`, the `x/sys` ban and the hand-cited-ABI discipline it imposes), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp vs refuse), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (`Deadliner` as a sibling), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (a file goes in the layer that owns the concern)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

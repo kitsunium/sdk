@@ -6,6 +6,8 @@
 - **Amended**: 2026-11-12 for the file engine (#821), the SQL engine (#822), the subscriber (#823) and compaction (#824), below.
 - **Amends**: nothing. A new domain, `data/stream` (`internal/core/data/stream`, `internal/service/data/stream`, later `pkg/v1/data/stream`), and two code ranges, `0.2.38.*` (the core's) and `0.3.94.*` (the engines', declared in the core — ADR 0160).
 - **Related**: [ADR 0054](0054-sdk-queue-domain.md) (the queue, the right-hand column of the frontier below), [ADR 0053](0053-sdk-events-domain.md) (the in-process bus), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a frozen port and its siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the policy's zeros), [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) (joining the caller's transaction), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (the `data` family), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (where a code is declared), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) and [ADR 0164](0164-an-error-code-is-the-designs-and-kit-writes-it.md) (design first), [ADR 0230](0230-a-segmented-log-is-a-kernel-primitive-that-writes-and-never-decides.md) (the segmented log the file engine builds on), issues [#818](https://github.com/kitsunium/sdk/issues/818) (this decision) and [#890](https://github.com/kitsunium/sdk/issues/890) (the program)
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

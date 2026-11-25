@@ -4,6 +4,8 @@
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0060](0060-sdk-health-domain.md) (the health domain), [ADR 0072](0072-health-bounds-every-wait-it-owns.md) (a budget on the injected clock), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md)
+- **Area**: app
+- **Need**: constraint
 
 ## Context
 

@@ -4,6 +4,8 @@
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (whose type a value is), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port), [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the backoff curve), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code ranges)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

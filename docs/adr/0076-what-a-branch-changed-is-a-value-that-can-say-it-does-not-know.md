@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — the domain moves to the framework
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is never an inert policy), [ADR 0052](0052-sdk-lock-domain.md) (why a two-backend domain has no registry), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer a public alias points at), [ADR 0075](0075-reading-the-cgroup-cap-that-already-bounds-us.md) (the first versement from the same source)
+- **Area**: framework
+- **Need**: decision
 
 ## Context
 

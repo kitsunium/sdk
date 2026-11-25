@@ -4,6 +4,8 @@
 - **Date**: 2026-10-14
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework is a module of the SDK), [ADR 0056](0056-sdk-vfs-domain.md) (the disk file system, refused on Windows), kitsunium/platform#35 item 6 (`d1e5961`), kitsunium/sdk#274
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

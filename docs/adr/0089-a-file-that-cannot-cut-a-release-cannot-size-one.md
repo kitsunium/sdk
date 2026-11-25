@@ -5,6 +5,8 @@
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0007](0007-sdk-release-and-versioning.md) §2 (row 4 — the `Release-bump` trailer is scoped to the paths that can *cut* a release, not to `pkg/` alone)
 - **Related**: [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) (both halves read the same range), [ADR 0009](0009-pkg-public-module-resolvability.md) (detached release commit)
+- **Area**: release
+- **Need**: incident
 
 ## Context
 

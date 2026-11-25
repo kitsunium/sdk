@@ -9,6 +9,8 @@
   - `internal/core/writer/CLAUDE.md` — promotes **`depTier`** (stdlib / vendor-in-root / third-party) from an implicit folder convention to a **documented, first-class property of every writer**, and states the **never-in-tree** placement rule for vendor-backed writers;
   - the ADR 0005 §Registry allocation table — reserves the service octets `0x1B.4` (rotfile decode), `0x1E` (net transport), `0x1F` (journald) and the `third-party/db/writer/*` octets `0x20` (mysql), `0x21` (clickhouse), `0x22` (redis-stream); each is **declared here, allocated, ADR-gated where vendored, and minted only in its own package's `codes.go`** when the corresponding WI lands.
 - **Gates**: WI-9 (`internal/service/writer/dbsink` batching shell), WI-10 (`third-party/db/writer/{mysql,clickhouse}`), WI-11 (`third-party/db/writer/redis` stream transport). Those items MUST NOT begin until this ADR is Accepted — they introduce vendor SDKs and a new core seam, which the SDK's one-decision-per-ADR rule requires be frozen *before* code.
+- **Area**: observe
+- **Need**: decision
 
 ## Context
 

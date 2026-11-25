@@ -13,6 +13,8 @@
   (D-N4; the kind set a group's options record),
   [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   (the loop's `http1` profile, HTTP/1.1 only)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

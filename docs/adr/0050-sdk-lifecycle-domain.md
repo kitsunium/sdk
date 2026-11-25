@@ -4,6 +4,8 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0043](0043-drain-is-a-signal-not-a-cancellation.md) (a drain is announced, not imposed), [ADR 0047](0047-sdk-net-websocket.md) §D9 (a hijacked connection is the handler's), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (published ports), [ADR 0041](0041-sdk-scheduler-domain.md) (the FUNC-port precedent), [ADR 0016](0016-sdk-process-supervision-domain.md) / [ADR 0026](0026-sdk-resilience-domain.md) (no-registry precedents)
+- **Area**: app
+- **Need**: incident
 
 ## Context
 

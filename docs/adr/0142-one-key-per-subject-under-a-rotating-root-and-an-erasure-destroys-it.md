@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0096](0096-a-secret-is-a-value-no-rendering-writes-down.md) §6 (a rotation's prune honours `RotatorConfig.InUse`)
 - **Related**: [ADR 0013](0013-sdk-crypto-domain.md) (the AEAD every box is sealed with), [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) (the KDF port, and `KeyEnvelope` / `KeyTree`, which this is not), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the frozen port), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the shapes it publishes), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (absence is an answer, `Replace` never resurrects), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the refused cache TTL), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer each alias points at), [ADR 0025](0025-sdk-cache-kernel.md) / [ADR 0049](0049-cache-becomes-a-domain.md) (the cache primitive reused), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the two ranges, both already owned)
+- **Area**: security
+- **Need**: decision
 
 ## Context
 

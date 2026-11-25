@@ -134,7 +134,7 @@ mkroot() {
 # gives, and green against the guard as it is.
 #
 # mkdocroot builds a root the rest of the guard passes — one Purpose paragraph
-# and its table, one ADR in all three indexes — so that the core/ block alone
+# and its table, one ADR in the index — so that the core/ block alone
 # decides each case. $1 is the block's lines under `├── core/`, `│` included;
 # every further argument is a package made under internal/core, holding one
 # non-test .go file.
@@ -147,8 +147,7 @@ mkdocroot() {
   done
   mkdir -p docs/adr
   echo '# ADR 0001' >docs/adr/0001-fixture.md
-  echo '| `0001-fixture.md` | fixture |' >docs/adr/CLAUDE.md
-  echo '| `adr/0001-fixture.md` | fixture |' >docs/CLAUDE.md
+  echo '| `0001-fixture.md` | fixture |' >docs/adr/INDEX.md
   {
     printf '# fixture\n\n## Purpose\n\nGo SDK providing a fixture.\n\n'
     printf '| Domain | What |\n|---|---|\n| `authz` | fixture |\n\n'
@@ -157,7 +156,7 @@ mkdocroot() {
     printf '├── core/          domain interfaces + domain values\n'
     printf '%s\n' "$block"
     printf '└── service/       implementations\n```\n\n'
-    printf '## Reference\n\n- ADR 0001 — fixture — `docs/adr/0001-fixture.md`\n'
+    printf '## Reference\n\nThe ADRs are listed in `docs/adr/INDEX.md`.\n'
   } >CLAUDE.md
 }
 
@@ -180,6 +179,85 @@ mkdocroot() {
   run "$SCRIPTS/check-domain-docs.sh" "$WORK"
 
   [ "$status" -eq 0 ]
+}
+
+# ADR 0251 folded the three ADR indexes into docs/adr/INDEX.md. A row left in,
+# or brought back to, a CLAUDE.md that used to hold one — what a union merge of
+# a branch cut before that change does — is refused, the root's Reference list
+# and docs/CLAUDE.md's Contents table alike; the index itself stays checked.
+@test "domain-docs: an ADR index row in a former host CLAUDE.md is refused" {
+  mkdocroot '│                  security/authz' security/authz
+  printf '\n- ADR 0001 — fixture — `docs/adr/0001-fixture.md`\n' >>CLAUDE.md
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CLAUDE.md: holds ADR index rows"* ]]
+}
+
+# ADR 0253 sets a CLAUDE.md a 200-line target and a subdirectory one a
+# 40 000-character ceiling. The guard reports a file over either and still
+# passes: most files are over, and are brought under one change at a time.
+@test "domain-docs: an oversized CLAUDE.md is reported, and the guard passes" {
+  mkdocroot '│                  security/authz' security/authz
+  mkdir -p deep
+  awk 'BEGIN { for (i = 0; i < 201; i++) print "line" }' >deep/CLAUDE.md
+  mkdir -p wide
+  awk 'BEGIN { for (i = 0; i < 5; i++) printf "%9000s\n", "x" }' >wide/CLAUDE.md
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 over 200 lines, 1 below the root over 40000 bytes"* ]]
+  [[ "$output" == *"deep/CLAUDE.md — 201 lines"* ]]
+  [[ "$output" == *"wide/CLAUDE.md — 5 lines, 45005 bytes"* ]]
+}
+
+# A tree whose every CLAUDE.md is within its size says nothing about sizes.
+@test "domain-docs: no size line when every CLAUDE.md is within its size" {
+  mkdocroot '│                  security/authz' security/authz
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"CLAUDE.md size"* ]]
+}
+
+@test "domain-docs: a docs/CLAUDE.md Contents row is refused too" {
+  mkdocroot '│                  security/authz' security/authz
+  echo '| `adr/0001-fixture.md` | fixture |' >docs/CLAUDE.md
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docs/CLAUDE.md: holds ADR index rows"* ]]
+}
+
+# A former host the guard cannot read is a guard that cannot answer: before,
+# `grep … || true` read the failure as "no row" and passed. root reads any
+# file whatever its mode, so the case needs an unprivileged user.
+@test "domain-docs: a former host that cannot be read stops the guard" {
+  [ "$(id -u)" -ne 0 ] || skip "root reads a file whatever its mode"
+  mkdocroot '│                  security/authz' security/authz
+  echo '# docs/' >docs/CLAUDE.md
+  chmod 000 docs/CLAUDE.md
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+  chmod 644 docs/CLAUDE.md
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docs/CLAUDE.md: could not be read"* ]]
+}
+
+@test "domain-docs: an ADR missing from docs/adr/INDEX.md is named" {
+  mkdocroot '│                  security/authz' security/authz
+  echo '# ADR 0002' >docs/adr/0002-fixture.md
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docs/adr/INDEX.md: the index table disagrees"* ]]
+  [[ "$output" == *"    0002"* ]]
 }
 
 # The regression the change exists for, written with full paths so the old

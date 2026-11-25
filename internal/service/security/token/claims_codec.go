@@ -43,15 +43,13 @@ var registeredNames = [registeredSlots]string{
 
 // claimShape is the per-format encoding of the claim values whose spelling the
 // two formats disagree about. Every decode method reads a value the scanner
-// already validated as JSON.
+// already validated as JSON. decodeTime and checkAudience are not on it: they
+// run on the hot verify path, where a call through the interface would make its
+// argument escape, so decodeTimeIn and checkAudienceIn reach each shape's own
+// method by a type switch and never dispatch them here.
 type claimShape interface {
-	// decodeTime reads one registered time claim.
-	decodeTime(raw []byte) (time.Time, error)
 	// encodeTime renders one registered time claim.
 	encodeTime(instant time.Time) json.RawMessage
-	// checkAudience refuses an "aud" value the format cannot carry, without
-	// building anything.
-	checkAudience(raw []byte) error
 	// decodeAudience reads an "aud" value checkAudience accepted into its
 	// general slice form; nil raw is no audience.
 	decodeAudience(raw []byte) ([]string, error)

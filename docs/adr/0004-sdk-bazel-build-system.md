@@ -1,11 +1,13 @@
 # ADR 0004 — Bazel 9 as the single build/test system
 
-**Status**: Accepted
-**Date**: 2026-04-20
-**Deciders**: @kodflow
-**Supersedes**: none
-**Related**: ADR 0001 (multi-module layout), ADR 0002 (errs registry), context `.claude/contexts/bazel-9-go-sdk.md`
-**Amended by**: [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) — §Layer firewall's mechanism: Gazelle gives every `internal/` package `//:__subpackages__` visibility, so the direction is asserted on the build graph instead; [ADR 0136](0136-every-module-is-scanned-for-the-vulnerabilities-it-reaches.md) — the four govulncheck jobs retired with the old pipeline come back as one blocking step outside Bazel, which carries no vulnerability database
+- **Status**: Accepted
+- **Date**: 2026-04-20
+- **Deciders**: @kodflow
+- **Supersedes**: none
+- **Related**: ADR 0001 (multi-module layout), ADR 0002 (errs registry), context `.claude/contexts/bazel-9-go-sdk.md`
+- **Amended by**: [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) — §Layer firewall's mechanism: Gazelle gives every `internal/` package `//:__subpackages__` visibility, so the direction is asserted on the build graph instead; [ADR 0136](0136-every-module-is-scanned-for-the-vulnerabilities-it-reaches.md) — the four govulncheck jobs retired with the old pipeline come back as one blocking step outside Bazel, which carries no vulnerability database
+- **Area**: build
+- **Need**: decision
 
 ## Context
 

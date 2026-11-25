@@ -13,6 +13,8 @@
   [ADR 0195](0195-an-http-groups-protocols-are-computed-once-and-its-alpn-follows-them.md)
   §D3 (the bounds), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md)
   (allocs: 0 in the alloc lane), [ADR 0194](0194-a-loop-lane-offloads-to-its-own-worker-and-an-http1-answer-may-be-pending.md) §D3
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

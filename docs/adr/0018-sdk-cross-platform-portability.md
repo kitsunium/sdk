@@ -1,11 +1,13 @@
 # ADR 0018 — Cross-platform portability strategy
 
-**Status**: Accepted (both bars extended to illumos and Solaris by [ADR 0144](0144-illumos-and-solaris-supervise-on-their-own-kernels-word.md); the `proc/exec` verdict gains the fd-table seal, `DieWithParent`, `Scheduling`, `StdioPTY`, `ProcessHandle` and placement-by-clone rows in [ADR 0217](0217-a-spawn-gives-the-child-only-what-it-names-and-waits-a-bounded-time.md), amended 2026-11-03; the adoption, notify-transport and `PIDEnv` rows in [ADR 0219](0219-a-supervisor-adopts-hears-and-hands-over-only-what-it-can-verify.md), amended 2026-11-07; adoption on darwin and the BSDs and the notify listener on FreeBSD, by ADR 0219's amendments of 2026-11-08; the `Spec.Sandbox` row — Linux amd64 and arm64 alone — by ADR 0217's amendment of 2026-11-08)
-**Date**: 2026-06-14
-**Deciders**: @kodflow
-**Amended**: 2026-11-04 — §Amendment (kitsunium/sdk#941): the verdict and roadmap tables restated as the backends that shipped, the capability matrix held to them by a test, the OOM bias refused off Linux before the spawn
-**Related**: ADR 0016 (process-supervision domain — the source of platform-specific calls),
+- **Status**: Accepted (both bars extended to illumos and Solaris by [ADR 0144](0144-illumos-and-solaris-supervise-on-their-own-kernels-word.md); the `proc/exec` verdict gains the fd-table seal, `DieWithParent`, `Scheduling`, `StdioPTY`, `ProcessHandle` and placement-by-clone rows in [ADR 0217](0217-a-spawn-gives-the-child-only-what-it-names-and-waits-a-bounded-time.md), amended 2026-11-03; the adoption, notify-transport and `PIDEnv` rows in [ADR 0219](0219-a-supervisor-adopts-hears-and-hands-over-only-what-it-can-verify.md), amended 2026-11-07; adoption on darwin and the BSDs and the notify listener on FreeBSD, by ADR 0219's amendments of 2026-11-08; the `Spec.Sandbox` row — Linux amd64 and arm64 alone — by ADR 0217's amendment of 2026-11-08)
+- **Date**: 2026-06-14
+- **Deciders**: @kodflow
+- **Amended**: 2026-11-04 — §Amendment (kitsunium/sdk#941): the verdict and roadmap tables restated as the backends that shipped, the capability matrix held to them by a test, the OOM bias refused off Linux before the spawn
+- **Related**: ADR 0016 (process-supervision domain — the source of platform-specific calls),
 ADR 0004 (Bazel visibility / Linux CI lane), ADR 0005 (dotted-quad error codes — the `UnsupportedPlatform` sentinel)
+- **Area**: platform
+- **Need**: decision
 
 ## Context
 

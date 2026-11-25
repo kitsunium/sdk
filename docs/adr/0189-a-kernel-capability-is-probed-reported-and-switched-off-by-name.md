@@ -19,6 +19,8 @@
   §D10 (gates at the merge), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md)
   (design first), [ADR 0018](0018-sdk-cross-platform-portability.md) (the
   uapi in-tree)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

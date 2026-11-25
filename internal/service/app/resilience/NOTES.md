@@ -1,0 +1,288 @@
+# internal/service/app/resilience/ — reference
+
+Moved unchanged from `internal/service/app/resilience/CLAUDE.md` (ADR 0253); each section keeps its title.
+
+## Backoff — one curve, published, owned by the kernel
+
+`BackoffValue.Delay(n)` (`resilience.Backoff` in the facade) is the curve `NewRetry` has always waited: `BaseDelay ×
+Multiplier^(n−1)`, held at `MaxDelay`, widened by `Jitter`. It is public
+because the loops that back off on their own terms — a supervised goroutine, an
+outbox, a failed state transition — each wrote their own copy of it, three in
+one downstream framework alone. `RetryConfig` keeps its four fields; the runner
+builds its waits from the curve's two halves, `kernel/backoff.Grow` and
+`Widen`, so the two cannot drift.
+
+The curve itself lives in `internal/kernel/backoff`, and `BackoffValue` is an
+alias of `backoff.Value`. It moved there because five domains — `lifecycle`,
+`queue`, `statemachine`, `mail/spool` and `net/server` — imported this whole
+package for that one stdlib-only type, which made `resilience` the hub of the
+service graph for a reason that had nothing to do with its policies. They now
+import the kernel, and the facade's `Backoff` aliases the kernel type directly:
+a public alias points at the layer that OWNS the type (ADR 0074).
+
+Publishing it closed a defect in the copy that was here. The growth was a
+`float64` converted to a `time.Duration` unchecked; past 2^63 ns that
+conversion is implementation-defined and on amd64 yields `math.MinInt64`, a
+negative wait a timer fires at once — so attempt 35 of a one-second retry
+stopped backing off, and a `MaxDelay` did not help because a negative duration
+is below every ceiling. The kernel's `grow` compares against the bound in the
+float domain BEFORE converting, and stops multiplying as soon as the bound is
+reached, so `Delay(math.MaxInt)` costs a few dozen multiplications. The
+multiplier's NaN, which slipped past `<= 1`, now doubles like every other
+non-growing value. `TestValueDelayNeverWrapsNegative` (in
+`internal/kernel/backoff`) pins both on every architecture, and
+`Test_retryRunner_backoffOverflow` here pins that the retry inherits the fix
+rather than keeping a copy.
+
+## Keyed rate limit — a bucket per caller, bounded
+
+`NewKeyedRateLimiter` exists because one bucket for everyone is right for a
+dependency and wrong for an endpoint: one client guessing passwords empties it
+and locks every other user out. The keys come from outside, so their number is
+bounded (`MaxKeys`, least recently used forgotten) and idle ones are forgotten
+(`IdleTimeout`, sliding). Both are enforced on the calling goroutine under one
+mutex; the bucket itself is charged after the lock is released, so two keys
+never contend beyond the lookup.
+
+An idle key is forgotten on its OWN next call, not only when some other new key
+triggers the eviction scan — the downstream copy this replaces did the latter,
+which made "is this key's bucket reset?" depend on unrelated traffic. The
+observable difference is small (an idle bucket refills to its burst anyway),
+and it is exactly zero when `IdleTimeout` is at least `Burst / Rate`, which the
+config comment tells the caller to choose.
+
+What it does not protect against is stated in the config: a flood of NEW keys
+pushes active ones out, and a key pushed out comes back with a full bucket.
+
+## Fallback — which error survives a double failure
+
+A fallback that also fails poses the only question the policy really has: which
+error does the caller get? **Both.** `Run` returns the `core/app/resilience`
+`FallbackFailed` sentinel with the two messages attached as the `primary` and
+`fallback` fields.
+
+The three candidates and why the other two lose:
+
+- *Only the fallback's error* — never says what plan B was covering for. The
+  originating failure, the one an operator needs, is gone.
+- *Only the primary's* — never says that plan B was tried and also broke, so
+  the operator debugs a dependency that was only half the story.
+- *Either one promoted to the wrap origin* — origin-wins (rule 6) would let an
+  `*errs.Error` half hijack the policy's code, which is precisely the hazard
+  `wrapAs` exists to prevent. The sentinel must be the origin.
+
+Two failure paths deliberately do **not** reach the fallback: a cancelled
+context (the fallback would fail the same way, and the outcome would be
+reported as a fallback fault rather than as the cancellation it is — the retry
+policy stops on the same condition), and an error the `Retryable` classifier
+rejects (a deterministic failure is the caller's own, and serving a substitute
+answer for it hides a bug behind a stale success). A **successful** fallback
+returns `nil` and the primary error is not surfaced at all — that masking is
+the policy; a caller who needs to count activations instruments the fallback
+`Operation`, which is their own closure.
+
+The cancellation rule is applied a second time, **after** a failed fallback,
+because the check before it cannot see a context that dies while plan B runs —
+and plan B starts on whatever budget the primary left, so that is the likelier
+moment. A fallback that fails with a dead context returns `ctx.Err()`, never
+`FALLBACK_FAILED`; one that **succeeds** despite the late cancellation still
+returns `nil`, because the work was done. A double failure on a live context is
+unchanged: `FALLBACK_FAILED` with both fields.
+`Test_fallbackRunner_RunCancelledDuringFallback` pins both halves.
+
+## Hedging — the two hazards, and how each is answered
+
+Hedging is the only policy here that runs an `Operation` **concurrently with
+itself**, which makes it the only one that can corrupt rather than merely
+delay. Two hazards follow, and neither is answerable by the SDK alone:
+
+**1. Duplicated effects.** A non-idempotent operation hedged is a double
+charge, a double insert, a duplicate outbound message — and the policy reports
+one clean success, so nothing in the code or the errors will ever mention it.
+The SDK cannot detect idempotence: it sees a `func(ctx) error`. So the claim is
+mandatory and made **in code**, as `HedgeConfig.Idempotent`, whose zero value
+refuses the policy. A comment would be the wrong instrument for a hazard whose
+symptom is silent success; a required field is visible at the construction site
+during review, cannot be reached by copying a config and deleting a line, and
+makes `grep -r 'Idempotent:'` enumerate every hedged call path in a codebase.
+The port itself (`core/app/resilience.Operation`) stays silent on idempotence
+because six of the seven policies do not need it.
+
+**2. Load amplification.** A dependency that has gone slow makes every
+in-flight call want a duplicate at the same instant, so an unbounded hedge adds
+load exactly when the dependency has least to spare and deepens the outage it
+was meant to hide. Three mechanics bound it:
+
+- `Delay` is **refused** at zero rather than clamped. Zero is what forgetting
+  the field yields, and it duplicates every call the instant it starts — the
+  policy inverted. The useful value is the caller's measured p95, which the SDK
+  cannot guess (the `RateLimiterConfig.Rate` argument, in latency).
+- `MaxInFlight` caps duplicates in flight across **all** calls of a Runner, and
+  is **refused** when unset. It is the rare knob where both directions of a
+  guess are harmful: a conservative SDK default silently stops hedging under
+  exactly the load hedging was bought for (inert — ADR 0031's own failure
+  mode), and a generous one hands back the amplifier. Reaching the cap degrades
+  the policy to **no-hedging**, never to a rejection: the first attempt of every
+  call always runs, and a caller who wants rejection under saturation composes
+  `NewBulkhead`, whose job that is.
+- **Hedging fires on latency, never on failure.** An attempt that fails before
+  `Delay` elapses ends the call with that error, verbatim; no duplicate is
+  issued. Replaying a failure is retrying, and `NewRetry` already does it —
+  `Retry(Hedge(op))` composes the two. Keeping them separate is what keeps the
+  added load proportional to *slowness* rather than to *breakage*.
+
+`MaxHedges` is the contrast that locates ADR 0031's clamp/refuse line: "issue
+at least one duplicate" is an obvious floor, so a non-positive value clamps to
+1 exactly as `Burst` and the bulkhead limit do. It has no ceiling and needs
+none: it bounds how many duplicates a call may issue, and **no per-call
+allocation grows with it**. That was not always true — the result channel used
+to be buffered to `MaxHedges+1`, so `math.MaxInt` overflowed into a `make()`
+panic on every call and a large budget allocated a channel per call that could
+never fill. `Test_hedge_RunWithAnUnboundedDuplicateBudget` pins it.
+
+Mechanics: one goroutine per attempt (including the first, so `Run` stays free
+to watch the delay elapse) and one ticker per call, on `HedgeConfig.Clock` — **this is the only policy
+in the package that is not allocation-trivial**, which is the price of racing.
+Losers are cancelled through a shared derived context, and every attempt hands
+its outcome to `Run` over an **unbuffered** channel or, once that context is
+done, drops it — so a straggler can neither block nor leak, whatever the
+budget. When every launched attempt has failed, the **first failure to arrive**
+is returned verbatim — no sentinel is minted, by the same first-to-finish rule
+that decides a success.
+
+**A panic reaches the caller, with its ORIGINAL value.** Hedging is the only
+policy that runs the `Operation` on goroutines of its own, and a panic that
+reaches the top of any goroutine ends the process — under every other policy the
+same panic unwinds through the caller's goroutine, where `net/http` or the
+caller's `recover` contains it. So `attemptOutcome.capture` recovers it on the
+attempt's own goroutine (the only place `recover()` can see it) and `Run`
+re-raises it on the caller's goroutine, ahead of any error, with the value
+unchanged: the caller's `recover` compares **equal** to what was panicked with,
+and `http.ErrAbortHandler` still aborts a handler silently. The kernel `group` /
+`singleflight` shape — a `PanicValue` wrapper carrying the stack — was
+deliberately NOT used: a wrapper breaks that equality, and with it the one
+sentinel `net/http` recognises by identity, turning a deliberate abort into a
+logged crash. **The cost, stated rather than hidden:** the re-raised panic's
+stack is the re-raise site inside `Run`, not the `Operation`'s frame — a value
+re-raised on another goroutine cannot carry the panicking goroutine's stack
+without being wrapped. There is no side channel for it. A copy that panics after
+`Run` has returned (a loser, once a winner was found or the caller went away) is
+recovered and **dropped**: there is no caller's goroutine left to raise it on,
+and raising it on its own would end the process. A panic racing the caller's
+cancellation can be dropped the same way, because `Run` does not wait for its
+copies. `Test_hedge_RunReRaisesAPanicWithItsOriginalValue` and
+`Test_hedge_RunDropsALosersLatePanic` pin both halves.
+
+## Retry budget — amplification bounded across calls (#475)
+
+`MaxAttempts` bounds one call; nothing bounded the sum. During an outage every
+call became `MaxAttempts` calls, and stacked layers multiplied again (the
+Builders' Library's "retries amplify load"). `RetryBudget` is a port of its
+own in `core/app/resilience`, a sibling of `Runner` rather than a widening of
+it (ADR 0039): a budget runs no Operation, it is a counter several policies
+consult. `NewRetryBudget` is gRFC A6's `retryThrottling` bucket, kept in
+thousandths of a token as gRPC does, so each update is one CAS on one
+`atomic.Int64` — the happy path of a budgeted retry stays allocation-free
+(`BENCH.md`).
+
+What each policy does with it:
+
+- **Retry** records every success and every *retryable* failure (the last
+  attempt's included), then asks before the next attempt; a refusal returns
+  `RetryBudgetExceeded` wrapping the last error, without waiting. A
+  deterministic error and a cancelled context record nothing.
+- **Hedge** asks before each duplicate — before taking the `MaxInFlight`
+  slot, so a refusal holds nothing — and a refusal degrades to no-hedging,
+  never to a rejection. It records each decided call once: a success, or a
+  failure on a live context. It has no classifier, so every failure counts.
+- **Both share one budget per dependency**, as gRPC's throttling covers
+  hedging. A `Retry(Hedge(op))` with one budget records a failed call at both
+  levels: the bucket drains and refills twice as fast and its threshold does
+  not move.
+
+The first attempt of a call never asks: a budget throttles amplification,
+never traffic, and the successes of a recovering dependency are what refill it.
+`MaxTokens ≤ 0` and a `TokenRatio` rounding below 0.001 are refused rather
+than defaulted (ADR 0031): a zero ratio is a budget that, once drained, never
+refills.
+
+## Breaker — a rate over a window, and a state an operator reads (#480)
+
+The consecutive breaker misses two dependencies: one that fails every other
+call (S, F, S, F never makes a streak) and one that answers every call a
+minute late. `BreakerConfig.Window` opens on a RATE — of failures, or of calls
+lasting `SlowAfter` or more on the breaker's clock — once the window holds
+`MinCalls`; nil keeps the consecutive breaker, byte for byte in behaviour.
+Decisions the implementation makes:
+
+- **Time slots, not a count of calls.** resilience4j offers both; a time
+  window answers "how is the dependency NOW" whatever the traffic, and is what
+  Polly v8 and gobreaker v2 (`BucketPeriod`) chose. A slot leaves whole, so the
+  reach is between `Size − Size/Buckets` and `Size`.
+- **Defaults are the libraries' own, and a nil Window stays the old mode.** A
+  zero field takes Polly's (`SamplingDuration` 30 s, ten windows,
+  `MinimumThroughput` 100, `FailureRatio` 0.1) or resilience4j's
+  (`slowCallDurationThreshold` 60 s, `slowCallRateThreshold` 100 %). Out of
+  range is refused naming the field; `Buckets` above 1000 too — the slots are
+  allocated at construction.
+- **Neutral calls are not calls.** A deterministic error and a caller who left
+  are left out of the window, as they are out of the streak: counting them
+  would dilute the rate.
+- **A slow trial fails the trial.** With one HalfOpen trial, its slow-call
+  "rate" is 0 or 1; a dependency still answering `SlowAfter` late is not
+  recovered.
+- **The window empties on every change of phase**, as resilience4j resets its
+  metrics: the calls before a trip are what the trip already judged.
+- **`OnStateChange` is delivered outside the lock, in order.** Each change is
+  queued under `mu`; the goroutine that queued the first undelivered one drains
+  the queue after unlocking, one change at a time, including those queued
+  meanwhile — by other calls, or by the listener calling `Reset`. Calling it
+  under the lock would deadlock a listener that reads `State`; calling it from
+  each goroutine after unlocking would reorder two changes made back to back.
+- **`Isolate` is a phase plus a flag**, not a fourth phase: the issue's
+  vocabulary is Closed/Open/HalfOpen, and `State().Isolated` tells an operator
+  which Open it is. It is not a trip (`Trips` counts the breaker's own).
+- **A refused breaker is not a `BreakerState`.** `misconfiguredRunner` keeps
+  no state to report; a type assertion fails, which a framework treats as the
+  start-up error it is.
+
+The window's closed path costs two reads of the clock — the slow-call measure —
+and the window's own work is a few nanoseconds; `pkg/v1/app/resilience/BENCH.md`
+has the numbers; the consecutive path pays 2 ns more than before, still
+allocation-free.
+
+## Bounded waits, three jitters, several trials (ADR 0184)
+
+- **A bulkhead waits only when bounded.** An unbounded queue pins memory and
+  goroutines behind the dependency that is saturated; an unbounded wait moves
+  the timeout to the caller. So both are required, and either zero is the
+  rejecting bulkhead. A free slot costs what it always did.
+- **The limiter reserves, as `x/time/rate` does.** A token due within
+  `MaxWait` is taken in debt at once, so the calls after it see the debt and
+  queue behind it in arrival order — no second lock, no list of waiters. A
+  cancelled wait repays it, capped at the burst.
+- **Decorrelated jitter needs the previous wait**, which the memoryless
+  `BackoffValue.Delay(n)` does not have: the retry keeps it per call. A wait
+  imposed by `RetryConfig.Delay` is the other side's and is not that previous
+  wait; the next drawn wait grows from the last drawn one.
+- **`HalfOpenTrials` keeps one trial at a time.** It asks for n successes in a
+  row across n trials, not n concurrent trials: the probing discipline of
+  #470 is unchanged, and the count dies with the phase.
+
+## Adaptive throttle — the SRE book's, client side (ADR 0184)
+
+`NewAdaptiveThrottle` refuses locally, with `Throttled`, a share of the calls
+to a dependency that has been refusing more than one call in K. Decisions:
+
+- **Requests include the refused ones.** That is the book's formula and what
+  keeps the refusals up while the dependency keeps refusing; the
+  probability is read before the current request is counted, so an empty
+  window never refuses.
+- **No draw on a healthy dependency.** `Random` is called only when the
+  probability is positive, so the healthy path is a lock, a slot advance and
+  two additions — allocation-free (`BENCH.md`).
+- **A caller who left is an accept** (#477), as is an error `Rejected` does
+  not call a refusal. A nil `Rejected` counts every error, as a nil
+  `Retryable` does for the breaker.
+- **Not a breaker and not a budget.** It has no phases to cross, and it
+  throttles first attempts — which a `RetryBudget` must never do.

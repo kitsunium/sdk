@@ -14,6 +14,8 @@
   [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a default is never
   inert — here, never the leaky one), [ADR 0030](0030-stdout-is-a-protocol-channel.md)
   (the zero value must not be the dangerous one)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

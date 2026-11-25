@@ -84,7 +84,7 @@ func newKeyed(t *testing.T, dir string, onSQLite, wait bool) *keyedAtelier {
 		return app.Erase(ctx, "the person asked", w.ID)
 	})
 	keyedEnv(t)
-	opts := []app.AppOption{app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard)}
+	opts := []app.AppOption{app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard), app.Clock(atFormerEra)}
 	if onSQLite {
 		opts = append(opts, app.Database("main", sqlite.Engine(), app.Keeps(app.Privacy, svc)))
 	}

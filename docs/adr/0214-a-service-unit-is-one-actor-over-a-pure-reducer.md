@@ -23,6 +23,8 @@
   #736 (S0d), #737 (S0e), #740 (S0f), #734 (S0g), #738 (S0h), and around them
   #726 (SB1), #727 (S1), #728 (S2), #729 (S3), #730 (S4), #739 (S5), #731 (S6);
   the roadmap supervizio/agent#326.
+- **Area**: proc
+- **Need**: decision
 
 ## Context
 

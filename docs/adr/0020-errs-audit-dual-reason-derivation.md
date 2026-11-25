@@ -1,11 +1,13 @@
 # ADR 0020 — errs audit accepts two Reason derivations (var-name OR Code-const); close the coverage gap
 
-**Status**: Accepted
-**Date**: 2026-06-15
-**Deciders**: kitsunium maintainers
-**Supersedes**: —
-**Amends**: ADR 0005 §Semantics (the `reason == screamingSnake(varName)` audit rule), ADR 0006 (formalises the namespaced-reason style it introduced)
-**Related**: ADR 0004 (the audit runs as a Bazel test over the `//:audit_sources` filegroup)
+- **Status**: Accepted
+- **Date**: 2026-06-15
+- **Deciders**: kitsunium maintainers
+- **Supersedes**: —
+- **Amends**: ADR 0005 §Semantics (the `reason == screamingSnake(varName)` audit rule), ADR 0006 (formalises the namespaced-reason style it introduced)
+- **Related**: ADR 0004 (the audit runs as a Bazel test over the `//:audit_sources` filegroup)
+- **Area**: errs
+- **Need**: incident
 
 ## Context
 

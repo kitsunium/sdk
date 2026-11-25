@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: `internal/core/CLAUDE.md` §Purpose — a 24th core sibling
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values are never inert), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (published ports), [ADR 0041](0041-sdk-scheduler-domain.md) (the FUNC-port precedent), [ADR 0046](0046-sdk-validation-domain.md) (a message names the rule and the bound, never the value), [ADR 0042](0042-sdk-token-domain.md) / [ADR 0045](0045-sdk-session-domain.md) (where a subject comes from), [ADR 0026](0026-sdk-resilience-domain.md) (no-registry precedent)
+- **Area**: security
+- **Need**: decision
 
 ## Context
 

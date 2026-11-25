@@ -6,6 +6,8 @@
 - **Deciders**: SDK maintainers, the owner (kodflow/ktn-linter#785)
 - **Extends**: [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (where a private socket lives), by a sibling function per [ADR 0039](0039-extending-a-published-port-without-breaking-it.md)
 - **Related**: kodflow/ktn-linter#785, #757 (its per-user daemon)
+- **Area**: proc
+- **Need**: constraint
 
 ## Context
 

@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0028](0028-sdk-config-domain.md) (the `config` domain), [ADR 0061](0061-sdk-config-schema.md) (the schema this reuses the vocabulary of), [ADR 0096](0096-a-secret-is-a-value-no-rendering-writes-down.md) (the `secret.Value` a field holds), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a sibling, not a widened `Source`), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (new shapes, published)
 - **Closes**: ADR 0028 §Deferred — "Secret redaction on decoded values + a `Secret` field type"; ADR 0061 §Deferred — "Marking a key secret so a `--show-config` redacts it"
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

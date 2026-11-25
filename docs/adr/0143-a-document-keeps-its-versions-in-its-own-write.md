@@ -9,6 +9,8 @@
 - **Amended**: 2026-10-15 — what the versions weigh, `VersionWeigher` and `VersionWeigherContext`, for kit's Studio (its ADR 0007 §5; see the third dated section at the end)
 - **Closes**: [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) §D10 and §Deferred, for versions (side values stay deferred)
 - **Related**: [ADR 0110](0110-a-document-store-writes-one-entry-and-rests-as-one-file.md) (the overlay entry a write publishes, the order-free replay), [ADR 0056](0056-sdk-vfs-domain.md) (the atomic publication), [ADR 0055](0055-sdk-sql-domain.md) (the transactions and savepoints), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no port, so the values are the engines'), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the refused settings), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the fields added to two published configurations), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port the versions are stamped with, public); kitsunium/platform ADR 0007 §3 and "Implementation, in order", step 3
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — §D5's precedent — `hash` and `sign` standing apart from `crypto` — rests on a false reason, and the facades nest; the amendment of 2026-11-03 below — `codec/json` names json/v2 under the v1 options with `NewV2` beside it, and `codec/jcs` is the second JSON policy placed as §D5 places this one; the amendment of 2026-11-03 in §Deferred — strict `cbor`, `msgpack` and `bson` instances refusing a duplicate key or an unknown member (#1106)
 - **Related**: [ADR 0003](0003-sdk-codec-package.md) (the universal codec), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero bound), [ADR 0029](0029-sdk-net-domain.md) (the HTTP adapter), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code range)
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

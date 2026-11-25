@@ -14,6 +14,8 @@
 - **Related**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   (the io_uring backend), [ADR 0189](0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md)
   (the release check)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

@@ -39,6 +39,11 @@ const (
 	drainPolls int           = 100
 )
 
+// lingerPoll is how often Stop probes a private group whose leader was reaped
+// inside the grace window (awaitGroupGone): the members get the rest of the
+// window, and a group already empty costs one kill(-pgid, 0) and no wait.
+const lingerPoll time.Duration = 10 * time.Millisecond
+
 // childwait.MaxRSSKB (its maxrss_rss64_unix.go / maxrss_rss32_unix.go — moved
 // there by #1136, so a reaper reports an orphan in the same KiB) reports the peak
 // resident set size in KiB from the wait4 rusage. Rusage.Maxrss is int64
@@ -352,9 +357,13 @@ func (h *handle) SignalGroup(sig coreproc.Signal) error {
 
 // Stop terminates the process group gracefully: it signals the whole group with
 // sig, waits up to grace for exit, then escalates to SIGKILL on the group —
-// at once when grace is not positive. It returns nil once the group has
-// exited, ctx's error if cancelled first, or StopFailed if the group survives
-// the SIGKILL escalation. The escalation sends SIGKILL again every
+// at once when grace is not positive. The grace applies to the GROUP, not to
+// the leader alone: with a private group (Setpgid), a leader reaped within the
+// window leaves the members the rest of it (awaitGroupGone), and a group that
+// still answers when it closes gets the SIGKILL too — a member that ignores
+// sig no longer outlives a leader that honoured it. It returns nil once the
+// group has exited, ctx's error if cancelled first, or StopFailed if the group
+// survives the SIGKILL escalation. The escalation sends SIGKILL again every
 // killResendInterval until the leader is reaped (killUntilReaped), so a
 // SIGKILL the kernel discarded does not leave Stop waiting for ever.
 func (h *handle) Stop(ctx context.Context, grace time.Duration, sig coreproc.Signal) error {
@@ -367,18 +376,113 @@ func (h *handle) Stop(ctx context.Context, grace time.Duration, sig coreproc.Sig
 	//: a positive grace is a window for a graceful exit; without one the
 	//: escalation follows at once, never an unbounded wait on sig alone.
 	if grace > 0 {
-		//: wait for graceful exit, ctx cancellation, or the grace deadline.
-		settled, gracefulErr := h.awaitExit(ctx, grace)
-		//: a settled outcome (exited or ctx done) needs no escalation.
-		if settled {
-			//: return the graceful result without sending SIGKILL.
-			return gracefulErr
+		//: a group gone within the window, or a cancellation, needs no SIGKILL.
+		if settled, err := h.awaitGrace(ctx, grace); settled {
+			//: nil once the group is gone, ctx's error once cancelled.
+			return err
 		}
 	}
 
 	//: phase two — escalate to an unignorable group SIGKILL, resent until the
 	//: leader is reaped.
 	return h.killUntilReaped(ctx)
+}
+
+// awaitGrace runs Stop's graceful window: grace for the leader's exit and,
+// with a private group, what is left of it for the members the leader leaves
+// behind (awaitGroupGone). settled reports a terminal outcome — the group
+// gone (err nil) or ctx cancelled (err is ctx's error); false means the
+// window closed on a leader or a member still running, and the caller must
+// escalate.
+func (h *handle) awaitGrace(ctx context.Context, grace time.Duration) (settled bool, err error) {
+	//: one window for the leader and the group after it, on the handle's
+	//: clock, so a test closes it by advancing a ManualClock.
+	window := h.clk.NewTimer(grace)
+	defer window.Stop()
+	exited, exitErr := h.awaitExitBy(ctx, window.C())
+	//: the window closed on the leader, or ctx ended the wait.
+	if !exited || exitErr != nil {
+		//: escalate (false), or the cancellation (true).
+		return exited, exitErr
+	}
+	//: without a private group there is nothing else this handle may wait on.
+	if !h.setpgid {
+		//: the leader's exit is the stop.
+		return true, nil
+	}
+	//: the leader is reaped: its group may outlive it.
+	return h.awaitGroupGone(ctx, window.C())
+}
+
+// awaitGroupGone watches a private group whose leader is reaped until it
+// empties, ctx ends, or deadline delivers: kill(-pgid, 0) every lingerPoll on
+// the handle's clock (groupEmpty). gone reports a group whose probe answered
+// ESRCH; false with a nil err means the window closed with a
+// member still answering, and the caller must escalate.
+//
+// The pgid is still this group's while the probe answers: POSIX does not
+// reuse a process ID as a process group ID while a group of that ID has a
+// member, and a lingering member — a zombie awaiting its reaper included — is
+// one. Only between a probe that answered and the SIGKILL that follows could
+// the group empty and the number be taken by a new group leader, which needs
+// the kernel to cycle through every pid in that window: the same residue the
+// escalation's first SIGKILL to a reaped leader's group already carries.
+func (h *handle) awaitGroupGone(ctx context.Context, deadline <-chan time.Time) (gone bool, err error) {
+	//: a bounded watch: the window's end is the bound.
+	for {
+		//: nothing left to signal: the stop is complete.
+		if h.groupEmpty() {
+			//: no escalation.
+			return true, nil
+		}
+		//: one poll interval, or the end of the wait.
+		if over, pollErr := h.awaitLingerPoll(ctx, deadline); over {
+			//: false once the window closed, ctx's error once cancelled.
+			return pollErr != nil, pollErr
+		}
+	}
+}
+
+// awaitLingerPoll waits one lingerPoll on the handle's clock before the next
+// probe of a group whose leader is reaped. over reports the end of the watch:
+// ctx cancelled (err is ctx's error) or deadline delivered (err nil); false
+// means the interval closed and the group is due another probe.
+func (h *handle) awaitLingerPoll(ctx context.Context, deadline <-chan time.Time) (over bool, err error) {
+	poll := h.clk.NewTimer(lingerPoll)
+	defer poll.Stop()
+	//: race the next probe against ctx and the window's end.
+	select {
+	case <-ctx.Done():
+		//: the caller cancelled the wait; the members keep running.
+		return true, ctx.Err()
+	case <-deadline:
+		//: the window closed on a member still answering.
+		return true, nil
+	case <-poll.C():
+		//: probe again.
+		return false, nil
+	}
+}
+
+// groupEmpty reports whether the private group is gone: kill(-pgid, 0)
+// answers ESRCH, on every kernel. Any other answer is a group still there:
+//
+//   - success is a member, alive or a zombie awaiting its reaper — Linux and
+//     the BSDs count zombies, and init reaps an orphan within milliseconds;
+//   - EPERM on Linux and the BSDs is a live member this process may not
+//     signal (it changed its credentials). It is not gone, and Stop must not
+//     say it stopped: the window runs out and the escalation, refused too,
+//     reports STOP_FAILED;
+//   - EPERM on darwin is also XNU's answer for a group holding only zombies
+//     (zombieGroupRefused). No darwin-only reading is needed here: those
+//     zombies are orphans init reaps within milliseconds, so the answer turns
+//     to ESRCH long before the window closes, while a live member keeps it
+//     EPERM — and should the window close first, the escalation's
+//     zombieGroupRefused, which watches the group drain (groupDrains), tells
+//     the two apart before any STOP_FAILED.
+func (h *handle) groupEmpty() bool {
+	//: a probe, no signal delivered; only "no such group" is gone.
+	return errors.Is(h.kill(-h.pgid, 0), syscall.ESRCH)
 }
 
 // killUntilReaped sends SIGKILL to the group and waits for the leader's reap,
@@ -531,19 +635,27 @@ func (h *handle) groupDrains() bool {
 // timer fires. settled reports whether a terminal outcome was reached; when
 // false the caller must escalate. A non-positive grace closes the window at
 // once.
+func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bool, err error) {
+	//: the grace window runs on the handle's clock, so a test closes it by
+	//: advancing a ManualClock rather than by sleeping through it.
+	timer := h.clk.NewTimer(grace)
+	defer timer.Stop()
+	//: the window is the timer's.
+	return h.awaitExitBy(ctx, timer.C())
+}
+
+// awaitExitBy is awaitExit on a window the caller owns: it returns when the
+// process is reaped, ctx is cancelled, or deadline delivers. awaitGrace hands
+// it the timer it then watches the group on, so the leader and the group share
+// one grace window.
 //
 // Goroutine lifecycle: it launches reapInBackground, which drives the once-only
 // Wait and returns as soon as the reap completes (closing h.done). The goroutine
 // cannot outlive the process: it blocks only inside os.Process.Wait, which
 // returns when the child is reaped, so no leak survives this call.
-func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bool, err error) {
+func (h *handle) awaitExitBy(ctx context.Context, deadline <-chan time.Time) (settled bool, err error) {
 	//: reap in the background so this select observes completion via h.done.
 	go h.reapInBackground()
-
-	//: the grace window runs on the handle's clock, so a test closes it by
-	//: advancing a ManualClock rather than by sleeping through it.
-	timer := h.clk.NewTimer(grace)
-	defer timer.Stop()
 	//: race exit against ctx and the grace deadline.
 	select {
 	case <-h.done:
@@ -552,7 +664,7 @@ func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bo
 	case <-ctx.Done():
 		//: ctx cancelled before the process exited — terminal.
 		return true, ctx.Err()
-	case <-timer.C():
+	case <-deadline:
 		//: grace elapsed without exit — not settled; caller must escalate.
 		return false, nil
 	}

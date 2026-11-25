@@ -23,6 +23,7 @@ on:
       - "docs/**"
       - "README.md"
       - "CLAUDE.md"
+      - "NOTES.md"
       - ".github/workflows/docs-deploy.yml"
   workflow_dispatch:
 

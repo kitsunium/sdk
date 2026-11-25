@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0029](0029-sdk-net-domain.md) (the inbound engine's accept loop)
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (a published shape while v0), [ADR 0095](0095-windows-runs-every-test-and-gates.md) (the Windows lane), [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the published backoff curve)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

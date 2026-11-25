@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0001 (multi-module layout), ADR 0005/0006 (error-code registry), ADR 0011 (snapshot registry), ADR 0014 (transform — the mirrored registry shape)
 - **Amends**: the `internal/core` purpose statement (admits the first Phase-B sibling)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 
