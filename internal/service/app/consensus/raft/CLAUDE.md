@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-15T08:00:00Z -->
+<!-- updated: 2026-11-16T18:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -67,6 +67,11 @@ write leave in `Ready.AfterSync`.
 - Lower a silence's truncation point in memory alone: the truncation that justifies it is durable, and a node restarted before the commit reached it came back on the old point with a log that no longer reached it, and stayed silent in a cluster that wrote nothing (#793)
 - Keep a silent node's truncation point above a snapshot it installs over a log that held the snapshot's index under another term: the snapshot is committed, so no entry of that log from there on ever counted towards a commit (Log Matching), and a node brought onto the leader's snapshot over a tail of an older term kept a point past the leader's whole log, silent in a cluster that wrote nothing (#792)
 - Drop a forward, or the answer to one, as an older term's message (`stepTerm`, `forwardKind`): both belong to the submission id, not to a term
+- Answer an append, a heartbeat or a PreVote of an older term at this node's term, or take the later term of a message that is no request of that term (`answerOlderTerm`, `termRequestKind`, `stepLaterAnswer`, #1472), but for the refusal of a node's own request: a leader refused its append or heartbeat takes the refuser's term, in `LogTerm` (`refusedForLaterTerm`), and a refused pre-candidate the refuser's (ADR 0152)
+- Answer an append or a heartbeat of an older term from a leader that does not announce protocol 5 at its own term, at the refuser's, or not at all (`refuseOlderLeader`, `announcesProtocol5`, #1472), or flag a `NOT_LEADER` refusal `FlagTruncated` (`truncatedReport`)
+- Expect a node of a previous release to climb to a member's term faster than one election timeout a term (`gapBound`, #1472)
+- Read the class between two nodes of a previous release as closed: it closes once one of the two runs this release (#1472)
+- Take a leader of this release stepping down at its own term on a `NOT_LEADER` for a defect of the term rule: a frame it sent as a leader of protocol 4, delayed past its upgrade, is refused at the next term (#1472)
 
 ## Reference in NOTES.md
 

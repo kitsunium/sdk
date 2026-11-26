@@ -1445,6 +1445,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagProtocol5",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "FlagProtocol5",
+      "spelled": "coreconsensus.MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "4",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol5",
+      "doc": "FlagProtocol5 marks a frame from a node that speaks protocol version\n5. It shares FlagNoLease's bit, the flags byte having no other, and\nits value: a switch that names both does not compile.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagTrace",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",

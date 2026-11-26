@@ -97,6 +97,19 @@ const (
 	// protocol 3 or below never meets the trailing bytes; on any other
 	// kind it is refused as a frame that does not parse (#1115).
 	FlagTrace
+	// FlagProtocol5 marks a frame from a node that speaks protocol version
+	// 5, which sets FlagProtocol2, FlagProtocol3 and FlagProtocol4 beside
+	// it. The byte has no bit left, so it shares FlagNoLease's, which every
+	// release reads on a MsgReadIndex alone: a node of protocol 5 sets it
+	// on every other kind, and on a read only as FlagNoLease. Its value is
+	// FlagNoLease's, so a switch that names both does not compile. A node
+	// of protocol 5 answers an append or a heartbeat of an older term from
+	// a leader whose frame carries it at that term, and from any other at
+	// the term after that one, its own term in LogTerm (#1472); a node of
+	// protocol 4 or below ignores it, and a leader refuses to raise the
+	// cluster version to 5 while a member's last frame of the term lacks
+	// it.
+	FlagProtocol5 = FlagNoLease
 )
 
 // Lane returns the connection the kind belongs on.
@@ -129,10 +142,14 @@ type MessageValue struct {
 	From NodeID
 	// To is the receiver.
 	To NodeID
-	// Term is the sender's term.
+	// Term is the sender's term. An answer stays at the term of the request it
+	// answers, even from a sender at a later term; the refusal of an older
+	// append or heartbeat from a leader that does not announce protocol 5 is
+	// at the term after its request's.
 	Term uint64
 	// LogTerm is the term of the entry at Index: the previous entry of an
-	// append, the last entry of a vote request.
+	// append, the last entry of a vote request. In the refusal of an older
+	// append, heartbeat or PreVote, it is the refuser's term.
 	LogTerm uint64
 	// Index is the previous index of an append, the last index of a vote
 	// request, the verified prefix of an acknowledgement, a read index.

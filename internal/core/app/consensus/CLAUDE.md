@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-12T12:00:00Z -->
+<!-- updated: 2026-11-16T12:00:00Z -->
 # internal/core/app/consensus/
 
 ## Purpose
@@ -37,4 +37,11 @@ storage and transport's), both declared here (ADR 0160).
   `EntrySessionCommand` is appended only once the cluster version is 4, so
   a node of protocol 3, whose `Known` stops at `EntryTransfer`, never
   meets it (D18, #918).
+- Give `FlagProtocol5` a bit of its own, or `FlagNoLease` a meaning on
+  another kind than `MsgReadIndex`: the flag byte has no bit left, so the
+  announcement of protocol 5 shares `FlagNoLease`'s, which every release
+  reads on a read alone, and a node of 5 sets it on every other kind
+  (#1472, ADR 0152's amendment of 2026-11-15). The two constants have one
+  value, so a `switch` that names both does not compile: test the bits. A
+  sixth protocol needs another carrier, decided before it is opened.
 - Hand-edit `*_gen.go`: edit the design, run `kit gen`, then `make api`.

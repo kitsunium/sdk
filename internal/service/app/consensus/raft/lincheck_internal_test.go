@@ -441,10 +441,18 @@ func TestLinearizableUnderFaults(t *testing.T) {
 
 // linearizableRun runs one seed of the client workload and checks it.
 func linearizableRun(seed uint64, mut mutation) error {
+	return linearizableRunWith(simOptions{seed: seed, drop: 0.03, crashRate: 0.3, mut: mut})
+}
+
+// linearizableRunWith runs the client workload on a simulation of opt and
+// checks it: its reads go through ReadIndex unless opt turns the lease on,
+// under which a leader serves them at once while its lease holds.
+func linearizableRunWith(opt simOptions) error {
+	seed := opt.seed
 	{
-		s := newSim(simOptions{seed: seed, drop: 0.03, crashRate: 0.3, mut: mut})
+		s := newSim(opt)
 		s.kv = newKVWorld()
-		s.kv.noLeas = true
+		s.kv.noLeas = !opt.lease
 		for _, id := range s.ids {
 			s.kv.restart(s.nodes[id])
 		}
