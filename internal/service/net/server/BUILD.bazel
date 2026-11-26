@@ -309,6 +309,8 @@ go_test(
         "proxy_bench_test.go",
         "proxy_internal_test.go",
         "ratelimit_external_test.go",
+        "release_accept_darwin_external_test.go",
+        "release_accept_unix_external_test.go",
         "release_linux_external_test.go",
         "release_nonlinux_external_test.go",
         "release_unix_external_test.go",

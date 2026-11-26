@@ -62,9 +62,143 @@ func listensOn(fd int, addr netip.AddrPort) bool {
 	if got.Addr().Unmap() != addr.Addr().Unmap() || got.Port() != addr.Port() {
 		return false
 	}
-	accepting, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_ACCEPTCONN)
+	accepting, err := acceptsConnections(fd)
 	//: a connected socket on the address does not hold it for a bind.
-	return err == nil && accepting != 0
+	return err == nil && accepting
+}
+
+// TestListensOn_tellsAListenerFromTheRest pins the predicate both checks of
+// #1386 read: a listening TCP socket on the address is one, and neither a
+// connection accepted on it, a socket bound to it that does not listen, a
+// listener elsewhere nor a file is. On darwin every case read "no listener"
+// while SO_ACCEPTCONN was asked, which XNU does not answer.
+func TestListensOn_tellsAListenerFromTheRest(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// open returns the descriptor to judge and the address to judge it
+		// against; the descriptor stays open until the case ends.
+		open func(t *testing.T) (int, netip.AddrPort)
+		// want is what listensOn must answer.
+		want bool
+	}
+	tests := []tc{
+		{name: "a listener on the address", open: openListener, want: true},
+		{name: "a connection accepted on the address", open: openAccepted},
+		{name: "a socket bound to the address, not listening", open: openBoundOnly},
+		{name: "a listener on another address", open: openListenerElsewhere},
+		{name: "a file", open: openFile},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Parallel()
+		fd, addr := c.open(t)
+		//: a listener must be read as one: the platform answers the accept
+		//: state without an error, or every check of #1386 proves nothing.
+		if c.want {
+			//: the accept state of a listener, and the error that hides it.
+			if accepting, err := acceptsConnections(fd); err != nil || !accepting {
+				t.Fatalf("accept state of a listener = %v, %v, want true, nil", accepting, err)
+			}
+		}
+		//: the verdict.
+		if got := listensOn(fd, addr); got != c.want {
+			t.Fatalf("listensOn(%d, %s) = %v, want %v", fd, addr, got, c.want)
+		}
+	}
+	//: each case on its own descriptors.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// openListener is a listener's descriptor and its address.
+func openListener(t *testing.T) (int, netip.AddrPort) {
+	t.Helper()
+	ln := listenTCP(t)
+	t.Cleanup(func() { closeOrFail(t, ln) })
+	return fdOf(t, ln), netip.MustParseAddrPort(ln.Addr().String())
+}
+
+// openAccepted is a connection accepted on a listener, judged against the
+// listener's address, which is the connection's local one.
+func openAccepted(t *testing.T) (int, netip.AddrPort) {
+	t.Helper()
+	ln := listenTCP(t)
+	t.Cleanup(func() { closeOrFail(t, ln) })
+	client, err := stdnet.Dial("tcp", ln.Addr().String())
+	//: no connection to accept.
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { closeOrFail(t, client) })
+	conn, err := ln.AcceptTCP()
+	//: the connection did not arrive.
+	if err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	t.Cleanup(func() { closeOrFail(t, conn) })
+	raw, err := conn.SyscallConn()
+	//: no raw access.
+	if err != nil {
+		t.Fatalf("syscall conn: %v", err)
+	}
+	fd := -1
+	//: the number, or why none.
+	if cerr := raw.Control(func(f uintptr) { fd = int(f) }); cerr != nil {
+		t.Fatalf("control: %v", cerr)
+	}
+	return fd, netip.MustParseAddrPort(ln.Addr().String())
+}
+
+// openBoundOnly is a TCP socket bound to a loopback port that never listens.
+func openBoundOnly(t *testing.T) (int, netip.AddrPort) {
+	t.Helper()
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	//: no socket.
+	if err != nil {
+		t.Fatalf("socket: %v", err)
+	}
+	syscall.CloseOnExec(fd)
+	t.Cleanup(func() { swallowClose(fd) })
+	//: bound, to a port the kernel draws.
+	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	sa, err := syscall.Getsockname(fd)
+	//: the bound address cannot be read.
+	if err != nil {
+		t.Fatalf("getsockname: %v", err)
+	}
+	in4, ok := sa.(*syscall.SockaddrInet4)
+	//: not the family it was bound in.
+	if !ok {
+		t.Fatalf("getsockname = %T, want *syscall.SockaddrInet4", sa)
+	}
+	return fd, netip.AddrPortFrom(netip.AddrFrom4(in4.Addr), uint16(in4.Port))
+}
+
+// openListenerElsewhere is a listener's descriptor judged against another
+// listener's address.
+func openListenerElsewhere(t *testing.T) (int, netip.AddrPort) {
+	t.Helper()
+	fd, _ := openListener(t)
+	_, other := openListener(t)
+	return fd, other
+}
+
+// openFile is a descriptor that is not a socket, judged against a listener's
+// address.
+func openFile(t *testing.T) (int, netip.AddrPort) {
+	t.Helper()
+	f, err := os.Open(os.DevNull)
+	//: no file to judge.
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	t.Cleanup(func() { closeOrFail(t, f) })
+	_, addr := openListener(t)
+	return int(f.Fd()), addr
 }
 
 // stillListening is the descriptors of before that still listen on addr:
