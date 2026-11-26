@@ -412,8 +412,8 @@ func TestServer_Shutdown_ReportsAnExpiredBudget(t *testing.T) {
 // that starts a child — TestAdopt_ServesTheInheritedSocket — forks a copy of
 // this process's descriptor table, which keeps the server's socket bound
 // until the child's exec, whatever Close did; beside it the rebind failed in
-// 34 of 100 runs, alone in none. Its cases still run in parallel with one
-// another: none starts a process.
+// 34 of 100 runs, alone in none. Its cases run one after another, so no sibling
+// of this process draws the freed port.
 func TestServer_Close(t *testing.T) {
 	type tc struct {
 		// name describes the case.
@@ -458,10 +458,9 @@ func TestServer_Close(t *testing.T) {
 		//: have been given it, and would answer.
 		releasedAfterClose(t, addr, held)
 	}
+	//: one after another: a sibling that bound the freed port in this process
+	//: could not be told from the server's socket by its descriptor number.
 	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
