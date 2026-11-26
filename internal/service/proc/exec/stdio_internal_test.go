@@ -7,6 +7,7 @@ package exec
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -813,18 +814,22 @@ func Test_stdioState_wait(t *testing.T) {
 		//: the drain; s.wg.Wait() joins every drain before the assertions.
 		s := &stdioState{}
 		sinks := make([]*bytes.Buffer, c.drains)
+		//: each writer reports on its own buffered channel, read after the
+		//: join: a failed write is named next to the sink it starved (#1501).
+		wrote := make([]chan error, c.drains)
 		for i := range c.drains {
 			pr, pw, err := os.Pipe()
 			if err != nil {
 				t.Fatalf("os.Pipe = %v", err)
 			}
 			sinks[i] = &bytes.Buffer{}
+			wrote[i] = make(chan error, 1)
 			s.wg.Add(1)
 			go s.drainOutput(pr, sinks[i])
-			go func(w *os.File) {
-				swallowErr(writeAll(w, c.payload))
-				swallowErr(w.Close())
-			}(pw)
+			go func(w *os.File, done chan<- error) {
+				werr := writeAll(w, c.payload)
+				done <- errors.Join(werr, w.Close())
+			}(pw, wrote[i])
 		}
 
 		s.wg.Wait()
@@ -832,8 +837,9 @@ func Test_stdioState_wait(t *testing.T) {
 		//: after the join every byte is in the caller's buffer, with no
 		//: further synchronisation needed.
 		for i, sink := range sinks {
-			if sink.String() != c.payload {
-				t.Errorf("sink %d holds %d bytes, want %d", i, sink.Len(), len(c.payload))
+			werr := <-wrote[i]
+			if got := sink.String(); got != c.payload {
+				t.Errorf("sink %d (writer error %v): %s", i, werr, describeMismatch(got, c.payload))
 			}
 		}
 	}
@@ -843,6 +849,97 @@ func Test_stdioState_wait(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// mismatchWindow is how many bytes describeMismatch quotes from the first
+// difference on.
+const mismatchWindow int = 16
+
+// describeMismatch says how got differs from want: both lengths, the first
+// offset that differs with the bytes found and expected from there, how many
+// of the common bytes differ, and the last one. Equal lengths with the wrong
+// content is what #1501 hid behind "holds 65536 bytes, want 65536". The
+// bytes found name their source — another test's pipe writes 'x' or 'y',
+// lost memory reads as zeros — and the offsets — a whole page, a 16- or
+// 32-byte lane, a scattered few — tell a kernel's page handling from a
+// register lost across a signal.
+func describeMismatch(got, want string) string {
+	n := min(len(got), len(want))
+	first, last, differ := -1, -1, 0
+	for i := range n {
+		//: equal bytes say nothing.
+		if got[i] == want[i] {
+			continue
+		}
+		//: the first difference is the one quoted.
+		if first < 0 {
+			first = i
+		}
+		last = i
+		differ++
+	}
+	//: one is a prefix of the other: the first difference is where it ends.
+	if first < 0 {
+		first = n
+	}
+	return fmt.Sprintf("holds %d bytes, want %d; first difference at byte %d (page offset %d): found %q, want %q; %d of the %d common bytes differ, the last at byte %d",
+		len(got), len(want), first, first%4096, mismatchAt(got, first), mismatchAt(want, first), differ, n, last)
+}
+
+// Test_describeMismatch pins the message Test_stdioState_wait fails with: it
+// names the first differing byte, what was found and expected there, and how
+// far the damage reaches, so one failed run on a platform nobody has at hand
+// is enough to tell the causes apart (#1501).
+func Test_describeMismatch(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		got, want string
+		message   string
+	}
+	tests := []tc{
+		{
+			name: "equal lengths, one page zeroed",
+			got:  strings.Repeat("z", 4096) + strings.Repeat("\x00", 4096), want: strings.Repeat("z", 8192),
+			message: `holds 8192 bytes, want 8192; first difference at byte 4096 (page offset 0): ` +
+				`found "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", want "zzzzzzzzzzzzzzzz"; ` +
+				`4096 of the 8192 common bytes differ, the last at byte 8191`,
+		},
+		{
+			name: "another pipe's bytes in the middle",
+			got:  "zzzyyzz", want: "zzzzzzz",
+			message: `holds 7 bytes, want 7; first difference at byte 3 (page offset 3): found "yyzz", want "zzzz"; ` +
+				`2 of the 7 common bytes differ, the last at byte 4`,
+		},
+		{
+			name: "a short sink",
+			got:  "zz", want: "zzz",
+			message: `holds 2 bytes, want 3; first difference at byte 2 (page offset 2): found "", want "z"; ` +
+				`0 of the 2 common bytes differ, the last at byte -1`,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := describeMismatch(c.got, c.want); got != c.message {
+			t.Errorf("describeMismatch =\n%s\nwant\n%s", got, c.message)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// mismatchAt is the window of s describeMismatch quotes from offset first.
+func mismatchAt(s string, first int) string {
+	end := min(len(s), first+mismatchWindow)
+	//: s ends at or before the difference.
+	if first >= end {
+		return ""
+	}
+	return s[first:end]
 }
 
 // writeAll writes the whole string to f.
