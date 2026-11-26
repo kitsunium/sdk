@@ -723,6 +723,8 @@ constants:
         value: "\"consensus_forward_runs\""
       - name: mForwardForgotten
         value: "\"consensus_forward_answers_forgotten_total\""
+      - name: mForwardResorts
+        value: "\"consensus_forward_last_resorts_total\""
       - name: mLogBytes
         value: "\"consensus_log_bytes\""
       - name: mLogQuota
@@ -10058,9 +10060,11 @@ types:
       - doc: |-
           observeForwards publishes the forwards this node neither proposed nor
           answered, by reason, the forwarder runs its fence keeps a mark of (raft's
-          fwdFence, #1482) and the answers its table forgot at its bound before
-          their window ended: a run of drops of reason evicted names the fence's
-          last resort, a node with more than 65 536 runs in one term, and a copy of
+          fwdFence, #1482), the answers its table forgot at its bound before
+          their window ended, and the fence's last resorts, past 65 536 runs in one
+          term, by whether they started a leadership transfer (#1540): a run of
+          drops of reason evicted follows a last resort, a last resort of action
+          none leaves its forwarders fenced until the next election, and a copy of
           an answer forgotten is a drop of reason copy.
         name: observeForwards
         params: st *raft.SummaryValue
@@ -11519,11 +11523,15 @@ types:
       - doc: |-
           seenDrops are consensus_forwards_dropped_total's by reason, in the
           order of fwdDropReasons; seenForgotten is
-          consensus_forward_answers_forgotten_total's.
+          consensus_forward_answers_forgotten_total's, and seenResorts
+          consensus_forward_last_resorts_total's by action, in the order of
+          fwdResortActions.
         name: seenDrops
         type: "[3]int64"
       - name: seenForgotten
         type: int64
+      - name: seenResorts
+        type: "[2]int64"
     kind: struct
     methods:
       - doc: |-
@@ -13570,6 +13578,12 @@ vars:
           order of raft.ForwardDropsValue's fields (#1482).
         name: fwdDropReasons
         value: "[3]string{\"copy\", \"restarted\", \"evicted\"}"
+      - doc: |-
+          fwdResortActions are consensus_forward_last_resorts_total's actions:
+          a last resort that started a leadership transfer, and one that could
+          not (#1540).
+        name: fwdResortActions
+        value: "[2]string{\"transfer\", \"none\"}"
     name: peerGauges
   - grouped: true
     items:

@@ -791,8 +791,15 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   the current term (runs per lane: about 32 768 restarts when each run
   forwards on both lanes) does the least recent mark of the node holding
   the most go, that node's new runs waiting for the next term, which the
-  reason `evicted` shows; restarts spread over several nodes fence each
-  of them in turn (#1540).
+  reason `evicted` shows. Restarts spread over several nodes fenced each
+  of them in turn under a leader that stays, so the step function's
+  leader hands its leadership over at that last resort, once a term at
+  most, to a voter that holds the commit and was heard (raft's guide,
+  #1540, recommended option (a), awaiting the owner's confirmation); a
+  leader alone, with no such voter, or whose transfer failed, leaves them
+  fenced until the next election. The last resorts are
+  `consensus_forward_last_resorts_total`, by action: `transfer`, or `none`
+  when it started no transfer, where an operator's transfer clears it.
   Another transport states no window and gets the step function's
   default, 22 s. No forward is dropped for room: at the step function's
   bound (2^20 answers kept, raft's guide) the oldest answer is forgotten,

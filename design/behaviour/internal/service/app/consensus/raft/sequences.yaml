@@ -82,6 +82,8 @@ sequences:
         to: runOf
       - bind: k, ok
         eval: f.marks[run]
+      - bind: resort
+        eval: "false"
       - opt:
           do:
             - opt:
@@ -91,14 +93,16 @@ sequences:
                 when: f.marks == nil
             - opt:
                 do:
-                  - eval: f.evict(soft, hard, current)
+                  - set: resort
                     to: f.evict
+                    value: f.evict(soft, hard, current)
                 when: len(f.marks) >= soft
           when: "!ok"
       - op: ++
         set: f.used
       - set: f.marks[run]
         value: "fwdMark{high: max(k.high, n), term: max(k.term, m.Term), used: f.used}"
+      - return: resort
   - of: (*fwdFence).evict
     participants:
       - id: caller
@@ -141,9 +145,11 @@ sequences:
           value: run
       - opt:
           do:
-            - eval: f.forget(f.crowded())
-              to: f.forget
-          when: len(f.marks) >= hard
+            - return: "false"
+          when: len(f.marks) < hard
+      - eval: f.forget(f.crowded())
+        to: f.forget
+      - return: "true"
   - of: (*fwdFence).crowded
     participants:
       - id: caller
@@ -2121,7 +2127,7 @@ sequences:
         kind: internal
       - id: r.fwdAnswers.remember
         kind: internal
-      - id: r.fwdFence.note
+      - id: r.fenceLastResort
         kind: internal
       - id: r.send
         kind: internal
@@ -2151,8 +2157,11 @@ sequences:
                 when: r.fwdAnswers.makeRoom(r.forwardCeiling())
             - eval: r.fwdAnswers.remember(key, a)
               to: r.fwdAnswers.remember
-            - eval: r.fwdFence.note(&m, maxFwdRuns, maxFwdRunsHard, r.term)
-              to: r.fwdFence.note
+            - opt:
+                do:
+                  - eval: r.fenceLastResort()
+                    to: r.fenceLastResort
+                when: r.fwdFence.note(&m, r.fwdRunsSoft(), r.fwdRunsHard(), r.term)
           when: "!ok || r.mutated(mutForwardNoDedupe)"
       - bind: resp
         eval: core.MsgForwardResp
@@ -2167,6 +2176,43 @@ sequences:
           		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm, Commit: a.commit,
           	})
         to: r.send
+  - of: (*Raft).fenceLastResort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).fenceLastResort
+        kind: self
+      - id: r.resortTarget
+        kind: internal
+      - id: r.startTransfer
+        kind: internal
+    steps:
+      - op: ++
+        set: r.fwdResorts
+      - opt:
+          do:
+            - return: ""
+          when: r.role != core.RoleLeader || r.transferTo != 0 || r.fwdResortTerm == r.term
+      - bind: to
+        eval: r.resortTarget()
+        to: r.resortTarget
+      - opt:
+          do:
+            - return: ""
+          when: to == 0
+      - set: r.fwdResortTerm
+        value: r.term
+      - op: ++
+        set: r.fwdResortTransfers
+      - eval: r.startTransfer(to)
+        to: r.startTransfer
+  - of: (*Raft).resortEligible
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: id == r.id || pr == nil || pr.facts&peerHeard == 0 || pr.facts&peerSilent != 0
+      - return: pr.match >= r.log.committed && r.now.Sub(pr.lastHeard) < r.timing.ElectionTimeoutMin
   - of: (*Raft).countFwdDrop
     participants:
       - id: caller
@@ -2206,6 +2252,20 @@ sequences:
             - return: min(r.cfg.ForwardWindow, maxForwardWindow)
           when: r.cfg.ForwardWindow > 0
       - return: defaultForwardWindow
+  - of: (*Raft).fwdRunsSoft
+    steps:
+      - opt:
+          do:
+            - return: r.cfg.fwdRunsSoft
+          when: r.cfg.fwdRunsSoft > 0
+      - return: maxFwdRuns
+  - of: (*Raft).fwdRunsHard
+    steps:
+      - opt:
+          do:
+            - return: r.cfg.fwdRunsHard
+          when: r.cfg.fwdRunsHard > 0
+      - return: maxFwdRunsHard
   - of: (*Raft).forwardCeiling
     steps:
       - opt:
@@ -4377,6 +4437,7 @@ sequences:
           		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
           		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
           		ForwardDrops: r.fwdDrops, ForwardRuns: len(r.fwdFence.marks), ForwardForgotten: r.fwdForgotten,
+          		ForwardLastResorts: r.fwdResorts, ForwardResortTransfers: r.fwdResortTransfers,
           	}
       - opt:
           do:

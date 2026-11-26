@@ -8311,7 +8311,8 @@ the wire: the acknowledgement is the order of the sender's submission ids.
   does not call (the safety review of the third version, O1, tracked in
   #1540, `needs-decision`: a leader that opens a new term at the last
   resort bounds it by construction, a documented limit alone does not; the
-  wording is the documented limit's, applied now). A forwarder that died
+  wording is the documented limit's, applied now, and the amendment of
+  2026-11-26 below hands the leadership over at the last resort). A forwarder that died
   leaves its mark until a later term, never its answers: the window
   forgets those.
 - **Observed.** Every forward the fence turns away, neither proposed nor
@@ -8405,8 +8406,8 @@ the wire: the acknowledgement is the order of the sender's submission ids.
   or measurement only). O2: the random model of the second version's
   review saw no mark eviction at the default bounds ("0 evictions seen");
   run with the bounds lowered it passes 3 000 seeds with 26 365 and 13 848
-  evictions, and the bounds are not yet tunable by a test-only `Config`
-  field. O3: past 4 096 marks of the current term every new run walks the
+  evictions, and the bounds are tunable by a test-only `Config` field
+  since the amendment of 2026-11-26 below. O3: past 4 096 marks of the current term every new run walks the
   marks up to three times, a cost paid per new run and not per forward,
   not measured against the lease's drift budget. O5: a random 32-bit epoch
   equal to a kept mark's refuses the new run until its counter passes the
@@ -8537,6 +8538,75 @@ more election for nothing.
   on a `LogTerm` equal to the term, and reading the dropped one as a
   refusal of the log.
 
+## Amendment — at the fence's last resort the leader hands its leadership over (2026-11-26, #1540)
+
+**State: recommended option, awaiting the owner's confirmation** (#1540,
+option (a); option (b), the documented limit, is the text of #1482's
+amendment above, applied with it). Revisable while v0 (ADR 0040).
+
+- **What was wrong.** Past 65 536 marks of the current term, the fence's
+  last resort forgets the least recent mark of the node holding the most,
+  and that node's new runs wait for the next term. Under a leader that
+  stays, restarts spread over several forwarders fenced each of them in
+  turn as the counts levelled out: the review's `TestRv3Leveling`, at
+  1 024 marks, ended with 20 nodes of 20 fenced at the current term, and
+  every forward from them went to `OUTCOME_UNKNOWN` until an election a
+  healthy leader never calls.
+- **What is decided.** A leader whose fence takes its last resort hands
+  its leadership over (`Raft.fenceLastResort`): the next term makes every
+  mark an older term's, the soft bound of 4 096 takes them back, and no
+  forwarder stays fenced. The transfer is `TransferLeadership`'s
+  (`startTransfer`, D8): the leader proposes nothing and holds no lease
+  from then on, catches its target up and sends `TimeoutNow` once the
+  target holds its whole log, or resumes at the transfer's deadline. Its
+  target is a voter other than the leader that holds the commit, answered
+  in this term, last within the minimum election timeout, and is not
+  silent — `PreferredLeaders`' rule (#662) —, the one with the highest
+  match, the lowest on a tie.
+- **Guards.** One transfer a term at most: a failed one is not started
+  again in its term, however many last resorts follow. None while a
+  transfer runs, an operator's, the progress watch's or a configuration
+  change's. None without a voter as above: a leader alone, a leader none
+  of whose voters answered in its term, and a node that does not lead
+  keep the fence's own last resort alone, as before. That one stays in
+  every case, the transfer under way included, so the safety never rests
+  on the transfer: no forward is handled twice whatever its delay or a
+  restart, by the same marks, the same start term and the same node
+  fences as #1482's amendment.
+- **No change on the wire.** No frame, no flag, no protocol raise:
+  `TimeoutNow` is D8's since the first release, and a voter of any
+  release that runs the fence campaigns on it, one run as the release
+  before #1472 or speaking protocol 1 included. A leader of a previous
+  release has no such trigger, and keeps its previous behaviour in a
+  mixed cluster.
+- **Observed.** Each last resort is counted, `Summary`'s
+  `ForwardLastResorts`, and each transfer one started,
+  `ForwardResortTransfers`; the driver publishes them as
+  `consensus_forward_last_resorts_total` by `action`, `transfer` or
+  `none`. A count of action `none` climbing names a leader with no voter
+  to take over, or whose transfer failed this term, whose forwarders stay
+  fenced until the next election: an operator's transfer clears it.
+- **The cost.** One leadership transfer per 65 536 runs per lane in one
+  term, about 32 768 restarts when each run forwards on both lanes: a
+  visible change, the leader calls an election of its own. As every
+  transfer, it refuses proposals until it ends, at most the maximum
+  election timeout, and drops the leader's lease for the rest of its term
+  (D9 c), a failed one included, whose reads then take a heartbeat round.
+- **Tests.** The fence's bounds are tunable by a test-only `Config` field,
+  `fwdRunsSoft` and `fwdRunsHard`, as `fwdCeiling` is (#1540, O2).
+  `TestTheFenceLastResortOpensANewTerm` (twelve forwarders restarting in
+  turn at bounds 16 and 128: red before this amendment, 12 forwarders of
+  12 fenced at term 2, 113 or 114 new runs refused each; now a transfer to
+  voter 2, every new run handled at the next term, no mark of term 2 kept,
+  no command appended twice, every copy stepped again included),
+  `TestTheLastResortTransfersOnceATerm`,
+  `TestTheLastResortLeavesATransferUnderWay`,
+  `TestTheLastResortWithNoVoterToTakeOver`,
+  `TestTheLastResortTimeoutNowIsTakenByAPreviousRelease`, and the
+  consensus package's `TestTheForwardDropsArePublishedByReason`.
+- **Still open.** O3 of #1540 — past 4 096 marks of the current term each
+  new run walks the marks up to three times — is not measured here.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -8600,6 +8670,7 @@ more election for nothing.
 | #1482 | the owner's decisions, 2026-11-15 and 2026-11-16 | a forward is handled once, whatever the delay of its copy: the step function fences forwards by the order of their submission ids, per run of a forwarder and per lane, forgetting a mark of its current term only past 65 536 marks (runs per lane, about 32 768 restarts when each forwards on both lanes) and then the least recent of the node holding the most, whose new runs wait for the next term, restarts spread over several nodes fencing each of them in turn (#1540, `needs-decision`), and a node handles no forward of a term up to its durable term at start, every forward to a node carrying a term it led; the forwards turned away counted by reason; what the fence turns away is neither proposed nor answered (`OUTCOME_UNKNOWN`); a forward's answer is kept for twice the transport's resend window (22 s by default, 2 minutes at most) on the step function's clock, a gap of more than a second counted as one, at most 2^20 answers per Raft group, the oldest forgotten for each new one past them, whatever its age, so no forward is dropped for room and a copy of an answer forgotten is fenced (the owner's decision of 2026-11-16, which removed the first version's ceiling of 2^18, past which a new forward was neither proposed nor answered), the map rebuilt and the expired answers forgotten a step at a time; the 4 096 answers evicted oldest first had let a late copy be appended twice or refused `NOT_LEADER`, and an answer kept for a time let a stopped sender's copy be appended again; no format change, no protocol raise, no raft mutation (amendments of 2026-11-15, #1482, corrected 2026-11-16) |
 | #1483 | the owner's decision, 2026-11-15 | the snapshot streams' queue serves the first voter waiting before any learner when a slot frees, first asked first served within each, cuts no stream in flight for it, lets a learner be passed by at most as many voters' streams as the configuration has voters besides the leader, and reads each waiter's role when the slot frees; no format change, no protocol raise, no raft mutation, nothing persisted (amendment of 2026-11-15, #1483) |
 | #1514 | Raft lot L1, 2026-11-26 | a leader of protocol 5 steps down on a member's `NOT_LEADER` only when its `LogTerm` is past the leader's term, at that term, and drops any other, never contact nor a refusal of its log, so a frame it sent as a leader of protocol 4 before its upgrade, refused at the next term after it won that term, no longer deposes it (O4 of the safety review of the amendment of 2026-11-16); no format change, no protocol raise, no raft mutation, nothing persisted (amendment of 2026-11-26, #1514) |
+| #1540 | Raft lot L1, 2026-11-26, recommended option (a), awaiting the owner's confirmation | at the fence's last resort, past 65 536 marks of the current term, the leader hands its leadership over to a voter that holds the commit and was heard, once a term at most and never while a transfer runs, `TransferLeadership`'s transfer; the fence's own last resort stays; a leader alone, with no such voter or whose transfer failed keeps it alone; counted in `consensus_forward_last_resorts_total` by action; the fence's bounds tunable by a test-only `Config` field (O2); no frame change, no protocol raise (amendment of 2026-11-26, #1540) |
 
 ## raft-sql-poc (owner's prior Raft)
 

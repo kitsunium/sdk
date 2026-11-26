@@ -1155,8 +1155,12 @@ packages:
               marks of the current term (runs per lane: about 32 768 restarts when
               each run forwards on both lanes), the least recent mark of the node
               holding the most goes, and that node's new runs wait for the next
-              term; restarts spread over several nodes fence each of them in turn
-              (#1540). No forward is dropped for room. The bound of 2^20 answers,
+              term, which the leader opens by handing its leadership over to a voter
+              that holds the commit and was heard, once a term at most (#1540); a
+              leader alone, with no such voter, or whose transfer failed, leaves
+              them fenced until the next election, restarts spread over several
+              nodes fencing each of them in turn. No forward is dropped for room.
+              The bound of 2^20 answers,
               about 152 MiB and 280 MiB at most under churn, holds per Raft group:
               a multi node with several groups adds them.
               None of them is a refusal, true or false: nothing tells the caller
@@ -6158,6 +6162,23 @@ packages:
                 consensus_forward_answers_forgotten_total).
               name: ForwardForgotten
               type: uint64
+            - doc: |-
+                ForwardLastResorts counts, since this node started, the fence's last
+                resorts: a new run past 65 536 marks of the current term made it
+                forget the least recent mark of the node holding the most, whose new
+                runs wait for the next term (#1540,
+                consensus_forward_last_resorts_total).
+              name: ForwardLastResorts
+              type: uint64
+            - doc: |-
+                ForwardResortTransfers counts, since this node started, the
+                leadership transfers its last resorts started, once a term at most, to
+                a voter that holds the commit and was heard: a last resort with none
+                leaves its forwarders fenced until the next election, and a count of
+                last resorts climbing past it asks the operator for a transfer
+                (#1540, consensus_forward_last_resorts_total{action="transfer"}).
+              name: ForwardResortTransfers
+              type: uint64
       - doc: |-
           ForwardDropsValue counts the forwards a node neither proposed nor
           answered, by cause (#1482).
@@ -6594,8 +6615,13 @@ packages:
       marks of the current term (runs per lane: about 32 768 restarts when
       each run forwards on both lanes), the least recent mark of the node
       holding the most goes, and that node's new runs wait for the next
-      term; restarts spread over several nodes fence each of them in turn
-      (#1540). The bound of 2^20 answers, about 152 MiB and 280 MiB at most
+      term, which the leader opens by handing its leadership over to a
+      voter that holds the commit and was heard, once a term at most
+      (#1540); a leader alone, with no such voter, or whose transfer
+      failed, leaves them fenced until the next election, restarts spread
+      over several nodes fencing each of them in turn, and its last
+      resorts are counted in consensus_forward_last_resorts_total by
+      action. The bound of 2^20 answers, about 152 MiB and 280 MiB at most
       under churn, holds per Raft group: a multi node with several groups
       adds them. None of them is a refusal, true
       or false: the entry may or may not have been appended. Handle it as
@@ -7644,8 +7670,12 @@ packages:
               marks of the current term (runs per lane: about 32 768 restarts when
               each run forwards on both lanes), the least recent mark of the node
               holding the most goes, and that node's new runs wait for the next
-              term; restarts spread over several nodes fence each of them in turn
-              (#1540). No forward is dropped for room. The bound of 2^20 answers,
+              term, which the leader opens by handing its leadership over to a voter
+              that holds the commit and was heard, once a term at most (#1540); a
+              leader alone, with no such voter, or whose transfer failed, leaves
+              them fenced until the next election, restarts spread over several
+              nodes fencing each of them in turn. No forward is dropped for room.
+              The bound of 2^20 answers,
               about 152 MiB and 280 MiB at most under churn, holds per Raft group:
               a multi node with several groups adds them.
               None of them is a refusal, true or false. Once every member runs this

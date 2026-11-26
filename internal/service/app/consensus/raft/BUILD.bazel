@@ -96,6 +96,7 @@ go_test(
         "withoutvoucher_internal_test.go",
         "yieldonstall_internal_test.go",
         "zdiverged_internal_test.go",
+        "zfencelastresort_internal_test.go",
         "zfounding_internal_test.go",
         "zfuzzstep_internal_test.go",
         "zleasetie_internal_test.go",

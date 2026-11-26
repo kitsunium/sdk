@@ -16503,6 +16503,15 @@ sequences:
         to: o.setGauge
       - eval: o.addTo(mForwardForgotten, &o.seenForgotten, int64(st.ForwardForgotten))
         to: o.addTo
+      - bind: transfers
+        eval: int64(st.ForwardResortTransfers)
+      - loop:
+          do:
+            - eval: o.addTo(mForwardResorts, &o.seenResorts[i], total, coreotel.String("action", fwdResortActions[i]))
+              to: o.addTo
+          key: i
+          range: "[2]int64{transfers, int64(st.ForwardLastResorts) - transfers}"
+          value: total
   - of: (*Node).ReadCommitted
     participants:
       - id: caller
