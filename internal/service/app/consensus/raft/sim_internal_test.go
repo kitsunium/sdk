@@ -94,6 +94,11 @@ type simNode struct {
 	applied     []core.EntryValue
 	checked     uint64
 	maxTerm     uint64
+	// liveTerm is the highest term the running node has held since it
+	// started, the durable one at the start: a term lowered in memory
+	// fails at the turn that lowers it, even when the node crashes before
+	// the HardState that carries it reaches the disk (#1362).
+	liveTerm uint64
 	// unsupported is the first entry this node reported it cannot apply,
 	// zero while it reported none.
 	unsupported UnsupportedEntryValue
@@ -298,6 +303,7 @@ func (s *sim) start(n *simNode) {
 	n.applied = nil
 	n.appliedFrom = n.base.Position.Index
 	n.checked = 0
+	n.liveTerm = n.hs.Term
 	n.applyQ, n.queued, n.reads, n.applyDue = nil, 0, 0, false
 	cfg := s.cfg(n.id)
 	cfg.NoTable = n.noTable
@@ -603,6 +609,10 @@ func (s *sim) checkNode(n *simNode) {
 		return
 	}
 	st := n.r.Status()
+	if st.Term < n.liveTerm {
+		s.fail("term went back in memory on node %d: %d < %d", n.id, st.Term, n.liveTerm)
+	}
+	n.liveTerm = max(n.liveTerm, st.Term)
 	if st.Role == core.RoleLeader {
 		if l, ok := s.leaders[st.Term]; ok && l != n.id && !s.forged {
 			s.fail("two leaders in term %d: %d and %d", st.Term, l, n.id)

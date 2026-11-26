@@ -1764,6 +1764,8 @@ files:
       - (*memRun).end
       - (*MemoryTransport).Send
       - (*MemoryTransport).Stream
+      - streamCancelWatch
+      - (*streamCancelWatch).Read
       - (*MemoryTransport).Bind
       - (*MemoryTransport).run
       - (*MemoryTransport).deliverFrame
@@ -1971,6 +1973,7 @@ files:
   - decls:
       - pinAfterStream
       - pinScaleMax
+      - maxPacedStreams
       - sendPin
       - pinFollow
       - (*Node).streamedPin
@@ -3634,6 +3637,17 @@ functions:
     params: w []queuedStream, role func(coreconsensus.NodeID) waiterRole
     results: kept []queuedStream, voter, learner int
   - doc: |-
+      maxPacedStreams is the most snapshot streams a pacer can share without
+      one's moved mark outliving its pin bound. Each of N streams waits for N
+      slices of the pacer's rate between two reads, N/paceSlices seconds, and
+      streamDue cuts one that has not moved for pinAfterStream maximum election
+      timeouts: N stays below it while N*time.Second is at most
+      pinAfterStream*paceSlices*etMax, that is while N is at most etMax over
+      ten milliseconds, 200 at the default 2 s (#1485).
+    name: maxPacedStreams
+    params: etMax time.Duration
+    results: int64
+  - doc: |-
       entrylessFrame is AppendMessage's frame of m, a message without entries,
       in a buffer of MessageHeaderLen bytes, the length of every such frame but
       a forward's trace: grown from nil, the frame took four to five
@@ -5110,7 +5124,12 @@ types:
       - doc: |-
           MaxSnapshotStreams bounds the snapshot streams this node sends at
           once; 0 is 1. A peer in need beyond it waits, its transfer pending,
-          and is served when a stream ends.
+          and is served when a stream ends. While SnapshotStreamBytesPerSecond
+          paces them, more than InitialTiming.ElectionTimeoutMax over ten
+          milliseconds (200 at the default 2 s) is refused as misconfigured:
+          streams sharing the pacer wait N slices of its rate between two
+          reads, and past that bound a healthy stream looks stalled and is
+          cut.
         name: MaxSnapshotStreams
         type: int
       - doc: |-
@@ -8054,6 +8073,25 @@ types:
         name: end
         recv: r *memRun
     name: memRun
+  - doc: |-
+      streamCancelWatch notes that a read of the stream failed while its context was
+      cancelled, which tells a cancelled stream from one that ended short.
+    fields:
+      - name: ""
+        role: embedded
+        type: io.ReadCloser
+      - name: ctx
+        type: context.Context
+      - name: cancelled
+        type: atomic.Bool
+    kind: struct
+    methods:
+      - doc: Read reads the stream and records a failure it owes to the cancellation.
+        name: Read
+        params: p []byte
+        recv: w *streamCancelWatch
+        results: int, error
+    name: streamCancelWatch
   - fields:
       - name: cfg
         type: Config
@@ -10361,7 +10399,7 @@ types:
         name: restoreFrom
         params: m coreconsensus.SnapshotMetaValue, durIdx uint64
         recv: n *Node
-        results: err error
+        results: error
       - doc: |-
           codecOf is the codec a snapshot of metadata m is decoded with, refused
           VERSION_UNSUPPORTED for a metadata version or a codec this build does

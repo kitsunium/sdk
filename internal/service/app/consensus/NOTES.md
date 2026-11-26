@@ -1571,6 +1571,11 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   beyond it waits in raft's snapshot state, holding no pin, and
   `serveWaiting` starts it, in `nextWaiter`'s order (below), when a stream
   ends (`streamWait`, cleared by `leadershipChanged`).
+  Past `maxPacedStreams` (`ElectionTimeoutMax` over ten milliseconds, 200 at
+  the default 2 s) `MaxSnapshotStreams` is refused by `refuseBounds` while the
+  rate is set, `CONSENSUS_MISCONFIGURED` naming the bound: N streams on one
+  pacer wait N slices between two reads, and past it `streamDue` cut
+  healthy streams (#1485).
   `SnapshotStreamBytesPerSecond` paces every stream together with one token
   bucket on the node's clock (`pacer`, `node_pace.go`), never the wall
   clock: a read is cut to a tenth of the rate and paid after it, its
@@ -1627,7 +1632,20 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   snapshot it held before to `Promote`, `watchUnfed` and Health, which
   `TestALearnerWhoseLimitIsRaisedIsFedInstalledAndPromoted` read under a
   sharded run (#1502). `restoreFrom` records it before `applied` moves
-  (`TestAnInstallRecordsItsNewestSnapshotBeforeItsAppliedPosition`).
+  (`TestAnInstallRecordsItsNewestSnapshotBeforeItsAppliedPosition`). When
+  the appends carried `applied` past the snapshot between `stillFresh` and
+  the restore's turn (`durIdx >= m.Position.Index`), `restoreFrom` restores
+  nothing and records no newest snapshot size; it only raises
+  `snapState.last` to the snapshot's index: the appends published `applied`, not the install,
+  and the install's `retain` records the newest snapshot after (#1554).
+- Fail a restore on its read handle's Close alone: the snapshot was read in
+  full and verified, so the Close says nothing of the state restored, and
+  the pin goes either way. Returned, it made the install remove the copy
+  and leave raft where it was while the machine, `applied` and the newest
+  snapshot size stood at it (#1554). `restoreFrom` warns
+  `consensus: snapshot handle close failed`, as `sendSnapshot` does, and
+  the install carries on to `installed`
+  (`TestARestoreWhoseHandleFailsToCloseStillInstalls`).
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).
@@ -1908,3 +1926,10 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   commands packs them with `multi/`'s `Packer` and `Machine`, on top of
   `Replicated`, and the log, wire and apply code stay as they are (#926,
   `multi/CLAUDE.md`, `multi/BENCH.md`).
+- A snapshot stream cancelled on `MemoryTransport` ends as cancelled, as a
+  closed TCP connection does: a read of the body that fails under a
+  cancelled context returns the context's error, never the receiver's
+  `SNAPSHOT_CORRUPT`, so the sender does not read its sound snapshot back
+  nor log that a peer found it corrupt; a body that ends short with nothing
+  cancelled stays `SNAPSHOT_CORRUPT` (#1484,
+  `TestACancelledSnapshotStreamIsNotACorruptVerdict`).

@@ -69005,7 +69005,7 @@
         {
           "name": "MaxSnapshotStreams",
           "type": "int",
-          "doc": "MaxSnapshotStreams bounds the snapshot streams this node sends at\nonce; 0 is 1. A peer in need beyond it waits, its transfer pending,\nand is served when a stream ends.\n"
+          "doc": "MaxSnapshotStreams bounds the snapshot streams this node sends at\nonce; 0 is 1. A peer in need beyond it waits, its transfer pending,\nand is served when a stream ends. While SnapshotStreamBytesPerSecond\npaces them, more than InitialTiming.ElectionTimeoutMax over ten\nmilliseconds (200 at the default 2 s) is refused as misconfigured:\nstreams sharing the pacer wait N slices of its rate between two\nreads, and past that bound a healthy stream looks stalled and is\ncut.\n"
         },
         {
           "name": "SnapshotStreamBytesPerSecond",

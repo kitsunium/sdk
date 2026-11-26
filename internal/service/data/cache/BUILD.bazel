@@ -52,6 +52,7 @@ go_test(
         "cache_bench_test.go",
         "chain_external_test.go",
         "chain_race_external_test.go",
+        "expire_seed_internal_test.go",
         "fetchmany_alloc_external_test.go",
         "gen_api_test.go",
         "lease_external_test.go",

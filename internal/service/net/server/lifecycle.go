@@ -802,7 +802,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // waitGrace keeps the server serving for its drain grace, or until ctx is
-// done, whichever comes first.
+// done, whichever comes first; then, while an internal test holds it
+// (graceHeld), until the test lets it go or ctx is done.
 func (s *Server) waitGrace(ctx context.Context) {
 	//: no grace: the drain closes at once.
 	if s.drainGrace <= 0 {
@@ -817,6 +818,15 @@ func (s *Server) waitGrace(ctx context.Context) {
 	case <-t.C:
 	//: the caller's budget ran out first: the drain goes on with what is left.
 	case <-ctx.Done():
+		//: no hold outlives the budget.
+		return
+	}
+	//: held by a test: until it lets go, or the budget's end.
+	if s.graceHeld != nil {
+		select {
+		case <-s.graceHeld:
+		case <-ctx.Done():
+		}
 	}
 }
 

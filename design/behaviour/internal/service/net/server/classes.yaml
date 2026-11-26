@@ -7701,6 +7701,14 @@ types:
           it closes a listener.
         name: drainGrace
         type: time.Duration
+      - doc: |-
+          graceHeld, nil unless an internal test sets it, keeps the grace going
+          past drainGrace until it is closed or the budget ends: the drain test
+          closes it once an arrival that began in the grace was served, so a
+          stall of its clients that outlasted drainGrace is not read as a drain
+          that serves nothing (#1385).
+        name: graceHeld
+        type: <-chan struct{}
       - doc: phase is the lifecycle phase, read without the mutex by State.
         name: phase
         type: atomic.Uint32
@@ -8091,7 +8099,8 @@ types:
         results: error
       - doc: |-
           waitGrace keeps the server serving for its drain grace, or until ctx is
-          done, whichever comes first.
+          done, whichever comes first; then, while an internal test holds it
+          (graceHeld), until the test lets it go or ctx is done.
         name: waitGrace
         params: ctx context.Context
         recv: s *Server

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
@@ -202,13 +204,38 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 	if err != nil {
 		return err
 	}
-	ierr := in(coreconsensus.InstallParams{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: rc})
+	body := &streamCancelWatch{ReadCloser: rc, ctx: ctx}
+	ierr := in(coreconsensus.InstallParams{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: body})
+	//: a stream cut by its cancellation ends as cancelled, as a closed TCP connection does,
+	// never as the receiver's corrupt verdict, which made the sender read its snapshot back.
+	if ierr != nil && body.cancelled.Load() {
+		abandon(rc.Close())
+		return ctx.Err()
+	}
 	// The install's verdict wins; a Close failure of the stream it read is
 	// reported only when the install itself succeeded.
 	if cerr := rc.Close(); cerr != nil && ierr == nil {
 		return cerr
 	}
 	return ierr
+}
+
+// streamCancelWatch notes that a read of the stream failed while its context was
+// cancelled, which tells a cancelled stream from one that ended short.
+type streamCancelWatch struct {
+	io.ReadCloser
+	ctx       context.Context
+	cancelled atomic.Bool
+}
+
+// Read reads the stream and records a failure it owes to the cancellation.
+func (w *streamCancelWatch) Read(p []byte) (int, error) {
+	k, err := w.ReadCloser.Read(p)
+	//: only a failed read under a cancelled context counts; a clean EOF never does.
+	if err != nil && !errors.Is(err, io.EOF) && w.ctx.Err() != nil {
+		w.cancelled.Store(true)
+	}
+	return k, err
 }
 
 // Bind implements Transport. The first Bind after construction or Close

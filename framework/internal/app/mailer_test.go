@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/textproto"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -115,17 +116,102 @@ func (r *relay) messages() []string {
 	return slices.Clone(r.got)
 }
 
-// refusedAddr is an address nothing listens on: every connection is refused
-// at once.
+// refusedAddr is an address nothing listens on, and nothing can: every
+// connection to it is refused at once, for as long as the test runs.
+//
+// Listening on an ephemeral port and closing it would hand the port back to
+// the kernel, free for any listener that asks. So the port is kept by a
+// connection instead: the client end of a connection made to a throwaway
+// listener owns its ephemeral port, no listener is bound to it, and neither
+// the kernel's choice of a port for another listener nor an explicit bind
+// takes it from the connection. The server end and the client end stay open
+// until the test ends, which is what keeps the client's port.
 func refusedAddr(t *testing.T) string {
 	t.Helper()
 	ln, lnErr := net.Listen("tcp", "127.0.0.1:0")
 	if lnErr != nil {
 		t.Fatal(lnErr)
 	}
-	addr := ln.Addr().String()
-	ln.Close()
-	return addr
+	defer ln.Close()
+	held, dialErr := net.Dial("tcp", ln.Addr().String())
+	//: a dial to the loopback listener that fails leaves no port to keep.
+	if dialErr != nil {
+		t.Fatal(dialErr)
+	}
+	t.Cleanup(func() { held.Close() })
+	// The server end, accepted so the connection outlives the listener: a
+	// connection still waiting in the queue of a closing listener is reset,
+	// and a reset client gives its port back.
+	peer, acceptErr := ln.Accept()
+	//: without the accepted end the client's port would not be kept.
+	if acceptErr != nil {
+		t.Fatal(acceptErr)
+	}
+	t.Cleanup(func() { peer.Close() })
+	return held.LocalAddr().String()
+}
+
+// A refused address stays refused for as long as the test runs. The helper
+// used to listen on an ephemeral port and close it, so the port went back to
+// the kernel, which hands ephemeral ports to every listener that asks — the
+// app's own HTTP listener, started a moment later, or another package's test
+// running beside this one. An attempt of the outbox that dialled it then
+// connected to a server that said nothing to an SMTP client, and waited until
+// that server gave up: the app's own HTTP server does after its ten seconds
+// of header time. The outbox counted the failed run at that instant, a few
+// milliseconds after TestMailBackoffDoubles had stopped waiting ten seconds
+// for it (issue #1551).
+func TestRefusedAddrCannotBeTaken(t *testing.T) {
+	type tc struct {
+		name string
+		// holds is the platforms whose kernel keeps the port from a listener;
+		// unused by a case that does not bind.
+		holds []string
+		// dials is how many times the address is dialled before the check.
+		dials int
+		// bind says whether the case tries to listen on the address.
+		bind bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		addr := refusedAddr(t)
+		//: the BSD kernels and Windows let a listener bind a port a connection
+		//: holds (Windows unless it asks for exclusive use, which no test here
+		//: can verify), so the hold is only asserted on Linux.
+		if c.bind && !slices.Contains(c.holds, runtime.GOOS) {
+			t.Skipf("%s: the address is not held on this system", runtime.GOOS)
+		}
+		//: only the case that asks for the address tries to bind it.
+		if c.bind {
+			taken, err := net.Listen("tcp", addr)
+			//: a listener that gets the address, as the app's or another
+			//: process's does when the kernel hands it the port, is the defect.
+			if err == nil {
+				taken.Close()
+				t.Fatalf("%s was handed to a new listener: a mail dialling it would wait for that listener instead of being refused", addr)
+			}
+		}
+		//: every dial, the first or a later one, is refused.
+		for range c.dials + 1 {
+			conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+			//: a connection that opens means somebody listens there.
+			if err == nil {
+				conn.Close()
+				t.Fatalf("%s accepted a connection", addr)
+			}
+			//: any other failure is not the refusal the outbox is meant to see.
+			if !strings.Contains(err.Error(), "refused") {
+				t.Fatalf("dialling %s: %v, want a refused connection", addr, err)
+			}
+		}
+	}
+	for _, c := range []tc{
+		{name: "no listener can take the address", holds: []string{"linux"}, bind: true},
+		{name: "the address is refused", dials: 0},
+		{name: "the address is still refused after a dial", dials: 2},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
 }
 
 // syncBuffer collects logs written from several goroutines.

@@ -21,6 +21,17 @@ const pinAfterStream int64 = 10
 // default 2 s.
 const pinScaleMax uint8 = 6
 
+// maxPacedStreams is the most snapshot streams a pacer can share without
+// one's moved mark outliving its pin bound. Each of N streams waits for N
+// slices of the pacer's rate between two reads, N/paceSlices seconds, and
+// streamDue cuts one that has not moved for pinAfterStream maximum election
+// timeouts: N stays below it while N*time.Second is at most
+// pinAfterStream*paceSlices*etMax, that is while N is at most etMax over
+// ten milliseconds, 200 at the default 2 s (#1485).
+func maxPacedStreams(etMax time.Duration) int64 {
+	return int64(etMax / (time.Second / time.Duration(pinAfterStream*paceSlices)))
+}
+
 // sendPin is a snapshot that pins compaction for a peer. While it streams,
 // until is zero; moved is when the stream last moved, in Unix nanoseconds
 // of n.clk: its offer, then the accept, which opens the snapshot, then each

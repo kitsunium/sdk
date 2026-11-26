@@ -23,11 +23,13 @@ type heldRetain struct {
 	release chan struct{}
 }
 
-// List implements SnapshotStore, and holds the first call retain makes
-// while armed once the store publishes a snapshot.
+// List implements SnapshotStore, and holds the first call the install's
+// retain makes while armed once the store publishes a snapshot. The retain
+// of a cut (afterCut, on the apply goroutine) is let through: held, it held
+// the restore behind it on that goroutine, and the setup failed (#1554).
 func (s *heldRetain) List() ([]coreconsensus.SnapshotMetaValue, error) {
 	metas, err := s.SnapshotStore.List()
-	if err != nil || len(metas) == 0 || !s.armed.Load() || !calledFrom(".(*Node).retain") {
+	if err != nil || len(metas) == 0 || !s.armed.Load() || !calledFrom(".(*Node).retain") || !calledFrom(".(*Node).installed") {
 		return metas, err
 	}
 	first := false

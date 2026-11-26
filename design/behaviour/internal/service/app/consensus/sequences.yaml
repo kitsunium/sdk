@@ -2200,6 +2200,12 @@ sequences:
               do:
                 - return: misconfigured("SnapshotStreamBytesPerSecond", "negative")
                   to: misconfigured
+            - case: c.SnapshotStreamBytesPerSecond > 0 && int64(c.MaxSnapshotStreams) > maxPacedStreams(c.InitialTiming.ElectionTimeoutMax)
+              do:
+                - return: |-
+                    misconfigured("MaxSnapshotStreams", "above "+strconv.FormatInt(maxPacedStreams(c.InitialTiming.ElectionTimeoutMax), 10)+
+                    			", ElectionTimeoutMax over ten milliseconds, while SnapshotStreamBytesPerSecond paces them")
+                  to: misconfigured
             - case: framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead)
               do:
                 - return: misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
@@ -10054,6 +10060,10 @@ sequences:
         kind: value
       - id: offerRefused
         kind: internal
+      - id: abandon
+        kind: internal
+      - id: ctx.Err
+        kind: value
       - id: rc.Close
         kind: value
     steps:
@@ -10115,8 +10125,17 @@ sequences:
           do:
             - return: err
           when: err != nil
+      - bind: body
+        eval: "&streamCancelWatch{ReadCloser: rc, ctx: ctx}"
       - bind: ierr
-        eval: "in(coreconsensus.InstallParams{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: rc})"
+        eval: "in(coreconsensus.InstallParams{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: body})"
+      - opt:
+          do:
+            - eval: abandon(rc.Close())
+              to: abandon
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ierr != nil && body.cancelled.Load()
       - opt:
           do:
             - return: cerr
@@ -10126,6 +10145,26 @@ sequences:
             to: rc.Close
           when: cerr != nil && ierr == nil
       - return: ierr
+  - of: (*streamCancelWatch).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamCancelWatch).Read
+        kind: self
+      - id: w.ReadCloser.Read
+        kind: value
+      - id: w.cancelled.Store
+        kind: value
+    steps:
+      - bind: k, err
+        eval: w.ReadCloser.Read(p)
+        to: w.ReadCloser.Read
+      - opt:
+          do:
+            - eval: w.cancelled.Store(true)
+              to: w.cancelled.Store
+          when: err != nil && !errors.Is(err, io.EOF) && w.ctx.Err() != nil
+      - return: k, err
   - of: (*MemoryTransport).Bind
     participants:
       - id: caller
@@ -15059,6 +15098,9 @@ sequences:
         eval: n.cuttingSince.Load()
         to: n.cuttingSince.Load
       - return: since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
+  - of: maxPacedStreams
+    steps:
+      - return: int64(etMax / (time.Second / time.Duration(pinAfterStream*paceSlices)))
   - of: (*Node).streamedPin
     steps:
       - return: "sendPin{index: index, since: now.UnixNano(), until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}"
@@ -23213,10 +23255,15 @@ sequences:
           when: err != nil
       - defer: |-
           func() {
-          		// The handle is only read; its Close matters to the node only when
-          		// it is the one failure there was.
-          		if cerr := h.Close(); cerr != nil && err == nil {
-          			err = cerr
+          		// The handle is only read, and the pin it holds goes whatever its
+          		// Close says: the failure is said, never returned. Returned after a
+          		// full read, a verification and a restore, it made the install
+          		// remove the copy and leave raft where it was, the machine and
+          		// applied at it (#1554); after another failure, the cause is the
+          		// error returned.
+          		//: a failed Close is warned, never returned in place of the outcome.
+          		if cerr := h.Close(); cerr != nil {
+          			n.obs.warn("consensus: snapshot handle close failed", lstr("id", m.ID), lstr("error", cerr.Error()))
           		}
           	}()
       - opt:
