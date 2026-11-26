@@ -151,16 +151,40 @@ func (r *memRun) end() { r.once.Do(func() { close(r.stop) }) }
 // Send implements Transport: it never blocks and drops when the queue is
 // full.
 func (t *MemoryTransport) Send(to coreconsensus.NodeID, frame []byte) {
-	dst := t.net.route(t.id, to)
-	if dst == nil || !t.net.admitted(t, to) {
+	//: a destination this end does not admit is sent nothing.
+	if !t.net.admitted(t, to) {
+		return
+	}
+	lane, err := wire.Lane(frame)
+	t.net.enqueue(t.id, to, frame, err == nil && lane == coreconsensus.LaneControl)
+}
+
+// enqueue queues a copy of frame from one node to another, on its control
+// lane or its data lane, unless that direction of the link is cut or the
+// destination never joined. The cut is read and the frame queued in one
+// section under the network's lock: a Send that took its destination, then
+// queued once the lock was released, queued its frame after a Cut or an
+// Isolate that had returned, and after the drain of the stopped node's
+// queues that followed, which delivered it at the node's restart (#1564).
+// The queue never blocks, a full lane dropping the frame, so the lock is
+// never held waiting on a receiver.
+func (n *MemoryNetwork) enqueue(from, to coreconsensus.NodeID, frame []byte, control bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	dst := n.nodes[to]
+	//: a cut link, or a destination that never joined, is sent nothing.
+	if n.cut[[2]coreconsensus.NodeID{from, to}] || dst == nil {
 		return
 	}
 	q := dst.data
-	if lane, err := wire.Lane(frame); err == nil && lane == coreconsensus.LaneControl {
+	//: the frame header names the control lane.
+	if control {
 		q = dst.ctrl
 	}
 	select {
-	case q <- memFrame{from: t.id, frame: bytes.Clone(frame)}:
+	//: queued for the destination's delivery goroutine.
+	case q <- memFrame{from: from, frame: bytes.Clone(frame)}:
+	//: the lane is full: the frame is dropped, as a real lane drops it.
 	default:
 	}
 }

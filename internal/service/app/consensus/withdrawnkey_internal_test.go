@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -272,6 +273,73 @@ func TestANodeStoppedBehindIsOwedNothingSentBeforeItsCut(t *testing.T) {
 	}
 	for _, tt := range []tc{{name: "an entry sent before the cut"}} {
 		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
+	}
+}
+
+// A Send routed before its destination is cut off queues nothing once the
+// cut and the drain of stopHearing are done: it took its destination under
+// the network's lock, then queued the frame after releasing it, so a Send
+// already past the route queued its frame after the drain, and the node
+// restarted reading entries past the end stopBehind returned. The sender is
+// held, with nothing but its own lock, between the two: the admission
+// model, on, reads the sender's admitted members under that lock (#1564).
+func TestASendRoutedBeforeACutQueuesNothingAfterTheDrain(t *testing.T) {
+	type tc struct {
+		name string
+		kind coreconsensus.MessageKind
+	}
+	runCase := func(t *testing.T, tcase tc) {
+		net := NewMemoryNetwork()
+		net.admission = true
+		from := NewMemoryTransport(net, 1)
+		to := &testNode{id: 2}
+		dst := NewMemoryTransport(net, to.id)
+		from.SetMembership(1, []coreconsensus.MemberValue{{ID: to.id, SPKI: memSPKI(to.id)}})
+		m := coreconsensus.MessageValue{Version: 1, Group: 1, Kind: tcase.kind, From: 1, To: to.id, Term: 3}
+		frame := wire.AppendMessage(nil, &m)
+		from.mu.Lock()
+		sent := make(chan struct{})
+		go func() {
+			defer close(sent)
+			from.Send(to.id, frame)
+		}()
+		blockedInSend(t)
+		stopHearing(&cluster{net: net}, to)
+		from.mu.Unlock()
+		<-sent
+		//: a frame queued now is delivered at the node's restart.
+		if data, ctrl := len(dst.data), len(dst.ctrl); data+ctrl != 0 {
+			t.Fatalf("%d frames on the data lane and %d on the control lane were queued for node %d after its cut and drain, by a Send routed before them: delivered at its restart, past the end stopBehind read", data, ctrl, to.id)
+		}
+	}
+	for _, tt := range []tc{
+		{name: "an append on the data lane", kind: coreconsensus.MsgApp},
+		{name: "a heartbeat on the control lane", kind: coreconsensus.MsgHeartbeat},
+	} {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
+	}
+}
+
+// blockedInSend waits until a goroutine is parked on a mutex inside
+// MemoryTransport.Send, read from the goroutines' stacks: the sender holds
+// no clock and signals nothing, and its stack is the one place that says it
+// reached the lock.
+func blockedInSend(t *testing.T) {
+	t.Helper()
+	buf := make([]byte, 1<<20)
+	for deadline := time.Now().Add(10 * time.Second); ; runtime.Gosched() {
+		n := runtime.Stack(buf, true)
+		//: a goroutine parked on a mutex with Send on its stack.
+		for _, g := range strings.Split(string(buf[:n]), "\n\n") {
+			//: the sender is parked on the lock the test holds.
+			if strings.Contains(g, "sync.Mutex.Lock") && strings.Contains(g, "(*MemoryTransport).Send(") {
+				return
+			}
+		}
+		//: the sender never reached the lock.
+		if time.Now().After(deadline) {
+			t.Fatal("setup: the Send never parked on the sender's lock")
+		}
 	}
 }
 
