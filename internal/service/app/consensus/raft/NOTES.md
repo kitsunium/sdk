@@ -910,7 +910,9 @@ under coverage before touching `shard_count`.
 - Step a leader of this release down on a `NOT_LEADER` whose `LogTerm` is
   not past its term, or read one as contact or as a refusal of its log
   (`refusedForLaterTerm`, #1514). A refuser of this release puts its own
-  term in `LogTerm` and refuses only a request of an older term, so every
+  term in `LogTerm` and refuses only a request of an older term — no
+  release of protocol 5 ever refused otherwise, the refusal's form and
+  `ProtocolMax = 5` having come in the same commit, 2ceeece29 — so every
   refusal of a request this leader sent at its term, which announces 5,
   carries a `LogTerm` past it. One whose `LogTerm` is the leader's term
   refuses a frame the leader sent as a leader of protocol 4, delayed past

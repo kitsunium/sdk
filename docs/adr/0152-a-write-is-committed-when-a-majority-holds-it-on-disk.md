@@ -8502,8 +8502,10 @@ more election for nothing.
   comes from a refuser at that term, whose leader is this one, refusing a
   frame of an older term that announced no 5 and was refused at the term
   after its own: one this node sent as a leader of a previous release
-  before its upgrade. A `LogTerm` below cannot come from an honest member,
-  and the transport authenticates `From`.
+  before its upgrade. A `LogTerm` below cannot come from an honest member:
+  no release of protocol 5 ever refused otherwise, since the refusal's form
+  (`LogTerm: r.term`, `Code: codeNotLeader`) and `ProtocolMax = 5` came
+  in the same commit, 2ceeece29; and the transport authenticates `From`.
 - **Every case of the issue.** A leader of this release refused by a member
   further ahead still steps down there, whatever release refuses: at
   `LogTerm` from this release, at the refusal's own later term from a
