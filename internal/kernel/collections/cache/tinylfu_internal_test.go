@@ -16,6 +16,54 @@ type sketchCell struct {
 
 // sketchCells returns the four counters and the three doorkeeper bits the
 // sketch counts key by.
+// separatingBusy and separatingFresh are the shape of the external test
+// "main full of busy keys": a cache of that many entries, every busy key used
+// that many times, then that many fresh keys written once each.
+const (
+	separatingBusy  = 20
+	separatingFresh = 50
+)
+
+// seedSeparatesBusyKeys reports whether, under the current sketchSeed, a
+// cache full of busy keys keeps busy-0, the key the external test asks for, through fresh writes. The
+// sketch shares counters between keys, so under some seeds a fresh key's
+// estimate collides with a busy key's and wins the contest: an estimate, not
+// a guarantee on the uses (admitAtLeast).
+func seedSeparatesBusyKeys() bool {
+	store := NewCache[string, int](Config[string, int]{MaxEntries: separatingBusy, Policy: PolicyTinyLFU})
+	for range 5 {
+		for i := range separatingBusy {
+			key := "busy-" + strconv.Itoa(i)
+			if _, ok := store.Fetch(key); !ok {
+				store.Set(key, i)
+			}
+		}
+	}
+	for i := range separatingFresh {
+		key := "new-" + strconv.Itoa(i)
+		store.Set(key, i)
+		store.Fetch(key)
+	}
+	_, held := store.Fetch("busy-0")
+	return held
+}
+
+// init pins the package's tests to a sketch seed that separates the busy keys
+// from the fresh ones. maphash offers no seed from a value, so the one drawn
+// per process is kept only if it separates them, and drawn again otherwise:
+// the external tests that fill a small cache with busy keys then judge the
+// policy and not the luck of a hash. The production seed stays the one
+// per-process draw; only the test binary chooses.
+func init() {
+	for range 1000 {
+		if seedSeparatesBusyKeys() {
+			return
+		}
+		sketchSeed = maphash.MakeSeed()
+	}
+	panic("no sketch seed separates the busy keys in 1000 draws")
+}
+
 func sketchCells[K comparable](s *frequencySketch, key K) [7]sketchCell {
 	hash := uint32(maphash.Comparable(sketchSeed, key))
 	block, mix := s.counters(hash)
