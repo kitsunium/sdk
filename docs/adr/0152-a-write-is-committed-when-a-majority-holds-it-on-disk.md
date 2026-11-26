@@ -8586,9 +8586,11 @@ amendment above, applied with it). Revisable while v0 (ADR 0040).
   `ForwardResortTransfers`; the driver publishes them as
   `consensus_forward_last_resorts_total` by `action`, `transfer` or
   `none`. `none` counts a last resort that started no transfer: no eligible voter, a transfer already under way (this one's included), or one that failed this term. A count of action `none` that climbs while
-  `transfer` stays at 0 in the term names a leader with no voter to take
-  over, whose forwarders stay fenced until the next election: an
-  operator's transfer clears it.
+  `transfer` stays at 0 in the term means no last-resort transfer
+  started, which does not say that no voter could take over: check for a
+  transfer already under way, an operator's included, and for a voter
+  that is up to date and eligible. The forwarders stay fenced until the
+  next election; a transfer of the operator's clears it.
 - **The cost.** One leadership transfer per 65 536 runs per lane in one
   term, about 32 768 restarts when each run forwards on both lanes: a
   visible change, the leader calls an election of its own. As every

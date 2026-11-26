@@ -802,8 +802,10 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `none`, which counts a last resort that started no transfer: no eligible
   voter, a transfer already under way (this one's included), or one that
   failed this term. `none` climbing while `transfer` stays at 0 in the
-  term names a leader with no voter to take over, which an operator's
-  transfer clears.
+  term means no last-resort transfer started, which does not say that no
+  voter could take over: check for a transfer already under way, an
+  operator's included, and for a voter that is up to date and eligible. A
+  transfer of the operator's clears the fence.
   Another transport states no window and gets the step function's
   default, 22 s. No forward is dropped for room: at the step function's
   bound (2^20 answers kept, raft's guide) the oldest answer is forgotten,

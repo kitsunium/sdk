@@ -5042,9 +5042,12 @@ types:
           leadership transfers its last resorts started, once a term at most, to
           a voter that holds the commit and was heard (#1540,
           consensus_forward_last_resorts_total{action="transfer"}). Last resorts
-          that climb while it stays at 0 in the term name a leader with no voter
-          to take over, whose forwarders stay fenced until the next election:
-          an operator's transfer clears it.
+          that climb while it stays at 0 in the term mean no last-resort
+          transfer started, which does not say that no voter could take over:
+          check for a transfer already under way, an operator's included, and
+          for a voter that is up to date and eligible. The forwarders stay
+          fenced until the next election; a transfer of the operator's
+          clears it.
         name: ForwardResortTransfers
         type: uint64
     kind: struct
