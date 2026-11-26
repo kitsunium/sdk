@@ -34,17 +34,47 @@ const (
 // for the server's end. No dial may fail, no echo be cut short, no kept
 // connection be reset: the grace serves what arrives after readiness turned
 // false, and the drain closes nothing before it read it.
+//
+// An arrival is dated by what the kernel did with it, not by when its dial
+// began (#1556): a dial refused once the listener may have closed — its
+// refusal returned drainGraceTest or more after Shutdown began — had no SYN
+// the listener answered, since a listening socket answers every SYN with a
+// SYN|ACK at once (FreeBSD's tcp_syncache.c, syncache_add) and a kernel
+// refuses one only once no listener is left; the server never had that
+// connection, so it owed it nothing. FreeBSD's guest showed one: begun 48 ms
+// into the grace, its first SYN unanswered, refused 1.03 s later on the
+// retransmission. Any other failed dial, a refusal inside the grace, and every
+// connection the kernel completed stay faults. Each late/ case forces that
+// order: one more client dates its dial inside the grace and sends its SYN
+// once the listener is closed.
 func TestDrain_graceUnderArrivals(t *testing.T) {
+	type tc struct {
+		name    string
+		p       drainProto
+		b       corenet.LoopBackend
+		lateSYN bool
+	}
+	var cases []tc
 	for _, p := range drainProtos() {
 		for _, b := range loopBackends() {
-			t.Run(p.name+"/"+b.String(), func(t *testing.T) { drainGraceUnderArrivals(t, p, b) })
+			cases = append(cases, tc{name: p.name + "/" + b.String(), p: p, b: b})
+			//: a dial's date is the protocol's no more than the backend's: once
+			//: per backend, on the line echo.
+			if p.name == "line" {
+				cases = append(cases, tc{name: "late/" + p.name + "/" + b.String(), p: p, b: b, lateSYN: true})
+			}
 		}
+	}
+	runCase := func(t *testing.T, c tc) { drainGraceUnderArrivals(t, c.p, c.b, c.lateSYN) }
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
 // drainGraceUnderArrivals is TestDrain_graceUnderArrivals on protocol p and
-// backend b.
-func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend) {
+// backend b; with lateSYN, one more client begins its dial inside the grace
+// and sends its SYN only once a probe was refused: the listener closed.
+func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend, lateSYN bool) {
 	srv := New(WithDrainGrace(drainGraceTest))
 	t.Cleanup(func() { swallowErr(srv.Close()) })
 	counts := p.group(srv, b)
@@ -64,20 +94,40 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend) 
 	}
 
 	var stop, notReady atomic.Bool
-	var late atomic.Int64
+	var late, unanswered atomic.Int64
+	// shutAt is when Shutdown was called, in nanoseconds: the listener closes
+	// no earlier than drainGraceTest after it.
+	var shutAt atomic.Int64
 	errc := make(chan string, 64)
+	// failed judges a dial begun at t0 that went wrong with msg, derr its
+	// dial's error: it reports whether the client stops.
+	failed := func(t0 time.Time, msg string, derr error) bool {
+		//: nothing went wrong.
+		if msg == "" {
+			return false
+		}
+		ended := time.Now()
+		//: refused once the listener may have closed: no SYN of it was
+		//: answered while the listener listened, so none was owed (#1556).
+		if s := shutAt.Load(); s != 0 && errors.Is(derr, syscall.ECONNREFUSED) && !ended.Before(time.Unix(0, s).Add(drainGraceTest)) {
+			unanswered.Add(1)
+			t.Logf("refused once the listener may have closed, no SYN of it answered while it listened: %s began %s, ended %s", msg, t0.Format("15:04:05.000"), ended.Format("15:04:05.000"))
+			return true
+		}
+		select {
+		case errc <- msg + " began " + t0.Format("15:04:05.000") + ", ended " + ended.Format("15:04:05.000") + ", readiness false " + strconv.FormatBool(notReady.Load()):
+		default:
+		}
+		return true
+	}
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
 			for !stop.Load() {
 				after := notReady.Load()
 				t0 := time.Now()
-				if _, msg, _ := p.exchange(addr); msg != "" {
-					msg += " began " + t0.Format("15:04:05.000")
-					select {
-					case errc <- msg + ", ended " + time.Now().Format("15:04:05.000") + ", readiness false " + strconv.FormatBool(notReady.Load()):
-					default:
-					}
+				//: a failure ends this client.
+				if _, msg, derr := p.exchange(addr); failed(t0, msg, derr) {
 					return
 				}
 				if after {
@@ -98,6 +148,28 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend) 
 		time.Sleep(drainLagTest)
 		stop.Store(true)
 	})
+	//: the order FreeBSD's guest showed, forced: a dial dated inside the
+	//: grace whose SYN the kernel first answers once the listener closed.
+	if lateSYN {
+		wg.Go(func() {
+			//: until readiness turned false: Shutdown began.
+			for !notReady.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			t0 := time.Now()
+			//: the listener never closed within the probe's bound.
+			if d := drainProbe(addr, t0.Add(10*time.Second)); d.refused.IsZero() {
+				failed(t0, "late: no probe refused within 10s", nil)
+				return
+			}
+			_, msg, derr := p.exchange(addr)
+			//: a listener that closed as it should refuses this dial.
+			if msg == "" {
+				msg = "dial: accepted after a refused probe"
+			}
+			failed(t0, msg, derr)
+		})
+	}
 	for _, c := range kept {
 		wg.Go(func() {
 			if msg := p.end(c); msg != "" {
@@ -113,6 +185,7 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend) 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	began := time.Now()
+	shutAt.Store(began.UnixNano())
 	if err := srv.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
@@ -127,6 +200,10 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend) 
 	}
 	if late.Load() == 0 {
 		t.Fatal("no connection was served once readiness turned false: the grace served nothing")
+	}
+	//: the forced order must have been met, and judged the kernel's.
+	if lateSYN && unanswered.Load() == 0 {
+		t.Fatal("late: the dial sent once the listener closed was not refused")
 	}
 	if o, cl := counts(); o != cl {
 		t.Fatalf("%d opened, %d closed", o, cl)
