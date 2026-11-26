@@ -6,8 +6,10 @@ package loop
 
 import (
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 // waitSlack is how late a wait may return past its bound on a loaded CI
@@ -21,6 +23,7 @@ func openWaitRing(t *testing.T, flags uint32) *uring {
 	t.Helper()
 	runtime.LockOSThread()
 	t.Cleanup(runtime.UnlockOSThread)
+	maskPreemption(t)
 	u, step, errno := openURing(16, flags)
 	if errno != 0 {
 		t.Skipf("io_uring %s: %v", step, errno)
@@ -149,5 +152,52 @@ func TestURingWoke(t *testing.T) {
 	}
 	if ul.spacing < 100*time.Microsecond || ul.spacing > 110*time.Microsecond {
 		t.Fatalf("after 128 batches of arrivals 100 µs apart the average is %v", ul.spacing)
+	}
+}
+
+// sigURG is the signal the Go runtime sends a thread to preempt the goroutine
+// on it.
+const sigURG = 23
+
+// maskPreemption blocks the runtime's preemption signal on the calling,
+// locked thread until the test ends. A signal delivered inside
+// io_uring_enter ends it with EINTR whatever its timeout (io_cqring_wait
+// returns -EINTR on task_sigpending, io_uring/io_uring.c), and the runtime
+// sends one to any goroutine it finds running for 10 ms, which a loaded runner
+// makes of the test between two statements: the waits below, which pin the
+// kernel's bound, would return after 60 to 100 µs (#1490). The loop itself
+// takes an EINTR for what it is — a wake with nothing to reap — and loops.
+func maskPreemption(t *testing.T) {
+	t.Helper()
+	set, old := uint64(1)<<(sigURG-1), uint64(0)
+	const sigBlock, sigSetmask = 0, 2
+	if _, _, e := syscall.RawSyscall6(syscall.SYS_RT_SIGPROCMASK, sigBlock, uintptr(unsafe.Pointer(&set)), uintptr(unsafe.Pointer(&old)), 8, 0, 0); e != 0 {
+		t.Fatalf("rt_sigprocmask: %v", e)
+	}
+	t.Cleanup(func() {
+		//: the thread goes back to the runtime with the mask it had.
+		syscall.RawSyscall6(syscall.SYS_RT_SIGPROCMASK, sigSetmask, uintptr(unsafe.Pointer(&old)), 0, 8, 0, 0)
+	})
+}
+
+// TestURingWaitInterrupted pins that a signal landing in the wait cannot
+// shorten what TestURingWait measures: the preemption signal is sent to the
+// waiting thread 1 ms into a 20 ms bound, as the runtime does to a thread it
+// finds busy.
+func TestURingWaitInterrupted(t *testing.T) {
+	u := openWaitRing(t, setupBase&^setupCoopTaskrun|setupSingleIssuer|setupDeferTaskrun)
+	pid, tid := syscall.Getpid(), syscall.Gettid()
+	done := make(chan struct{})
+	defer func() { <-done }()
+	go func() {
+		defer close(done)
+		time.Sleep(time.Millisecond)
+		syscall.Tgkill(pid, tid, syscall.Signal(sigURG))
+	}()
+	ts := kernelTimespec{nsec: int64(20 * time.Millisecond)}
+	start := time.Now()
+	u.wait(&ts, 8)
+	if took := time.Since(start); took < 20*time.Millisecond {
+		t.Fatalf("returned after %v, want the 20ms bound: a signal ended io_uring_enter with EINTR", took)
 	}
 }
