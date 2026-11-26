@@ -346,7 +346,8 @@ func TestTheLastResortWithNoVoterToTakeOver(t *testing.T) {
 		name string
 		make func() *resortBench
 	}
-	for _, x := range []tc{
+	//: Each case names how a last resort comes with no voter to take over.
+	cases := []tc{
 		{"a leader alone", func() *resortBench {
 			b := newResortBench(soft, hard)
 			b.r = soloLeader(soft, hard)
@@ -366,21 +367,28 @@ func TestTheLastResortWithNoVoterToTakeOver(t *testing.T) {
 			b.r.Step(t0, msg(core.MsgHeartbeat, 2, 1, 2))
 			return b
 		}},
-	} {
-		t.Run(x.name, func(t *testing.T) {
-			b := x.make()
-			b.drain()
-			role := b.r.role
-			b.restartAll(ids, 6, false)
-			st := b.r.Summary()
-			if st.ForwardLastResorts == 0 || st.ForwardResortTransfers != 0 || st.Transfer != 0 || b.timeoutNow != 0 {
-				t.Fatalf("last resorts %d, %d transfers, transfer to %d, TimeoutNow to %d: want last resorts and no transfer",
-					st.ForwardLastResorts, st.ForwardResortTransfers, st.Transfer, b.timeoutNow)
-			}
-			if b.r.role != role || b.r.term != 2 || len(b.fenced(ids)) == 0 {
-				t.Fatalf("%v at term %d, forwarders fenced %v: want the role kept, term 2, and the fence's own last resort", b.r.role, b.r.term, b.fenced(ids))
-			}
-		})
+	}
+	//: runCase drives one case: its restarts reach the last resort, which starts
+	//: no transfer, keeps the fence's own and is counted.
+	runCase := func(t *testing.T, c tc) {
+		b := c.make()
+		b.drain()
+		role := b.r.role
+		b.restartAll(ids, 6, false)
+		st := b.r.Summary()
+		//: A last resort that went uncounted, or a transfer started, is the defect.
+		if st.ForwardLastResorts == 0 || st.ForwardResortTransfers != 0 || st.Transfer != 0 || b.timeoutNow != 0 {
+			t.Fatalf("last resorts %d, %d transfers, transfer to %d, TimeoutNow to %d: want last resorts and no transfer",
+				st.ForwardLastResorts, st.ForwardResortTransfers, st.Transfer, b.timeoutNow)
+		}
+		//: The role and the term are kept, and the fence's own last resort fenced someone.
+		if b.r.role != role || b.r.term != 2 || len(b.fenced(ids)) == 0 {
+			t.Fatalf("%v at term %d, forwarders fenced %v: want the role kept, term 2, and the fence's own last resort", b.r.role, b.r.term, b.fenced(ids))
+		}
+	}
+	//: One sub-test per case, each through runCase.
+	for _, x := range cases {
+		t.Run(x.name, func(t *testing.T) { runCase(t, x) })
 	}
 }
 
