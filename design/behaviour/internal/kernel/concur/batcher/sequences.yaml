@@ -257,6 +257,8 @@ sequences:
         kind: self
       - id: b.stopOnce.Do
         kind: value
+      - id: b.busy.Load
+        kind: value
       - id: ctx.Err
         kind: value
     steps:
@@ -278,12 +280,15 @@ sequences:
               do:
                 - return: nil
             - comm: <-ctx.Done()
+      - bind: inDelivery
+        eval: b.busy.Load()
+        to: b.busy.Load
       - eval: b.lifeCancel()
       - opt:
           do:
             - eval: <-b.done
             - return: nil
-          when: "!b.busy.Load()"
+          when: "!inDelivery && !b.busy.Load()"
       - return: ctx.Err()
         to: ctx.Err
   - of: (*Batcher).acquire
