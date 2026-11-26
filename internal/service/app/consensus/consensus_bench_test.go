@@ -226,18 +226,6 @@ type benchDevice struct {
 	Name, Dir, Device, FS, Skip string
 }
 
-// benchWorkspace is the workspace root: BUILD_WORKSPACE_DIRECTORY under
-// `bazel run`, git's top level under `go test`, "" when neither answers.
-func benchWorkspace() string {
-	if root := os.Getenv("BUILD_WORKSPACE_DIRECTORY"); root != "" {
-		return root
-	}
-	if v, ok := benchCmd("git", "rev-parse", "--show-toplevel"); ok {
-		return v
-	}
-	return ""
-}
-
 // benchDevices is what CONSENSUS_BENCH_DEVICES names, else the data disk
 // (.bench/consensus under the workspace, the disk the checkout is on) and
 // the tmpfs at /dev/shm where one is mounted.
@@ -1170,10 +1158,10 @@ func collectBenchEnvelope() benchEnvelope {
 		osName = strings.Trim(v, `"`)
 	}
 	kernel, kok := benchCmd("uname", "-sr")
-	branch, bok := benchCmd("git", "rev-parse", "--abbrev-ref", "HEAD")
 	// The stamp says "uncommitted tree on <sha>" for a tree that is not the
-	// commit, the case of a bench run on work not yet committed (#1487).
-	commit := benchCommitStamp(".")
+	// commit, the case of a bench run on work not yet committed (#1487); both
+	// read the workspace, not the runfiles tree `bazel run` starts in.
+	branch, commit := benchTreeStamps()
 	bt := "1s"
 	if f := flag.Lookup("test.benchtime"); f != nil {
 		bt = f.Value.String()
@@ -1181,7 +1169,7 @@ func collectBenchEnvelope() benchEnvelope {
 	return benchEnvelope{
 		CPU: or(cpu, ok), Cores: fmt.Sprint(runtime.NumCPU()), RAM: ram, OS: osName, Kernel: or(kernel, kok),
 		Arch: runtime.GOARCH, Go: runtime.Version() + " " + runtime.GOOS + "/" + runtime.GOARCH,
-		Branch: or(branch, bok), Commit: commit, At: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		Branch: branch, Commit: commit, At: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		BenchTime: bt,
 	}
 }
