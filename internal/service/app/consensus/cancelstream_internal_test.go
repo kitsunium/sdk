@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -147,6 +148,10 @@ func TestACancelledSnapshotStreamIsNotACorruptVerdict(t *testing.T) {
 		reads := int(oc.opens.Load() - ct.started.Load())
 		if got := errs.HasCode(verdict, coreconsensus.CodeSnapshotCorrupt); got != c.corrupt {
 			t.Fatalf("the first stream ended with %v: SNAPSHOT_CORRUPT %v, want %v", verdict, got, c.corrupt)
+		}
+		//: a cancelled stream must end as the context's cancellation, not as another refusal.
+		if c.cancel && !errors.Is(verdict, context.Canceled) {
+			t.Fatalf("the cancelled stream ended with %v, want context.Canceled", verdict)
 		}
 		if found != c.corrupt {
 			t.Fatalf("the journal's \"found a sound snapshot corrupt\" is %v, want %v", found, c.corrupt)
