@@ -533,6 +533,10 @@ constants:
           carried FlagProtocol4.
         name: peerProtocol4
       - doc: |-
+          peerProtocol5 is set while the peer's last message of the term
+          carried FlagProtocol5 (#1472).
+        name: peerProtocol5
+      - doc: |-
           peerSilent is set while the peer's last answer, to an append or a
           heartbeat, said it is silent (FlagTruncated, #636): it answers, but
           acknowledges no append, so it counts for no change that must commit
@@ -594,11 +598,16 @@ constants:
       beside FlagProtocol4 at any cluster version (#919), the trace context of
       a forward (#1115), and the client sessions, their entry kind and the
       metadata that records them (#918), those two written only once the
-      committed cluster version is 4.
+      committed cluster version is 4. Version 5 changes no format: a node of 5
+      answers an append or a heartbeat of an older term, its own term in
+      LogTerm, at that term to a leader that announces 5 (FlagProtocol5),
+      which steps down at LogTerm as a pre-candidate refused its PreVote does,
+      and at the term after it to a leader of a previous release, which steps
+      down there (#1472).
     items:
       - name: ProtocolMax
         type: uint32
-        value: "4"
+        value: "5"
     name: ProtocolMax
   - doc: |-
       Protocol2 is the protocol version whose formats a node writes once the
@@ -627,6 +636,18 @@ constants:
         type: uint32
         value: "4"
     name: Protocol4
+  - doc: |-
+      Protocol5 is the protocol version from which a node answers an append
+      or a heartbeat of an older term with its own term in LogTerm, at that
+      term when the leader announces it (FlagProtocol5) and at the term after
+      it otherwise, and never takes a later term from an answer but the
+      refusal of its own request or campaign (#1472). A node below it answers
+      older-term traffic at its own term, as every release before did.
+    items:
+      - name: Protocol5
+        type: uint32
+        value: "5"
+    name: Protocol5
   - doc: |-
       MaxSessions is how many client sessions the cluster keeps: opening one
       more evicts the one whose last entry is the oldest. It is part of
@@ -721,6 +742,7 @@ files:
       - (*Raft).sendEntries
       - (*Raft).maybeCommit
       - (*Raft).stepLeader
+      - (*Raft).refusedForLaterTerm
       - (*Raft).handleHeartbeatResp
       - (*Raft).feedSilence
       - (*Raft).watchWindow
@@ -890,6 +912,7 @@ files:
       - Protocol2
       - Protocol3
       - Protocol4
+      - Protocol5
       - MaxSessions
       - rttRounds
       - raftFacts
@@ -965,6 +988,8 @@ files:
       - (*Raft).resetElection
       - (*Raft).admitted
       - (*Raft).send
+      - (*Raft).announcement
+      - truncatedReport
       - (*Raft).waitsForSync
       - (*Raft).noteAppended
       - (*Raft).confChanged
@@ -988,6 +1013,7 @@ files:
       - (*Raft).commitTimingContract
       - (*Raft).commitClusterVersion
       - (*Raft).speaks
+      - (*Raft).answersAsBefore
       - (*Raft).commitTo
       - (*Raft).publishAdmitted
       - (*Raft).admissionAt
@@ -1014,9 +1040,14 @@ files:
       - (*Raft).Step
       - (*Raft).stepTerm
       - (*Raft).stepHigherTerm
+      - termRequestKind
+      - (*Raft).stepLaterAnswer
       - forwardKind
       - (*Raft).adoptTerm
       - (*Raft).answerOlderTerm
+      - (*Raft).refuseOlderLeader
+      - announcesProtocol5
+      - (*Raft).answerOlderTermAsBefore
       - (*Raft).stepAnyRole
       - (*Raft).refuseForLiveLeader
       - (*Raft).validTransferFlag
@@ -1071,12 +1102,14 @@ functions:
     results: fwdRun, uint32
   - doc: |-
       announcementOf is the announcement every frame of a node speaking
-      protocol version v carries: FlagProtocol2 from 2, FlagProtocol3 beside
-      it from 3 and FlagProtocol4 beside both from 4 (D18, #648, #919).
+      protocol version v carries (announcements).
     name: announcementOf
     params: v uint32
     results: core.MessageFlags
-  - doc: announced is the announcement a message's flags carry.
+  - doc: |-
+      announced is the announcement a message's flags carry, on any kind but a
+      read, whose FlagProtocol5 bit is FlagNoLease: stepLeader takes a read
+      before it reads the announcement.
     name: announced
     params: flags core.MessageFlags
     results: peerFacts
@@ -1194,6 +1227,16 @@ functions:
     params: st *StartState, snapIndex, last uint64
     results: uint64
   - doc: |-
+      truncatedReport is the flag a silent node's refusal m carries: FlagTruncated,
+      its report of a truncation (#636), but on a refusal of an older term's
+      append or heartbeat, NOT_LEADER, which is none. Read as one by a leader of
+      a previous release, that refusal lowered the member's match to 0 and the
+      leader resent its log from index 1 at every refusal, at the network's
+      round trip, for as long as it led (#1472).
+    name: truncatedReport
+    params: m core.MessageValue
+    results: core.MessageFlags
+  - doc: |-
       actsAtCommit reports whether an entry of kind changes the engine's own
       replicated state when it commits. A membership does only when it is the
       founding one, which carries the generation 1 contract (#421).
@@ -1233,10 +1276,29 @@ functions:
     params: v core.SessionValue, ok bool, seq uint64, sum uint32
     results: core.PositionValue, errs.Code, bool
   - doc: |-
+      termRequestKind reports whether a message of kind k, of a later term than
+      its receiver's, is read at that term (#1472): an append or a heartbeat
+      of that term's leader, which the receiver follows, a vote request past
+      D5's live-leader refusal, and a PreVote, whose prospective term moves
+      nothing. The list is closed: every other kind — an answer, which stays at
+      its request's term, a read or a forward, which a node sends its leader at
+      its own term, and any kind this list does not name — never moves a term
+      (stepLaterAnswer).
+    name: termRequestKind
+    params: k core.MessageKind
+    results: bool
+  - doc: |-
       forwardKind reports whether k is a forwarded proposal or the answer to
       one, both of which a submission id correlates (#1440).
     name: forwardKind
     params: k core.MessageKind
+    results: bool
+  - doc: |-
+      announcesProtocol5 reports whether m, of any kind but a read, carries the
+      whole announcement of a node of protocol 5 (FlagProtocol5 beside the
+      three before it).
+    name: announcesProtocol5
+    params: m core.MessageValue
     results: bool
   - doc: |-
       founding returns the payload of e when e is a founding membership entry,
@@ -1773,10 +1835,15 @@ types:
     methods:
       - doc: |-
           noteSilence records whether the peer's answer says it is silent: a silent
-          node marks its every refusal and heartbeat answer with FlagTruncated, and
-          sends no acknowledgement (#636). An answer without it, an
-          acknowledgement above all, is from a node that is not silent, or no
-          longer, and clears the no-op fed for its silence too (#787).
+          node marks its heartbeat answers and its refusals of an append of this
+          leader's term with FlagTruncated, and sends no acknowledgement (#636). Its
+          refusal of an older term, NOT_LEADER, carries no flag, since it reports no
+          truncation, and never gets here: a leader of protocol 5 steps down on it
+          first (stepLeader), and a leader of a previous release, refused at the
+          term after its request's, steps down on that later term (#1472). An
+          answer without the flag, an acknowledgement above all, is from a node
+          that is not silent, or no longer, and clears the no-op fed for its
+          silence too (#787).
         name: noteSilence
         params: flags core.MessageFlags
         recv: p *progress
@@ -1968,6 +2035,17 @@ types:
           it forgot as the release before #1482's did, so the fence is shown to
           be the safety on its own; the mutations' type is full.
         name: fwdUnfenced
+        type: bool
+      - doc: |-
+          termFromAnswers, set by the package's own tests alone, runs this node
+          as every release before #1472: it speaks protocol 4 at most (speaks),
+          so it answers older-term traffic, and a deposed leadership's reads, at
+          its own term, takes the later term an answer carries, reads a refusal
+          of its own term as a refusal of its log, announces no FlagProtocol5,
+          refuses a raise to 5 and stops on one committed. It is the mutation
+          the checks of that rule take as an argument, the mutations' type
+          being full; a node below protocol 5 (speaks) runs so too.
+        name: termFromAnswers
         type: bool
     kind: struct
     name: Config
@@ -2220,6 +2298,8 @@ types:
       - name: from
         type: core.NodeID
       - name: round
+        type: uint64
+      - name: term
         type: uint64
     kind: struct
     name: readReq
@@ -2622,6 +2702,25 @@ types:
         name: stepLeader
         params: now time.Time, m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          refusedForLaterTerm reports whether m is a member's refusal of this
+          leader's append or heartbeat for a later term it holds, which it answers
+          at this leader's term with its own in LogTerm (answerOlderTerm, #1472):
+          the leader then steps down at that term, the refusal of its own request
+          telling it, and a PreVote round decides (R1-18). Of all the nodes that
+          may read a refusal, the leader that sent the request is the one that
+          acknowledged no round of a later leader, so the term it takes breaks no
+          lease (D5, D9 (b)). It is not contact: taken as one, the refusals of the
+          members it no longer leads kept the leader past CheckQuorum. A leader
+          below protocol 5 reads it as a refusal of its log, so it is refused at
+          the term after its request's instead (refuseOlderLeader). Only a
+          member's is read: a node outside the configuration, a removed member
+          whose frames still reach this leader, is no refuser of a request it was
+          never sent.
+        name: refusedForLaterTerm
+        params: m core.MessageValue
+        recv: r *Raft
+        results: bool
       - doc: |-
           handleHeartbeatResp acknowledges every round up to the one answered,
           recording the contract generation the peer applied, follows a silent
@@ -3333,6 +3432,11 @@ types:
       - doc: |-
           answerRead answers a read at index, or refuses it with code: locally in
           Ready.ReadStates, or with a message to the follower that forwarded it.
+
+          The answer is at the term the read was asked at (#1472), which is this
+          leader's but for the refusals a deposed leader sends from the term it
+          moved to: stamped with that later term, they raised the asker's past D5's
+          live-leader refusal.
         name: answerRead
         params: q readReq, index uint64, code errs.Code
         recv: r *Raft
@@ -3946,6 +4050,14 @@ types:
         params: m core.MessageValue
         recv: r *Raft
       - doc: |-
+          announcement is the announcement a frame of kind k carries: every frame's,
+          but a read's, whose FlagProtocol5 bit is FlagNoLease, set only by a read
+          that asks for a round.
+        name: announcement
+        params: k core.MessageKind
+        recv: r *Raft
+        results: core.MessageFlags
+      - doc: |-
           waitsForSync reports whether a message of kind vouches for durable state,
           an append's acknowledgement or a granted vote, and so leaves only after
           the write (D5b).
@@ -4062,10 +4174,21 @@ types:
         results: bool
       - doc: |-
           speaks is the highest protocol version this node speaks: ProtocolMax,
-          unless a test runs it as a node of the previous release.
+          unless a test runs it as a node of a previous release, protocol 4 at
+          most when run as a release before #1472 (termFromAnswers), which then
+          refuses a raise to 5 and stops on one committed, as such a release does
+          (D18).
         name: speaks
         recv: r *Raft
         results: uint32
+      - doc: |-
+          answersAsBefore reports whether this node answers older-term traffic,
+          reads a later term's answers and announces itself as every release
+          before #1472 did: one below protocol 5, as a node run as a release
+          before #1472 is (speaks).
+        name: answersAsBefore
+        recv: r *Raft
+        results: bool
       - doc: |-
           commitTo advances the commit to i, never back, applying the engine's own
           effects of the entries it covers and republishing the admission set when
@@ -4148,8 +4271,9 @@ types:
       - doc: |-
           stepTerm reconciles m's term with this node's before anything else reads
           m: a higher term makes it a follower, unless the message is one a higher
-          term must not impose; an older term is answered so its sender steps down,
-          but for a forward and its answer, which go on at this node's term.
+          term must not impose, an answer above all (#1472); an older term is
+          answered so its sender steps down, but for a forward and its answer,
+          which go on at this node's term.
           It reports whether m goes on to be handled at this node's term.
         name: stepTerm
         params: now time.Time, m core.MessageValue
@@ -4163,17 +4287,78 @@ types:
         recv: r *Raft
         results: bool
       - doc: |-
+          stepLaterAnswer reads a message of a later term than this node's that is
+          no request of that term (termRequestKind): an answer, which a node of a
+          previous release sends to older-term traffic at its own term, or a kind
+          no release sends past its receiver's term. Its term is taken only by the
+          two nodes that hold no lease promise to a live leader, from the refusal
+          of their own request: a pre-candidate refused the PreVote of its
+          campaign, which is outside its vote window, and a leader refused its
+          append or heartbeat, which acknowledged no round of a later leader
+          (#1472). Taken by any other, that term came with no vote and no leader,
+          past D5's live-leader refusal: a follower that had just heard its live
+          leader granted the next vote of the term, and a lease read on that
+          leader missed a write the new leader committed (D9 (b)). A granted
+          PreVote's prospective term moves nothing; a refused one ends the
+          campaign that asked, lost (D13) at the refuser's term — this release's
+          in LogTerm, a previous release's in Term, past this node's either way —
+          and never below the term it asked for; a refused append or heartbeat
+          steps a leader down at the refuser's term, a previous release's (R1-18).
+          Any other is dropped. It reports whether m goes on.
+        name: stepLaterAnswer
+        params: m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
           adoptTerm makes this node a follower at m's higher term, following its
           sender when m comes from a leader. A PreVote, and the granted answer to
-          one, carry a prospective term and move nothing.
+          one, carry a prospective term and move nothing. Any other kind than
+          termRequestKind's reaches it only on a node below protocol 5, which reads
+          older-term traffic as every release before #1472 (answersAsBefore);
+          stepLaterAnswer reads it otherwise.
         name: adoptTerm
         params: m core.MessageValue
         recv: r *Raft
       - doc: |-
           answerOlderTerm tells the sender of an older term's append, heartbeat or
-          PreVote of the current term; anything else of an older term is dropped
-          unanswered.
+          PreVote that this node is past that term; anything else of an older term
+          is dropped unanswered. The refusal stays at the request's term, its
+          refuser's in LogTerm, which only the leader of that request and the
+          pre-candidate of that PreVote read (#1472): stamped with the refuser's
+          term, it raised the term of whoever read it, the leader that sent the
+          request or the follower it had become since, with no vote and no
+          leader, and that node then granted the next vote of the term past D5's
+          live-leader refusal (D9 (b); R1-18, a refusal never moves a term). A
+          leader of a previous release, which reads no LogTerm, is refused at the
+          term after its request's (refuseOlderLeader).
         name: answerOlderTerm
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          refuseOlderLeader answers an append or a heartbeat of an older term, from
+          the leader of that term: NOT_LEADER, the refusal of the term and not of
+          the log, this node's term in LogTerm, so that the leader steps down and a
+          PreVote round decides (R1-18). A leader that announces protocol 5 is
+          refused at the request's term and steps down at LogTerm (stepLeader). A
+          leader of a previous release reads Term alone: refused at its own term,
+          it read the refusal as one of its log and counted it as contact, so
+          CheckQuorum never deposed it while another member acknowledged it, and
+          this node stayed out for as long (#1472, O1). It is refused at the term
+          after its request's, which it steps down at as at any later term: the
+          one term past the request's that raises no other reader, since a node
+          still at the request's term led it and so acknowledged no round of a
+          later leader (D9 (b)), and a node past it, which may have, finds the
+          refusal of its own term or an older one. This node's term raised a node
+          that had led the request's term and since followed a live leader, past
+          D5's live-leader refusal (D0).
+        name: refuseOlderLeader
+        params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          answerOlderTermAsBefore is answerOlderTerm as every release before #1472
+          answered, at this node's term, for a node below protocol 5, which the
+          package's own tests run as one (termFromAnswers, speaks).
+        name: answerOlderTermAsBefore
         params: m core.MessageValue
         recv: r *Raft
       - doc: |-
@@ -4806,15 +4991,34 @@ types:
     name: SessionTable
 vars:
   - doc: |-
-      announcedBy is, per protocol version up to ProtocolMax, the facts a
-      member's frames carry once it speaks that version: a table, so that
-      checkAnnounced stays under its inline budget as versions are added.
+      The announcement tables, one row per protocol version up to
+      ProtocolMax: tables, so that checkAnnounced and announces stay under
+      their inline budget as versions are added.
+    grouped: true
     items:
-      - name: announcedBy
+      - doc: |-
+          announcedBy is, per protocol version, the facts a member's frames
+          carry once it speaks that version.
+        name: announcedBy
         value: |-
           [ProtocolMax + 1]peerFacts{
-          	Protocol2: peerProtocol2,
-          	Protocol3: peerProtocol2 | peerProtocol3,
-          	Protocol4: peerProtocol2 | peerProtocol3 | peerProtocol4,
-          }
+          		Protocol2: peerProtocol2,
+          		Protocol3: peerProtocol2 | peerProtocol3,
+          		Protocol4: peerProtocol2 | peerProtocol3 | peerProtocol4,
+          		Protocol5: peerProtocol2 | peerProtocol3 | peerProtocol4 | peerProtocol5,
+          	}
+      - doc: |-
+          announcements is, per protocol version, the announcement every frame
+          of a node speaking it carries: FlagProtocol2 from 2, FlagProtocol3
+          beside it from 3, FlagProtocol4 beside both from 4 and FlagProtocol5
+          beside the three from 5 (D18, #648, #919, #1472), but on a read,
+          whose FlagProtocol5 bit is FlagNoLease (announcement).
+        name: announcements
+        value: |-
+          [ProtocolMax + 1]core.MessageFlags{
+          		Protocol2: core.FlagProtocol2,
+          		Protocol3: core.FlagProtocol2 | core.FlagProtocol3,
+          		Protocol4: core.FlagProtocol2 | core.FlagProtocol3 | core.FlagProtocol4,
+          		Protocol5: core.FlagProtocol2 | core.FlagProtocol3 | core.FlagProtocol4 | core.FlagProtocol5,
+          	}
     name: announcedBy

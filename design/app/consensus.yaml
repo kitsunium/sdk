@@ -480,6 +480,23 @@ packages:
         name: FlagTrace
         type: MessageFlags
         value: "128"
+      - blockDoc: The flags.
+        doc: |-
+          FlagProtocol5 marks a frame from a node that speaks protocol version
+          5, which sets FlagProtocol2, FlagProtocol3 and FlagProtocol4 beside
+          it. The byte has no bit left, so it shares FlagNoLease's, which every
+          release reads on a MsgReadIndex alone: a node of protocol 5 sets it
+          on every other kind, and on a read only as FlagNoLease. Its value is
+          FlagNoLease's, so a switch that names both does not compile. A node
+          of protocol 5 answers an append or a heartbeat of an older term from
+          a leader whose frame carries it at that term, and from any other at
+          the term after that one, its own term in LogTerm (#1472); a node of
+          protocol 4 or below ignores it, and a leader refuses to raise the
+          cluster version to 5 while a member's last frame of the term lacks
+          it.
+        name: FlagProtocol5
+        type: MessageFlags
+        value: "4"
       - blockDoc: The states of a stamp.
         doc: |-
           StampJoining is a directory Init prepared: it may join as an empty
@@ -1901,12 +1918,17 @@ packages:
             - doc: To is the receiver.
               name: To
               type: NodeID
-            - doc: Term is the sender's term.
+            - doc: |-
+                Term is the sender's term. An answer stays at the term of the request it
+                answers, even from a sender at a later term; the refusal of an older
+                append or heartbeat from a leader that does not announce protocol 5 is
+                at the term after its request's.
               name: Term
               type: uint64
             - doc: |-
                 LogTerm is the term of the entry at Index: the previous entry of an
-                append, the last entry of a vote request.
+                append, the last entry of a vote request. In the refusal of an older
+                append, heartbeat or PreVote, it is the refuser's term.
               name: LogTerm
               type: uint64
             - doc: |-
@@ -5107,10 +5129,15 @@ packages:
           beside FlagProtocol4 at any cluster version (#919), the trace context of
           a forward (#1115), and the client sessions, their entry kind and the
           metadata that records them (#918), those two written only once the
-          committed cluster version is 4.
+          committed cluster version is 4. Version 5 changes no format: a node of 5
+          answers an append or a heartbeat of an older term, its own term in
+          LogTerm, at that term to a leader that announces 5 (FlagProtocol5),
+          which steps down at LogTerm as a pre-candidate refused its PreVote does,
+          and at the term after it to a leader of a previous release, which steps
+          down there (#1472).
         name: ProtocolMax
         type: uint32
-        value: "4"
+        value: "5"
       - doc: |-
           Protocol2 is the protocol version whose formats a node writes once the
           cluster version is raised to it.
@@ -5132,6 +5159,16 @@ packages:
         name: Protocol4
         type: uint32
         value: "4"
+      - doc: |-
+          Protocol5 is the protocol version from which a node answers an append
+          or a heartbeat of an older term with its own term in LogTerm, at that
+          term when the leader announces it (FlagProtocol5) and at the term after
+          it otherwise, and never takes a later term from an answer but the
+          refusal of its own request or campaign (#1472). A node below it answers
+          older-term traffic at its own term, as every release before did.
+        name: Protocol5
+        type: uint32
+        value: "5"
       - doc: |-
           MaxSessions is how many client sessions the cluster keeps: opening one
           more evicts the one whose last entry is the oldest. It is part of
@@ -7274,6 +7311,14 @@ packages:
             reexport: coreconsensus.FlagTrace
             type: coreconsensus.MessageFlags
             value: "128"
+          - doc: |-
+              FlagProtocol5 marks a frame from a node that speaks protocol version
+              5. It shares FlagNoLease's bit, the flags byte having no other, and
+              its value: a switch that names both does not compile.
+            name: FlagProtocol5
+            reexport: coreconsensus.FlagProtocol5
+            type: coreconsensus.MessageFlags
+            value: "4"
           - name: MsgForward
             reexport: coreconsensus.MsgForward
             type: coreconsensus.MessageKind

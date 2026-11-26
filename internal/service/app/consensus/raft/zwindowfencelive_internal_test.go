@@ -163,20 +163,35 @@ func TestAForwardToANodeCarriesATermItLed(t *testing.T) {
 	}
 	runCase := func(t *testing.T, x tc) {
 		t.Helper()
+		var answers []core.MessageValue
+		var appended uint64
+		drops := r.fwdDrops
 		if x.campaigns {
 			r.campaign(false, 0, 0)
+			drainForwards(r)
 		} else {
-			r.Step(r.now, x.m)
+			answers, appended = stepForward(r, x.m)
 		}
-		drainForwards(r)
 		if st := r.Status(); st.Term != x.term || st.Lead != x.lead {
 			t.Fatalf("%s: term %d, leader %d, want term %d, leader %d", x.name, st.Term, st.Lead, x.term, x.lead)
 		}
+		// No case of a term above the node's is answered or appended, nor
+		// counted by the fence: the term rule drops what is no request of
+		// that term (stepLaterAnswer, #1472).
+		if len(answers) != 0 || appended != 0 || r.fwdDrops != drops {
+			t.Fatalf("%s: %d forward answers, %d entries appended, drops %+v then %+v; want none", x.name, len(answers), appended, drops, r.fwdDrops)
+		}
 	}
+	// An answer and a forward of a term above the node's move no term and
+	// name no leader (#1472): the node stays at term 2 under node 3. The
+	// forward is synthetic — a forward carries a term its receiver led, so a
+	// term durable there, and no honest member sends one past it — and the
+	// term rule drops it before the fence: neither proposed, nor answered,
+	// nor counted.
 	for _, x := range []tc{
 		{"node 3's heartbeat of term 2", msg(core.MsgHeartbeat, 3, 1, 2), 2, 3, false},
-		{"node 2's answer of term 3", msg(core.MsgHeartbeatResp, 2, 1, 3), 3, 0, false},
-		{"node 2's forward of term 4", liveForward(2, 1, 1, 4), 4, 0, false},
+		{"node 2's answer of term 3", msg(core.MsgHeartbeatResp, 2, 1, 3), 2, 3, false},
+		{"node 2's forward of term 4", liveForward(2, 1, 1, 4), 2, 3, false},
 		{"node 2's heartbeat of term 4", msg(core.MsgHeartbeat, 2, 1, 4), 4, 2, false},
 		{"node 3's PreVote of term 5", msg(core.MsgPreVote, 3, 1, 5), 4, 2, false},
 		{"its own campaign", core.MessageValue{}, 5, 0, true},

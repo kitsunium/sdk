@@ -242,11 +242,29 @@ func TestARestartedNodeNeverHandlesALateCopyAgain(t *testing.T) {
 		if c := fenceIndexes(r); len(as) != 0 || len(c) != 1 {
 			t.Fatalf("%s: the copy answered %+v, the command at %v; want no answer and the command once", x.name, as, c)
 		}
-		// A forward of a term past the one the new run started at is a
-		// new one: handled.
+		if x.leads {
+			// A forward of a term past the one the new run started at,
+			// the term it leads, is a new one: handled.
+			r.Step(r.now, fenceForward(3, 10))
+			if as := forwardAnswers(r, 10); len(as) != 1 {
+				t.Fatalf("%s: a forward of term 3 answered %+v, want one answer", x.name, as)
+			}
+			return
+		}
+		// The follower of term 2 meets a forward of term 3, above its own
+		// term. The case is synthetic: a forward carries a term its
+		// receiver led, so a term durable there, and no honest member
+		// sends one past it. The term rule (stepLaterAnswer, #1472) drops
+		// it before the fence: neither proposed, nor answered, nor counted
+		// by the fence, the receiver's term and leader unchanged, and the
+		// command of the copy still in the log once.
+		lead, drops := r.lead, r.fwdDrops
 		r.Step(r.now, fenceForward(3, 10))
-		if as := forwardAnswers(r, 10); len(as) != 1 {
-			t.Fatalf("%s: a forward of term 3 answered %+v, want one answer", x.name, as)
+		as = forwardAnswers(r, 10)
+		settleDurable(r)
+		if c := fenceIndexes(r); len(as) != 0 || len(c) != 1 || r.term != 2 || r.lead != lead || r.fwdDrops != drops {
+			t.Fatalf("%s: a forward of term 3 answered %+v, the command at %v, term %d, leader %d, drops %+v; want no answer, the command once, term 2, leader %d, drops %+v",
+				x.name, as, c, r.term, r.lead, r.fwdDrops, lead, drops)
 		}
 	}
 	for _, x := range []tc{

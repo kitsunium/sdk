@@ -65,8 +65,12 @@ var BatcherCloseTimedOut *errs.Error // 0.1.5.3 BATCHER_CLOSE_TIMED_OUT
   and `Close` cancels it on every exit. `Close(ctx)` joins the goroutine
   within `ctx` while it is inside a delivery (`busy`): when `ctx` ends first it
   cancels `life`, returns `BatcherCloseTimedOut` wrapping `ctx`'s error with
-  the field `undelivered`, and leaves the final batch undelivered. An idle
-  goroutine is joined whatever `ctx` is: once `life` is cancelled, a delivery
+  the field `undelivered`, and leaves the final batch undelivered. Whether
+  the goroutine was inside a delivery is read when `ctx` ended, BEFORE `life`
+  is cancelled: the cancellation releases a Sink that honours its context, so
+  reading it after made the verdict a race between `Close` and that Sink — a
+  `Close` whose own cancellation let the join finish answered `nil` (#1470).
+  An idle goroutine is joined whatever `ctx` is: once `life` is cancelled, a delivery
   it begins gives up before the Sink. The goroutine also waits for the Sink
   within `life`, and `Close` within `ctx`: `acquire` takes `deliverMu` by
   `TryLock`, then waits on `freed`, which `unlockDeliver` signals only while
@@ -125,7 +129,10 @@ Closed-after-Close + idempotent second Close, background ticker),
 `batcher_internal_test.go` (`weigh` count-only fallback, the ticker flushing
 when an injected `ManualClock` passes `FlushEvery`, concurrent
 producers + flusher race, serial `Sink` invocation (V6), every `Add` accepted
-while `Close` runs is delivered, deliver-closure-controls-order proof),
+while `Close` runs is delivered, deliver-closure-controls-order proof, the join's
+two orders forced — #1470: the Sink returning before the join reads whether the
+goroutine was in a delivery, and holding past the cancellation — with an idle
+ticker as the control),
 `lifetime_external_test.go` (#1040: a `Close` bounded while a tick flush is
 stuck in a Sink, the Sink cancelled and the ticker gone; the tick's context
 ended by `Close`; the final batch bounded behind a caller's flush; #817:

@@ -715,7 +715,36 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   the forwarder then granted a vote of that term, and a lease read on the
   leader it had just acknowledged could miss a committed write (the safety
   review of #1457; raft's `TestAForwardAnswerNeverRaisesTheForwardersTerm`,
-  `TestALeaseHoldsAcrossALateForwardAnswer`).
+  `TestALeaseHoldsAcrossALateForwardAnswer`). The class is closed in raft
+  at its source (#1472): every answer stays at its request's term, R1-18's
+  refusal of an older append or heartbeat and a deposed leader's read
+  refusal included, and a later term is taken only from the refusal of
+  one's own request, by the leader of that append or heartbeat, within a
+  heartbeat interval, and by the pre-candidate of that PreVote, both at the
+  refuser's term (`LogTerm`), so one PreVote round readmits the stuck
+  member whatever its gap. That rule is protocol version 5 (`ProtocolMax`,
+  `FlagProtocol5` on `FlagNoLease`'s bit, the same value, so a `switch`
+  naming both does not compile): a node of 5 refuses an older append or
+  heartbeat of a leader of a previous release, which reads `Term` alone, at
+  the term after its request's, which that leader steps down at, never at
+  its own term, which it read as contact and was never deposed by
+  CheckQuorum, nor at the refuser's, which raised a node that had moved
+  on, and the raise to 5 waits for every member to announce it, which
+  `Status.Versions` reports (raft's `answerOlderTerm`, `refuseOlderLeader`,
+  `stepLaterAnswer`, `TestALeaseHoldsAcrossALateAppendAnswer`,
+  `TestAStuckMemberIsReadmittedAfterItsLeaderStepsDown`,
+  `TestAFailedTransferLeavesNoMemberOut`,
+  `TestARollingUpgradeTo5ReopensEveryGate`,
+  `TestAMixedClusterWritesAgainAfterAFailure`). During a rolling upgrade a
+  member of 5 ahead of a leader of 4 deposes it within a heartbeat
+  interval, as R1-18 always did, so the gate (`failure_tolerance >= 1`)
+  reopens within an election timeout one term ahead; several terms ahead,
+  the nodes of 4 climb to that member's term about one election timeout a
+  term, writes stopped meanwhile with nobody failing (9.98 s ten terms
+  ahead, 16.4 s when the leader then fails), within raft's `gapBound`
+  (ADR 0152, the amendment of 2026-11-16). The class between two nodes of
+  4 stays open until one of them runs this release. The driver filters no term before `Step` and needs nothing
+  more.
 - Hand the step function a forward window shorter than the transport's
   resend window, or take that window for the safety. Raft keeps the answer
   it gave a forward for `ForwardWindow` and answers a copy within it from
@@ -748,9 +777,12 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   That rule rests on `forward`, which stamps the term and the leader of
   one status, so a forward to a node always carries a term that node led
   (raft's guide; a refusal can leave before its term is durable, so the
-  timing of an answer is not what holds). Every forward the step function
-  neither proposes nor answers is counted, `consensus_forwards_dropped_total`
-  by reason (`copy`, `restarted`, `evicted`), the runs its fence marks are
+  timing of an answer is not what holds). Every forward the fence turns
+  away, neither proposed nor answered, is counted,
+  `consensus_forwards_dropped_total` by reason (`copy`, `restarted`,
+  `evicted`); a forward of a term above its receiver's, which no honest
+  member sends, is dropped before the fence by raft's term rule
+  (`stepLaterAnswer`, #1472) and counted nowhere. The runs its fence marks are
   `consensus_forward_runs`, and the answers its table forgot at its bound
   before their window ended are `consensus_forward_answers_forgotten_total`
   (`observeForwards`, `TestTheForwardDropsArePublishedByReason`); past

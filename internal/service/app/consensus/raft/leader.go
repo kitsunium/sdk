@@ -316,11 +316,16 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr := r.prs[m.From]
 	switch m.Kind {
 	case core.MsgReadIndex:
-		r.pendingReads = append(r.pendingReads, readReq{ctx: m.Context, from: m.From})
+		r.pendingReads = append(r.pendingReads, readReq{ctx: m.Context, from: m.From, term: m.Term})
 		r.serveLeaseRead(m.Flags&core.FlagNoLease == 0)
 		return
 	case core.MsgVoteResp, core.MsgPreVoteResp:
 		return
+	case core.MsgAppResp:
+		if r.refusedForLaterTerm(m) {
+			r.becomeFollower(max(r.term, m.LogTerm), 0)
+			return
+		}
 	default:
 		// Every other kind is from a member: its progress is read below.
 	}
@@ -331,7 +336,7 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr.facts |= peerHeard
 	// The announcement follows the peer's last message: a member rolled
 	// back to a previous release stops carrying it at once.
-	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4) | announced(m.Flags)
+	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4|peerProtocol5) | announced(m.Flags)
 	switch m.Kind {
 	case core.MsgAppResp:
 		pr.noteSilence(m.Flags)
@@ -343,6 +348,24 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 		// Nothing else carries news for a leader of this term: the
 		// contact above is all it records.
 	}
+}
+
+// refusedForLaterTerm reports whether m is a member's refusal of this
+// leader's append or heartbeat for a later term it holds, which it answers
+// at this leader's term with its own in LogTerm (answerOlderTerm, #1472):
+// the leader then steps down at that term, the refusal of its own request
+// telling it, and a PreVote round decides (R1-18). Of all the nodes that
+// may read a refusal, the leader that sent the request is the one that
+// acknowledged no round of a later leader, so the term it takes breaks no
+// lease (D5, D9 (b)). It is not contact: taken as one, the refusals of the
+// members it no longer leads kept the leader past CheckQuorum. A leader
+// below protocol 5 reads it as a refusal of its log, so it is refused at
+// the term after its request's instead (refuseOlderLeader). Only a
+// member's is read: a node outside the configuration, a removed member
+// whose frames still reach this leader, is no refuser of a request it was
+// never sent.
+func (r *Raft) refusedForLaterTerm(m core.MessageValue) bool {
+	return m.Reject && m.Code == codeNotLeader && !r.answersAsBefore() && r.prs[m.From] != nil
 }
 
 // handleHeartbeatResp acknowledges every round up to the one answered,
@@ -863,30 +886,35 @@ func (r *Raft) checkHeard(v uint32) errs.Code {
 	return 0
 }
 
-// announcedBy is, per protocol version up to ProtocolMax, the facts a
-// member's frames carry once it speaks that version: a table, so that
-// checkAnnounced stays under its inline budget as versions are added.
-var announcedBy = [ProtocolMax + 1]peerFacts{
-	Protocol2: peerProtocol2,
-	Protocol3: peerProtocol2 | peerProtocol3,
-	Protocol4: peerProtocol2 | peerProtocol3 | peerProtocol4,
-}
+// The announcement tables, one row per protocol version up to
+// ProtocolMax: tables, so that checkAnnounced and announces stay under
+// their inline budget as versions are added.
+var (
+	// announcedBy is, per protocol version, the facts a member's frames
+	// carry once it speaks that version.
+	announcedBy = [ProtocolMax + 1]peerFacts{
+		Protocol2: peerProtocol2,
+		Protocol3: peerProtocol2 | peerProtocol3,
+		Protocol4: peerProtocol2 | peerProtocol3 | peerProtocol4,
+		Protocol5: peerProtocol2 | peerProtocol3 | peerProtocol4 | peerProtocol5,
+	}
+	// announcements is, per protocol version, the announcement every frame
+	// of a node speaking it carries: FlagProtocol2 from 2, FlagProtocol3
+	// beside it from 3, FlagProtocol4 beside both from 4 and FlagProtocol5
+	// beside the three from 5 (D18, #648, #919, #1472), but on a read,
+	// whose FlagProtocol5 bit is FlagNoLease (announcement).
+	announcements = [ProtocolMax + 1]core.MessageFlags{
+		Protocol2: core.FlagProtocol2,
+		Protocol3: core.FlagProtocol2 | core.FlagProtocol3,
+		Protocol4: core.FlagProtocol2 | core.FlagProtocol3 | core.FlagProtocol4,
+		Protocol5: core.FlagProtocol2 | core.FlagProtocol3 | core.FlagProtocol4 | core.FlagProtocol5,
+	}
+)
 
 // announcementOf is the announcement every frame of a node speaking
-// protocol version v carries: FlagProtocol2 from 2, FlagProtocol3 beside
-// it from 3 and FlagProtocol4 beside both from 4 (D18, #648, #919).
+// protocol version v carries (announcements).
 func announcementOf(v uint32) core.MessageFlags {
-	var f core.MessageFlags
-	if v >= Protocol2 {
-		f |= core.FlagProtocol2
-	}
-	if v >= Protocol3 {
-		f |= core.FlagProtocol3
-	}
-	if v >= Protocol4 {
-		f |= core.FlagProtocol4
-	}
-	return f
+	return announcements[min(v, ProtocolMax)]
 }
 
 // heartbeatLast is the last index a heartbeat of this leader carries in
@@ -902,10 +930,12 @@ func (r *Raft) heartbeatLast() uint64 {
 // announces is the announcement this node's own frames carry, as the facts
 // a leader keeps of a peer that sent them.
 func (r *Raft) announces() peerFacts {
-	return announced(announcementOf(r.speaks()))
+	return announcedBy[min(r.speaks(), ProtocolMax)]
 }
 
-// announced is the announcement a message's flags carry.
+// announced is the announcement a message's flags carry, on any kind but a
+// read, whose FlagProtocol5 bit is FlagNoLease: stepLeader takes a read
+// before it reads the announcement.
 func announced(flags core.MessageFlags) peerFacts {
 	var f peerFacts
 	if flags&core.FlagProtocol2 != 0 {
@@ -916,6 +946,9 @@ func announced(flags core.MessageFlags) peerFacts {
 	}
 	if flags&core.FlagProtocol4 != 0 {
 		f |= peerProtocol4
+	}
+	if flags&core.FlagProtocol5 != 0 {
+		f |= peerProtocol5
 	}
 	return f
 }
@@ -1789,12 +1822,21 @@ func (r *Raft) dropRoundsThrough(confirmed uint64) {
 
 // answerRead answers a read at index, or refuses it with code: locally in
 // Ready.ReadStates, or with a message to the follower that forwarded it.
+//
+// The answer is at the term the read was asked at (#1472), which is this
+// leader's but for the refusals a deposed leader sends from the term it
+// moved to: stamped with that later term, they raised the asker's past D5's
+// live-leader refusal.
 func (r *Raft) answerRead(q readReq, index uint64, code errs.Code) {
 	if q.from == 0 || q.from == r.id {
 		r.rd.ReadStates = append(r.rd.ReadStates, ReadState{Context: q.ctx, Index: index, Code: code})
 		return
 	}
-	r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})
+	term := q.term
+	if r.answersAsBefore() {
+		term = r.term
+	}
+	r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code, Term: term})
 }
 
 // ---- leadership transfer ----

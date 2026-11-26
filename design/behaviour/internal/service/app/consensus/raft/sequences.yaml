@@ -848,6 +848,8 @@ sequences:
         kind: self
       - id: r.serveLeaseRead
         kind: internal
+      - id: r.becomeFollower
+        kind: internal
       - id: pr.noteSilence
         kind: internal
       - id: r.handleAppResp
@@ -862,13 +864,21 @@ sequences:
             - case: core.MsgReadIndex
               do:
                 - set: r.pendingReads
-                  value: "append(r.pendingReads, readReq{ctx: m.Context, from: m.From})"
+                  value: "append(r.pendingReads, readReq{ctx: m.Context, from: m.From, term: m.Term})"
                 - eval: r.serveLeaseRead(m.Flags&core.FlagNoLease == 0)
                   to: r.serveLeaseRead
                 - return: ""
             - case: core.MsgVoteResp, core.MsgPreVoteResp
               do:
                 - return: ""
+            - case: core.MsgAppResp
+              do:
+                - opt:
+                    do:
+                      - eval: r.becomeFollower(max(r.term, m.LogTerm), 0)
+                        to: r.becomeFollower
+                      - return: ""
+                    when: r.refusedForLaterTerm(m)
             - default: true
           "on": m.Kind
       - opt:
@@ -881,7 +891,7 @@ sequences:
         set: pr.facts
         value: peerHeard
       - set: pr.facts
-        value: pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4) | announced(m.Flags)
+        value: pr.facts&^(peerProtocol2|peerProtocol3|peerProtocol4|peerProtocol5) | announced(m.Flags)
       - switch:
           cases:
             - case: core.MsgAppResp
@@ -898,6 +908,9 @@ sequences:
                   to: r.handleHeartbeatResp
             - default: true
           "on": m.Kind
+  - of: (*Raft).refusedForLaterTerm
+    steps:
+      - return: m.Reject && m.Code == codeNotLeader && !r.answersAsBefore() && r.prs[m.From] != nil
   - of: (*Raft).handleHeartbeatResp
     participants:
       - id: caller
@@ -1492,28 +1505,7 @@ sequences:
         to: r.checkHeard
   - of: announcementOf
     steps:
-      - var:
-          name: f
-          type: core.MessageFlags
-      - opt:
-          do:
-            - op: "|="
-              set: f
-              value: core.FlagProtocol2
-          when: v >= Protocol2
-      - opt:
-          do:
-            - op: "|="
-              set: f
-              value: core.FlagProtocol3
-          when: v >= Protocol3
-      - opt:
-          do:
-            - op: "|="
-              set: f
-              value: core.FlagProtocol4
-          when: v >= Protocol4
-      - return: f
+      - return: announcements[min(v, ProtocolMax)]
   - of: (*Raft).heartbeatLast
     participants:
       - id: caller
@@ -1530,16 +1522,8 @@ sequences:
       - return: r.log.lastIndex()
         to: r.log.lastIndex
   - of: (*Raft).announces
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Raft).announces
-        kind: self
-      - id: announced
-        kind: internal
     steps:
-      - return: announced(announcementOf(r.speaks()))
-        to: announced
+      - return: announcedBy[min(r.speaks(), ProtocolMax)]
   - of: announced
     steps:
       - var:
@@ -1563,6 +1547,12 @@ sequences:
               set: f
               value: peerProtocol4
           when: flags&core.FlagProtocol4 != 0
+      - opt:
+          do:
+            - op: "|="
+              set: f
+              value: peerProtocol5
+          when: flags&core.FlagProtocol5 != 0
       - return: f
   - of: (*Raft).checkNoSpaceClear
     steps:
@@ -2658,7 +2648,14 @@ sequences:
               value: "append(r.rd.ReadStates, ReadState{Context: q.ctx, Index: index, Code: code})"
             - return: ""
           when: q.from == 0 || q.from == r.id
-      - eval: "r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})"
+      - bind: term
+        eval: q.term
+      - opt:
+          do:
+            - set: term
+              value: r.term
+          when: r.answersAsBefore()
+      - eval: "r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code, Term: term})"
         to: r.send
   - of: (*Raft).TransferLeadership
     participants:
@@ -4744,7 +4741,9 @@ sequences:
         kind: actor
       - id: (*Raft).send
         kind: self
-      - id: announcementOf
+      - id: r.announcement
+        kind: internal
+      - id: truncatedReport
         kind: internal
     steps:
       - set: m.Version
@@ -4755,8 +4754,8 @@ sequences:
         value: r.id
       - op: "|="
         set: m.Flags
-        to: announcementOf
-        value: announcementOf(r.speaks())
+        to: r.announcement
+        value: r.announcement(m.Kind)
       - opt:
           do:
             - set: m.Term
@@ -4770,7 +4769,8 @@ sequences:
                 when: "!m.Reject"
             - op: "|="
               set: m.Flags
-              value: core.FlagTruncated
+              to: truncatedReport
+              value: truncatedReport(m)
           when: m.Kind == core.MsgAppResp && r.cfg.SilentIndex != 0
       - opt:
           do:
@@ -4780,6 +4780,32 @@ sequences:
           when: r.waitsForSync(m.Kind)
       - set: r.rd.Messages
         value: append(r.rd.Messages, m)
+  - of: (*Raft).announcement
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).announcement
+        kind: self
+      - id: announcementOf
+        kind: internal
+    steps:
+      - bind: a
+        eval: announcementOf(r.speaks())
+        to: announcementOf
+      - opt:
+          do:
+            - op: "&^="
+              set: a
+              value: core.FlagProtocol5
+          when: k == core.MsgReadIndex
+      - return: a
+  - of: truncatedReport
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: m.Code == codeNotLeader
+      - return: core.FlagTruncated
   - of: (*Raft).waitsForSync
     steps:
       - return: (kind == core.MsgAppResp || kind == core.MsgVoteResp) && !r.mutated(mutAckBeforeSync)
@@ -5259,11 +5285,22 @@ sequences:
       - return: "false"
   - of: (*Raft).speaks
     steps:
+      - bind: v
+        eval: ProtocolMax
       - opt:
           do:
-            - return: r.cfg.speaks
+            - set: v
+              value: r.cfg.speaks
           when: r.cfg.speaks != 0
-      - return: ProtocolMax
+      - opt:
+          do:
+            - set: v
+              value: min(v, Protocol4)
+          when: r.cfg.termFromAnswers
+      - return: v
+  - of: (*Raft).answersAsBefore
+    steps:
+      - return: r.speaks() < Protocol5
   - of: (*Raft).commitTo
     participants:
       - id: caller
@@ -5660,6 +5697,8 @@ sequences:
         kind: self
       - id: r.adoptTerm
         kind: internal
+      - id: r.stepLaterAnswer
+        kind: internal
     steps:
       - opt:
           do:
@@ -5667,9 +5706,51 @@ sequences:
           when: |-
             (m.Kind == core.MsgTimeoutNow && !r.mutated(mutTimeoutNowAnyTerm)) ||
             		((m.Kind == core.MsgPreVote || m.Kind == core.MsgVote) && r.refuseForLiveLeader(now, m))
-      - eval: r.adoptTerm(m)
-        to: r.adoptTerm
-      - return: "true"
+      - opt:
+          do:
+            - eval: r.adoptTerm(m)
+              to: r.adoptTerm
+            - return: "true"
+          when: r.answersAsBefore() || termRequestKind(m.Kind)
+      - return: r.stepLaterAnswer(m)
+        to: r.stepLaterAnswer
+  - of: termRequestKind
+    steps:
+      - switch:
+          cases:
+            - case: core.MsgApp, core.MsgHeartbeat, core.MsgVote, core.MsgPreVote
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": k
+  - of: (*Raft).stepLaterAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepLaterAnswer
+        kind: self
+      - id: r.becomeFollower
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: m.Kind == core.MsgPreVoteResp && !m.Reject
+              do:
+                - return: "true"
+            - case: m.Kind == core.MsgPreVoteResp && r.role == core.RolePreCandidate
+              do:
+                - op: ++
+                  set: r.preVotesLost
+                - eval: r.becomeFollower(max(m.Term, m.LogTerm), 0)
+                  to: r.becomeFollower
+            - case: m.Kind == core.MsgAppResp && r.role == core.RoleLeader
+              do:
+                - eval: r.becomeFollower(m.Term, 0)
+                  to: r.becomeFollower
+            - default: true
+      - return: "false"
   - of: forwardKind
     steps:
       - switch:
@@ -5713,6 +5794,58 @@ sequences:
       - id: caller
         kind: actor
       - id: (*Raft).answerOlderTerm
+        kind: self
+      - id: r.answerOlderTermAsBefore
+        kind: internal
+      - id: r.refuseOlderLeader
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: r.answerOlderTermAsBefore(m)
+              to: r.answerOlderTermAsBefore
+            - return: ""
+          when: r.answersAsBefore()
+      - switch:
+          cases:
+            - case: core.MsgApp, core.MsgHeartbeat
+              do:
+                - eval: r.refuseOlderLeader(m)
+                  to: r.refuseOlderLeader
+            - case: core.MsgPreVote
+              do:
+                - eval: "r.send(core.MessageValue{Kind: core.MsgPreVoteResp, To: m.From, Term: m.Term, LogTerm: r.term, Reject: true})"
+                  to: r.send
+            - default: true
+          "on": m.Kind
+  - of: (*Raft).refuseOlderLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).refuseOlderLeader
+        kind: self
+      - id: r.send
+        kind: internal
+    steps:
+      - bind: refusal
+        eval: "core.MessageValue{Kind: core.MsgAppResp, To: m.From, Term: m.Term, LogTerm: r.term, Reject: true, Code: codeNotLeader}"
+      - opt:
+          do:
+            - set: refusal.Term, refusal.Index
+              value: m.Term+1, m.Index
+          when: "!announcesProtocol5(m)"
+      - eval: r.send(refusal)
+        to: r.send
+  - of: announcesProtocol5
+    steps:
+      - return: m.Kind != core.MsgReadIndex && m.Flags&announcements[Protocol5] == announcements[Protocol5]
+  - of: (*Raft).answerOlderTermAsBefore
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).answerOlderTermAsBefore
         kind: self
       - id: r.send
         kind: internal

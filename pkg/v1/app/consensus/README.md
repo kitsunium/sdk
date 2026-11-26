@@ -395,6 +395,15 @@ The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol4`.
 
+<a name="FlagProtocol5"></a>
+```go
+const FlagProtocol5 coreconsensus.MessageFlags = 4
+```
+
+FlagProtocol5 marks a frame from a node that speaks protocol version 5. It shares FlagNoLease's bit, the flags byte having no other, and its value: a switch that names both does not compile.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol5`.
+
 <a name="FlagTrace"></a>
 ```go
 const FlagTrace coreconsensus.MessageFlags = 128
@@ -3297,10 +3306,14 @@ type MessageValue struct {
 	From           NodeID
 	// To is the receiver.
 	To             NodeID
-	// Term is the sender's term.
+	// Term is the sender's term. An answer stays at the term of the request it
+	// answers, even from a sender at a later term; the refusal of an older
+	// append or heartbeat from a leader that does not announce protocol 5 is
+	// at the term after its request's.
 	Term           uint64
 	// LogTerm is the term of the entry at Index: the previous entry of an
-	// append, the last entry of a vote request.
+	// append, the last entry of a vote request. In the refusal of an older
+	// append, heartbeat or PreVote, it is the refuser's term.
 	LogTerm        uint64
 	// Index is the previous index of an append, the last index of a vote
 	// request, the verified prefix of an acknowledgement, a read index.

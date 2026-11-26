@@ -3,6 +3,7 @@ package batcher
 import (
 	"context"
 	"errors"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 func Test_Batcher_weigh(t *testing.T) {
@@ -466,6 +468,99 @@ func Test_Batcher_deliverClosureMayReorder(t *testing.T) {
 		//: the closure's reorder must be what reaches the sink.
 		if !slices.Equal(got, c.want) {
 			t.Errorf("%s: delivered=%v want %v", c.name, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_Batcher_closeJoinOrders is #1470's order, forced both ways. Close's
+// context has ended while the ticker is inside the Sink: the join is then
+// abandoned — BatcherCloseTimedOut — whatever the Sink does once Close's own
+// cancellation of the lifetime context reaches it. "returns before the join
+// looks" is the order that made the verdict a race: the Sink, released by that
+// cancellation, finishes and the goroutine leaves its delivery before the join
+// reads whether it was in one. "holds past the cancellation" is the order the
+// first version of the acceptance test assumed. An idle ticker is the control:
+// nothing is abandoned, so the join completes and Close answers nil.
+func Test_Batcher_closeJoinOrders(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name         string
+		tickInFlight bool
+		holdPast     bool
+		settleFirst  bool
+		wantTimedOut bool
+	}
+	tests := []tc{
+		{"the Sink returns before the join looks", true, false, true, true},
+		{"the Sink holds past the cancellation", true, true, false, true},
+		{"an idle ticker is joined", false, false, false, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		mc := clock.NewManualClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+		entered, returned, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		sink := func(ctx context.Context, _ []int) error {
+			close(entered)
+			<-ctx.Done()
+			//: the Sink that holds past the cancellation waits for the test.
+			if c.holdPast {
+				<-release
+			}
+			close(returned)
+			return ctx.Err()
+		}
+		b := NewBatcher(sink, Config[int]{FlushEvery: time.Second, Clock: mc})
+		t.Cleanup(func() {
+			//: a Sink still held at the end is let go, and its goroutine joined.
+			if c.holdPast {
+				close(release)
+			}
+			<-b.done
+		})
+		mc.BlockUntil(1)
+		//: an idle ticker is never advanced and holds nothing: no delivery is in flight.
+		if c.tickInFlight {
+			if err := b.Add(t.Context(), 1); err != nil {
+				t.Fatalf("%s: Add: %v", c.name, err)
+			}
+			mc.Advance(time.Second)
+			<-entered
+		}
+		//: the ticker's goroutine has entered the Sink, so it is busy.
+		if c.tickInFlight && !b.busy.Load() {
+			t.Fatalf("%s: the goroutine is inside the Sink yet not busy", c.name)
+		}
+		//: the order under test: Close's cancellation is followed, at once, by
+		//: the Sink's return and the goroutine's leaving its delivery.
+		if c.settleFirst {
+			realCancel := b.lifeCancel
+			b.lifeCancel = func() {
+				realCancel()
+				<-returned
+				//: bounded by the test's deadline, not by a retry count.
+				deadline := time.Now().Add(5 * time.Second)
+				for b.busy.Load() && time.Now().Before(deadline) {
+					runtime.Gosched()
+				}
+			}
+		}
+		//: the caller's context has ended before Close starts: no wall clock.
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := b.Close(ctx)
+		//: a join abandoned is BatcherCloseTimedOut wrapping ctx's cause.
+		if c.wantTimedOut && (!errs.HasCode(err, CodeBatcherCloseTimedOut) || !errors.Is(err, context.Canceled)) {
+			t.Errorf("%s: Close = %v, want BatcherCloseTimedOut wrapping context.Canceled", c.name, err)
+		}
+		//: a join that completed with nothing abandoned is a nil Close.
+		if !c.wantTimedOut && err != nil {
+			t.Errorf("%s: Close = %v, want nil", c.name, err)
 		}
 	}
 	for _, c := range tests {

@@ -25,6 +25,9 @@ const (
 	// peerProtocol4 is set while the peer's last message of the term
 	// carried FlagProtocol4.
 	peerProtocol4
+	// peerProtocol5 is set while the peer's last message of the term
+	// carried FlagProtocol5 (#1472).
+	peerProtocol5
 	// peerSilent is set while the peer's last answer, to an append or a
 	// heartbeat, said it is silent (FlagTruncated, #636): it answers, but
 	// acknowledges no append, so it counts for no change that must commit
@@ -83,10 +86,15 @@ type progress struct {
 }
 
 // noteSilence records whether the peer's answer says it is silent: a silent
-// node marks its every refusal and heartbeat answer with FlagTruncated, and
-// sends no acknowledgement (#636). An answer without it, an
-// acknowledgement above all, is from a node that is not silent, or no
-// longer, and clears the no-op fed for its silence too (#787).
+// node marks its heartbeat answers and its refusals of an append of this
+// leader's term with FlagTruncated, and sends no acknowledgement (#636). Its
+// refusal of an older term, NOT_LEADER, carries no flag, since it reports no
+// truncation, and never gets here: a leader of protocol 5 steps down on it
+// first (stepLeader), and a leader of a previous release, refused at the
+// term after its request's, steps down on that later term (#1472). An
+// answer without the flag, an acknowledgement above all, is from a node
+// that is not silent, or no longer, and clears the no-op fed for its
+// silence too (#787).
 func (p *progress) noteSilence(flags core.MessageFlags) {
 	if flags&core.FlagTruncated != 0 {
 		p.facts |= peerSilent

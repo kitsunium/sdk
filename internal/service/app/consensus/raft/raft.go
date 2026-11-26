@@ -46,8 +46,13 @@ const (
 // beside FlagProtocol4 at any cluster version (#919), the trace context of
 // a forward (#1115), and the client sessions, their entry kind and the
 // metadata that records them (#918), those two written only once the
-// committed cluster version is 4.
-const ProtocolMax uint32 = 4
+// committed cluster version is 4. Version 5 changes no format: a node of 5
+// answers an append or a heartbeat of an older term, its own term in
+// LogTerm, at that term to a leader that announces 5 (FlagProtocol5),
+// which steps down at LogTerm as a pre-candidate refused its PreVote does,
+// and at the term after it to a leader of a previous release, which steps
+// down there (#1472).
+const ProtocolMax uint32 = 5
 
 // Protocol2 is the protocol version whose formats a node writes once the
 // cluster version is raised to it.
@@ -63,6 +68,14 @@ const Protocol3 uint32 = 3
 // carries its trace context (#1115), a session command is appended and a
 // snapshot records the client sessions (#918).
 const Protocol4 uint32 = 4
+
+// Protocol5 is the protocol version from which a node answers an append
+// or a heartbeat of an older term with its own term in LogTerm, at that
+// term when the leader announces it (FlagProtocol5) and at the term after
+// it otherwise, and never takes a later term from an answer but the
+// refusal of its own request or campaign (#1472). A node below it answers
+// older-term traffic at its own term, as every release before did.
+const Protocol5 uint32 = 5
 
 // MaxSessions is how many client sessions the cluster keeps: opening one
 // more evicts the one whose last entry is the oldest. It is part of
@@ -171,6 +184,15 @@ type Config struct {
 	// it forgot as the release before #1482's did, so the fence is shown to
 	// be the safety on its own; the mutations' type is full.
 	fwdUnfenced bool
+	// termFromAnswers, set by the package's own tests alone, runs this node
+	// as every release before #1472: it speaks protocol 4 at most (speaks),
+	// so it answers older-term traffic, and a deposed leadership's reads, at
+	// its own term, takes the later term an answer carries, reads a refusal
+	// of its own term as a refusal of its log, announces no FlagProtocol5,
+	// refuses a raise to 5 and stops on one committed. It is the mutation
+	// the checks of that rule take as an argument, the mutations' type
+	// being full; a node below protocol 5 (speaks) runs so too.
+	termFromAnswers bool
 }
 
 // fwdEntry is one forwarded command a leader appended.
@@ -401,6 +423,7 @@ type readReq struct {
 	index uint64
 	from  core.NodeID // 0 for local
 	round uint64
+	term  uint64 // the term a follower asked it at, its answer's (#1472)
 }
 
 // leaderHeard is what a node that does not lead last heard of the leader
@@ -1315,7 +1338,7 @@ func (r *Raft) send(m core.MessageValue) {
 	m.Version = 1
 	m.Group = r.cfg.Group
 	m.From = r.id
-	m.Flags |= announcementOf(r.speaks())
+	m.Flags |= r.announcement(m.Kind)
 	if m.Term == 0 && m.Kind != core.MsgPreVote && m.Kind != core.MsgPreVoteResp {
 		m.Term = r.term
 	}
@@ -1323,13 +1346,37 @@ func (r *Raft) send(m core.MessageValue) {
 		if !m.Reject {
 			return // a silent node acknowledges nothing
 		}
-		m.Flags |= core.FlagTruncated
+		m.Flags |= truncatedReport(m)
 	}
 	if r.waitsForSync(m.Kind) {
 		r.rd.AfterSync = append(r.rd.AfterSync, m)
 		return
 	}
 	r.rd.Messages = append(r.rd.Messages, m)
+}
+
+// announcement is the announcement a frame of kind k carries: every frame's,
+// but a read's, whose FlagProtocol5 bit is FlagNoLease, set only by a read
+// that asks for a round.
+func (r *Raft) announcement(k core.MessageKind) core.MessageFlags {
+	a := announcementOf(r.speaks())
+	if k == core.MsgReadIndex {
+		a &^= core.FlagProtocol5
+	}
+	return a
+}
+
+// truncatedReport is the flag a silent node's refusal m carries: FlagTruncated,
+// its report of a truncation (#636), but on a refusal of an older term's
+// append or heartbeat, NOT_LEADER, which is none. Read as one by a leader of
+// a previous release, that refusal lowered the member's match to 0 and the
+// leader resent its log from index 1 at every refusal, at the network's
+// round trip, for as long as it led (#1472).
+func truncatedReport(m core.MessageValue) core.MessageFlags {
+	if m.Code == codeNotLeader {
+		return 0
+	}
+	return core.FlagTruncated
 }
 
 // waitsForSync reports whether a message of kind vouches for durable state,
@@ -1681,12 +1728,27 @@ func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
 }
 
 // speaks is the highest protocol version this node speaks: ProtocolMax,
-// unless a test runs it as a node of the previous release.
+// unless a test runs it as a node of a previous release, protocol 4 at
+// most when run as a release before #1472 (termFromAnswers), which then
+// refuses a raise to 5 and stops on one committed, as such a release does
+// (D18).
 func (r *Raft) speaks() uint32 {
+	v := ProtocolMax
 	if r.cfg.speaks != 0 {
-		return r.cfg.speaks
+		v = r.cfg.speaks
 	}
-	return ProtocolMax
+	if r.cfg.termFromAnswers {
+		v = min(v, Protocol4)
+	}
+	return v
+}
+
+// answersAsBefore reports whether this node answers older-term traffic,
+// reads a later term's answers and announces itself as every release
+// before #1472 did: one below protocol 5, as a node run as a release
+// before #1472 is (speaks).
+func (r *Raft) answersAsBefore() bool {
+	return r.speaks() < Protocol5
 }
 
 // commitTo advances the commit to i, never back, applying the engine's own
