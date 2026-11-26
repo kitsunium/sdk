@@ -159,17 +159,22 @@ const drainProbeDial = 5 * time.Millisecond
 // in it was served (graceHeld), so at least one crosses the drain whatever
 // the guest's scheduling took of its 50 ms.
 func TestDrain_arrivalsAcrossTheDrain(t *testing.T) {
-	for _, p := range drainProtos() {
-		for _, b := range loopBackends() {
-			t.Run(p.name+"/"+b.String(), func(t *testing.T) { drainArrivalsAcross(t, p, b, 0) })
-		}
+	runCase := func(t *testing.T, c drainArrivalsCase) { drainArrivalsAcross(t, c) }
+	for _, c := range drainArrivalsCases("", 0, 0) {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
 // drainStallTest is how long TestDrain_arrivalsAcrossAStalledGrace holds its
 // clients once the drain began: three times the grace drainArrivalsAcross
 // gives, as a guest whose clients were descheduled for the whole grace.
-const drainStallTest = 150 * time.Millisecond
+// drainLagShutdown is how late its second case calls Shutdown once it began
+// dialling for the drain: longer than the stall, so a client held from the
+// test's own start, not the server's, would be served before the drain.
+const (
+	drainStallTest   = 150 * time.Millisecond
+	drainLagShutdown = 200 * time.Millisecond
+)
 
 // TestDrain_arrivalsAcrossAStalledGrace is TestDrain_arrivalsAcrossTheDrain
 // with its clients held for drainStallTest once the drain began: what a
@@ -178,18 +183,42 @@ const drainStallTest = 150 * time.Millisecond
 // the grace until one that began in it was served (graceHeld), and does not
 // read a stall of its own clients as a drain that serves nothing — "0 served
 // during it, 4 refused after" on macOS's kqueue and under load on the
-// portable backend (#1385).
+// portable backend (#1385). Its second case calls Shutdown drainLagShutdown
+// late: an arrival counts as crossing only once the server's phase is
+// PhaseDraining, never on the test's word that it called Shutdown.
 func TestDrain_arrivalsAcrossAStalledGrace(t *testing.T) {
-	for _, p := range drainProtos() {
-		for _, b := range loopBackends() {
-			t.Run(p.name+"/"+b.String(), func(t *testing.T) { drainArrivalsAcross(t, p, b, drainStallTest) })
-		}
+	runCase := func(t *testing.T, c drainArrivalsCase) { drainArrivalsAcross(t, c) }
+	cases := append(drainArrivalsCases("", drainStallTest, 0), drainArrivalsCases("late/", drainStallTest, drainLagShutdown)...)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
-// drainArrivalsAcross is TestDrain_arrivalsAcrossTheDrain on protocol p and
-// backend b, its clients held for stall once the drain began.
-func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend, stall time.Duration) {
+// drainArrivalsCase is one case of the arrivals tests: protocol p on backend
+// b, the clients held for stall once the server drains, Shutdown called lag
+// after the test began to wait for the drain.
+type drainArrivalsCase struct {
+	name       string
+	p          drainProto
+	b          corenet.LoopBackend
+	stall, lag time.Duration
+}
+
+// drainArrivalsCases is every protocol on every backend the platform has,
+// named prefix+protocol/backend, with stall and lag.
+func drainArrivalsCases(prefix string, stall, lag time.Duration) []drainArrivalsCase {
+	var out []drainArrivalsCase
+	for _, p := range drainProtos() {
+		for _, b := range loopBackends() {
+			out = append(out, drainArrivalsCase{name: prefix + p.name + "/" + b.String(), p: p, b: b, stall: stall, lag: lag})
+		}
+	}
+	return out
+}
+
+// drainArrivalsAcross is TestDrain_arrivalsAcrossTheDrain on c.
+func drainArrivalsAcross(t *testing.T, c drainArrivalsCase) {
+	p, b, stall := c.p, c.b, c.stall
 	if runtime.GOOS == "windows" {
 		// ADR 0196 §D3: a Windows listener cannot be duplicated into the
 		// portable backend's own, so its drain takes no queue and a close
@@ -213,10 +242,16 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend, stal
 		at, failed time.Time
 		msg        string
 	}
-	var draining atomic.Bool
-	// drainAt is when the drain began, in nanoseconds: the stall's start.
+	// drainsNow reports whether the server drains: its phase, never the
+	// test's word that it called Shutdown, which a descheduled caller makes
+	// late (#1557).
+	drainsNow := func() bool { return corenet.Phase(srv.phase.Load()) >= corenet.PhaseDraining }
+	// drainAt is when a client first saw the server drain, in nanoseconds:
+	// the stall's start, no earlier than the drain's.
 	var drainAt atomic.Int64
-	var during, refused atomic.Int64
+	// beforeDrain counts the arrivals counted as crossing that began while
+	// the server was not draining yet: none may be.
+	var during, refused, beforeDrain atomic.Int64
 	var mu sync.Mutex
 	var cuts []cut
 	// early holds the dials that failed before the drain began: faults of
@@ -231,7 +266,11 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend, stal
 		wg.Go(func() {
 			stalled := false
 			for {
-				began := draining.Load()
+				began := drainsNow()
+				//: the first to see the drain dates it.
+				if began {
+					drainAt.CompareAndSwap(0, time.Now().UnixNano())
+				}
 				//: held once, as a descheduled client is, from the drain's start.
 				if began && !stalled && stall > 0 {
 					stalled = true
@@ -241,6 +280,7 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend, stal
 				//: an h2c exchange on a slow guest (NetBSD) began 20.036 ms
 				//: before the close and was completed inside the window.
 				start := time.Now()
+				serving := corenet.Phase(srv.phase.Load()) < corenet.PhaseDraining
 				at, msg, derr := p.exchange(addr)
 				failed := time.Now()
 				mu.Lock()
@@ -250,7 +290,7 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend, stal
 				switch {
 				//: before the drain began: a fault whatever the close's date,
 				//: never one of the close's window.
-				case derr != nil && !began && !draining.Load():
+				case derr != nil && !began && !drainsNow():
 					early = append(early, msg)
 				case derr != nil:
 					refused.Add(1)
@@ -261,6 +301,10 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend, stal
 					cuts = append(cuts, cut{at, failed, msg})
 				case began:
 					during.Add(1)
+					//: counted as crossing, yet begun while the server served.
+					if serving {
+						beforeDrain.Add(1)
+					}
 					crossedOnce.Do(func() { close(crossed) })
 				}
 				mu.Unlock()
@@ -276,16 +320,19 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend, stal
 	time.Sleep(100 * time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	drainAt.Store(time.Now().UnixNano())
-	draining.Store(true)
 	var probe drainDate
 	wg.Go(func() {
 		probe = drainProbe(addr, time.Now().Add(10*time.Second))
 	})
+	//: the Shutdown caller descheduled, as a loaded guest may.
+	time.Sleep(c.lag)
 	if err := srv.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
 	wg.Wait()
+	if n := beforeDrain.Load(); n > 0 {
+		t.Fatalf("%d of %d arrivals counted as crossing the drain began before the server drained", n, during.Load())
+	}
 	if during.Load() == 0 || refused.Load() == 0 {
 		t.Fatalf("arrivals did not cross the drain: %d served during it, %d refused after", during.Load(), refused.Load())
 	}
