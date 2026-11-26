@@ -169,6 +169,21 @@ type simOptions struct {
 	watch bool
 	// sessionUnchecked appends every session command unasked (#918).
 	sessionUnchecked bool
+	// fwdLate, when not 0, delays the copy of a forward up to that long
+	// past its original, as a sender that stopped mid-batch resends it,
+	// instead of a millisecond; a copy reaches no node that restarted
+	// since its original was sent, as a connection dies with its node,
+	// unless fwdAcross is set (#1482).
+	fwdLate time.Duration
+	// fwdAcross lets a late copy reach the node it was sent to after that
+	// node restarted: the stopped sender dials the new run (#1482, review
+	// D1 (c)).
+	fwdAcross bool
+	// fwdWindow is every node's ForwardWindow.
+	fwdWindow time.Duration
+	// fwdUnfenced switches every node's forward fence off, as the release
+	// before #1482's ran: the scenarios' control.
+	fwdUnfenced bool
 }
 
 type sim struct {
@@ -268,6 +283,7 @@ func (s *sim) cfg(id core.NodeID) Config {
 		MaxInflight: 16, MaxInflightBytes: 1 << 20, MaxBatchBytes: 64 << 10, MinVoters: 1,
 		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent,
 		MaxApplyLagBytes: s.opt.applyLag, speaks: s.opt.speaks[id], sessionUnchecked: s.opt.sessionUnchecked,
+		ForwardWindow: s.opt.fwdWindow, fwdUnfenced: s.opt.fwdUnfenced,
 	}
 }
 
@@ -368,8 +384,22 @@ func (s *sim) deliver(m core.MessageValue) {
 	d := rtt(m.From, m.To)/2 + time.Duration(s.rng.Int64N(int64(2*time.Millisecond)))
 	s.push(&event{at: s.now.Add(d), kind: evDeliver, node: m.To, msg: m})
 	if s.rng.Float64() < s.opt.dup {
-		s.push(&event{at: s.now.Add(d + time.Millisecond), kind: evDeliver, node: m.To, msg: m})
+		s.push(s.copyOf(m, d))
 	}
+}
+
+// copyOf is the delivery of m's copy, a millisecond after its original due
+// in d, or, for a forward under fwdLate, up to fwdLate after it, to the
+// same run of its node only unless fwdAcross is set.
+func (s *sim) copyOf(m core.MessageValue, d time.Duration) *event {
+	e := &event{at: s.now.Add(d + time.Millisecond), kind: evDeliver, node: m.To, msg: m}
+	if s.opt.fwdLate > 0 && (m.Kind == core.MsgForward || m.Kind == core.MsgForwardAdmin) {
+		e.at = e.at.Add(time.Duration(s.rng.Int64N(int64(s.opt.fwdLate))))
+		if !s.opt.fwdAcross {
+			e.life = s.nodes[m.To].life
+		}
+	}
+	return e
 }
 
 // ownEntries is m with each entry's Data copied, as the driver's frame copy
@@ -776,7 +806,7 @@ func (s *sim) run(until time.Time, load bool) {
 			s.process(n)
 			s.push(&event{at: s.now.Add(10 * time.Millisecond), kind: evTick, node: n.id, life: n.life})
 		case evDeliver:
-			if !n.alive {
+			if !n.alive || (e.life != 0 && e.life != n.life) {
 				continue
 			}
 			n.r.Step(s.clock(n), ownEntries(e.msg))

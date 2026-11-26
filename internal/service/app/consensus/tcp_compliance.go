@@ -6,6 +6,7 @@ package consensus
 // aborts no longer counted. Each line turns that into a compile error.
 var (
 	_ silenceBounder = (*TCPTransport)(nil)
+	_ resendWindower = (*TCPTransport)(nil)
 	_ interface {
 		linksAborted() (userTimeout, readSilence int64)
 	} = (*TCPTransport)(nil)

@@ -1,6 +1,6 @@
 # ADR 0025 — Generic LRU+TTL cache as a kernel primitive (`cache`)
 
-- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node; #1059: `UnlockedMap.Deadline`)
+- **Status**: Accepted — **amended by [ADR 0049](0049-cache-becomes-a-domain.md)**; amended 2026-11-02 (the L6 wave: an expiry sweep, weights, S3-FIFO, a striped sibling, a coarse clock); amended 2026-11-13 (#1038: a `sync.Mutex`, the `UnlockedMap` core, a 64-byte node; #1059: `UnlockedMap.Deadline`); amended 2026-11-15 (#834: S3-FIFO's shares, and W-TinyLFU as a third policy)
 - **Date**: 2026-06-24
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0010 (recycler), ADR 0011 (snapshot), ADR 0006 (ring) — the kernel-primitive precedents; ADR 0024 (Phase-B wave)
@@ -158,3 +158,48 @@ hit — no counter moves and a passed deadline is reported, not reaped.
 `UnlockedMap.Fetch` writes its lookup out rather than delegating to the
 `fetch` a `Cache` calls under its lock, so a hit through it is one call deep;
 `Cache`'s own path does not change.
+
+## Amendment — 2026-11-15: S3-FIFO's shares, and W-TinyLFU beside it ([#834](https://github.com/kitsunium/sdk/issues/834))
+
+#834 asked S3-FIFO for 5 hit-ratio points over LRU on a Zipf law of exponent
+1.0 at a tenth of a million keys, 10 through a scan, and a hit within 15 ns of
+LRU's; the wave above stated +3.9 and +5.8. The owner kept the bound and asked
+for the algorithm to be challenged first, then for W-TinyLFU, the issue's
+"then", held to the same bound (2026-11-13, 2026-11-14). The placement and the
+three properties of this ADR — no error surface, no goroutine, the standard
+library alone — stand.
+
+- **The measurement is the review's protocol.** `BenchmarkHitRatio` draws
+  100 million accesses a cell on the fly from a PCG of fixed seed — the
+  2 million-access trace the wave replayed in a loop measured its period as
+  much as the policies — after a warm-up of twice the capacity, over the
+  issue's six Zipf cells, the scan, and two guard cells against fitting a
+  policy to Zipf: a loop over six fifths of the capacity and a popularity that
+  moves every 10 million accesses. A hit ratio on a fixed trace is the same on
+  every machine, so its rules gate in the A/B lane.
+- **S3-FIFO keeps its algorithm and changes two shares.** Every published
+  variant and parameter was measured on every cell (`BENCH.md`): the
+  promotion at two hits, the ghost at 0.9, three and four bits of counter,
+  larger and smaller ghosts and small queues, libCacheSim's defaults. The
+  small queue holds a **fiftieth** of the bound instead of a tenth, and the
+  ghost a **quarter** in hashes instead of the bound: fewer keys of the long
+  tail that come back once by chance reach main. Measured: +5.12 points on
+  the bound's Zipf cell and +10.95 through the scan — both bounds hold —,
+  more on every Zipf cell and on the loop, 0.86 point less where popularity
+  moves. The two-bit counter stays: more bits held old favourites through a
+  change of popularity.
+- **`PolicyTinyLFU`, W-TinyLFU (Einziger, Friedman and Manes, 2017).** An LRU
+  window of a hundredth of the bound in front of a segmented LRU (probation,
+  and protected at four fifths of main); the window's oldest enters main
+  while main has room and otherwise contests main's victim, staying only when
+  its estimated frequency is at least 2 and above the victim's. The estimate
+  is TinyLFU's, from a frequency sketch that shares its counters between
+  keys: it is an estimate, not a count of uses. The sketch's seed is drawn
+  once a process, so no input targets a key's counters. A key just written is
+  always served: the window holds it; admission refuses a key only when it
+  leaves the window. The constraint is #834's, held to W-TinyLFU as to
+  S3-FIFO: a hit within 15 ns of LRU's. Measured: +5.01 to +5.09 and +10.22 to +10.44 over
+  seven seeds. It changes no existing behaviour: `PolicyLRU` stays the zero.
+  The sketch's layout, the node's and the hit's cost are in the package's
+  `NOTES.md`; the hit's cost is the A/B lane's to judge (`834-fetch-hit-s3fifo`,
+  `834-fetch-hit-tinylfu`).

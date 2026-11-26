@@ -2528,3 +2528,26 @@ func (t *TCPTransport) ReloadFailures() int { return int(t.id.ReloadFailures()) 
 // maxFrameBytes is the largest frame this transport reads: the engine
 // refuses a batch bound above it.
 func (t *TCPTransport) maxFrameBytes() int { return t.cfg.MaxFrameBytes }
+
+// resendWindow is how long after a frame first reached its peer this
+// transport, running, may deliver it again (#1482): sendBatch writes a
+// batch at most three times — on the link, on the link dialled again, on
+// the back link — each write under WriteTimeout and the dial under
+// HandshakeTimeout; the back link's write first waits for its lock, which
+// another write holds for at most its WriteTimeout (backLink.write); and
+// the bytes of a write that returned reach the peer within the bound
+// boundUnacknowledged sets, WriteTimeout on Linux, rounded up to the second
+// on macOS and Windows, none on the BSDs and illumos, where WriteTimeout
+// stands for it. 4 × WriteTimeout + HandshakeTimeout + that bound, 11 s
+// under the defaults; saturated, never wrapped. It counts this node's
+// configuration, a sender's own timeouts being unknown here, and a sender's
+// running time, a stopped sender resuming past it: the step function's
+// window is a precision only, its fence keeping any later copy from being
+// handled again.
+func (t *TCPTransport) resendWindow() time.Duration {
+	w, h := t.cfg.WriteTimeout, t.cfg.HandshakeTimeout
+	if w > (math.MaxInt64-h-time.Second)/5 {
+		return math.MaxInt64
+	}
+	return 4*w + h + unackedLeg(w)
+}

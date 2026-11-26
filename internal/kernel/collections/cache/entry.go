@@ -1,10 +1,13 @@
 package cache
 
 const (
-	// queueMain is the LRU list, and S3-FIFO's main queue.
+	// queueMain is the LRU list, S3-FIFO's main queue and W-TinyLFU's
+	// protected segment.
 	queueMain queueID = iota
-	// queueSmall is S3-FIFO's probationary queue.
+	// queueSmall is S3-FIFO's probationary queue and W-TinyLFU's window.
 	queueSmall
+	// queueProbation is W-TinyLFU's probationary segment.
+	queueProbation
 )
 
 // queueID names the list an entry sits in.
@@ -16,10 +19,11 @@ type queueID uint8
 // deadline.
 //
 // The layout is a budget (#1038): for a string key and a word-sized value the
-// node is 58 bytes, so it lands in the 64-byte size class — one class, and one
+// node is 63 bytes, so it lands in the 64-byte size class — one class, and one
 // cache line, since the runtime places an object of that class on a 64-byte
 // boundary. A time.Time deadline (24 bytes) and a heap handle (8) had taken it
-// to 80 bytes, two lines, and every insertion paid the larger class.
+// to 80 bytes, two lines, and every insertion paid the larger class; the
+// sketch's period (2) and hash (4) took the padding after the queue (#834).
 type entry[K comparable, V any] struct {
 	key  K
 	val  V
@@ -37,6 +41,15 @@ type entry[K comparable, V any] struct {
 	// freq counts the hits since admission or the last demotion, capped at
 	// maxFreq (S3-FIFO only).
 	freq uint8
-	// queue says which list the entry sits in (S3-FIFO only; LRU uses main).
+	// queue says which list the entry sits in (LRU uses main alone).
 	queue queueID
+	// period is the sketch's aging period in which the key last went
+	// through the doorkeeper (W-TinyLFU only): a later use in that period
+	// counts without asking the doorkeeper. A word: the marks wrap every
+	// 65 535 periods, and the cache marks them all stale when they do.
+	period uint16
+	// hash is the key's hash under the frequency sketch's seed, taken once
+	// when the entry is admitted (W-TinyLFU only): a hit counts the key
+	// without hashing it again.
+	hash uint32
 }

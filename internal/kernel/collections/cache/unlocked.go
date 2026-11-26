@@ -8,7 +8,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
-// UnlockedMap is the cache without its lock: the same LRU or S3-FIFO policy, TTL,
+// UnlockedMap is the cache without its lock: the same eviction policy, TTL,
 // bounds, sweep and counters as Cache, for a caller that already serialises
 // every call under a lock of its own — a store that keeps more state beside
 // the entries, which a second lock inside would only slow down. It is NOT
@@ -26,12 +26,20 @@ type UnlockedMap[K comparable, V any] struct {
 	onEvict    func(key K, val V)
 	policy     Policy
 	items      map[K]*entry[K, V]
-	// main is the LRU list, and S3-FIFO's main queue.
+	// main is the LRU list, S3-FIFO's main queue and W-TinyLFU's protected
+	// segment.
 	main entryList[K, V]
-	// small is S3-FIFO's probationary queue; empty under LRU.
+	// small is S3-FIFO's probationary queue and W-TinyLFU's window; empty
+	// under LRU.
 	small entryList[K, V]
+	// probation is W-TinyLFU's probationary segment; empty otherwise.
+	probation entryList[K, V]
 	// ghost remembers the keys probation evicted (S3-FIFO only).
 	ghost ghostSet[K]
+	// sketch counts how often each key was used (W-TinyLFU only).
+	sketch frequencySketch
+	// shares are W-TinyLFU's segment bounds.
+	shares tinyLFUShares
 	// expiry orders the entries that carry a deadline, earliest first.
 	expiry deadlineHeap[K, V]
 	// epoch is the instant every deadline counts from: the clock's reading at
@@ -41,6 +49,16 @@ type UnlockedMap[K comparable, V any] struct {
 	hits      uint64
 	misses    uint64
 	evictions uint64
+}
+
+// tinyLFUShares are W-TinyLFU's segment bounds, derived once from the
+// cache's: the window's and the protected segment's, in entries and in
+// weight.
+type tinyLFUShares struct {
+	window          int
+	windowWeight    int64
+	protected       int
+	protectedWeight int64
 }
 
 // NewUnlockedMap builds an UnlockedMap from cfg, as NewCache builds a Cache. A nil
@@ -74,11 +92,19 @@ func (c *UnlockedMap[K, V]) init(cfg Config[K, V]) {
 	c.onEvict = cfg.OnEvict
 	c.policy = PolicyLRU
 	c.items = make(map[K]*entry[K, V], c.maxEntries)
-	//: an unknown policy runs as LRU, and Stats says so; only S3-FIFO needs a
-	//: ghost, so only it pays for one.
-	if cfg.Policy == PolicyS3FIFO {
+	//: an unknown policy runs as LRU, and Stats says so; each policy builds
+	//: only what it uses — S3-FIFO a ghost, W-TinyLFU a sketch.
+	switch cfg.Policy {
+	//: S3-FIFO's ghost.
+	case PolicyS3FIFO:
 		c.policy = PolicyS3FIFO
 		c.ghost = newGhostSet[K]()
+	//: W-TinyLFU's shares and sketch.
+	case PolicyTinyLFU:
+		c.policy = PolicyTinyLFU
+		c.initTinyLFU()
+	//: LRU builds nothing more.
+	default:
 	}
 }
 
@@ -93,11 +119,24 @@ func (c *UnlockedMap[K, V]) Fetch(key K) (value V, ok bool) {
 		//: the zero value on a miss, once the observer saw a reap.
 		return zero, false
 	}
-	//: S3-FIFO counts the hit; LRU promotes it, inlined.
-	if c.policy == PolicyS3FIFO {
-		c.touch(ent)
-	} else {
+	//: each policy records the hit, inlined where it is short.
+	switch c.policy {
+	//: LRU relinks — the hot path.
+	case PolicyLRU:
 		c.main.moveFront(ent)
+	//: S3-FIFO counts, saturating at the counter's cap.
+	case PolicyS3FIFO:
+		ent.freq = min(ent.freq+1, maxFreq)
+	//: W-TinyLFU counts in its sketch and relinks; protected, where the
+	//: hits land, is an LRU.
+	default:
+		c.countHit(ent)
+		//: the hot path relinks inline; the others reorder.
+		if ent.queue == queueMain {
+			c.main.moveFront(ent)
+		} else {
+			c.reorderTinyLFU(ent)
+		}
 	}
 	c.hits++
 	//: the live value.
@@ -196,15 +235,18 @@ func (c *UnlockedMap[K, V]) Len() int {
 
 // Purge drops every entry without firing OnEvict.
 func (c *UnlockedMap[K, V]) Purge() {
-	//: replace the map and clear both lists, the deadlines and the ghost.
+	//: replace the map and clear the lists, the deadlines, the ghost and the
+	//: counts.
 	c.items = make(map[K]*entry[K, V], c.maxEntries)
 	c.main = entryList[K, V]{}
 	c.small = entryList[K, V]{}
+	c.probation = entryList[K, V]{}
 	c.expiry = deadlineHeap[K, V]{}
 	//: only S3-FIFO built a ghost.
 	if c.policy == PolicyS3FIFO {
 		c.ghost.reset()
 	}
+	c.sketch.clear()
 }
 
 // Stats returns a copy of the hit/miss/eviction counters.
@@ -212,7 +254,7 @@ func (c *UnlockedMap[K, V]) Stats() StatsValue {
 	var weight int64
 	//: a cache that weighs nothing reports no weight.
 	if c.maxWeight > 0 || c.weightOf != nil {
-		weight = c.main.weight + c.small.weight
+		weight = c.weight()
 	}
 	//: copy the counters.
 	return StatsValue{Hits: c.hits, Misses: c.misses, Evictions: c.evictions, Weight: weight, Policy: c.policy}
@@ -233,11 +275,24 @@ func (c *UnlockedMap[K, V]) fetch(key K, pending *[]evictionValue[K, V]) (value 
 		//: the zero value on a miss.
 		return zero, false
 	}
-	//: S3-FIFO counts the hit; LRU promotes it — inlined, the hot path.
-	if c.policy == PolicyS3FIFO {
-		c.touch(ent)
-	} else {
+	//: each policy records the hit, inlined where it is short.
+	switch c.policy {
+	//: LRU relinks — the hot path.
+	case PolicyLRU:
 		c.main.moveFront(ent)
+	//: S3-FIFO counts, saturating at the counter's cap.
+	case PolicyS3FIFO:
+		ent.freq = min(ent.freq+1, maxFreq)
+	//: W-TinyLFU counts in its sketch and relinks; protected, where the
+	//: hits land, is an LRU.
+	default:
+		c.countHit(ent)
+		//: the hot path relinks inline; the others reorder.
+		if ent.queue == queueMain {
+			c.main.moveFront(ent)
+		} else {
+			c.reorderTinyLFU(ent)
+		}
 	}
 	c.hits++
 	//: the live value.
@@ -265,11 +320,11 @@ func (c *UnlockedMap[K, V]) set(key K, val V, ttl time.Duration, pending *[]evic
 		ent.weight = c.weigh(key, val)
 	}
 	c.items[key] = ent
-	//: LRU, the zero policy, pushes onto main; S3-FIFO picks the queue.
-	if c.policy == PolicyS3FIFO {
-		c.admit(ent)
-	} else {
+	//: LRU, the zero policy, pushes onto main; the others pick the list.
+	if c.policy == PolicyLRU {
 		c.main.pushFront(ent)
+	} else {
+		c.admit(ent)
 	}
 	//: an entry without a deadline never touches the heap.
 	if ttl > 0 {
@@ -296,6 +351,10 @@ func (c *UnlockedMap[K, V]) overwrite(ent *entry[K, V], val V, timed bool, at in
 		c.clearDeadline(ent)
 	}
 	c.touch(ent)
+	//: a weight that changed may take a protected entry past its share.
+	if c.weightOf != nil && c.policy == PolicyTinyLFU {
+		c.rebalanceReweighed(ent)
+	}
 	//: a heavier value may push the cache over its weight bound; a count
 	//: bound cannot move on an overwrite.
 	if c.maxWeight > 0 {
@@ -444,7 +503,14 @@ func (c *UnlockedMap[K, V]) overCapacity() bool {
 		return true
 	}
 	//: the weight bound, with something besides one entry to evict.
-	return c.maxWeight > 0 && count > 1 && c.main.weight+c.small.weight > c.maxWeight
+	return c.maxWeight > 0 && count > 1 && c.weight() > c.maxWeight
+}
+
+// weight returns the summed weight of the live entries, over every list.
+// Caller holds the lock.
+func (c *UnlockedMap[K, V]) weight() int64 {
+	//: the lists partition the entries.
+	return c.main.weight + c.small.weight + c.probation.weight
 }
 
 // evictIfNeeded removes entries while a bound is exceeded, never fresh — the
@@ -532,13 +598,21 @@ func (c *UnlockedMap[K, V]) notifyEvicted(pending []evictionValue[K, V]) {
 
 // listOf returns the list ent sits in. Caller holds the lock.
 func (c *UnlockedMap[K, V]) listOf(ent *entry[K, V]) *entryList[K, V] {
-	//: only S3-FIFO's probation uses the small list.
-	if ent.queue == queueSmall {
-		//: probation.
+	//: the queue the entry records.
+	switch ent.queue {
+	//: S3-FIFO's probation, or W-TinyLFU's window.
+	case queueSmall:
+		//: the small list.
 		return &c.small
+	//: W-TinyLFU's probation.
+	case queueProbation:
+		//: the probation list.
+		return &c.probation
+	//: the LRU list, S3-FIFO's main or W-TinyLFU's protected segment.
+	default:
+		//: the main list.
+		return &c.main
 	}
-	//: the LRU list, or S3-FIFO's main.
-	return &c.main
 }
 
 // unlink detaches ent from its list, fixing head/tail. Caller holds the lock.

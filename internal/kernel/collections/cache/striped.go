@@ -13,8 +13,8 @@ import (
 //
 // Each stripe holds an equal share of MaxEntries and MaxWeight, at least one
 // unit when the bound is set: the policy is exact within a stripe and
-// approximate across them — the victim is the least-recently-used entry of
-// the stripe that overflowed, not of the whole cache. OnEvict fires per
+// approximate across them — the victim is the policy's victim in the stripe
+// that overflowed, not in the whole cache. OnEvict fires per
 // stripe, outside that stripe's lock, as a Cache fires it. With one stripe a
 // Striped behaves exactly as one Cache.
 //

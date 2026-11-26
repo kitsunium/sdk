@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-15T08:00:00Z -->
+<!-- updated: 2026-11-26T00:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -73,6 +73,7 @@ The Raft engine of ADR 0152 and everything it ships: the event loop over the ste
 - Serve `laneMembership` to anyone but a member on its pinned key and slot, or read its answer without the member's pin, its certificate's slot, and the member listed …
 - Refuse a JOIN on a held slot when the member holding it is the requester itself — id, incarnation, slot and key all equal
 - Drop the answer to a forward because this node's term moved since, nor leave unanswered a forward that reaches its leader after that leader's term moved
+- Hand the step function a forward window shorter than the transport's resend window, or take that window for the safety
 - Forward a JOIN from a node that would answer it only once it applied the `AddLearner` itself
 - Remove the snapshot a node with no table holds before its replacement is published, or an installed copy that did not restore on such a node
 - Skip a snapshot of a version or codec this build does not know

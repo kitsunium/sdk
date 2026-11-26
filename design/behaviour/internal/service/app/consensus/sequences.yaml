@@ -10836,6 +10836,7 @@ sequences:
           		CanVote: n.canVote, MaxChainRefusals: maxChainRefusals, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
           		MaxApplyLagBytes: cfg.MaxApplyLagBytes, SilentTerm: silentTerm, SilentIndex: silentIndex,
           		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
+          		ForwardWindow: forwardWindow(cfg.Transport),
           	}, &start)
       - eval: n.publish()
         to: n.publish
@@ -10858,6 +10859,29 @@ sequences:
       - go: n.loop()
         to: n.loop
       - return: n, nil
+  - of: forwardWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: forwardWindow
+        kind: self
+      - id: w.resendWindow
+        kind: internal
+    steps:
+      - bind: w, ok
+        eval: t.(resendWindower)
+      - opt:
+          do:
+            - return: "0"
+          when: "!ok"
+      - bind: d
+        eval: w.resendWindow()
+        to: w.resendWindow
+      - opt:
+          do:
+            - return: math.MaxInt64
+          when: d > math.MaxInt64/2
+      - return: 2 * d
   - of: startStamp
     participants:
       - id: caller
@@ -16074,6 +16098,8 @@ sequences:
         kind: value
       - id: o.addTo
         kind: internal
+      - id: n.observeForwards
+        kind: internal
       - id: replicationLag
         kind: internal
       - id: n.observePeer
@@ -16105,6 +16131,8 @@ sequences:
         to: n.r.Summary
       - eval: o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
         to: o.addTo
+      - eval: n.observeForwards(&st)
+        to: n.observeForwards
       - bind: lag, _
         eval: replicationLag(&st, now)
         to: replicationLag
@@ -16398,6 +16426,32 @@ sequences:
       - eval: o.addTo(mLinksAborted, &o.seenTimedOut, timedOut, coreotel.String("reason", "user_timeout"))
         to: o.addTo
       - eval: o.addTo(mLinksAborted, &o.seenSilenced, silenced, coreotel.String("reason", "read_silence"))
+        to: o.addTo
+  - of: (*Node).observeForwards
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).observeForwards
+        kind: self
+      - id: o.addTo
+        kind: internal
+      - id: o.setGauge
+        kind: internal
+    steps:
+      - bind: o
+        eval: n.obs
+      - bind: d
+        eval: st.ForwardDrops
+      - loop:
+          do:
+            - eval: o.addTo(mForwardsDropped, &o.seenDrops[i], int64(total), coreotel.String("reason", fwdDropReasons[i]))
+              to: o.addTo
+          key: i
+          range: "[3]uint64{d.Copies, d.Restarted, d.Evicted}"
+          value: total
+      - eval: o.setGauge(mForwardRuns, float64(st.ForwardRuns))
+        to: o.setGauge
+      - eval: o.addTo(mForwardForgotten, &o.seenForgotten, int64(st.ForwardForgotten))
         to: o.addTo
   - of: (*Node).ReadCommitted
     participants:
@@ -29485,6 +29539,15 @@ sequences:
   - of: (*TCPTransport).maxFrameBytes
     steps:
       - return: t.cfg.MaxFrameBytes
+  - of: (*TCPTransport).resendWindow
+    steps:
+      - bind: w, h
+        eval: t.cfg.WriteTimeout, t.cfg.HandshakeTimeout
+      - opt:
+          do:
+            - return: math.MaxInt64
+          when: w > (math.MaxInt64-h-time.Second)/5
+      - return: 4*w + h + unackedLeg(w)
   - of: streamOffer
     participants:
       - id: caller
@@ -29904,6 +29967,9 @@ sequences:
   - of: kernelTimedOut
     steps:
       - return: err != nil && errors.Is(err, errTimedOut)
+  - of: unackedLeg
+    steps:
+      - return: d
   - of: boundUnacknowledged
     participants:
       - id: caller

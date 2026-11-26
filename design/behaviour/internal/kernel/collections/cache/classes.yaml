@@ -17,12 +17,16 @@ constants:
     name: heapArity
   - grouped: true
     items:
-      - doc: queueMain is the LRU list, and S3-FIFO's main queue.
+      - doc: |-
+          queueMain is the LRU list, S3-FIFO's main queue and W-TinyLFU's
+          protected segment.
         name: queueMain
         type: queueID
         value: iota
-      - doc: queueSmall is S3-FIFO's probationary queue.
+      - doc: queueSmall is S3-FIFO's probationary queue and W-TinyLFU's window.
         name: queueSmall
+      - doc: queueProbation is W-TinyLFU's probationary segment.
+        name: queueProbation
     name: queueMain
   - doc: |-
       minGhostRing is the ring's first allocation: small enough for a tiny cache,
@@ -43,12 +47,32 @@ constants:
         value: iota
       - doc: |-
           PolicyS3FIFO is S3-FIFO (Yang et al., SOSP 2023): a new key enters a small
-          probationary FIFO holding a tenth of the capacity; one hit there promotes
-          it to the main FIFO when it reaches the tail, none sends its key to a
-          bounded ghost set, and a key the ghost remembers is admitted straight into
-          main. A one-time scan therefore churns the small queue and leaves the hot
-          set in main. A hit only sets a counter — it moves nothing.
+          probationary FIFO holding a fiftieth of the capacity; one hit there
+          promotes it to the main FIFO when it reaches the tail, none sends its key
+          to a ghost set holding a quarter of the capacity in hashes, and a key the
+          ghost remembers is admitted straight into main. A one-time scan therefore
+          churns the small queue and leaves the hot set in main. A hit only sets a
+          counter — it moves nothing.
         name: PolicyS3FIFO
+      - doc: |-
+          PolicyTinyLFU is W-TinyLFU (Einziger, Friedman and Manes, ACM TOS 2017):
+          a new key enters an LRU window holding a hundredth of the capacity; the
+          key the window pushes out moves into main when main has room, and
+          otherwise contests main's next victim — the least recently used of main's
+          probationary segment — and stays only when a frequency sketch estimates it
+          was used more, and twice at least. A second use in main moves an entry into
+          the protected segment, four fifths of main; an entry heavier than that
+          segment alone stays in probation. Every Set and every hit counts its key:
+          the first use in a period in a doorkeeper, a Bloom filter, the later ones in
+          a count-min sketch of four-bit counters halved every ten uses an entry of
+          the bound, so a key used once — a scan, the long tail — is estimated at one
+          use and does not win a contest against a key estimated higher, and the
+          counts follow what is used now. The sketch shares its counters between
+          keys: the contest compares estimates, which can run above a key's real use,
+          and nothing is promised about actual uses. A key just written is always
+          served: the window holds it, and no contest is held for it, so with room for
+          one key it replaces any other.
+        name: PolicyTinyLFU
     name: PolicyLRU
   - doc: |-
       maxFreq caps an entry's hit counter: S3-FIFO's two bits. Three hits are
@@ -59,13 +83,121 @@ constants:
         value: "3"
     name: maxFreq
   - doc: |-
-      smallShare is the small queue's share of the capacity: one tenth, the
-      paper's figure, written as the divisor it is used as.
+      smallShare is the small queue's share of the capacity, written as the
+      divisor it is used as: a fiftieth. The paper's tenth admitted into main
+      keys that came back once by chance; measured over 100 million accesses
+      (#834, BENCH.md), a fiftieth keeps 0.9 points more of a Zipf s = 1.0 at a
+      tenth of the keys, and more of every Zipf, scan and loop cell.
     items:
       - name: smallShare
         type: int
-        value: "10"
+        value: "50"
     name: smallShare
+  - doc: |-
+      ghostShare is the ghost's share of the capacity, written as the divisor it
+      is used as: a quarter. A ghost as long as main (the paper's) remembers keys
+      that recur too rarely to earn main, which they then share with the hot set;
+      a quarter admits a key straight into main only when it came back soon.
+    items:
+      - name: ghostShare
+        type: int
+        value: "4"
+    name: ghostShare
+  - grouped: true
+    items:
+      - doc: |-
+          sketchSample is the sketch's aging period, in increments per entry of
+          the bound: every sketchSample × bound increments, every counter is
+          halved, so the counts follow what is used now.
+        name: sketchSample
+        type: int
+        value: "10"
+      - doc: "blockWords is a block's words: eight, one cache line."
+        name: blockWords
+        type: int
+        value: "8"
+      - doc: |-
+          sketchMaxEntries caps the keys a table is sized for at 2^27 — a
+          gibibyte of counters, past any bound the entries' memory allows —, so
+          the period and the doorkeeper's bits fit an int on 32 bits too.
+        name: sketchMaxEntries
+        type: int
+        value: 1 << 27
+      - doc: counterMax is a four-bit counter's ceiling.
+        name: counterMax
+        type: uint64
+        value: "15"
+      - doc: counterLowBits masks the low bit of every four-bit counter of a word.
+        name: counterLowBits
+        type: uint64
+        value: "0x1111111111111111"
+      - doc: |-
+          counterHalfMask clears what a one-bit shift carries into each counter's
+          top bit from its neighbour.
+        name: counterHalfMask
+        type: uint64
+        value: "0x7777777777777777"
+      - doc: counterMix remixes a hash into the bytes that pick a key's counters.
+        name: counterMix
+        type: uint32
+        value: "0x31848bab"
+      - doc: |-
+          doorBitsPerSample sizes the doorkeeper: four bits per increment of
+          the aging period, so the keys used once in a period fill it sparsely.
+        name: doorBitsPerSample
+        type: int
+        value: "4"
+      - doc: "doorMinBits is the smallest doorkeeper: one word."
+        name: doorMinBits
+        type: int
+        value: "64"
+      - doc: doorMaxBits caps the doorkeeper at 2^30 bits (128 MiB).
+        name: doorMaxBits
+        type: int
+        value: 1 << 30
+      - doc: |-
+          periodStale is the mark of an entry whose period is over for good; the
+          sketch's period is never it, so it never reads as the current one.
+        name: periodStale
+        type: uint16
+        value: "0"
+      - doc: |-
+          doorMixLow and doorMixHigh spread a hash into the doorkeeper's three
+          bit positions.
+        name: doorMixLow
+        type: uint64
+        value: "0x9e3779b97f4a7c15"
+      - doc: doorMixHigh is the second multiplier, for the third position.
+        name: doorMixHigh
+        type: uint64
+        value: "0xc2b2ae3d27d4eb4f"
+    name: sketchSample
+  - grouped: true
+    items:
+      - doc: |-
+          windowShare is W-TinyLFU's window against the bound, written as the
+          divisor it is used as: a hundredth.
+        name: windowShare
+        type: int
+        value: "100"
+      - doc: protectedFifths is the protected segment's share of main, in fifths.
+        name: protectedFifths
+        type: int
+        value: "4"
+      - doc: fifths divides a share in fifths.
+        name: fifths
+        type: int
+        value: "5"
+      - doc: |-
+          admitAtLeast is the estimate a candidate needs to replace a key of
+          main: an estimate of two uses — the doorkeeper's and one counted —, so a
+          key used once, a scan's or the long tail's, is estimated below it. The
+          sketch shares counters, so this holds for the estimate, not for the
+          actual uses.
+        name: admitAtLeast
+        type: uint64
+        value: "2"
+    name: windowShare
 files:
   - decls:
       - cacheLine
@@ -128,19 +260,40 @@ files:
   - decls:
       - Policy
       - PolicyLRU
+      - (*UnlockedMap).admit
+      - (*UnlockedMap).touch
+      - (*UnlockedMap).evictOne
     name: policy.go
   - decls:
       - maxFreq
       - smallShare
-      - (*UnlockedMap).admit
-      - (*UnlockedMap).touch
-      - (*UnlockedMap).evictOne
+      - ghostShare
+      - (*UnlockedMap).admitS3FIFO
       - (*UnlockedMap).evictS3FIFO
       - (*UnlockedMap).smallIsLarge
       - (*UnlockedMap).evictSmall
       - (*UnlockedMap).evictMain
       - (*UnlockedMap).ghostBound
     name: s3fifo.go
+  - decls:
+      - sketchSample
+      - sketchBlock
+      - frequencySketch
+      - (*frequencySketch).size
+      - (*frequencySketch).advance
+      - (*frequencySketch).fit
+      - (*frequencySketch).clear
+      - (*frequencySketch).record
+      - (*frequencySketch).touch
+      - (*frequencySketch).estimateHeld
+      - (*frequencySketch).doorCells
+      - (*frequencySketch).doorHolds
+      - (*frequencySketch).counters
+      - (*frequencySketch).increment
+      - bump
+      - (*frequencySketch).frequency
+      - (*frequencySketch).age
+    name: sketch.go
   - decls:
       - StatsValue
     name: stats.go
@@ -161,7 +314,30 @@ files:
       - (*Striped).Stripes
     name: striped.go
   - decls:
+      - windowShare
+      - sketchSeed
+      - (*UnlockedMap).initTinyLFU
+      - protectedShare
+      - (*UnlockedMap).admitTinyLFU
+      - (*UnlockedMap).touchTinyLFU
+      - (*UnlockedMap).countHit
+      - (*UnlockedMap).retireMarks
+      - (*UnlockedMap).reorderTinyLFU
+      - (*UnlockedMap).exceedsProtected
+      - (*UnlockedMap).trimProtected
+      - (*UnlockedMap).rebalanceReweighed
+      - (*UnlockedMap).evictTinyLFU
+      - (*UnlockedMap).contest
+      - (*UnlockedMap).probate
+      - (*UnlockedMap).mainVictim
+      - (*UnlockedMap).windowIsLarge
+      - (*UnlockedMap).protectedIsLarge
+      - (*UnlockedMap).mainHasRoom
+      - olderThan
+    name: tinylfu.go
+  - decls:
       - UnlockedMap
+      - tinyLFUShares
       - NewUnlockedMap
       - (*UnlockedMap).init
       - (*UnlockedMap).Fetch
@@ -188,6 +364,7 @@ files:
       - (*UnlockedMap).weigh
       - (*UnlockedMap).reweigh
       - (*UnlockedMap).overCapacity
+      - (*UnlockedMap).weight
       - (*UnlockedMap).evictIfNeeded
       - (*UnlockedMap).removeEvict
       - (*UnlockedMap).detach
@@ -204,6 +381,13 @@ functions:
     name: newGhostSet
     results: ghostSet[K]
     typeParams: K comparable
+  - doc: |-
+      bump adds one to the counter at nibble of word unless it is at its
+      ceiling, and returns 1 when it did, 0 otherwise — without a branch: a
+      counter of 15 plus one carries into bit 4.
+    name: bump
+    params: word *uint64, nibble uint32
+    results: uint64
   - name: NewStriped
     params: cfg Config[K, V], stripes int, hash func(key K) uint64
     results: "*Striped[K, V]"
@@ -215,11 +399,26 @@ functions:
     name: shareOf
     params: bound, count, at int
     results: int
+  - doc: |-
+      protectedShare returns the protected segment's share of a main of size
+      units: four fifths, rounded down, computed without overflowing for a bound
+      near the int64's maximum.
+    name: protectedShare
+    params: size int64
+    results: int64
+  - doc: |-
+      olderThan returns l's oldest entry, or the one before it when the oldest
+      is skip, and nil for a list holding nothing else.
+    name: olderThan
+    params: l *entryList[K, V], skip *entry[K, V]
+    results: "*entry[K, V]"
+    typeParams: K comparable, V any
   - name: NewUnlockedMap
     params: cfg Config[K, V]
     results: "*UnlockedMap[K, V]"
     typeParams: K comparable, V any
 imports:
+  bits: math/bits
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   iter: iter
   maphash: hash/maphash
@@ -289,7 +488,7 @@ types:
     name: Cache
     typeParams: K comparable, V any
   - fields:
-      - doc: MaxEntries caps the live entry count (LRU eviction above it). 0 = unbounded.
+      - doc: MaxEntries caps the live entry count (the policy evicts above it). 0 = unbounded.
         name: MaxEntries
         type: int
       - doc: DefaultTTL applies to Set entries (SetTTL overrides per-entry). 0 = no expiry.
@@ -403,10 +602,11 @@ types:
       deadline.
 
       The layout is a budget (#1038): for a string key and a word-sized value the
-      node is 58 bytes, so it lands in the 64-byte size class — one class, and one
+      node is 63 bytes, so it lands in the 64-byte size class — one class, and one
       cache line, since the runtime places an object of that class on a 64-byte
       boundary. A time.Time deadline (24 bytes) and a heap handle (8) had taken it
-      to 80 bytes, two lines, and every insertion paid the larger class.
+      to 80 bytes, two lines, and every insertion paid the larger class; the
+      sketch's period (2) and hash (4) took the padding after the queue (#834).
     fields:
       - name: key
         type: K
@@ -436,9 +636,22 @@ types:
           maxFreq (S3-FIFO only).
         name: freq
         type: uint8
-      - doc: queue says which list the entry sits in (S3-FIFO only; LRU uses main).
+      - doc: queue says which list the entry sits in (LRU uses main alone).
         name: queue
         type: queueID
+      - doc: |-
+          period is the sketch's aging period in which the key last went
+          through the doorkeeper (W-TinyLFU only): a later use in that period
+          counts without asking the doorkeeper. A word: the marks wrap every
+          65 535 periods, and the cache marks them all stale when they do.
+        name: period
+        type: uint16
+      - doc: |-
+          hash is the key's hash under the frequency sketch's seed, taken once
+          when the entry is admitted (W-TinyLFU only): a hit counts the key
+          without hashing it again.
+        name: hash
+        type: uint32
     kind: struct
     name: entry
     typeParams: K comparable, V any
@@ -535,6 +748,148 @@ types:
   - kind: named
     name: Policy
     underlying: uint8
+  - doc: |-
+      sketchBlock is eight words of sixteen four-bit counters, one cache line: a
+      key's four counters all lie in one block.
+    kind: named
+    name: sketchBlock
+    underlying: "[blockWords]uint64"
+  - doc: |-
+      frequencySketch counts how often each key was used, approximately and in
+      bounded memory: a count-min sketch of four-bit counters, sixteen to a word,
+      a key's four counters in one block of eight words — one cache line, so a
+      count costs one miss at most (Caffeine's layout) — behind TinyLFU's
+      doorkeeper, a Bloom filter that takes a key's first use in an aging period
+      so that a key used once never reaches the counters (Einziger, Friedman and
+      Manes, "TinyLFU", ACM TOS 2017). A held key's estimate is the least of its
+      four counters, plus one when its entry went through the doorkeeper in the
+      current aging period. Caller holds the cache's lock.
+    fields:
+      - doc: blocks holds the counters; nil for a cache that never evicts.
+        name: blocks
+        type: "[]sketchBlock"
+      - doc: door is the doorkeeper's bits, cleared at every aging.
+        name: door
+        type: "[]uint64"
+      - doc: blockMask picks a block from a hash.
+        name: blockMask
+        type: uint32
+      - doc: doorMask picks a doorkeeper bit from a mixed hash.
+        name: doorMask
+        type: uint32
+      - doc: additions counts the increments since the last aging.
+        name: additions
+        type: int
+      - doc: sampleSize is the aging period.
+        name: sampleSize
+        type: int
+      - doc: |-
+          period numbers the aging periods, from 1 and wrapping: an entry
+          records the one in which its key last went through the doorkeeper, and
+          periodStale — never a period — when that mark is worth nothing.
+        name: period
+        type: uint16
+      - doc: |-
+          wrapped is set when period came round to its start: the marks the
+          entries hold may now name a period that is not the one they were made
+          in, and the cache that owns them marks every one stale at once.
+        name: wrapped
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          size gives the sketch a table for entries keys: the power of two of words
+          at or above it, one word — sixteen counters — a key, an aging period of
+          sketchSample × entries increments, and a doorkeeper of four bits an
+          increment of the period. The counts start over, and so does the
+          doorkeeper: a new period begins, so an entry's mark of an earlier one is not
+          the new doorkeeper's.
+        name: size
+        params: entries int
+        recv: s *frequencySketch
+      - doc: |-
+          advance opens the next aging period, skipping periodStale, and says
+          through wrapped when the numbers came round.
+        name: advance
+        recv: s *frequencySketch
+      - doc: |-
+          fit grows the table to entries keys when its words are fewer — a cache
+          bounded by weight alone sizes its sketch by its live count. The counts
+          start over on growth.
+        name: fit
+        params: entries int
+        recv: s *frequencySketch
+      - doc: |-
+          clear forgets every count and the doorkeeper, keeping the tables; the
+          cache that clears it holds no entry any more.
+        name: clear
+        recv: s *frequencySketch
+      - doc: |-
+          record counts the use of a key the cache does not hold — a key being
+          admitted —, and records in *seen the period it went through: its first use
+          since the last aging sets its doorkeeper bits and leaves the counters
+          alone, a later one — a key evicted and back within the period — counts.
+          Nothing without a table.
+        name: record
+        params: hash uint32, seen *uint16
+        recv: s *frequencySketch
+      - doc: |-
+          touch counts the use of a key the cache holds, whose entry records in
+          *seen the period it last went through the doorkeeper: a later use in that
+          period counts in the sketch, the first of a new one goes through the
+          doorkeeper — the doorkeeper's answer for a resident key, without reading
+          its bits.
+        name: touch
+        params: hash uint32, seen *uint16
+        recv: s *frequencySketch
+      - doc: |-
+          estimateHeld returns how often a key the cache holds was used: its
+          counters' least, plus one when its entry went through the doorkeeper in
+          this period — exact where the doorkeeper's bits could be shared.
+        name: estimateHeld
+        params: hash uint32, seen uint16
+        recv: s *frequencySketch
+        results: uint64
+      - doc: doorCells returns the doorkeeper's three bit positions for hash.
+        name: doorCells
+        params: hash uint32
+        recv: s *frequencySketch
+        results: first, second, third uint32
+      - doc: doorHolds reports whether the doorkeeper holds the three positions.
+        name: doorHolds
+        params: first, second, third uint32
+        recv: s *frequencySketch
+        results: bool
+      - doc: |-
+          counters returns hash's block and its counter hash: the block from the
+          hash's low bits, each of the four counters from a byte of its remix — a
+          word of its pair from the byte's low bit, a nibble of the word from the
+          four above.
+        name: counters
+        params: hash uint32
+        recv: s *frequencySketch
+        results: block *sketchBlock, mix uint32
+      - doc: |-
+          increment counts one more use of the key of hash, ages the table every
+          sampleSize increments, and does nothing without a table. A counter at its
+          ceiling stays there; the four updates are branch-free.
+        name: increment
+        params: hash uint32
+        recv: s *frequencySketch
+      - doc: |-
+          frequency returns the least of the four counters of the key of hash, 0 to
+          15, and 0 without a table.
+        name: frequency
+        params: hash uint32
+        recv: s *frequencySketch
+        results: uint64
+      - doc: |-
+          age halves every counter and the count of additions — less the counters'
+          lost halves, so the period stays sampleSize increments — and empties the
+          doorkeeper.
+        name: age
+        recv: s *frequencySketch
+    name: frequencySketch
   - fields:
       - name: Hits
         type: uint64
@@ -618,15 +973,28 @@ types:
         type: Policy
       - name: items
         type: map[K]*entry[K, V]
-      - doc: main is the LRU list, and S3-FIFO's main queue.
+      - doc: |-
+          main is the LRU list, S3-FIFO's main queue and W-TinyLFU's protected
+          segment.
         name: main
         type: entryList[K, V]
-      - doc: small is S3-FIFO's probationary queue; empty under LRU.
+      - doc: |-
+          small is S3-FIFO's probationary queue and W-TinyLFU's window; empty
+          under LRU.
         name: small
+        type: entryList[K, V]
+      - doc: probation is W-TinyLFU's probationary segment; empty otherwise.
+        name: probation
         type: entryList[K, V]
       - doc: ghost remembers the keys probation evicted (S3-FIFO only).
         name: ghost
         type: ghostSet[K]
+      - doc: sketch counts how often each key was used (W-TinyLFU only).
+        name: sketch
+        type: frequencySketch
+      - doc: shares are W-TinyLFU's segment bounds.
+        name: shares
+        type: tinyLFUShares
       - doc: expiry orders the entries that carry a deadline, earliest first.
         name: expiry
         type: deadlineHeap[K, V]
@@ -645,25 +1013,30 @@ types:
         type: uint64
     kind: struct
     methods:
-      - doc: |-
-          admit places a new entry: at the front of the LRU list, or for S3-FIFO in
-          the small queue — main when the ghost remembers its key. Caller holds the lock.
+      - doc: admit places a new entry by the policy. Caller holds the lock.
         name: admit
         params: ent *entry[K, V]
         recv: c *UnlockedMap[K, V]
       - doc: |-
-          touch records a hit: LRU promotes the entry, S3-FIFO counts it. Caller
-          holds the lock.
+          touch records a hit by the policy: LRU promotes the entry, S3-FIFO counts
+          it, W-TinyLFU counts it and moves it up its segment. Caller holds the lock.
         name: touch
         params: ent *entry[K, V]
         recv: c *UnlockedMap[K, V]
       - doc: |-
           evictOne removes one entry by the policy, never fresh — the entry the
-          current Set wrote — and reports whether it found a victim. Caller holds the lock.
+          current Set wrote — and reports whether it found a victim. Caller holds
+          the lock.
         name: evictOne
         params: fresh *entry[K, V], pending *[]evictionValue[K, V]
         recv: c *UnlockedMap[K, V]
         results: bool
+      - doc: |-
+          admitS3FIFO places a new entry in the small queue, or in main when the
+          ghost remembers its key. Caller holds the lock.
+        name: admitS3FIFO
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
       - doc: |-
           evictS3FIFO evicts from the small queue while it holds its share or main is
           empty, from main otherwise, and falls back to the other queue when the
@@ -676,7 +1049,7 @@ types:
         recv: c *UnlockedMap[K, V]
         results: bool
       - doc: |-
-          smallIsLarge reports whether the small queue holds its tenth of the bound
+          smallIsLarge reports whether the small queue holds its share of the bound
           that applies. Caller holds the lock.
         name: smallIsLarge
         recv: c *UnlockedMap[K, V]
@@ -704,11 +1077,132 @@ types:
         recv: c *UnlockedMap[K, V]
         results: bool
       - doc: |-
-          ghostBound is how many hashes the ghost keeps: the entry bound when there is
-          one, else the live count. Caller holds the lock.
+          ghostBound is how many hashes the ghost keeps: a quarter of the entry
+          bound when there is one, else of the live count, and at least one. Caller
+          holds the lock.
         name: ghostBound
         recv: c *UnlockedMap[K, V]
         results: int
+      - doc: |-
+          initTinyLFU derives the segment bounds and sizes the sketch: by the entry
+          bound, else by the live count as it grows; a cache that never evicts keeps
+          none. Caller holds the lock.
+        name: initTinyLFU
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          admitTinyLFU hashes and counts a new entry, places it at the front of the
+          window, and moves the window's overflow into probation while main has room
+          for it. Caller holds the lock.
+        name: admitTinyLFU
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          touchTinyLFU records a hit: the sketch counts it, and the entry moves to
+          the front of its segment — out of probation into protected. Caller holds
+          the lock.
+        name: touchTinyLFU
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          countHit counts a hit on a held entry in the sketch, and retires every
+          mark when that use ended the last period of a turn. Caller holds the lock.
+        name: countHit
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          retireMarks marks every held entry's doorkeeper period stale, once the
+          periods' numbers have come round: a mark made 65 535 periods ago must not
+          read as the current period's. One pass over the entries a turn of 65 535
+          periods — each a tenth of the bound's increments at least — is nothing
+          beside the use that wraps it. Caller holds the lock.
+        name: retireMarks
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          reorderTinyLFU moves a window entry to the window's front, and a
+          probation entry to protected's, whose oldest go back to probation while
+          it holds more than its share. A probation entry that outweighs protected's
+          whole share is refreshed in probation instead: no share could hold it, and
+          moving it would empty protected of the entries that fit. Caller holds the
+          lock.
+        name: reorderTinyLFU
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          exceedsProtected reports whether ent alone is more than protected's share
+          of a bound that applies. Caller holds the lock.
+        name: exceedsProtected
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          trimProtected sends protected's oldest back to probation while it holds
+          more than its share. Caller holds the lock.
+        name: trimProtected
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          rebalanceReweighed brings the lists back within their shares after a write
+          gave a held entry a new weight: a protected entry that now outweighs the
+          whole share goes to probation's front, any other protected entry may have
+          pushed protected over its share. Only a write reweighs, so the hit path
+          never comes here. Caller holds the lock.
+        name: rebalanceReweighed
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          evictTinyLFU evicts by W-TinyLFU's admission: while the window holds more
+          than its share, its oldest entry is a candidate for main and contests
+          main's victim; otherwise main's victim goes — probation's oldest, then
+          protected's —, or the window's oldest when main has none. The entry the
+          current Set wrote is stepped over, never stopped at, and never evicted.
+          Caller holds the lock.
+        name: evictTinyLFU
+        params: fresh *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          contest settles a candidate from the window: it moves into probation when
+          main has room for it; otherwise the sketch decides between it and main's
+          victim, and the one estimated lower goes — the candidate when they tie, so a
+          key's estimate must exceed the one it replaces, and reach two at least. The
+          estimate is the sketch's, shared between keys: no guarantee is made about
+          actual uses.
+          Caller holds the lock.
+        name: contest
+        params: candidate, fresh *entry[K, V], pending *[]evictionValue[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          probate moves a window entry to the front of probation. Caller holds the
+          lock.
+        name: probate
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          mainVictim returns main's next victim, never fresh: probation's oldest,
+          then protected's, or nil. Caller holds the lock.
+        name: mainVictim
+        params: fresh *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: "*entry[K, V]"
+      - doc: |-
+          windowIsLarge reports whether the window holds more than its share of a
+          bound that applies. Caller holds the lock.
+        name: windowIsLarge
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          protectedIsLarge reports whether protected holds more than its share of a
+          bound that applies. Caller holds the lock.
+        name: protectedIsLarge
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          mainHasRoom reports whether main — probation and protected — can take ent
+          within its share of every bound: what is left of the bound past the
+          window's share. Caller holds the lock.
+        name: mainHasRoom
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: bool
       - doc: init configures c from cfg; NewUnlockedMap and NewCache share it.
         name: init
         params: cfg Config[K, V]
@@ -835,6 +1329,12 @@ types:
         recv: c *UnlockedMap[K, V]
         results: bool
       - doc: |-
+          weight returns the summed weight of the live entries, over every list.
+          Caller holds the lock.
+        name: weight
+        recv: c *UnlockedMap[K, V]
+        results: int64
+      - doc: |-
           evictIfNeeded removes entries while a bound is exceeded, never fresh — the
           entry the current Set wrote. An entry whose deadline has passed goes before
           any live one: the heap's top is tried first, so a dead entry never costs a
@@ -879,3 +1379,27 @@ types:
         recv: c *UnlockedMap[K, V]
     name: UnlockedMap
     typeParams: K comparable, V any
+  - doc: |-
+      tinyLFUShares are W-TinyLFU's segment bounds, derived once from the
+      cache's: the window's and the protected segment's, in entries and in
+      weight.
+    fields:
+      - name: window
+        type: int
+      - name: windowWeight
+        type: int64
+      - name: protected
+        type: int
+      - name: protectedWeight
+        type: int64
+    kind: struct
+    name: tinyLFUShares
+vars:
+  - doc: |-
+      sketchSeed keys the hash the frequency sketch counts by. One seed per
+      process, drawn at start: no input can be crafted to collide with a key's
+      counters, and two caches of one process count a key alike.
+    items:
+      - name: sketchSeed
+        value: maphash.MakeSeed()
+    name: sketchSeed

@@ -15,6 +15,34 @@
 // decide, or carry a per-key revision in the command, because a replayed
 // compare-and-swap is not harmless under ABA (D6, R1-04).
 //
+// A proposal made on a follower travels to the leader as a forward, and
+// once every member runs this version no forward is applied twice,
+// whatever the delay of a copy of it, even across a restart (#1482). To
+// keep that, the node a forward went to declines a frame it may have
+// handled already, and the proposal meets OUTCOME_UNKNOWN in three cases:
+// a copy that arrives after the forward window, when the first answer
+// was lost; a forward its connection delivered behind a later one, when
+// that connection was replaced; and any forward still sent to a leader
+// that restarted, until the next election. Two bounds add their own,
+// and neither drops a new forward: the leader keeps at most 2^20
+// answers, and past them forgets the oldest, whatever its age, so a copy
+// of a forward whose answer went before the window ended, when the first
+// answer was lost, meets OUTCOME_UNKNOWN too, which only a load above
+// 47 662 forwards a second under the defaults reaches; and, past 65 536
+// marks of the current term (runs per lane: about 32 768 restarts when
+// each run forwards on both lanes), the least recent mark of the node
+// holding the most goes, and that node's new runs wait for the next
+// term; restarts spread over several nodes fence each of them in turn
+// (#1540). The bound of 2^20 answers, about 152 MiB and 280 MiB at most
+// under churn, holds per Raft group: a multi node with several groups
+// adds them. None of them is a refusal, true
+// or false: the entry may or may not have been appended. Handle it as
+// any OUTCOME_UNKNOWN: read the state through Barrier before a Propose
+// is made again, and retry a ProposeSession with the same arguments.
+// The forwards declined are
+// counted by reason in consensus_forwards_dropped_total, and the answers
+// forgotten at the bound in consensus_forward_answers_forgotten_total.
+//
 // # Exactly once, through a client session
 //
 // A command without a natural key — an event appended, a counter moved —

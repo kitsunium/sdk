@@ -57,6 +57,9 @@ const (
 	mChainRefusals    = "consensus_chain_refusals_total"
 	mStopped          = "consensus_stopped"
 	mJoinsRateLimited = "consensus_joins_rate_limited_total"
+	mForwardsDropped  = "consensus_forwards_dropped_total"
+	mForwardRuns      = "consensus_forward_runs"
+	mForwardForgotten = "consensus_forward_answers_forgotten_total"
 	mLogBytes         = "consensus_log_bytes"
 	mLogQuota         = "consensus_log_quota_bytes"
 	mFsFree           = "consensus_fs_free_bytes"
@@ -85,6 +88,9 @@ var (
 	// where a healthy commit lands, so a regression is visible before it is
 	// an outage.
 	latencyBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
+	// fwdDropReasons are consensus_forwards_dropped_total's reasons, in the
+	// order of raft.ForwardDropsValue's fields (#1482).
+	fwdDropReasons = [3]string{"copy", "restarted", "evicted"}
 )
 
 // obs holds a node's instruments. Every method is safe on a nil Meter,
@@ -117,6 +123,11 @@ type obs struct {
 	// seenSilenced are consensus_links_aborted_total's by reason.
 	seenTails, seenReloads, seenRounds, seenPreVotes int64
 	seenTimedOut, seenSilenced                       int64
+	// seenDrops are consensus_forwards_dropped_total's by reason, in the
+	// order of fwdDropReasons; seenForgotten is
+	// consensus_forward_answers_forgotten_total's.
+	seenDrops     [3]int64
+	seenForgotten int64
 }
 
 // newObs binds a node's instruments to its configured Meter, Tracer and
@@ -356,6 +367,7 @@ func (n *Node) observePeers() {
 	o.setGauge(mFailureTolerance, float64(n.r.FailureTolerance(now)))
 	st := n.r.Summary()
 	o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
+	n.observeForwards(&st)
 	lag, _ := replicationLag(&st, now)
 	o.setGauge(mReplicationLag, float64(lag))
 	seen := map[coreconsensus.NodeID]bool{}
@@ -507,4 +519,20 @@ func (n *Node) observeLinkAborts(o *obs) {
 	timedOut, silenced := la.linksAborted()
 	o.addTo(mLinksAborted, &o.seenTimedOut, timedOut, coreotel.String("reason", "user_timeout"))
 	o.addTo(mLinksAborted, &o.seenSilenced, silenced, coreotel.String("reason", "read_silence"))
+}
+
+// observeForwards publishes the forwards this node neither proposed nor
+// answered, by reason, the forwarder runs its fence keeps a mark of (raft's
+// fwdFence, #1482) and the answers its table forgot at its bound before
+// their window ended: a run of drops of reason evicted names the fence's
+// last resort, a node with more than 65 536 runs in one term, and a copy of
+// an answer forgotten is a drop of reason copy.
+func (n *Node) observeForwards(st *raft.SummaryValue) {
+	o := n.obs
+	d := st.ForwardDrops
+	for i, total := range [3]uint64{d.Copies, d.Restarted, d.Evicted} {
+		o.addTo(mForwardsDropped, &o.seenDrops[i], int64(total), coreotel.String("reason", fwdDropReasons[i]))
+	}
+	o.setGauge(mForwardRuns, float64(st.ForwardRuns))
+	o.addTo(mForwardForgotten, &o.seenForgotten, int64(st.ForwardForgotten))
 }

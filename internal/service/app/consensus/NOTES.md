@@ -745,6 +745,66 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   (ADR 0152, the amendment of 2026-11-16). The class between two nodes of
   4 stays open until one of them runs this release. The driver filters no term before `Step` and needs nothing
   more.
+- Hand the step function a forward window shorter than the transport's
+  resend window, or take that window for the safety. Raft keeps the answer
+  it gave a forward for `ForwardWindow` and answers a copy within it from
+  the table (#1482), and the node passes twice the resend window its
+  transport states (`forwardWindow`, the `resendWindower` capability,
+  `TestTheForwardWindowIsTwiceTheTransportsResendWindow`). The TCP
+  transport's is 4 × `WriteTimeout` + `HandshakeTimeout` + the kernel's
+  bound, 11 s under the defaults: `sendBatch` writes a batch at most three
+  times — on the link, on the link dialled again after a write that
+  failed, on the back link — each write under `WriteTimeout` and the dial
+  under `HandshakeTimeout`; the back link's write first waits for its
+  lock, which another write holds for a `WriteTimeout` at most; and the
+  bytes of a write that returned reach the peer within the bound
+  `boundUnacknowledged` sets, `WriteTimeout` on Linux, rounded up to the
+  second on macOS and Windows, none on the BSDs and illumos, where
+  `WriteTimeout` stands for it (`unackedLeg`, review Q3). The doubling is
+  for what no timeout bounds on the receiving node, its reader, its inbox
+  and its loop; the step function's clock covers a node that did not run.
+  That window counts this node's configuration, a peer's timeouts being
+  unknown here, and a sender's running time: a sender stopped mid-batch
+  resumes past its deadline and writes the batch again, and the copy came
+  25.1 s after its original at the defaults (the safety review of #1482,
+  D1; `TestAStalledSendersLateCopyIsAppendedOnce`, below). None of that is
+  the safety: raft's fence (`fwdFence`) never handles a copy again,
+  whatever its delay, after a restart of the receiving node too, and a
+  copy past the window is neither proposed nor answered, its forwarder
+  answering `OUTCOME_UNKNOWN` if it still waits. A restarted node handles
+  no forward of a term up to its durable term at start: forwards sent to
+  a leader that restarted are answered by nobody until the next election.
+  That rule rests on `forward`, which stamps the term and the leader of
+  one status, so a forward to a node always carries a term that node led
+  (raft's guide; a refusal can leave before its term is durable, so the
+  timing of an answer is not what holds). Every forward the fence turns
+  away, neither proposed nor answered, is counted,
+  `consensus_forwards_dropped_total` by reason (`copy`, `restarted`,
+  `evicted`); a forward of a term above its receiver's, which no honest
+  member sends, is dropped before the fence by raft's term rule
+  (`stepLaterAnswer`, #1472) and counted nowhere. The runs its fence marks are
+  `consensus_forward_runs`, and the answers its table forgot at its bound
+  before their window ended are `consensus_forward_answers_forgotten_total`
+  (`observeForwards`, `TestTheForwardDropsArePublishedByReason`); past
+  4 096 runs in one term
+  the fence keeps every mark of that term, and only past 65 536 marks of
+  the current term (runs per lane: about 32 768 restarts when each run
+  forwards on both lanes) does the least recent mark of the node holding
+  the most go, that node's new runs waiting for the next term, which the
+  reason `evicted` shows; restarts spread over several nodes fence each
+  of them in turn (#1540).
+  Another transport states no window and gets the step function's
+  default, 22 s. No forward is dropped for room: at the step function's
+  bound (2^20 answers kept, raft's guide) the oldest answer is forgotten,
+  and a copy of it is fenced, the forwarder's sweep answering
+  `OUTCOME_UNKNOWN` if it still waits. `TestAStalledSendersLateCopyIsAppendedOnce`
+  (Linux, 16 s, in the package's suite) runs a real TCP transport at both
+  ends and a real step function at the receiver: the sender, this test
+  binary run again under `KITSUNIUM_CONSENSUS_STALL_ROLE`, which it never
+  passes on and which spawns nothing, is stopped mid-write by `SIGSTOP`
+  for 14 s, past the receiver's window of 12 s (`WriteTimeout` 1 s), and
+  its copy is not appended again (red on #1482's first fix: appended
+  twice); a schedule that delivers no copy skips, naming what it saw.
 - Forward a JOIN from a node that would answer it only once it applied the
   `AddLearner` itself: a learner still waiting for its snapshot held it for
   its whole deadline and answered OUTCOME_UNKNOWN although the leader had

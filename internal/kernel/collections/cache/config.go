@@ -9,7 +9,7 @@ import (
 // Config parameterises a Cache. The zero value is valid: an unbounded cache with
 // no default TTL, the system clock, and no eviction callback.
 type Config[K comparable, V any] struct {
-	// MaxEntries caps the live entry count (LRU eviction above it). 0 = unbounded.
+	// MaxEntries caps the live entry count (the policy evicts above it). 0 = unbounded.
 	MaxEntries int
 	// DefaultTTL applies to Set entries (SetTTL overrides per-entry). 0 = no expiry.
 	DefaultTTL time.Duration

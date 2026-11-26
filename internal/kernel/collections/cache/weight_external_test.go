@@ -109,7 +109,7 @@ func TestACacheThatWeighsNothingReportsNoWeight(t *testing.T) {
 // entries ahead of it. A walk that promoted its hit entries into main and
 // evicted nothing did not ask main again. An entry alone in main with a hit
 // left was taken for the entry just written and never evicted. Each case
-// ends with a Set over the bound of 100, and is run under both policies.
+// ends with a Set over the bound of 100, and is run under every policy.
 func TestTheS3FIFOWalkMakesRoomWhileAVictimIsLeft(t *testing.T) {
 	t.Parallel()
 	type tc struct {

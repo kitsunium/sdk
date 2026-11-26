@@ -19,6 +19,14 @@ type silenceBounder interface {
 	boundSilence(d time.Duration)
 }
 
+// resendWindower is a transport that states how long after a frame first
+// reached its peer it may deliver that frame again while its sender runs
+// (TCPTransport.resendWindow, #1482): the step function keeps a forward's
+// answer twice that long (forwardWindow).
+type resendWindower interface {
+	resendWindow() time.Duration
+}
+
 // joinReleaser is a transport that keeps a JOIN answer's members admitted
 // apart from the engine's configuration until the joiner is admitted
 // (#552).
