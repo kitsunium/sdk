@@ -75,6 +75,12 @@ func TestDrain_graceUnderArrivals(t *testing.T) {
 // backend b; with lateSYN, one more client begins its dial inside the grace
 // and sends its SYN only once a probe was refused: the listener closed.
 func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend, lateSYN bool) {
+	//: Windows cannot give the order the late case forces: its contract
+	//: asserted, then skipped.
+	if lateSYN && runtime.GOOS == "windows" {
+		windowsRefusesLate(t)
+		t.Skip("Windows answers a refused SYN only after its own retransmissions, and as WSAECONNREFUSED: no probe bounded by drainProbeDial dates the close, and no refusal is judged the kernel's")
+	}
 	srv := New(WithDrainGrace(drainGraceTest))
 	t.Cleanup(func() { swallowErr(srv.Close()) })
 	counts := p.group(srv, b)
@@ -207,6 +213,67 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend, 
 	}
 	if o, cl := counts(); o != cl {
 		t.Fatalf("%d opened, %d closed", o, cl)
+	}
+}
+
+// wsaeConnRefused is WSAECONNREFUSED (winerror.h, 10061): what Windows'
+// connectex returns for a refused connection. Package syscall's
+// ECONNREFUSED on Windows is a value of its own, never returned by a socket
+// call, and Errno.Is does not map one onto the other.
+const wsaeConnRefused = syscall.Errno(10061)
+
+// windowsRefusesLate asserts the contract that keeps the late case off
+// Windows (ADR 0095). A dial to a closed loopback port, bounded by
+// drainProbeDial, times out: the stack answers the RST by sending its SYN
+// again, and connectex fails only once those retries are spent, about two
+// seconds later. The dial then fails with WSAECONNREFUSED, which
+// errors.Is(err, syscall.ECONNREFUSED) does not match. drainProbe therefore
+// never dates the close there, and the grace's judgement never takes a
+// refusal for the kernel's. Should either change, this fails, and the late
+// case can run on Windows.
+func windowsRefusesLate(t *testing.T) {
+	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	swallowErr(ln.Close())
+	type tc struct {
+		name    string
+		timeout time.Duration
+		check   func(err error) string
+	}
+	cases := []tc{
+		{name: "bounded", timeout: drainProbeDial, check: func(err error) string {
+			var ne stdnet.Error
+			//: refused within the probe's bound: the probe works here.
+			if !errors.As(err, &ne) || !ne.Timeout() {
+				return "not a timeout within " + drainProbeDial.String()
+			}
+			return ""
+		}},
+		{name: "unbounded", timeout: 10 * time.Second, check: func(err error) string {
+			//: the refusal is WSAECONNREFUSED, and only that.
+			if !errors.Is(err, wsaeConnRefused) || errors.Is(err, syscall.ECONNREFUSED) {
+				return "not WSAECONNREFUSED alone"
+			}
+			return ""
+		}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		conn, err := stdnet.DialTimeout("tcp", addr, c.timeout)
+		//: the closed port accepted.
+		if err == nil {
+			swallowErr(conn.Close())
+			t.Fatalf("%s dial to the closed port %s was accepted", c.name, addr)
+		}
+		//: the platform's contract changed.
+		if why := c.check(err); why != "" {
+			t.Fatalf("%s dial to the closed port %s: %v: %s; the late case may run on Windows now", c.name, addr, err, why)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
