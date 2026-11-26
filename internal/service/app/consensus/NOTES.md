@@ -1110,11 +1110,17 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   next fell due coalesces them, the two snapshots kept can lie far apart and
   the log, compacted to the older, stops short of it with the writes done.
   Wait for the log to start past the stopped node's end
-  (`compactedPastItsEnd`, #588). A test whose leader must keep its
+  (`compactedPastItsEnd`, #588), and read that end only once the stopped
+  node hears nothing: the memory network queues what is sent to a stopped
+  node and delivers it at its restart, so the appends its leader went on
+  sending it brought it back past the end read, it caught up by appends,
+  and the snapshot the test waited for never came — one run in about two
+  thousand, when the leader's cuts stalled near the start of its log
+  (`stopHearing`, #1547). A test whose leader must keep its
   leadership cuts the restarted node off from the other followers, which it
   would grant a PreVote, and runs on `steadyTiming`: testTimingFast's
   100 ms CheckQuorum window stepped a leader down on a loaded run
-  (`hearOnlyTheLeader`, #588). A setup on disk proposes to whichever node
+  (`restartHearingOnly`, #588). A setup on disk proposes to whichever node
   leads (`proposeOnDisk`): a leader whose own fdatasync stalls past the
   maximum election timeout hands its leadership over (#554, #587).
 - Hand a held snapshot stream its release with a bare channel send: the
@@ -1124,7 +1130,7 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `TestATransferInFlightPinsCompaction`, on `testTimingFast` and with the
   restarted node granting any PreVote, once in a few hundred `-race` runs
   (#598). `releaseHeld` bounds the send and says why nobody took it; that
-  test runs on `steadyTiming` behind `hearOnlyTheLeader`, as its siblings.
+  test runs on `steadyTiming` behind `restartHearingOnly`, as its siblings.
 - Run a timing contract whose `ElectionTimeoutMin` is not well above the
   disk's fdatasync latency: a campaign is a durable term and vote on the
   candidate and on each voter, a voter's queued behind the sync its storage

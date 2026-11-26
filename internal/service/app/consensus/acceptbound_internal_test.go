@@ -383,14 +383,13 @@ func TestRemovingAPeerCancelsItsSnapshotStream(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	compactedPastItsEnd(t, l, lag)
+	compactedPastItsEnd(t, c, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
 	lt.holding.Store(true)
 	defer lt.holding.Store(false)
-	hearOnlyTheLeader(c, l, lag)
-	c.start(lag)
+	restartHearingOnly(c, lag, l)
 	select {
 	case <-lt.started:
 	case <-time.After(10 * time.Second):

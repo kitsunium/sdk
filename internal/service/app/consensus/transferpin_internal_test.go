@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
 
 // holdTransport is a memory transport whose snapshot streams wait, while
@@ -107,8 +109,19 @@ func (r *eofReader) Read(p []byte) (int, error) {
 // slow runner (macOS, Solaris) cut that way, and the setup failed (#588).
 // The leader's cuts are let settle too, so the snapshot it offers is the
 // one at the end of its writes, whatever the pace of its cuts.
-func compactedPastItsEnd(t *testing.T, l, lag *testNode) {
+//
+// The node hears nothing from here until restartHearingOnly: it is cut off
+// from every member, and the frames the memory network still queues for it
+// are dropped. Its end is then the end it restarts with. The network kept
+// queueing what the leader sent it while it was down, the appends of the
+// window it was replicating in, and delivered them at its restart: the node
+// came back holding the entries its end, read here, did not count. With
+// the leader's log starting at 17, its cuts stalled as above, the appends
+// queued reached past it, the node caught up by appends, and no snapshot
+// was offered (#1547).
+func compactedPastItsEnd(t *testing.T, c *cluster, l, lag *testNode) {
 	t.Helper()
+	stopHearing(c, lag)
 	_, end := lag.log.Bounds()
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		if first, _ := l.log.Bounds(); first > end+1 {
@@ -122,24 +135,48 @@ func compactedPastItsEnd(t *testing.T, l, lag *testNode) {
 	}
 }
 
-// hearOnlyTheLeader cuts the stopped node off from every member but the
-// leader, both ways, before it restarts. Restarted, it knows no leader and
-// grants any PreVote: a follower whose election timer fired under a loaded
-// -race run then won an election with it, and the leader whose stream the
-// test holds lost its leadership before it offered one — one run in a few
-// hundred (#588). Cut off, that follower's PreVote reaches only the leader,
-// which refuses it.
+// stopHearing cuts stopped node tn off from every member, both ways, then
+// drops the frames its end of the memory network still queues: delivered
+// at its restart, they were entries it did not hold when it stopped
+// (#1547). Cut first, nothing is queued for it after the drop.
+func stopHearing(c *cluster, tn *testNode) {
+	c.net.Isolate(tn.id, true)
+	tr := NewMemoryTransport(c.net, tn.id)
+	for {
+		select {
+		case <-tr.ctrl:
+		case <-tr.data:
+		default:
+			return
+		}
+	}
+}
+
+// restartHearingOnly restarts tn, which compactedPastItsEnd stopped hearing,
+// then links it, both ways, to the members of hear and to no other. It
+// starts cut off, so nothing reaches it before it runs but what a live node
+// would be sent.
+//
+// A test whose leader holds a stream names that leader alone. Restarted,
+// the node knows no leader and grants any PreVote: a follower whose
+// election timer fired under a loaded -race run then won an election with
+// it, and the leader whose stream the test holds lost its leadership
+// before it offered one — one run in a few hundred (#588). Cut off, that
+// follower's PreVote reaches only the leader, which refuses it.
 //
 // The leader itself must not step down either: with testTimingFast's
 // CheckQuorum window of 100 ms, a loop the loaded runner did not schedule
 // for 130 ms heard from no peer and stepped down (traced under -race
 // -cpu=4). These tests run on steadyTiming, whose window is 500 ms.
-func hearOnlyTheLeader(c *cluster, l, lag *testNode) {
-	for _, tn := range c.nodes {
-		if tn != l && tn != lag {
-			c.net.Cut(lag.id, tn.id, true)
-			c.net.Cut(tn.id, lag.id, true)
+func restartHearingOnly(c *cluster, tn *testNode, hear ...*testNode) {
+	c.start(tn)
+	for _, other := range c.nodes {
+		if other == tn {
+			continue
 		}
+		cut := !slices.Contains(hear, other)
+		c.net.Cut(tn.id, other.id, cut)
+		c.net.Cut(other.id, tn.id, cut)
 	}
 }
 
@@ -222,13 +259,12 @@ func TestATransferInFlightPinsCompaction(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	compactedPastItsEnd(t, l, lag)
+	compactedPastItsEnd(t, c, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
 	lt.holding.Store(true)
-	hearOnlyTheLeader(c, l, lag)
-	c.start(lag)
+	restartHearingOnly(c, lag, l)
 	select {
 	case <-lt.started:
 	case <-time.After(10 * time.Second):
@@ -290,7 +326,7 @@ func TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	compactedPastItsEnd(t, l, lag)
+	compactedPastItsEnd(t, c, l, lag)
 	// A cut on request, at the last index: the snapshot the node is
 	// offered next.
 	if _, err := l.node.SaveSnapshot(context.Background(), "op:test", io.Discard); err != nil {
@@ -308,7 +344,7 @@ func TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp(t *testing.T) {
 	cutOff := func() { once.Do(func() { link(true); close(ended) }) }
 	lt.streamed.Store(&cutOff)
 	lt.holding.Store(true)
-	c.start(lag)
+	restartHearingOnly(c, lag, c.nodes...)
 	select {
 	case <-lt.started:
 	case <-time.After(10 * time.Second):
@@ -402,7 +438,7 @@ func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	compactedPastItsEnd(t, l, lag)
+	compactedPastItsEnd(t, c, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
@@ -411,8 +447,7 @@ func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
 	cutOff := func() { c.net.Isolate(lag.id, true) }
 	lt.streamed.Store(&cutOff)
 	lt.holding.Store(true)
-	hearOnlyTheLeader(c, l, lag)
-	c.start(lag)
+	restartHearingOnly(c, lag, l)
 	var offer coreconsensus.InstallOfferValue
 	select {
 	case offer = <-lt.started:
@@ -464,15 +499,14 @@ func TestALeaderThatLosesItsLeadershipStopsItsSnapshotStream(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	compactedPastItsEnd(t, l, lag)
+	compactedPastItsEnd(t, c, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
 	lt.holding.Store(true)
-	hearOnlyTheLeader(c, l, lag)
 	first, _ := l.log.Bounds()
 	_, end := lag.log.Bounds()
-	c.start(lag)
+	restartHearingOnly(c, lag, l)
 	select {
 	case <-lt.started:
 	case <-time.After(10 * time.Second):
@@ -536,9 +570,9 @@ func TestAFollowerSlowerToRestoreThanThePinBoundCatchesUp(t *testing.T) {
 	for i := range 100 {
 		propose(t, l.node, fmt.Sprintf("a%03d=v", i))
 	}
-	compactedPastItsEnd(t, l, f)
+	compactedPastItsEnd(t, c, l, f)
 	fid = f.id
-	c.start(f)
+	restartHearingOnly(c, f, c.nodes...)
 	// Steady writes, about a hundred a second, for at most 20 s.
 	caught := false
 	i := 0
@@ -553,5 +587,43 @@ func TestAFollowerSlowerToRestoreThanThePinBoundCatchesUp(t *testing.T) {
 		restores.Load(), caught, f.node.Status().Applied, l.node.Status().Commit)
 	if !caught {
 		t.Errorf("a follower whose Restore takes 3 s, past the 2 s pin bound, never caught up under writes: %d restores in 20 s", restores.Load())
+	}
+}
+
+// #1547: the node compactedPastItsEnd waits behind restarts with the log
+// whose end it read. Stopped while its leader replicated to it, the node
+// was still sent the appends of its window, and the memory network queued
+// them for it, to deliver at its restart: it came back past that end, and
+// when the leader's log started near it, as it does when the leader's cuts
+// stall, it caught up by appends, offered no snapshot, and the tests that
+// wait for one failed one run in about two thousand. Nothing waits for it
+// once the setup read its end.
+func TestANodeStoppedBehindHearsNothingSentWhileItWasDown(t *testing.T) {
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 6}, every: 20, size: 3}
+	c.configure = func(_ *testNode, cfg *Config) { cfg.InitialTiming = steadyTiming() }
+	newClusterWith(t, c)
+	l := c.settledLeader(5 * time.Second)
+	lag := c.otherThan(l)
+	// Replicating to it, the leader sends it every new entry at once.
+	waitFor(t, "the leader replicating its whole log to the node", func() bool {
+		replicating := false
+		l.node.exec(func() {
+			last := l.node.r.Status().Last
+			for _, p := range l.node.r.PeerStats() {
+				if p.ID == lag.id {
+					replicating = !p.Flags.Has(raft.StatProbing) && !p.Flags.Has(raft.StatSnapshot) && p.Match == last
+				}
+			}
+		})
+		return replicating
+	})
+	c.kill(lag)
+	for i := range 200 {
+		propose(t, l.node, fmt.Sprintf("a%d=v", i))
+	}
+	compactedPastItsEnd(t, c, l, lag)
+	tr := NewMemoryTransport(c.net, lag.id)
+	if data, ctrl := len(tr.data), len(tr.ctrl); data+ctrl != 0 {
+		t.Fatalf("%d frames on the data lane and %d on the control lane wait for the stopped node: delivered at its restart, the appends among them extend the log whose end the setup read", data, ctrl)
 	}
 }
