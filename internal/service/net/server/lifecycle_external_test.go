@@ -438,6 +438,7 @@ func TestServer_Close(t *testing.T) {
 			t.Fatalf("start: %v", err)
 		}
 		addr := srv.State().Listeners[0].Address
+		held := serverListeners(t, addr)
 		for range c.requests {
 			roundTrip(t, addr, "x")
 		}
@@ -455,7 +456,7 @@ func TestServer_Close(t *testing.T) {
 		//: address possible (releasedAfterClose). Dialling the freed port
 		//: proves nothing — another test's listener on 127.0.0.1:0 may just
 		//: have been given it, and would answer.
-		releasedAfterClose(t, addr)
+		releasedAfterClose(t, addr, held)
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
