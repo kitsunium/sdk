@@ -419,6 +419,26 @@ packages:
                 type: bool
             recv: pointer
           - doc: |-
+              FetchMany appends to refs one reference for every key of keys, in order:
+              the value keys[i] holds, or nil when the map does not hold it unexpired.
+              Each key is read as Fetch reads it, except that the clock is read once for
+              the batch, and not at all while no entry carries a deadline, every deadline
+              judged at that instant. A key keys names more than once is read once: its
+              first position records the hit, and every later one gets the same reference
+              without moving the entry or counting it again. A reference is the map's own
+              value: valid until the next call into the map, to be read, never written
+              through. refs grows only when its capacity is short. OnEvict runs at the end
+              of the call for every entry the batch reaped.
+            in:
+              - name: keys
+                type: "[]K"
+              - name: refs
+                type: "[]*V"
+            name: FetchMany
+            out:
+              - type: "[]*V"
+            recv: pointer
+          - doc: |-
               Deadline returns the instant the entry under key expires, on the cache's
               clock, and whether key is present; an entry without a deadline answers the
               zero Time. It is a read, not a hit: the policy records nothing, no counter

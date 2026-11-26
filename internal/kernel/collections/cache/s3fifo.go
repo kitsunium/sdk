@@ -4,6 +4,11 @@ package cache
 // enough to survive three passes of main's clock hand.
 const maxFreq uint8 = 3
 
+// readMark is the bit of an entry's freq FetchMany marks a hit it recorded
+// with, under every policy, for the length of one batch: far above maxFreq,
+// and cleared before the batch returns (#840).
+const readMark uint8 = 1 << 7
+
 // smallShare is the small queue's share of the capacity, written as the
 // divisor it is used as: a fiftieth. The paper's tenth admitted into main
 // keys that came back once by chance; measured over 100 million accesses

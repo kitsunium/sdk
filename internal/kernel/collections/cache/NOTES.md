@@ -35,3 +35,28 @@ inlined in `fetch` beside LRU's.
 S3-FIFO's hit sets a counter; W-TinyLFU's adds one sketch count — about
 16 ns on the development VM's Zen 1, where LRU's hit takes 49. The verdict is
 the A/B lane's (`834-fetch-hit-s3fifo`, `834-fetch-hit-tinylfu`).
+
+## The batched read
+
+`UnlockedMap.FetchMany(keys, refs)` (#840, ADR 0025 amended 2026-11-15)
+appends one reference a key — the entry's own value, nil for a miss —, read
+as `Fetch` reads it with three differences, each a cost `Fetch` pays once a
+key: the clock is read once a batch, at the first entry that carries a
+deadline (`TestUnlockedMapFetchManyReadsTheClockOnce`); a chunk of sixteen
+lookups (`lookupChunk`) is issued before any entry is read, so the map's
+cache misses overlap; and a key the batch names twice is read once — its
+first position records the hit through the policy's `touch` and sets
+`readMark`, the top bit of the entry's freq, and its later positions get the
+same reference without a relink or a count
+(`TestUnlockedMapFetchManyReadsARepeatOnce`). The node has no byte left for a
+mark of its own: W-TinyLFU's period and hash fill it to 64 bytes
+(`Test_entry_size`), and a 32-bit batch number there took it to 72. The batch
+keeps the entries it marked in `marked`, its room reused from one call to the
+next, and `clearMarks` clears them before the call returns, so S3-FIFO's
+counter never reads a mark. An entry past its deadline is reaped as `Fetch`
+reaps it, its later positions of the chunk looked up again, and `OnEvict`
+runs at the end of the call (`TestUnlockedMapFetchManyReapsWhatExpired`). A
+reference is valid until the next call into the map, to be read and never
+written through: the caller holds the lock the map is serialised under.
+`refs` grows only when its capacity is short, so a caller with stack room
+allocates nothing.

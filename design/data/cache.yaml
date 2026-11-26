@@ -396,19 +396,30 @@ packages:
           BulkFetcher is the sibling that reads many keys in one call (ADR 0039,
           #840): one lock acquisition per stripe on a memory store, one pass per tier
           on a chain, one round trip on a remote tier — where N calls of Fetch pay N.
+          It answers by position, in slices the caller hands it and may reuse from
+          one batch to the next: no map is built for the answer.
         methods:
           - doc: |-
-              FetchMany returns the values of the keys the store holds, and no entry for
-              a key it does not. It mutates the store as Fetch does. Duplicate keys
-              are read once.
+              FetchMany appends to values and found one answer for every key of keys, in
+              order: the value keys[i] holds and true, or V's zero value and false when
+              the store does not hold it. It mutates the store as Fetch does. A key named
+              more than once is read once, and every position naming it is answered.
+              values and found grow only when their capacity is short: a caller that
+              hands back the slices of its last batch, emptied, reuses them. On an error
+              nothing is appended.
             in:
               - name: ctx
                 type: context.Context
               - name: keys
                 type: "[]string"
+              - name: values
+                type: "[]V"
+              - name: found
+                type: "[]bool"
             name: FetchMany
             out:
-              - type: map[string]V
+              - type: "[]V"
+              - type: "[]bool"
               - type: error
         name: BulkFetcher
         typeParams:
@@ -1053,7 +1064,8 @@ packages:
       - alias:
           - doc: |-
               BulkFetcher is the sibling that reads many keys in one call — one lock per
-              stripe, one pass per tier.
+              stripe, one pass per tier — and answers by position, in slices you hand it
+              and may reuse from one batch to the next.
             name: BulkFetcher
             target: corecache.BulkFetcher[V]
             typeParams:
