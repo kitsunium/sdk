@@ -13,6 +13,8 @@
   [ADR 0195](0195-an-http-groups-protocols-are-computed-once-and-its-alpn-follows-them.md)
   §D3 (the bounds), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md)
   (allocs: 0 in the alloc lane), [ADR 0194](0194-a-loop-lane-offloads-to-its-own-worker-and-an-http1-answer-may-be-pending.md) §D3
+- **Area**: net
+- **Need**: decision
 
 ## Context
 
@@ -335,3 +337,82 @@ pairs; whether ten rounds still fit its 30 minutes is the runner's to say.
   BENCH.md). The tests frame HTTP/2 by hand because Go 1.27's `http.Transport`
   refuses a `:protocol` field before it chooses HTTP/2 (`validateHeaders`);
   `TestXConnectTransportRefusesProtocolField` fails once a release lets it through.
+
+## Amendment 2026-11-15 — the original criteria of #964, #966 and #967, held or brought to the nearest reachable
+
+The three issues were reopened because their criteria had been rewritten by the
+change that closed them. The owner's decisions of 2026-11-14: aim at the original
+criterion; declare it out of reach only after an adversarial challenge of three
+approaches at least, each tried or refuted on a primary source; then bring it to the
+nearest reachable, writing the trace down.
+
+- **An h2-only list refuses an http/1.1-only client at the handshake (#964, original
+  criterion held).** The amendment of 2026-11-10 said `Protocols("h2")` could not fail
+  that handshake, crypto/tls letting such a client through with no protocol (Go issue
+  46310, `negotiateALPN`). It can: `GetConfigForClient` sees the client's offer before
+  the negotiation, and the configuration it returns is the one `negotiateALPN` reads.
+  A listener whose list names h2 without http/1.1 answers an offer that names nothing
+  of the list with a configuration whose list is the empty name alone — no ClientHello
+  carries it (RFC 7301 §3.1), and it is not h2 —, and crypto/tls sends
+  no_application_protocol (RFC 7301 §3.2). The HTTP group's listeners and the TLS codec
+  group's do so (`alpnStrict`); a client that offers no ALPN completes the handshake,
+  as RFC 7301 leaves it, and is refused at its first request (400 on the codec, a close
+  on net/http). `TestLoopTLSH2_protocols`, `TestProtocols_h2AloneRefusesAtTheHandshake`.
+- **HTTP/2's error counts (#966).** The adapter's per-request cost is one atomic add:
+  `BenchmarkHTTP_Adapter` allocates 64 times a request with the per-version counter and
+  `CountError`, 64 without them and 64 for net/http alone, go1.27.4 (server BENCH.md,
+  edition 2026-11-15) — the original criterion held. A frame of a bad length counts
+  `frame_size` once on both engines. A header list past `MaxHeaderBytes` counts
+  `header_list` on the loop adapter; on net/http's engine the standard library answers
+  it 431 itself, with no `CountError` and nothing logged, and the only way to see it —
+  decoding every HPACK block a second time beside net/http's own — would break the
+  one-atomic-add criterion. Brought to the nearest reachable by the owner's rule of
+  2026-11-14: counted on the loop adapter, stated as not counted on net/http's engine.
+- **RFC 8441's client (#967).** The server holds the criterion; its Go client cannot:
+  `http.Transport` and the `ClientConn` Go 1.26 added both refuse a `:protocol` field
+  name before HTTP/2 is chosen (`validateHeaders`), and `golang.org/x/net/http2` is no
+  module `internal/` may require (ADR 0156). Brought to the nearest reachable by the
+  owner's rule of 2026-11-14: a client framing RFC 8441 by hand, and
+  `TestXConnectTransportRefusesProtocolField` failing, for both entry points, the day
+  the standard library lets the field through. The BENCH.md row of a 4 KiB message over
+  HTTP/2 the amendment of 2026-11-10 said missing has existed since the 2026-11-13
+  amendment (`XConnectLoopback/4096`).
+
+The challenges, the approaches tried and refuted with their sources, are in each
+issue's record of 2026-11-15.
+
+## Amendment 2026-11-15 (second) — an idle h2c connection within the loop's 256 B (#961)
+
+The amendment of 2026-11-13 replaced #961's idle bound — "the idle-memory test
+holds 10 000 idle h2c connections within the loop's documented 256 B of Go heap
+each" — by "within the HTTP/1.1 adapter's idle cost plus 200 B", the 256 B being
+the loop's own before any adapter. The owner's decision of 2026-11-14 is to aim
+at the original bound, and it is held.
+
+On the base, `TestLoopHTTP2_idleMemory` (Linux 6.12, go1.27.4, two loops, 10 000
+connections that sent the preface and an empty SETTINGS) read 344 B a
+connection on epoll and 365 B on io_uring. A heap profile split it: the loop's
+slot table 148–177 B (a `connCtl` of 144 bytes and the table's growth), its
+timer link 16–18 B, io_uring's sweep epochs and receive bookkeeping 17 B, and the
+adapter's entry 159–178 B (152 bytes: the HPACK decoder's 48, the field block's
+scan, the open requests). What an idle connection does not use is now taken
+when it is used:
+
+- the loop's slot keeps the index of a file record — a file body's descriptor,
+  pipe, offsets, operations and error, 40 bytes — in the ring's file table
+  (`fileCtl`, `ring.takeFile`): `connCtl` is 104 bytes;
+- the HPACK decoder lives beside its table in the lane's arena, both taken at
+  the connection's first field block, the peer's SETTINGS ACK kept in a flag
+  until then; the adapter keeps a connection's open requests by that table, a
+  request being opened only after a decode; the per-batch control count and the
+  CONTINUATION count are narrowed to what they can reach (`uint16`, `uint8`):
+  `Conn` is 68 bytes and the adapter's entry 80.
+
+Measured after, the same test: 218 B on epoll, 240 B on io_uring — on 6.12,
+whose deferred puts keep an eight-byte sweep epoch a slot, which 6.13 and later
+do not need —, 217 B on linux/386; the loop alone (`TestMemory_idleConnection`)
+137 B on epoll and 148 B on io_uring. `TestLoopHTTP2_idleMemory` and its auto
+twin now hold h2c to 256 B (`h2cIdleBudget`), the HTTP/1.1 reading logged
+beside it; `TestConnHasNoPointer` holds the entry to 80 bytes. The drain part of
+the criterion is unchanged: ADR 0196's suite runs on h2c (the amendment of
+2026-11-13).

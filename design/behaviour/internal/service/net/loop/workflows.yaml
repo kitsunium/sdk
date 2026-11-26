@@ -153,7 +153,7 @@ workflows:
             - opt:
                 do:
                   - return: "false"
-                when: slices.Contains(rr.queueDone, false)
+                when: slices.Contains(rr.queueDone, false) || armedAny(rr.armed)
           key: _
           range: ul.rings
           value: rr

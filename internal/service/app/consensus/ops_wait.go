@@ -132,7 +132,7 @@ func (n *Node) appliedAs(t coreconsensus.TokenValue) error {
 // more; ok is false when the node stopped.
 func (n *Node) appliedTermAt(index uint64) (term uint64, known, ok bool) {
 	if !n.exec(func() {
-		if index <= n.r.Status().Commit {
+		if index <= n.r.Summary().Commit {
 			term, known = n.r.TermAt(index)
 		}
 	}) {

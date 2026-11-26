@@ -5,6 +5,7 @@ package server
 
 import (
 	"bytes"
+	"io"
 	stdnet "net"
 	"testing"
 	"time"
@@ -140,6 +141,50 @@ func TestPortableTimer_idleSparesAClosingConnection(t *testing.T) {
 		}
 		if !c.closing && pc.open {
 			t.Fatal("the idle bound left an idle open connection open")
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestPortableEnd_aClosingConnectionsOutputLeavesFirst pins that the peer's
+// end of input, on a connection whose close is decided and whose output has
+// not all left, goes through the batch's settlement — the writer sends what
+// is queued, then closes — instead of finishing the connection at once, its
+// queued output dropped: the drain's close lost the rest of an answer when
+// the peer half-closed. A lingering close, its writing side already shut,
+// ends at the peer's end as before.
+func TestPortableEnd_aClosingConnectionsOutputLeavesFirst(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// lingering marks the writing side already shut after the output.
+		lingering bool
+	}
+	cases := []tc{
+		{name: "output still queued"},
+		{name: "lingering", lingering: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Parallel()
+		pl := newOpenPortable(&portableLineH{}, 1)
+		pc := pl.conns[0]
+		server, client := stdnet.Pipe()
+		t.Cleanup(func() { swallowErr(client.Close()) })
+		pc.conn = server
+		pc.reasonSet, pc.closeErr = true, corenet.ServerClosed
+		if c.lingering {
+			pc.lingering.Store(true)
+		} else {
+			pc.out = []byte("the rest of an answer")
+		}
+		pl.handleEnd(&portableEvent{kind: pevEnd, slot: 0, gen: pc.gen, err: io.EOF})
+		if c.lingering && pc.open {
+			t.Fatal("a lingering close was left open at the peer's end")
+		}
+		if !c.lingering && (!pc.open || !pc.peerDone) {
+			t.Fatalf("the peer's end finished a closing connection with output queued: open %v, peer done %v", pc.open, pc.peerDone)
 		}
 	}
 	for _, c := range cases {

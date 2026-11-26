@@ -3,6 +3,10 @@ package transform_test
 import (
 	"bytes"
 	"compress/flate"
+	"compress/gzip"
+	"compress/zlib"
+	"errors"
+	"io"
 	"testing"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
@@ -39,7 +43,16 @@ func FuzzDecompressBounded(f *testing.F) {
 	}
 	f.Add([]byte{0x1f, 0x8b, 0x08, 0x00})
 	f.Add([]byte{})
+	//: the envelope seeds: an FDICT header, a header alone, a short trailer.
+	f.Add([]byte{0x78, 0xbb, 0, 0, 0, 1, 3, 0, 0, 0, 0, 1})
+	f.Add([]byte{0x78, 0x9c})
+	f.Add([]byte{0x78, 0x9c, 3, 0, 0, 0, 0})
+	//: a body that decodes past the ceiling and is truncated after it.
+	f.Add([]byte("x\x9c\xec\xc0\x81\f\x00\x00\x00\xc30Z\xfbK\x9ccI;\x00\x00\x00\x00"))
 	f.Fuzz(func(t *testing.T, data []byte) {
+		fuzzZlibAgrees(t, engines[2], data)
+		fuzzPastCeiling(t, engines[0], data, func(r io.Reader) (io.Reader, error) { return gzip.NewReader(r) })
+		fuzzPastCeiling(t, engines[1], data, func(r io.Reader) (io.Reader, error) { return flate.NewReader(r), nil })
 		for _, e := range engines {
 			out, err := e.DecompressBounded(nil, data, fuzzCeiling)
 			//: never past the ceiling, refused or not.
@@ -67,4 +80,69 @@ func FuzzDecompressBounded(f *testing.F) {
 			}
 		}
 	})
+}
+
+// fuzzZlibAgrees holds the zlib engine's own RFC 1950 envelope
+// (kitsunium/sdk#1102) to compress/zlib, which it replaced on the block path:
+// over any input, the engine accepts what the standard library accepts, with
+// the same bytes, and refuses what it refuses, for the error the standard
+// library names; a stream past the ceiling is the ceiling's refusal alone,
+// DecompressedTooLarge, read at max+1 bytes as the engine reads it.
+func fuzzZlibAgrees(t *testing.T, engine coretransform.BoundedDecompressor, data []byte) {
+	t.Helper()
+	got, gerr := engine.DecompressBounded(nil, data, fuzzCeiling)
+	var want []byte
+	zr, werr := zlib.NewReader(bytes.NewReader(data))
+	//: a header the standard library accepts has a body to read.
+	if werr == nil {
+		want, werr = io.ReadAll(io.LimitReader(zr, fuzzCeiling+1))
+	}
+	//: past the ceiling: the standard library's read is cut at max+1, and the
+	//: engine refuses with the ceiling's code and no other: the decoder's own
+	//: fault for a body that ends short after the ceiling is not the answer,
+	//: whatever the rest of the stream holds (kitsunium/sdk#1432).
+	if werr == nil && int64(len(want)) > fuzzCeiling {
+		//: refused for its size, and never accepted.
+		if !errors.Is(gerr, coretransform.DecompressedTooLarge) {
+			t.Fatalf("zlib: %d bytes past the ceiling, engine err=%v", len(want), gerr)
+		}
+		return
+	}
+	//: a stream the standard library refuses is refused for its reason.
+	if werr != nil {
+		if gerr == nil || !errors.Is(gerr, werr) {
+			t.Fatalf("zlib: stdlib err=%v, engine err=%v", werr, gerr)
+		}
+		return
+	}
+	//: a stream it accepts decodes to the same bytes.
+	if gerr != nil || !bytes.Equal(got, want) {
+		t.Fatalf("zlib: stdlib %d bytes, engine %d bytes, err=%v", len(want), len(got), gerr)
+	}
+}
+
+// fuzzPastCeiling holds gzip and flate to the order of their two refusals
+// (kitsunium/sdk#1432): a stream the standard library decodes to more than the
+// ceiling, read at max+1 bytes as the engine reads it, is refused with
+// DecompressedTooLarge, even when its body ends short after the ceiling.
+func fuzzPastCeiling(t *testing.T, engine coretransform.BoundedDecompressor, data []byte, open func(io.Reader) (io.Reader, error)) {
+	t.Helper()
+	rd, err := open(bytes.NewReader(data))
+	//: a header the standard library refuses is no stream past anything.
+	if err != nil {
+		return
+	}
+	want, werr := io.ReadAll(io.LimitReader(rd, fuzzCeiling+1))
+	//: a fault inside the first max+1 bytes is not a size question.
+	if werr != nil && int64(len(want)) <= fuzzCeiling {
+		return
+	}
+	//: the standard library stopped at the ceiling, and so does the engine.
+	if int64(len(want)) > fuzzCeiling {
+		_, gerr := engine.DecompressBounded(nil, data, fuzzCeiling)
+		//: refused for its size, whatever follows.
+		if !errors.Is(gerr, coretransform.DecompressedTooLarge) {
+			t.Fatalf("%s: %d bytes past the ceiling, engine err=%v", engine.(coretransform.Compressor).Algorithm(), len(want), gerr)
+		}
+	}
 }

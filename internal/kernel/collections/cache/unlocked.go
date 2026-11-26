@@ -85,11 +85,57 @@ func (c *UnlockedMap[K, V]) init(cfg Config[K, V]) {
 // Fetch returns the value for key and whether it was present and unexpired. A
 // hit is recorded by the policy, as Cache.Fetch records it.
 func (c *UnlockedMap[K, V]) Fetch(key K) (value V, ok bool) {
+	ent := c.items[key]
+	//: a missing key, or one whose deadline has passed, is a miss.
+	if ent == nil || (ent.slot != 0 && c.sinceEpoch() >= ent.deadline) {
+		c.missed(ent)
+		var zero V
+		//: the zero value on a miss, once the observer saw a reap.
+		return zero, false
+	}
+	//: S3-FIFO counts the hit; LRU promotes it, inlined.
+	if c.policy == PolicyS3FIFO {
+		c.touch(ent)
+	} else {
+		c.main.moveFront(ent)
+	}
+	c.hits++
+	//: the live value.
+	return ent.val, true
+}
+
+// missed counts a miss of Fetch, reaping ent — the entry the key named, its
+// deadline passed — when there is one, and runs OnEvict for it once the map
+// is consistent.
+func (c *UnlockedMap[K, V]) missed(ent *entry[K, V]) {
 	var pending []evictionValue[K, V]
-	value, ok = c.fetch(key, &pending)
+	//: a lazily-expired entry is evicted before the miss is counted.
+	if ent != nil {
+		c.removeEvict(ent, &pending)
+	}
+	c.misses++
 	c.notifyEvicted(pending)
-	//: the value, once the observer has seen what the lookup evicted.
-	return value, ok
+}
+
+// Deadline returns the instant the entry under key expires, on the cache's
+// clock, and whether key is present; an entry without a deadline answers the
+// zero Time. It is a read, not a hit: the policy records nothing, no counter
+// moves, and an entry whose deadline has passed is reported, not reaped.
+func (c *UnlockedMap[K, V]) Deadline(key K) (deadline time.Time, ok bool) {
+	ent := c.items[key]
+	//: absent: neither a deadline nor an entry.
+	if ent == nil {
+		//: not present.
+		return time.Time{}, false
+	}
+	//: present, and held until something removes it.
+	if ent.slot == 0 {
+		//: no deadline.
+		return time.Time{}, true
+	}
+	//: the offset back onto the clock it was read from; a saturated offset
+	//: is a deadline centuries out, which time.Time still spells.
+	return c.epoch.Add(time.Duration(ent.deadline)), true
 }
 
 // Set stores key=val with the cache's default TTL.

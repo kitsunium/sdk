@@ -75,6 +75,17 @@ constants:
         value: "8"
     name: tempCounterBytes
   - doc: |-
+      publishWindow is how many files of a batch ([osFS.WriteAtomicAll]) have
+      their temporaries open and their flushes in flight at once (#827): enough
+      for a journal to commit a window's flushes together, few enough that a
+      batch of any size holds sixteen descriptors and sixteen blocked threads at
+      most, and that a crash leaves sixteen orphaned temporaries at most.
+    items:
+      - name: publishWindow
+        type: int
+        value: "16"
+    name: publishWindow
+  - doc: |-
       platformNative reports that this GOOS has every mechanic the disk filesystem
       requires. NewOS reads it and refuses where it is false, rather than building
       a filesystem that would silently provide neither durability nor a meaningful
@@ -190,6 +201,7 @@ files:
       - tempAttempts
       - tempNameRoom
       - tempCounterBytes
+      - publishWindow
       - tempCounter
       - drawTempSeed
       - tempHandle
@@ -199,9 +211,19 @@ files:
       - publish
       - (*osFS).WriteAtomicAll
       - publishAll
+      - appendDirs
+      - stageWindow
+      - writeWindow
+      - windowFlusher
+      - newWindowFlusher
+      - windowFlusher.start
+      - windowFlusher.wait
+      - discardAll
       - syncDirs
       - stage
       - writeAndSync
+      - writeTemp
+      - syncAndClose
       - syncPublished
       - (*osFS).SyncDir
       - failDirSync
@@ -282,11 +304,54 @@ functions:
     params: ops atomicOps, name string, data []byte, perm fs.FileMode
     results: error
   - doc: |-
-      publishAll runs steps 1 to 4 for every file over ops, then step 5 once per
-      directory renamed into, and returns how many files were renamed into place.
+      publishAll runs steps 1 to 4 for every file over ops, a window at a time,
+      then step 5 once per directory renamed into, and returns how many files
+      were renamed into place.
     name: publishAll
     params: ops atomicOps, files []corevfs.FileValue, perm fs.FileMode
     results: published int, err error
+  - doc: |-
+      appendDirs appends to dirs the directory of every file of files it does
+      not hold yet, in the order the batch reaches them.
+    name: appendDirs
+    params: dirs []string, files []corevfs.FileValue
+    results: "[]string"
+  - doc: |-
+      stageWindow runs steps 1 to 4 for every file of window: the temporaries
+      created and written in order, each one's flush started as soon as it is
+      written ([writeWindow]), then, once every flush has returned, the renames
+      in order, up to the first file whose write, flush, close or rename failed.
+      That file's temporary and every later one are removed, so renamed counts
+      the files published, from the first, and err is the failure of
+      window[renamed] — PublishFailed, the lowest index winning whatever order
+      the flushes answered in.
+    name: stageWindow
+    params: ops atomicOps, window []corevfs.FileValue, perm fs.FileMode
+    results: renamed int, err error
+  - doc: |-
+      writeWindow runs steps 1 and 2 for the files of window, in order, and
+      starts step 3 for each as soon as it is written, so a file's flush
+      overlaps the writing of the next ones and the flushes of the others. It
+      returns the temporaries written, flushed and closed, once every flush has
+      returned, and each flush's verdict at its temporary's index — nil, the
+      slice, when every flush succeeded. The first file whose temporary cannot
+      be created or written ends the writing: its temporary removed, its
+      failure returned as PublishFailed beside the temporaries before it.
+    name: writeWindow
+    params: ops atomicOps, window []corevfs.FileValue, perm fs.FileMode
+    results: temps []tempHandle, verdicts []error, err error
+  - doc: newWindowFlusher returns the flusher of a window of files temporaries.
+    name: newWindowFlusher
+    params: files int
+    results: windowFlusher
+  - doc: |-
+      discardAll removes the temporaries of temps — the one of the file a
+      window stopped at and every later one, all closed — and returns cause as
+      PublishFailed for name, the first removal that failed kept beneath it, as
+      [discard] does for one.
+    name: discardAll
+    params: ops atomicOps, temps []tempHandle, name string, cause error
+    results: error
   - doc: |-
       syncDirs flushes every directory of dirs — all of them, a failure
       included, so as much of a batch as the device accepts is durable — and
@@ -306,6 +371,21 @@ functions:
       handle. It never renames: the caller owns the ordering.
     name: writeAndSync
     params: file tempFile, data []byte
+    results: error
+  - doc: |-
+      writeTemp writes the payload into a temporary in one Write — the payload
+      is a whole file, never a stream — and closes the handle when it fails, so
+      the descriptor is not leaked along with the failure: the removal that
+      follows does not need it open.
+    name: writeTemp
+    params: file tempFile, data []byte
+    results: error
+  - doc: |-
+      syncAndClose flushes a written temporary to the device and closes it. It
+      runs BEFORE the rename, or the rename publishes a name for bytes that may
+      not be on the device yet.
+    name: syncAndClose
+    params: file tempFile
     results: error
   - doc: syncPublished performs step 5 and reports its distinct verdict.
     name: syncPublished
@@ -448,6 +528,7 @@ imports:
   corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
   errors: errors
   fs: io/fs
+  group: github.com/kitsunium/sdk/internal/kernel/concur/group
   hex: encoding/hex
   io: io
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -932,11 +1013,21 @@ types:
           after the last of them gives every file of the batch the guarantee a flush
           per file gave each, at half the device round trips.
 
+          The batch runs in windows of [publishWindow] files: each window's
+          temporaries are created and written in order, each one's flush started as
+          soon as it is written, so the window's flushes are in flight together —
+          still one per file, each before its own rename, the journal free to
+          commit them together (ADR 0056, amended 2026-11-15) —; once every flush
+          has returned, the renames follow in the batch's order, stopping at the
+          first file whose steps 1 to 4 failed. The next window begins only once
+          this one is renamed whole.
+
           Every target is checked before any is written, so a refusal publishes
           nothing. A failure at a file's steps 1 to 4 leaves that file and the rest
-          unpublished and their previous bytes untouched; the files already renamed
-          are flushed with their directories first, so the count returned beside
-          PublishFailed is a count of durable files.
+          unpublished and their previous bytes untouched, no temporary of theirs
+          surviving; the files already renamed are flushed with their directories
+          first, so the count returned beside PublishFailed is a count of durable
+          files.
         name: WriteAtomicAll
         params: files []corevfs.FileValue, perm fs.FileMode
         recv: o *osFS
@@ -1136,6 +1227,36 @@ types:
         type: func(dir string) error
     kind: struct
     name: atomicOps
+  - doc: |-
+      windowFlusher runs step 3 for the temporaries of one window, each on a
+      goroutine of its own: a flush and its close, the verdict written at the
+      temporary's index. Concurrent flushes of one filesystem are what a
+      journal commits together (ext4's jbd2 among them): sixteen flushes one
+      after the other cost sixteen device round trips, sixteen in flight a few.
+      A window of one has nothing to overlap, and flushes on the caller's
+      goroutine.
+    fields:
+      - name: runner
+        type: "*group.Group"
+      - name: verdicts
+        type: "[]error"
+    kind: struct
+    methods:
+      - doc: |-
+          start flushes and closes the temporary file at index, on a goroutine of
+          its own unless the window is of one.
+        name: start
+        params: index int, file tempFile
+        recv: f windowFlusher
+      - doc: |-
+          wait returns once every flush started has, re-raising a panic one of them
+          raised after the others ([group.Group.Wait]), and reports a flush that
+          failed — which, the verdicts say; nil when every one succeeded. The join
+          is the happens-before edge that makes every verdict visible to the caller.
+        name: wait
+        recv: f windowFlusher
+        results: error
+    name: windowFlusher
 vars:
   - grouped: true
     items:

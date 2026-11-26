@@ -10,4 +10,7 @@ var (
 	_ handoverSource = (*multiReader)(nil)
 	// The batched sink must satisfy the seam replies are written against.
 	_ datagramSink = (*multiWriter)(nil)
+	// The connection a group with no bound hands out reaches its socket's
+	// RawConn as a datagram socket's does (#970).
+	_ rawConnProvider = (*rawView)(nil)
 )

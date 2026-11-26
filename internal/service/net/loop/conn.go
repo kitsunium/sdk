@@ -74,7 +74,7 @@ const (
 	zcHold
 )
 
-// The bits of connCtl.fileBits, io_uring's file state.
+// The bits of fileCtl.bits, io_uring's file state.
 const (
 	// ffEOF is a read that returned nothing.
 	ffEOF uint8 = 1 << iota
@@ -83,6 +83,9 @@ const (
 	// ffPoll is the POLLOUT that waits for it.
 	ffPoll
 )
+
+// noFile is connCtl.file when the slot sends no file.
+const noFile int32 = -1
 
 // The reasons a connection is closed, mapped to the preallocated error
 // OnClose receives (closeErr).
@@ -128,6 +131,11 @@ type connCtl struct {
 	// ops counts operations in flight on io_uring; the slot is released only
 	// at zero.
 	ops int32
+	// file is the slot's file record in the ring's file table while a file
+	// body is being sent, noFile otherwise: an idle connection carries no
+	// file's state (#961). Placed here, the slot has no padding before its
+	// chunks.
+	file int32
 	// spill holds the unconsumed input; out the written, unsent output;
 	// flight the output the kernel is sending.
 	spill  chunkRef
@@ -140,18 +148,6 @@ type connCtl struct {
 	// lruPrev and lruNext link the ring's open connections, least recent first.
 	lruPrev int32
 	lruNext int32
-	// dirtyNext links the ring's dirty list.
-	dirtyNext int32
-	// fileFD is the file being sent, the engine's own duplicate; -1 when none.
-	fileFD int32
-	// pipeR and pipeW are the pipe the file crosses on io_uring, a connection's
-	// own, -1 when none; pipeHeld how many bytes the pipe holds.
-	pipeR, pipeW int32
-	pipeHeld     int32
-	// fileOps counts the file's operations in flight on io_uring.
-	fileOps uint8
-	// fileBits holds ffEOF, ffFull and ffPoll.
-	fileBits uint8
 	// zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
 	// send of it zero-copy, zcHold none for now — zcPend is at its bound —
 	// until its notifications came, the rest then sent plainly. zcPend counts
@@ -163,17 +159,12 @@ type connCtl struct {
 	zc     uint8
 	zcPend uint8
 	zcVoid uint8
-	// fileErr is the errno a file operation failed with, zero when none.
-	fileErr int32
-	// fileOff is the next byte of the file to send, fileLeft how many are left.
-	fileOff  int64
-	fileLeft int64
 }
 
 // sending reports whether the slot holds output, sent or not, or a file.
 func (c *connCtl) sending() bool {
 	//: bytes, or a file behind them.
-	return c.pending() > 0 || c.fileFD >= 0
+	return c.pending() > 0 || c.file != noFile
 }
 
 // pending is how many output bytes the slot holds, sent or not.
@@ -186,8 +177,8 @@ func (c *connCtl) pending() int {
 func emptyConn(gen uint32) connCtl {
 	//: every chunk released, every link cut.
 	return connCtl{
-		gen: gen, fd: -1, fileFD: -1, pipeR: -1, pipeW: -1, state: stFree, reason: rNone,
+		gen: gen, fd: -1, file: noFile, state: stFree, reason: rNone,
 		spill: chunkRef{idx: noChunk}, out: chunkRef{idx: noChunk}, flight: chunkRef{idx: noChunk},
-		lruPrev: noLink, lruNext: noLink, dirtyNext: noLink,
+		lruPrev: noLink, lruNext: noLink,
 	}
 }

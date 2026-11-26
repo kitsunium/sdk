@@ -44,25 +44,24 @@ func TestLoopKqueue_refusedOffItsPlatforms(t *testing.T) {
 }
 
 // TestLoopKqueue_autoAndTheOperator starts auto and an explicit kqueue on
-// darwin and the BSDs: auto runs kqueue on darwin, where its paired gate held,
-// and portable on the BSDs, which have no measured row (ADR 0222 §D6, amended
-// 2026-11-13), not degraded either way; KITSUNIUM_NET_ENGINE=portable takes
-// darwin's auto back to portable; the explicit kqueue runs on it, its probe's
-// last stage named, not degraded; KITSUNIUM_NET_ENGINE=portable lowers it,
-// the override naming the cap, and an explicit kqueue the operator switched
-// off runs portable, as an explicit epoll does on Linux. The suite runs on
-// the darwin lane and the BSD guests (ADR 0222); elsewhere the refusal above
-// is the platform's contract.
+// darwin and the BSDs: auto runs kqueue on each of them (ADR 0222 §D6,
+// amended 2026-11-15), its probe's last stage named, not degraded;
+// KITSUNIUM_NET_ENGINE=portable takes auto back to portable; the explicit
+// kqueue runs too; KITSUNIUM_NET_ENGINE=portable lowers it, the override
+// naming the cap, and an explicit kqueue the operator switched off runs
+// portable, as an explicit epoll does on Linux. The suite runs on the darwin
+// lane and the FreeBSD, OpenBSD and NetBSD guests (ADR 0222); elsewhere the
+// refusal above is the platform's contract.
 func TestLoopKqueue_autoAndTheOperator(t *testing.T) {
 	t.Parallel()
 	if nativePoller != corenet.CapabilityKqueue {
 		t.Skip("kqueue is darwin's and the BSDs': TestLoopKqueue_refusedOffItsPlatforms holds the refusal here")
 	}
-	// darwin's auto is kqueue; a BSD's stays portable.
-	autoBackend := corenet.LoopBackendPortable
-	if kqueueAuto(runtime.GOOS) {
-		autoBackend = corenet.LoopBackendKqueue
+	// auto is kqueue on every platform whose poller it is.
+	if !kqueueAuto(runtime.GOOS) {
+		t.Fatalf("auto does not take kqueue on %s, whose poller it is", runtime.GOOS)
 	}
+	autoBackend := corenet.LoopBackendKqueue
 	cases := []struct {
 		name    string
 		vars    map[string]string

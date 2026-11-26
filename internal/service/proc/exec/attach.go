@@ -66,7 +66,10 @@ func Attach(ctx context.Context, pid int) (proc coreproc.Process, err error) {
 //
 // Off Linux there is no cgroup, so a Cgroup bound is AdoptionRefused; the
 // users are read from the kernel's process record (sysctl kinfo_proc), whose
-// start time must be the same before and after the knotes are registered.
+// start time must be the same before and after the knotes are registered. A
+// record the kernel has not filled yet — NetBSD's, for a process inside its
+// execve(2) — is read again every 5 ms, for a second at most on the system
+// clock, and the process is AdoptionRefused if it never is.
 // Each directory of the walk is held open for reading there, where Linux needs
 // only the permission to search it.
 func AttachPIDFile(ctx context.Context, path string, want coreproc.AttachValue) (proc coreproc.Process, err error) {

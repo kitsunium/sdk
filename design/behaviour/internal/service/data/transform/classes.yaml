@@ -45,9 +45,47 @@ constants:
         name: schemeGzip
       - doc: schemeFlate tags a box filled by takeFlateReader.
         name: schemeFlate
-      - doc: schemeZlib tags a box filled by takeZlibReader.
+      - doc: schemeZlib tags a box filled by takeZlibStream.
         name: schemeZlib
     name: schemeNone
+  - doc: |-
+      The RFC 1950 §2.2 envelope the block decode reads itself (zlibBody,
+      zlibCheckTrailer): field widths, the one method and window, the FDICT bit and
+      the one dictionary id this scheme accepts.
+    grouped: true
+    items:
+      - doc: "zlibHeaderLen is the header: CMF and FLG."
+        name: zlibHeaderLen
+        type: int
+        value: "2"
+      - doc: zlibDictIDLen is the DICTID field an FDICT header adds.
+        name: zlibDictIDLen
+        type: int
+        value: "4"
+      - doc: zlibTrailerLen is the Adler-32 trailer.
+        name: zlibTrailerLen
+        type: int
+        value: "4"
+      - doc: zlibMethodDeflate is CM, the only compression method RFC 1950 defines.
+        name: zlibMethodDeflate
+        type: byte
+        value: "8"
+      - doc: "zlibMaxWindow is the largest CINFO RFC 1950 allows: a 32 KiB window."
+        name: zlibMaxWindow
+        type: byte
+        value: "7"
+      - doc: "zlibFlagDict is FLG's FDICT bit: a preset dictionary is named."
+        name: zlibFlagDict
+        type: byte
+        value: "0x20"
+      - doc: |-
+          zlibEmptyDictID is the Adler-32 of no bytes, the DICTID compress/zlib
+          accepts from a reader built without a dictionary, and so the only one
+          this package accepts: it never writes a dictionary, so it never reads one.
+        name: zlibEmptyDictID
+        type: uint32
+        value: "1"
+    name: zlibHeaderLen
 files:
   - decls:
       - maxDecompressedBytes
@@ -56,8 +94,13 @@ files:
       - spillChunk
       - spillPool
       - appendAllBounded
+      - drainBox
       - fillSpare
+      - boundedRead
       - spill
+      - fillChunks
+      - ceilingFirst
+      - probeEnd
       - settle
       - releaseSpill
     name: bounded.go
@@ -119,7 +162,6 @@ files:
       - takeFlateStream
       - fillFlateBox
       - releaseFlateReader
-      - takeZlibReader
       - takeZlibStream
       - fillZlibBox
       - releaseZlibReader
@@ -140,6 +182,7 @@ files:
       - gzipWrap
     name: wrap.go
   - decls:
+      - zlibHeaderLen
       - ZlibCompressor
       - zlibCompressor
       - NewZlibCompressor
@@ -150,6 +193,8 @@ files:
       - zlibCompressor.Decompress
       - zlibDecompress
       - zlibDecompressCore
+      - zlibBody
+      - zlibCheckTrailer
     name: zlib.go
 functions:
   - doc: |-
@@ -170,11 +215,35 @@ functions:
       partial payload — dst's spare capacity may have been written, which the
       port's convention allows.
 
+      The ceiling outranks the fault (ADR 0213, kitsunium/sdk#1432): a decoder
+      hands over the last bytes of a cut stream in the same return as its sticky
+      fault, so a read that brings the detector byte and a fault together is an
+      overflow, and the fault is not reported. A fault is reported only when the
+      stream gave no more than max bytes before it (see ceilingFirst).
+
+      A dst that holds the payload exactly leaves the stream unread at its end, and
+      the end is found by asking for ONE byte into probe — the decoder's own box
+      owns it, so asking costs nothing — and never by taking a 32 KiB spill chunk
+      for the question: a chunk the pool did not have (a collection, a goroutine
+      migrated to another P) was a 32 768-byte allocation in a call that decodes
+      into place, measured as the 1 B/op the sized rows still showed. A byte the
+      probe does find starts the first chunk. A nil probe is allocated, for the
+      callers that decode no box.
+
       max is an explicit parameter (production passes maxDecompressedBytes) so the
       overflow path can be exercised against a small cap in tests without
       materialising the production ceiling and without mutating shared state.
     name: appendAllBounded
-    params: dst []byte, r io.Reader, max int64
+    params: dst []byte, r io.Reader, probe *[1]byte, max int64
+    results: decoded []byte, overflow bool, err error
+  - doc: |-
+      drainBox drains a boxed decoder onto dst under max, then closes it, and says
+      what the stream owed: an overflow, a fault, or the payload. The decoder's
+      Close reports the sticky fault of a cut stream, and a stream past the
+      ceiling is refused for its size whatever its end holds (kitsunium/sdk#1432),
+      so a Close fault is judged only when the stream stayed within max.
+    name: drainBox
+    params: dst []byte, box *readerBox, max int64
     results: decoded []byte, overflow bool, err error
   - doc: |-
       fillSpare reads r into out's spare capacity, never more than limit bytes
@@ -185,12 +254,42 @@ functions:
     params: out []byte, r io.Reader, limit int64
     results: filled []byte, done bool, err error
   - doc: |-
-      spill reads the rest of r into pooled chunks, then grows out once to its
-      final length and copies them in. A dst that held the payload exactly finds
-      io.EOF on its first chunk read and is returned as it is, unreallocated.
+      spill reads the rest of the stream into pooled chunks, then grows out once to
+      its final length and copies them in. A dst that held the payload exactly
+      finds the end with one byte asked into the probe, and is returned as it is,
+      unreallocated, having taken no chunk.
     name: spill
-    params: dst, out []byte, r io.Reader, limit, max int64
+    params: dst, out []byte, br *boundedRead
     results: decoded []byte, overflow bool, err error
+  - doc: |-
+      fillChunks reads the stream into chunks, which already hold spilled bytes,
+      until it ends, the limit is reached or it faults, held being the bytes dst
+      already holds past its prefix. It hands back the chunks and the bytes they
+      hold, and reports overflow when the detector byte is in, and the fault
+      verbatim. The list goes in and comes back rather than living in a struct
+      beside the caller's frame, which would move its backing array to the heap.
+    name: fillChunks
+    params: br *boundedRead, chunks []*spillChunk, spilled int, held int64
+    results: filled []*spillChunk, total int, overflow bool, err error
+  - doc: |-
+      ceilingFirst orders the two refusals a read can owe (kitsunium/sdk#1432):
+      read is every byte the stream has handed over past dst's prefix, fault the
+      one that came with them. Past max the answer is the ceiling's — overflow, no
+      fault — because the plaintext a caller refused to hold is a size fact
+      whatever the rest of the stream holds; within max the fault stands.
+    name: ceilingFirst
+    params: fault error, read, max int64
+    results: overflow bool, err error
+  - doc: |-
+      probeEnd asks r for one byte into probe, and says what came back: carried,
+      that probe[0] is the stream's next byte (a fault beside it is returned with
+      it); ended, that the stream is over with nothing more to take; or a fault. A decoder that answers with no byte and no
+      error is asked again, as io.Reader permits. When room is false — the limit is
+      reached, so the detector byte is already in — nothing is asked: the loop in
+      spill judges the overflow.
+    name: probeEnd
+    params: r io.Reader, probe *[1]byte, room bool
+    results: carried, ended bool, err error
   - doc: |-
       settle reports overflow when out holds more than max bytes past dst, and
       hands out back otherwise.
@@ -403,13 +502,6 @@ functions:
     name: releaseFlateReader
     params: box *readerBox
   - doc: |-
-      takeZlibReader borrows a zlib decoder already reading src, through the box's
-      own reader. Both paths parse the RFC 1950 header, so a bad envelope is
-      rejected identically either way.
-    name: takeZlibReader
-    params: src []byte
-    results: box *readerBox, err error
-  - doc: |-
       takeZlibStream borrows a zlib decoder already reading the caller's stream r,
       for a StreamingCompressor reader (ADR 0213).
     name: takeZlibStream
@@ -457,10 +549,42 @@ functions:
       zlibDecompressCore is the shared body behind both the layer backstop and the
       caller-supplied ceiling. It reports an over-cap stream as tooLarge rather
       than choosing a sentinel, so each caller can name the fact in its own terms.
+
+      It reads the RFC 1950 envelope itself — the two-byte header and the four-byte
+      Adler-32 trailer — over the pooled raw-DEFLATE decoder, because compress/zlib
+      builds a fresh digest (adler32.New) on every Reset and so allocates once per
+      call, however large the caller's dst (kitsunium/sdk#1102). The body is still
+      decoded by compress/flate and the sum is hash/adler32's; only the thirty
+      lines of envelope are this package's, and every refusal is the stdlib's own
+      sentinel (zlib.ErrHeader, zlib.ErrDictionary, zlib.ErrChecksum,
+      io.ErrUnexpectedEOF) so errors.Is reads what it always read. The stream
+      readers (NewReader) keep compress/zlib.
     name: zlibDecompressCore
     params: dst, src []byte, max int64
     results: decoded []byte, tooLarge bool, err error
+  - doc: |-
+      zlibBody validates src's RFC 1950 header and returns what follows it, the
+      DEFLATE stream and its trailer. Its refusals are compress/zlib's, in the
+      order compress/zlib makes them: a stream too short for the header, or for the
+      DICTID an FDICT header promises, is io.ErrUnexpectedEOF, a header that is not
+      CM 8 with a window of at most 32 KiB and a multiple of 31 is zlib.ErrHeader,
+      and a DICTID other than the empty dictionary's is zlib.ErrDictionary.
+    name: zlibBody
+    params: src []byte
+    results: body []byte, err error
+  - doc: |-
+      zlibCheckTrailer judges tail, what the DEFLATE stream left of the input,
+      against plain, what it decoded: a tail shorter than four bytes is
+      io.ErrUnexpectedEOF, a big-endian Adler-32 that is not plain's is
+      zlib.ErrChecksum. Bytes past the four are ignored, as compress/zlib ignores
+      them. The sum is one pass of hash/adler32 over the plaintext already on the
+      caller's dst, so it allocates nothing.
+    name: zlibCheckTrailer
+    params: tail, plain []byte
+    results: error
 imports:
+  adler32: hash/adler32
+  binary: encoding/binary
   bytes: bytes
   coretransform: github.com/kitsunium/sdk/internal/core/data/transform
   errs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -483,6 +607,24 @@ types:
     kind: named
     name: spillChunk
     underlying: "[spillChunkBytes]byte"
+  - doc: |-
+      boundedRead is one appendAllBounded call's read: the source, the byte its end
+      is probed with, and the two widths of the bound.
+    fields:
+      - doc: r is the decoder being drained.
+        name: r
+        type: io.Reader
+      - doc: probe is the one byte the end of the stream is asked into.
+        name: probe
+        type: "*[1]byte"
+      - doc: limit is max plus the detector byte, saturated at math.MaxInt64.
+        name: limit
+        type: int64
+      - doc: max is the plaintext the caller agreed to hold.
+        name: max
+        type: int64
+    kind: struct
+    name: boundedRead
   - doc: |-
       flateCompressor is the concrete Compressor for the raw DEFLATE wire format.
       The level is fixed at construction and never mutated, so the value stays
@@ -640,6 +782,12 @@ types:
           take, which the decoder did already.
         name: in
         type: bytes.Reader
+      - doc: |-
+          probe is the one byte appendAllBounded asks of the decoder to find the
+          end of a stream that filled dst exactly. A field, so asking allocates
+          nothing: the box is on the heap already (kitsunium/sdk#1102).
+        name: probe
+        type: "[1]byte"
     kind: struct
     name: readerBox
   - doc: |-
@@ -901,8 +1049,12 @@ vars:
         name: flateReaderPool
         value: recycler.NewPool(func() *readerBox { return &readerBox{} })
       - doc: |-
-          zlibReaderPool recycles the RFC 1950 decoder, unexported for the same
-          reason and boxed the same way, so the three schemes read identically.
+          zlibReaderPool recycles the RFC 1950 decoder of the stream reader
+          (NewReader), unexported for the same reason and boxed the same way, so
+          the three schemes read identically. A block Decompress does not take
+          from it: it reads the envelope itself over flateReaderPool's decoder,
+          because compress/zlib's Reset allocates a digest on every call
+          (kitsunium/sdk#1102).
         name: zlibReaderPool
         value: recycler.NewPool(func() *readerBox { return &readerBox{} })
     name: gzipWriterPools

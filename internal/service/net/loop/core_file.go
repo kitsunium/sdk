@@ -4,15 +4,39 @@ import (
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
+// fileCtl is one file body in flight on a slot (#982): what WriteFile and the
+// backend's beginFile took, released by endFile. It lives in the ring's file
+// table, not in connCtl, so a connection that sends no file pays none of it
+// (#961); like connCtl it holds no pointer.
+type fileCtl struct {
+	// off is the next byte of the file to send, left how many are left.
+	off  int64
+	left int64
+	// fd is the file being sent, the engine's own duplicate.
+	fd int32
+	// pipeR and pipeW are the pipe the file crosses on io_uring, a
+	// connection's own, -1 on epoll; pipeHeld how many bytes the pipe holds.
+	pipeR, pipeW int32
+	pipeHeld     int32
+	// err is the errno a file operation failed with, zero when none.
+	err int32
+	// ops counts the file's operations in flight on io_uring.
+	ops uint8
+	// bits holds ffEOF, ffFull and ffPoll.
+	bits uint8
+}
+
 // fileSender is the optional side of a driver that sends a file's bytes from
 // the kernel. Both native backends implement it; a platform without one has
 // no driver at all, and LoopFileWriter refuses.
 type fileSender interface {
 	// beginFile takes what sending a file on slot needs — a duplicate of fd, a
-	// pipe — and records it in the slot; a refusal leaves the slot untouched.
+	// pipe — and records it in a file record of the ring (takeFile); a refusal
+	// leaves the slot untouched.
 	beginFile(r *ring, slot int32, fd int) error
-	// endFile releases what beginFile took, the file done or the slot's last
-	// operation over: nothing of it is left in the kernel.
+	// endFile releases what beginFile took, and the record (putFile), the file
+	// done or the slot's last operation over: nothing of it is left in the
+	// kernel.
 	endFile(r *ring, slot int32)
 }
 
@@ -41,7 +65,7 @@ func (lp *loop) WriteFile(ref corenet.LoopConnRef, head []byte, file corenet.Loo
 	}
 	c := &r.conns[slot]
 	//: one file at a time, and the head under the ceiling as a Write's bytes.
-	if c.fileFD >= 0 || c.pending()+len(head) > lp.sz.outputCap {
+	if c.file != noFile || c.pending()+len(head) > lp.sz.outputCap {
 		//: refused; OnWritable says when.
 		return r.refuseOutput(c)
 	}
@@ -62,7 +86,8 @@ func (lp *loop) WriteFile(ref corenet.LoopConnRef, head []byte, file corenet.Loo
 		//: refused.
 		return r.refuseOutput(c)
 	}
-	c.fileOff, c.fileLeft = file.Off, file.Len
+	f := r.fileOf(slot)
+	f.off, f.left = file.Off, file.Len
 	r.markDirty(slot)
 	//: queued; OnWritable says when its last byte left.
 	return nil
@@ -72,7 +97,7 @@ func (lp *loop) WriteFile(ref corenet.LoopConnRef, head []byte, file corenet.Loo
 // left in flight.
 func (r *ring) dropFile(slot int32) {
 	//: a file still attached: no operation of it remains, so it closes now.
-	if fs, ok := r.drv.(fileSender); ok && r.conns[slot].fileFD >= 0 {
+	if fs, ok := r.drv.(fileSender); ok && r.conns[slot].file != noFile {
 		fs.endFile(r, slot)
 	}
 }
@@ -92,4 +117,34 @@ func (r *ring) fileDone(slot int32) {
 	if c.state == stOpen {
 		r.lp.h.OnWritable(r.lp, r.ref(slot))
 	}
+}
+
+// takeFile gives slot a file record, released by putFile, and returns it.
+// A pointer to it is good until the next takeFile, which may move the table.
+func (r *ring) takeFile(slot, fd int32) *fileCtl {
+	var idx int32
+	//: a released record first, so the table grows only with the peak.
+	if n := len(r.freeFiles); n > 0 {
+		idx = r.freeFiles[n-1]
+		r.freeFiles = r.freeFiles[:n-1]
+	} else {
+		idx = int32(len(r.files))
+		r.files = append(r.files, fileCtl{})
+	}
+	r.files[idx] = fileCtl{fd: fd, pipeR: -1, pipeW: -1}
+	r.conns[slot].file = idx
+	//: the slot's.
+	return &r.files[idx]
+}
+
+// fileOf returns slot's file record; the slot must have one.
+func (r *ring) fileOf(slot int32) *fileCtl {
+	//: by the slot's index.
+	return &r.files[r.conns[slot].file]
+}
+
+// putFile releases slot's file record, its descriptors already closed.
+func (r *ring) putFile(slot int32) {
+	r.freeFiles = append(r.freeFiles, r.conns[slot].file)
+	r.conns[slot].file = noFile
 }

@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) §D5 (Windows accepted every lock directory; it no longer does) and its §Deferred DACL item, [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) §D4 and its §Deferred DACL item — both closed here
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) (the domain), [ADR 0018](0018-sdk-cross-platform-portability.md) (the `x/sys` ban, and the lazy-DLL discipline that answers it), [ADR 0057](0057-sdk-authz-domain.md) (byte-equality comparison of an identifier, rather than a parser)
+- **Area**: app
+- **Need**: incident
 
 ## Context
 

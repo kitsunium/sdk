@@ -4,6 +4,8 @@
 - **Date**: 2026-11-03
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0102](0102-a-document-somebody-else-wrote-is-decoded-one-way-or-not-at-all.md) (strictjson, the reading this validator goes through), [ADR 0046](0046-sdk-validation-domain.md) (the report and its path grammar), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (standard library only), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code range)
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

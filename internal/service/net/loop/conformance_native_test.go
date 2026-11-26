@@ -436,7 +436,11 @@ func TestConformance_tinyTable(t *testing.T) {
 	})
 }
 
-// TestConformance_maxConns pins LimitsValue.MaxConns: accepted and closed.
+// TestConformance_maxConns pins LimitsValue.MaxConns: accepted and closed,
+// the refused peer reading its end at once. On io_uring's direct descriptors
+// the close alone left the refused peer without one — the file put only once
+// the open connection's multishot recv ended —, and its read ran to its own
+// deadline, 20 s of the suite's shard (#1439); a timeout is no refusal.
 func TestConformance_maxConns(t *testing.T) {
 	eachBackend(t, func(t *testing.T, b backendCase) {
 		h := &lineH{}
@@ -444,8 +448,13 @@ func TestConformance_maxConns(t *testing.T) {
 		dial(t, addr)
 		waitFor(t, "one open", func() bool { o, _ := h.counts(); return o == 1 })
 		c := dial(t, addr)
-		if _, err := c.Read(make([]byte, 1)); err == nil {
+		_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, err := c.Read(make([]byte, 1))
+		if err == nil {
 			t.Fatal("a connection past MaxConns was served")
+		}
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatal("a connection past MaxConns read no end in 5 s: refused, its peer was never told")
 		}
 		waitFor(t, "the rejection", func() bool { return g.Rejected() == 1 })
 	})
@@ -602,6 +611,34 @@ func echo(t *testing.T, c stdnet.Conn, line string) {
 	got := make([]byte, len(line))
 	if _, err := io.ReadFull(c, got); err != nil || string(got) != line {
 		t.Fatalf("echo = %q, %v", got, err)
+	}
+}
+
+// resetClose closes conns with a reset (SO_LINGER 0) rather than a FIN:
+// neither end keeps a TIME_WAIT socket, and the connection-tracking entry a
+// netfilter host keeps for each lives seconds (CLOSE) rather than two
+// minutes (TIME_WAIT). The suite's tests of tens of thousands of
+// connections, closed by FIN, held a hundred thousand of a runner's 262 144
+// conntrack entries, and server's suite, which go test runs beside this one,
+// filled the rest: every new loopback flow was refused, a datagram lane's
+// send failing with EPERM (#1377). A client that read the server's end
+// closes so too: the server, which closed first, would otherwise keep the
+// TIME_WAIT, a 4-tuple held for a minute (30 s on macOS, out of 16 384
+// ephemeral ports) — the drain tests of a thousand connections each ran a
+// macOS runner's range out (#1430). It lives here, on every native platform,
+// not beside the stop tests, because loop_memory_test compiles this file and
+// not theirs.
+func resetClose(conns []stdnet.Conn) {
+	for _, c := range conns {
+		//: a slot a failed dial left empty.
+		if c == nil {
+			continue
+		}
+		//: a connection that is not TCP is closed as it is.
+		if tc, ok := c.(*stdnet.TCPConn); ok {
+			_ = tc.SetLinger(0)
+		}
+		_ = c.Close()
 	}
 }
 

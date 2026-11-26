@@ -502,6 +502,22 @@ func (u *uring) reap(max int, fn func(c *cqe)) int {
 	return n
 }
 
+// completed is how many completions the CQ holds for ud, not yet reaped. One
+// the kernel held back on an overflow is not counted.
+func (u *uring) completed(ud uint64) int {
+	tail := atomic.LoadUint32(u.cqTail)
+	n := 0
+	//: from the head, nothing consumed.
+	for head := *u.cqHead; head != tail; head++ {
+		//: ud's.
+		if u.cqes[head&u.cqMask].userData == ud {
+			n++
+		}
+	}
+	//: how many.
+	return n
+}
+
 // overflowed reports a CQ the kernel had to hold back (NODROP):
 // flushOverflow moves it into the CQ.
 func (u *uring) overflowed() bool {

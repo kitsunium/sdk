@@ -24,6 +24,9 @@ type bindReport struct {
 	// applied; backlogReason says why it is not what was asked, "" when it is.
 	backlog       int
 	backlogReason string
+	// sized is the bound socket, under its layers, when the group asked for a
+	// Backlog: the one whose queue the drain widens (#978); nil otherwise.
+	sized stdnet.Listener
 	// receiveBuffer and sendBuffer are ListenerStateValue's, read back after
 	// bind.
 	receiveBuffer, sendBuffer int

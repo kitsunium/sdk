@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers (issues #273 and #276)
 - **Depends on**: [ADR 0161](0161-an-untyped-error-fails-the-build.md) (every error is `errs.Define` or `errs.Wrap`), [ADR 0164](0164-an-error-code-is-the-designs-and-kit-writes-it.md) (codes and sentinels are the design's), [ADR 0168](0168-a-declaration-is-the-designs-and-a-body-is-the-codes.md) (a declaration is the design's, a body the code's)
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a sibling, never a widening), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence), [ADR 0172](0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md) (§Deferred), issues #273 and #276
+- **Area**: errs
+- **Need**: decision
 
 ## Context
 

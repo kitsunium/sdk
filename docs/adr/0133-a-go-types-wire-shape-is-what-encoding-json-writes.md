@@ -4,6 +4,8 @@
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0003](0003-sdk-codec-package.md) (the codec tree), [ADR 0102](0102-a-document-somebody-else-wrote-is-decoded-one-way-or-not-at-all.md) (a JSON package with its own facade), [ADR 0046](0046-sdk-validation-domain.md) (validation), [ADR 0101](0101-a-secret-shown-is-a-secret-replaced-and-the-bound-is-exact.md) (redact)
+- **Area**: data
+- **Need**: constraint
 
 ## Context
 

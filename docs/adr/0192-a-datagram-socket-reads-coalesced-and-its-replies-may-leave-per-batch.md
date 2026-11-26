@@ -18,6 +18,8 @@
   (`Faults`), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md)
   (design first), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md)
   (performance contracts)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

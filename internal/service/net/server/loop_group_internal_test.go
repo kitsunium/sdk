@@ -192,15 +192,13 @@ func TestLoopGroup_serves(t *testing.T) {
 					t.Fatalf("backend %v degraded %v, want %v", ls.Backend, ls.Degraded, b)
 				}
 			case kqueueAuto(runtime.GOOS):
-				// darwin: kqueue, its paired gate held (ADR 0222 §D6, amended
-				// 2026-11-13).
+				// darwin and the BSDs: kqueue (ADR 0222 §D6, amended
+				// 2026-11-15).
 				if ls.Backend != corenet.LoopBackendKqueue || ls.Degraded {
 					t.Fatalf("auto = %v degraded %v %q, want kqueue", ls.Backend, ls.Degraded, ls.DegradedReason)
 				}
 			case runtime.GOOS != "linux":
-				// Elsewhere the portable backend: the best there is, or, on
-				// the BSDs, auto's choice while no row of theirs was measured
-				// (ADR 0222 §D6).
+				// Elsewhere the portable backend: the best there is.
 				if ls.Backend != corenet.LoopBackendPortable || ls.Degraded {
 					t.Fatalf("auto = %v degraded %v", ls.Backend, ls.Degraded)
 				}

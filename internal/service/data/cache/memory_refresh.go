@@ -20,11 +20,14 @@ func (s *memoryStore[V]) LoadRefreshing(ctx context.Context, key string, fill co
 	}
 	stripe := s.stripeOf(key)
 	stripe.mu.Lock()
-	rec, ok := stripe.fetch(key)
-	left := remainingOf(rec.expireAt, s.clk.Now())
+	rec, ok := stripe.lru.Fetch(key)
+	//: the primitive's deadline, read under the lock that found the entry;
+	//: a miss has none.
+	deadline, _ := stripe.lru.Deadline(key)
+	left := remainingOf(deadline, s.clk.Now())
 	//: a live positive hit inside the window, with no refresh running yet:
 	//: claim the key, under the same lock that read the entry.
-	start := ok && rec.absent == nil && !rec.expireAt.IsZero() && left < before && stripe.claimRefresh(key)
+	start := ok && rec.absent == nil && !deadline.IsZero() && left < before && stripe.claimRefresh(key)
 	stripe.mu.Unlock()
 	//: a miss fills on the caller's path, exactly as Load does.
 	if !ok {

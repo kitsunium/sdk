@@ -14,6 +14,8 @@
   (the grouped wait, and the fixed cost of a batch);
   [ADR 0203](0203-an-io-uring-loops-rings-fill-in-order-and-a-rings-buffers-follow-its-table.md)
   (rings filled in order)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

@@ -166,8 +166,37 @@ func TestInstanceCanceledStillRuns(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	u, err := service.SpawnInstance(ctx, &service.Config{Spawner: &fakeSpawner{}, ExecStart: []coresvc.CommandValue{command(t, "/bin/true")}}, "c1", conn)
+	ranToItsEnd(t, u, err, conn)
+}
+
+// unseenCancel is a context canceled already, as Start's select sees it on
+// a run that took the unit's answer: Err reports the cancellation, Done is
+// never ready. Go's select picks at random among the cases ready, so no
+// context.WithCancel can force that order (kitsunium/sdk#1493); this one
+// holds it on every run.
+type unseenCancel struct{ context.Context }
+
+func (unseenCancel) Done() <-chan struct{} { return nil }
+
+func (unseenCancel) Err() error { return context.Canceled }
+
+// TestInstanceCanceledBeforeTheAnswer (kitsunium/sdk#1493): a context
+// canceled already is reported even when the unit would answer the start
+// first — the instance up and its answer nil before the context is read —,
+// and the instance runs to its end all the same.
+func TestInstanceCanceledBeforeTheAnswer(t *testing.T) {
+	conn, _ := connection(t)
+	u, err := service.SpawnInstance(unseenCancel{context.Background()}, &service.Config{Spawner: &fakeSpawner{}, ExecStart: []coresvc.CommandValue{command(t, "/bin/true")}}, "c1", conn)
+	ranToItsEnd(t, u, err, conn)
+}
+
+// ranToItsEnd checks what a canceled caller of SpawnInstance gets — the
+// instance and context.Canceled — and that the instance ran to its end, its
+// connection closed.
+func ranToItsEnd(t *testing.T, u *service.Unit, err error, conn *os.File) {
+	t.Helper()
 	if err != context.Canceled || u == nil {
-		t.Fatalf("SpawnInstance(canceled) = %v, %v; want the instance and context.Canceled", u, err)
+		t.Fatalf("SpawnInstance(canceled): instance %t, error %v; want the instance and context.Canceled", u != nil, err)
 	}
 	ended(t, u)
 	if !closedFile(conn) || u.State().Restarts != 0 || u.State().Generation == 0 {

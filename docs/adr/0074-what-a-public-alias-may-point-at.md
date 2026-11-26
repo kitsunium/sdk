@@ -4,6 +4,8 @@
 - **Date**: 2026-09-12
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0001](0001-sdk-go-multimodule-layout.md) (the four layers), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (what publishing a type commits to), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the direction is checked on the graph, not inferred)
+- **Area**: design
+- **Need**: constraint
 
 ## Context
 

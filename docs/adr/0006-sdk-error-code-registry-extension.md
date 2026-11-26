@@ -1,11 +1,13 @@
 # ADR 0006 — Error Code Registry Extension (logger v2 + ring)
 
-**Status**: Accepted
-**Date**: 2026-04-23
-**Deciders**: @kodflow
-**Amends**: ADR 0005 §Registry (dotted-quad error codes)
-**Amended by**: [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) — the ring's MPSC sibling, its cursors on their own cache lines
-**Related**: ADR 0002 §Registry (superseded), post-audit plan `dreamy-nibbling-bear.md`
+- **Status**: Accepted
+- **Date**: 2026-04-23
+- **Deciders**: @kodflow
+- **Amends**: ADR 0005 §Registry (dotted-quad error codes)
+- **Amended by**: [ADR 0216](0216-a-pool-bounds-workers-a-semaphore-bounds-weight-and-the-ring-takes-many-producers.md) — the ring's MPSC sibling, its cursors on their own cache lines
+- **Related**: ADR 0002 §Registry (superseded), post-audit plan `dreamy-nibbling-bear.md`
+- **Area**: errs
+- **Need**: record
 
 ## Context
 

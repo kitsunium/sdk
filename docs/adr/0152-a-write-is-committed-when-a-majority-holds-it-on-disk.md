@@ -6,6 +6,8 @@
 - **Accepted**: 2026-10-13
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19); **Split into** [ADR 0173, *divergence of replicated state: prevented by construction, detected at fixed indexes, repaired automatically*](0173-divergence-is-prevented-by-construction-and-repaired-automatically.md) (divergence prevention and automatic repair, Q12). The number 0173 is reserved and the ADR is cited by its title until it merges (R7-00d, R7-03). **Depends on** the TLS sibling ADR of D4, number 0174 reserved, which must be Accepted before this one (R3-17). The pre-handshake admission sibling in `net/server` (R7-26) is folded into it (R7-00d). **Follows** the SDK reorganisation and the design rules: [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (the charter), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (the `app` family), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (stdlib only), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) (zstd stays in its vendor module), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) (no distribution mechanism here), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (the kernel), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (every service has a core, codes declared in the core, a wire format lives in the service), [ADR 0161](0161-an-untyped-error-fails-the-build.md) (typed errors), [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) (one module, one tag), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) (the design file), [ADR 0164](0164-an-error-code-is-the-designs-and-kit-writes-it.md) (codes), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md) (budgets), [ADR 0166](0166-a-facade-is-the-designs-and-a-forwarders-form-is-measured.md) (the facade), [ADR 0167](0167-a-doc-comment-is-the-designs-and-a-readme-is-written-from-docs-api.md) (doc comments), [ADR 0168](0168-a-declaration-is-the-designs-and-a-body-is-the-codes.md) (declarations and bodies), [ADR 0169](0169-the-sdk-is-rebuilt-from-its-design-in-a-copy-and-a-generation-is-held-to-the-whole-inline-set.md) (rebuilt from the design) (R7-01). **First consumer's deployment** (outside this repository): making.codes ADR 0006 and ADR 0015 (D20, R7-46)
+- **Area**: consensus
+- **Need**: decision
 
 ## Context
 
@@ -7370,7 +7372,7 @@ after as many warm-up calls (ADR 0165), three runs alike:
 | D15 row | Budget (`fn`, fixture) | D15 | Measured | Bound |
 |---|---|---|---|---|
 | leader handling one `AppendEntries` response | `raft.(*Raft).Step`, `StepAppResp` | 0 | 1 | **1, revised** |
-| follower handling 64 entries, memory log | `raft.(*Raft).Step`, `StepApp64` | ≤ 1 amortized, 0 per entry | 65 | **65, revised** |
+| follower handling 64 entries, memory log | `raft.(*Raft).Step`, `StepApp64` | ≤ 1 amortized, 0 per entry | 65, then 1 once #1110 landed | **1** (65 until L1's audit, 2026-11-13) |
 | encode / decode of a frame | `wire.AppendMessage`, `wire.ParseMessage` | 0 | 0 | 0 |
 | encode / decode of a log record | `TestTheRecordCodecAllocatesNothing` (hand-written) | 0 | 0 | 0 |
 | `Propose` → applied, 3 nodes, memory doubles | `BENCH.md`, `MEM/propose` (#911) | ≤ 4 | 183 to 184 | **not a budget** (below) |
@@ -7476,6 +7478,230 @@ leader's address, and that the joiner tries the leader.
   was asked — the authorizer runs on a node that answers, never on one that
   sends the joiner elsewhere.
 
+## Amendment — a voter that does not know its leader's last index refuses a JOIN, and a forward is answered across a change of term (2026-11-15, #1447, #1440)
+
+Two corrections of the rules a member follows when it does not lead; no
+frame changes, no protocol raise, no raft mutation (the type is full: the
+tests carry theirs).
+
+- **A JOIN reaches a voter that cannot tell how far behind it is
+  ([#1447](https://github.com/kitsunium/sdk/issues/1447)).** The amendment
+  of 2026-11-14 lets a voter answer a JOIN when its log is within 1 024
+  entries of "the leader's last index as its last heartbeat carried it".
+  A leader of protocol 3 or below carries none, and none has come before
+  the first heartbeat of a term: the index read 0, and a voter at 100
+  entries against a leader at 100 000 passed the check, forwarded the
+  `AddLearner` and waited its deadline to apply it — the timeout and the
+  `OUTCOME_UNKNOWN` #1422 removed for a learner. A voter that knows no last
+  index of its leader is not level: it refuses `NOT_LEADER`, as a learner
+  does. The refusal names the leader when the refusing member knows one,
+  and the leader's address only when it knows that address too
+  (`TCPTransport.Join`'s doc said the address always).
+- **A forward and its answer belong to their submission id, not to a term
+  ([#1440](https://github.com/kitsunium/sdk/issues/1440)).** D6 answers a
+  forwarded command with the leader's refusal, the one exception to
+  `OUTCOME_UNKNOWN`, or with its position. The step function dropped every
+  message of an older term but an append, a heartbeat and a PreVote, so a
+  forward that reached its leader after that leader's term moved went
+  unanswered, and an answer read by a follower whose term had moved was
+  never read: the follower's sweep answered `OUTCOME_UNKNOWN` two maximum
+  election timeouts later, for an entry the leader had refused or, in the
+  second case, appended and committed. `TestApplyLagBackpressure` met it
+  under load: its blocked apply makes the leader hand over after the
+  maximum election timeout (the progress watch of #554), and the hand-off's
+  `TimeoutNow` reached the forwarding follower before the `OVERLOADED` the
+  leader had answered; the forward was never appended. A forward and the
+  answer to one, of an older term, are now handled at the receiver's term:
+  a deposed leader refuses the forward `NOT_LEADER` naming the leader it
+  follows, a leader of the later term proposes it, both under the same
+  deduplication of the submission id (#401), and the answer resolves the
+  forward as at its own term. Every other message of an older term is
+  dropped or answered as before.
+- **The answer keeps the forward's term, never the receiver's (the safety
+  review of #1457).** The answer is not liveness alone: its term is the
+  forward's, which a forwarder reads at its own term or below, so it never
+  moves the forwarder's term (D5, D9 (b), R1-18). Stamped with the
+  receiver's later term, as #1457, this amendment's first pull request,
+  sent it, the answer to a forward of an older term raised the forwarder's
+  term with no live-leader check: a follower that had just acknowledged
+  its leader's round took the later term with no vote and no leader, then
+  granted a candidate's vote of that term within its vote window, which D5
+  refuses and the lease's condition (b) of D9 requires refused. The
+  candidate led the later term and committed a write while the leader it
+  deposed still served lease reads that missed it; the review drove three
+  step functions over a network that only delays, drops and reorders lanes
+  (D15's fault model), and 47 schedules of 47 violated the lease, none on
+  the base. A forward and the vote request travel on different lanes (data
+  and control), which keep no order between them. ReadIndex, the default,
+  was not affected. The same class through the answer R1-18 gives an older
+  term's append or heartbeat predates this amendment and is tracked apart
+  ([#1472](https://github.com/kitsunium/sdk/issues/1472)).
+- **Tests.**
+  `TestAJoinThroughAVoterThatDoesNotKnowTheLeadersLastIndexIsRefusedNotLeader`
+  (red on the base: admitted through the voter),
+  `TestAForwardAnsweredAcrossAChangeOfTermIsResolved` (red on the base:
+  `OUTCOME_UNKNOWN` for a committed entry),
+  `TestAForwardReachingALeaderThatMovedOnIsRefusedNotLeader` (red on the
+  base: `OUTCOME_UNKNOWN` after two maximum election timeouts);
+  `TestAJoinThroughALevelVoterIsForwarded` waits until the voter knows the
+  leader's last index; `TestApplyLagBackpressure` sends a forward refused
+  `NOT_LEADER` again through the leader of the moment, takes no other
+  answer than `OVERLOADED`, checks that proposals are accepted again once
+  every node applied its commit, on the leader of that moment, and that no
+  node applied the forward refused; raft's
+  `TestAForwardAnswerNeverRaisesTheForwardersTerm` (the answer at the
+  forward's term, and the forwarder refusing the next vote for its live
+  leader) and `TestALeaseHoldsAcrossALateForwardAnswer` (the review's
+  schedule, 64 seeds), each also run with the answer re-stamped in flight
+  at its sender's term, which they must catch: red on #1457's step
+  function (the vote granted; 47 of 47 schedules violate the lease).
+
+## Amendment — the leader's loop turn is measured raw, and reads the step function without cloning a configuration (2026-11-15, #912, #1364)
+
+The amendment of 2026-11-12 left #912's second criterion "not measured
+here": `consensus_loop_turn_seconds` p99 at 1 000 proposals/s not worse than
+before, and the bytes allocated per batch divided by the follower count
+([#912](https://github.com/kitsunium/sdk/issues/912),
+[#1364](https://github.com/kitsunium/sdk/issues/1364)). This amendment
+measures it, states the two rules it is judged by, and lightens the turn
+that the measure found heavy.
+
+- **The measure.** The series' first bucket is 0.5 ms (D13's latency
+  buckets) and a turn of the leader lasts 2 to 40 µs at that rate, so a
+  p99 read on the histogram would be its first bound before and after any
+  change. A test `Meter` on the leader keeps every observation raw instead:
+  `BenchmarkLeaderLoopTurnAt1000PerSecond` (three and five nodes over
+  loopback mutual TLS, memory logs, one paced run of 5 s) and
+  `BenchmarkLeaderTurnEncoding` (a turn of 64 entries of 256 B to N
+  followers, through a `BatchSender` and through a transport without one,
+  which the driver still sends a frame per follower grown from nil, the
+  path before #912 byte for byte). Both files are self-contained, so they
+  build on the commits the A/B lane copies them onto. The bench lane's
+  generator writes their `TURN/followers=N` and `ENC/followers=N` rows into
+  `BENCH.md`, and copies the lane's verdicts committed under
+  `testdata/bench/`; `CONSENSUS_BENCH_ONLY=turn,enc,ab` rewrites those
+  sections alone.
+- **The two rules.** "Not worse than before" is a ratio of two commits on
+  one machine: the A/B lane's suite `cturn` runs base and head alternated,
+  twenty rounds or more, and holds when the high end of the 95 % interval of
+  the per-round ratio head over base of the p99 is at most 1.00, three
+  nodes and five apart. Its base is `ee1f48ba2` (main before lot L1), and
+  `bench/912-parent` for #1364: the parent of #912's commit, which does not
+  build since #832, with the one line of `stream.go` that makes it build,
+  in a file the turn never runs. The bytes are the suite `cenc`: shared
+  over per-follower at most 1/N, in the head, 0.114 at two followers and
+  0.058 at four.
+- **What the turn did.** `Raft.Status` clones both memberships at each call,
+  and the loop called it two to four times a turn for a role, a term, a
+  leader or a timing (`handleProposals`, `leadershipChanged`, `publish`,
+  the lease's `checkTurn` and the tick's reads): over half of the bench
+  cluster's allocated bytes, and a third of `MEM/propose`'s allocations
+  (amendment of 2026-11-12). `publish` built the status on the heap before
+  comparing it with the last, and every frame without entries (heartbeats,
+  the commit-only appends, the acknowledgements and votes that wait for a
+  write) grew from nil, 900 allocations for 200 frames.
+- **What it does now.** The step function gains two read-only accessors,
+  designed (`design/app/consensus.yaml`): `Summary`, the status without
+  `Conf` and `Committed` (`StatusValue` embeds the `SummaryValue` it
+  returns), and `SameConf`, whether a configuration the driver published
+  is the one in force, compared field by field without a clone; both are
+  budgets of 0 allocations in `design/sdk.yaml`. The loop reads `Summary`
+  wherever it reads no membership, the compiler holding it to that;
+  `publishConf` clones and publishes the configuration, through `Status`,
+  only once `SameConf` says it changed; `publish` compares the status on
+  the stack; a frame without entries is encoded in one buffer of
+  `wire.MessageHeaderLen`. A turn that changes nothing allocates nothing
+  in `publish` (`TestATurnThatChangesNothingPublishesWithoutAllocating`,
+  400 allocations for 200 turns through `Status`, mutation-checked).
+- **Safety.** Every change reads; none writes. `Summary` and `SameConf`
+  read the step function's fields on the goroutine that owns it, the loop,
+  where `Status` was called before, at the same points; the configuration
+  the driver passes to `SameConf` is a published value, never written again
+  (a new configuration is a new pointer), and `SameConf` keeps nothing of
+  it; the configuration published is still `Status`'s clone, which nothing
+  else holds. The persistence, the order of the entries, the term, the
+  vote, the write before an acknowledgement, and the bytes on the wire are
+  untouched (`TestAFrameWithoutEntriesIsEncodedInOneAllocation` compares
+  each frame with `AppendMessage`'s; the simulator's `simOptions.speaks`
+  passes).
+- **Measured, indicatively.** On a shared VM (AMD EPYC 7351P, 4 CPUs,
+  go1.27.4), eight alternated passes against `ee1f48ba2` (twelve for the
+  base): the p99 of a turn went from 34.6 to 30.1 µs at two followers and
+  from 40.7 to 35.0 µs at four, the median of the per-pass ratios 0.856
+  and 0.848, none above 0.931; the median turn from 3.98 to 2.19 µs; the
+  cluster's allocations per leader turn from 31.0 to 14.0 and from 37.0 to
+  16.8. The parent of #912, repaired, measured 34.4 and 40.9 µs. The
+  verdict is the lane's on its runner: the rules stay `report` until it
+  holds; should it not, the owner's rule of 2026-11-14 raises the bound to
+  the best the runner measured, with this trail.
+
+## Amendment — a paced snapshot stream is measured against the same cluster's windows without one, at a rate fixed before measuring (2026-11-15, #920, #1365)
+
+[#920](https://github.com/kitsunium/sdk/issues/920) bounded the snapshot
+streams (`MaxSnapshotStreams`, `SnapshotStreamBytesPerSecond`, D14's table)
+and left its third criterion unmeasured: "the TCP lane shows commit p99 on
+the data lane within 10 % of the no-stream baseline while a paced stream
+runs". A hand-run bench measured it with memory logs and four nodes in one
+process holding a key-value state of 48 MiB and four snapshots: up to
+1.47 GB of heap, 319 ms of concurrent marking, and the bound missed in two
+runs of five at 8 MiB/s ([#1365](https://github.com/kitsunium/sdk/issues/1365)).
+It measured that heap's collections, not the stream. This amendment states
+the measure, the rate and the rule; the engine does not change.
+
+- **The measure.** `BenchmarkTCPCommitStream/<device>/rate=<R>MiB/{paced,paced+stream}`
+  (`streamcommit_bench_test.go`, in the bench lane's `manual` target): three
+  voters over loopback mutual TLS, each on a data directory of the device as
+  `TCP/<device>/paced`, take 1 000 proposals/s of 256 B. Their state machine
+  keeps no state, and its snapshot is 10 s of the rate of pseudo-random bytes
+  written on the fly, which the codec cannot shrink, cut once before the
+  windows (a load of 2 400 entries of 4 KiB passes `SnapshotEveryBytes`,
+  8 MiB, once; `SnapshotTrailing` 4) and never during them. One op is one
+  cluster under one leader: A, 4 s with no stream; B, 8 s while a learner
+  that joined on tmpfs — another host's disk in a deployment, whose writes
+  never compete with the voters' fdatasyncs — is streamed that snapshot at
+  `SnapshotStreamBytesPerSecond`, in flight from B's first proposal to its
+  last commit; A again, 4 s, once the learner is closed and removed. Each A
+  follows 2 s of the same load, measured and dropped: the load, the cut and
+  the removal leave transients a p99 of two pooled windows leans to.
+  `paced` is the p99 of both A pooled, 8 000 commits, `paced+stream` B's,
+  8 000. The op fails, and reports nothing, when the leadership moves (a
+  leader whose fdatasync stalls hands it over, #554), when a proposal fails,
+  or when the stream is not in flight through B. Each row also reports the
+  leader's fdatasync p99, the collections, their pause p99 and the
+  scheduling delay p99 of its window, which tell a disk, a collection or the
+  scheduler apart from the stream.
+- **The rate.** 8 MiB/s, fixed before any measure: the rate the hand-run
+  bench failed at, 32 times the data lane's 256 KiB/s of payload, some 6 % of
+  a 1 Gbit/s link. 2 and 32 MiB/s are published for the curve, not judged.
+- **The rule.** B / A, both rows of the head and of one cluster, never two
+  runs: the A/B lane's suite `cstream` runs the op twenty rounds on one
+  runner and holds when the high end of the 95 % interval of the per-round
+  ratio is at most 1.10, `data-disk` and `tmpfs` apart; `cstream-scale`
+  publishes 2 and 32 MiB/s under the same bound (`mode=scale`). Its rules
+  stay `report` until the runner's verdict holds; should it not, the
+  owner's rule of 2026-11-14 raises the bound to the best value the runner
+  measured, with this trail. `BENCH.md`'s `TCP/<device>/paced+stream` rows
+  print B / A and, as #1365 asks, B over the `TCP/<device>/paced` of the same
+  generation against the same bound, for information: another cluster at
+  another time, which mixes the drift of the disk and of the host with the
+  stream.
+- **Held in reserve.** The learner runs in the voters' process, its
+  receiving side on their CPUs, which a deployment does not do. It moves to
+  a process of its own, the test binary run again, only if the runner's
+  step 0 (the suite's CPU profile, and the windows' collections and
+  scheduling delays) leaves it a share of a ratio above the bound.
+- **Safety.** Test code only. The persistence, the order of the entries,
+  the term, the vote, the write before an acknowledgement and the bytes on
+  the wire are untouched; the pacing keeps its guarantees — the pin renewed
+  at every read and after every wait, the handle pinning the snapshot for
+  the whole transfer, a peer that waits for a stream held in raft's
+  snapshot state.
+- **Measured, indicatively.** On a shared VM (AMD EPYC 7351P, GOMAXPROCS 4,
+  go1.27.4), one op a pass at 8 MiB/s: B / A from 0.70 to 1.19 over five
+  passes on tmpfs (median 0.96), and from 1.02 to 1.28 over four on the
+  VM's disk (median 1.07), the stream at 8.0 MiB/s through B each time.
+  The verdict is the lane's on its runner.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -7532,6 +7758,9 @@ leader's address, and that the joiner tries the leader.
 | #763 (c) | the owner's decision, 2026-11-01 | a member's `TruncateAndStaySilent` reads the configuration the cluster runs with from a live member, every other member its log names asked under the key the log pins, the newest answer judged, and is refused `RECOVER_REFUSED`, its log and silence condition untouched (the audit line is written first), when that configuration lists none of the kept members, no longer lists the node, or when no member answers; `QuarantineOptions`, `ClearQuarantineWith` and `AskMembership` added, a transport lane `laneMembership` (5) that an older member ends unanswered; no raft frame, payload or record change, nothing persisted, no protocol raise, no raft mutation (amendment of 2026-11-01, #763) |
 | #911 | bench lane, 2026-11-11 | `make bench` runs the consensus lane (`consensus_bench_test`, race off, `manual`) and writes `internal/service/app/consensus/BENCH.md`; D16's commit target is revised to 2 × the nearest RTT + 4 × the fsync p99, its throughput and failover targets confirmed, each on the `BENCH.md` row it rests on |
 | #1422 | the owner's decision, 2026-11-14 | a node that cannot answer a JOIN at once — any but the leader and a voter level with it — refuses it `NOT_LEADER`, the leader's id and address in the reason, before the slot's rate and the authorizer, and the shipped joiners try the named leader next; no format change, no protocol raise, no raft mutation (amendment of 2026-11-14, #1422) |
+| #1447, #1440 | Raft lot L1, 2026-11-15 | a voter that does not know its leader's last index refuses a JOIN `NOT_LEADER`, the leader's address named only when known; a forward and its answer of an older term are handled at the receiver's term, so a forward that crossed a change of term is answered and no longer left to `OUTCOME_UNKNOWN`, the answer carrying the forward's term and never the receiver's later one, which raised the forwarder's past D5's live-leader refusal and broke D9 (b)'s lease (the safety review of #1457); no format change, no protocol raise, no raft mutation (amendment of 2026-11-15, #1447, #1440) |
+| #912, #1364 | the leader's loop turn, 2026-11-15 | `BENCH.md`'s `TURN` rows keep the leader's turns raw through a test `Meter` and its `ENC` rows a turn's bytes on both paths; "not worse" is the A/B lane's `cturn`, the high end of the 95 % interval of head over base at most 1.00, against `ee1f48ba2` and the repaired parent of #912, and the bytes its `cenc`, at most 1/N; the loop reads the step function's `Summary` and asks `SameConf` instead of cloning both memberships through `Status` at each read, publishes a status it compared on the stack, and encodes a frame without entries at its length; read-only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #912, #1364) |
+| #920, #1365 | the commit while a snapshot streams, 2026-11-15 | `BENCH.md`'s `TCP/<device>/paced+stream` rows measure the data lane's commit p99 while a stream paced at 8 MiB/s runs against the same cluster's windows without one — A, B, A under one leader, a machine that keeps no state, the learner on tmpfs —, and print B over `TCP/<device>/paced` beside it; the A/B lane's `cstream` holds when the high end of the 95 % interval of B / A is at most 1.10, `cstream-scale` publishes 2 and 32 MiB/s; test code only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #920, #1365) |
 
 ## raft-sql-poc (owner's prior Raft)
 

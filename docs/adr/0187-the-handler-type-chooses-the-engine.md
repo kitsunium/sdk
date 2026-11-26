@@ -31,6 +31,8 @@
   [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md)
   (design first), [ADR 0174](0174-a-tls-identity-is-checked-on-every-handshake-and-reloaded-in-place.md)
   (`PreHandshake`)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 
@@ -342,3 +344,39 @@ counted lost is one refused or reset once `Shutdown` began, nothing echoed, its
 line never read. `TestBacklog_drainLossIsTheKernels` makes the loss with a 300 ms
 grace and one cohort (about 375 of 384 lost, the drain still serving all it
 opened).
+
+Amended 2026-11-15 (kitsunium/sdk#978, the original criterion): a `Backlog(1)` group
+whose accept path is held completes at most two connects on every engine, nothing
+taken off the queue by the engine itself. Two engines took: io_uring's armed
+single-shot accepts were completed by the kernel while the loop's thread was held —
+31 more connects —, and the portable backend's acceptor emptied the queue into the
+lane's 512 events — 513 more. A group that sets `Backlog` now runs its io_uring loop
+under DEFER_TASKRUN (it opts into `uring-defer-taskrun`, missing in State where the
+kernel lacks it): an armed accept's task work runs only when the loop enters the
+kernel to reap, so a busy or held loop takes nothing. Its portable acceptor accepts
+only while a lane waits in its select, the last lane to wake withdrawing the Accept in
+progress with an expired deadline, which Go checks before accept(2), and waiting until
+it returned — the netpoller lets a connection that arrives after the deadline fired, but
+before the woken acceptor runs, win over it, and a starved acceptor took one a held lane
+never served; the drain and Close open that gate for good, and a TLS codec group's listener, whose layer hides
+the deadline, keeps at most one connection in hand. Measured on Linux 6.12: two
+connects of eight on the goroutine engine, epoll, io_uring and the portable backend.
+
+The ADR 0196 drain with `Backlog(8)` and 384 peers now serves every one of them, on
+every loop backend — the original criterion, which the amendment of 2026-11-13
+relaxed by counting a peer "lost" when its final ACK was dropped and its
+retransmission met the closed listener. A full accept queue drops a SYN without a
+trace (`tcp_conn_request`), and a final ACK too, without a reset while
+`tcp_abort_on_overflow` is off (`tcp_v4_syn_recv_sock`): the peers the queue refused
+while the loop was held come back in cohorts on their own timers, and nine places
+overflowed again whenever the loop was slow to take, until a peer's every
+retransmission of the grace had been dropped. Ten such drains at once on one CPU lost
+11 to 41 peers in 14 of 30. Shutdown now widens, before the grace, the queue of every
+socket a `Backlog` sized to the host's somaxconn — listen(2) called again adjusts a
+listening socket's backlog at once (`__inet_listen_sk`) —: the retries are queued,
+not dropped, and the drain's take serves them; under the same load and a heavier one,
+96 drains of 96 served all 384. `Backlog` bounds what waits for a group that serves;
+a draining group owes service to what is already on its way. State reports the depth
+the group set. A peer whose first retransmission comes after the listener closed —
+a grace shorter than a SYN's 1 s — is still lost: the kernel kept nothing of it
+(`TestBacklog_drainLossIsTheKernels`).

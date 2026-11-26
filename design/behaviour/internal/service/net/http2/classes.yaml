@@ -21,9 +21,10 @@ constants:
       - doc: |-
           controlPerBatch is how many frames that ask for an answer, or do no
           useful work, one batch may carry on one connection: past it the
-          connection is ending the peer's flood, RFC 9113 §10.5.
+          connection is ending the peer's flood, RFC 9113 §10.5. Conn.control
+          never passes it by more than one, so a uint16 holds it.
         name: controlPerBatch
-        type: int32
+        type: uint16
         value: "1024"
       - doc: |-
           resetBudgetFactor sizes the Rapid Reset budget, in MaxStreams: the peer
@@ -35,7 +36,7 @@ constants:
           maxContinuationFrames bounds the frames of one field block: past them
           it is a CONTINUATION flood, however few bytes each carries.
         name: maxContinuationFrames
-        type: int32
+        type: uint8
         value: "32"
       - doc: |-
           blockBoundFactor sizes the bytes of a whole field block, in the
@@ -86,6 +87,10 @@ constants:
         name: flagPeerGoAway
       - doc: "flagClosing says the connection ended with an error: nothing more is read."
         name: flagClosing
+      - doc: |-
+          flagAcked says the peer acknowledged our SETTINGS: a decoder taken from
+          then on starts at the table bound we advertised.
+        name: flagAcked
     name: flagPreface
   - grouped: true
     items:
@@ -876,6 +881,7 @@ files:
       - connEntry
       - entryFlags
       - (*connEntry).live
+      - connRequests
       - requestState
       - requestFlags
       - (*requestState).has
@@ -891,6 +897,7 @@ files:
       - (*laneState).take
       - (*laneState).give
       - (*laneState).takeRequest
+      - (*laneState).reqs
       - (*requestState).resetKeepingBuffers
       - (*laneState).findRequest
       - (*laneState).unlinkRequest
@@ -1280,9 +1287,6 @@ types:
     name: streamFlags
     underlying: uint8
   - fields:
-      - doc: decoder is the connection's HPACK table's bookkeeping.
-        name: decoder
-        type: Decoder
       - doc: peerWindow is what the peer may send on the connection.
         name: peerWindow
         type: int32
@@ -1315,8 +1319,9 @@ types:
         name: lastOpen
         type: uint32
       - doc: |-
-          table is the dynamic table's block in the lane's arena; noIndex until
-          the connection's first field block.
+          table is the dynamic table's block in the lane's arena, its decoder
+          beside it; noIndex until the connection's first field block, so an idle
+          connection carries neither (#961).
         name: table
         type: int32
       - doc: |-
@@ -1330,23 +1335,29 @@ types:
       - doc: resets is what is left of the Rapid Reset budget.
         name: resets
         type: int32
-      - doc: control counts this batch's frames that ask for an answer or do no work.
-        name: control
-        type: int32
       - doc: epoch is the batch control was counted in.
         name: epoch
         type: uint32
       - doc: |-
-          scanFrames is how many CONTINUATION frames of the field block waiting
-          at the front of the input are already known good.
-        name: scanFrames
-        type: int32
-      - doc: scanOff is where they end, relative to the HEADERS frame's first byte.
+          scanOff is where the CONTINUATION frames scanFrames counts end,
+          relative to the HEADERS frame's first byte.
         name: scanOff
         type: int32
       - doc: scanBlock counts the field block's bytes seen so far.
         name: scanBlock
         type: int32
+      - doc: |-
+          control counts this batch's frames that ask for an answer or do no
+          work: the connection ends one past controlPerBatch.
+        name: control
+        type: uint16
+      - doc: |-
+          scanFrames is how many CONTINUATION frames of the field block waiting
+          at the front of the input are already known good: the block is refused
+          at maxContinuationFrames, so a uint8 holds it. The two narrow fields
+          and flags share one word: an idle connection's Conn is 68 bytes (#961).
+        name: scanFrames
+        type: uint8
       - doc: flags are the connection's booleans.
         name: flags
         type: connFlags
@@ -1464,7 +1475,7 @@ types:
       - doc: freeStream is the free list's head in streams.
         name: freeStream
         type: int32
-      - doc: tables hands out the HPACK tables.
+      - doc: tables hands out the HPACK tables and their decoders.
         name: tables
         type: tableArena
       - doc: holds are the held-bytes buffers, by Conn.hold.
@@ -1618,7 +1629,9 @@ types:
         recv: "*Lane"
         results: int
     name: Lane
-  - doc: tableArena hands out HPACK tables of one size from chunks, pointer-free.
+  - doc: |-
+      tableArena hands out HPACK tables of one size from chunks, pointer-free,
+      each with its decoder: a connection takes both at its first field block.
     fields:
       - doc: size is one table's bytes.
         name: size
@@ -1626,6 +1639,11 @@ types:
       - doc: chunks are the arena's chunks, tableChunk tables each.
         name: chunks
         type: "[][]byte"
+      - doc: |-
+          decoders are the tables' decoders, by table id: the bookkeeping of the
+          table whose bytes are in chunks.
+        name: decoders
+        type: "[]Decoder"
       - doc: free are the tables on the free list.
         name: free
         type: "[]int32"
@@ -2339,7 +2357,11 @@ types:
         recv: a *LoopHandler
       - doc: |-
           answerSlot writes a worker's answer on its stream, ends the connection when
-          it was the last of a closing one, and frees the slot.
+          it was the last of a closing one, and frees the slot. On a connection the
+          batch fed, the answer joins the batch's output and the batch's end writes
+          and closes it (flush, closeIfDone): written and closed here, it went out
+          ahead of the SETTINGS and the GOAWAY the batch had queued, and the close
+          refused them (#1385).
         name: answerSlot
         params: io corenet.LoopIO, st *laneState, e *connEntry, slot *workSlot, idx uint32
         recv: a *LoopHandler
@@ -2399,19 +2421,11 @@ types:
     name: LoopHandler
   - doc: |-
       connEntry is one connection of a lane. An idle HTTP/2 connection holds this
-      and nothing else: no request record, no table, no buffer.
+      and nothing else: no request record, no table, no buffer (#961).
     fields:
       - doc: conn is the protocol state.
         name: conn
         type: Conn
-      - doc: |-
-          requests is the head of the connection's list of open requests in the
-          lane's request table, noIndex when none.
-        name: requests
-        type: int32
-      - doc: buffered counts the body bytes the connection's open requests hold.
-        name: buffered
-        type: int32
       - doc: gen is the generation of the connection the entry describes.
         name: gen
         type: uint32
@@ -2435,6 +2449,21 @@ types:
     kind: named
     name: entryFlags
     underlying: uint8
+  - doc: |-
+      connRequests are one connection's open requests: the head of its list in
+      the lane's request table, noIndex when none, and the body bytes they hold.
+      A request is opened only once its field block was decoded, so only once the
+      connection took its HPACK table: the lane keeps these by table, not by
+      connection, and an idle connection carries neither (#961).
+    fields:
+      - doc: head is the list's first record, noIndex when none.
+        name: head
+        type: int32
+      - doc: buffered counts the body bytes the connection's open requests hold.
+        name: buffered
+        type: int32
+    kind: struct
+    name: connRequests
   - doc: |-
       requestState is one HTTP/2 request that outlives the OnData that opened it:
       a body still arriving, or an answer a worker owes. Pooled by the lane.
@@ -2589,6 +2618,11 @@ types:
         type: "[]*requestState"
       - name: freeRequests
         type: int32
+      - doc: |-
+          tableReqs are each connection's open requests, by the id of the HPACK
+          table the connection holds (connRequests).
+        name: tableReqs
+        type: "[]connRequests"
       - doc: completed are the requests answered this batch, returned at its end.
         name: completed
         type: "[]int32"
@@ -2654,6 +2688,13 @@ types:
         params: e *connEntry, stream uint32
         recv: st *laneState
         results: int32, *requestState
+      - doc: |-
+          reqs returns the open requests of e, which holds its HPACK table: the
+          table's entry, the lane's table of them grown to it, a new one with none.
+        name: reqs
+        params: e *connEntry
+        recv: st *laneState
+        results: "*connRequests"
       - doc: findRequest returns the record of stream on e and its predecessor, or noIndex.
         name: findRequest
         params: e *connEntry, stream uint32

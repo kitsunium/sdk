@@ -530,7 +530,7 @@ sequences:
       - return: "newReport(newSwitches(&Config{Disabled: disabled, DisabledBy: disabledBy}), backend).rows"
   - of: (*connCtl).sending
     steps:
-      - return: c.pending() > 0 || c.fileFD >= 0
+      - return: c.pending() > 0 || c.file != noFile
   - of: (*connCtl).pending
     steps:
       - return: int(c.out.len-c.out.off) + int(c.flight.len-c.flight.off)
@@ -538,9 +538,9 @@ sequences:
     steps:
       - return: |-
           connCtl{
-          		gen: gen, fd: -1, fileFD: -1, pipeR: -1, pipeW: -1, state: stFree, reason: rNone,
+          		gen: gen, fd: -1, file: noFile, state: stFree, reason: rNone,
           		spill: chunkRef{idx: noChunk}, out: chunkRef{idx: noChunk}, flight: chunkRef{idx: noChunk},
-          		lruPrev: noLink, lruNext: noLink, dirtyNext: noLink,
+          		lruPrev: noLink, lruNext: noLink,
           	}
   - of: newRing
     steps:
@@ -548,7 +548,7 @@ sequences:
           &ring{
           		lp: lp, index: i, drv: drv,
           		wheel:   newWheel(0, lp.tick),
-          		lruHead: noLink, lruTail: noLink, dirtyHead: noLink,
+          		lruHead: noLink, lruTail: noLink,
           		pub: &ringStats{},
           	}
   - of: slotCap
@@ -687,7 +687,7 @@ sequences:
     steps:
       - bind: c
         eval: "&r.conns[slot]"
-      - return: c.state == stOpen && c.spill.empty() && c.pending() == 0 && c.fileFD < 0 && !r.drv.unread(r, slot) && !lp.waits(r, slot)
+      - return: c.state == stOpen && c.spill.empty() && c.pending() == 0 && c.file == noFile && !r.drv.unread(r, slot) && !lp.waits(r, slot)
   - of: (*loop).waits
     steps:
       - return: lp.busy != nil && lp.busy(lp.index, r.ref(slot))
@@ -995,10 +995,8 @@ sequences:
       - op: "|="
         set: c.flags
         value: fDirty
-      - set: c.dirtyNext
-        value: r.dirtyHead
-      - set: r.dirtyHead
-        value: slot
+      - set: r.dirty
+        value: append(r.dirty, slot)
   - of: (*ring).flushDirty
     participants:
       - id: caller
@@ -1009,29 +1007,19 @@ sequences:
         kind: internal
     steps:
       - loop:
-          cond: s != noLink
+          cond: i < len(r.dirty)
           do:
-            - set: r.dirtyHead
-              value: noLink
-            - loop:
-                cond: s != noLink
-                do:
-                  - bind: c
-                    eval: "&r.conns[s]"
-                  - bind: nxt
-                    eval: c.dirtyNext
-                  - op: "&^="
-                    set: c.flags
-                    value: fDirty
-                  - set: c.dirtyNext
-                    value: noLink
-                  - eval: r.settle(s)
-                    to: r.settle
-                  - set: s
-                    value: nxt
-            - set: s
-              value: r.dirtyHead
-          init: s := r.dirtyHead
+            - bind: s
+              eval: r.dirty[i]
+            - op: "&^="
+              set: r.conns[s].flags
+              value: fDirty
+            - eval: r.settle(s)
+              to: r.settle
+          init: i := 0
+          post: i++
+      - set: r.dirty
+        value: r.dirty[:0]
   - of: (*ring).settle
     participants:
       - id: caller
@@ -1123,7 +1111,7 @@ sequences:
               value: fWantWritable
             - eval: r.lp.h.OnWritable(r.lp, r.ref(slot))
               to: r.lp.h.OnWritable
-          when: c.flags&fWantWritable != 0 && c.state == stOpen && c.pending() < r.lp.lowWater && c.fileFD < 0
+          when: c.flags&fWantWritable != 0 && c.state == stOpen && c.pending() < r.lp.lowWater && c.file == noFile
   - of: (*ring).fail
     participants:
       - id: caller
@@ -1611,7 +1599,7 @@ sequences:
           do:
             - return: r.refuseOutput(c)
               to: r.refuseOutput
-          when: c.fileFD >= 0 || c.pending()+len(p) > lp.sz.outputCap || !lp.queue(r, slot, c, p)
+          when: c.file != noFile || c.pending()+len(p) > lp.sz.outputCap || !lp.queue(r, slot, c, p)
       - return: nil
   - of: (*loop).queue
     participants:
@@ -1857,6 +1845,8 @@ sequences:
         kind: internal
       - id: fs.endFile
         kind: internal
+      - id: r.fileOf
+        kind: internal
       - id: r.markDirty
         kind: internal
     steps:
@@ -1882,7 +1872,7 @@ sequences:
           do:
             - return: r.refuseOutput(c)
               to: r.refuseOutput
-          when: c.fileFD >= 0 || c.pending()+len(head) > lp.sz.outputCap
+          when: c.file != noFile || c.pending()+len(head) > lp.sz.outputCap
       - bind: fs, ok
         eval: r.drv.(fileSender)
       - opt:
@@ -1904,7 +1894,10 @@ sequences:
             - return: r.refuseOutput(c)
               to: r.refuseOutput
           when: len(head) > 0 && !lp.queue(r, slot, c, head)
-      - set: c.fileOff, c.fileLeft
+      - bind: f
+        eval: r.fileOf(slot)
+        to: r.fileOf
+      - set: f.off, f.left
         value: file.Off, file.Len
       - eval: r.markDirty(slot)
         to: r.markDirty
@@ -1925,7 +1918,7 @@ sequences:
           init:
             bind: fs, ok
             eval: r.drv.(fileSender)
-          when: ok && r.conns[slot].fileFD >= 0
+          when: ok && r.conns[slot].file != noFile
   - of: (*ring).fileDone
     participants:
       - id: caller
@@ -1961,9 +1954,45 @@ sequences:
             - eval: r.lp.h.OnWritable(r.lp, r.ref(slot))
               to: r.lp.h.OnWritable
           when: c.state == stOpen
+  - of: (*ring).takeFile
+    steps:
+      - var:
+          name: idx
+          type: int32
+      - alt:
+          - do:
+              - set: idx
+                value: r.freeFiles[n-1]
+              - set: r.freeFiles
+                value: r.freeFiles[:n-1]
+            init:
+              bind: "n"
+              eval: len(r.freeFiles)
+            when: n > 0
+          - do:
+              - set: idx
+                value: int32(len(r.files))
+              - set: r.files
+                value: append(r.files, fileCtl{})
+            else: true
+      - set: r.files[idx]
+        value: "fileCtl{fd: fd, pipeR: -1, pipeW: -1}"
+      - set: r.conns[slot].file
+        value: idx
+      - return: "&r.files[idx]"
+  - of: (*ring).fileOf
+    steps:
+      - return: "&r.files[r.conns[slot].file]"
+  - of: (*ring).putFile
+    steps:
+      - set: r.freeFiles
+        value: append(r.freeFiles, r.conns[slot].file)
+      - set: r.conns[slot].file
+        value: noFile
   - of: threadCheck
     steps:
       - return: nil
+  - of: atWritableEdge
   - of: newListenerSet
     participants:
       - id: caller
@@ -2984,6 +3013,8 @@ sequences:
         kind: actor
       - id: (*epollLoop).writable
         kind: self
+      - id: atWritableEdge
+        kind: internal
       - id: el.flush
         kind: internal
       - id: swallowErr
@@ -2993,6 +3024,8 @@ sequences:
     steps:
       - bind: r
         eval: el.r
+      - eval: atWritableEdge(r.conns[slot].fd)
+        to: atWritableEdge
       - op: "&^="
         set: r.conns[slot].flags
         value: fSending
@@ -3239,7 +3272,7 @@ sequences:
   - of: (*epollLoop).afterOutput
     steps:
       - loop:
-          cond: r.conns[slot].fileFD >= 0 && r.conns[slot].state != stDead && el.sendFile(r, slot)
+          cond: r.conns[slot].file != noFile && r.conns[slot].state != stDead && el.sendFile(r, slot)
           do: null
   - of: (*epollLoop).sendFile
     participants:
@@ -3256,19 +3289,19 @@ sequences:
       - id: swallowErr
         kind: internal
     steps:
-      - bind: c
-        eval: "&r.conns[slot]"
+      - bind: c, f
+        eval: "&r.conns[slot], r.fileOf(slot)"
       - bind: "off"
-        eval: c.fileOff
+        eval: f.off
       - bind: n, err
-        eval: syscall.Sendfile(int(c.fd), int(c.fileFD), &off, int(min(c.fileLeft, sendfileStep)))
+        eval: syscall.Sendfile(int(c.fd), int(f.fd), &off, int(min(f.left, sendfileStep)))
         to: syscall
       - switch:
           cases:
             - case: n > 0
               do:
-                - set: c.fileOff, c.fileLeft
-                  value: off, c.fileLeft-int64(n)
+                - set: f.off, f.left
+                  value: off, f.left-int64(n)
                 - op: +=
                   set: r.st.bytesOut
                   value: uint64(n)
@@ -3279,7 +3312,7 @@ sequences:
                       - eval: r.fileDone(slot)
                         to: r.fileDone
                       - return: "false"
-                    when: c.fileLeft == 0
+                    when: f.left == 0
             - case: err == syscall.EINTR
               do:
                 - return: "true"
@@ -3308,6 +3341,8 @@ sequences:
         kind: self
       - id: dupCloexec
         kind: internal
+      - id: r.takeFile
+        kind: internal
     steps:
       - bind: dup, err
         eval: dupCloexec(fd)
@@ -3316,8 +3351,8 @@ sequences:
           do:
             - return: corenet.LoopFileRefused
           when: err != nil
-      - set: r.conns[slot].fileFD
-        value: int32(dup)
+      - eval: r.takeFile(slot, int32(dup))
+        to: r.takeFile
       - return: nil
   - of: (*epollLoop).endFile
     participants:
@@ -3327,13 +3362,13 @@ sequences:
         kind: self
       - id: swallowErr
         kind: internal
+      - id: r.putFile
+        kind: internal
     steps:
-      - bind: c
-        eval: "&r.conns[slot]"
-      - eval: swallowErr(syscall.Close(int(c.fileFD)))
+      - eval: swallowErr(syscall.Close(int(r.fileOf(slot).fd)))
         to: swallowErr
-      - set: c.fileFD, c.fileOff, c.fileLeft
-        value: "-1, 0, 0"
+      - eval: r.putFile(slot)
+        to: r.putFile
   - of: (*epollLoop).shutdown
     participants:
       - id: caller
@@ -8570,7 +8605,7 @@ sequences:
         eval: |-
           &uRing{
           		ul: ul, u: u, armed: make([]int, len(ul.lfds)),
-          		queueDone: doneOutside(ul.owners, lp.index), queueCancel: make([]bool, len(ul.lfds)), queueEmptied: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
+          		queueDone: doneOutside(ul.owners, lp.index), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), seen: make([]uint64, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
           	}
       - set: rr.r
         to: newRing
@@ -8975,20 +9010,11 @@ sequences:
         kind: actor
       - id: (*uRing).takeQueue
         kind: self
-      - id: rr.waiting
-        kind: internal
       - id: rr.cancelAccept
         kind: internal
       - id: rr.ul.set.handBack
         kind: internal
-      - id: rr.armTake
-        kind: internal
-      - id: rr.tookAll
-        kind: internal
     steps:
-      - bind: q
-        eval: rr.waiting(i, fd)
-        to: rr.waiting
       - opt:
           do:
             - opt:
@@ -8996,32 +9022,72 @@ sequences:
                   - set: rr.queueCancel[i]
                     to: rr.cancelAccept
                     value: rr.cancelAccept(i)
-                when: q == 0 && !rr.queueCancel[i]
+                when: "!rr.queueCancel[i] && rr.waiting(i, fd) == 0"
             - return: ""
           when: rr.armed[i] > 0
       - set: rr.queueCancel[i]
         value: "false"
       - opt:
           do:
-            - set: rr.queueDone[i]
-              value: "true"
-            - eval: rr.ul.set.handBack(i)
-              to: rr.ul.set.handBack
             - return: ""
-          when: q == 0
-      - bind: "n"
-        eval: min(q, queueTakeBatch, rr.acceptRoom(), queueTakeMax-rr.taken[i])
+          when: "!rr.takeRounds(i, fd)"
       - opt:
           do:
+            - set: rr.queueCancel[i]
+              to: rr.cancelAccept
+              value: rr.cancelAccept(i)
             - return: ""
-          when: n == 0 || (rr.paused && rr.ul.lp.tick < rr.resumeAt)
-      - op: +=
-        set: rr.taken[i]
-        to: rr.armTake
-        value: rr.armTake(i, fd, n)
-      - set: rr.queueEmptied[i]
-        to: rr.tookAll
-        value: rr.tookAll(fd)
+          when: rr.u.completed(udPack(udAccept, 0, uint32(i))) < rr.armed[i]
+      - set: rr.queueDone[i]
+        value: "true"
+      - eval: rr.ul.set.handBack(i)
+        to: rr.ul.set.handBack
+  - of: (*uRing).takeRounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).takeRounds
+        kind: self
+      - id: rr.waiting
+        kind: internal
+      - id: rr.armTake
+        kind: internal
+      - id: rr.u.submit
+        kind: internal
+    steps:
+      - bind: share
+        eval: queueTakeBatch
+      - loop:
+          do:
+            - bind: q
+              eval: rr.waiting(i, fd)
+              to: rr.waiting
+            - opt:
+                do:
+                  - return: "true"
+                when: q == 0
+            - bind: "n"
+              eval: min(q, share, rr.acceptRoom(), queueTakeMax-rr.taken[i])
+            - opt:
+                do:
+                  - return: "false"
+                when: n == 0 || (rr.paused && rr.ul.lp.tick < rr.resumeAt)
+            - bind: armed
+              eval: rr.armTake(i, fd, n)
+              to: rr.armTake
+            - op: +=
+              set: rr.taken[i]
+              value: armed
+            - op: "-="
+              set: share
+              value: armed
+            - eval: rr.u.submit()
+              to: rr.u.submit
+            - opt:
+                do:
+                  - return: "false"
+                when: armed < n
+          forever: true
   - of: (*uRing).waiting
     participants:
       - id: caller
@@ -9034,21 +9100,9 @@ sequences:
       - opt:
           do:
             - return: "0"
-          when: rr.take != takeOn || rr.taken[i] >= queueTakeMax || rr.queueEmptied[i]
+          when: rr.take != takeOn || rr.taken[i] >= queueTakeMax
       - return: queued(fd)
         to: queued
-  - of: (*uRing).tookAll
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*uRing).tookAll
-        kind: self
-      - id: rr.u.submit
-        kind: internal
-    steps:
-      - eval: rr.u.submit()
-        to: rr.u.submit
-      - return: queued(fd) == 0
   - of: (*uRing).armTake
     participants:
       - id: caller
@@ -9709,7 +9763,13 @@ sequences:
         kind: self
       - id: closeFDs
         kind: internal
+      - id: udPack
+        kind: internal
+      - id: rr.u.submit
+        kind: internal
       - id: rr.u.get
+        kind: internal
+      - id: prepShutdownFixed
         kind: internal
       - id: prepCloseDirect
         kind: internal
@@ -9720,6 +9780,28 @@ sequences:
               to: closeFDs
             - return: ""
           when: "!rr.ul.direct"
+      - bind: ud
+        eval: udPack(udOrphanClose, 0, index)
+        to: udPack
+      - opt:
+          do:
+            - eval: rr.u.submit()
+              to: rr.u.submit
+          when: "!rr.u.room(2)"
+      - opt:
+          do:
+            - bind: s
+              eval: rr.u.get()
+              to: rr.u.get
+            - eval: prepShutdownFixed(s, index, syscall.SHUT_RDWR, ud)
+              to: prepShutdownFixed
+            - op: "|="
+              set: s.flags
+              value: sqeIOHardlink
+            - eval: prepCloseDirect(rr.u.get(), index, ud)
+              to: prepCloseDirect
+            - return: ""
+          when: rr.u.room(2)
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
@@ -9729,7 +9811,7 @@ sequences:
               set: rr.r.st.retries
             - return: ""
           when: s == nil
-      - eval: prepCloseDirect(s, index, udPack(udOrphanClose, 0, index))
+      - eval: prepCloseDirect(s, index, ud)
         to: prepCloseDirect
   - of: (*uRing).armRecv
     participants:
@@ -9935,7 +10017,7 @@ sequences:
           do:
             - eval: rr.armRecv(slot)
               to: rr.armRecv
-          when: "!more && rr.r.conns[slot].state == stOpen"
+          when: "!more && reads(&rr.r.conns[slot])"
   - of: (*uRing).recvBytes
     participants:
       - id: caller
@@ -9963,10 +10045,7 @@ sequences:
           do:
             - eval: rr.armRecv(slot)
               to: rr.armRecv
-          init:
-            bind: c
-            eval: "&rr.r.conns[slot]"
-          when: "!more && (c.state == stOpen || (c.state == stClosing && c.reason == rDrain))"
+          when: "!more && reads(&rr.r.conns[slot])"
   - of: (*uRing).recvStarved
     participants:
       - id: caller
@@ -9978,17 +10057,21 @@ sequences:
     steps:
       - op: ++
         set: rr.r.st.starved
-      - bind: open
-        eval: rr.r.conns[slot].state == stOpen
-      - alt:
-          - do:
-              - set: rr.starved
-                value: append(rr.starved, slot)
-            when: open && len(rr.starved) < starvedCap
-          - do:
-              - eval: rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
-                to: rr.r.fail
-            when: open
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - switch:
+          cases:
+            - case: reads(c) && len(rr.starved) < starvedCap
+              do:
+                - set: rr.starved
+                  value: "append(rr.starved, starvedRecv{slot: slot, gen: c.gen})"
+            - case: c.state == stOpen
+              do:
+                - eval: rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
+                  to: rr.r.fail
+  - of: reads
+    steps:
+      - return: c.state == stOpen || (c.state == stClosing && c.reason == rDrain)
   - of: (*uRing).recvEOF
     participants:
       - id: caller
@@ -10529,19 +10612,22 @@ sequences:
                 do:
                   - break: true
                 when: g < 0
-            - bind: slot
+            - bind: e
               eval: rr.starved[k]
             - op: ++
               set: k
             - opt:
                 do:
-                  - eval: rr.armRecvOn(slot, g)
+                  - eval: rr.armRecvOn(e.slot, g)
                     to: rr.armRecvOn
                   - op: "--"
                     set: left[g]
                   - op: "--"
                     set: room
-                when: rr.r.conns[slot].state == stOpen
+                init:
+                  bind: c
+                  eval: "&rr.r.conns[e.slot]"
+                when: c.gen == e.gen && reads(c)
       - set: rr.starved
         value: rr.starved[:copy(rr.starved, rr.starved[k:])]
   - of: (*uRing).flush
@@ -10567,7 +10653,7 @@ sequences:
                 do:
                   - eval: rr.fileStep(slot)
                     to: rr.fileStep
-                when: c.fileFD >= 0
+                when: c.file != noFile
             - return: ""
           when: c.out.empty() || c.out.off == c.out.len
       - set: c.flight, c.out
@@ -10773,7 +10859,7 @@ sequences:
           when: c.gen != w.gen || c.state != stDead || c.ops == 0
       - op: ++
         set: rr.backstops
-      - return: rr.cancelOp(w.slot, udRecv) && (c.flags&fSending == 0 || rr.cancelOp(w.slot, udSend)) && (c.fileBits&ffPoll == 0 || rr.cancelOp(w.slot, udFilePoll))
+      - return: rr.cancelOp(w.slot, udRecv) && (c.flags&fSending == 0 || rr.cancelOp(w.slot, udSend)) && (c.file == noFile || rr.r.fileOf(w.slot).bits&ffPoll == 0 || rr.cancelOp(w.slot, udFilePoll))
   - of: (*uRing).cancelOp
     participants:
       - id: caller
@@ -11062,6 +11148,9 @@ sequences:
       - bind: lp
         eval: ul.lp
       - opt:
+          do: null
+          when: lp.draining
+      - opt:
           do:
             - eval: ul.startDrain()
               to: ul.startDrain
@@ -11244,6 +11333,8 @@ sequences:
         kind: stdlib
       - id: closeFDs
         kind: internal
+      - id: r.takeFile
+        kind: internal
     steps:
       - opt:
           do:
@@ -11269,12 +11360,11 @@ sequences:
             eval: syscall.Pipe2(pipe[:], syscall.O_NONBLOCK|syscall.O_CLOEXEC)
             to: syscall
           when: err != nil
-      - bind: c
-        eval: "&r.conns[slot]"
-      - set: c.fileFD, c.pipeR, c.pipeW
-        value: int32(dup), int32(pipe[0]), int32(pipe[1])
-      - set: c.pipeHeld, c.fileOps, c.fileBits, c.fileErr
-        value: 0, 0, 0, 0
+      - bind: f
+        eval: r.takeFile(slot, int32(dup))
+        to: r.takeFile
+      - set: f.pipeR, f.pipeW
+        value: int32(pipe[0]), int32(pipe[1])
       - return: nil
   - of: (*uRing).endFile
     participants:
@@ -11282,19 +11372,20 @@ sequences:
         kind: actor
       - id: (*uRing).endFile
         kind: self
+      - id: r.fileOf
+        kind: internal
       - id: closeFDs
         kind: internal
+      - id: r.putFile
+        kind: internal
     steps:
-      - bind: c
-        eval: "&r.conns[slot]"
-      - eval: closeFDs([]int{int(c.fileFD), int(c.pipeR), int(c.pipeW)})
+      - bind: f
+        eval: r.fileOf(slot)
+        to: r.fileOf
+      - eval: closeFDs([]int{int(f.fd), int(f.pipeR), int(f.pipeW)})
         to: closeFDs
-      - set: c.fileFD, c.pipeR, c.pipeW
-        value: "-1, -1, -1"
-      - set: c.pipeHeld, c.fileOps, c.fileBits, c.fileErr
-        value: 0, 0, 0, 0
-      - set: c.fileOff, c.fileLeft
-        value: 0, 0
+      - eval: r.putFile(slot)
+        to: r.putFile
   - of: (*uRing).releaseFiles
     participants:
       - id: caller
@@ -11310,7 +11401,7 @@ sequences:
                 do:
                   - eval: rr.endFile(rr.r, int32(i))
                     to: rr.endFile
-                when: rr.r.conns[i].fileFD >= 0
+                when: rr.r.conns[i].file != noFile
           key: i
           range: rr.r.conns
   - of: (*uRing).fileStep
@@ -11334,14 +11425,14 @@ sequences:
       - id: rr.ul.onFD
         kind: internal
     steps:
-      - bind: c
-        eval: "&rr.r.conns[slot]"
+      - bind: c, f
+        eval: "&rr.r.conns[slot], rr.r.fileOf(slot)"
       - opt:
           do:
-            - eval: rr.fileOut(slot, uint32(c.pipeHeld))
+            - eval: rr.fileOut(slot, uint32(f.pipeHeld))
               to: rr.fileOut
             - return: ""
-          when: c.pipeHeld > 0
+          when: f.pipeHeld > 0
       - opt:
           do:
             - eval: rr.u.submit()
@@ -11356,20 +11447,20 @@ sequences:
                 when: "!rr.u.room(2)"
           when: "!rr.u.room(2)"
       - bind: "n"
-        eval: uint32(min(c.fileLeft, fileStepBytes))
-      - eval: "prepSpliceIn(rr.u.get(), spliceIn{file: c.fileFD, pipeW: c.pipeW, off: c.fileOff, n: n}, udPack(udFileIn, c.gen, uint32(slot)))"
+        eval: uint32(min(f.left, fileStepBytes))
+      - eval: "prepSpliceIn(rr.u.get(), spliceIn{file: f.fd, pipeW: f.pipeW, off: f.off, n: n}, udPack(udFileIn, c.gen, uint32(slot)))"
         to: prepSpliceIn
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
-      - eval: prepSpliceOut(s, c.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
+      - eval: prepSpliceOut(s, f.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
         to: prepSpliceOut
       - eval: rr.ul.onFD(s)
         to: rr.ul.onFD
       - op: +=
         set: c.ops
         value: "2"
-      - set: c.fileOps
+      - set: f.ops
         value: "2"
       - op: "|="
         set: c.flags
@@ -11389,8 +11480,8 @@ sequences:
       - id: rr.ul.onFD
         kind: internal
     steps:
-      - bind: c
-        eval: "&rr.r.conns[slot]"
+      - bind: c, f
+        eval: "&rr.r.conns[slot], rr.r.fileOf(slot)"
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
@@ -11402,13 +11493,13 @@ sequences:
               to: rr.r.fail
             - return: ""
           when: s == nil
-      - eval: prepSpliceOut(s, c.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
+      - eval: prepSpliceOut(s, f.pipeR, uint32(c.fd), n, udPack(udFileOut, c.gen, uint32(slot)))
         to: prepSpliceOut
       - eval: rr.ul.onFD(s)
         to: rr.ul.onFD
       - op: ++
         set: c.ops
-      - set: c.fileOps
+      - set: f.ops
         value: "1"
       - op: "|="
         set: c.flags
@@ -11419,6 +11510,8 @@ sequences:
         kind: actor
       - id: (*uRing).onFileIn
         kind: self
+      - id: rr.r.fileOf
+        kind: internal
       - id: rr.fileAdvance
         kind: internal
     steps:
@@ -11426,33 +11519,34 @@ sequences:
           do:
             - return: ""
           when: "!rr.owns(slot, gen)"
-      - bind: cc
-        eval: "&rr.r.conns[slot]"
+      - bind: f
+        eval: rr.r.fileOf(slot)
+        to: rr.r.fileOf
       - op: "--"
-        set: cc.ops
+        set: rr.r.conns[slot].ops
       - op: "--"
-        set: cc.fileOps
+        set: f.ops
       - switch:
           cases:
             - case: c.res > 0
               do:
                 - op: +=
-                  set: cc.pipeHeld
+                  set: f.pipeHeld
                   value: c.res
                 - op: +=
-                  set: cc.fileOff
+                  set: f.off
                   value: int64(c.res)
                 - op: "-="
-                  set: cc.fileLeft
+                  set: f.left
                   value: int64(c.res)
             - case: c.res == 0
               do:
                 - op: "|="
-                  set: cc.fileBits
+                  set: f.bits
                   value: ffEOF
             - case: c.res != -int32(errnoECANCELED)
               do:
-                - set: cc.fileErr
+                - set: f.err
                   value: "-c.res"
       - eval: rr.fileAdvance(slot)
         to: rr.fileAdvance
@@ -11469,18 +11563,18 @@ sequences:
           do:
             - return: ""
           when: "!rr.owns(slot, gen)"
-      - bind: cc
-        eval: "&rr.r.conns[slot]"
+      - bind: cc, f
+        eval: "&rr.r.conns[slot], rr.r.fileOf(slot)"
       - op: "--"
         set: cc.ops
       - op: "--"
-        set: cc.fileOps
+        set: f.ops
       - switch:
           cases:
             - case: c.res > 0
               do:
                 - op: "-="
-                  set: cc.pipeHeld
+                  set: f.pipeHeld
                   value: c.res
                 - op: +=
                   set: rr.r.st.bytesOut
@@ -11490,12 +11584,12 @@ sequences:
             - case: c.res == -int32(syscall.EAGAIN)
               do:
                 - op: "|="
-                  set: cc.fileBits
+                  set: f.bits
                   value: ffFull
             - case: c.res == 0, c.res == -int32(errnoECANCELED)
             - default: true
               do:
-                - set: cc.fileErr
+                - set: f.err
                   value: "-c.res"
       - eval: rr.fileAdvance(slot)
         to: rr.fileAdvance
@@ -11505,6 +11599,8 @@ sequences:
         kind: actor
       - id: (*uRing).onFilePoll
         kind: self
+      - id: rr.r.fileOf
+        kind: internal
       - id: rr.fileAdvance
         kind: internal
     steps:
@@ -11512,18 +11608,19 @@ sequences:
           do:
             - return: ""
           when: "!rr.owns(slot, gen)"
-      - bind: cc
-        eval: "&rr.r.conns[slot]"
+      - bind: f
+        eval: rr.r.fileOf(slot)
+        to: rr.r.fileOf
       - op: "--"
-        set: cc.ops
+        set: rr.r.conns[slot].ops
       - op: "--"
-        set: cc.fileOps
+        set: f.ops
       - op: "&^="
-        set: cc.fileBits
+        set: f.bits
         value: ffPoll
       - opt:
           do:
-            - set: cc.fileErr
+            - set: f.err
               value: "-c.res"
           when: c.res < 0 && c.res != -int32(errnoECANCELED)
       - eval: rr.fileAdvance(slot)
@@ -11549,12 +11646,12 @@ sequences:
       - id: rr.r.fileDone
         kind: internal
     steps:
-      - bind: c
-        eval: "&rr.r.conns[slot]"
+      - bind: c, f
+        eval: "&rr.r.conns[slot], rr.r.fileOf(slot)"
       - opt:
           do:
             - return: ""
-          when: c.fileOps > 0
+          when: f.ops > 0
       - op: "&^="
         set: c.flags
         value: fSending
@@ -11566,26 +11663,26 @@ sequences:
           when: c.state != stOpen && c.state != stClosing
       - switch:
           cases:
-            - case: c.fileErr != 0
+            - case: f.err != 0
               do:
-                - eval: rr.failLive(slot, c.fileErr)
+                - eval: rr.failLive(slot, f.err)
                   to: rr.failLive
-            - case: c.fileBits&ffFull != 0
+            - case: f.bits&ffFull != 0
               do:
                 - op: "&^="
-                  set: c.fileBits
+                  set: f.bits
                   value: ffFull
                 - eval: rr.pollOut(slot)
                   to: rr.pollOut
-            - case: c.pipeHeld > 0
+            - case: f.pipeHeld > 0
               do:
-                - eval: rr.fileOut(slot, uint32(c.pipeHeld))
+                - eval: rr.fileOut(slot, uint32(f.pipeHeld))
                   to: rr.fileOut
-            - case: c.fileBits&ffEOF != 0
+            - case: f.bits&ffEOF != 0
               do:
                 - eval: rr.r.fail(slot, rFile, 0)
                   to: rr.r.fail
-            - case: c.fileLeft > 0
+            - case: f.left > 0
               do:
                 - eval: rr.fileStep(slot)
                   to: rr.fileStep
@@ -11610,8 +11707,8 @@ sequences:
       - id: rr.ul.onFD
         kind: internal
     steps:
-      - bind: c
-        eval: "&rr.r.conns[slot]"
+      - bind: c, f
+        eval: "&rr.r.conns[slot], rr.r.fileOf(slot)"
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
@@ -11629,10 +11726,10 @@ sequences:
         to: rr.ul.onFD
       - op: ++
         set: c.ops
-      - set: c.fileOps
+      - set: f.ops
         value: "1"
       - op: "|="
-        set: c.fileBits
+        set: f.bits
         value: ffPoll
       - op: "|="
         set: c.flags
@@ -13062,6 +13159,31 @@ sequences:
               set: "n"
       - eval: atomic.StoreUint32(u.cqHead, head)
         to: atomic
+      - return: "n"
+  - of: (*uring).completed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).completed
+        kind: self
+      - id: atomic
+        kind: stdlib
+    steps:
+      - bind: tail
+        eval: atomic.LoadUint32(u.cqTail)
+        to: atomic
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: head != tail
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                when: u.cqes[head&u.cqMask].userData == ud
+          init: head := *u.cqHead
+          post: head++
       - return: "n"
   - of: (*uring).overflowed
     steps:

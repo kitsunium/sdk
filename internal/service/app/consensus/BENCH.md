@@ -50,6 +50,28 @@ Commit is `Propose` on the leader, from the proposal's due time to its return (c
 | `TCP/xfs-loop/paced` | 1132 | 6.810 ms | 13.160 ms | 1.975 ms | 3.193 ms | 2.00 | 996 |
 | `TCP/xfs-loop/saturated` | 147555 | 30.888 ms | 55.301 ms | 3.860 ms | 14.048 ms | 2.00 | 129527 |
 
+## Commit while a snapshot streams (`BenchmarkTCPCommitStream`, #920, #1365)
+
+#920's third criterion (#1365): the data lane's commit p99 within 10 % of the no-stream baseline while a paced snapshot stream runs. Three voters over loopback mTLS, each on a data directory of the device as in `TCP/<device>/paced`, take 1 000 proposals/s of 256 B. Their state machine keeps no state: its snapshot is 10 s of the rate of pseudo-random bytes written on the fly, which the codec cannot shrink, cut once before the windows and never during them. One op is three windows of one cluster under one leader: A, 4 s with no stream; B, 8 s while a learner that joined on tmpfs (another host's disk in a deployment) is streamed that snapshot at `SnapshotStreamBytesPerSecond`, the stream in flight from B's first proposal to its last; A again, 4 s, once the learner is closed and removed. Each A follows 2 s of the same load, measured and dropped. **B / A** — B's p99 over the p99 of both A pooled — is the ratio #920 bounds: one cluster, so it never compares two runs, and the order A B A cancels a linear drift. B / `TCP/<device>/paced`, the ratio #1365 asks for, divides by that row of the same generation, another cluster at another time (measured again just before the op when this section is rewritten alone): printed against the same bound, for information. The rate is fixed before measuring at 8 MiB/s, the rate a hand-run bench missed the bound at. The leader's fdatasync, the collections and the scheduling delay of each window tell a disk, a collection or the scheduler apart from the stream. One op is one measure on this host: the verdict is the A/B lane's, below. Measured on AMD EPYC 7351P 16-Core Processor (8 cores, GOMAXPROCS 4), go1.27.4 linux/amd64, `docs/consensus-ab-verdicts` at `48e4cd30d`, 2026-11-16T10:01:14Z.
+
+| Row | Rate | Snapshot | Commits A / B | commit p99, A | commit p99, B | B / A, bound 1.10 | `TCP/<device>/paced` commit p99 | B / `TCP/<device>/paced`, bound 1.10 | fdatasync p99, A / B | GC cycles, A / B | sched p99, A / B | Stream through B |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `TCP/data-disk/paced+stream` | 8 MiB/s | 80.0 MiB | 8000 / 8000 | 12.252 ms | 12.777 ms | 1.043, met | 9.493 ms | 1.346, **not met** | 1.841 / 2.031 ms | 4 / 4 | 115 / 164 µs | 8.07 MiB/s, 15.2 MiB left |
+| `TCP/tmpfs/paced+stream` | 8 MiB/s | 80.0 MiB | 8000 / 8000 | 1.451 ms | 1.531 ms | 1.056, met | 1.705 ms | 0.898, met | 0.001 / 0.001 ms | 4 / 4 | 57 / 57 µs | 8.00 MiB/s, 15.2 MiB left |
+
+The verdict is the A/B lane's (`.github/workflows/bench-ab.yml`, suite `cstream` of `scripts/ci/bench-ab.conf`): twenty rounds of the op on one runner, both rows the head's, and the rule holds when the high end of the 95 % interval of the per-round B / A meets 1.10, on `data-disk` and on `tmpfs` apart; `cstream-scale` publishes 2 and 32 MiB/s under the same bound, for information. Each verdict is the lane's `verdict.md`, committed under `testdata/bench/` as `<suite>-<base>.verdict.md`.
+
+From `testdata/bench/cstream-ee1f48ba2.verdict.md`:
+
+### bench A/B: cstream on AMD EPYC 9V45 96-Core Processor, 4 vCPUs
+
+20 rounds read from /home/runner/work/_temp/bench-ab/raw; 4 CPUs (the suite needs 4). A rule holds when the bound of the 95 % interval of its per-round values meets its threshold.
+
+| rule | issue | value | n | low | median | high | threshold | verdict | mode |
+|---|---|---|---|---|---|---|---|---|---|
+| 920-stream-8mib-tmpfs | #920 | p99-ms/commit BenchmarkTCPCommitStream/tmpfs/rate=8MiB/paced+stream-4 / BenchmarkTCPCommitStream/tmpfs/rate=8MiB/paced-4 | 20 | 1.00527 | 1.00801 | 1.01067 | <= 1.10 | pass | report |
+| 920-stream-8mib-disk | #920 | p99-ms/commit BenchmarkTCPCommitStream/data-disk/rate=8MiB/paced+stream-4 / BenchmarkTCPCommitStream/data-disk/rate=8MiB/paced-4 | 20 | 0.140203 | 0.990724 | 1.01796 | <= 1.10 | pass | report |
+
 ## `Propose` → applied, three in-process nodes over the memory doubles (`BenchmarkThreeNodePropose`)
 
 Allocations are counted over every goroutine of the three nodes. The row is no kit budget: kit's 60 000 calls with the collector off would hold some 2 GB on three nodes, so its allocs/op are compared here, wave to wave (D15's 4, ADR 0152's amendment of 2026-11-12, #921).
@@ -66,6 +88,50 @@ Three memory nodes in a synctest bubble, every frame delayed by half its pair's 
 |---|---|---|---|---|
 | `SIM/commit` (1 000 proposals/s from a FRA or RBX leader) | 2000 | 15.268 ms | 17.125 ms | 17.153 ms |
 | `SIM/failover` (leader killed → first commit under the next, 60 seeds) | 60 | 1509 ms | 3211 ms | 3211 ms |
+
+## The leader's loop turn at 1 000 proposals/s (`BenchmarkLeaderLoopTurnAt1000PerSecond`)
+
+#912's second criterion (#1364): `consensus_loop_turn_seconds` on the leader while it takes 1 000 proposals/s of 256 B, three and five nodes over loopback mTLS with memory logs, so that a turn is the loop's work and not a disk's; one paced run of 5 s a row. The series' first bucket is 0.5 ms and these turns last microseconds, so the leader's Meter keeps every observation raw: a p99 read on the histogram would be its first bound before and after any change. Commit is a proposal's latency from its due time to its return. Measured on AMD EPYC 7351P 16-Core Processor (4 cores, GOMAXPROCS 4), go1.27.4 linux/amd64, `perf/consensus-turn-encode` at `cc4fe9713`, 2026-11-15T07:17:18Z.
+
+| Row | Turns | p50 | p99 | max | commit p99 |
+|---|---|---|---|---|---|
+| `TURN/followers=2` | 34751 | 2.16 µs | 33.32 µs | 425 µs | 1.402 ms |
+| `TURN/followers=4` | 54408 | 2.14 µs | 34.95 µs | 466 µs | 1.502 ms |
+
+## A leader turn's bytes, per follower (`BenchmarkLeaderTurnEncoding`)
+
+#912's second criterion (#1364): "bytes allocated per batch divided by the follower count". One op is a leader turn of 64 entries of 256 B to N followers in replicate state, through the driver's `sendMessages`: `shared` through a `BatchSender`, the entries encoded once for every follower and the turn's headers in one buffer (#912); `per-peer` through a transport without the sibling, which the driver still sends `AppendMessage`'s whole frame per follower, each grown from nil — the path before #912, byte for byte. Both are this binary's, so the ratio needs no other commit; it holds when shared / per-peer is at most 1/N. Measured on AMD EPYC 7351P 16-Core Processor (4 cores, GOMAXPROCS 4), go1.27.4 linux/amd64, `perf/consensus-turn-encode` at `cc4fe9713`, 2026-11-15T07:17:18Z.
+
+| Row | shared B/op | shared allocs/op | per-peer B/op | per-peer allocs/op | shared / per-peer | Bound 1/N | Verdict |
+|---|---|---|---|---|---|---|---|
+| `ENC/followers=2` | 19296 | 2 | 169456 | 36 | 0.114 | 0.500 | met |
+| `ENC/followers=4` | 19520 | 2 | 338914 | 72 | 0.058 | 0.250 | met |
+
+## Not worse than before: the A/B lane on the TURN and ENC rows (#912, #1364)
+
+"Not worse than before" compares two commits, which one host's rows cannot: the A/B lane (`.github/workflows/bench-ab.yml`, suites `cturn` and `cenc` of `scripts/ci/bench-ab.conf`) runs the base's test binary, built with the head's `loopturn_bench_test.go`, and the head's alternated on one runner, twenty rounds or more, and a rule holds when the high end of the 95 % interval of its per-round values meets its threshold: `TURN`'s p99 head over base at most 1.00, `ENC`'s shared over per-peer at most 1/N. Two bases: `ee1f48ba2`, the suites' own, main before lot L1, and `bench/912-parent`, the parent of #912's commit with the one line of `stream.go` that makes it build. Each verdict is the lane's `verdict.md`, committed under `testdata/bench/` as `<suite>-<base>.verdict.md`.
+
+From `testdata/bench/cenc-ee1f48ba2.verdict.md`:
+
+### bench A/B: cenc on AMD EPYC 7763 64-Core Processor, 4 vCPUs
+
+20 rounds read from /home/runner/work/_temp/bench-ab/raw; 4 CPUs (the suite needs 1). A rule holds when the bound of the 95 % interval of its per-round values meets its threshold.
+
+| rule | issue | value | n | low | median | high | threshold | verdict | mode |
+|---|---|---|---|---|---|---|---|---|---|
+| 912-bytes-2followers | #912 | B/op BenchmarkLeaderTurnEncoding/shared/followers=2-4 / BenchmarkLeaderTurnEncoding/perpeer/followers=2-4 | 20 | 0.11387 | 0.11387 | 0.11387 | <= 0.50 | pass | report |
+| 912-bytes-4followers | #912 | B/op BenchmarkLeaderTurnEncoding/shared/followers=4-4 / BenchmarkLeaderTurnEncoding/perpeer/followers=4-4 | 20 | 0.0575959 | 0.0575959 | 0.0575959 | <= 0.25 | pass | report |
+
+From `testdata/bench/cturn-ee1f48ba2.verdict.md`:
+
+### bench A/B: cturn on AMD EPYC 7763 64-Core Processor, 4 vCPUs
+
+20 rounds read from /home/runner/work/_temp/bench-ab/raw; 4 CPUs (the suite needs 4). A rule holds when the bound of the 95 % interval of its per-round values meets its threshold.
+
+| rule | issue | value | n | low | median | high | threshold | verdict | mode |
+|---|---|---|---|---|---|---|---|---|---|
+| 912-turn-p99-2followers | #912 | p99-us/turn BenchmarkLeaderLoopTurnAt1000PerSecond/followers=2-4 head/base | 20 | 0.932952 | 0.958652 | 0.996603 | <= 1.00 | pass | report |
+| 912-turn-p99-4followers | #912 | p99-us/turn BenchmarkLeaderLoopTurnAt1000PerSecond/followers=4-4 head/base | 20 | 0.896538 | 0.904935 | 0.928084 | <= 1.00 | pass | report |
 
 ## D16's provisional targets on this host
 
@@ -86,6 +152,9 @@ Three memory nodes in a synctest bubble, every frame delayed by half its pair's 
 make bench                       # every generator, this file included
 make bench-consensus             # this file alone
 CONSENSUS_BENCH_DEVICES=nvme=/mnt/nvme/bench,tmpfs=/dev/shm make bench-consensus
+CONSENSUS_BENCH_ONLY=stream make bench-consensus     # the paced+stream rows alone, in place, TCP/<device>/paced measured again (#920, #1365)
+CONSENSUS_BENCH_ONLY=turn,enc make bench-consensus   # the TURN and ENC rows alone, in place (#912, #1364)
+CONSENSUS_BENCH_ONLY=ab make bench-consensus         # the A/B verdicts committed under testdata/bench/, nothing measured
 make profile-consensus WAVE=before && make profile-consensus WAVE=after
 make benchstat-diff BEFORE=before AFTER=after
 ```
@@ -169,18 +238,34 @@ included, against 67.1 MB of records. The lane's raw lines are in
 | ext4 | ZeroFill | 10 081 | 372 µs | 2.46 ms | 16.5 ms | 161 842 517 |
 | ext4 | Fallocate | 10 081 | 990 µs | 5.05 ms | 18.0 ms | 141 275 136 |
 | ext4 | ZeroFill | 10 081 | 636 µs | 6.16 ms | 26.9 ms | 161 839 786 |
-| xfs | both | — | not measured | | | |
 
 Taken 2026-11-12 at a9714f4b3 (#1110) plus this change, Docker Desktop's
 Linux VM on an Apple-silicon Mac (debian:stable-slim, LUKS2 aes-xts-plain64
 over a loop device on a tmpfs), under the load of seven other builds. The
 run stopped there: the host's disk filled, and xfs and the fourth row were
-not reached.
+not reached. Run again on 2026-11-13 on devbox (Debian 13, Linux 6.12.101
+amd64, 8 cores; a privileged debian:stable-slim container, LUKS2
+aes-xts-plain64 over a 4 GiB loop image on the host's ext4 disk), each mode
+twice, alternated (`testdata/dmcrypt/RESULTS.md`, "On Linux: ext4 and xfs"):
+
+| Filesystem | Mode | syncs | `Sync` p50 | p90 | p99 | device bytes per segment |
+|---|---|---|---|---|---|---|
+| ext4 | ZeroFill | 10 081 | 2.28 ms | 2.69 ms | 3.82 ms | 161 858 901 |
+| ext4 | Fallocate | 10 081 | 3.71 ms | 4.77 ms | 7.27 ms | 141 186 389 |
+| ext4 | ZeroFill | 10 081 | 2.35 ms | 2.85 ms | 5.69 ms | 161 850 709 |
+| ext4 | Fallocate | 10 081 | 4.28 ms | 8.65 ms | 13.26 ms | 141 190 485 |
+| xfs | ZeroFill | 10 081 | 2.46 ms | 3.35 ms | 9.19 ms | 161 819 306 |
+| xfs | Fallocate | 10 081 | 4.41 ms | 6.93 ms | 12.52 ms | 100 507 306 |
+| xfs | ZeroFill | 10 081 | 2.41 ms | 3.12 ms | 9.78 ms | 161 752 064 |
+| xfs | Fallocate | 10 081 | 4.42 ms | 9.10 ms | 14.06 ms | 100 498 602 |
 
 - **ext4**: `fallocate` writes 13 % fewer bytes, not the 64 MiB of zeros,
   since each `fdatasync` after a write into an unwritten extent journals its
   conversion, and the median `Sync` is 1.6 to 2.7 times the zero-filled
-  one's. Not adopted: ZeroFill stays the default (ADR 0152, Deferred).
+  one's.
+- **xfs**: `fallocate` writes 38 % fewer bytes, and its median `Sync` is
+  1.8 times the zero-filled one's.
+- Not adopted on either: ZeroFill stays the default (ADR 0152, Deferred).
 
 ### Sync path of a batch (G1, #923)
 
@@ -198,13 +283,18 @@ is >= 1.00 and its Sync p99 ratio's upper bound is <= 1.00.
 
 | Device | Filesystem | ratio entries/s | ratio Sync p99 | verdict |
 |---|---|---|---|---|
-| dm-crypt over a loop device | ext4 | not measured | not measured | Fdatasync stays the default |
-| dm-crypt over a loop device | xfs | not measured | not measured | Fdatasync stays the default |
+| dm-crypt over a loop device | ext4 | [0.958, 1.034] | [0.586, 2.162] | gate not met: Fdatasync stays the default |
+| dm-crypt over a loop device | xfs | [0.955, 1.064] | [0.470, 1.967] | gate not met: Fdatasync stays the default |
 | OVH VPS of D16 | — | not measured | not measured | Fdatasync stays the default |
 
-Not measured on 2026-11-12: the change was written on a macOS host whose
-Docker could not start and whose disk was full, so the lane did not run.
-`SyncFdatasync` stays the default everywhere until a row meets the gate.
+Ten rounds a filesystem on devbox on 2026-11-13 (Debian 13, Linux 6.12.101
+amd64, 8 cores; a privileged debian:stable-slim container, LUKS2
+aes-xts-plain64 over a 4 GiB loop image on the host's ext4 disk), the
+`SYNCPATH_GATE` lines of `testdata/dmcrypt/RESULTS.md`, "Sync path". Both
+intervals straddle 1.00 on both filesystems; the suite, its fuzz seeds and
+12 of 12 power cuts pass with every log writing `RWF_DSYNC`. The OVH VPS is
+not measured. `SyncFdatasync` stays the default everywhere until a row
+meets the gate.
 
 ### The apply side: applied1 (#1109)
 

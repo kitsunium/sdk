@@ -1,5 +1,10 @@
 # ADR 0011 — Kernel copy-on-write snapshot primitive
 
+- Area: kernel
+- Need: decision
+- Status: Accepted
+- Date: 2026-05-25
+
 ## Status
 
 Accepted

@@ -16,14 +16,15 @@ const (
 	defaultHoldCap int = 1 << 20
 	// controlPerBatch is how many frames that ask for an answer, or do no
 	// useful work, one batch may carry on one connection: past it the
-	// connection is ending the peer's flood, RFC 9113 §10.5.
-	controlPerBatch int32 = 1024
+	// connection is ending the peer's flood, RFC 9113 §10.5. Conn.control
+	// never passes it by more than one, so a uint16 holds it.
+	controlPerBatch uint16 = 1024
 	// resetBudgetFactor sizes the Rapid Reset budget, in MaxStreams: the peer
 	// resets at most that many unfinished streams net of those it let finish.
 	resetBudgetFactor int32 = 2
 	// maxContinuationFrames bounds the frames of one field block: past them
 	// it is a CONTINUATION flood, however few bytes each carries.
-	maxContinuationFrames int32 = 32
+	maxContinuationFrames uint8 = 32
 	// blockBoundFactor sizes the bytes of a whole field block, in the
 	// header-list ceiling: Huffman coding can only expand a string so far.
 	blockBoundFactor int = 4
@@ -54,6 +55,9 @@ const (
 	flagPeerGoAway
 	// flagClosing says the connection ended with an error: nothing more is read.
 	flagClosing
+	// flagAcked says the peer acknowledged our SETTINGS: a decoder taken from
+	// then on starts at the table bound we advertised.
+	flagAcked
 )
 
 const (
@@ -106,8 +110,6 @@ type streamFlags uint8
 // adapter keeps one per (ring, slot) and hands it to every call of its Lane;
 // zero is not ready, Lane.Open makes it a connection.
 type Conn struct {
-	// decoder is the connection's HPACK table's bookkeeping.
-	decoder Decoder
 	// peerWindow is what the peer may send on the connection.
 	peerWindow int32
 	// sendWindow is what we may send on the connection.
@@ -128,8 +130,9 @@ type Conn struct {
 	lastStream uint32
 	// lastOpen is the highest stream id admitted: what GOAWAY names, §6.8.
 	lastOpen uint32
-	// table is the dynamic table's block in the lane's arena; noIndex until
-	// the connection's first field block.
+	// table is the dynamic table's block in the lane's arena, its decoder
+	// beside it; noIndex until the connection's first field block, so an idle
+	// connection carries neither (#961).
 	table int32
 	// hold is the connection's held-bytes buffer in the lane's arena; noIndex
 	// when nothing is held.
@@ -138,17 +141,21 @@ type Conn struct {
 	held int32
 	// resets is what is left of the Rapid Reset budget.
 	resets int32
-	// control counts this batch's frames that ask for an answer or do no work.
-	control int32
 	// epoch is the batch control was counted in.
 	epoch uint32
-	// scanFrames is how many CONTINUATION frames of the field block waiting
-	// at the front of the input are already known good.
-	scanFrames int32
-	// scanOff is where they end, relative to the HEADERS frame's first byte.
+	// scanOff is where the CONTINUATION frames scanFrames counts end,
+	// relative to the HEADERS frame's first byte.
 	scanOff int32
 	// scanBlock counts the field block's bytes seen so far.
 	scanBlock int32
+	// control counts this batch's frames that ask for an answer or do no
+	// work: the connection ends one past controlPerBatch.
+	control uint16
+	// scanFrames is how many CONTINUATION frames of the field block waiting
+	// at the front of the input are already known good: the block is refused
+	// at maxContinuationFrames, so a uint8 holds it. The two narrow fields
+	// and flags share one word: an idle connection's Conn is 68 bytes (#961).
+	scanFrames uint8
 	// flags are the connection's booleans.
 	flags connFlags
 }
@@ -248,7 +255,7 @@ type Lane struct {
 	streams []streamState
 	// freeStream is the free list's head in streams.
 	freeStream int32
-	// tables hands out the HPACK tables.
+	// tables hands out the HPACK tables and their decoders.
 	tables tableArena
 	// holds are the held-bytes buffers, by Conn.hold.
 	holds []holdBuffer
@@ -262,12 +269,16 @@ type Lane struct {
 	epoch uint32
 }
 
-// tableArena hands out HPACK tables of one size from chunks, pointer-free.
+// tableArena hands out HPACK tables of one size from chunks, pointer-free,
+// each with its decoder: a connection takes both at its first field block.
 type tableArena struct {
 	// size is one table's bytes.
 	size int
 	// chunks are the arena's chunks, tableChunk tables each.
 	chunks [][]byte
+	// decoders are the tables' decoders, by table id: the bookkeeping of the
+	// table whose bytes are in chunks.
+	decoders []Decoder
 	// free are the tables on the free list.
 	free []int32
 	// next is the first table never handed out.
@@ -282,9 +293,10 @@ func (a *tableArena) get() int32 {
 		a.free = a.free[:n-1]
 		return id
 	}
-	//: the last chunk is full: another one.
+	//: the last chunk is full: another one, and its decoders.
 	if a.next == int32(len(a.chunks))*tableChunk {
 		a.chunks = append(a.chunks, make([]byte, int(tableChunk)*a.size))
+		a.decoders = append(a.decoders, make([]Decoder, tableChunk)...)
 	}
 	id := a.next
 	a.next++
@@ -335,7 +347,6 @@ func newLaneResolved(resolved corehttp2.LimitsValue, maxBody int64, holdCap int)
 // connection once Close released it.
 func (l *Lane) Open(c *Conn) {
 	*c = Conn{
-		decoder:      NewDecoder(l.limits.HeaderTable, l.limits.MaxHeaderList),
 		peerWindow:   int32(corehttp2.DefaultWindow),
 		sendWindow:   int32(corehttp2.DefaultWindow),
 		initialSend:  int32(corehttp2.DefaultWindow),
@@ -403,11 +414,17 @@ func (l *Lane) countErr(code corehttp2.ErrCode) {
 // caller ends the connection with Abort. A FieldMalformed leaves the table
 // intact, and only the stream is refused.
 func (l *Lane) Decode(c *Conn, block, scratch []byte, req *corenet.HTTP1RequestValue) ([]byte, error) {
-	//: the table is taken at the connection's first block, never before.
+	//: the table and its decoder are taken at the connection's first block,
+	//: never before; a decoder taken after the peer's ACK starts there.
 	if c.table == noIndex {
 		c.table = l.tables.get()
+		d := &l.tables.decoders[c.table]
+		*d = NewDecoder(l.limits.HeaderTable, l.limits.MaxHeaderList)
+		if c.has(flagAcked) {
+			d.acknowledge()
+		}
 	}
-	return c.decoder.Decode(l.tables.mem(c.table), block, scratch, req)
+	return l.tables.decoders[c.table].Decode(l.tables.mem(c.table), block, scratch, req)
 }
 
 // Closing reports whether c ended with an error; the connection closes once

@@ -1042,10 +1042,16 @@ files:
       - packetConnsFromFiles
     name: adopt.go
   - decls:
+      - alpnRefusal
+      - alpnStrict
+      - sharesProtocol
+    name: alpn_strict.go
+  - decls:
       - maxListenerBacklog
       - defaultBacklog
       - applyBacklog
       - joinReason
+      - (*Server).widenBacklogs
     name: backlog.go
   - decls:
       - setBacklog
@@ -1139,6 +1145,22 @@ files:
       - (*conn).Close
       - (*conn).closeGracefully
       - (*conn).reset
+      - (*conn).handed
+      - (*conn).bounded
+      - (*conn).rawConn
+      - rawView
+      - (*rawView).pooled
+      - (*rawView).SyscallConn
+      - (*rawView).Read
+      - (*rawView).Write
+      - (*rawView).ReadFrom
+      - (*rawView).WriteTo
+      - (*rawView).Unwrap
+      - (*rawView).ID
+      - (*rawView).Group
+      - (*rawView).Buffer
+      - (*rawView).Close
+      - pooledOf
     name: conn.go
   - decls:
       - _#2
@@ -1407,6 +1429,7 @@ files:
       - noDelayOf
       - dupListeners
       - closeHandoff
+      - backlogCapabilities
     name: loop_engine_native.go
   - decls:
       - networkUnixpacket
@@ -1546,6 +1569,19 @@ files:
   - decls:
       - _#4
     name: loop_portable_compliance.go
+  - decls:
+      - gateExpired
+      - deadlineListener
+      - acceptGate
+      - newAcceptGate
+      - (*acceptGate).enter
+      - (*acceptGate).leave
+      - (*acceptGate).reaches
+      - (*acceptGate).wait
+      - (*acceptGate).done
+      - (*acceptGate).release
+      - (*acceptGate).setDeadlines
+    name: loop_portable_gate.go
   - decls:
       - portablePeer
     name: loop_portable_peer_linux.go
@@ -2100,6 +2136,26 @@ functions:
     params: name string, files []*os.File
     results: conns []stdnet.PacketConn, err error
   - doc: |-
+      alpnStrict makes cfg refuse, with no_application_protocol, a client whose
+      ALPN offer names nothing cfg.NextProtos holds, when the list holds h2
+      without http/1.1 (#964). That is the one case crypto/tls lets through: a
+      client offering http/1.1 to a server offering h2 completes the handshake
+      with no protocol (Go issue 46310, crypto/tls's negotiateALPN), which RFC
+      7301 §3.2 does not allow. Any other list, a client that offers no ALPN at
+      all — RFC 7301 leaves it unnegotiated — and one that shares a name with
+      the list keep the standard library's own negotiation, with nothing
+      allocated per handshake. cfg is the listener's own (serverTLS, codecTLS);
+      it is returned.
+    name: alpnStrict
+    params: cfg *tls.Config
+    results: "*tls.Config"
+  - doc: |-
+      sharesProtocol reports whether the client's offer names a protocol the
+      listener offers.
+    name: sharesProtocol
+    params: offered, client []string
+    results: bool
+  - doc: |-
       defaultBacklog is the backlog a listener has when the group asked for none:
       the host's somaxconn, as the standard library reads it once and caps it.
       Zero when the platform does not say.
@@ -2213,6 +2269,13 @@ functions:
     name: tighterBudget
     params: a, b time.Duration
     results: time.Duration
+  - doc: |-
+      pooledOf returns the engine's own conn behind c, as handed to a handler:
+      the conn itself or its rawView; false for a connection the engine did not
+      pool — a middleware's own type.
+    name: pooledOf
+    params: c corenet.Conn
+    results: "*conn, bool"
   - doc: |-
       hijackedTracker returns the tracker under c's socket when a handler has
       taken that socket over, or nil — when nothing was hijacked, or the group
@@ -2746,6 +2809,21 @@ functions:
     name: closeHandoff
     params: ls []loop.Listener
   - doc: |-
+      backlogCapabilities opts a group that set Backlog into uring-defer-taskrun
+      (#978): io_uring keeps single-shot accepts armed ahead, and on a ring that
+      runs its completions' task work cooperatively the kernel completes them
+      while the loop's thread is busy — up to 32 connections a ring off the
+      queue the backlog bounds, waiting for a loop that does not serve them yet.
+      Under DEFER_TASKRUN an armed accept runs only when the loop enters the
+      kernel to reap: a busy or held loop takes nothing, and the listen queue the
+      group sized is the only one. Where the kernel lacks it the row reports the
+      capability missing, the group's fault (ADR 0189); the operator's switch
+      still wins. Any other backend ignores the row. caps is returned unchanged,
+      or extended in a copy.
+    name: backlogCapabilities
+    params: caps []corenet.Capability, backlog int
+    results: "[]corenet.Capability"
+  - doc: |-
       loopHonours reports the options the loop engine honours itself (ADR 0186
       §D4, ADR 0187): IdleTimeout, MaxConns and Adopt, Backlog (#978, the
       listener's own), and Plaintext, Name and Engine, which every engine honours. Listen and Loop are not options a loop
@@ -2906,6 +2984,12 @@ functions:
     name: acceptCloexec
     params: fd int
     results: int, error
+  - doc: |-
+      newAcceptGate is the gate of a group accepting on lns, closed until a lane
+      waits.
+    name: newAcceptGate
+    params: lns []stdnet.Listener
+    results: "*acceptGate"
   - doc: |-
       portablePeer reads the credentials of a Unix connection's peer as the kernel
       recorded them when it connected (SO_PEERCRED). It answers the zero value for
@@ -3114,11 +3198,12 @@ functions:
     params: code corenet.LoopBackend, goos string
     results: bool
   - doc: |-
-      kqueueAuto reports whether auto takes kqueue on goos: on darwin alone,
-      where the paired gate of ADR 0190 held it against the goroutine engine on
-      macos-15 (P6, the bench-darwin rows). FreeBSD, OpenBSD, NetBSD and
-      DragonFly have no measured row, so auto stays portable there (ADR 0222
-      §D6, amended 2026-11-13).
+      kqueueAuto reports whether auto takes kqueue on goos: on darwin and every
+      BSD, the platforms kqueue runs on. The paired gate of ADR 0190 held the
+      backend against the goroutine engine on macos-15 (P6, the bench-darwin
+      rows), and the backend is one driver on all of them, whose suites pass on
+      the FreeBSD, OpenBSD and NetBSD guests (ADR 0222 §D6, amended 2026-11-15).
+      Elsewhere there is no kqueue to take.
     name: kqueueAuto
     params: goos string
     results: bool
@@ -4163,6 +4248,15 @@ types:
           lingering on each (ADR 0193 §D4).
         name: refused
         type: bool
+      - doc: rawMu guards raw, which a handler's two directions may ask for at once.
+        name: rawMu
+        type: sync.Mutex
+      - doc: |-
+          raw is the socket's syscall.RawConn, asked of the socket on the first
+          SyscallConn of the connection and kept for the next ones: the standard
+          library's own allocates one each call (#970).
+        name: raw
+        type: syscall.RawConn
     kind: struct
     methods:
       - doc: Read implements net.Conn, bounding this read before it starts.
@@ -4254,6 +4348,25 @@ types:
           would pin a closed socket for as long as the pool lives.
         name: reset
         recv: c *conn
+      - doc: |-
+          handed is the connection as its handler receives it (#970): the pooled conn,
+          or, when the group bounds neither reads nor writes and the socket is the
+          listener's own — no TLS, no PROXY header, no close tracker over it —, the
+          same conn seen as a rawView, which adds syscall.Conn.
+        name: handed
+        recv: c *conn
+        results: corenet.Conn
+      - doc: |-
+          bounded reports whether the group bounds this connection's reads or writes:
+          a copy that reached the socket's descriptor directly would run under no
+          deadline of the group's.
+        name: bounded
+        recv: c *conn
+        results: bool
+      - doc: rawConn returns the socket's syscall.RawConn, asked once a connection.
+        name: rawConn
+        recv: c *conn
+        results: syscall.RawConn, error
     name: conn
   - doc: |-
       connWriter hides ReadFrom, so io.Copy into it uses conn.Write's per-operation
@@ -4285,6 +4398,68 @@ types:
         recv: r connReader
         results: n int, err error
     name: connReader
+  - doc: |-
+      rawView is the pooled conn a handler receives when its group bounds neither
+      reads nor writes and nothing is layered over the socket (#970): every
+      method is conn's, and SyscallConn adds syscall.Conn, the socket's own
+      RawConn. The standard library's zero-copy paths assert it on the writer and
+      the reader they are given — os.File.WriteTo's sendfile, os.File.ReadFrom's
+      splice — and then reach the socket's descriptor directly, with nothing
+      allocated once the connection's first copy asked for it. A group with a
+      bound hands out the conn itself, so its copies keep their deadline per step
+      through ReadFrom and WriteTo.
+    kind: named
+    methods:
+      - doc: pooled is the conn rv views.
+        name: pooled
+        recv: rv *rawView
+        results: "*conn"
+      - doc: "SyscallConn implements syscall.Conn: the socket's RawConn."
+        name: SyscallConn
+        recv: rv *rawView
+        results: syscall.RawConn, error
+      - doc: Read implements net.Conn as conn does.
+        name: Read
+        params: p []byte
+        recv: rv *rawView
+        results: n int, err error
+      - doc: Write implements net.Conn as conn does.
+        name: Write
+        params: p []byte
+        recv: rv *rawView
+        results: n int, err error
+      - doc: ReadFrom implements io.ReaderFrom as conn does.
+        name: ReadFrom
+        params: r io.Reader
+        recv: rv *rawView
+        results: n int64, err error
+      - doc: WriteTo implements io.WriterTo as conn does.
+        name: WriteTo
+        params: w io.Writer
+        recv: rv *rawView
+        results: n int64, err error
+      - doc: Unwrap implements corenet.ConnUnwrapper as conn does.
+        name: Unwrap
+        recv: rv *rawView
+        results: stdnet.Conn
+      - doc: ID implements corenet.Conn.
+        name: ID
+        recv: rv *rawView
+        results: uint64
+      - doc: Group implements corenet.Conn.
+        name: Group
+        recv: rv *rawView
+        results: string
+      - doc: Buffer implements corenet.Conn.
+        name: Buffer
+        recv: rv *rawView
+        results: "[]byte"
+      - doc: Close implements net.Conn as conn does.
+        name: Close
+        recv: rv *rawView
+        results: error
+    name: rawView
+    underlying: conn
   - doc: |-
       trackedConn is an accepted socket that reports its own Close, so a ceilinged
       group keeps counting a connection a handler has taken over.
@@ -4501,6 +4676,11 @@ types:
         type: int
       - name: backlogReason
         type: string
+      - doc: |-
+          sized is the bound socket, under its layers, when the group asked for a
+          Backlog: the one whose queue the drain widens (#978); nil otherwise.
+        name: sized
+        type: stdnet.Listener
       - doc: |-
           receiveBuffer and sendBuffer are ListenerStateValue's, read back after
           bind.
@@ -4946,6 +5126,11 @@ types:
         type: corenet.AddressValue
       - doc: ln is the live listener.
         name: ln
+        type: stdnet.Listener
+      - doc: |-
+          sized is the socket under ln's layers when the group asked for a
+          Backlog, nil otherwise: Shutdown widens its queue (widenBacklogs).
+        name: sized
         type: stdnet.Listener
       - doc: made creates closed on first use, so a zero boundListener works.
         name: made
@@ -5489,6 +5674,11 @@ types:
       - doc: hsLog records a failed negotiation under the server's budget (#846).
         name: hsLog
         type: "*errorLogWriter"
+      - doc: |-
+          gate keeps the acceptors from taking while no lane waits, for a group
+          that set Backlog (#978); nil otherwise.
+        name: gate
+        type: "*acceptGate"
       - doc: turn is the lane the next accepted connection goes to, modulo the count.
         name: turn
         type: atomic.Uint64
@@ -5506,7 +5696,9 @@ types:
         name: live
         recv: g *portableGroup
         results: int64
-      - doc: acceptLoop hands each accepted connection to a lane, in turn.
+      - doc: |-
+          acceptLoop hands each accepted connection to a lane, in turn; a Backlog
+          group's accepts only while a lane waits (acceptGate).
         name: acceptLoop
         params: ln stdnet.Listener
         recv: g *portableGroup
@@ -5936,6 +6128,101 @@ types:
         recv: e portableEngine
         results: corenet.LoopStateValue
     name: portableEngine
+  - doc: |-
+      deadlineListener is a listener whose Accept a deadline bounds: a TCP or
+      Unix listener of the standard library; a TLS codec group's, whose layer
+      hides SetDeadline, is not one.
+    kind: named
+    name: deadlineListener
+    underlying: |-
+      interface {
+      	stdnet.Listener
+      	// SetDeadline bounds Accept.
+      	SetDeadline(t time.Time) error
+      }
+  - doc: |-
+      acceptGate keeps a Backlog group's acceptors on the portable backend from
+      taking a connection while no lane waits for work (#978). An acceptor runs
+      beside the lanes: left alone it accepts into a lane's event channel while
+      the lane is busy or held, up to the channel's 512 events and one more in
+      hand — a queue past the one Backlog sizes, of connections nobody serves
+      yet. With the gate, an acceptor calls Accept only while a lane waits in its
+      select, and the last lane to wake withdraws the Accepts in progress with an
+      expired deadline, and waits until they have returned: the netpoller lets a
+      readiness that arrives after the deadline fired, but before the woken
+      acceptor runs, win over it (runtime/netpoll.go: netpollunblock leaves the
+      descriptor pdNil, the I/O sets pdReady, netpollblock returns true), and
+      Accept then takes the connection — an acceptor starved of CPU took one a
+      held lane never served. A connection an Accept returns before the lane's
+      leave completes arrived while the lane waited; past it, a busy or held lane
+      takes nothing, and the kernel's queue is the only one. A listener a deadline
+      does not reach — a TLS codec group's — is not waited for, and keeps at most
+      its acceptor's one in hand. The drain and Close open the gate for good
+      (off), so an acceptor sees its listener close. Every wait is on one
+      condition, changed, so no channel is ever closed twice.
+    fields:
+      - doc: mu guards every field below.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          changed is signalled on mu when a lane waits again, the last
+          withdrawable Accept returned, or the gate opened for good.
+        name: changed
+        type: sync.Cond
+      - doc: idle counts the lanes waiting in run's select.
+        name: idle
+        type: int
+      - doc: accepting counts the acceptors inside an Accept a deadline withdraws.
+        name: accepting
+        type: int
+      - doc: "off is set once the group drains or stops: the gate stays open."
+        name: "off"
+        type: bool
+      - doc: lns are the acceptors' listeners a deadline reaches.
+        name: lns
+        type: "[]deadlineListener"
+    kind: struct
+    methods:
+      - doc: |-
+          enter records a lane about to wait for an event: the first one opens the
+          gate, the deadline it set cleared, and releases a lane still waiting in
+          leave for an acceptor it no longer needs kept out.
+        name: enter
+        recv: g *acceptGate
+      - doc: |-
+          leave records a lane that woke: the last one withdraws the Accepts in
+          progress and waits until they returned — unless a lane waits again
+          meanwhile, or the gate opens for good.
+        name: leave
+        recv: g *acceptGate
+      - doc: reaches reports whether a deadline withdraws an Accept on ln.
+        name: reaches
+        params: ln stdnet.Listener
+        recv: g *acceptGate
+        results: bool
+      - doc: |-
+          wait blocks an acceptor until a lane waits or the gate is off, and counts
+          it inside Accept when counted — its listener one a deadline reaches —;
+          done ends that count.
+        name: wait
+        params: counted bool
+        recv: g *acceptGate
+      - doc: |-
+          done records a counted acceptor out of Accept, waking a lane that waits
+          for the last one.
+        name: done
+        params: counted bool
+        recv: g *acceptGate
+      - doc: |-
+          release opens the gate for good — the group drains or stops — its
+          deadlines cleared, so every acceptor accepts until its listener closes.
+        name: release
+        recv: g *acceptGate
+      - doc: setDeadlines sets every listener's deadline to t. The caller holds mu.
+        name: setDeadlines
+        params: t time.Time
+        recv: g *acceptGate
+    name: acceptGate
   - doc: filer is a listener whose descriptor can be duplicated.
     kind: named
     name: filer
@@ -6718,10 +7005,9 @@ types:
           choice takes it (kqueueTaken) and the environment allows it, the portable
           backend otherwise. An explicit kqueue never falls back — the probe's
           refusal is the code's LoopBackendUnavailable —; auto's does, to portable,
-          reported. A backend whose paired gate has never held on a platform is not
-          its default, so auto stays portable on the BSDs (ADR 0222 §D6, amended
-          2026-11-13). io_uring and epoll, refused by startLoopEngine there, plan the
-          floor.
+          reported, as a probe that refuses on a BSD kqueue never ran on does
+          (ADR 0222 §D6, amended 2026-11-15). io_uring and epoll, refused by
+          startLoopEngine there, plan the floor.
         name: kqueuePlan
         params: code corenet.LoopBackend, take bool
         recv: e *operatorEnv
@@ -7578,6 +7864,20 @@ types:
         params: name string
         recv: s *Server
         results: conns []stdnet.PacketConn, err error
+      - doc: |-
+          widenBacklogs raises, as a drain begins, the listen backlog of every socket
+          a group sized with Backlog to the host's somaxconn (#978). Backlog bounds
+          what waits for a group that serves; a draining group owes service to what
+          is already on its way. A peer the full queue refused retries — its SYN on
+          its own timer, 1, 3 and 7 s after the first —, and a final ACK a full queue
+          dropped is sent again with the peer's data: into a queue of the group's
+          depth, a cohort of them overflows it again whenever the loop is slow to
+          take, and a peer dropped at every retry of the grace meets the closed
+          listener. Widened, the queue holds them all, and the drain's take serves
+          them. A socket a group did not size, an adopted one, and a platform with no
+          second listen(2) keep their queue; State reports the depth the group asked.
+        name: widenBacklogs
+        recv: s *Server
       - doc: |-
           errorLog is the *log.Logger a group's http.Server writes to: the server's
           logger and budget behind an io.Writer, with no prefix and no flags — the
@@ -8580,8 +8880,9 @@ types:
         results: error
       - doc: |-
           loopLayers wraps a TLS codec group's listeners in TLS, offering the
-          group's ALPN list, never below TLS 1.2 (tlsFloor); any other loop group's
-          are returned as they are.
+          group's ALPN list — a client offering none of it refused at the handshake
+          with no_application_protocol (alpnStrict) —, never below TLS 1.2
+          (tlsFloor); any other loop group's are returned as they are.
         name: loopLayers
         params: lns []stdnet.Listener
         recv: g *StreamGroup
@@ -8748,8 +9049,9 @@ types:
       - doc: |-
           serverTLS returns the TLS configuration of one of the group's listeners,
           nil without an identity: the identity's, offering the group's ALPN list
-          when it serves HTTP, never below TLS 1.2 (tlsFloor). A fresh value each
-          call, so no listener shares one.
+          when it serves HTTP — a client offering none of it refused at the handshake
+          with no_application_protocol (alpnStrict) —, never below TLS 1.2
+          (tlsFloor). A fresh value each call, so no listener shares one.
         name: serverTLS
         recv: g *StreamGroup
         results: "*tls.Config"
@@ -8824,6 +9126,17 @@ types:
     kind: struct
     name: httpProtocols
 vars:
+  - doc: |-
+      alpnRefusal is the ALPN list a refused handshake is answered with: the
+      empty name, which no ClientHello can carry — RFC 7301 §3.1 sizes a
+      ProtocolName 1 to 255 bytes, and crypto/tls refuses an empty one when it
+      parses the hello — so it never matches what a client offers, and it is not
+      h2, the one name crypto/tls makes an exception for. crypto/tls then
+      answers no_application_protocol, as RFC 7301 §3.2 requires.
+    items:
+      - name: alpnRefusal
+        value: "[]string{\"\"}"
+    name: alpnRefusal
   - grouped: true
     items:
       - doc: |-
@@ -8863,7 +9176,9 @@ vars:
       The pooled connection wrapper must still satisfy the port it is handed to
       handlers as; a drift here is silent until a handler calls the missing method.
       A handler's io.Copy finds the socket's own copy through ReaderFrom and
-      WriterTo, and the standard library's concrete assertions through Unwrap (#970).
+      WriterTo, and the standard library's concrete assertions through Unwrap (#970);
+      the view a group with no bound hands out adds syscall.Conn, so os.File's
+      sendfile and splice reach the socket's descriptor directly.
     grouped: true
     items:
       - name: _
@@ -8884,6 +9199,21 @@ vars:
       - name: _
         type: io.WriterTo
         value: (*trackedConn)(nil)
+      - name: _
+        type: corenet.Conn
+        value: (*rawView)(nil)
+      - name: _
+        type: io.ReaderFrom
+        value: (*rawView)(nil)
+      - name: _
+        type: io.WriterTo
+        value: (*rawView)(nil)
+      - name: _
+        type: corenet.ConnUnwrapper
+        value: (*rawView)(nil)
+      - name: _
+        type: syscall.Conn
+        value: (*rawView)(nil)
     name: _#2
   - doc: |-
       netHTTPFrameErrors are the frame layer's error names net/http reports with
@@ -8927,6 +9257,12 @@ vars:
         name: _
         type: datagramSink
         value: (*multiWriter)(nil)
+      - doc: |-
+          The connection a group with no bound hands out reaches its socket's
+          RawConn as a datagram socket's does (#970).
+        name: _
+        type: rawConnProvider
+        value: (*rawView)(nil)
     name: _#3
   - doc: streamNetworks are the socket families the stream engine serves.
     items:
@@ -8977,6 +9313,14 @@ vars:
         type: corenet.LoopPeer
         value: (*portableLoop)(nil)
     name: _#4
+  - doc: |-
+      gateExpired is the deadline that withdraws an Accept in progress: in the
+      past, so the netpoller wakes the acceptor at once with a timeout, no
+      connection taken — Go checks a listener's deadline before accept(2).
+    items:
+      - name: gateExpired
+        value: time.Unix(1, 0)
+    name: gateExpired
   - doc: The ALPN lists a TLS codec group offers when Protocols names none.
     grouped: true
     items:

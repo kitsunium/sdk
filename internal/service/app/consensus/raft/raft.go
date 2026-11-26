@@ -896,22 +896,30 @@ func (r *Raft) TermAt(i uint64) (uint64, bool) { return r.log.term(i) }
 
 // ---- status ----
 
-// StatusValue is the step function's part of a node's status. It is a copy:
-// its memberships are cloned, so the caller may keep it.
+// StatusValue is the step function's part of a node's status: its summary
+// and its two memberships. It is a copy: its memberships are cloned, so the
+// caller may keep it.
 type StatusValue struct {
-	Role      core.Role
-	Term      uint64
-	Lead      core.NodeID
-	Commit    uint64
-	Last      uint64
-	Stable    uint64
-	Timing    core.TimingContractSpec
-	Cluster   uint32
-	ClusterG  uint64
-	NoSpace   core.AlarmID
+	SummaryValue
 	Conf      core.MembershipValue
 	Committed core.MembershipValue
-	Transfer  core.NodeID
+}
+
+// SummaryValue is the step function's view without its memberships: every
+// field of a StatusValue but Conf and Committed, which Summary returns
+// without cloning a configuration (#912).
+type SummaryValue struct {
+	Role     core.Role
+	Term     uint64
+	Lead     core.NodeID
+	Commit   uint64
+	Last     uint64
+	Stable   uint64
+	Timing   core.TimingContractSpec
+	Cluster  uint32
+	ClusterG uint64
+	NoSpace  core.AlarmID
+	Transfer core.NodeID
 	// HandedBy is, while the node leads, the leader whose TimeoutNow made it
 	// campaign for this term, 0 for a term it won by an election.
 	HandedBy core.NodeID
@@ -932,23 +940,44 @@ type StatusValue struct {
 
 // Status returns the step function's view.
 func (r *Raft) Status() StatusValue {
-	st := StatusValue{
+	return StatusValue{
+		SummaryValue: r.Summary(),
+		Conf:         r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
+	}
+}
+
+// Summary returns the step function's view without its two memberships:
+// Status's every other field, with no configuration cloned. The event
+// loop reads it at every turn; Status clones both memberships at each
+// call (#912).
+func (r *Raft) Summary() SummaryValue {
+	s := SummaryValue{
 		Role: r.role, Term: r.term, Lead: r.lead, Commit: r.log.committed,
 		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
-		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
 		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
 	}
 	if r.role != core.RoleLeader && r.heard.term == r.term && r.heard.from == r.lead {
-		st.LeaderLast, st.Appended = r.heard.last, r.heard.appended
+		s.LeaderLast, s.Appended = r.heard.last, r.heard.appended
 	}
 	if r.role == core.RoleLeader {
 		// The issuer of the TimeoutNow whose campaign won this term, 0 for
 		// an election: becomeLeader keeps the campaign's flag, and
 		// becomeFollower clears it (#676).
-		st.HandedBy = r.campaignIssuer
+		s.HandedBy = r.campaignIssuer
 	}
-	return st
+	return s
+}
+
+// SameConf reports whether m is the configuration in force, Status's
+// Conf, compared as a value: the index of the entry that produced it,
+// and its members, retired ids and retired keys in order. A driver that
+// published m clones the configuration again only once it changed
+// (#912). It reads m and keeps nothing of it.
+func (r *Raft) SameConf(m *core.MembershipValue) bool {
+	c := r.conf()
+	return c.Index == m.Index && slices.Equal(c.Members, m.Members) &&
+		slices.Equal(c.Retired, m.Retired) && slices.Equal(c.RetiredKeys, m.RetiredKeys)
 }
 
 // Progress returns the leader's match index of a peer.

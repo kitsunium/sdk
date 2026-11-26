@@ -7,6 +7,8 @@
 - **Amended**: 2026-10-14 (the same day): the residue Decision 3 deferred is built, and the lab is removed
 - **Amends**: [ADR 0018](0018-sdk-cross-platform-portability.md) (§(b), the runtime bar: where it runs)
 - **Related**: issue #118 (the lab legs that hung), [ADR 0095](0095-windows-runs-every-test-and-gates.md), [ADR 0144](0144-illumos-and-solaris-supervise-on-their-own-kernels-word.md)
+- **Area**: build
+- **Need**: decision
 
 ## Context
 

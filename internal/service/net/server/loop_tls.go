@@ -151,8 +151,9 @@ func (g *StreamGroup) tlsErr(option string) error {
 }
 
 // loopLayers wraps a TLS codec group's listeners in TLS, offering the
-// group's ALPN list, never below TLS 1.2 (tlsFloor); any other loop group's
-// are returned as they are.
+// group's ALPN list — a client offering none of it refused at the handshake
+// with no_application_protocol (alpnStrict) —, never below TLS 1.2
+// (tlsFloor); any other loop group's are returned as they are.
 func (g *StreamGroup) loopLayers(lns []stdnet.Listener) []stdnet.Listener {
 	//: plaintext.
 	if !g.tlsCodec() {
@@ -162,7 +163,7 @@ func (g *StreamGroup) loopLayers(lns []stdnet.Listener) []stdnet.Listener {
 	out := make([]stdnet.Listener, len(lns))
 	//: each one.
 	for i, ln := range lns {
-		out[i] = tls.NewListener(ln, tlsFloor(g.codecTLS()))
+		out[i] = tls.NewListener(ln, alpnStrict(tlsFloor(g.codecTLS())))
 	}
 	//: wrapped.
 	return out

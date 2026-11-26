@@ -45,6 +45,13 @@ type httpProtocols struct {
 // LoopOptionUnsupported unless its handler or a layer honours it
 // (LoopOptionHonourer).
 //
+// Over TLS, a list naming h2 without http/1.1 fails the handshake of a client
+// whose ALPN offer names nothing the list holds with no_application_protocol
+// (RFC 7301 §3.2) — the client offering http/1.1 alone included, which
+// crypto/tls would let through with no protocol (#964). A client that offers
+// no ALPN completes the handshake, as RFC 7301 leaves it, and is refused at
+// its first request.
+//
 // A request that arrived over HTTP/2 has no http.Hijacker: a handler that
 // hijacks its connection — a WebSocket upgrade written by hand, say — serves
 // HTTP/1.1 clients only, and a TLS group that relies on it for every client
@@ -272,8 +279,9 @@ func (g *StreamGroup) protocolsErr(reason string) error {
 
 // serverTLS returns the TLS configuration of one of the group's listeners,
 // nil without an identity: the identity's, offering the group's ALPN list
-// when it serves HTTP, never below TLS 1.2 (tlsFloor). A fresh value each
-// call, so no listener shares one.
+// when it serves HTTP — a client offering none of it refused at the handshake
+// with no_application_protocol (alpnStrict) —, never below TLS 1.2
+// (tlsFloor). A fresh value each call, so no listener shares one.
 func (g *StreamGroup) serverTLS() *tls.Config {
 	//: plaintext.
 	if g.identity.IsZero() {
@@ -281,9 +289,12 @@ func (g *StreamGroup) serverTLS() *tls.Config {
 		return nil
 	}
 	cfg := g.identity.ServerConfig()
-	//: an HTTP group offers what it computed; any other keeps the identity's.
+	//: an HTTP group offers what it computed, and nothing else; any other
+	//: keeps the identity's.
 	if g.httpAdapter != nil {
 		cfg.NextProtos = slices.Clone(g.httpProtos.alpn)
+		//: the listener's own, at the floor, its list held.
+		return alpnStrict(tlsFloor(cfg))
 	}
 	//: the listener's own, at the floor.
 	return tlsFloor(cfg)

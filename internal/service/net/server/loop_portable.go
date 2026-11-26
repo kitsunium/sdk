@@ -161,6 +161,9 @@ type portableGroup struct {
 	handshake time.Duration
 	// hsLog records a failed negotiation under the server's budget (#846).
 	hsLog *errorLogWriter
+	// gate keeps the acceptors from taking while no lane waits, for a group
+	// that set Backlog (#978); nil otherwise.
+	gate *acceptGate
 	// turn is the lane the next accepted connection goes to, modulo the count.
 	turn     atomic.Uint64
 	drainReq atomic.Bool
@@ -272,6 +275,10 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 		})
 	}
 	g.lns, g.owned = ownListeners(lns)
+	//: a Backlog sized the queue: the acceptors take only for a waiting lane.
+	if group.limits.Backlog > 0 {
+		g.gate = newAcceptGate(g.lns)
+	}
 	//: one acceptor per listener; it ends when its listener closes.
 	for _, ln := range g.lns {
 		g.accepting.Add(1)
@@ -315,19 +322,27 @@ func orDefaultInt(v, def int) int {
 	return v
 }
 
-// acceptLoop hands each accepted connection to a lane, in turn.
+// acceptLoop hands each accepted connection to a lane, in turn; a Backlog
+// group's accepts only while a lane waits (acceptGate).
 func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
 	defer g.accepting.Add(-1)
 	failures := 0
+	counted := g.gate.reaches(ln)
 	//: until its listener closes.
 	for {
+		g.gate.wait(counted)
 		c, err := ln.Accept()
+		g.gate.done(counted)
 		//: closed, or a failure to back off from.
 		if err != nil {
 			//: server closed it.
 			if errors.Is(err, stdnet.ErrClosed) || g.stopReq.Load() {
 				//: done.
 				return
+			}
+			//: withdrawn by the gate: no connection taken, nothing to back off from.
+			if g.gate != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
 			}
 			failures++
 			time.Sleep(acceptDelay(failures))
@@ -484,12 +499,16 @@ func (pl *portableLoop) run(done chan<- struct{}) {
 	defer tick.Stop()
 	//: until stopped, or drained to the last connection.
 	for {
+		pl.g.gate.enter()
 		//: the first event of the batch, or a tick, or a wake.
 		select {
 		case ev := <-pl.events:
+			pl.g.gate.leave()
 			pl.handle(&ev)
 		case <-pl.wake:
+			pl.g.gate.leave()
 		case <-tick.C:
+			pl.g.gate.leave()
 		}
 		pl.batch()
 		//: finished.
@@ -594,8 +613,12 @@ func (pl *portableLoop) handleEnd(ev *portableEvent) {
 		//: done.
 		return
 	}
-	//: a clean end of input still lets the output leave.
-	if errors.Is(ev.err, io.EOF) && !pc.reasonSet {
+	//: a clean end of input still lets the output leave — a close decided
+	//: included, the drain's or the handler's: finished here, its output
+	//: still queued or on the wire was lost (#1385). Only a lingering close,
+	//: its writing side already shut after the output, ends at the peer's
+	//: end.
+	if errors.Is(ev.err, io.EOF) && !pc.lingering.Load() {
 		pc.peerDone = true
 		pl.markDirty(ev.slot)
 		//: settled at the end of the batch.
@@ -1324,6 +1347,7 @@ func (g *portableGroup) wakeAll() {
 func (e portableEngine) Shutdown(ctx context.Context) error {
 	g := e.g
 	g.drainReq.Store(true)
+	g.gate.release()
 	g.wakeAll()
 	g.takeQueues(ctx)
 	//: every lane drained, or out of budget.
@@ -1345,6 +1369,7 @@ func (e portableEngine) Close() error {
 	g := e.g
 	g.once.Do(func() {
 		g.stopReq.Store(true)
+		g.gate.release()
 		g.closeOwned()
 		g.wakeAll()
 		//: every lane's goroutine returned.

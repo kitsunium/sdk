@@ -4,6 +4,8 @@
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0003](0003-sdk-codec-package.md) (the codec registry), [ADR 0021](0021-sdk-codec-bson.md) (BSON over the MongoDB driver), [ADR 0102](0102-a-document-somebody-else-wrote-is-decoded-one-way-or-not-at-all.md) (a codec-tree package with its own facade)
+- **Area**: data
+- **Need**: constraint
 
 ## Context
 

@@ -11,6 +11,8 @@
   §D1 (when the grouped wait starts); §D3 stands, on a new measure
 - **Related**: [ADR 0200](0200-an-io-uring-close-is-a-shutdown-alone-and-the-accept-watchdog-judges-a-listener.md)
   (the accept watchdog this ADR paces)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

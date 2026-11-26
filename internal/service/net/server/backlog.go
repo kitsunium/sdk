@@ -2,6 +2,7 @@ package server
 
 import (
 	stdnet "net"
+	"slices"
 	"strconv"
 )
 
@@ -49,4 +50,35 @@ func joinReason(reason, more string) string {
 		return reason + more
 	}
 	return reason + "; " + more
+}
+
+// widenBacklogs raises, as a drain begins, the listen backlog of every socket
+// a group sized with Backlog to the host's somaxconn (#978). Backlog bounds
+// what waits for a group that serves; a draining group owes service to what
+// is already on its way. A peer the full queue refused retries — its SYN on
+// its own timer, 1, 3 and 7 s after the first —, and a final ACK a full queue
+// dropped is sent again with the peer's data: into a queue of the group's
+// depth, a cohort of them overflows it again whenever the loop is slow to
+// take, and a peer dropped at every retry of the grace meets the closed
+// listener. Widened, the queue holds them all, and the drain's take serves
+// them. A socket a group did not size, an adopted one, and a platform with no
+// second listen(2) keep their queue; State reports the depth the group asked.
+func (s *Server) widenBacklogs() {
+	wide := defaultBacklog()
+	//: the platform says no somaxconn: nothing to widen to.
+	if wide <= 0 {
+		return
+	}
+	s.mu.RLock()
+	listeners := slices.Clone(s.listeners)
+	s.mu.RUnlock()
+	//: each socket a group sized.
+	for _, b := range listeners {
+		//: sized by no Backlog.
+		if b.sized == nil {
+			continue
+		}
+		//: a refusal keeps the queue's depth: the drain serves what it holds.
+		setBacklog(b.sized, wide)
+	}
 }

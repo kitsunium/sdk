@@ -6,6 +6,8 @@
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
 - **Depends on**: [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) (the SQL broker: a message published in a transaction exists if and only if it commits), [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) (`Joiner`, `Deferrer`, every call runs where its context says), [ADR 0143](0143-a-document-keeps-its-versions-in-its-own-write.md) (versions, and the trash it deferred)
 - **Related**: [ADR 0140](0140-sqlites-migration-lock-is-the-database-files-write-lock.md) (SQLite's write lock), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (kit's engine is `framework/`), [ADR 0111](0111-a-mail-spool-retries-on-a-backoff-and-resends-only-after-a-crash.md) and [ADR 0141](0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md) (the mail spool), [ADR 0112](0112-a-loop-that-must-keep-running-is-supervised-beside-the-lifecycle.md) (the supervisor), [ADR 0172](0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md), [ADR 0175](0175-a-products-tests-reach-the-disk-with-one-option.md) (`kittest.NewDisk`, which the tests of this work run on), [ADR 0040](0040-changing-a-published-shape-while-v0.md); kitsunium/platform#34 decision 4, kitsunium/platform#35, kodmain/moderation#16
+- **Area**: data
+- **Need**: decision
 
 ## Context
 

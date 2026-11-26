@@ -226,7 +226,7 @@ constants:
           rest by IORING_OP_SEND.
         name: zcHold
     name: zcOff
-  - doc: The bits of connCtl.fileBits, io_uring's file state.
+  - doc: The bits of fileCtl.bits, io_uring's file state.
     grouped: true
     items:
       - doc: ffEOF is a read that returned nothing.
@@ -238,6 +238,12 @@ constants:
       - doc: ffPoll is the POLLOUT that waits for it.
         name: ffPoll
     name: ffEOF
+  - doc: noFile is connCtl.file when the slot sends no file.
+    items:
+      - name: noFile
+        type: int32
+        value: "-1"
+    name: noFile
   - doc: |-
       The reasons a connection is closed, mapped to the preallocated error
       OnClose receives (closeErr).
@@ -1775,6 +1781,7 @@ files:
       - drainLinger
       - zcOff
       - ffEOF
+      - noFile
       - rNone
       - connCtl
       - (*connCtl).sending
@@ -1847,14 +1854,19 @@ files:
       - (*ring).wrote
     name: core.go
   - decls:
+      - fileCtl
       - fileSender
       - (*loop).WriteFile
       - (*ring).dropFile
       - (*ring).fileDone
+      - (*ring).takeFile
+      - (*ring).fileOf
+      - (*ring).putFile
     name: core_file.go
   - decls:
       - loopDebug
       - threadCheck
+      - atWritableEdge
     name: debug_off_linux.go
   - decls: []
     name: doc.go
@@ -2221,6 +2233,7 @@ files:
       - udSlot
       - pollFd
       - uRing
+      - starvedRecv
       - closeWait
       - uLoop
       - ringUses
@@ -2258,8 +2271,8 @@ files:
       - (*uRing).cancelAccept
       - (*uRing).takeQueues
       - (*uRing).takeQueue
+      - (*uRing).takeRounds
       - (*uRing).waiting
-      - (*uRing).tookAll
       - (*uRing).armTake
       - (*uLoop).queuesTaken
       - (*uRing).used
@@ -2294,6 +2307,7 @@ files:
       - (*uRing).recvCancelled
       - (*uRing).recvBytes
       - (*uRing).recvStarved
+      - reads
       - (*uRing).recvEOF
       - (*uRing).failLive
       - (*uRing).onSend
@@ -2415,6 +2429,7 @@ files:
       - (*uring).wait
       - (*uring).ready
       - (*uring).reap
+      - (*uring).completed
       - (*uring).overflowed
       - (*uring).flushOverflow
       - (*uring).setupBuffers
@@ -2608,6 +2623,9 @@ functions:
     name: threadCheck
     params: _ int
     results: func() bool
+  - doc: atWritableEdge compiles no hook without the loopdebug build tag.
+    name: atWritableEdge
+    params: _ int32
   - doc: |-
       newListenerSet shares fds among their takers: takersOf(i) of them hand
       listener i back.
@@ -3196,6 +3214,14 @@ functions:
     params: res int32, live int64
     results: bool
   - doc: |-
+      reads reports whether c's recv stays armed: an open connection, or one the
+      drain closes, which reads on to linger (ring.lingers) — on every path that
+      re-arms a recv, so a linger never stops reading on an ENOBUFS or a cancel
+      and closes with input unread.
+    name: reads
+    params: c *connCtl
+    results: bool
+  - doc: |-
       bufBudgetFor is the bytes of provided buffers one loop of sz may hand its
       rings: loopBufBudget, or less under MaxConns — a buffer for each of the
       loop's share of the connections, and the first ones every ring starts
@@ -3592,6 +3618,13 @@ types:
         name: ops
         type: int32
       - doc: |-
+          file is the slot's file record in the ring's file table while a file
+          body is being sent, noFile otherwise: an idle connection carries no
+          file's state (#961). Placed here, the slot has no padding before its
+          chunks.
+        name: file
+        type: int32
+      - doc: |-
           spill holds the unconsumed input; out the written, unsent output;
           flight the output the kernel is sending.
         name: spill
@@ -3611,30 +3644,6 @@ types:
         type: int32
       - name: lruNext
         type: int32
-      - doc: dirtyNext links the ring's dirty list.
-        name: dirtyNext
-        type: int32
-      - doc: fileFD is the file being sent, the engine's own duplicate; -1 when none.
-        name: fileFD
-        type: int32
-      - doc: |-
-          pipeR and pipeW are the pipe the file crosses on io_uring, a connection's
-          own, -1 when none; pipeHeld how many bytes the pipe holds.
-        name: pipeR
-        type: int32
-      - doc: |-
-          pipeR and pipeW are the pipe the file crosses on io_uring, a connection's
-          own, -1 when none; pipeHeld how many bytes the pipe holds.
-        name: pipeW
-        type: int32
-      - name: pipeHeld
-        type: int32
-      - doc: fileOps counts the file's operations in flight on io_uring.
-        name: fileOps
-        type: uint8
-      - doc: fileBits holds ffEOF, ffFull and ffPoll.
-        name: fileBits
-        type: uint8
       - doc: |-
           zc is how the flight leaves (#969): zcOff by plain sends, zcOn every
           send of it zero-copy, zcHold none for now — zcPend is at its bound —
@@ -3650,14 +3659,6 @@ types:
         type: uint8
       - name: zcVoid
         type: uint8
-      - doc: fileErr is the errno a file operation failed with, zero when none.
-        name: fileErr
-        type: int32
-      - doc: fileOff is the next byte of the file to send, fileLeft how many are left.
-        name: fileOff
-        type: int64
-      - name: fileLeft
-        type: int64
     kind: struct
     methods:
       - doc: sending reports whether the slot holds output, sent or not, or a file.
@@ -3746,14 +3747,26 @@ types:
         type: int32
       - name: lruTail
         type: int32
-      - doc: dirtyHead starts the list of slots to flush at the end of the batch.
-        name: dirtyHead
-        type: int32
+      - doc: |-
+          dirty lists the slots to flush at the end of the batch, each once
+          (fDirty). A slice, not a link in the slot, as compact is: a slot
+          released inside the batch is reset whole, and a link cut the list
+          there — every slot behind kept its fDirty, so no later markDirty listed
+          it again, and its output never left nor its close finished (#1385).
+        name: dirty
+        type: "[]int32"
       - doc: |-
           compact lists the slots whose spill's head was consumed in the batch,
           compacted at its end. A slice, not a link in the slot: a slot released
           inside the batch is reset whole, and a link would cut the list there.
         name: compact
+        type: "[]int32"
+      - doc: |-
+          files are the file bodies in flight, by connCtl.file, and freeFiles the
+          records released: grown to the most files the ring sent at once (#961).
+        name: files
+        type: "[]fileCtl"
+      - name: freeFiles
         type: "[]int32"
       - doc: drv is the backend.
         name: drv
@@ -3853,7 +3866,11 @@ types:
         recv: r *ring
       - doc: |-
           flushDirty sends every dirty slot's output and finishes the closes it
-          waited for. It runs once OnBatchEnd has returned.
+          waited for. It runs once OnBatchEnd has returned. A slot released in the
+          batch and still listed is settled as what it holds now: free, it has
+          nothing to settle; taken again, its new connection is, and a settle only
+          sends what was written and finishes a close or a peer's end, each of which
+          listed the slot already.
         name: flushDirty
         recv: r *ring
       - doc: |-
@@ -3975,6 +3992,22 @@ types:
           fileDone ends slot's file, its last byte gone: its descriptor and pipe
           released, a producer told, and the slot settled, a close having waited for it.
         name: fileDone
+        params: slot int32
+        recv: r *ring
+      - doc: |-
+          takeFile gives slot a file record, released by putFile, and returns it.
+          A pointer to it is good until the next takeFile, which may move the table.
+        name: takeFile
+        params: slot, fd int32
+        recv: r *ring
+        results: "*fileCtl"
+      - doc: fileOf returns slot's file record; the slot must have one.
+        name: fileOf
+        params: slot int32
+        recv: r *ring
+        results: "*fileCtl"
+      - doc: putFile releases slot's file record, its descriptors already closed.
+        name: putFile
         params: slot int32
         recv: r *ring
       - doc: full reports whether the ring's table has no slot left for a connection.
@@ -4371,6 +4404,43 @@ types:
       	peer(r *ring, slot int32) (corenet.LoopPeerValue, bool)
       }
   - doc: |-
+      fileCtl is one file body in flight on a slot (#982): what WriteFile and the
+      backend's beginFile took, released by endFile. It lives in the ring's file
+      table, not in connCtl, so a connection that sends no file pays none of it
+      (#961); like connCtl it holds no pointer.
+    fields:
+      - doc: off is the next byte of the file to send, left how many are left.
+        name: "off"
+        type: int64
+      - name: left
+        type: int64
+      - doc: fd is the file being sent, the engine's own duplicate.
+        name: fd
+        type: int32
+      - doc: |-
+          pipeR and pipeW are the pipe the file crosses on io_uring, a
+          connection's own, -1 on epoll; pipeHeld how many bytes the pipe holds.
+        name: pipeR
+        type: int32
+      - doc: |-
+          pipeR and pipeW are the pipe the file crosses on io_uring, a
+          connection's own, -1 on epoll; pipeHeld how many bytes the pipe holds.
+        name: pipeW
+        type: int32
+      - name: pipeHeld
+        type: int32
+      - doc: err is the errno a file operation failed with, zero when none.
+        name: err
+        type: int32
+      - doc: ops counts the file's operations in flight on io_uring.
+        name: ops
+        type: uint8
+      - doc: bits holds ffEOF, ffFull and ffPoll.
+        name: bits
+        type: uint8
+    kind: struct
+    name: fileCtl
+  - doc: |-
       fileSender is the optional side of a driver that sends a file's bytes from
       the kernel. Both native backends implement it; a platform without one has
       no driver at all, and LoopFileWriter refuses.
@@ -4379,10 +4449,12 @@ types:
     underlying: |-
       interface {
       	// beginFile takes what sending a file on slot needs — a duplicate of fd, a
-      	// pipe — and records it in the slot; a refusal leaves the slot untouched.
+      	// pipe — and records it in a file record of the ring (takeFile); a refusal
+      	// leaves the slot untouched.
       	beginFile(r *ring, slot int32, fd int) error
-      	// endFile releases what beginFile took, the file done or the slot's last
-      	// operation over: nothing of it is left in the kernel.
+      	// endFile releases what beginFile took, and the record (putFile), the file
+      	// done or the slot's last operation over: nothing of it is left in the
+      	// kernel.
       	endFile(r *ring, slot int32)
       }
   - doc: |-
@@ -4676,7 +4748,9 @@ types:
         params: r *ring, slot int32, fd int
         recv: el *epollLoop
         results: error
-      - doc: "endFile implements fileSender: the duplicate closes; epoll held nothing else."
+      - doc: |-
+          endFile implements fileSender: the duplicate closes and the record is
+          released; epoll held nothing else.
         name: endFile
         params: r *ring, slot int32
         recv: el *epollLoop
@@ -6074,16 +6148,12 @@ types:
       - doc: |-
           queueDone is, per listener, that the ring took its share of the
           listener's queue as the group drains and handed it back (plan P6);
-          queueCancel that a cancel of its accepts is in flight; queueEmptied
-          that the queue read empty right after a round of its accepts ran, which
-          ends the ring's take once they came back (#1385). take is takeOff for a
-          ring that takes nothing more: the watchdog drained it before the group
-          did, or an accept failed during the take.
+          queueCancel that a cancel of its accepts is in flight. take is takeOff
+          for a ring that takes nothing more: the watchdog drained it before the
+          group did, or an accept failed during the take.
         name: queueDone
         type: "[]bool"
       - name: queueCancel
-        type: "[]bool"
-      - name: queueEmptied
         type: "[]bool"
       - name: take
         type: uint8
@@ -6093,10 +6163,11 @@ types:
         name: taken
         type: "[]int"
       - doc: |-
-          starved are slots whose recv ran out of buffers, re-armed as buffers
-          come back; recycle the buffers the batch handed out.
+          starved are the connections whose recv ran out of buffers, each a
+          slot and its generation then, re-armed as buffers come back; recycle
+          the buffers the batch handed out.
         name: starved
-        type: "[]int32"
+        type: "[]starvedRecv"
       - name: recycle
         type: "[]uint16"
       - doc: |-
@@ -6269,12 +6340,15 @@ types:
           that completed as its cancel crossed it is served like any other —, it
           arms as many single-shot accepts as the queue holds (TCP_INFO), up to
           queueTakeBatch a batch as epoll and kqueue take, within the room above the
-          reserve, submits them, and reads the queue again once they ran: empty
-          there, the ring's take is over, as epoll's is at its first EAGAIN. It
-          hands the listener back to the group's set once the queue read empty and
-          none of its accepts is in flight; the last ring closes it. An accept left
-          waiting on an empty queue, because another ring took the connection, is
-          cancelled again.
+          reserve, submits them and reads the queue again, round after round: an
+          accept on a queue that holds a connection completes as it is submitted, so
+          an empty read is the take's EAGAIN. When every accept of the rounds
+          completed so, none waits on the listener, and the ring hands it back to
+          the group's set at that read, its last before the close, as epoll does;
+          the last taker closes it, and the rounds' connections are opened as the
+          next batch reaps them. An accept left waiting on an empty queue, because
+          another ring took the connection, is cancelled, and the queue read again
+          once it came back.
 
           Read a batch after the round instead, the queue was never empty under
           arrivals once a batch outlasted the gap between two of them, and
@@ -6282,31 +6356,38 @@ types:
           budget with the queue at its backlog, and the close reset connections
           queued half a second before it (#1385). acceptDepth bounds the accepts a
           serving ring keeps waiting, never what the take arms for a queue it
-          counted.
+          counted. Handed back a batch after an empty read, on that read, the
+          listener closed on what arrived in between — the rest of the batch, the
+          wait and the next reap, 70 to 230 ms on a loaded runner —, reset unread
+          (#1385, after #1460).
         name: takeQueues
         recv: rr *uRing
-      - doc: takeQueue is takeQueues' step on listener i, fd.
+      - doc: |-
+          takeQueue is takeQueues' step on listener i, fd: once no accept of the
+          ring is in flight on it, rounds of accepts, each submitted and the queue
+          read right after it, until a read finds it empty — the listener handed
+          back at that read when every accept completed as it was submitted — or
+          until the batch's share of queueTakeBatch is armed.
         name: takeQueue
         params: i, fd int
         recv: rr *uRing
       - doc: |-
+          takeRounds arms and submits rounds of accepts on listener i, fd, each as
+          many as the queue holds, and reports whether a read found the queue
+          empty, or the take over, before the batch's share was armed or the room
+          ran out.
+        name: takeRounds
+        params: i, fd int
+        recv: rr *uRing
+        results: bool
+      - doc: |-
           waiting is how many connections listener i, fd, holds for the ring's
-          take: none for a ring the watchdog drained, whose accept failed, past its
-          budget, or whose queue read empty after its last round — it takes nothing
-          more.
+          take: none for a ring the watchdog drained, whose accept failed, or past
+          its budget — it takes nothing more.
         name: waiting
         params: i, fd int
         recv: rr *uRing
         results: int
-      - doc: |-
-          tookAll submits the take's round and reports whether listener fd's queue
-          reads empty once it ran: a single-shot accept on a queue that holds a
-          connection completes as it is submitted, so what the queue holds then
-          arrived during the submission, or was left to an accept still in flight.
-        name: tookAll
-        params: fd int
-        recv: rr *uRing
-        results: bool
       - doc: |-
           armTake arms n single-shot accepts on listener i, fd, for the drain's take,
           and says how many the SQ had room for.
@@ -6377,7 +6458,14 @@ types:
         params: index uint32
         recv: rr *uRing
         results: bool
-      - doc: orphanClose closes a direct descriptor no slot owns.
+      - doc: |-
+          orphanClose closes a direct descriptor no slot owns, its peer told first:
+          a shutdown hard-linked ahead of the close. A direct descriptor's close
+          puts its file only once the requests issued before it ended, and the
+          multishot recvs of the ring's other connections last as long as they do
+          (uRing.shutdown): closed alone, a connection refused past MaxConns, or by a
+          stopping or drained ring, read no end, its peer waiting for its own
+          deadline.
         name: orphanClose
         params: index uint32
         recv: rr *uRing
@@ -6704,8 +6792,8 @@ types:
       - doc: |-
           endFile implements fileSender: the duplicate and the pipe close. Closing a
           pipe discards what it holds, so a file given up in mid-step leaves no byte
-          behind, and no operation names them any more (fileOps zero, or the slot
-          released only at zero).
+          behind, and no operation names them any more (the file's ops zero, or the
+          slot released only at zero); the record is released with them.
         name: endFile
         params: r *ring, slot int32
         recv: rr *uRing
@@ -6840,6 +6928,20 @@ types:
         params: slot int32, alive bool
         recv: rr *uRing
     name: uRing
+  - doc: |-
+      starvedRecv is a connection whose recv ran out of buffers: its slot, and
+      the slot's generation then. The generation tells the connection from the
+      next one the slot serves: one that finished while queued leaves its entry
+      behind, and re-armed by slot alone it would arm a second recv on its
+      successor, beside the one take armed, which would split the socket's
+      bytes between two requests (#1471).
+    fields:
+      - name: slot
+        type: int32
+      - name: gen
+        type: uint32
+    kind: struct
+    name: starvedRecv
   - doc: |-
       closeWait is a slot whose close waits on its shutdown: its generation then,
       and the tick its backstop is due at.
@@ -7214,7 +7316,9 @@ types:
         results: bool
       - doc: |-
           queuesTaken reports whether every ring of the loop handed every listener
-          back.
+          back and reaped every accept it armed: the take hands a listener back with
+          its last round's accepts completed, not yet reaped, and the loop stops
+          only once their connections are open.
         name: queuesTaken
         recv: ul *uLoop
         results: bool
@@ -7863,6 +7967,13 @@ types:
       - doc: reap calls fn for up to max completions and advances the head past them.
         name: reap
         params: max int, fn func(c *cqe)
+        recv: u *uring
+        results: int
+      - doc: |-
+          completed is how many completions the CQ holds for ud, not yet reaped. One
+          the kernel held back on an overflow is not counted.
+        name: completed
+        params: ud uint64
         recv: u *uring
         results: int
       - doc: |-

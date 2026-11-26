@@ -40,8 +40,10 @@ go_test(
     srcs = [
         "allocwindow_test.go",
         "bounded_internal_test.go",
+        "ceiling_external_test.go",
         "conformance_external_test.go",
         "decompress_alloc_test.go",
+        "decompress_gc_bench_test.go",
         "flate_internal_test.go",
         "fuzz_external_test.go",
         "gen_api_test.go",
@@ -50,6 +52,7 @@ go_test(
         "pool_internal_test.go",
         "registry_external_test.go",
         "transform_bench_test.go",
+        "zlib_envelope_internal_test.go",
         "zlib_external_test.go",
         "zlib_internal_test.go",
     ],

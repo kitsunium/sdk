@@ -32,7 +32,10 @@ pipeline table, the base path, the versioning — is `docs/site/CLAUDE.md`.
   on every run.
 - **Two root `CLAUDE.md` sections are published**, by their exact H2 titles:
   `Architecture at a glance` (the Concepts page) and `Verification` (on the
-  contributors page). Renaming either drops its page without an error.
+  contributors page). Renaming either drops its page without an error. A
+  section the root `NOTES.md` holds under the same title (ADR 0253: the
+  reference half of a `CLAUDE.md`) is appended to it, so the Concepts page
+  still shows the whole architecture tree.
 - **Every page records its `source`** in its frontmatter, the repository-relative
   file `EditLink.astro` links to.
 - **The wipe is total**: `sync-versions.mjs` removes the three content trees,

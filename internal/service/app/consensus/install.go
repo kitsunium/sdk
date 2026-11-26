@@ -60,7 +60,7 @@ type undecodableBinder interface {
 func (n *Node) undecodableOffer(from coreconsensus.AuthenticatedPeerValue, term uint64, cause error) errs.Code {
 	fromLeader := false
 	if !n.exec(func() {
-		st := n.r.Status()
+		st := n.r.Summary()
 		fromLeader = term == st.Term && from.ID == st.Lead && st.Role != coreconsensus.RoleLeader
 	}) {
 		return coreconsensus.CodeNodeStopped

@@ -1,5 +1,10 @@
 # ADR 0012 — Logger writer registry (named, config-driven Sink factories)
 
+- Area: observe
+- Need: decision
+- Status: Accepted
+- Date: 2026-05-29
+
 ## Status
 
 Accepted

@@ -43,7 +43,11 @@ func (f *feedRun) settingsAck() {
 		return
 	}
 	f.spendControl()
-	f.c.decoder.acknowledge()
+	f.c.set(flagAcked)
+	//: a table already taken moves its bound now; one taken later starts there.
+	if f.c.table != noIndex {
+		f.l.tables.decoders[f.c.table].acknowledge()
+	}
 }
 
 // applySettings walks the frame's parameters in order, §6.5.3.

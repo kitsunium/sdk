@@ -12,6 +12,7 @@ import (
 	"io"
 	stdnet "net"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -31,6 +32,15 @@ const (
 	stopBound time.Duration = 30 * time.Second
 	// stopDialers is how many goroutines open the connections.
 	stopDialers int = 64
+	// stopSources is how many loopback source addresses the dialers spread
+	// the connections over (127.0.0.2 onwards), each its own range of
+	// ephemeral ports towards the server's one address.
+	stopSources int = 8
+	// ipBindAddressNoPort is Linux's IP_BIND_ADDRESS_NO_PORT
+	// (include/uapi/linux/in.h), which package syscall names on some
+	// architectures only: a socket bound to an address with port 0 gets its
+	// port at connect, unique by its 4-tuple, not at bind.
+	ipBindAddressNoPort int = 0x18
 )
 
 // stopGuard counts what a backend issues to stop a group, where the count
@@ -150,7 +160,13 @@ func stopBounded(t *testing.T, drain bool) {
 }
 
 // heardConns opens n connections to addr, each sending one line and reading
-// its echo, so the drain closes them at once.
+// its echo, so the drain closes them at once. The dialers spread them over
+// stopSources source addresses: from one, connect(2) looks for a free
+// ephemeral port by walking the range, even ports first, so past about
+// 14 000 connections to the one server address each dial walked the half
+// already taken — 20 000 took 7 to 9 s where the first 10 000 took under
+// one, most of the stop tests' time (#1439) —, and the TIME_WAIT sockets
+// earlier tests of the process left on the range made it longer still.
 func heardConns(t *testing.T, addr string, n int) []stdnet.Conn {
 	t.Helper()
 	conns := make([]stdnet.Conn, n)
@@ -158,8 +174,23 @@ func heardConns(t *testing.T, addr string, n int) []stdnet.Conn {
 	var wg sync.WaitGroup
 	for w := range stopDialers {
 		wg.Go(func() {
+			d := stdnet.Dialer{
+				Timeout:   5 * time.Second,
+				LocalAddr: &stdnet.TCPAddr{IP: stdnet.IPv4(127, 0, 0, byte(2+w%stopSources))},
+				// The port chosen at connect, by the 4-tuple: bound at bind,
+				// it would be unique on the source address alone.
+				Control: func(_, _ string, rc syscall.RawConn) error {
+					var serr error
+					if err := rc.Control(func(fd uintptr) {
+						serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, ipBindAddressNoPort, 1)
+					}); err != nil {
+						return err
+					}
+					return serr
+				},
+			}
 			for i := w; i < n; i += stopDialers {
-				c, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
+				c, err := d.Dial("tcp", addr)
 				if err != nil {
 					errc <- err
 					return

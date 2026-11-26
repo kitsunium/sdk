@@ -213,6 +213,10 @@ func listen(ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, 
 		traitIf(exclusiveOf(listenerSocket(raw)), traitExclusive) |
 		traitIf(multipathOf(listenerSocket(raw)), traitMultipath)
 	rep.backlog, rep.backlogReason = applyBacklog(raw, spec.backlog)
+	//: a queue the group sized: the drain widens it.
+	if spec.backlog > 0 {
+		rep.sized = raw
+	}
 	rep.receiveBuffer, rep.sendBuffer = socketBuffers(listenerSocket(raw))
 	//: the same layers an adopted socket gets, from the same function.
 	return layered(raw, cfgTLS, spec.trackCloses, spec.proxy), rep, nil
@@ -273,6 +277,9 @@ type boundListener struct {
 	addr corenet.AddressValue
 	// ln is the live listener.
 	ln stdnet.Listener
+	// sized is the socket under ln's layers when the group asked for a
+	// Backlog, nil otherwise: Shutdown widens its queue (widenBacklogs).
+	sized stdnet.Listener
 	// made creates closed on first use, so a zero boundListener works.
 	made sync.Once
 	// shut closes closed exactly once, whoever closes the listener first.

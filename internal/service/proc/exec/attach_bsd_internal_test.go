@@ -37,16 +37,16 @@ func openFDCount(t *testing.T) int {
 // TestReadRecordReadsTheKernel pins the record decoded on a real kernel —
 // the layout bsdabi holds for this GOOS and GOARCH against the kernel's own
 // answer: this process's users are its uid and euid, its start lies in the
-// last day, and a child spawned afterwards started no earlier. A pid nobody
-// holds is SIGNAL_FAILED (ESRCH).
+// last day, the kernel states it valid, and a child spawned afterwards
+// started no earlier. A pid nobody holds is SIGNAL_FAILED (ESRCH).
 func TestReadRecordReadsTheKernel(t *testing.T) {
 	t.Parallel()
 	self, err := readRecord(os.Getpid())
 	if err != nil {
 		t.Fatalf("readRecord(self) = %v", err)
 	}
-	if self.ruid != os.Getuid() || self.euid != os.Geteuid() {
-		t.Errorf("record users %d/%d, want %d/%d", self.ruid, self.euid, os.Getuid(), os.Geteuid())
+	if !self.valid || self.ruid != os.Getuid() || self.euid != os.Geteuid() {
+		t.Errorf("record users %d/%d (valid %v), want %d/%d, valid", self.ruid, self.euid, self.valid, os.Getuid(), os.Geteuid())
 	}
 	now := time.Now().UnixMicro()
 	if self.start <= now-int64(24*time.Hour/time.Microsecond) || self.start > now+int64(time.Minute/time.Microsecond) {
@@ -188,7 +188,9 @@ func TestDeliverRefusesAReusedPID(t *testing.T) {
 
 // TestAttachBoundsOffLinux pins the bounds without a cgroup: a cgroup bound
 // refuses before anything is held, and a start time that differs between the
-// two reads of the record — the pid changed hands — refuses the adoption.
+// two reads of the record — the pid changed hands — refuses the adoption. The
+// child's record is read once the kernel states it valid (await): the shell
+// execs sleep, and NetBSD states no start for a process inside its execve.
 func TestAttachBoundsOffLinux(t *testing.T) {
 	t.Parallel()
 	child := startOSSleeper(t)
@@ -201,18 +203,19 @@ func TestAttachBoundsOffLinux(t *testing.T) {
 	}
 	defer a.release()
 	own := coreproc.AttachValue{UIDs: []int{os.Getuid(), os.Geteuid()}}
-	if err = a.checkUsersHeld(own, procRecord{start: 1}); !errs.HasCode(err, coreproc.CodeSignalFailed) {
+	kernel := kernelRecords()
+	if err = a.checkUsersHeld(kernel, own, procRecord{start: 1, valid: true}); !errs.HasCode(err, coreproc.CodeSignalFailed) {
 		t.Errorf("a start time that changed = %v, want SIGNAL_FAILED", err)
 	}
-	rec, err := readRecord(child.Pid)
+	rec, err := kernel.await(child.Pid)
 	if err != nil {
-		t.Fatalf("readRecord = %v", err)
+		t.Fatalf("await = %v", err)
 	}
-	if err = a.checkUsersHeld(own, rec); err != nil {
+	if err = a.checkUsersHeld(kernel, own, rec); err != nil {
 		t.Errorf("the same start time and this user = %v, want nil", err)
 	}
 	other := coreproc.AttachValue{UIDs: []int{os.Getuid() + 12345}}
-	if err = a.checkUsersHeld(other, rec); !errs.HasCode(err, coreproc.CodeAdoptionRefused) {
+	if err = a.checkUsersHeld(kernel, other, rec); !errs.HasCode(err, coreproc.CodeAdoptionRefused) {
 		t.Errorf("another user = %v, want ADOPTION_REFUSED", err)
 	}
 }

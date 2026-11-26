@@ -14,6 +14,8 @@
   (metrics), ADR 0028 (config — typed load), ADR 0013 (crypto — the redacting
   `Key` precedent), ADR 0005/0006 (error codes)
 - **Amends**: widens the `internal/core` purpose statement with an 11th sibling
+- **Area**: net
+- **Need**: decision
 
 ## Context
 
@@ -639,3 +641,18 @@ the call, not of its bytes, and that constant is not zero in Go 1.27: the
 standard library's own `io.Copy` to a bare `*net.TCPConn` allocates 192 B in 4
 allocations with the file's open, the engine's connection 80 to 170 B more
 (`internal/service/net/server/BENCH.md`, edition 2026-11-13).
+
+## Amendment 2026-11-15 (#970): a file's copy allocates nothing on a group with no bound
+
+The amendment of 2026-11-13 said the copy's constant was not zero in Go 1.27. It is
+not zero through `ReadFrom`: the socket's `ReadFrom` goes by `net.sendFile`, which
+allocates four times a call. `io.Copy(c, f)` reaches the socket another way when the
+destination is a `syscall.Conn`: `os.File.WriteTo` asks it for its RawConn and calls
+sendfile on the socket's descriptor itself, with nothing allocated. A handler of a
+group that bounds neither reads, nor the wait between them, nor writes, on a plaintext
+socket under no layer — no TLS, no PROXY header, no close tracker —, now receives its
+connection as such a `syscall.Conn`, the socket's RawConn asked once a connection and
+kept: a 64 MiB file's copy allocates nothing (`TestConnRawView_fileCopyAllocs`, server
+BENCH.md, edition 2026-11-15), and splice serves `io.Copy(f, c)` the same way. A
+bounded or layered connection is handed out as before, and its copies keep their bound
+per step through `ReadFrom` and `WriteTo`.

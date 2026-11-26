@@ -283,16 +283,35 @@ func unshardedEnv(env []string) []string {
 // engines, under prefix when given.
 func startL3Child(tb testing.TB, prefix, bind string, engines ...string) *l3Child {
 	tb.Helper()
-	env := []string{l3ChildEnv + "=L3:" + strings.Join(engines, ","), l3BindEnv + "=" + bind}
+	c := startReceiver(tb, prefix, "^TestLoadL3Child$", "L3:"+strings.Join(engines, ","), bind)
+	line, err := c.out.ReadString('\n')
+	addrs, ok := strings.CutPrefix(strings.TrimSpace(line), "addr ")
+	c.addrs = strings.Fields(addrs)
+	if err != nil || !ok || len(c.addrs) != len(engines) {
+		tb.Fatalf("L3 receiver printed %q, %v, want one address an engine", line, err)
+	}
+	return c
+}
+
+// startReceiver re-runs this binary on the test named by run, under prefix
+// when given, as a receiver of role role bound to bind. The child's role is
+// set once, any inherited one removed first, and no receiver role starts a
+// receiver: the child's environment is built here, never inherited whole.
+func startReceiver(tb testing.TB, prefix, run, role, bind string) *l3Child {
+	tb.Helper()
+	env := []string{l3ChildEnv + "=" + role, l3BindEnv + "=" + bind}
 	var cmd *exec.Cmd
 	if p := strings.Fields(prefix); len(p) > 0 {
 		// sudo and ip netns exec reset the environment: it goes through env.
 		args := append(append(p[1:], "env"), env...)
-		args = append(args, os.Args[0], "-test.run=^TestLoadL3Child$", "-test.count=1")
+		args = append(args, os.Args[0], "-test.run="+run, "-test.count=1")
 		cmd = exec.Command(p[0], args...)
 	} else {
-		cmd = exec.Command(os.Args[0], "-test.run=^TestLoadL3Child$", "-test.count=1")
-		cmd.Env = append(unshardedEnv(os.Environ()), env...)
+		cmd = exec.Command(os.Args[0], "-test.run="+run, "-test.count=1")
+		inherited := slices.DeleteFunc(unshardedEnv(os.Environ()), func(kv string) bool {
+			return strings.HasPrefix(kv, l3ChildEnv+"=") || strings.HasPrefix(kv, l3BindEnv+"=")
+		})
+		cmd.Env = append(inherited, env...)
 	}
 	cmd.Stderr = os.Stderr
 	in, err := cmd.StdinPipe()
@@ -318,12 +337,6 @@ func startL3Child(tb testing.TB, prefix, bind string, engines ...string) *l3Chil
 			<-done
 		}
 	})
-	line, err := c.out.ReadString('\n')
-	addrs, ok := strings.CutPrefix(strings.TrimSpace(line), "addr ")
-	c.addrs = strings.Fields(addrs)
-	if err != nil || !ok || len(c.addrs) != len(engines) {
-		tb.Fatalf("L3 receiver printed %q, %v, want one address an engine", line, err)
-	}
 	return c
 }
 
@@ -479,16 +492,37 @@ func dialGSO(local, peer string) (*stdnet.UDPConn, error) {
 // interleave. It returns how many datagrams it sent: datagrams rounded up to
 // whole sends of every flow.
 func sendL3(flows []*stdnet.UDPConn, datagrams int) (int, error) {
-	payload := make([]byte, l3Segments*l3DatagramSize)
-	perFlow := (datagrams + len(flows)*l3Segments - 1) / (len(flows) * l3Segments)
+	return paceL3(flows, datagrams, nil)
+}
+
+// l3Sends is how many sends each of flows makes for datagrams datagrams:
+// whole sends of every flow, rounded up.
+func l3Sends(flows, datagrams int) int {
+	return (datagrams + flows*l3Segments - 1) / (flows * l3Segments)
+}
+
+// paceL3 is sendL3's schedule. fill, when not nil, writes send i of flow f
+// into its payload before it leaves: the sends of all flows numbered in the
+// order the schedule interleaves them, i×len(flows)+f.
+func paceL3(flows []*stdnet.UDPConn, datagrams int, fill func(payload []byte, send int)) (int, error) {
+	perFlow := l3Sends(len(flows), datagrams)
 	every := time.Duration(float64(time.Second) * l3Segments * float64(len(flows)) / l3Rate)
 	var wg sync.WaitGroup
 	errc := make(chan error, len(flows))
 	start := time.Now()
+	// One payload, read-only, unless each send is written: then one a flow.
+	shared := make([]byte, l3Segments*l3DatagramSize)
 	for f, c := range flows {
 		offset := every * time.Duration(f) / time.Duration(len(flows))
 		wg.Go(func() {
+			payload := shared
+			if fill != nil {
+				payload = make([]byte, len(shared))
+			}
 			for i := range perFlow {
+				if fill != nil {
+					fill(payload, i*len(flows)+f)
+				}
 				if d := time.Until(start.Add(offset + time.Duration(i)*every)); d > 0 {
 					time.Sleep(d)
 				}

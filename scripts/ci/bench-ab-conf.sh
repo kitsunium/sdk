@@ -89,7 +89,7 @@ check() {
     elif [ -n "${ids[$id]:-}" ]; then why="rule '$id' declared twice"
     elif [ -z "${suites[$suite]:-}" ]; then why="rule '$id' names no suite '$suite'"
     elif ! [[ "$kind" =~ ^(ab|ratio|diff|value|cross|delta)$ ]]; then why="kind '$kind' (ab, ratio, diff, value, cross or delta)"
-    elif ! [[ "$metric" =~ ^[A-Za-z%-]+/[A-Za-z]+$ ]]; then why="metric '$metric'"
+    elif ! [[ "$metric" =~ ^[A-Za-z0-9%-]+/[A-Za-z0-9]+$ ]]; then why="metric '$metric'"
     elif ! [[ "$row" =~ ^Benchmark[^[:space:]]+$ ]]; then why="row '$row'"
     elif [[ "$kind" =~ ^(ratio|diff|cross)$ ]] && ! [[ "$row2" =~ ^Benchmark[^[:space:]]+$ ]]; then why="a $kind rule needs a second row"
     elif [[ "$kind" =~ ^(ab|value|delta)$ ]] && [ "$row2" != - ]; then why="a $kind rule takes no second row"
@@ -125,13 +125,13 @@ check() {
 
 # field <name> — the suite's record, without its line number; empty when absent.
 suite_record() {
-  records suite | awk -v name="$1" '$2 == name { $1 = ""; sub(/^ /, ""); print; exit }'
+  records suite | awk -v name="$1" '!done && $2 == name { $1 = ""; sub(/^ /, ""); print; done = 1 }'
 }
 
 # step0_record <name> — the suite's `step0` record as `PROFILES PATTERN`;
 # empty when the suite records no profile.
 step0_record() {
-  records step0 | awk -v name="$1" '$2 == name { print $3, $4; exit }'
+  records step0 | awk -v name="$1" '!done && $2 == name { print $3, $4; done = 1 }'
 }
 
 suite() {

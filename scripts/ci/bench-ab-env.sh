@@ -19,7 +19,7 @@ read_or() { if [ -r "$1" ]; then tr -d '\n' <"$1"; else printf '%s' "$2"; fi; }
 # read with the processor that produced it. /proc/cpuinfo's "model name",
 # lscpu's when that has none (CPUINFO names another cpuinfo file).
 cpu_model="$(awk -F': *' '/^model name/ { print $2; exit }' "${CPUINFO:-/proc/cpuinfo}" 2>/dev/null)"
-[ -n "$cpu_model" ] || cpu_model="$(lscpu 2>/dev/null | awk -F': *' '/^Model name/ { print $2; exit }')"
+[ -n "$cpu_model" ] || cpu_model="$(lscpu 2>/dev/null | awk -F': *' '!done && /^Model name/ { print $2; done = 1 }')"
 cpu_model="${cpu_model//[|\\]/}"
 cpu_model="$(printf '%s' "$cpu_model" | tr -c '[:print:]' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')"
 line cpu-model "${cpu_model:-unknown}"

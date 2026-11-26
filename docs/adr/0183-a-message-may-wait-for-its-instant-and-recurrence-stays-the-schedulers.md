@@ -17,6 +17,8 @@
   [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) and
   [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md)
   (the injected clock), kitsunium/sdk#481
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

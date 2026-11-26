@@ -4,6 +4,8 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0001](0001-sdk-go-multimodule-layout.md) (4-layer shape), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (error codes), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings, never by widening), [ADR 0050](0050-sdk-lifecycle-domain.md) (`lifecycle`, the previous assembly domain), [ADR 0016](0016-sdk-process-supervision-domain.md) / [ADR 0026](0026-sdk-resilience-domain.md) / [ADR 0041](0041-sdk-scheduler-domain.md) (the no-registry precedents)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

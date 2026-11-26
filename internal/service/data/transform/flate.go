@@ -165,12 +165,7 @@ func flateDecompressCore(dst, src []byte, max int64) (decoded []byte, tooLarge b
 	//: return the decoder on every exit below.
 	defer releaseFlateReader(box)
 	//: drain the reader straight onto dst through the shared bounded helper.
-	out, overflow, derr := appendAllBounded(dst, box.rc, max)
-	//: fold a Close fault into the result so the reader error is never dropped.
-	if cerr := box.rc.Close(); cerr != nil && derr == nil {
-		//: a clean drain followed by a Close fault still fails decompression.
-		derr = cerr
-	}
+	out, overflow, derr := drainBox(dst, box, max)
 	//: a read/close fault (corrupt body / truncated stream) is a failure.
 	if derr != nil {
 		//: wrap the body error under the flate sentinel.

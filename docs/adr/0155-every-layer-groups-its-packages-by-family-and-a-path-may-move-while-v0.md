@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0013](0013-sdk-crypto-domain.md) and [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) (the scheme facades placed beside `pkg/v1/crypto`), [ADR 0102](0102-a-document-somebody-else-wrote-is-decoded-one-way-or-not-at-all.md) §D5 (the reason it gave for that placement), [ADR 0016](0016-sdk-process-supervision-domain.md) (six `proc` facades at the root of `pkg/v1`), [ADR 0029](0029-sdk-net-domain.md) (three `net` facades at the root of `pkg/v1`), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (its v0 licence now covers import paths)
 - **Related**: [ADR 0001](0001-sdk-go-multimodule-layout.md) (the layers this groups inside), [ADR 0035](0035-pp-range-ownership-enforcement.md) (the owner table keyed on directories), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the firewall keyed on layers), [ADR 0134](0134-a-program-links-the-codecs-it-imports.md) (one facade per format), [ADR 0135](0135-a-release-is-sized-by-a-label-a-maintainer-set.md) (the size label), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework moves in lockstep), [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (principle 4), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) (the four packages that leave), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (`concur` and `collections`), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (core mirrors service)
+- **Area**: design
+- **Need**: decision
 
 ## Context
 

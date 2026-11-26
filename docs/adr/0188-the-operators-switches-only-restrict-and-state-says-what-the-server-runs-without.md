@@ -21,6 +21,8 @@
   (readiness is not liveness), [ADR 0095](0095-windows-runs-every-test-and-gates.md)
   (a degradation `State` reported wrong), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md)
   (design first)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 

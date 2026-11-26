@@ -188,6 +188,33 @@ func tcpLeader(t *testing.T, ns []*tcpNode) *tcpNode {
 	return nil
 }
 
+// tcpSettledLeader is the leader once it committed an entry of its own
+// term, its no-op at least. raft admits a membership change only then
+// (checkMembership): a JOIN that reached a leader tcpLeader returned the
+// moment it was elected, its no-op not committed yet, was refused
+// MEMBERSHIP_CHANGE_PENDING on a slow guest (#1458). The leader's role, term
+// and commit are read at one instant; the term of the entry at that commit
+// is its log's, which a commit never changes.
+func tcpSettledLeader(t *testing.T, ns []*tcpNode) *tcpNode {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		for _, tn := range ns {
+			if tn.node == nil {
+				continue
+			}
+			st := tn.node.Status()
+			if st.Role != coreconsensus.RoleLeader || st.Commit == 0 {
+				continue
+			}
+			if term, err := tn.log.Term(st.Commit); err == nil && term == st.Term {
+				return tn
+			}
+		}
+	}
+	t.Fatal("no leader over TCP committed an entry of its own term")
+	return nil
+}
+
 func newTCPCluster(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode) {
 	return newTCPClusterWith(t, nil)
 }

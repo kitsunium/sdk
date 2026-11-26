@@ -1055,7 +1055,8 @@ func (g gatedKV) Apply(e coreconsensus.EntryValue) any {
 
 // D6, R1-14: once the gap between commit and applied reaches
 // MaxApplyLagBytes, the leader refuses new proposals with OVERLOADED, and
-// accepts them again once apply catches up.
+// accepts them again once apply catches up; a forwarded command refused
+// under it is never applied.
 func TestApplyLagBackpressure(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	gate := make(chan struct{})
@@ -1092,30 +1093,68 @@ func TestApplyLagBackpressure(t *testing.T) {
 	if !overloaded {
 		t.Fatal("no OVERLOADED while apply was blocked")
 	}
-	// A command forwarded by a follower meets the same backpressure
-	// (review M2).
-	for _, tn := range c.nodes {
-		if tn == l {
-			continue
-		}
-		fctx, fcancel := context.WithTimeout(ctx, 2*time.Second)
-		_, _, err := tn.node.Propose(fctx, []byte("forwarded=1"))
-		fcancel()
-		if !errors.Is(err, coreconsensus.Overloaded) {
-			t.Fatalf("forwarded under backpressure: %v", err)
-		}
-		break
-	}
+	forwardedOverloaded(ctx, t, c)
 	close(gate)
+	// Every node applies what it holds, then the leader of the moment
+	// accepts proposals again.
+	for _, tn := range c.nodes {
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			if st := tn.node.Status(); st.Applied >= st.Commit {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("node %d never applied its commit: %+v", tn.id, tn.node.Status())
+			}
+		}
+	}
+	l = c.settledLeader(5 * time.Second)
+	var after coreconsensus.TokenValue
 	for {
-		_, _, err := l.node.Propose(ctx, []byte("after=1"))
+		tok, _, err := l.node.Propose(ctx, []byte("after=1"))
 		if err == nil {
+			after = tok
 			break
 		}
 		if !errors.Is(err, coreconsensus.Overloaded) {
 			t.Fatalf("after apply caught up: %v", err)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	// Every forward of "forwarded=1" was refused, OVERLOADED or NOT_LEADER:
+	// nothing appended, so no node applies it, before or after the entry
+	// committed past every one of them.
+	c.waitApplied(after.Index, 5*time.Second)
+	for _, tn := range c.nodes {
+		if v, ok := tn.sm.get("forwarded"); ok {
+			t.Fatalf("node %d applied a forward that was refused: forwarded=%q", tn.id, v)
+		}
+	}
+}
+
+// forwardedOverloaded checks that a command forwarded by a follower meets
+// the apply backpressure (review M2). Apply blocked for the maximum election
+// timeout makes the leader hand over (#554), so the leadership moves while
+// apply stays blocked: a forward is answered OVERLOADED by the leader it
+// reaches, or NOT_LEADER, nothing appended, by a node that leads no longer,
+// and is sent again from a follower of the leader of the moment. It is never
+// OUTCOME_UNKNOWN: the answer of a forward that crossed a change of term was
+// dropped as an older term's, and the sweep answered it so (#1440).
+func forwardedOverloaded(ctx context.Context, t *testing.T, c *cluster) {
+	t.Helper()
+	for {
+		l := c.leader(5 * time.Second)
+		f := c.otherThan(l)
+		fctx, fcancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _, err := f.node.Propose(fctx, []byte("forwarded=1"))
+		fcancel()
+		switch {
+		case errors.Is(err, coreconsensus.Overloaded):
+			return
+		case errors.Is(err, coreconsensus.NotLeader) && ctx.Err() == nil:
+			time.Sleep(10 * time.Millisecond)
+		default:
+			t.Fatalf("forwarded under backpressure: %v", err)
+		}
 	}
 }
 
@@ -1451,8 +1490,18 @@ func TestInstallAfterTheReceiverMovedPastTheSnapshot(t *testing.T) {
 
 // The last guard, on the apply goroutine: a restore queued for a snapshot
 // the machine already passed leaves the machine as it is (review H3).
+//
+// The snapshot is planted behind the follower's two newest, the first one
+// its retention removes (R6-02). The follower's own cut, due on the last
+// batch staleSnapshot applied, ran that retention between the Commit and
+// the restore's Open, which found no snapshot and answered SNAPSHOT_CORRUPT
+// (#1451). The follower's cuts are held from before the Create until the
+// snapshot is held open, so no retention runs while it is unpinned. Once
+// they are released, the cut they coalesced, if any, and a retention the
+// test runs itself find it pinned, and their removal of it is refused.
 func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
 	c, l, f, meta, body, tok := staleSnapshot(t)
+	release := holdCuts(t, f.node)
 	sink, _, err := f.snaps.Create(meta.ID, meta)
 	if err != nil {
 		t.Fatal(err)
@@ -1463,15 +1512,56 @@ func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
 	if err := sink.Commit(meta); err != nil {
 		t.Fatal(err)
 	}
+	held, err := f.snaps.Open(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	f.node.retain()
 	done := make(chan error, 1)
 	f.node.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
-	if err := <-done; err != nil {
+	err = <-done
+	if cerr := held.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got := f.node.Status().Applied; got < tok.Index {
 		t.Fatalf("the restore moved applied back to %d from %d", got, tok.Index)
 	}
 	checkNothingLost(t, c, l, f)
+}
+
+// holdCuts waits until n has no cut in flight and none coalesced, then
+// marks one in flight, as SaveSnapshot does on its caller's goroutine: no
+// cut starts, nor the retention one ends on, until release, and a trigger
+// meanwhile is coalesced. release clears the mark and asks for that
+// trigger as a cut's end does (cutPending); it runs once, at the latest at
+// the test's cleanup.
+func holdCuts(t *testing.T, n *Node) (release func()) {
+	t.Helper()
+	ss := &n.snapState
+	waitFor(t, "the cuts to settle", func() bool {
+		ss.mu.Lock()
+		defer ss.mu.Unlock()
+		if ss.inFlight || ss.pending {
+			return false
+		}
+		ss.inFlight = true
+		return true
+	})
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			ss.mu.Lock()
+			ss.inFlight = false
+			ss.mu.Unlock()
+			n.cutPending()
+		})
+	}
+	t.Cleanup(release)
+	return release
 }
 
 // smallFrames is a transport whose frames are smaller than a batch.

@@ -39,11 +39,17 @@ sequences:
         to: layoutOf
       - opt:
           do:
-            - return: 0, 0, 0, false
+            - return: 0, 0, 0, false, false
           when: l == nil || !l.fits(buf) || readInt32(buf, l.pid) != int64(pid)
+      - set: ruid, euid
+        value: int(binary.NativeEndian.Uint32(buf[l.ruid:])), int(binary.NativeEndian.Uint32(buf[l.euid:]))
+      - opt:
+          do:
+            - return: 0, ruid, euid, false, true
+          when: l.uvalid != noValidity && binary.NativeEndian.Uint64(buf[l.uvalid:]) == 0
       - set: start
         value: int64(readField(buf, l.sec))*usecPerSec + int64(readField(buf, l.usec))
-      - return: start, int(binary.NativeEndian.Uint32(buf[l.ruid:])), int(binary.NativeEndian.Uint32(buf[l.euid:])), true
+      - return: start, ruid, euid, true, true
   - of: (*procLayout).fits
     steps:
       - opt:
@@ -53,7 +59,9 @@ sequences:
       - return: len(buf) == l.size && (l.structSize == noStructSize || readInt32(buf, l.structSize) == int64(l.size))
   - of: (*procLayout).end
     steps:
-      - return: max(l.pid+int32Bytes, l.ruid+int32Bytes, l.euid+int32Bytes, l.sec.off+l.sec.width, l.usec.off+l.usec.width)
+      - return: |-
+          max(l.pid+int32Bytes, l.ruid+int32Bytes, l.euid+int32Bytes, l.uvalid+int64Bytes,
+          		l.sec.off+l.sec.width, l.usec.off+l.usec.width)
   - of: readInt32
     steps:
       - return: int64(int32(binary.NativeEndian.Uint32(buf[off:])))

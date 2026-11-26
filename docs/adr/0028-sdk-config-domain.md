@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Related**: ADR 0024 (Phase-B wave — this ADR closes it), ADR 0003 (codec — file parsing dispatch), ADR 0018 (portability), ADR 0016 (no-registry sibling precedent)
 - **Amends**: covered by the ADR 0024 Phase-B purpose-statement widening
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

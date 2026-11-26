@@ -4,6 +4,8 @@
 - **Date**: 2026-09-12
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0016](0016-sdk-process-supervision-domain.md) (the proc domain), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is never an inert policy), [ADR 0001](0001-sdk-go-multimodule-layout.md) (the four layers)
+- **Area**: proc
+- **Need**: decision
 
 ## Context
 

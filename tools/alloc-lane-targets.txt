@@ -174,7 +174,10 @@
 # outboundLane.Send keeps a copy of the lane's first LoopIO, so it allocates
 # nothing per call (loop_outbound_alloc_internal_test.go, //go:build !race).
 # Storing &io itself moved the parameter to the heap: one allocation per
-# Send, which the test caught before the fix.
+# Send, which the test caught before the fix. And #970's file copy: io.Copy(c,
+# f) on a group with no bound allocates nothing a copy, os.File's sendfile on
+# the socket's RawConn kept a connection (conn_rawview_alloc_linux_internal_test.go,
+# //go:build linux && !race); through ReadFrom it was four.
 //internal/service/net/server:server_test
 
 # internal/service/data/transform — the decompression tail (kitsunium/sdk#1102,

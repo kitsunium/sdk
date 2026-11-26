@@ -4,6 +4,8 @@
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0044](0044-metrics-adopts-the-otel-data-model.md) (the data model that has this field), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published interface is extended by a sibling), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (**the v0 licence this ADR invokes**), [ADR 0048](0048-sdk-metrics-otlp-json.md) (the OTLP/JSON wire, and its three fields emitted at their zero), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp vs refuse), [ADR 0027](0027-sdk-metrics-domain.md) (the domain)
+- **Area**: observe
+- **Need**: constraint
 
 ## Context
 

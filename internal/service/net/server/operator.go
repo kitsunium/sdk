@@ -357,10 +357,9 @@ func (e *operatorEnv) linuxPlan(code corenet.LoopBackend) loopPlan {
 // choice takes it (kqueueTaken) and the environment allows it, the portable
 // backend otherwise. An explicit kqueue never falls back — the probe's
 // refusal is the code's LoopBackendUnavailable —; auto's does, to portable,
-// reported. A backend whose paired gate has never held on a platform is not
-// its default, so auto stays portable on the BSDs (ADR 0222 §D6, amended
-// 2026-11-13). io_uring and epoll, refused by startLoopEngine there, plan the
-// floor.
+// reported, as a probe that refuses on a BSD kqueue never ran on does
+// (ADR 0222 §D6, amended 2026-11-15). io_uring and epoll, refused by
+// startLoopEngine there, plan the floor.
 func (e *operatorEnv) kqueuePlan(code corenet.LoopBackend, take bool) loopPlan {
 	//: taken, and allowed.
 	if take && e.allows(corenet.CapabilityKqueue) {
@@ -378,12 +377,22 @@ func kqueueTaken(code corenet.LoopBackend, goos string) bool {
 	return code == corenet.LoopBackendKqueue || code == corenet.LoopBackendAuto && kqueueAuto(goos)
 }
 
-// kqueueAuto reports whether auto takes kqueue on goos: on darwin alone,
-// where the paired gate of ADR 0190 held it against the goroutine engine on
-// macos-15 (P6, the bench-darwin rows). FreeBSD, OpenBSD, NetBSD and
-// DragonFly have no measured row, so auto stays portable there (ADR 0222
-// §D6, amended 2026-11-13).
+// kqueueAuto reports whether auto takes kqueue on goos: on darwin and every
+// BSD, the platforms kqueue runs on. The paired gate of ADR 0190 held the
+// backend against the goroutine engine on macos-15 (P6, the bench-darwin
+// rows), and the backend is one driver on all of them, whose suites pass on
+// the FreeBSD, OpenBSD and NetBSD guests (ADR 0222 §D6, amended 2026-11-15).
+// Elsewhere there is no kqueue to take.
 func kqueueAuto(goos string) bool {
-	//: darwin's rows held; no BSD has one.
-	return goos == "darwin"
+	//: by platform.
+	switch goos {
+	//: darwin and the BSDs: kqueue is their poller.
+	case "darwin", "freebsd", "openbsd", "netbsd", "dragonfly":
+		//: taken.
+		return true
+	//: no kqueue here.
+	default:
+		//: not taken.
+		return false
+	}
 }

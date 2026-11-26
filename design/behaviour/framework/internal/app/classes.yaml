@@ -6963,9 +6963,9 @@ functions:
     results: error
   - doc: |-
       lengthPrefixed writes part into h behind its length, as eight big-endian
-      bytes.
+      bytes. h is a hash in every caller, whose Write never fails.
     name: lengthPrefixed
-    params: h hash.Hash, part []byte
+    params: h io.Writer, part []byte
   - doc: digestOf is the SHA-256 of parts, each length-prefixed.
     name: digestOf
     params: parts ...[]byte
@@ -11678,7 +11678,7 @@ types:
           listBreakers prints each port a breaker guards, and whether an operator
           isolated it; a mark it cannot read is said, and fails the command.
         name: listBreakers
-        params: fsys vfs.FullFS, stdout, stderr io.Writer
+        params: fsys fs.FS, stdout, stderr io.Writer
         recv: a *App
         results: int
       - doc: markBreaker writes, or takes off, the mark that isolates port's breaker.

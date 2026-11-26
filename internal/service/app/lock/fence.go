@@ -65,7 +65,7 @@ type fenceFile interface {
 // stay a plain previous+1 — the ledger's validity is decided in one place, and
 // "can this be read as a counter" and "can this counter be advanced" are the
 // same question asked of the same bytes.
-func readFence(file fenceFile, path string) (fence uint64, err error) {
+func readFence(file io.ReaderAt, path string) (fence uint64, err error) {
 	var buf [maxFenceBytes]byte
 	read, readErr := file.ReadAt(buf[:], 0)
 	//: a short read is the normal case (the ledger is a handful of bytes), so

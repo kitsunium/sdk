@@ -4,6 +4,8 @@
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0050](0050-sdk-lifecycle-domain.md) (the ordered start/stop this completes), [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the one backoff curve it waits), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock it waits on), [ADR 0043](0043-drain-is-a-signal-not-a-cancellation.md) (a budget cancels and steps aside)
+- **Area**: app
+- **Need**: decision
 
 ## Context
 

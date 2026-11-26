@@ -265,6 +265,24 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Shards(1) against the base on the L3 run (#977)
+        # L3's load on the pair as `up` leaves it, before the next step turns
+        # GRO on on its far end: every datagram stamped, sent to a datagram
+        # group with Shards(1) and to one without the option, both served in
+        # the receiver's namespace; each must bind one socket without
+        # SO_REUSEPORT and read all 400 000 once, byte for byte. The test
+        # skips anywhere else; this step is its lane (the repository guide's
+        # rule 12), so a skip here fails the step.
+        working-directory: internal/service/net/server
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/server.test" -test.run='^TestShardsL3_oneSocketIsTheBase$' -test.v -test.count=1 -test.timeout=5m \
+            2> >(grep -v '^net/loop:' >&2) | tee "$RUNNER_TEMP/shards-l3.txt"
+          if grep -q -e '--- SKIP' "$RUNNER_TEMP/shards-l3.txt"; then
+            echo "::error::TestShardsL3_oneSocketIsTheBase skipped on its one lane"
+            exit 1
+          fi
+
       - name: busy polling against the sleeping loop, GRO on on the veth pair's far end
         working-directory: internal/service/net/server
         run: |
@@ -311,6 +329,7 @@ jobs:
           path: |
             ${{ runner.temp }}/bench.txt
             ${{ runner.temp }}/netgate-report.json
+            ${{ runner.temp }}/shards-l3.txt
             ${{ runner.temp }}/blackhole.txt
           retention-days: 90
 

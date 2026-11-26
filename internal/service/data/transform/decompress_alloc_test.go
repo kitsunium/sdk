@@ -8,6 +8,8 @@ package transform
 
 import (
 	"bytes"
+	"runtime"
+	"runtime/debug"
 	"strconv"
 	"testing"
 
@@ -37,15 +39,13 @@ var decompressAllocSizes = []int{4 << 10, 64 << 10}
 var decompressAllocSchemes = []struct {
 	name string
 	comp coretransform.Compressor
-	// sized is how many allocations a call into a sized dst may make: zero,
-	// except zlib's one — compress/zlib's Reset builds a fresh Adler-32
-	// digest (adler32.New) on every stream, a cost of the standard library's
-	// that no caller-side buffer can shed.
-	sized uint64
 }{
-	{"gzip", GzipCompressor, 0},
-	{"flate", FlateCompressor, 0},
-	{"zlib", ZlibCompressor, 1},
+	{"gzip", GzipCompressor},
+	{"flate", FlateCompressor},
+	//: zlib allocates nothing either: it reads the RFC 1950 envelope itself, so
+	//: compress/zlib's Reset, which builds an Adler-32 digest per stream, is
+	//: not on the block path.
+	{"zlib", ZlibCompressor},
 }
 
 // decompressWarmed records the payloads warmDecompress already ran, so the
@@ -106,9 +106,9 @@ func TestDecompressIntoASizedDstAllocatesNothing(t *testing.T) {
 					t.Fatalf("Decompress: err=%v, %d bytes, want the %d-byte payload", derr, len(out), size)
 				}
 				reportWindow(t, sc.name, got)
-				if want := sc.sized * uint64(decompressAllocRuns); got.own > want {
-					t.Fatalf("%d decompressions into a %d-byte dst made %d allocations, want at most %d (%d a call)",
-						decompressAllocRuns, size, got.own, want, sc.sized)
+				if got.own != 0 {
+					t.Fatalf("%d decompressions into a %d-byte dst made %d allocations, want none",
+						decompressAllocRuns, size, got.own)
 				}
 			})
 		}
@@ -138,10 +138,10 @@ func TestDecompressIntoANilDstAllocatesThePayloadOnce(t *testing.T) {
 					t.Fatalf("Decompress: err=%v, %d bytes, want the %d-byte payload", derr, len(out), size)
 				}
 				reportWindow(t, sc.name, got)
-				//: one allocation for the result, plus zlib's digest.
-				if want := (1 + sc.sized) * uint64(decompressAllocRuns); got.own > want {
-					t.Fatalf("%d decompressions into a nil dst made %d allocations, want at most %d (%d a call)",
-						decompressAllocRuns, got.own, want, 1+sc.sized)
+				//: one allocation for the result.
+				if want := uint64(decompressAllocRuns); got.own > want {
+					t.Fatalf("%d decompressions into a nil dst made %d allocations, want at most %d (1 a call)",
+						decompressAllocRuns, got.own, want)
 				}
 				//: and that one allocation is the payload's size, not a guess.
 				if cap(out) > size+size/2 {
@@ -149,5 +149,42 @@ func TestDecompressIntoANilDstAllocatesThePayloadOnce(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestADstHoldingThePayloadExactlyFindsTheEndWithoutAChunk is the gate on the
+// last bytes #1102's sized rows still showed: a dst holding the payload exactly
+// leaves the stream unread at its end, and finding the end used to take a
+// 32 KiB spill chunk for one question. The chunk came from spillPool, which two
+// collections empty and a goroutine moved to another P does not find, so a
+// decode into place allocated 32 768 bytes now and then — 1 B/op over a
+// 20 000-iteration row, with no decoder built and no collection in the loop
+// (instrumented: one malloc, 32 768 bytes). Two collections empty the pool here
+// on purpose, and the call after them must allocate less than a chunk.
+func TestADstHoldingThePayloadExactlyFindsTheEndWithoutAChunk(t *testing.T) {
+	body := bytes.Repeat([]byte("kitsunium "), 6554)[:64<<10]
+	rd := bytes.NewReader(body)
+	dst := make([]byte, 0, len(body))
+	var probe [1]byte
+	//: once before, so the call below is the steady state and not a first use.
+	if _, _, err := appendAllBounded(dst, rd, &probe, maxDecompressedBytes); err != nil {
+		t.Fatalf("appendAllBounded: %v", err)
+	}
+	rd.Reset(body)
+	//: the pool a chunk would come from is emptied: the second collection drops
+	//: what the first moved to the victim cache.
+	runtime.GC()
+	runtime.GC()
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	out, overflow, err := appendAllBounded(dst, rd, &probe, maxDecompressedBytes)
+	runtime.ReadMemStats(&after)
+	if err != nil || overflow || !bytes.Equal(out, body) {
+		t.Fatalf("appendAllBounded: err=%v overflow=%v, %d bytes", err, overflow, len(out))
+	}
+	//: a chunk is spillChunkBytes; the runtime's own noise is far below it.
+	if got := after.TotalAlloc - before.TotalAlloc; got >= uint64(spillChunkBytes) {
+		t.Fatalf("finding the end of an exactly sized dst allocated %d bytes, want less than a %d-byte chunk", got, spillChunkBytes)
 	}
 }

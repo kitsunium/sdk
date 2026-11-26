@@ -1874,7 +1874,6 @@ files:
       - (*Node).preferLeader
       - (*Node).publish
       - (*Node).publishConf
-      - sameMembership
       - fetchDone
       - (*Node).reader
       - (*Node).fetch
@@ -1965,6 +1964,7 @@ files:
       - encodedBody
       - (*appendBodies).body
       - (*appendBodies).reset
+      - entrylessFrame
       - (*Node).sendShared
     name: node_sendshared.go
   - decls:
@@ -3279,7 +3279,7 @@ functions:
       acknowledge, and the leader's Lag of it agrees with this within the
       window in flight. The leader reports 0 and -1.
     name: replicationLag
-    params: st *raft.StatusValue, now time.Time
+    params: st *raft.SummaryValue, now time.Time
     results: uint64, time.Duration
   - doc: isolationFlags are the health facts of a voter's isolation causes.
     name: isolationFlags
@@ -3543,10 +3543,6 @@ functions:
     name: lowerSilenceIn
     params: log coreconsensus.LogStore, index uint64
     results: error
-  - doc: sameMembership reports whether a and b are the same configuration.
-    name: sameMembership
-    params: a, b *coreconsensus.MembershipValue
-    results: bool
   - doc: |-
       needsSync reports whether a Ready must be durable before its completion:
       all but one that only carries a commit, which is written lazily (raft's
@@ -3567,6 +3563,15 @@ functions:
     name: newPacer
     params: clk clock.Timed, rate int64
     results: "*pacer"
+  - doc: |-
+      entrylessFrame is AppendMessage's frame of m, a message without entries,
+      in a buffer of MessageHeaderLen bytes, the length of every such frame but
+      a forward's trace: grown from nil, the frame took four to five
+      allocations, up to 128 bytes, for its 112 (#912). The bytes are
+      AppendMessage's.
+    name: entrylessFrame
+    params: m *coreconsensus.MessageValue
+    results: "[]byte"
   - doc: |-
       newObs binds a node's instruments to its configured Meter, Tracer and
       Logger; every series carries the group, so two groups never share one.
@@ -8740,8 +8745,8 @@ types:
           that entry itself: a learner still waiting for its snapshot, which applies
           nothing, held the JOIN for its whole deadline and answered
           OUTCOME_UNKNOWN although the leader had committed the admission. Only
-          the leader and a voter level with it (joinServes) answer; every other
-          node refuses before it proposes anything. A stopped node is left to the
+          the leader and a voter it knows to be level with it (joinServes) answer;
+          every other node refuses before it proposes anything. A stopped node is left to the
           path that answers its stop.
         name: joinElsewhere
         recv: n *Node
@@ -8751,7 +8756,8 @@ types:
           reads st, answers a JOIN it forwards promptly: it follows a known leader
           as a voter that holds its state (joinVoter), and its apply and its log are
           level with the leader's (joinLevel) (#1422). A learner, a joiner, a node
-          with no table, a candidate and a lagging voter do not.
+          with no table, a candidate, a lagging voter and a voter that does not know
+          its leader's last index (#1447) do not.
         name: joinServes
         params: st *raft.StatusValue
         recv: n *Node
@@ -8767,7 +8773,12 @@ types:
       - doc: |-
           joinLevel reports whether this node's apply is not held back, and its
           applied index and its log are within joinApplyLag entries of its commit
-          index and of the leader's last index as its last heartbeat carried it.
+          index and of the leader's last index as its last heartbeat carried it. A
+          node that knows no last index of its leader — a leader of protocol 3 or
+          below sends none, and none came yet in this term — cannot tell how far
+          behind it is, and is not level (#1447): at 100 entries against a leader
+          at 100 000, it forwarded the JOIN and waited its whole deadline for an
+          AddLearner it was far from applying.
         name: joinLevel
         params: st *raft.StatusValue
         recv: n *Node
@@ -9281,7 +9292,10 @@ types:
         name: setMembership
         params: rd *raft.ReadyValue
         recv: n *Node
-      - doc: leadershipChanged answers what a change of leader or term made unknown.
+      - doc: |-
+          leadershipChanged answers what a change of leader or term made unknown.
+          It runs at every turn and reads raft's summary, which clones no
+          configuration (#912).
         name: leadershipChanged
         recv: n *Node
       - doc: |-
@@ -9289,13 +9303,13 @@ types:
           it led, once st says it no longer does: a forward answered with a
           position may never commit now.
         name: endForwardTraces
-        params: st *raft.StatusValue
+        params: st *raft.SummaryValue
         recv: n *Node
       - doc: |-
           restartPrefer starts the watch of the preferred nodes over with the
           leadership st describes.
         name: restartPrefer
-        params: st *raft.StatusValue
+        params: st *raft.SummaryValue
         recv: n *Node
       - doc: |-
           startGrace starts the grace period of every unresolved proposal.
@@ -9352,15 +9366,18 @@ types:
           publish stores the status a turn produced and wakes every watcher with
           it, replacing a value the watcher has not read yet so a slow reader sees
           the newest status, never a backlog; an unchanged status publishes nothing.
+          It runs at every turn and reads raft's summary, which clones no
+          configuration (#912).
         name: publish
         recv: n *Node
       - doc: |-
           publishConf stores the configuration a turn ended with, when it differs
           from the one last published, and wakes every membership watcher with a
           copy of its own, replacing a value the watcher has not read yet (#915).
-          conf is the step function's clone, which nothing else holds.
+          raft compares the configuration in force with the one published, so a
+          turn that changed none clones none (#912); a change is published as
+          Status's clone, which nothing else holds.
         name: publishConf
-        params: conf *coreconsensus.MembershipValue
         recv: n *Node
       - doc: |-
           reader serves the step function's reads below its in-memory window, on
@@ -9459,7 +9476,9 @@ types:
         results: bool
       - doc: |-
           completeWrite hands the loop the completion of a synced Ready with the
-          replies that waited on it; false when the node stopped first.
+          replies that waited on it; false when the node stopped first. Those
+          replies, acknowledgements and votes, carry no entries: each is encoded
+          at its exact length (entrylessFrame).
         name: completeWrite
         params: rd *raft.ReadyValue
         recv: n *Node
@@ -9931,7 +9950,8 @@ types:
         results: propResult
       - doc: |-
           handleProposals appends every proposal waiting at this turn as one batch
-          at a leader, or forwards each to the leader (D6).
+          at a leader, or forwards each to the leader (D6). It reads raft's summary,
+          which clones no configuration (#912).
         name: handleProposals
         params: ps []*proposal
         recv: n *Node
@@ -9982,9 +10002,9 @@ types:
         recv: n *Node
       - doc: |-
           forward sends a proposal to the leader under a submission id that never
-          repeats across restarts (nextID).
+          repeats across restarts (nextID); st is raft's summary of the turn.
         name: forward
-        params: p *proposal, st raft.StatusValue
+        params: p *proposal, st *raft.SummaryValue
         recv: n *Node
       - doc: |-
           nextID is the next submission id of a forward or a read: a random epoch

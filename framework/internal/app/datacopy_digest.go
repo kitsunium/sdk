@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
-	"hash"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -23,8 +23,8 @@ import (
 type digest = [sha256.Size]byte
 
 // lengthPrefixed writes part into h behind its length, as eight big-endian
-// bytes.
-func lengthPrefixed(h hash.Hash, part []byte) {
+// bytes. h is a hash in every caller, whose Write never fails.
+func lengthPrefixed(h io.Writer, part []byte) {
 	var n [8]byte
 	binary.BigEndian.PutUint64(n[:], uint64(len(part)))
 	h.Write(n[:])

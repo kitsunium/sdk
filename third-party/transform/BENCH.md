@@ -325,39 +325,86 @@ corpus above a kilobyte.
 
 ## Streams (ADR 0213, kitsunium/sdk#892)
 
-Measured 2026-11-03, Go 1.27.3, same box, `BenchmarkStream`,
-`-benchtime=0.5s -count=3`, medians: a compress through `NewWriter` into a
-buffer against `Compress` into nil, a decompress through `NewReader` drained to
-`io.Discard` against `Decompress` into nil, with the stream codecs pooled (one
-zstd pool of each per compressor, one shared s2 pool of each).
+The bound of #892: every stream row within 10 % of the block form at 4 MiB.
+It is judged by the interleaved A/B lane, suite `tstream` of
+`scripts/ci/bench-ab.conf` (`BenchmarkStream` and `BenchmarkStreamFloor`, 20
+rounds, the high end of the 95 % interval of each round's ratio), on the CI
+runner; the figures below are this box's, indicative only.
+
+Measured 2026-11-15, Go 1.27.4, AMD EPYC 7351P (Zen 1, 512 KiB L2 a core),
+`BenchmarkStream`, `-benchtime=300ms -count=3 -cpu=4`, `taskset -c 2-5`,
+medians: a compress through `NewWriter` into a buffer against `Compress` into
+nil, a decompress through `NewReader` drained by `io.Copy` to `io.Discard`
+against `Decompress` into nil, with the stream codecs pooled.
 
 | corpus | scheme | verb | block | stream | Δ | block B/op | stream B/op |
 |---|---|---|---:|---:|---:|---:|---:|
-| json | zstd-fastest | compress | 18.39 ms | 17.78 ms | −3 % | 3.87 Mi | 337 Ki |
-| json | zstd-fastest | decompress | 5.414 ms | 5.503 ms | **+1.6 %** | 4.01 Mi | 56 Ki |
-| json | s2 | compress | 7.973 ms | 6.269 ms | −21 % | 4.01 Mi | 53 Ki |
-| json | s2 | decompress | 2.513 ms | 2.777 ms | **+10.5 %** | 4.01 Mi | 9.8 Ki |
-| random | zstd-fastest | compress | 4.359 ms | 2.326 ms | −47 % | 21.2 Mi | 64 Ki |
-| random | zstd-fastest | decompress | 1.417 ms | 1.130 ms | −20 % | 4.01 Mi | 9.6 Ki |
-| random | s2 | compress | 1.020 ms | 1.069 ms | +4.8 % | 4.01 Mi | 17 Ki |
-| random | s2 | decompress | 0.957 ms | 1.707 ms | **+78 %** | 4.00 Mi | 6.0 Ki |
+| json | zstd-fastest | compress | 18.51 ms | 17.63 ms | −5 % | 3.87 Mi | 549 Ki |
+| json | zstd-fastest | decompress | 4.824 ms | 4.279 ms | −11 % | 4.01 Mi | 63 Ki |
+| json | s2 | compress | 6.075 ms | 6.048 ms | −0.4 % | 4.01 Mi | 53 Ki |
+| json | s2 | decompress | 2.424 ms | 2.440 ms | +0.7 % | 4.01 Mi | 3.5 Ki |
+| random | zstd-fastest | compress | 4.506 ms | 2.023 ms | −55 % | 21.2 Mi | 96 Ki |
+| random | zstd-fastest | decompress | 1.506 ms | 1.174 ms | −22 % | 4.01 Mi | 17 Ki |
+| random | s2 | compress | 1.006 ms | 1.106 ms | +10 % | 4.01 Mi | 27 Ki |
+| random | s2 | decompress | 1.015 ms | 0.805 ms | **−21 %** | 4.00 Mi | 0.7 Ki |
 
-**zstd streams at the block form's speed**, and faster where the block form's
-cost is materialising: compressing random bytes, the block encoder's output
-buffer grows to 21 MiB/op; the stream's is the caller's.
+The floor (`BenchmarkStreamFloor`) is a measured base of this implementation,
+without the framing or a writer: a stored block copied out
+of the source and its CRC-32C, a compressed one decoded and its CRC-32C — 0.783
+ms on random bytes and 2.403 ms on JSON here. The stream is now within 3 % of
+it on both. The lane's two floor rules read it against the block form: on a
+machine where the floor itself is past 10 %, the measured floor exceeds the
+bound for this copy-and-CRC form. That is one measurement on one machine, not
+a proof for every single-goroutine s2 stream: one that fuses or reorders the
+copy and the checksum may avoid the cost the floor measures.
 
-**s2 is within the 10 % on JSON and is not on random bytes, for a reason that
-belongs to the format.** An s2 stream is the framing format, which carries a
-CRC-32C per chunk and verifies it; the block format carries none. On
-incompressible bytes the block decode is a copy, so the checksum is most of the
-stream's work: +78 %. That is the price of a checked stream and is kept — the
-alternative, a stream form without integrity, would be the block format the
-stream cannot be. On JSON, where decoding is real work, it is +10.5 %.
+The block rows of this box move by up to 20 % between runs (s2 random
+compress's block row read 1.006 ms here and 1.214 ms an hour earlier, its
+stream row 1.106 and 1.116 ms), so a Δ under ±10 % is not read here: the
+lane interleaves both rows round by round for that reason.
+
+**Why s2 decompression was 78 % slower, and what changed.** On incompressible
+bytes the block decode is a copy, so an s2 stream's work is the format's
+CRC-32C and its copies. `s2.Reader` copies a block twice — from the source into
+its buffer, then into the caller's — and the writer cut 1 MiB blocks, larger
+than a Zen core's L2: the CRC and the second copy reread every block from L3.
+Three changes, none exported, the CRC still verified before a byte of a block
+leaves and no goroutine started:
+
+1. `NewWriter` cuts 256 KiB blocks (`s2.WriterBlockSize`); JSON's stream ratio
+   moves from 3.383 to 3.375. Still the s2 framing format: every reader reads
+   it, and the reader still takes the format's 4 MiB blocks.
+2. The stream is an `io.WriterTo`, so `io.Copy` hands the caller's writer each
+   decoded block in one `Write`, from where it was decoded: zstd through
+   `Decoder.WriteTo`, s2 through the package's own framing decoder
+   (`s2frame.go`), held to `s2.Reader` by a differential test and fuzz target
+   — same bytes, same errors (`FuzzS2FrameAgainstTheLibrary`).
+3. The ceiling is the same through both: `ceilingWriter` lets `limit` bytes
+   through and refuses the next one with `DecompressedTooLarge`.
+
+**Designs tried** (same box and flags, s2 decompress, stream over block):
+
+| design | random | json |
+|---|---:|---:|
+| before (1 MiB blocks, `s2.Reader`, `io.Copy` through `Read`) | 1.40× | 1.01× |
+| 256 KiB blocks alone, `s2.Reader` kept | 0.98× | 1.08× |
+| 1 MiB blocks, the package's decoder and `WriteTo` | 1.63× | 0.97× |
+| **256 KiB blocks, the package's decoder and `WriteTo` (shipped)** | **0.72×–0.79×** | **0.86×–1.01×** |
+| 64 KiB blocks, the package's decoder and `WriteTo` | 0.79× | 0.92× |
+
+64 KiB blocks decompress no faster and cost the random compress row: 1.38× its
+block form, against 1.10× at 256 KiB. The block size alone does most of the
+random row; the decoder of its own takes the second copy off, which the JSON
+row needs to keep its margin.
 
 The first measurement, before the stream codecs were pooled, put zstd's
 decompress at +8.4 % and s2's at +23 % on JSON: a stream decoder's history and
-an s2 writer's 1 MiB block buffer were built per stream. Pooling took them off
-the per-call path; the B/op column is what is left.
+an s2 writer's block buffer were built per stream. Pooling took them off the
+per-call path; the B/op column is what is left.
+
+**linux/386** computes CRC-32C with the generic slicing-by-8 table, a few times
+slower than the SSE 4.2 path: the s2 stream there stays well behind the block
+form, which carries no checksum. The bound is the amd64 runner's.
 
 ## Consensus snapshots: cut and install of a 256 MiB state (kitsunium/sdk#917)
 

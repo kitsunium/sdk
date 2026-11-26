@@ -503,7 +503,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendIOURing`
 const LoopBackendKqueue LoopBackend = 4
 ```
 
-LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe, when named: LoopBackendAuto does not choose it yet.
+LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe; LoopBackendAuto takes it there.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendKqueue`.
 
@@ -1449,7 +1449,7 @@ A named socket the supervisor did not pass is SocketAdoptFailed, never a silent 
 func Backlog(n int) GroupOption
 ```
 
-Backlog sets the depth the kernel queues established connections at before the group's accept loop takes them: zero keeps the host's somaxconn, the kernel clamps a larger value to it, and State reports the depth applied in ListenerStateValue.Backlog. A negative value fails Start with OptionValueInvalid; a datagram group refuses the option.
+Backlog sets the depth the kernel queues established connections at before the group's accept loop takes them: zero keeps the host's somaxconn, the kernel clamps a larger value to it, and State reports the depth applied in ListenerStateValue.Backlog. No engine takes a connection off that queue while it cannot serve it: io\_uring's loop runs DEFER\_TASKRUN, the portable backend's acceptor accepts only while a lane waits; a drain widens the queue to the host's somaxconn as it begins, so a peer the full queue refused retries into it and is served (#978). A negative value fails Start with OptionValueInvalid; a datagram group refuses the option.
 
 <a name="BatchReplies"></a>
 ## func [BatchReplies](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1675,6 +1675,8 @@ func Protocols(protos ...string) GroupOption
 ```
 
 Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier — "http/1.1" and "h2" — in the order its TLS listeners prefer them, unless the identity names NextProtos, whose order then wins over the entries the list holds. Unset, a group with TLS serves both, h2 first, and one without serves HTTP/1.1. Start refuses with ProtocolsRefused an empty list, an empty, repeated or unknown identifier, h2 without TLS on a group not given Plaintext, an identity whose NextProtos names a version the list excludes or none it includes, and a group that serves no http.Handler; the http1 codec given TLS honours "http/1.1" alone and refuses any other list with ProtocolsRefused (ADR 0198); any other loop group refuses it with LoopOptionUnsupported unless its handler or a layer honours it (LoopOptionHonourer).
+
+Over TLS, a list naming h2 without http/1.1 fails the handshake of a client whose ALPN offer names nothing the list holds with no\_application\_protocol (RFC 7301 §3.2) — the client offering http/1.1 alone included, which crypto/tls would let through with no protocol (#964). A client that offers no ALPN completes the handshake, as RFC 7301 leaves it, and is refused at its first request.
 
 A request that arrived over HTTP/2 has no http.Hijacker: a handler that hijacks its connection serves HTTP/1.1 clients only, and a TLS group that relies on it for every client says Protocols("http/1.1").
 

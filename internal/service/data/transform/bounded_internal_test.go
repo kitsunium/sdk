@@ -14,6 +14,7 @@ import (
 	"io"
 	"math"
 	"testing"
+	"testing/iotest"
 
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 )
@@ -62,6 +63,25 @@ func (r *lateErrReader) Read(p []byte) (int, error) {
 	}
 	r.n -= k
 	return k, nil
+}
+
+// emptyReadReader answers an empty read, nil, before every real one: the reader
+// io.Reader permits and a probe that took a nil error for the end would
+// misjudge.
+type emptyReadReader struct {
+	r     io.Reader
+	empty bool
+}
+
+// Read implements io.Reader: nothing, nil, then a read of r, in turn.
+func (e *emptyReadReader) Read(p []byte) (int, error) {
+	e.empty = !e.empty
+	//: every other call says nothing.
+	if e.empty {
+		//: zero bytes, no error.
+		return 0, nil
+	}
+	return e.r.Read(p)
 }
 
 // compressBomb returns a scheme-compressed blob of n zero bytes.
@@ -120,6 +140,11 @@ type boundedCase struct {
 	bodyLen int
 	// fault makes the reader fail after the body instead of ending it.
 	fault bool
+	// shape is how the reader hands the body over: "" as bytes.Reader does,
+	// "onebyte" a byte a read, "dataerr" the last bytes WITH io.EOF, "empty" an
+	// empty read between every two, the three shapes io.Reader allows that the
+	// end-of-stream probe must survive.
+	shape string
 	// prefix is what dst holds before the call, and spare its spare capacity.
 	prefix string
 	spare  int
@@ -149,6 +174,15 @@ func Test_appendAllBounded(t *testing.T) {
 		{name: "over-cap/in-a-chunk", bodyLen: 2*chunk + 1, prefix: "PFX", spare: 100, max: int64(2 * chunk), wantOverflow: true},
 		{name: "at-cap/chunk-boundary", bodyLen: 2 * chunk, max: int64(2 * chunk)},
 		{name: "unbounded/max-int64", bodyLen: chunk + 5, prefix: "PFX", spare: 7, max: math.MaxInt64},
+		{name: "exact-capacity/one-byte-reads", bodyLen: 300, spare: 300, max: loweredCapBytes, shape: "onebyte"},
+		{name: "exact-capacity/data-with-eof", bodyLen: 300, spare: 300, max: loweredCapBytes, shape: "dataerr"},
+		{name: "exact-capacity/empty-reads", bodyLen: 300, spare: 300, max: loweredCapBytes, shape: "empty"},
+		{name: "one-past-capacity/data-with-eof", bodyLen: 301, spare: 300, max: loweredCapBytes, shape: "dataerr"},
+		{name: "one-past-capacity/one-byte-reads", bodyLen: 301, prefix: "PFX", spare: 300, max: loweredCapBytes, shape: "onebyte"},
+		{name: "one-past-capacity/empty-reads", bodyLen: 301, spare: 300, max: loweredCapBytes, shape: "empty"},
+		{name: "one-past-capacity/over-the-cap", bodyLen: 301, spare: 300, max: 300, shape: "empty", wantOverflow: true},
+		{name: "exact-capacity/at-the-cap", bodyLen: 300, spare: 300, max: 300},
+		{name: "a-byte-past-the-chunk-edge/data-with-eof", bodyLen: chunk + 1, spare: chunk, max: maxDecompressedBytes, shape: "dataerr"},
 		{name: "read-fault/at-once", bodyLen: 0, fault: true, prefix: "PFX", spare: 16, max: loweredCapBytes, wantErr: errBoundedRead},
 		{name: "read-fault/in-capacity", bodyLen: 10, fault: true, prefix: "PFX", spare: 64, max: loweredCapBytes, wantErr: errBoundedRead},
 		{name: "read-fault/in-a-chunk", bodyLen: chunk + 10, fault: true, spare: 64, max: maxDecompressedBytes, wantErr: errBoundedRead},
@@ -166,12 +200,21 @@ func Test_appendAllBounded(t *testing.T) {
 					reader = errReader{}
 				}
 			}
+			//: the shapes an io.Reader may take.
+			switch tc.shape {
+			case "onebyte":
+				reader = iotest.OneByteReader(reader)
+			case "dataerr":
+				reader = iotest.DataErrReader(reader)
+			case "empty":
+				reader = &emptyReadReader{r: reader}
+			}
 			var dst []byte
 			//: nil stays nil: the case without a dst at all.
 			if tc.prefix != "" || tc.spare > 0 {
 				dst = append(make([]byte, 0, len(tc.prefix)+tc.spare), tc.prefix...)
 			}
-			out, overflow, err := appendAllBounded(dst, reader, tc.max)
+			out, overflow, err := appendAllBounded(dst, reader, nil, tc.max)
 			//: a refusal hands dst back exactly as it came.
 			if tc.wantErr != nil || tc.wantOverflow {
 				if !errors.Is(err, tc.wantErr) || overflow != tc.wantOverflow {

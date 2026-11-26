@@ -202,13 +202,15 @@ func maskedBinary(size int) []byte {
 }
 
 // TestXConnectTransportRefusesProtocolField is the witness of #967's
-// amendment: Go 1.27's http.Transport validates every header field name
+// criterion, brought to the nearest reachable by the owner's rule of
+// 2026-11-14: Go 1.27's http.Transport validates every header field name
 // before it chooses HTTP/2 (transport.go, validateHeaders), and :protocol is
 // no valid name, so a client cannot send RFC 8441's extended CONNECT through
 // it — net/http's HTTP/2 client half sends :protocol only for a caller that
-// skips that check, which no public API is. The tests frame HTTP/2 by hand
-// for that reason; this one fails once a Go release lets the Transport
-// through, and they can move to it.
+// skips that check, which no public API is: the ClientConn Go 1.26 added
+// validates the same way (clientconn.go). The tests frame HTTP/2 by hand for
+// that reason; this one fails once a Go release lets either through, and they
+// can move to it.
 func TestXConnectTransportRefusesProtocolField(t *testing.T) {
 	inXConnectChild(t)
 	_, addr, pool := h2Group(t, echoHandler(make(chan error, 1)))
@@ -227,5 +229,18 @@ func TestXConnectTransportRefusesProtocolField(t *testing.T) {
 	}
 	if want := `invalid header field name ":protocol"`; !strings.Contains(err.Error(), want) {
 		t.Fatalf("RoundTrip = %v, want %q", err, want)
+	}
+	cc, err := tr.NewClientConn(t.Context(), "https", addr)
+	if err != nil {
+		t.Fatalf("NewClientConn: %v", err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+	resp, err = cc.RoundTrip(req)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("http.ClientConn sent an extended CONNECT (%s): the tests can use it now", resp.Status)
+	}
+	if want := `invalid header field name ":protocol"`; !strings.Contains(err.Error(), want) {
+		t.Fatalf("ClientConn.RoundTrip = %v, want %q", err, want)
 	}
 }

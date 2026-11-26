@@ -80,12 +80,20 @@ test:
 # gate of //framework/internal/app:app_test, `manual` under Bazel because the suite
 # reads its own sources and positions relative to the module root (rule 12,
 # ADR 0147).
+#
+# SCOPE (CI, a pull request — ADR 0250) names a file of the packages the change
+# reaches, `scripts/ci/scope.sh affected`'s answer; set, only the framework's
+# packages among them run, in the same modules with the same flags.
 test-framework:
+ifdef SCOPE
+	bash scripts/ci/scope.sh go-test "$(SCOPE)" github.com/kitsunium/sdk/framework/ -race -count=1
+else
 	@echo "→ framework (the SDK module)"
 	GOWORK=off go test -race -count=1 ./framework/...
 	@set -e; for m in $$(bash scripts/ci/go-modules.sh | grep '^framework/connectors/'); do \
 	  echo "→ $$m"; (cd $$m && GOWORK=off go test -race -count=1 ./...); \
 	done
+endif
 
 # `test-alloc` runs the race-off allocation gates. Every target here carries at
 # least one `//go:build !race` test file (testing.AllocsPerRun /

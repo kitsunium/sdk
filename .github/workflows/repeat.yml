@@ -1,0 +1,105 @@
+name: Repeat a test
+# A test run many times on the runner, by hand: the measurement a flaky test is
+# closed on — 500 passes under -race, 0 failures — which no other lane gives
+# (bazel-ci.yml and e2e-cross.yml run a test once, or three times only to name
+# a failure). Dispatch only; it blocks nothing and runs on no push.
+#
+#   gh workflow run repeat.yml -R kitsunium/sdk --ref main \
+#     -f package=./service/app/consensus \
+#     -f run=TestALostReadIndexOrForwardIsAnsweredWithoutALeaderChange \
+#     -f count=500 -f race=true
+#
+# Every input reaches scripts/ci/repeat.sh through env:, never inside a run:
+# command, and the script validates each against an allow-list before it builds
+# a command from it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "module directory of the census (scripts/ci/go-modules.sh)"
+        required: false
+        default: "internal"
+      package:
+        description: "package pattern inside the module, starting with ./"
+        required: false
+        default: "./..."
+      run:
+        description: "test names, [A-Za-z0-9_] joined by |; run as -run '^(…)$'"
+        required: true
+      count:
+        description: "passes (1..2000)"
+        required: false
+        default: "100"
+      race:
+        description: "run under -race"
+        required: false
+        type: boolean
+        default: true
+      failfast:
+        description: "stop at the first failing batch"
+        required: false
+        type: boolean
+        default: false
+      gomaxprocs:
+        description: "GOMAXPROCS (1..256); empty keeps the runner's"
+        required: false
+        default: ""
+      runner:
+        description: "runner OS"
+        required: false
+        type: choice
+        options:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        default: ubuntu-latest
+      deadline_minutes:
+        description: "total minutes after which no new batch starts (1..330)"
+        required: false
+        default: "120"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+
+permissions:
+  contents: read
+
+jobs:
+  repeat:
+    name: repeat ${{ inputs.run }} x${{ inputs.count }}
+    if: github.repository == 'kitsunium/sdk'
+    runs-on: ${{ inputs.runner }}
+    # The script's deadline (at most 330 min) stops new batches; this cap is the
+    # hosted runners' own 6 hours, with a margin for the last batch.
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: repeat the test
+        shell: bash
+        env:
+          REPEAT_MODULE: ${{ inputs.module }}
+          REPEAT_PACKAGE: ${{ inputs.package }}
+          REPEAT_RUN: ${{ inputs.run }}
+          REPEAT_COUNT: ${{ inputs.count }}
+          REPEAT_RACE: ${{ inputs.race }}
+          REPEAT_FAILFAST: ${{ inputs.failfast }}
+          REPEAT_GOMAXPROCS: ${{ inputs.gomaxprocs }}
+          REPEAT_DEADLINE: ${{ inputs.deadline_minutes }}
+          REPEAT_OUT: ${{ runner.temp }}/repeat-out
+        run: bash scripts/ci/repeat.sh
+
+      - name: upload the raw output and the summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: repeat-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/repeat-out
+          if-no-files-found: warn

@@ -122,14 +122,15 @@ func (n *Node) awaitProposal(ctx context.Context, p *proposal) propResult {
 }
 
 // handleProposals appends every proposal waiting at this turn as one batch
-// at a leader, or forwards each to the leader (D6).
+// at a leader, or forwards each to the leader (D6). It reads raft's summary,
+// which clones no configuration (#912).
 func (n *Node) handleProposals(ps []*proposal) {
 	ps = claimed(ps)
-	st := n.r.Status()
+	st := n.r.Summary()
 	now := n.clk.Now()
 	if st.Role != coreconsensus.RoleLeader {
 		for _, p := range ps {
-			n.forward(p, st)
+			n.forward(p, &st)
 		}
 		return
 	}
@@ -307,8 +308,8 @@ func (n *Node) displace(p *proposal) {
 }
 
 // forward sends a proposal to the leader under a submission id that never
-// repeats across restarts (nextID).
-func (n *Node) forward(p *proposal, st raft.StatusValue) {
+// repeats across restarts (nextID); st is raft's summary of the turn.
+func (n *Node) forward(p *proposal, st *raft.SummaryValue) {
 	if st.Lead == 0 || st.Lead == n.stamp.ID {
 		p.done <- propResult{err: notLeader(0)}
 		return
@@ -627,7 +628,7 @@ func (n *Node) startLocal(to coreconsensus.NodeID) (<-chan errs.Code, error) {
 	var code errs.Code
 	var running chan errs.Code
 	if !n.exec(func() {
-		if cur := n.r.Status().Transfer; cur != 0 && cur != to {
+		if cur := n.r.Summary().Transfer; cur != 0 && cur != to {
 			running = make(chan errs.Code, 1)
 			n.transfers = append(n.transfers, running)
 			return

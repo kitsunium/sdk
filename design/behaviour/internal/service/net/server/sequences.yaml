@@ -406,6 +406,38 @@ sequences:
           range: files
           value: file
       - return: out, nil
+  - of: alpnStrict
+    participants:
+      - id: caller
+        kind: actor
+      - id: alpnStrict
+        kind: self
+      - id: cfg.Clone
+        kind: value
+    steps:
+      - bind: offered
+        eval: cfg.NextProtos
+      - opt:
+          do:
+            - return: cfg
+          when: "!slices.Contains(offered, protoH2) || slices.Contains(offered, protoHTTP1)"
+      - bind: refuse
+        eval: cfg.Clone()
+        to: cfg.Clone
+      - set: refuse.NextProtos
+        value: alpnRefusal
+      - set: cfg.GetConfigForClient
+        value:
+          closure:
+            params: hello *tls.ClientHelloInfo
+            results: "*tls.Config, error"
+            steps:
+              - opt:
+                  do:
+                    - return: nil, nil
+                  when: len(hello.SupportedProtos) == 0 || sharesProtocol(offered, hello.SupportedProtos)
+              - return: refuse, nil
+      - return: cfg
   - of: defaultBacklog
     steps:
       - return: min(hostSomaxconn(), maxListenerBacklog)
@@ -451,6 +483,48 @@ sequences:
             - return: reason + more
           when: more == "" || reason == ""
       - return: reason + "; " + more
+  - of: (*Server).widenBacklogs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).widenBacklogs
+        kind: self
+      - id: defaultBacklog
+        kind: internal
+      - id: s.mu.RLock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: s.mu.RUnlock
+        kind: value
+      - id: setBacklog
+        kind: internal
+    steps:
+      - bind: wide
+        eval: defaultBacklog()
+        to: defaultBacklog
+      - opt:
+          do:
+            - return: ""
+          when: wide <= 0
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: listeners
+        eval: slices.Clone(s.listeners)
+        to: slices
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: b.sized == nil
+            - eval: setBacklog(b.sized, wide)
+              to: setBacklog
+          key: _
+          range: listeners
+          value: b
   - of: setBacklog
     participants:
       - id: caller
@@ -1566,6 +1640,187 @@ sequences:
         value: "false"
       - set: c.refused
         value: "false"
+      - set: c.raw
+        value: nil
+  - of: (*conn).handed
+    steps:
+      - bind: _, plain
+        eval: c.Conn.(syscall.Conn)
+      - opt:
+          do:
+            - return: c
+          when: "!plain || c.bounded()"
+      - return: (*rawView)(c)
+  - of: (*conn).bounded
+    steps:
+      - return: c.timeouts.Read.Duration() > 0 || c.timeouts.Idle.Duration() > 0 || c.timeouts.Write.Duration() > 0
+  - of: (*conn).rawConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conn).rawConn
+        kind: self
+      - id: sc.SyscallConn
+        kind: value
+    steps:
+      - lock:
+          mutex: c.rawMu
+      - opt:
+          do:
+            - return: c.raw, nil
+          when: c.raw != nil
+      - bind: sc, ok
+        eval: c.Conn.(syscall.Conn)
+      - opt:
+          do:
+            - return: nil, stdnet.ErrClosed
+          when: "!ok"
+      - bind: raw, err
+        eval: sc.SyscallConn()
+        to: sc.SyscallConn
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - set: c.raw
+        value: raw
+      - return: raw, nil
+  - of: (*rawView).pooled
+    steps:
+      - return: (*conn)(rv)
+  - of: (*rawView).SyscallConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).SyscallConn
+        kind: self
+      - id: rv.pooled().rawConn
+        kind: internal
+    steps:
+      - return: rv.pooled().rawConn()
+        to: rv.pooled().rawConn
+  - of: (*rawView).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).Read
+        kind: self
+      - id: rv.pooled().Read
+        kind: internal
+    steps:
+      - return: rv.pooled().Read(p)
+        to: rv.pooled().Read
+  - of: (*rawView).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).Write
+        kind: self
+      - id: rv.pooled().Write
+        kind: internal
+    steps:
+      - return: rv.pooled().Write(p)
+        to: rv.pooled().Write
+  - of: (*rawView).ReadFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).ReadFrom
+        kind: self
+      - id: rv.pooled().ReadFrom
+        kind: internal
+    steps:
+      - return: rv.pooled().ReadFrom(r)
+        to: rv.pooled().ReadFrom
+  - of: (*rawView).WriteTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).WriteTo
+        kind: self
+      - id: rv.pooled().WriteTo
+        kind: internal
+    steps:
+      - return: rv.pooled().WriteTo(w)
+        to: rv.pooled().WriteTo
+  - of: (*rawView).Unwrap
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).Unwrap
+        kind: self
+      - id: rv.pooled().Unwrap
+        kind: internal
+    steps:
+      - return: rv.pooled().Unwrap()
+        to: rv.pooled().Unwrap
+  - of: (*rawView).ID
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).ID
+        kind: self
+      - id: rv.pooled().ID
+        kind: internal
+    steps:
+      - return: rv.pooled().ID()
+        to: rv.pooled().ID
+  - of: (*rawView).Group
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).Group
+        kind: self
+      - id: rv.pooled().Group
+        kind: internal
+    steps:
+      - return: rv.pooled().Group()
+        to: rv.pooled().Group
+  - of: (*rawView).Buffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).Buffer
+        kind: self
+      - id: rv.pooled().Buffer
+        kind: internal
+    steps:
+      - return: rv.pooled().Buffer()
+        to: rv.pooled().Buffer
+  - of: (*rawView).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rawView).Close
+        kind: self
+      - id: rv.pooled().Close
+        kind: internal
+    steps:
+      - return: rv.pooled().Close()
+        to: rv.pooled().Close
+  - of: pooledOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: pooledOf
+        kind: self
+      - id: v.pooled
+        kind: internal
+    steps:
+      - typeswitch:
+          bind: v
+          cases:
+            - do:
+                - return: v, true
+              types: "*conn"
+            - do:
+                - return: v.pooled(), true
+                  to: v.pooled
+              types: "*rawView"
+            - default: true
+              do:
+                - return: nil, false
+          "on": c
   - of: (*trackedConn).Close
     participants:
       - id: caller
@@ -2641,9 +2896,17 @@ sequences:
           when: waiter.hijacked.Load()
       - return: nil
   - of: markHijacked
+    participants:
+      - id: caller
+        kind: actor
+      - id: markHijacked
+        kind: self
+      - id: pooledOf
+        kind: internal
     steps:
       - bind: pooled, ok
-        eval: c.(*conn)
+        eval: pooledOf(c)
+        to: pooledOf
       - opt:
           do:
             - return: ""
@@ -2880,9 +3143,17 @@ sequences:
           read: true
       - return: a.bridge
   - of: rawSocket
+    participants:
+      - id: caller
+        kind: actor
+      - id: rawSocket
+        kind: self
+      - id: pooledOf
+        kind: internal
     steps:
       - bind: pooled, ok
-        eval: c.(*conn)
+        eval: pooledOf(c)
+        to: pooledOf
       - opt:
           do:
             - return: c
@@ -4312,7 +4583,7 @@ sequences:
                   - return: err
                 when: err != nil
             - bind: bound
-              eval: "&boundListener{group: group.name, addr: addr, ln: ln}"
+              eval: "&boundListener{group: group.name, addr: addr, ln: ln, sized: rep.sized}"
             - eval: s.mu.Lock()
               to: s.mu.Lock
             - set: s.listeners
@@ -4552,7 +4823,7 @@ sequences:
       - defer: recoverHandler()
         to: recoverHandler
       - bind: err
-        eval: s.admit(ctx, group.limiter, &group.conns.admitted, c, handler)
+        eval: s.admit(ctx, group.limiter, &group.conns.admitted, c.handed(), handler)
         to: s.admit
       - opt:
           do:
@@ -4634,6 +4905,8 @@ sequences:
         kind: value
       - id: s.stopStallWatch
         kind: internal
+      - id: s.widenBacklogs
+        kind: internal
       - id: s.waitGrace
         kind: internal
       - id: s.closeStreamListeners
@@ -4665,6 +4938,8 @@ sequences:
         to: s.stopStallWatch
       - opt:
           do:
+            - eval: s.widenBacklogs()
+              to: s.widenBacklogs
             - eval: s.waitGrace(ctx)
               to: s.waitGrace
           when: "!stopped"
@@ -5104,6 +5379,11 @@ sequences:
       - set: rep.backlog, rep.backlogReason
         to: applyBacklog
         value: applyBacklog(raw, spec.backlog)
+      - opt:
+          do:
+            - set: rep.sized
+              value: raw
+          when: spec.backlog > 0
       - set: rep.receiveBuffer, rep.sendBuffer
         to: socketBuffers
         value: socketBuffers(listenerSocket(raw))
@@ -5464,6 +5744,8 @@ sequences:
         kind: internal
       - id: dupListeners
         kind: internal
+      - id: backlogCapabilities
+        kind: internal
       - id: loop
         kind: package
     steps:
@@ -5489,6 +5771,9 @@ sequences:
         eval: group.loop
       - set: value.Backend
         value: plan.backend
+      - set: value.Capabilities
+        to: backlogCapabilities
+        value: backlogCapabilities(value.Capabilities, group.limits.Backlog)
       - bind: g, err
         eval: |-
           loop.Start(loop.Config{
@@ -5692,6 +5977,13 @@ sequences:
           key: _
           range: ls
           value: l
+  - of: backlogCapabilities
+    steps:
+      - opt:
+          do:
+            - return: caps
+          when: backlog <= 0 || slices.Contains(caps, corenet.CapabilityURingDeferTaskrun)
+      - return: append(slices.Clone(caps), corenet.CapabilityURingDeferTaskrun)
   - of: (*StreamGroup).HandleLoop
     steps:
       - opt:
@@ -6010,8 +6302,15 @@ sequences:
           do:
             - bind: addr
               eval: "corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}"
+            - bind: bound
+              eval: "&boundListener{group: group.name, addr: addr, ln: ln}"
+            - opt:
+                do:
+                  - set: bound.sized
+                    value: rep.sized
+                when: rep != nil
             - set: s.listeners
-              value: "append(s.listeners, &boundListener{group: group.name, addr: addr, ln: ln})"
+              value: append(s.listeners, bound)
             - opt:
                 do:
                   - continue: true
@@ -6911,6 +7210,8 @@ sequences:
         kind: internal
       - id: ownListeners
         kind: internal
+      - id: newAcceptGate
+        kind: internal
       - id: g.accepting.Add
         kind: value
       - id: g.acceptLoop
@@ -6963,6 +7264,12 @@ sequences:
       - set: g.lns, g.owned
         to: ownListeners
         value: ownListeners(lns)
+      - opt:
+          do:
+            - set: g.gate
+              to: newAcceptGate
+              value: newAcceptGate(g.lns)
+          when: group.limits.Backlog > 0
       - loop:
           do:
             - eval: g.accepting.Add(1)
@@ -7011,8 +7318,14 @@ sequences:
         kind: self
       - id: g.accepting.Add
         kind: value
+      - id: g.gate.reaches
+        kind: internal
+      - id: g.gate.wait
+        kind: internal
       - id: ln.Accept
         kind: value
+      - id: g.gate.done
+        kind: internal
       - id: time
         kind: stdlib
       - id: g.admit
@@ -7022,17 +7335,28 @@ sequences:
         to: g.accepting.Add
       - bind: failures
         eval: "0"
+      - bind: counted
+        eval: g.gate.reaches(ln)
+        to: g.gate.reaches
       - loop:
           do:
+            - eval: g.gate.wait(counted)
+              to: g.gate.wait
             - bind: c, err
               eval: ln.Accept()
               to: ln.Accept
+            - eval: g.gate.done(counted)
+              to: g.gate.done
             - opt:
                 do:
                   - opt:
                       do:
                         - return: ""
                       when: errors.Is(err, stdnet.ErrClosed) || g.stopReq.Load()
+                  - opt:
+                      do:
+                        - continue: true
+                      when: g.gate != nil && errors.Is(err, os.ErrDeadlineExceeded)
                   - op: ++
                     set: failures
                   - eval: time.Sleep(acceptDelay(failures))
@@ -7257,6 +7581,10 @@ sequences:
         kind: stdlib
       - id: tick.Stop
         kind: value
+      - id: pl.g.gate.enter
+        kind: internal
+      - id: pl.g.gate.leave
+        kind: internal
       - id: pl.handle
         kind: internal
       - id: pl.batch
@@ -7272,14 +7600,24 @@ sequences:
         to: tick.Stop
       - loop:
           do:
+            - eval: pl.g.gate.enter()
+              to: pl.g.gate.enter
             - select:
                 cases:
                   - comm: ev := <-pl.events
                     do:
+                      - eval: pl.g.gate.leave()
+                        to: pl.g.gate.leave
                       - eval: pl.handle(&ev)
                         to: pl.handle
                   - comm: <-pl.wake
+                    do:
+                      - eval: pl.g.gate.leave()
+                        to: pl.g.gate.leave
                   - comm: <-tick.C
+                    do:
+                      - eval: pl.g.gate.leave()
+                        to: pl.g.gate.leave
             - eval: pl.batch()
               to: pl.batch
             - opt:
@@ -7447,7 +7785,7 @@ sequences:
             - eval: pl.markDirty(ev.slot)
               to: pl.markDirty
             - return: ""
-          when: errors.Is(ev.err, io.EOF) && !pc.reasonSet
+          when: errors.Is(ev.err, io.EOF) && !pc.lingering.Load()
       - eval: pl.finish(ev.slot, pc, ev.err)
         to: pl.finish
   - of: (*portableLoop).handleSent
@@ -8466,6 +8804,8 @@ sequences:
         kind: self
       - id: g.drainReq.Store
         kind: value
+      - id: g.gate.release
+        kind: internal
       - id: g.wakeAll
         kind: internal
       - id: g.takeQueues
@@ -8479,6 +8819,8 @@ sequences:
         eval: e.g
       - eval: g.drainReq.Store(true)
         to: g.drainReq.Store
+      - eval: g.gate.release()
+        to: g.gate.release
       - eval: g.wakeAll()
         to: g.wakeAll
       - eval: g.takeQueues(ctx)
@@ -8512,6 +8854,7 @@ sequences:
       - eval: |-
           g.once.Do(func() {
           		g.stopReq.Store(true)
+          		g.gate.release()
           		g.closeOwned()
           		g.wakeAll()
           		//: every lane's goroutine returned.
@@ -8571,6 +8914,160 @@ sequences:
         eval: syscall.Accept4(fd, syscall.SOCK_CLOEXEC)
         to: syscall
       - return: nfd, err
+  - of: (*acceptGate).enter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*acceptGate).enter
+        kind: self
+      - id: g.setDeadlines
+        kind: internal
+      - id: g.changed.Broadcast
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: g == nil
+      - lock:
+          mutex: g.mu
+      - op: ++
+        set: g.idle
+      - opt:
+          do:
+            - eval: g.setDeadlines(time.Time{})
+              to: g.setDeadlines
+            - eval: g.changed.Broadcast()
+              to: g.changed.Broadcast
+          when: g.idle == 1 && !g.off
+  - of: (*acceptGate).leave
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*acceptGate).leave
+        kind: self
+      - id: g.setDeadlines
+        kind: internal
+      - id: g.changed.Wait
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: g == nil
+      - lock:
+          mutex: g.mu
+      - op: "--"
+        set: g.idle
+      - opt:
+          do:
+            - return: ""
+          when: g.idle > 0 || g.off
+      - opt:
+          do:
+            - eval: g.setDeadlines(gateExpired)
+              to: g.setDeadlines
+          when: g.accepting > 0
+      - loop:
+          cond: g.accepting > 0 && g.idle == 0 && !g.off
+          do:
+            - eval: g.changed.Wait()
+              to: g.changed.Wait
+  - of: (*acceptGate).reaches
+    steps:
+      - bind: _, ok
+        eval: ln.(deadlineListener)
+      - return: g != nil && ok
+  - of: (*acceptGate).wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*acceptGate).wait
+        kind: self
+      - id: g.changed.Wait
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: g == nil
+      - lock:
+          mutex: g.mu
+      - loop:
+          cond: "!g.off && g.idle == 0"
+          do:
+            - eval: g.changed.Wait()
+              to: g.changed.Wait
+      - opt:
+          do:
+            - op: ++
+              set: g.accepting
+          when: counted
+  - of: (*acceptGate).done
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*acceptGate).done
+        kind: self
+      - id: g.changed.Broadcast
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!counted"
+      - lock:
+          mutex: g.mu
+      - op: "--"
+        set: g.accepting
+      - opt:
+          do:
+            - eval: g.changed.Broadcast()
+              to: g.changed.Broadcast
+          when: g.accepting == 0
+  - of: (*acceptGate).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*acceptGate).release
+        kind: self
+      - id: g.setDeadlines
+        kind: internal
+      - id: g.changed.Broadcast
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: g == nil
+      - lock:
+          mutex: g.mu
+      - opt:
+          do:
+            - return: ""
+          when: g.off
+      - set: g.off
+        value: "true"
+      - eval: g.setDeadlines(time.Time{})
+        to: g.setDeadlines
+      - eval: g.changed.Broadcast()
+        to: g.changed.Broadcast
+  - of: (*acceptGate).setDeadlines
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*acceptGate).setDeadlines
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(ln.SetDeadline(t))
+              to: swallowErr
+          key: _
+          range: g.lns
+          value: ln
   - of: portablePeer
     participants:
       - id: caller
@@ -9087,7 +9584,7 @@ sequences:
           do:
             - set: out[i]
               to: tls
-              value: tls.NewListener(ln, tlsFloor(g.codecTLS()))
+              value: tls.NewListener(ln, alpnStrict(tlsFloor(g.codecTLS())))
           key: i
           range: lns
           value: ln
@@ -11133,7 +11630,15 @@ sequences:
       - return: code == corenet.LoopBackendKqueue || code == corenet.LoopBackendAuto && kqueueAuto(goos)
   - of: kqueueAuto
     steps:
-      - return: goos == "darwin"
+      - switch:
+          cases:
+            - case: "\"darwin\", \"freebsd\", \"openbsd\", \"netbsd\", \"dragonfly\""
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": goos
   - of: (*optionSet).add
     steps:
       - op: "|="
@@ -15747,6 +16252,13 @@ sequences:
       - eval: l.release()
         to: l.release
   - of: markRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: markRefused
+        kind: self
+      - id: pooledOf
+        kind: internal
     steps:
       - opt:
           do:
@@ -15754,7 +16266,8 @@ sequences:
               value: "true"
           init:
             bind: pooled, ok
-            eval: c.(*conn)
+            eval: pooledOf(c)
+            to: pooledOf
           when: ok
   - of: (*Server).admit
     participants:
@@ -16080,6 +16593,8 @@ sequences:
         kind: value
       - id: slices
         kind: stdlib
+      - id: alpnStrict
+        kind: internal
       - id: tlsFloor
         kind: internal
     steps:
@@ -16095,6 +16610,8 @@ sequences:
             - set: cfg.NextProtos
               to: slices
               value: slices.Clone(g.httpProtos.alpn)
+            - return: alpnStrict(tlsFloor(cfg))
+              to: alpnStrict
           when: g.httpAdapter != nil
       - return: tlsFloor(cfg)
         to: tlsFloor

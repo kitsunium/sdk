@@ -119,20 +119,35 @@ func tracesPending(a *app.App) int {
 	return ex.Signals[0].Pending
 }
 
+// recountInterval is how long the export's forwarders go before they count
+// their queue again: forward.DefaultRecountInterval, which the export leaves
+// at its default.
+const recountInterval = time.Minute
+
 // A dead letter `otlp replay` puts back while the product runs is counted
 // pending by the running export (issue #580) — its runtime state, and the
 // readiness and bounds that read the same counts — while its collector is
-// still down and the batch before it is retried: the forwarder counts its
-// queue again once its interval passed, not at the next start.
+// still down for the traces and the batch before it is retried: the
+// forwarder counts its queue again once its interval passed, not at the next
+// start.
+//
+// The collector takes the metrics: refused at once, the snapshot the first
+// process queued at its stop was retried as fast as drive advanced its
+// backoff, thirty seconds a turn, and took the clock to drive's horizon
+// before the trace's batch was tried a second time (issue #1408). The clock
+// is then moved once, by the interval, rather than driven: the trace's
+// retries, refused at once, would move it the same way while the count is
+// listed.
 func TestAnOTLPReplayWhileTheProductRunsIsCounted(t *testing.T) {
 	db := app.NewFakeDB(sql.DialectPostgres)
 	clk := newDrivenClock()
 	deadLetterTrace(t, db, clk)
 	var refused atomic.Int64
 	down := func(_ context.Context, b app.OTLPBatchValue) error {
-		if b.Signal == app.OTLPTraces {
-			refused.Add(1)
+		if b.Signal != app.OTLPTraces {
+			return nil
 		}
+		refused.Add(1)
 		return app.NewError(http.StatusServiceUnavailable, app.WireUnavailable, "down")
 	}
 	running := otlpDatabaseApp(t, db, clk, down, app.OTLPDatabase("database"))
@@ -146,7 +161,8 @@ func TestAnOTLPReplayWhileTheProductRunsIsCounted(t *testing.T) {
 	if status, out, errOut := otlpRun(t, cli, "replay", "traces"); status != 0 || !strings.Contains(out, "replayed 1 dead letter(s) of traces") {
 		t.Fatalf("replay while the product runs: %d\n%s%s", status, out, errOut)
 	}
-	clk.drive(t, "the replayed batch counted pending", func() bool { return tracesPending(running) == 2 })
+	clk.Advance(recountInterval)
+	eventually(t, "the replayed batch counted pending", func() bool { return tracesPending(running) == 2 })
 }
 
 // `otlp replay --drop` deletes every dead letter for good: none is listed

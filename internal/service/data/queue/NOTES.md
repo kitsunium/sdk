@@ -1,0 +1,875 @@
+# internal/service/data/queue — notes
+
+Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same section titles.
+
+## Contents
+
+| File | Holds |
+|---|---|
+| `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
+| `queue.go` | the dead-letter `causeValue` reduction — the cause's trail with it, `trailCodes`, and its text form, `encodeTrail` / `decodeTrail`, `cloneTrail` (issue #500) —, `randomHex`, the shared guards (`checkBatch`, `checkSize`, `checkDeadLetter` and `checkLiveMessage` — the refusals of `PutDeadLetter` and `PutMessage`, identical on the three brokers, ADR 0178; `nackDeadline`, `publishVisibleAt` and `onceUntil` — the arguments of `NackAfter`, `PublishAt` and `PublishOnce`, read and refused identically on the three, and `onceDigest`, the SHA-256 the durable brokers keep of a key, ADR 0183), `deadLetterNotFound` |
+| `retry.go` | `retryDelay`: RetryDelay, or the `kernel/backoff` curve from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) —, randomised as `RetryJitterMode` says from one draw of the broker's `Random` (`drawBetween`, `randomOrDefault`; issue #1044) |
+| `lifetime.go` | the two lifetimes every broker applies alike: `messageExpired` and `expiredCause` (`MaxAge`, `MESSAGE_EXPIRED`; issue #835), `retentionDue` and `retentionCutoff` (`DeadLetterRetention`, one sweep a minute at most; issue #1120) |
+| `bulk.go` | what the siblings that act on a whole queue share: `checkSizes` (a batch refused whole before a byte is written), `pagedMessages` (`AllMessages` over a broker's `Messages`, 256 a page), `refusedReceipt` |
+| `memory_bulk.go` / `file_bulk.go` / `sql_bulk.go` | each broker's `DeadLettersAfter`, `Stats`, `Purge`, `ReplayDeadLetters`, `PurgeDeadLetters`, `PublishMany`, `AckMany` and `AllMessages`, and its retention sweep; the file broker's `expireReady` is in `file_receive.go`, its `Stats` in `file_stats.go` (`countLive`, `countDead`) |
+| `sql_bulk_dialect.go` | the SQL broker's statements for them, per dialect: `stats`, `purgeQueued` / `purgeLeased`, `expire`, `retention`, `replayMany` / `purgeDeadMany` (MySQL's `ORDER BY id LIMIT` on the statement, a sub-select of the ids elsewhere), and per call `insertRows`, `ackRows` (`RETURNING id, lease` on PostgreSQL and SQLite) and MySQL's `ackPick` |
+| `consume_acked.go` | `ackedWindow`, the last `ConsumerConfig.AckedWindow` identifiers a Consume handled (issue #1046) |
+| `consume_idle.go` | `idleGate`, the slot one idle worker of a Consume holds while it polls for the others; `consume.go`'s `idleTurn` takes it or waits on it (issue #1049) |
+| `memory.go` | `NewMemory` and the in-heap broker: the lease expiry on an indexed heap — one entry per lease in flight, re-keyed by `Extend` and removed by every call that ends the lease (`unlease`, #1036) —, the ready list ordered at insertion; `Reject`, `Release`, `NackAfter`, `PublishAt`, `PublishOnce` (a map of the keys reserved and a heap of their windows' ends, `dropPassedOnce`), `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter`, `Messages`, `PutMessage` |
+| `memory_config.go` / `mem_record.go` / `lease_expiry.go` / `once_end.go` | `MemoryConfig` and the three values the memory broker keeps |
+| `file.go` | `NewFile`, `Publish`, `PublishAt` (a queued name whose visibility is the instant), `write` (the durable publication both share, waking nobody), `Ack`, receipt resolution |
+| `file_listing.go` | `namesOf`: a state directory's names, its last listing reused while the directory's mtime has not moved and was older than the listing by `racyMargin`, `listingMaxAge` at most (issue #811) — the rule itself is `listingStamp.reusable`, which the index's unwatched mode reads too; `readNames` (`Readdirnames`, sorted) |
+| `file_index.go` | `fileIndex`, what a `Receive` walks (issue #811, 2026-11-14): `ready/` in a heap per level and `inflight/` in one, each a `dirIndex` (`kernel/collections/heap.IndexedHeap` + a map from name to handle), brought up to its directory by `sync` — the kernel's changes applied where they are watched, a full read past `watchedRelistAge` or on an overflow; elsewhere a full read under `listingStamp.reusable` —, a full read being a mark and a sweep (`relist`, `see`, `seeBytes`, `sweep`), no sort; `head` / `take`, the two looks that hand a name to one goroutine of the broker; `invalidate`, `unwatch` |
+| `file_index_linux.go` | the watch: one inotify instance per receiving broker, `IN_NONBLOCK`, read through `RawConn` (`drain`, `apply`); each state directory watched through `/proc/self/fd/<the descriptor os.Root opened>`, refused on a network or FUSE filesystem (`remoteMagics`, by `fstatfs`); `readEntries` over `getdents64`, a name looked up in the read's buffer without a copy |
+| `file_index_other.go` | every other platform: no watch, and `readEntries` over `Readdirnames` in steps of 256 |
+| `file_once.go` | `PublishOnce` (ADR 0183): the message written first, then the key reserved — `once/<sha256>.key`, written under a name of its own with `O_EXCL` and `link(2)`ed to the key's —, a racer's message withdrawn before anybody is woken (`withdraw`), a passed reservation set aside and read again before it is removed (`dropPassed`), and the sweep, at most once a minute per broker (`sweepOnce`) |
+| `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
+| `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through the kernel's reader, `internal/kernel/fs/winacl` |
+| `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
+| `file_receive.go` | `Receive`, the reclaim walk and the ready walk over the index (`leaseLevel`, `leaseOne`), the rename that IS the exclusion |
+| `file_dead.go` | `Nack` and `NackAfter` (one `nackWith`, the delay the policy's or the caller's), `Reject`, `Release` (one rename back into `ready/`, visible now, the count one lower), `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding — a `trail` header line only when the cause has one (issue #500) |
+| `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (a burial's record, published atomically and durably), `Messages` (`liveFiles`, `parseLive`: the two state directories' names, sorted by identifier) and `PutMessage` (a `ready/` file, as a retry leaves one), `deadRecordsOf` — every record of one message by its ID |
+| `sql.go` | `NewSQL`, the SQL broker, `Publish` and `PublishAt` (one INSERT, `due` the instant), `Ack`, `Nack` and `NackAfter` (one `nackWith`), `Release`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
+| `sql_once.go` | `PublishOnce` (ADR 0183): one transaction — the key's passed reservation dropped, the key claimed by an insertion that affects no row when it is taken, the message inserted when the claim took, and up to 100 passed reservations of other keys read `SKIP LOCKED` and removed (`claimOnce`, `sweepOnce`) |
+| `sql_receive.go` | `Receive`: the probe, then — only when something is due — the lease transaction: `pickDue`, `buryLapsed`, `leaseRows`, `minDue` |
+| `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (one INSERT of a dead row, in the caller's transaction when its context carries one), `Messages` (one unlocked read of the live rows after an identifier) and `PutMessage` (one INSERT of a live row with its count) on the table |
+| `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
+| `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect — those a cause goes through naming the `trail` column with `SQLConfig.Trail`, and the arguments they bind, `causeArgs` / `putDeadArgs` (issue #500) —, `leaseRows` / `buryRows` / `onceSweepRows` rendered per call, `onceClaimStatement` (`ON CONFLICT (id) DO NOTHING`, MySQL's `INSERT IGNORE`), the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/data/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
+| `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/data/sql` migration the caller numbers; `SQLTrailMigration`: the `trail` column added to a table an earlier `SQLMigration` made (issue #500) |
+| `sql_priority.go` | `SQLPriorityMigration`: the `priority` column (`NOT NULL DEFAULT 0`) and the index over `(dead, priority, due, id)`, added after a read of the table's columns on every engine, dropped index first; `priorityIndexName`, shortened with a hash past `MaxSQLTableLen` (issue #1045) |
+| `sql_trail.go` | `SQLTrailMigration`'s statements and steps: PostgreSQL's `ALTER TABLE IF EXISTS … ADD COLUMN IF NOT EXISTS`, and on SQLite (`pragma_table_info`) and MySQL (`information_schema.columns`) a read of the table's columns first, the `ALTER` sent only when it changes something; `trailColumnType` |
+| `consume.go` | `Consume` (its workers in a `kernel/concur/group` joined group) and `consumer`, the siblings asked once; the pull loop, the batch (`settleBatch`, `prepare`: a message whose lease ran down is handed back or renewed before it starts), the outcomes (`settle` — `NackAfter` for a `RetryAfter` failure when the broker has the sibling, ADR 0183 —, `handBack` — `Release`, or `Nack` without the sibling — `nack`), the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`, `armUntil`: the wait armed until an instant measured before the broker is asked, re-armed when the clock moved across its registration — a ManualClock advanced while a worker armed its wait fired it that much late, and a spool retry was missed on OpenBSD's CI; `TestAnIdleConsumerWakesAtTheDueInstantWhenTheClockMovesWhileItArms`) |
+| `consume_lease.go` | the handler's watch (kitsunium/sdk#474): `leasePlan` (the lease as granted, its margin — a tenth, at most `SettleTimeout` — and AutoExtend's third), `watch`/`oversee`/`finish` (one goroutine per handled message that ends its context on the stop, after `DrainTimeout`, and a margin before the lease ends, and renews it under AutoExtend), `renew`, and `bounded`/`bound` — every outcome on its context without the cancellation, bounded by `SettleTimeout` from the stop on, a renewal always |
+| `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
+| `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
+| `perf_fixtures_test.go` | race off: `perfConsumeRoundTrip`, the fixture of `Consume`'s allocation budget in `design/sdk.yaml` (ADR 0165, issue #1048), counted by the `gen_perf_test.go` kit writes |
+| `fill_export_test.go` / `scale_bench_test.go` / `fill_external_test.go` | the scale rows of issue #811: `FillReadyForTest` writes a backlog straight into `ready/` by the name grammar, without the two flushes of a Publish (a million messages in seconds, not an hour); `BenchmarkReceiveBacklog_Scale` runs ReceiveBacklog's file row at the depths `KITSUNIUM_BENCH_SCALE` names, the backlog filled once a depth, and skips without it — its lane is `.github/workflows/bench-ab.yml`'s scale mode (suite `queue-scale`, 10 000 to 1 000 000; rule 12); `TestFillReadyForTestWritesWhatABrokerReceives` holds the fill to the broker's own reading |
+| `name_export_test.go` / `sql_export_test.go` | the unexported readers and renderers the external suites reach: the name grammars, the dead-letter record and the trail for the fuzz targets (issue #1047); the rendered statements for the fake engine |
+
+## Why the durable broker's state is a FILENAME
+
+Because `rename(2)` is the only operation a POSIX filesystem offers that
+changes a fact indivisibly and refuses for the loser. Three directories are the
+three states — `ready/`, `inflight/`, `dead/` — and every transition is one
+rename. So:
+
+- **Exclusion is free and needs no lock.** Two consumers reaching for the same
+  message both attempt the same rename; the kernel gives it to one and gives
+  the other `ENOENT`. There is no lock file, nothing a dead process could hold,
+  and — unlike `flock(2)`, which ADR 0052 MEASURED giving zero exclusion
+  between goroutines sharing one open file description — it resolves identically
+  for two goroutines and for two processes.
+- **A name a rename left behind is removed (`dropStale`).** Not every
+  filesystem renames in one step: OpenBSD's FFS links the new name and then
+  unlinks the old, and two consumers racing on one message there left it
+  under two names — queued, and leased by nobody (#398, where a queued
+  command's restart test then saw it delivered twice). After each transition
+  the broker removes the name it no longer owns: the source it just renamed
+  away (`takeLease`, `Nack`, `recoverOne`), or, when its rename lost with
+  `ENOENT`, the target carrying its own fresh lease (`takeLease`). On a
+  one-step kernel each removal answers `ENOENT` and costs one syscall. What it
+  cannot undo is two renames that both report success; delivery stays at
+  least once, as it always was.
+- **Recovery needs no daemon.** A lease deadline and a delivery count are both
+  in the name, so a consumer that is SIGKILLed leaves a directory entry any
+  other process can read and act on. There is no sweeper goroutine: a lapsed
+  lease is noticed by the next `Receive`, in whatever process makes it. A
+  sweeper would be a fourth thing that can die, and it would need electing.
+- **A lexicographic sort is a chronological sort.** Every name opens with a
+  19-digit zero-padded instant, so `fs.ReadDir`'s ordering is FIFO for free.
+
+Two consequences of "the state is a name" are enforced rather than assumed:
+
+- **The states are checked like the root, one notch stricter.**
+  `prepareState` runs the root's rule (`unusableBecause`) on each of `ready/`,
+  `inflight/` and `dead/` through `os.Mkdir` + `os.Lstat` — never `MkdirAll`
+  or `Stat`, which both follow a symlink — plus one refusal of its own
+  (`stateUnusableBecause`): a state any account outside the owner and group
+  can write is refused EVEN with the sticky bit. At the root, sticky stops the
+  states being replaced, which is all the root needs; in a state it only stops
+  an unlink, and a planted entry is a delivered message. Only the root used to
+  be checked, so under a root the rule accepts (a group share, a sticky
+  `/tmp`-like directory) another account could pre-create `ready/` and plant or
+  unlink messages; then the root's rule was applied as it stood, and a sticky
+  world-writable `ready/` still passed. A state that is a symlink is refused
+  whatever it points at. `TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust`.
+  What the rule still does NOT see is an owner inside the group: a
+  group-writable state another member made is trusted, as the group share
+  itself is.
+- **An instant a name cannot carry is never written.** A name's instants are
+  19 digits of a non-negative int64, so the grammar ends on 2262-04-11; past
+  it `pad` wrote a sign, `parseNano` refused the name, and the message was
+  stranded. `core/data/queue.MaxDeadlineOffset` bounds the policy's durations for
+  both brokers; `Extend`'s `by` never passes through `Validate`, so the file
+  broker checks the deadline itself (`nameable`) and refuses before anything
+  is renamed. The memory broker keeps `time.Time`, which would hold such a
+  deadline, and refuses the same `by` anyway, in the same order: it is the
+  double, and a double more permissive than the durable broker is a test that
+  passes where production strands the message.
+  `TestEveryBrokerRefusesAnExtensionANameCannotCarry` runs on all three — the
+  SQL broker keeps its deadlines as the same int64 of Unix nanoseconds.
+
+## On Windows: the directory rules read the DACL, and the broker is then refused
+
+The permission half of the refusals used to read mode bits on every platform.
+Windows has none — `os.Stat` synthesises `0777` with no sticky bit for every
+writable directory — so the rule refused EVERY queue directory there as
+`QUEUE_DIRECTORY_UNUSABLE`, a verdict that blames the deployment for the
+platform (ADR 0018 §(a)); the first Windows run of the whole suite found it on
+every `/file` case (ADR 0095). The two questions stayed; the vocabulary moved to
+the DACL, read by the one reader this repository has —
+`internal/kernel/fs/winacl.GrantsAnyone` (ADR 0084/0086): the lock domain's
+reader, exported from `lock` for exactly this rather than copied, and moved to
+the kernel so that the queue no longer imports another service to call it
+(ADR 0159):
+
+| | Unix (mode) | Windows (DACL, an identifier meaning anybody) |
+|---|---|---|
+| root refused when anybody can | unlink an entry: other-write without sticky | `winacl.ReplaceRights` — delete a child, rewrite the list, take ownership |
+| state refused when anybody can | write at all: other-write, sticky or not | add a file (a planted message) or a directory/junction, or `ReplaceRights`; or write a FILE created there (`winacl.ContentRights`, through what it inherits — on Unix a message is 0600 whatever the directory allows) |
+| an indirection | `ModeSymlink` | `ModeSymlink`, or any reparse point — a junction reads as a plain directory through `os.Lstat` |
+
+A permission refusal names what it was read from in an `observed` field — the
+mode on Unix, the entry on Windows (`S-1-1-0=0x40`), where there is no mode to
+look at. A list the reader could not read, or read only in part, is refused as
+`why=unverifiable` with the reader's status in `observed`
+(`GetNamedSecurityInfoW=5`, `GetAce#3`). That is the one place the queue parts
+from the lock, which accepts the same case and logs it (ADR 0084 §D5): a lock
+directory wrongly accepted costs the hardening, a queue directory wrongly
+accepted is a planted message a consumer acts on — and the queue refused every
+Windows directory before this rule, so the refusal takes away nothing that
+worked (ADR 0095). `TestAWindowsDirectoryNobodyCouldInspectIsRefused` pins the
+verdict on every answer; `TestAWindowsDirectoryWhoseListCannotBeReadIsRefused`
+drives both rules over a REAL reader failure — `GetNamedSecurityInfoW` on a
+directory that is not there. A list made unreadable with `icacls` (READ_CONTROL
+denied to Everyone and to OWNER RIGHTS) was still read on the windows-latest
+runner, measured, so that fixture is not one a test can rely on.
+
+Two consequences, stated rather than discovered:
+
+- **Windows has no "created owner-only".** A state the broker makes INHERITS
+  its parent's list, so a root that lets anybody ADD entries — accepted at the
+  root, as sticky is on Unix — hands that grant to `ready/`, which is then
+  refused as a planted-message risk. On Unix the state would have been made
+  `0700` whatever the parent allowed. Closing that needs a security descriptor
+  at creation; it is not done.
+- **The broker still does not run on Windows.** `internal/service/data/vfs` refuses
+  the platform by design (no flushable directory handle, a mode that is not an
+  ACL), so once the directory rules accept, `NewFile` returns
+  `UNSUPPORTED_PLATFORM` — the platform's refusal, where it used to be a false
+  verdict on the caller's directory. The rules run first anyway, so they are
+  right on the day vfs gains a Windows backend. The suite asserts that refusal
+  and then skips every case that needs a broker (`requireFileBroker`), and
+  `TestTheWindowsQueueDirectoryRuleIsTheDACL` /
+  `TestAWindowsStateDirectoryIsCheckedWhoeverMadeIt` pin both rules through
+  real ACLs (`icacls`) and a real junction (`mklink /J`).
+
+## The queue directory's rule, beside the other four
+
+`app/lock`, `proc/ipc`, `security/secret` and `security/session` each refuse a
+directory by a rule of their own, compared side by side in
+`internal/kernel/fs/CLAUDE.md` §Five directory rules. They share the kernel's
+measurements (`winacl` here; `pathchain` elsewhere) and no rule. This one's,
+and why it is not a neighbour's:
+
+- **Two levels, one notch apart.** The root takes `lock`'s decision —
+  other-write without sticky refused, group-writable accepted — because
+  nothing lives there but the three states; a STATE is refused as soon as an
+  outsider can write it at all, sticky or not, because there an entry IS a
+  message. No other domain has a directory whose entries are acted upon.
+- **Group-writable is accepted at both levels**, as `lock` accepts it: a queue
+  shared between two service accounts through a group is a deployment, and a
+  state another member of that group made is trusted as the share itself is.
+  `ipc`, `secret` and `session` refuse a group bit; their rule would refuse
+  the shared queue.
+- **An unreadable Windows list is REFUSED** (`why=unverifiable`) where `lock`
+  accepts and logs the same answer from the same reader — the asymmetry runs
+  the other way here (ADR 0095).
+- **The root's path is not walked**, and a link configured as `Dir` is
+  followed (`os.Stat`), where `lock`, `ipc` and `session` audit every
+  component through `pathchain`. The states are `Lstat`ed, so a link or a
+  junction planted AT a state is refused; one planted at a PARENT of `Dir`, in
+  a directory anybody can write, is not looked for. That is the gap
+  `pathchain` closed for the other three (ADR 0083), named here rather than
+  implied closed.
+- **Nothing is narrowed**: a state this broker made is checked like one it
+  found, and an existing directory is refused rather than chmod'ed.
+
+## A listing is reused only while its directory is "racily clean" (issue #811)
+
+Every `Receive` used to read and sort `ready/` and `inflight/` whole — 4 026
+allocations and 2.9 ms for an idle poll of a thousand messages not yet
+visible. `namesOf` keeps each state directory's last listing (`ready/`,
+`inflight/`, `dead/`; never `once/`, swept once a minute) and reuses it only
+when three things hold, git's rule for its index:
+
+- the directory's mtime, read by one stat, is the one the listing recorded —
+  every change of a state is an entry added, renamed or removed, and moves it,
+  in this process or another;
+- that mtime is older than the instant the listing BEGAN by `racyMargin`
+  (3 s), on the REAL clock — never the broker's, which a test holds still. A
+  change made in the listing's own tick can leave the mtime where it was: the
+  kernel stamps from a clock up to a tick behind, and a filesystem truncates
+  to its granularity, two seconds on FAT. Such a listing is "racily clean" and
+  is read again; so a publication in the same tick as a listing, by another
+  process, is seen by the next `Receive`
+  (`TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen`,
+  `TestACoarseMtimeWithinTheMarginOfItsListingIsNeverTrusted`);
+- the listing is younger than `listingMaxAge` (10 s, monotonic). That bounds
+  the one case the mtime cannot see — a wall clock stepped back across the
+  listing, a network filesystem stamping from a server clock far behind, a
+  tool restoring a directory's mtime — to a delay rather than a loss
+  (`TestAListingAnMtimeCannotInvalidateIsReadAgainPastItsMaximumAge`).
+
+The stat and the clock reading come BEFORE the read: a change between them is
+in the names and moves the mtime, which only costs one read more. A listing
+once stored is never written; concurrent workers share it read-only, and two
+that relist at once store two valid snapshots. The gain is an idle poll, a
+`Stats` and a listing of a QUIET queue: one stat per directory
+(`TestAnIdlePollOfAQuietQueueReadsNoDirectory` makes the directories
+unreadable and still gets its answers). A queue being consumed changes its
+directory at every lease, and a listing of it is read every time — reusing
+one after this consumer's own rename would also reuse it after another
+process's rename in the same tick. That is why a `Receive` no longer walks a
+listing at all: it walks the index below. `namesOf` still serves `Stats`,
+`Messages`, the dead letters and the bulk siblings. `BENCH.md` has both.
+
+## A Receive walks an index the kernel keeps where it names the changes (issue #811, 2026-11-14)
+
+The rule above cannot make a backlog in motion cheap: the mtime does not
+tell this consumer's rename from another process's in the same tick, so a
+`Receive` that leases and a `Nack` that hands back relisted `ready/` every
+time — a read, a string and a sort an entry, 7× depth 10 at depth 1 000
+where the issue asks 2×, and the ratio WORSENS on a faster disk, where the
+fixed system calls shrink and the per-entry cost does not. Only a signal
+that NAMES the change separates the two, and that is the decision of
+ADR 0054's amendment of 2026-11-14:
+
+- **The index.** `fileIndex` holds `ready/` as five heaps, one a level,
+  ordered as the sorted listing was — the instant, then the rest of the name
+  (`compareItems`) —, and `inflight/` as one heap in deadline order; a map
+  from name to heap handle removes a name from anywhere. Only a name its
+  state's grammar reads is indexed, so a `.vfs-*.tmp`, a stray file or a
+  directory is skipped exactly as the walk skipped it. A `Receive` reads the
+  heads, never the directory: depth costs O(log n) a lease.
+- **Watched (Linux, a local filesystem).** At the first `Receive` the broker
+  opens one inotify instance (`IN_NONBLOCK | IN_CLOEXEC`), watches `ready/`
+  and `inflight/` — added, gone, the directory itself moved or vanished —,
+  then reads both whole. Every look first drains the instance: a read that
+  answers `EAGAIN` when nothing changed. The kernel queues an event INSIDE
+  the `rename(2)` or `unlink(2)` that causes it, before the call returns, so
+  a change another process finished before this `Receive` is in the queue
+  it drains: **the first `Receive` after a publication sees it, with no
+  margin and no mtime** — stricter than the rule above
+  (`TestAPublicationByAnotherProcessInTheTickOfAListingIsSeen/watched`,
+  `TestAListingAnMtimeCannotInvalidateIsReadAgainPastItsMaximumAge/watched`).
+  The broker's own renames reach its index the same way; its walk takes a
+  name out of the heap before renaming it, so the event that follows finds
+  nothing to do.
+- **What the watch cannot vouch for is read whole, never guessed.** A
+  directory is watched through `/proc/self/fd/<n>`, `n` the descriptor
+  `os.Root` opened — never a path resolved again —, and only on a filesystem
+  whose every change this kernel makes: `fstatfs` refuses NFS, SMB/CIFS,
+  FUSE, Ceph, 9P, virtiofs and the rest of `remoteMagics`. An
+  `IN_Q_OVERFLOW` (past `max_queued_events`) — or a drain still reading after
+  `maxDrainReads` (64) reads, a writer outpacing it — reads both directories
+  whole at the next look (`TestAWatchedIndexIsReadWholeAgainAfterTheKernelsQueueOverflows`);
+  a watched directory moved, removed or unmounted drops the watch for good,
+  and the broker reads under the rule above from then on
+  (`TestAWatchWhoseDirectoryMovedFallsBackToTheListingsRule`); and the index
+  is read whole every `watchedRelistAge` (one minute) whatever the queue
+  said — a net under a defect of this code, never what keeps a publication
+  visible.
+- **Unwatched: every other platform, and every refusal above** — no instance
+  (`EMFILE` past `max_user_instances`, 128 by default, shared by the user's
+  processes), no `/proc`, a remote filesystem, a lost watch, a test's
+  `UnwatchForTest`. The index is read again exactly when `namesOf` would
+  read its listing (`listingStamp.reusable`), so the guarantee is the rule
+  above, unchanged. A full read is a mark and a sweep: each name met is kept
+  or indexed, each name not met dropped, nothing sorted; on Linux it reads
+  `getdents64` into a buffer of the broker's and looks a name up in place
+  (`m[string(b)]` allocates nothing), so only a name the index lacks is
+  copied. macOS's FSEvents and kqueue, the BSDs' and illumos' interfaces say
+  THAT a directory changed and not WHAT, which is the mtime's problem again;
+  Windows' `ReadDirectoryChangesW` would name the entries, and is not wired:
+  the file broker is refused there anyway (ADR 0018).
+- **One mutex, held for the index only.** `head` reads a heap's first name,
+  the walk decides outside the lock, `take` removes it only if it is still
+  first — so two goroutines of one broker never try one message, and the
+  rename still settles a race with any other process. An operation that
+  fails after `take` (the medium refused a rename) marks the index stale: the
+  name may still be there, and the next look reads whole.
+- **What it costs.** One instance and two watches per RECEIVING broker — a
+  broker that only publishes opens none —, released by `Close`, or with the
+  instance's `os.File` when a broker is collected unclosed; a 16 KiB event
+  buffer and an 8 KiB read buffer; about 200 bytes per message the index
+  holds (the name, its map entry, its heap cell), some 200 MB for a million. The
+  directory format is unchanged: a broker of an earlier release sharing the
+  directory is one more process whose renames the kernel names.
+
+## The SQL broker (ADR 0151)
+
+`NewSQL` keeps the queue in ONE table of a PostgreSQL, MySQL or SQLite database
+the caller owns and hands over as a `core/data/sql` transactor — which must also be
+a `Joiner` and a `Deferrer`, as the SDK's is. It exists for one property the
+other two cannot have: **a message published inside the caller's transaction
+exists if and only if that transaction commits** — the transactional outbox.
+
+- **Every call runs where its context says**, exactly as docstore's SQL engine
+  (ADR 0139 §D5): inside the caller's transaction every call that writes is a
+  SAVEPOINT of it — a failed statement undoes itself alone and, on PostgreSQL,
+  clears the aborted state — and outside one, a call of one statement runs on
+  the pool and a Receive that leases runs in a transaction of the broker's
+  own, READ COMMITTED on MySQL. A publication's wake goes through `Defer`, so
+  consumers are woken after the commit and never for a rollback.
+- **One table, three columns of state.** `dead` (0 live, 1 dead letter),
+  `lease` (NULL queued, the lease's random half when leased) and `due` — the
+  instant the row next matters on its own: a queued message's visibility, a
+  leased one's deadline, a dead letter's failure. So every live row whose `due`
+  has passed is either receivable or a lease whose holder may have died, and
+  ONE ordered read over the `UNIQUE (dead, due, id)` index finds both. That
+  constraint can never be broken — `id` is the key — and exists to build the
+  index, which PostgreSQL and SQLite declare no other way inside CREATE TABLE.
+- **An idle Receive is one read and takes no lock**: `SELECT MIN(due)` over the
+  live rows (the probe). Only when something is due does it open the lease
+  transaction: on SQLite a write that writes nothing first (ADR 0140's
+  statement, `service/data/sql`'s `FileLockSQL`, the migration runner's too —
+  SQLite's lock is taken by a transaction's first WRITE, and a lease that
+  read first could be refused busy at its update), then the due
+  rows in `(due, id)` order `FOR UPDATE SKIP LOCKED` on PostgreSQL and MySQL,
+  then one UPDATE leasing them all under one deadline and one random half, 500
+  identifiers a statement. A lapsed lease with no attempt left is buried with
+  `LEASE_EXPIRED` by the same read; one with attempts left is leased again,
+  its count moved on. A Receive that did not fill its batch asks when the next
+  row is due (`MIN(due) > now`) and records for `Wake` the earlier of that and
+  a lease's deadline taken now — a concurrent consumer's lease on a row the
+  locked read skipped is invisible to it; one that did records now. The
+  probe keeps NULL apart from an instant of zero. No sweeper, as for the
+  other two.
+- **On PostgreSQL, outside the caller's transaction, the lease is ONE
+  statement (issue #1042)**: `UPDATE … FROM (SELECT id, due … ORDER BY due, id
+  LIMIT n FOR UPDATE SKIP LOCKED) AS picked … RETURNING …, picked.due` —
+  atomic by itself, so it runs on the pool, no BEGIN, no COMMIT: a Receive
+  that fills its batch sends the probe and that statement, where it sent
+  five. It skips a lapsed lease with no attempt left; a batch it did not fill
+  buries those (`buryExhausted`, LEASE_EXPIRED) and asks for the next due
+  instant. RETURNING promises no order, so the batch is sorted by the
+  instant each row WAS due — the column the statement returns — then by
+  identifier: pick's order, the queue's visibility order. SQLite keeps the
+  transaction: its RETURNING cannot name a column of the sub-select, so the
+  batch could not be put back in visibility order — a message held by
+  `PublishAt` would come out ahead of one visible before it. MySQL has no
+  `UPDATE … RETURNING`. Inside the caller's transaction every engine keeps
+  the transaction path.
+- **Ack, Nack, Extend, Reject and Release are ONE statement each**, matching the
+  receipt's identifier, lease and delivery count, a live row, and a deadline
+  still ahead of the instant the call read — so a lapsed lease is refused
+  whether or not anybody reclaimed it, as ADR 0054 §D2 requires, and zero rows
+  is `LEASE_EXPIRED`. Every UPDATE changes a column, which keeps MySQL's
+  affected-row count exact.
+- **A receipt is `<id>.<count>.<lease>`**, refused `UNKNOWN_RECEIPT` by SHAPE
+  as the file broker's is: two brokers over one table, in one process or in
+  twenty, are one queue, so a receipt minted elsewhere is legitimate.
+- **The instants are the broker's clock, never the database's `NOW()`**, so a
+  test drives every deadline with a `ManualClock` — and brokers in several
+  processes compare instants their own clocks wrote. A reading 64-bit Unix
+  nanoseconds cannot hold, or whose lease or retry deadline passes 2262, is
+  refused `QUEUE_MISCONFIGURED` (field `Clock`) before any statement.
+- **A storage failure is `QUEUE_BACKEND_FAILED`**, JOINED with the driver's
+  error — never wrapped, so the verdict stays the origin — whose text is
+  WITHHELD from every rendering (through `service/data/sql`'s `Withheld`, which
+  docstore joins its own failures through too): a driver quotes the row a
+  statement touched. The transactor's own verdicts pass through.
+- **`SQLMigration(dialect, table, version)`** creates the table in one
+  `CREATE TABLE IF NOT EXISTS`; the SDK numbers nothing (ADR 0055 §D12).
+- **A dead letter's trail is a nullable `trail` column, written only with
+  `SQLConfig.Trail` (issue #500).** `SQLMigration` creates the table with it;
+  `SQLTrailMigration(dialect, table, version)` adds it to a table an earlier
+  release made, and does nothing on a table that has it or that is not there
+  yet, so it runs before or after `SQLMigration` and twice. PostgreSQL says so
+  in the statement (`IF [NOT] EXISTS`); SQLite and MySQL have no such clause on
+  a column, so the step reads the catalogue first — the table's name bound —
+  and alters only when the change is due, which also covers a run MySQL's
+  implicit DDL commit stopped after the `ALTER`. Its Down drops the column
+  (SQLite from 3.35). Without `Trail` the broker sends, byte for byte, the
+  statements it sent before the column existed — a deployment that upgrades
+  the SDK before it runs the migration keeps working —, and its dead letters
+  have no trail. With it, the burial, `PutDeadLetter` and the dead-letter
+  read name the column (the codes in decimal, comma-separated, `NULL` for
+  none), and a replay and a burial of lapsed leases clear it.
+- **Two brokers over one pool and table share a wake** (`sqlWakes`), keyed by
+  the executor `Join` answers outside a transaction and the table; a joiner
+  whose pool is nil or incomparable gets a signal of its own.
+
+What is NOT guaranteed, and says so in the ADR: a publication from another
+process is found by the poll (no LISTEN/NOTIFY — a driver feature
+`database/sql` does not carry); a call inside the caller's transaction runs at
+that transaction's isolation — on PostgreSQL REPEATABLE READ a leased row
+another transaction changed since the snapshot is a serialization failure,
+which the caller gets as `QUEUE_BACKEND_FAILED`; SKIP LOCKED needs MySQL 8.0.1
+or MariaDB 10.6, and an older server fails the lease the same way. And a
+database fails transiently where a directory rarely does, while `Consume` still
+returns on a storage failure: a consumer over the SQL broker runs under
+`lifecycle`'s supervisor (ADR 0112), and SQLite is opened with a busy timeout.
+
+## Failures no retry can fix, the dead letters' two decisions (ADR 0151), and a dead letter written as it lies (ADR 0178)
+
+- **`Consume` rejects a `DoNotRetry` failure.** `settle` asks for the
+  `Rejecter` sibling and `errs.HasCode(failure, CodeNotRetryable)`; both true,
+  the message is dead-lettered at once with the handler's cause, at the count
+  it had. A broker without the sibling is nacked as before. A panic is never
+  the mark: `guard` carries the recovered value as a FIELD of
+  `HANDLER_PANICKED`, never as its origin.
+- **`ReplayDeadLetter` and `DeleteDeadLetter`**, by `MessageValue.ID`, on all
+  three brokers. The memory broker moves the record back into its ready list.
+  The file broker publishes the payload into `ready/` — atomically and
+  durably, as `Publish` does — and removes every record of the ID AFTER, the
+  order that degrades into a duplicate rather than a loss; two replays racing
+  can therefore queue it twice, which at-least-once permits (a record cannot be
+  renamed into the queue: a queued message is its payload alone). A record
+  whose header names another message than its file name does is never
+  queued. The SQL
+  broker's replay is one UPDATE of the row's state, so the second of two racing
+  replays is refused `DEAD_LETTER_NOT_FOUND`.
+- **`PutDeadLetter` writes a dead letter as it lies (ADR 0178)**, on all three
+  brokers, for a copy of a queue from one broker to another: payload, both
+  instants, count, reason, cause, code — 0 included — and trail (none on an
+  SQL broker without `SQLConfig.Trail`) kept, under an
+  identifier the broker mints from the enqueue instant (the memory broker
+  from it and its sequence). `checkDeadLetter` refuses first, identically
+  everywhere: an identifier set, a count below 1 or above 2³¹−1 (MySQL's
+  `INT`), an instant `nameable` refuses, a reason or cause `oneLine` would
+  rewrite, a trail over sixteen codes — `INVALID_DEAD_LETTER`, naming the
+  field — then a payload over the bound, `MESSAGE_TOO_LARGE`. The file broker writes the record a burial
+  writes, through the same `WriteAtomic`; the SQL broker one INSERT with
+  `dead = 1` and the failure instant as `due`, a savepoint of the caller's
+  transaction when there is one. A dead letter is never receivable, so none
+  wakes a consumer. `deadletter_write_external_test.go` holds it on every
+  broker, and the SQL one in and out of a rolled-back transaction.
+- **A dead letter keeps the trail of its cause (issue #500).** `describeCause`
+  keeps `errs.TrailOf(cause)` beside the origin's reason, Public half and
+  code: at most sixteen codes, the kernel's own bound (`maxDeadTrail`), oldest
+  first, nil for none. It is the part of a failure only the trail carries — a
+  mail spool's `MAIL_REJECTED` or `MAIL_EXPIRED` behind the transport's
+  `SEND_REFUSED`, the queue's own `NOT_RETRYABLE` behind both. The memory
+  broker keeps a copy and hands every reader its own; the file broker writes
+  a `trail <code>,<code>` header line after `code`, ONLY when there is one, so
+  a record whose cause had none is the bytes `ktnq/1` always was and a reader
+  older than the line skips it as an unknown field; a line that does not
+  parse, or holds more than sixteen codes, reads as no trail and costs the
+  record nothing else. `deadletter_trail_external_test.go` holds it on every
+  broker: a rejection and a last nack keep it, a death by lapsed leases and a
+  cause without one have none, a replayed message that dies again keeps
+  nothing of its first death, the file record without a trail and with a
+  corrupt one, and the SQL broker without `Trail`.
+- **`Messages` and `PutMessage` move a live message as it lies (ADR 0178)**,
+  on all three brokers, for the same copy. `Messages(ctx, after, max)` lists
+  the queued and leased messages in identifier order, resuming after `after`:
+  the file broker reads `ready/` and `inflight/` — a name already says a
+  message's state, deadline and count —, then the payloads, renaming nothing;
+  the SQL broker sends one unlocked read, `liveList` (`WHERE dead = 0 AND id >
+  ? ORDER BY id LIMIT ?`); the memory broker copies under its read lock. None
+  leases, counts or reclaims. `PutMessage` refuses through
+  `checkLiveMessage`, shared — an identifier set, `Leased`, a count below 0
+  or above 2³¹−1, an instant `nameable` refuses: `INVALID_MESSAGE`, naming the
+  field; then `MESSAGE_TOO_LARGE` — and writes a queued message visible at
+  `VisibleAt` with its count: the file broker a `ready/` file named by both
+  instants and the count, the state a retry leaves; the SQL broker one
+  `putLive` INSERT, a savepoint of the caller's transaction, its consumers
+  woken after the commit; the memory broker a record in its ready list. Its
+  next delivery counts one more than the count given.
+  `message_copy_external_test.go` holds it on every broker.
+- **The growing retry delay is `retry.go`'s one function**, so the double waits
+  exactly what the durable brokers wait. The curve's jitter stays at zero: the
+  retry instant is what `Wake` reports and what a test asserts.
+
+## Consume, and the one piece of ceremony
+
+`ConsumerConfig.HandlerIsIdempotent` must be `true`; its zero value is refused
+with `ConsumerMisconfigured`. This is `resilience.HedgeConfig.Idempotent`'s
+instrument for its reason: the queue delivers at least once, the SDK cannot
+check whether a handler survives that, so the caller asserts it where a
+reviewer sees it — and `grep -rn HandlerIsIdempotent` enumerates every place in
+a codebase where somebody promised it.
+
+`Parallelism`, `BatchSize` and `PollInterval` are all CLAMPED, because each has
+one sensible reading at zero and none of them is dangerous.
+
+The `Parallelism` workers run in a `kernel/concur/group` JOINED group
+(`group.NewJoined`): the first worker the storage refuses cancels the others —
+they all poll the same broken medium — and `Consume` returns once every worker
+has, with each worker's own failure joined in worker order (a sibling that was
+merely cancelled reports nothing). A worker's panic outside the handler — the
+handler's own is recovered into a nack — is re-raised in `Consume`'s goroutine
+after its siblings have stopped. `TestAStorageFailureStopsEveryWorkerAndIsReturned`
+pins the report.
+
+Every outcome — an acknowledgement, a nack, a rejection, a release — is sent
+on the consumer's context WITHOUT its cancellation (`bounded`): a stop landing
+between the handler's return and the `Ack` used to abandon the acknowledgement
+on every broker — each one's `Ack` honours its context — so the message stayed
+leased and came back after the visibility timeout, a duplicate a graceful stop
+caused (kitsunium/sdk#472, a kept letter the framework's re-seal test found
+still at rest after `Stop`). `TestAHandledMessageIsAcknowledgedWhenTheStopLandsBeforeItsAck`
+cancels from inside the handler, so it is that interleaving every time, on
+every broker.
+
+## A stop, a drain and a lease (kitsunium/sdk#474)
+
+A stop used to reach the handler as its context and nothing else, and a batch
+was handled whatever its leases had left. Reproduced first, on every broker,
+by `consume_lease_external_test.go` — each case failed before the change:
+
+- **A stop in the middle of a batch hands the rest back, uncounted.** Before,
+  the rest of the batch went to the handler under a dead context and was
+  nacked on it; every broker refused that nack, so each message stayed leased
+  for a whole visibility timeout and came back one delivery closer to the
+  dead-letter store — a deployment burnt a delivery of work nobody tried.
+  Now `settleBatch` starts nothing once the context is done and `handBackAll`
+  releases what is left (`TestAStopInTheMiddleOfABatchHandsTheUnstartedMessagesBackUncounted`).
+- **Handed back is `Releaser.Release`**: receivable at once, the delivery
+  count put back, never dead-lettered — SQS's `ChangeMessageVisibility(0)`.
+  Each broker does it in one move: the memory broker re-queues the record with
+  its count one lower, the file broker renames `inflight/` back to `ready/`
+  under a name visible now with the count one lower (a `ready/` name at zero
+  is the one `PutMessage` writes for a message never tried), the SQL broker
+  sends one `UPDATE … SET due = now, lease = NULL, deliveries = deliveries - 1`
+  under the condition every lease-ending statement carries. A broker without
+  the sibling is nacked instead, with no cause: retried after its delay, the
+  delivery counted (`TestAStopFallsBackToANackWithoutReleaser`).
+- **The message in hand drains.** `DrainTimeout` (River's `SoftStopTimeout`)
+  keeps the stop from the handler that long; what finishes is acknowledged,
+  what the drain cuts short is released, and a failure once the consumer is
+  stopping is the stop's, not the message's — released, unless it is a panic
+  or `DoNotRetry`; that holds when the lease's margin ends the handler before
+  the drain does (`TestALeaseThatEndsDuringADrainStillHandsTheMessageBackUncounted`).
+  Zero cancels at once, as a stop always did — and that handler's message is
+  released too, where its nack used to be refused on the dead context
+  (`TestADrain…`, `TestAStopWithNoDrainHandsTheInterruptedMessageBack`).
+- **A handler that extends its own lease is not tracked.** The bound stays the
+  lease it was handed and the outcome goes on that lease's void receipt, so
+  such a handler parks its message and returns, as the mail spool does; one
+  that must outlive its lease sets `AutoExtend` instead.
+- **Every outcome past the stop is bounded by `SettleTimeout`** (zero is five
+  seconds), on the consumer's clock, from the instant the consumer stops — a
+  medium that stopped answering cannot hold a stop forever. The cut is
+  `QUEUE_BACKEND_FAILED` naming the operation, which the pump reads as the
+  stop it happened during (`TestAnOutcomeSentPastTheStopIsBoundedBySettleTimeout`).
+  While the consumer runs an outcome is NOT timed, deliberately: nothing waits
+  on it but the worker, which the medium's own failure reaches, and an idle
+  worker's clock then holds no wait but its poll — what a test driving a
+  `ManualClock` with `BlockUntil(1)` counts on. A renewal is always bounded.
+- **A handler ends a margin before its lease.** Its context is cancelled with
+  `LEASE_EXPIRED` as the cause at `ExpiresAt − margin`, the margin a tenth of
+  the lease as granted, at most `SettleTimeout` — room for the nack to land
+  while the lease holds. The lease is the broker's instant read on the
+  consumer's clock: they must be one clock, and a lease that already looks
+  ended on arrival — two clocks that disagree — is not bounded at all rather
+  than never run (`TestAHandlerIsStoppedBeforeItsLeaseEnds`). A message of a
+  batch whose lease is down to the margin when its turn comes is released, not
+  started (`TestAMessageWhoseLeaseRanOutInItsBatchIsNotHandedToTheHandler`).
+- **`AutoExtend` renews instead** (the heartbeat of SQS, JetStream's `+WPI`,
+  Temporal's): every third of the lease while the handler runs, by the length
+  the broker granted, moving the margin with it, and before a batch message
+  starts once a third of its lease is spent. A refused renewal cancels the
+  handler with the refusal as its cause. The engine acknowledges on the
+  newest receipt (`TestAutoExtend…`, `TestARefusedRenewalStopsTheHandler`).
+
+The watch is one goroutine per handled message (`oversee`), joined before the
+outcome is sent; its timers — the margin, AutoExtend's ticker — are armed
+before the handler starts, so a test sees them armed once it runs, and every
+one is stopped before the outcome. When there is nothing to watch — no lease
+to bound, no drain — the handler gets the consumer's own context, as before.
+A test that waits for an idle consumer with `BlockUntil(1)` must therefore do
+so once the handler has RETURNED: while it runs, its margin timer is armed
+(`TestARetryIsDeliveredWhenItsDelayEndsNotAtTheNextPoll` waits for the nack's
+wake first).
+
+## Waking an idle consumer (ADR 0104)
+
+`Consume` used to find work only by polling, so latency and idle cost were one
+knob: a downstream framework ran a dozen consumers at 50 ms and paid ~3 % of a
+core for nothing. Every broker here implements `core/data/queue.Waker`, an ADR 0039
+sibling — `Broker` keeps its four methods — and `Consume` waits on it. The SQL
+broker's due instant is recorded by its Receive, as the file broker's is, and
+its signal is closed after the COMMIT of the publication it announces.
+
+- **A signal, closed and replaced.** `Publish` and `Nack` close the channel
+  every idle worker holds; closing is what makes it a broadcast, where a send
+  would wake one receiver or nobody. A worker takes the channel BEFORE its
+  `Receive`, so a publication landing between an empty `Receive` and the wait
+  has already closed it — there is no lost wake-up window.
+- **A due instant, because nothing happens when a retry becomes due.** A
+  nacked message turns visible `RetryDelay` later and a dead consumer's lease
+  lapses `VisibilityTimeout` later; no call marks either moment, so no signal
+  can. `Wake().In` says how long until the earliest one, and the worker sleeps
+  `min(PollInterval, In)`. The memory broker reads it from its ready list and
+  its expiry heap under its lock; the durable broker cannot read a directory
+  without a `Receive`, so each `Receive` RECORDS what its two scans stopped
+  on — they already stop at the first future instant — and `Wake` reads the
+  record. It can only be stale early (another process took the message, a
+  lease was extended), which costs one empty `Receive`.
+- **In is a duration, not an instant.** The broker and the consumer each take
+  a clock, and nothing forces them to be one. A duration read on the broker's
+  clock is waited on the consumer's; an instant compared across two clocks
+  that disagree could be permanently in the past and spin the loop.
+- **The durable signal belongs to the directory.** Two brokers over one `Dir`
+  are one queue, so the signal is looked up in a process-wide table keyed by
+  the directory resolved through its links, held WEAKLY with a
+  `runtime.AddCleanup` that drops the entry once no broker references it. A
+  publication from another process closes nothing; that is what the poll is
+  for, and it is why `PollInterval` stays and becomes a bound.
+- **Still no timer and no goroutine in a broker.** The wait is the consumer's;
+  the broker only answers.
+
+## A retry after the handler's delay, a message for later, a publication once (ADR 0183)
+
+Three siblings, on all three brokers, each one statement, one rename or one
+write beside what the broker already did:
+
+- **`NackAfter` is `Nack` with another delay.** Each broker's `Nack` became
+  `nackWith(wait)`: the policy's `retryDelay` for `Nack`, the caller's delay for
+  `NackAfter`. The count, the burial on the last attempt and the wake are the
+  same. A negative delay is now, and an instant no name or column carries is
+  `QUEUE_MISCONFIGURED`, checked before the lease is touched (`nackDeadline`).
+  `Consume`'s `settle` reads `RetryAfterOf` after `DoNotRetry` and after a
+  stop, and nacks without the sibling.
+- **`PublishAt` is `Publish` with a later visibility.** Memory: the record's
+  `visibleAt`. File: the queued name's first field, which is what the
+  directory sorts on. SQL: the `due` the INSERT already binds (`Publish` is
+  `PublishAt` at the zero instant). A past instant is now, one past 2262 is
+  refused (`publishVisibleAt`). The idle consumer's wake already reports the
+  earliest due, so it sleeps until the instant.
+- **`PublishOnce` reserves a key for a window.** A duplicate returns `false`
+  and the zero message, never an error. The refusals are `onceUntil`'s: an
+  empty key, a window that is not positive, or one past 2262.
+  - Memory: `once` maps a key to its window's end, and `onceEnds`, a heap,
+    drops passed ones at the next `PublishOnce`.
+  - SQL: a row of the queue's own table, `dead = 2`, id the key's SHA-256 (64
+    hex bytes, never a message identifier), `due` the window's end. The
+    primary key is the unique constraint, so a table that predates this needs
+    no migration. Every older statement names `dead = 0` or `1`, so none ever
+    reads such a row: `TestSQLAReservationIsNoMessage`. One transaction, the
+    caller's as a savepoint, so the reservation and the message commit or roll
+    back together: `TestSQLAReservationExistsIfAndOnlyIfItsTransactionCommits`.
+  - File: `once/`, a fourth directory under the states' rule. An account that
+    could plant `once/<digest>.key` could silence that key:
+    `TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust`. The message is
+    written first and the key reserved after, so a crash costs a duplicate and
+    never a lost message. The reservation is written under `<digest>.<hex>.new`
+    with `O_EXCL`, then `link(2)`ed to `<digest>.key`. A create-then-write was
+    read empty, as passed, by a racing producer, which published too: three of
+    eight producers published under `-race`
+    (`TestProducersRacingOnOneKeyPublishOnce`). A producer that loses the link
+    unlinks its message before waking anybody (`withdraw`). If a consumer
+    leased it in that instant, the call reports a publication. A passed
+    reservation is renamed to `<digest>.<hex>.gone`, read again, and put back
+    by `link(2)` if it turns out to be running. The sweep runs at most once a
+    minute per broker: it removes passed reservations, passed `.gone`
+    leftovers and passed `.new` leftovers. It never removes a `.new` whose end
+    it cannot read, since that may be another producer still writing. The
+    reservation is not flushed: a power cut may forget it, which is a
+    duplicate. `TestAFileReservationIsOneFilePerKeySweptOnceItsWindowPassed`,
+    `TestAHalfWrittenReservationReadsAsPassed`,
+    `TestTwoFileBrokersOverOneDirectoryShareTheirReservations`.
+
+`TestSQLStatementsPerCall` pins the costs. `PublishAt` and `NackAfter` are one
+statement each. `PublishOnce` is one transaction: `onceDrop`, `onceClaim`,
+`insert` when claimed, `oncePick`, and `onceSweepRows` only when something
+passed.
+
+## The siblings that act on a whole queue, a message's lifetime, and a jittered retry (ADR 0054 and ADR 0151, amended 2026-11-02)
+
+- **One order for the dead letters, and a cursor (issue #1043).** The port
+  promised "oldest first" and the brokers read it three ways: the file broker
+  by name — the enqueue instant —, the SQL broker by `due`, which a burial
+  sets to the failure instant, and the memory broker by burial. A message
+  enqueued first and buried last came back first on file and last on the
+  other two — the drift the conformance suite exists for, which it missed
+  because no case buried out of enqueue order
+  (`TestTheDeadLettersAreListedInEnqueueOrderWhateverOrderTheyDied` now
+  does). The order is the identifier's, which every broker mints from the
+  enqueue instant: the SQL read is `WHERE dead = 1 AND id > ? ORDER BY id`, a
+  primary-key scan; the memory broker keeps its list sorted at insertion
+  (`insertDead`) and its identifiers fixed-width (`memID`, two thirteen-digit
+  base-36 halves), so their byte order is their instants'; the file broker
+  was already right. `DeadLettersAfter` resumes after an identifier;
+  `DeadLetters` is its first page.
+- **`Stats` reads no payload (issue #833).** File: the three directories'
+  names, no file opened, and no directory read on a quiet queue (issue #811); SQL: one `GROUP BY dead, CASE WHEN lease IS NULL …`;
+  memory: lengths and one walk. A lapsed lease nobody reclaimed counts as
+  leased. The file broker's count is two readings, the queued directory then
+  the in-flight one, so a message a reclaim, a nack or a release renames from
+  flight back into the queue between them is in neither (issue #1369): the
+  snapshot races the queue, as `Counter` says, and a test waits on an
+  acknowledgement the broker accepted, never on an empty `Stats` taken while
+  a consumer runs (`TestTheAckedWindowAcknowledgesARedeliveryWithoutRunningTheHandler`).
+- **`MaxAge` dead-letters, it never drops (issue #835).** A message whose age
+  reached it is buried `MESSAGE_EXPIRED` with the count it had, by the
+  Receive that reaches it visible: the memory broker at its head; the file
+  broker claims it by the rename into flight under a lease of its own, then
+  buries it as a lapsed lease is buried (`expireReady`, so two consumers never
+  bury it twice and a crash leaves an ordinary lease); the SQL broker in the
+  lease transaction, one `UPDATE … WHERE enqueued_at <= now − MaxAge AND due
+  <= now` before the first pick. A message already leased keeps its lease:
+  its acknowledgement lands. With no MaxAge nothing more is sent.
+- **`Purge` removes the live messages and never a dead letter (issue #835)**:
+  the file broker unlinks `ready/` then `inflight/` (a message leased
+  meanwhile moves into the second and is not missed); SQL deletes the rows
+  without, then with, a lease in one transaction; a held lease's
+  acknowledgement then answers `LEASE_EXPIRED`. Consumers are woken.
+- **Bulk replay and purge of the dead letters, and a retention (issue
+  #1120).** Oldest first in the store's order; one directory read per call on
+  file, one statement on SQL — MySQL bounds an UPDATE or a DELETE with its
+  own `ORDER BY id LIMIT`, the others with a sub-select of the ids, since
+  MySQL refuses a sub-select of the table it changes. A failure part-way
+  returns the count done; the file broker checks the context between
+  messages. `DeadLetterRetention` is swept by a Receive, at most once a minute
+  per broker on its clock: one `DELETE` on SQL, a read of each record's
+  HEADER on file (`deadFailedAt`, 4 KiB at most, never the payload).
+- **`PublishMany` (issue #827)**: every payload checked before anything is
+  written; SQL inserts the batch in multi-row INSERTs, atomic — one statement
+  up to 125 rows, a transaction of its own beyond, the caller's when it has
+  one; memory under one lock, one wake. **The file broker names every
+  message, then hands the batch to vfs's `AtomicBatchWriter.WriteAtomicAll`**
+  (`mintFileBatch`): each message its own atomic publication with its own file
+  flush, and `ready/` flushed ONCE after the last rename; since 2026-11-15
+  the file flushes of a window of sixteen are in flight together (ADR 0056,
+  amended), the renames still in order — indicatively 0.4 to 1.0 ms a message
+  for a batch of sixteen against `Publish`'s 3.1 ms on the VM, the runner's
+  lane the figure of record (BENCH.md). A failure at the k-th
+  returns the first k−1, durable; a directory flush that failed returns none
+  (visible, durability in doubt, as `Publish` returns nothing beside the same
+  failure). A publisher without the sibling publishes message by message
+  (`publishEach`). The five steps stay vfs's; this package still does not
+  reimplement them (§ "Where `internal/service/data/vfs` is used").
+  `TestFilePublishManySharesOneDirectoryFlush`,
+  `TestFilePublishManyReturnsTheDurablePrefix`.
+- **`AckMany` (issue #1152)**: one outcome per receipt. SQL: one DELETE per
+  167 receipts, `(id = ? AND lease = ? AND deliveries = ?) OR …`, the rows
+  that landed named by `RETURNING id, lease` on PostgreSQL and SQLite and by
+  a locking read first on MySQL; a receipt of another grammar is never sent.
+  File and memory: `Ack` per receipt. A refusal is an outcome; the call's
+  error is the medium's, the receipts after it `AckNotAttempted`.
+- **`AllMessages` (issue #816)**: memory and SQL page `Messages` (256 a
+  page); the file broker lists its two directories once and reads each
+  payload only when its message is yielded. The memory broker's `Messages`
+  sorts its records and copies the payloads of the page alone — it copied
+  every live message's before, so paging a thousand cost a thousand copies
+  per page (BENCH.md, `BenchmarkListings`).
+- **Measured (issue #1048)**: `BENCH.md` carries rows for `Consume` (plain,
+  `AutoExtend`, `DrainTimeout`), `Extend`, `Release`, `Reject`, `PublishAt`,
+  `PublishOnce` fresh and duplicate, the listings, `Stats`, `PublishMany`,
+  `AckMany`, and the SQL broker per verb over the fake engine
+  (`siblings_bench_test.go`). The `Consume` round trip on the memory broker
+  is a design budget since: `allocs: 28` on `queue.Consume` in
+  `design/sdk.yaml` (ADR 0165), held by the race-off `gen_perf_test.go` kit
+  writes over `perf_fixtures_test.go`'s `perfConsumeRoundTrip` — a message
+  published and handled by a running `Consume`, the wake, the watch and the
+  acknowledgement included — in the alloc lane. The real engines' rows are
+  `e2e/integration/sql/BENCH.md`'s (`queue_bench_test.go`): SQLite measured,
+  PostgreSQL and MySQL waiting for a run with Docker.
+- **The retry jitter draws from the broker's `Random` (issue #1044)**, never
+  from `kernel/backoff`'s process-wide source, so a test injecting a fixed
+  draw still asserts every instant to the nanosecond, and the three brokers
+  draw alike. `Random` may be called by several goroutines at once. With the
+  zeros nothing is drawn and the instant is the curve's.
+- **`Acknowledged` and `AckedWindow` (issue #1046).** `settle` sends nothing
+  for a failure carrying `CodeAcknowledged` — the handler acknowledged in its
+  own transaction, so its effects and its acknowledgement commit together
+  (on the SQL broker its `Ack` is a savepoint of that transaction); one that
+  only said so leaves its message leased until it lapses. `AckedWindow`
+  remembers the last N identifiers a handler finished — nil or Acknowledged
+  — in this process; a redelivery of one is acknowledged without running the
+  handler (`process`).
+- **One idle worker polls for the others (issue #1049).** A worker whose
+  Receive came back empty takes the `idleGate`'s slot and waits as ADR 0104's
+  idle worker does — wake, due instant, poll —, or, when another holds it,
+  waits until that one finds work; the holder hands the slot on and wakes
+  them all when it does. Eight idle workers send one probe per interval, not
+  eight (`TestIdleWorkersPollOncePerInterval`,
+  `TestSQLIdleWorkersProbeOncePerInterval`), and four messages published at
+  once still reach four of them with the clock never moved
+  (`TestFourMessagesPublishedAtOnceReachFourIdleWorkersAtOnce`). A worker
+  that has just settled a batch receives directly: the gate is for idle
+  workers only, so a backlog's Receives are never serialised through it.
+
+## Priorities: five levels, strict (ADR 0054, amended 2026-11-03, issue #1045)
+
+`PriorityPublisher.PublishPriority(ctx, payload, level)` on every broker. A
+Receive hands out the visible messages of the highest level first, then by
+visibility, then by identifier; a level's first message not yet visible ends
+that level's walk and never the next one's, so a high message in its retry
+delay holds back no visible normal one. Strict and without ageing: a steady
+higher level starves every lower one — `TestASteadyHigherLevelStarvesTheLevelBelow`
+shows it, as `TestASingleRetryReordersTheStream` shows the reorder. The level
+is kept across a nack, a release, a lapsed lease, a burial, a replay, a listing
+and a copy (`LiveMessageValue.Priority`, `DeadLetterValue.Priority`).
+
+- **Memory**: one ready list per level (`ready [priorityLevels][]*memRecord`,
+  `readyIndex`), each in visibility order; `takeEligible` walks them from the
+  highest, `earliestReady` is the wake's and `Stats`' next due.
+- **File**: the normal level's names are the ones written before priorities
+  existed, **byte for byte** — a queue on disk keeps working, and a process of
+  an earlier release sharing the directory still sees every normal message
+  (it skips the others as strays). Every other level opens the name with one
+  digit, `PriorityHighest − level` (`atLevel`): `0.` for the highest to
+  `4.` for the lowest, `2.` never written — a message has one name, so
+  `splitLeveled` refuses it. The ready listing sorts by level digit, a name
+  without one standing as `2`, then by the rest (`compareReady`), so one read
+  still serves the whole walk; in-flight and dead names sort by what follows
+  the digit (`compareStem`), a deadline and an enqueue instant, as before. A
+  dead letter's level is its name's; its record's header is unchanged.
+  `TestTheFileBrokerReadsTheNamesWrittenBeforePriorities` plants a 4-field
+  queued name, a 5-field in-flight name and a 3-field dead name spelled by hand.
+- **SQL**: opt-in. `SQLConfig.Priority` names the `priority` column
+  `SQLPriorityMigration` adds — a migration of its own, since `SQLMigration`'s
+  statements are frozen by their checksum (#1056) — `NOT NULL DEFAULT 0`, so a
+  row written before reads normal and every insertion that names no level
+  still writes a normal one. With it: `pick` orders `priority DESC, due, id`,
+  `insertPriority` publishes at a level, `putLive`/`putDead` write it and
+  `deadList`/`liveList` read it last; PostgreSQL leases through `pick` instead
+  of its one-statement `leaseReturning`, whose batch would ignore the level.
+  Without it every statement is today's, byte for byte, and a level other than
+  the normal one — published or copied — is `QUEUE_MISCONFIGURED`.
+  `TestSQLThePriorityStatementsAsSent`,
+  `TestSQLPriorityMigrationAddsTheColumnAndItsIndex`, and on a real SQLite file
+  `framework/connectors/sqlite`'s `TestOldRowsReadAtTheNormalLevelAfterThePriorityMigration`;
+  the three engines in `e2e/integration/sql`.
+
+## Tests worth knowing about
+
+- **`TestAKilledConsumerLosesItsLeaseAndTheMessageComesBack`** is the domain's
+  central proof and it is not a `Nack` test. It re-executes this test binary as
+  a child process, waits for the child to announce a lease, asserts that the
+  PARENT (a different process) can see nothing, then SIGKILLs the child — no
+  deferred function, no signal handler, no flush — and asserts the message
+  comes back with `Deliveries == 2`. Every fact that recovery needs had to have
+  been on the disk, because the process that knew them is gone.
+  `TestTheVictimConsumer` is the child; it self-skips unless
+  `KTNQ_VICTIM_QUEUE_DIR` is set, so it is discovered by `go test ./...` like
+  any other test and needs no build tag, no `manual` target and no compensating
+  lane (CLAUDE.md rule 12).
+- **`TestASingleRetryReordersTheStream`** demonstrates the thing everyone
+  discovers in production, on purpose, so it is documented rather than found.
+- **The conformance suite is table-driven over EVERY broker** — memory, file,
+  and SQL on each dialect's statements (`everyBroker`). A double nobody checks
+  against the real thing is a double that has already drifted.
+- **`sqlfake_external_test.go` is a SQL engine** that understands exactly the
+  SQL broker's statements, as docstore's does its store's: the real pool,
+  `*sql.Tx`, savepoints, `Join` and `Defer` above a table in a map, serialised
+  transactions, PostgreSQL's aborted state, a statement log, and failures at a
+  named statement. It verifies neither the SQL an engine accepts nor SKIP
+  LOCKED; `sql_statements_external_test.go` pins the text, and
+  `e2e/integration/sql` runs the broker on the three real engines under the
+  `integration` tag — see its CLAUDE.md.
+- **`TestSQLAPublicationExistsIfAndOnlyIfItsTransactionCommits`** is the SQL
+  broker's reason to exist, and **`TestSQLStatementsPerCall`** what each call
+  costs: one read for an idle Receive, one statement per Ack, Nack, NackAfter,
+  Extend, Reject or Release, one INSERT per Publish or PublishAt, one
+  transaction per PublishOnce.
+- **`TestAStrayFileInTheQueueDirectoryIsNeverDelivered`** plants a
+  `.vfs-<hex>.tmp` in `ready/` — the temporary a CONCURRENT atomic publication
+  is genuinely writing there — and asserts the scan skips it. Delivering it
+  would hand a consumer a truncated payload under a receipt naming a file about
+  to be renamed away.

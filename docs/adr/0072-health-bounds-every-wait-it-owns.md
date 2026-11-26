@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0060](0060-sdk-health-domain.md) — the bounds, not the three-probe shape
 - **Related**: [ADR 0043](0043-drain-is-a-signal-not-a-cancellation.md) (a cancellation is an announcement, not a kill), [ADR 0050](0050-sdk-lifecycle-domain.md) (a per-component budget nobody else can spend), [ADR 0031](0031-policy-zero-values-are-never-inert.md)
+- **Area**: app
+- **Need**: incident
 
 ## Context
 

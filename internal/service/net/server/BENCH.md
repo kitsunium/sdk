@@ -55,6 +55,10 @@ What the SDK number includes that the baseline does not: the pooled wrapper,
 middleware-chain resolution, per-phase deadline application, the live-socket
 registry, the connection counters and the drain bookkeeping.
 
+A file sent through a handler with `io.Copy(c, f)` (#970) is measured by
+`BenchmarkCopyFile`: 64 MiB at 0 B/op and 0 allocs/op on a group with no bound,
+the connection handed out with `syscall.Conn` (edition 2026-11-15 below).
+
 ### 2. HTTP adapter vs stock `net/http`
 
 One keep-alive `GET` against an identical handler.
@@ -227,6 +231,128 @@ above, including the one that turned out not to help.
 - `AcquireRelease_ReadBuffer16K` above 0 allocs/op means the scratch buffer
   stopped coming from `kernel/concur/buffer`'s 16 KiB class — check that
   `acquire` still calls `buffer.GetSize(size)`.
+
+## Edition 2026-11-15 (second) — an idle h2c connection within 256 B (#961), Shards(1) on the L3 run (#977), kqueue for auto on the BSDs (#976)
+
+**An idle h2c connection's Go heap** (`TestLoopHTTP2_idleMemory` and its auto twin:
+two loops, 10 000 raw clients that sent the preface and an empty SETTINGS, the
+median of three settled readings; AMD EPYC 7351P, 8 vCPU, `GOMAXPROCS=4`, Linux
+6.12.101, go1.27.4). #961's original bound, the loop's documented 256 B, is held:
+
+| Backend | before (base `ff2af942a`) | after | HTTP/1.1, same harness, after |
+|---|---|---|---|
+| epoll | 344 B | 218 B | 330 B |
+| io_uring (`auto`) | 365 B | 240 B | 341 B |
+| epoll, linux/386 | — | 217 B | 245 B |
+
+The heap profile of the base split an idle h2c connection into the loop's slot
+table (a 144-byte `connCtl` and its growth, 148–177 B), its timer link (16–18 B),
+io_uring's sweep epochs and receive bookkeeping (17 B; the sweep exists before
+Linux 6.13 only) and the adapter's entry (152 bytes, 159–178 B with its growth).
+A file body's state moved out of the slot into the ring's file table (`connCtl`
+104 bytes), and the HPACK decoder, the open requests and two narrowed counters out
+of the adapter's entry (80 bytes): taken when a connection uses them. The loop
+alone (`TestMemory_idleConnection`) reads 137 B on epoll and 148 B on io_uring,
+178 B and 191 B before. The HTTP/1.1 column is the http1 adapter's state for a
+request begun, logged, not bounded by #961.
+
+**Shards(1) against the base on the L3 run** (`TestShardsL3_oneSocketIsTheBase`):
+L3's load, every datagram stamped, to a datagram group with `Shards(1)` and to one
+without the option, both served in the receiver's namespace; each binds one socket
+without `SO_REUSEPORT`, reports one shard and reads all 400 000 once, byte for byte.
+Its lane is net-kernel-gate's bench job, after the L3 rounds (veth, root): that
+run judges it. Over loopback here, with the same sender and 400 032 datagrams a
+group: 400 032 read exact on each, none differing, none twice.
+
+**kqueue for auto on FreeBSD, OpenBSD, NetBSD and DragonFly** (ADR 0222 amended
+2026-11-15): no new number. The gate auto's choice waits on is the macos-15 row of
+the 2026-11-13 edition (`kqueue`, 0.3313–0.3995 against P6's 0.7); the backend is
+one driver on darwin and the BSDs, whose loop and server suites pass on the
+FreeBSD, OpenBSD and NetBSD guests (e2e-cross run 43668177804).
+
+## Edition 2026-11-15 — a file's copy at 0 B/op (#970), the adapter's cost and HTTP/2's counts (#966)
+
+The box of the 2026-11-13 edition below (AMD EPYC 7351P, 8 vCPU, `GOMAXPROCS=4`,
+Linux 6.12.101, go1.27.4).
+
+**`BenchmarkCopyFile`, the copy alone.** The file is opened once and rewound each round
+(`Seek`), so a round's B/op is the copy's own: the rows of 2026-11-13 counted each
+round's `os.Open`, about 180 B in three allocations. `-benchmem -benchtime=400x -count=3`
+(`before_generic` and `bounded_ReadFrom` at `20x`):
+
+| Benchmark | MB/s | B/op | allocs/op |
+|---|---|---|---|
+| `CopyFile/after_syscallConn` (a group with no bound: `os.File`'s sendfile on the socket's RawConn) | 4 118–4 259 | 0–3 | **0** |
+| `CopyFile/after_ReadFrom` (the connection's `ReadFrom`: `net.sendFile`) | 3 889–3 930 | 88–89 | 4 |
+| `CopyFile/bare_TCPConn` (the standard library alone) | 3 894–3 986 | 9–11 | 1 |
+| `CopyFile/bounded_ReadFrom` (`WriteTimeout`: sendfile a MiB a deadline) | 3 290–3 368 | 5 744–5 762 | 261 |
+| `CopyFile/before_generic` (32 KiB loop) | 1 026–1 098 | 32 768–32 784 | 1 |
+
+#970's original criterion — `io.Copy(c, f)` of 64 MiB at 0 B/op — is held. The four
+allocations of 2026-11-13 were `net.sendFile`'s (its closure, the results it captures,
+`werr`, and the file's RawConn: `net/sendfile.go:24`, `:43`, `:48`, `:49`, pprof's
+`-list`), paid by any `ReadFrom` of a `*net.TCPConn`. `io.Copy` avoids them when the
+destination is a `syscall.Conn`: `os.File.WriteTo` asks it for its RawConn and calls
+sendfile on the socket's descriptor itself (`os/zero_copy_linux.go`), allocating only
+that RawConn — the bare `*net.TCPConn`'s one allocation. A group with no bound now
+hands its connection out with `syscall.Conn`, its RawConn asked once a connection and
+kept, so a copy allocates nothing: `TestConnRawView_fileCopyAllocs` counts 0 a copy
+(`testing.AllocsPerRun`, 20 copies of 1 MiB, race off); what the rows show past 0
+B/op is the first round's RawConn and the run's own, over 400 rounds. A bounded group
+keeps its copies on `ReadFrom`, a deadline a mebibyte, and pays `net.sendFile`'s four a
+step.
+
+**The adapter's per-request cost (#966).** `BenchmarkHTTP_Adapter` with and without the
+per-version counter and `CountError`, the counter taken out of the tree for the second
+run, then `BenchmarkHTTP_Native`, one session, `-benchtime=3000x -count=6`:
+
+| Benchmark | ns/op (median of 6) | B/op | allocs/op |
+|---|---|---|---|
+| `HTTP_Adapter`, counters | 164 637 | 5 083–5 119 | **64** |
+| `HTTP_Adapter`, no counters | 171 406 | 5 083–5 109 | **64** |
+| `HTTP_Native` | 165 109 | 5 077–5 093 | **64** |
+
+The counters add no allocation: #966's original criterion 3 — one atomic add a request,
+no new allocation in the adapter rows — is held. The rows' 61 of 2026-09-03 are 64 on
+go1.27.4 for the adapter and for net/http alone alike: the toolchain's three, not the
+adapter's.
+
+**A header list past `MaxHeaderBytes` on net/http's engine (#966's criterion 2),
+relevé selon la règle du propriétaire du 2026-11-14.** Original criterion: "a client
+sending a header block larger than MaxHeaderBytes makes State's HTTP2Errors carry the
+header-list type with Count 1". The loop's h2 adapter counts it (`TestLoopHTTP2_counts`),
+and a frame of a bad length counts `frame_size` once on both engines
+(`TestHTTPCounts_netHTTP`). On net/http's engine the standard library answers the list
+431 itself: its frame reader marks the block truncated and never calls `CountError`
+(`net/http/internal/http2/frame.go:1776-1786`, `server.go:1973-1975`), nothing is
+logged, and a block "too much" past the bound ends the connection with a generic
+PROTOCOL_ERROR the error log cannot tell apart (`frame.go:1799-1812`). Approaches tried
+and refuted: `CountError`; `ErrorLog`; raising `MaxHeaderBytes` and refusing in the
+adapter (the bound is HTTP/1.1's too, and advertised as SETTINGS_MAX_HEADER_LIST_SIZE);
+an observer of the decrypted HTTP/2 stream — reachable since net/http detects TLS by
+interface, but it must decode every HPACK block a second time and replay net/http's
+exact budget, against the one atomic add a request above. New criterion: header_list
+counted on the loop adapter, frame_size on both engines, and net/http's own 431 stated
+as not counted on its engine.
+
+**The `Backlog(8)` drain under load (#978's criterion 3).** `TestBacklog_drainThroughASmallQueue`
+— 384 peers dialled at a held loop of `Backlog(8)`, then a drain with an 8 s grace —, N
+copies of the race binary at once pinned with `taskset`, three drains each (io_uring, epoll,
+portable); the kernel's `TcpExt` counters over the run:
+
+| Drain | Load | drains with no peer lost | peers lost a drain | ListenOverflows | SyncookiesSent |
+|---|---|---|---|---|---|
+| queue kept at 8 | 6 copies, 2 CPUs | 18 / 18 | 0 | 16 484 | 5 064 |
+| queue kept at 8 | 10 copies, 1 CPU | 16 / 30 | 11 to 41 | 43 862 | 7 968 |
+| widened at the drain | 10 copies, 1 CPU | 30 / 30 | 0 | 12 732 | 127 |
+| widened at the drain | 12 copies, 1 CPU | 36 / 36 | 0 | 20 899 | 140 |
+| widened, the final build | 10 copies, 1 CPU | 30 / 30 | 0 | 16 857 | 193 |
+
+A starved loop takes a retry cohort slower than it arrives, and nine places overflow again at
+each of the grace's SYN retransmissions (1, 3, 7 s): the next one, at 15 s, met the closed
+listener (#1353's 38 of 385 under Bazel's parallel shards). Widened to somaxconn as Shutdown
+begins (`widenBacklogs`), the queue holds the retries and the drain's take serves them; the
+overflows left are the hold's own, the test filling the queue on purpose.
 
 ## Edition 2026-11-13 — the gate's new rows (#852, #977, #969, #982, #979, #961, #976)
 

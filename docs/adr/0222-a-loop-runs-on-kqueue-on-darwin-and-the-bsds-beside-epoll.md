@@ -4,6 +4,8 @@
 - **Date**: 2026-11-11
 - **Deciders**: SDK maintainers (kitsunium/sdk#976, lot L2)
 - **Related**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md) (§D5 deferred kqueue; this ADR resolves it), [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md) (the lattice and min(code, environment)), [ADR 0189](0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md) (rows, classes, staged probes), [ADR 0196](0196-a-drain-stops-the-routing-first-takes-the-listen-queue-then-closes-and-loopsauto-reads-gomaxprocs-once.md) (the drain's take), [ADR 0190](0190-a-merge-gate-judges-the-ratio-of-two-engines-measured-side-by-side.md) (the paired gate), [ADR 0018](0018-sdk-cross-platform-portability.md) (constants cited, no `x/sys`, `UnsupportedPlatform`)
+- **Area**: net
+- **Need**: decision
 
 ## Context
 
@@ -183,3 +185,50 @@ lower. `TestKqueueAuto` and `TestOperatorPlan_kqueueAuto` pin the plan on any
 platform, darwin's and FreeBSD's side by side; `TestLoopKqueue_autoAndTheOperator`
 and `TestLoopGroup_serves` start `auto` on the darwin lane (kqueue) and the BSD
 guests (portable).
+
+## Amendment 2026-11-15 — `auto` takes kqueue on every BSD (kitsunium/sdk#976)
+
+#976's original first criterion reads "On darwin and FreeBSD,
+`Loop(LoopValue{Backend: LoopBackendAuto})` starts on kqueue", and its third
+criterion places the gate auto's preference waits on — `tools/netgate` holding
+`goroutine:loop` at P6's threshold on macos-15 — which held (the second
+amendment of 2026-11-13). That amendment then added a rule no criterion asked
+for: a BSD's `auto` moves only in a change citing a row measured on that BSD.
+The owner's decision of 2026-11-14 is to aim at the original criterion; what
+could still keep `auto` off kqueue on FreeBSD, OpenBSD, NetBSD and DragonFly was
+checked one by one.
+
+- **The probe.** Its three stages are the same on every BSD — `kqueue(2)`, a
+  pipe registered as the wake, a Unix socket pair's readiness and end (§D4) —
+  and use no `EVFILT_USER`, which OpenBSD's and NetBSD's package `syscall` lack
+  (§D3). A stage that fails sends `auto` to the portable backend, reported, as
+  on darwin.
+- **The BSD lanes.** e2e-cross on `main` at `6e4c06d6d` (run 43668177804,
+  2026-11-15) passed `internal/service/net/loop` and `internal/service/net/server`
+  on the FreeBSD, OpenBSD and NetBSD guests, 47 groups starting on
+  `backend=kqueue`, probe `kqueue-socket`, on each: the backend serves there
+  whenever it is named.
+- **kqueue's differences between them**, each handled by the driver already:
+  darwin alone lacks `accept4`, `pipe2` (close-on-exec set under the fork lock)
+  and `MSG_NOSIGNAL` (`SO_NOSIGPIPE` per socket); `Kevent_t`'s layout and
+  `Udata`'s type differ (`Udata` is never used); OpenBSD takes raw system calls
+  only through its libc (no `FIONREAD`, a one-byte `MSG_PEEK` for `unread`, the
+  `loopdebug` thread check compiled out); the keepalive's idle time, interval
+  and count are `TCP_KEEPALIVE` on darwin, the `TCP_KEEPIDLE` family on FreeBSD,
+  NetBSD and DragonFly, and the system's on OpenBSD; `SO_REUSEPORT` does not
+  balance connections on the BSDs as Linux's does, which concerns `Shards(0)`
+  alone, Linux's case (§D6).
+- **DragonFly** has no guest: `cross-build` compiles and vets it, nothing runs
+  it. Its `auto` takes the same staged probe, whose refusal falls back to the
+  portable backend, reported.
+
+Nothing found keeps `auto` off kqueue there, so `server`'s plan for `auto` is
+kqueue on darwin, FreeBSD, OpenBSD, NetBSD and DragonFly (`kqueueAuto`), with
+its fallback to portable; an explicit kqueue still never falls back. This
+changes a default on the four BSDs: the pull request carries the
+`net:default-change` label and its `Override:` block names the way back,
+`KITSUNIUM_NET_ENGINE=portable` (`KITSUNIUM_NET_DISABLE=kqueue` does the same for
+kqueue alone). `TestKqueueAuto` and `TestOperatorPlan_kqueueAuto` pin the plan
+for each of the five on any platform; `TestLoopKqueue_autoAndTheOperator` and
+`TestLoopGroup_serves` start `auto` on kqueue on the darwin lane and the
+FreeBSD, OpenBSD and NetBSD guests.

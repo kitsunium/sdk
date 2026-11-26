@@ -569,11 +569,9 @@ packages:
       - blockDoc: The loop backends. The zero value is LoopBackendAuto.
         doc: |-
           LoopBackendAuto takes the best backend the platform's probe reaches:
-          io_uring, then epoll on Linux, kqueue on darwin, the portable backend
-          elsewhere — a native backend the probe refuses falls back to it. On
-          FreeBSD, OpenBSD, NetBSD and DragonFly it stays portable while no
-          paired row was measured there: kqueue runs there when named,
-          LoopBackendKqueue (ADR 0222).
+          io_uring, then epoll on Linux, kqueue on darwin, FreeBSD, OpenBSD,
+          NetBSD and DragonFly, the portable backend elsewhere — a native
+          backend the probe refuses falls back to it (ADR 0222).
         name: LoopBackendAuto
         type: LoopBackend
         value: "0"
@@ -601,8 +599,8 @@ packages:
         doc: |-
           LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and
           DragonFly, after a staged probe (ADR 0222). LoopBackendAuto takes it on
-          darwin, where its paired gate held on macos-15; on the BSDs it runs
-          only when named.
+          each of them, its paired gate having held on macos-15; named, it never
+          falls back.
         name: LoopBackendKqueue
         type: LoopBackend
         value: "4"
@@ -1776,6 +1774,14 @@ packages:
           under each write deadline; any other source goes by the generic copy,
           one bounded write at a time. Out of it (ReadTimeout or IdleTimeout), the
           generic copy, one bounded read at a time.
+
+          On a group that bounds neither reads nor writes, a plaintext socket's
+          connection also implements syscall.Conn: the socket's own RawConn, asked
+          once a connection. os.File's sendfile, and its splice in the other
+          direction, then reach the descriptor directly, and a file's copy allocates
+          nothing (#970). A bounded connection, or one under a layer — TLS, a PROXY
+          header, the close tracker —, does not, and its copies go by ReaderFrom and
+          WriterTo.
 
           IFACE-PLUGIN: the concrete type stays unexported in internal/service/net/server.
         embeds:
@@ -8098,6 +8104,13 @@ packages:
           LoopOptionUnsupported unless its handler or a layer honours it
           (LoopOptionHonourer).
 
+          Over TLS, a list naming h2 without http/1.1 fails the handshake of a client
+          whose ALPN offer names nothing the list holds with no_application_protocol
+          (RFC 7301 §3.2) — the client offering http/1.1 alone included, which
+          crypto/tls would let through with no protocol (#964). A client that offers
+          no ALPN completes the handshake, as RFC 7301 leaves it, and is refused at
+          its first request.
+
           A request that arrived over HTTP/2 has no http.Hijacker: a handler that
           hijacks its connection — a WebSocket upgrade written by hand, say — serves
           HTTP/1.1 clients only, and a TLS group that relies on it for every client
@@ -8349,8 +8362,17 @@ packages:
           ListenerStateValue.Backlog, with a DegradedReason when the clamp bit. A
           negative value fails Start with OptionValueInvalid. Both engines honour it,
           the loop's accepted sockets sharing the listener's queue; Windows keeps the
-          platform's own and says so. A datagram group refuses it with
-          PacketOptionUnsupported.
+          platform's own and says so. No engine takes a connection off that queue
+          while it cannot serve it, so the depth set is the only one: the goroutine
+          engine serves each connection it accepts on a goroutine of its own, epoll
+          accepts on the thread that serves; io_uring runs the group's loop under
+          DEFER_TASKRUN (uring-defer-taskrun, reported missing in State where the
+          kernel lacks it), so an armed accept waits for the loop to reap; the
+          portable backend's acceptor accepts only while a lane waits — a TLS codec
+          group's keeps at most one in hand (#978). As a drain begins, the queue is
+          widened to the host's somaxconn: a peer the full queue refused retries
+          into it and is served, not dropped again; State still reports the depth
+          set. A datagram group refuses it with PacketOptionUnsupported.
         in:
           - name: n
             type: int
@@ -11828,8 +11850,13 @@ packages:
             Backlog sets the depth the kernel queues established connections at before
             the group's accept loop takes them: zero keeps the host's somaxconn, the
             kernel clamps a larger value to it, and State reports the depth applied
-            in ListenerStateValue.Backlog. A negative value fails Start with
-            OptionValueInvalid; a datagram group refuses the option.
+            in ListenerStateValue.Backlog. No engine takes a connection off that
+            queue while it cannot serve it: io_uring's loop runs DEFER_TASKRUN, the
+            portable backend's acceptor accepts only while a lane waits; a drain
+            widens the queue to the host's somaxconn as it begins, so a peer the
+            full queue refused retries into it and is served (#978). A negative
+            value fails Start with OptionValueInvalid; a datagram group refuses the
+            option.
           forward: svcserver.Backlog
           in:
             - name: "n"
@@ -12155,8 +12182,8 @@ packages:
             value: "3"
       - const:
           - doc: |-
-              LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe,
-              when named: LoopBackendAuto does not choose it yet.
+              LoopBackendKqueue is kqueue, on darwin and the BSDs, after a staged probe;
+              LoopBackendAuto takes it there.
             name: LoopBackendKqueue
             reexport: corenet.LoopBackendKqueue
             type: LoopBackend
@@ -13270,6 +13297,13 @@ packages:
             list with ProtocolsRefused (ADR 0198); any other loop group refuses it with
             LoopOptionUnsupported unless its handler or a layer honours it
             (LoopOptionHonourer).
+
+            Over TLS, a list naming h2 without http/1.1 fails the handshake of a client
+            whose ALPN offer names nothing the list holds with no_application_protocol
+            (RFC 7301 §3.2) — the client offering http/1.1 alone included, which
+            crypto/tls would let through with no protocol (#964). A client that offers
+            no ALPN completes the handshake, as RFC 7301 leaves it, and is refused at
+            its first request.
 
             A request that arrived over HTTP/2 has no http.Hijacker: a handler that
             hijacks its connection serves HTTP/1.1 clients only, and a TLS group that

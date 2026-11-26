@@ -7876,7 +7876,7 @@ sequences:
       - bind: p
         eval: "&n.progress"
       - bind: ok
-        eval: applyReady(p.caughtUp, st.Commit, st.Applied, now.Sub(p.movedAt), n.r.Status().Timing.ElectionTimeoutMin)
+        eval: applyReady(p.caughtUp, st.Commit, st.Applied, now.Sub(p.movedAt), n.r.Summary().Timing.ElectionTimeoutMin)
         to: applyReady
       - opt:
           do:
@@ -7907,7 +7907,7 @@ sequences:
         kind: value
       - id: snapshotLimit
         kind: internal
-      - id: n.r.Status
+      - id: n.r.Summary
         kind: value
       - id: replicationLag
         kind: internal
@@ -7934,8 +7934,8 @@ sequences:
         to: snapshotLimit
         value: snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
       - bind: rs
-        eval: n.r.Status()
-        to: n.r.Status
+        eval: n.r.Summary()
+        to: n.r.Summary
       - set: h.ReplicationLagEntries, h.LeaderLastAppend
         to: replicationLag
         value: replicationLag(&rs, now)
@@ -8325,7 +8325,7 @@ sequences:
             - return: coreconsensus.CodeNodeStopped
           when: |-
             !n.exec(func() {
-            		st := n.r.Status()
+            		st := n.r.Summary()
             		fromLeader = term == st.Term && from.ID == st.Lead && st.Role != coreconsensus.RoleLeader
             	})
       - opt:
@@ -9387,7 +9387,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: st.LeaderLast > st.Last+joinApplyLag || n.applyOverloaded()
+          when: st.LeaderLast == 0 || st.LeaderLast > st.Last+joinApplyLag || n.applyOverloaded()
       - eval: n.am.Lock()
         to: n.am.Lock
       - bind: applied
@@ -12430,7 +12430,7 @@ sequences:
             - return: ""
           when: n.cfg.Reads != ReadLease
       - bind: t
-        eval: n.r.Status().Timing
+        eval: n.r.Summary().Timing
       - bind: budget
         eval: time.Duration(float64(t.ElectionTimeoutMin) * t.MaxClockDrift)
         to: time
@@ -12459,7 +12459,7 @@ sequences:
         kind: internal
     steps:
       - bind: grace
-        eval: 2 * n.r.Status().Timing.ElectionTimeoutMax
+        eval: 2 * n.r.Summary().Timing.ElectionTimeoutMax
       - opt:
           do:
             - eval: s.boundSilence(grace)
@@ -12510,7 +12510,7 @@ sequences:
         kind: value
     steps:
       - bind: etMax
-        eval: n.r.Status().Timing.ElectionTimeoutMax
+        eval: n.r.Summary().Timing.ElectionTimeoutMax
       - loop:
           do:
             - switch:
@@ -12548,7 +12548,7 @@ sequences:
         kind: value
     steps:
       - bind: commit
-        eval: n.r.Status().Commit
+        eval: n.r.Summary().Commit
       - eval: n.am.Lock()
         to: n.am.Lock
       - loop:
@@ -12590,7 +12590,7 @@ sequences:
         to: n.am.Unlock
   - of: (*Node).tickInterval
     steps:
-      - return: max(n.r.Status().Timing.HeartbeatInterval/5, time.Millisecond)
+      - return: max(n.r.Summary().Timing.HeartbeatInterval/5, time.Millisecond)
   - of: (*Node).handleReady
     participants:
       - id: caller
@@ -12706,7 +12706,7 @@ sequences:
             - opt:
                 do:
                   - return: ""
-                when: n.r.Status().Role != coreconsensus.RoleLeader
+                when: n.r.Summary().Role != coreconsensus.RoleLeader
             - bind: a, err
               eval: wire.ParseAdminAt(e.Version, e.Data)
               to: wire
@@ -13271,7 +13271,7 @@ sequences:
         kind: actor
       - id: (*Node).leadershipChanged
         kind: self
-      - id: n.r.Status
+      - id: n.r.Summary
         kind: value
       - id: n.endForwardTraces
         kind: internal
@@ -13281,8 +13281,8 @@ sequences:
         kind: internal
     steps:
       - bind: st
-        eval: n.r.Status()
-        to: n.r.Status
+        eval: n.r.Summary()
+        to: n.r.Summary
       - opt:
           do:
             - return: ""
@@ -13489,7 +13489,7 @@ sequences:
         kind: actor
       - id: (*Node).publish
         kind: self
-      - id: n.r.Status
+      - id: n.r.Summary
         kind: value
       - id: n.am.Lock
         kind: value
@@ -13511,24 +13511,24 @@ sequences:
         kind: value
     steps:
       - bind: st
-        eval: n.r.Status()
-        to: n.r.Status
+        eval: n.r.Summary()
+        to: n.r.Summary
       - eval: n.am.Lock()
         to: n.am.Lock
       - bind: applied
         eval: n.applied
       - eval: n.am.Unlock()
         to: n.am.Unlock
-      - bind: s
+      - bind: cur
         eval: |-
-          &coreconsensus.StatusValue{
+          coreconsensus.StatusValue{
           		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,
           		Log: n.lineage(), Timing: st.Timing, NoSpace: st.NoSpace,
           		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
           	}
-      - eval: n.progress.noteApplied(s.Commit, s.Applied, n.clk.Now())
+      - eval: n.progress.noteApplied(cur.Commit, cur.Applied, n.clk.Now())
         to: n.progress.noteApplied
-      - eval: n.publishConf(&st.Conf)
+      - eval: n.publishConf()
         to: n.publishConf
       - bind: old
         eval: n.status.Load()
@@ -13536,7 +13536,11 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: old != nil && *old == *s
+          when: old != nil && *old == cur
+      - bind: s
+        eval: new(coreconsensus.StatusValue)
+      - set: "*s"
+        value: cur
       - eval: n.status.Store(s)
         to: n.status.Store
       - eval: n.observeStatus(old, s)
@@ -13579,9 +13583,9 @@ sequences:
             bind: old
             eval: n.conf.Load()
             to: n.conf.Load
-          when: old != nil && sameMembership(old, conf)
+          when: old != nil && n.r.SameConf(old)
       - bind: c
-        eval: "*conf"
+        eval: n.r.Status().Conf
       - eval: n.conf.Store(&c)
         to: n.conf.Store
       - eval: n.watchMu.Lock()
@@ -13600,11 +13604,6 @@ sequences:
           range: n.confWatchers
       - eval: n.watchMu.Unlock()
         to: n.watchMu.Unlock
-  - of: sameMembership
-    steps:
-      - return: |-
-          a.Index == b.Index && slices.Equal(a.Members, b.Members) &&
-          		slices.Equal(a.Retired, b.Retired) && slices.Equal(a.RetiredKeys, b.RetiredKeys)
   - of: (*Node).reader
     participants:
       - id: caller
@@ -14006,7 +14005,7 @@ sequences:
       - loop:
           do:
             - set: d.after
-              value: append(d.after, wire.AppendMessage(nil, &m))
+              value: append(d.after, entrylessFrame(&m))
             - set: d.to
               value: append(d.to, m.To)
           key: _
@@ -14542,7 +14541,7 @@ sequences:
             - return: ""
           when: n.lastRole == coreconsensus.RoleLeader || n.lastLead == 0
       - bind: every
-        eval: n.r.Status().Timing.ElectionTimeoutMin / 2
+        eval: n.r.Summary().Timing.ElectionTimeoutMin / 2
       - opt:
           do:
             - return: ""
@@ -14578,7 +14577,7 @@ sequences:
             - case: n.lastRole == coreconsensus.RoleLeader
               do:
                 - return: "true"
-      - return: n.contact.from == n.lastLead && now.Sub(n.contact.heard) <= n.r.Status().Timing.ElectionTimeoutMax
+      - return: n.contact.from == n.lastLead && now.Sub(n.contact.heard) <= n.r.Summary().Timing.ElectionTimeoutMax
   - of: newPacer
     steps:
       - opt:
@@ -14732,7 +14731,7 @@ sequences:
         kind: actor
       - id: (*Node).watchProgress
         kind: self
-      - id: n.r.Status
+      - id: n.r.Summary
         kind: value
       - id: n.am.Lock
         kind: value
@@ -14746,8 +14745,8 @@ sequences:
         kind: internal
     steps:
       - bind: st
-        eval: n.r.Status()
-        to: n.r.Status
+        eval: n.r.Summary()
+        to: n.r.Summary
       - bind: w
         eval: "&n.watch"
       - eval: n.am.Lock()
@@ -14785,7 +14784,7 @@ sequences:
           do:
             - return: ""
           when: (!stuckSync && !stuckApply) || st.Transfer != 0
-      - eval: n.handOver(now, &st, applied, stuckApply)
+      - eval: n.handOver(now, new(n.r.Status()), applied, stuckApply)
         to: n.handOver
   - of: (*Node).handOver
     participants:
@@ -14973,7 +14972,7 @@ sequences:
       - opt:
           do:
             - return: pin
-          when: "!ok || !pin.follow.catchingUp(pos, n.r.Status().Last)"
+          when: "!ok || !pin.follow.catchingUp(pos, n.r.Summary().Last)"
       - set: pin.until, pin.follow.at
         value: now.Add(n.pinBound(to)), pos
       - set: n.sending[to]
@@ -15010,7 +15009,7 @@ sequences:
       - return: max(pin.index, match), true
   - of: (*Node).pinBound
     steps:
-      - return: time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax << n.pinScale[to]
+      - return: time.Duration(pinAfterStream) * n.r.Summary().Timing.ElectionTimeoutMax << n.pinScale[to]
   - of: (*Node).streamDue
     participants:
       - id: caller
@@ -15065,7 +15064,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: "!ok || n.logTight() || n.pinScale[to] >= pinScaleMax || now.Sub(heard) >= n.r.Status().Timing.ElectionTimeoutMax"
+          when: "!ok || n.logTight() || n.pinScale[to] >= pinScaleMax || now.Sub(heard) >= n.r.Summary().Timing.ElectionTimeoutMax"
       - op: ++
         set: n.pinScale[to]
       - eval: |-
@@ -15090,7 +15089,7 @@ sequences:
         kind: internal
     steps:
       - bind: last
-        eval: n.r.Status().Last
+        eval: n.r.Summary().Last
       - bind: ended
         eval: "false"
       - loop:
@@ -15292,6 +15291,17 @@ sequences:
       - eval: clear(b.ranges)
       - set: b.ranges
         value: b.ranges[:0]
+  - of: entrylessFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: entrylessFrame
+        kind: self
+      - id: wire
+        kind: package
+    steps:
+      - return: wire.AppendMessage(make([]byte, 0, wire.MessageHeaderLen), m)
+        to: wire
   - of: (*Node).sendShared
     participants:
       - id: caller
@@ -15334,7 +15344,7 @@ sequences:
               eval: "&ms[i]"
             - opt:
                 do:
-                  - eval: n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, m))
+                  - eval: n.cfg.Transport.Send(m.To, entrylessFrame(m))
                     to: n.cfg.Transport.Send
                   - continue: true
                 when: len(m.Entries) == 0
@@ -15970,7 +15980,7 @@ sequences:
         kind: value
       - id: o.setGauge
         kind: internal
-      - id: n.r.Status
+      - id: n.r.Summary
         kind: value
       - id: o.addTo
         kind: internal
@@ -16001,8 +16011,8 @@ sequences:
       - eval: o.setGauge(mFailureTolerance, float64(n.r.FailureTolerance(now)))
         to: o.setGauge
       - bind: st
-        eval: n.r.Status()
-        to: n.r.Status
+        eval: n.r.Summary()
+        to: n.r.Summary
       - eval: o.addTo(mPreVotesLost, &o.seenPreVotes, int64(st.PreVotesLost))
         to: o.addTo
       - bind: lag, _
@@ -20396,7 +20406,7 @@ sequences:
         kind: self
       - id: claimed
         kind: internal
-      - id: n.r.Status
+      - id: n.r.Summary
         kind: value
       - id: n.clk.Now
         kind: value
@@ -20413,8 +20423,8 @@ sequences:
         to: claimed
         value: claimed(ps)
       - bind: st
-        eval: n.r.Status()
-        to: n.r.Status
+        eval: n.r.Summary()
+        to: n.r.Summary
       - bind: now
         eval: n.clk.Now()
         to: n.clk.Now
@@ -20422,7 +20432,7 @@ sequences:
           do:
             - loop:
                 do:
-                  - eval: n.forward(p, st)
+                  - eval: n.forward(p, &st)
                     to: n.forward
                 key: _
                 range: ps
@@ -21227,7 +21237,7 @@ sequences:
             - return: nil, n.stoppedErr()
           when: |-
             !n.exec(func() {
-            		if cur := n.r.Status().Transfer; cur != 0 && cur != to {
+            		if cur := n.r.Summary().Transfer; cur != 0 && cur != to {
             			running = make(chan errs.Code, 1)
             			n.transfers = append(n.transfers, running)
             			return
@@ -21504,7 +21514,7 @@ sequences:
             - return: 0, false, false
           when: |-
             !n.exec(func() {
-            		if index <= n.r.Status().Commit {
+            		if index <= n.r.Summary().Commit {
             			term, known = n.r.TermAt(index)
             		}
             	})
@@ -22415,7 +22425,7 @@ sequences:
                 value: "propResult{err: origin(sentinelOf(code), errs.String(\"leader\", n.stamp.ID.String()))}"
             - return: ""
           when: code != 0
-      - eval: n.appendedSession(p, pos, n.r.Status().Commit, true)
+      - eval: n.appendedSession(p, pos, n.r.Summary().Commit, true)
         to: n.appendedSession
   - of: (*Node).appendedSession
     participants:
@@ -23345,7 +23355,7 @@ sequences:
       - bind: ok
         eval: |-
           n.exec(func() {
-          		if commit = n.r.Status().Commit; idx > commit {
+          		if commit = n.r.Summary().Commit; idx > commit {
           			return
           		}
           		eng := n.r.EngineAt(idx)
@@ -24412,7 +24422,7 @@ sequences:
       - set: n.sending[to]
         value: "sendPin{index: meta.Position.Index, since: moved.Load(), sent: sent, moved: moved, progress: progress, size: meta.EncodedSize}"
       - bind: offer
-        eval: "coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}"
+        eval: "coreconsensus.InstallOfferValue{Term: n.r.Summary().Term, SnapshotID: meta.ID, Meta: meta}"
       - bind: ctx, cancel
         eval: context.WithCancel(context.Background())
         to: context
@@ -24535,7 +24545,7 @@ sequences:
       - alt:
           - do:
               - bind: pin
-                eval: n.streamedPin(to, index, n.r.Status().Last, n.clk.Now())
+                eval: n.streamedPin(to, index, n.r.Summary().Last, n.clk.Now())
                 to: n.streamedPin
               - opt:
                   do:

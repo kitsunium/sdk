@@ -239,9 +239,10 @@ func (c *h2Call) take(idx, prev int32, r *requestState, ev Event) {
 func (c *h2Call) buffer(r *requestState, ev Event) {
 	st := c.st
 	r.body = append(r.body, ev.Data...)
-	c.e.buffered += int32(len(ev.Data))
+	q := st.reqs(c.e)
+	q.buffered += int32(len(ev.Data))
 	//: within the connection's bound: credited now.
-	if int(c.e.buffered) <= st.lane.limits.ReceivePerConn {
+	if int(q.buffered) <= st.lane.limits.ReceivePerConn {
 		st.lane.Consume(&c.e.conn, ev.Stream, len(ev.Data))
 	} else {
 		r.uncredited += int32(len(ev.Data))

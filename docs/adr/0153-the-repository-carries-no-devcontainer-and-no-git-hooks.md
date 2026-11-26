@@ -5,6 +5,8 @@
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) (§Decision 5, the `hooks-check` gate; closes the §Deferred item on the four checks only the local hook ran), [ADR 0008](0008-readme-from-code-generation.md) (§Decision 1, `gomarkdoc` shipped by the devcontainer Go feature)
 - **Related**: [ADR 0004](0004-sdk-bazel-build-system.md) (`bazel-ci.yml` is the gating lane)
+- **Area**: process
+- **Need**: convention
 
 ## Context
 

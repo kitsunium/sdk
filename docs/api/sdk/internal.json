@@ -32139,7 +32139,7 @@
       "name": "Conn",
       "spelled": "interface{Buffer() []byte; Group() string; ID() uint64; stdnet.Conn}",
       "canonical": "interface{Buffer() []byte; Group() string; ID() uint64; net.Conn}",
-      "doc": "Conn is one accepted stream connection.\n\nIt embeds stdlib net.Conn, so a handler reads and writes it exactly as it\nwould any socket and every io helper keeps working — io.Copy, bufio, encoding\nwrappers, crypto/tls. Everything the domain adds is additive, which is what\nkeeps \"plug a handler in\" a four-line exercise.\n\nA Conn is pooled and recycled once ServeConn returns. A handler MUST NOT\nretain it, nor the slice returned by Buffer, past that point — the same\ncontract the logger's builder already carries.\n\nThe connection a server hands out also implements io.ReaderFrom and\nio.WriterTo, so io.Copy in either direction reaches the socket's own copy —\nsendfile and splice on a plaintext TCP socket — and [ConnUnwrapper]. A\ndirection the group bounds keeps a bound per operation. Into the\nconnection (WriteTimeout), a source the socket sends without user space\n— a file or a socket, any syscall.Conn, alone or under an\nio.LimitedReader — still goes by the socket's own copy, one mebibyte\nunder each write deadline; any other source goes by the generic copy,\none bounded write at a time. Out of it (ReadTimeout or IdleTimeout), the\ngeneric copy, one bounded read at a time.\n\nIFACE-PLUGIN: the concrete type stays unexported in internal/service/net/server.\n",
+      "doc": "Conn is one accepted stream connection.\n\nIt embeds stdlib net.Conn, so a handler reads and writes it exactly as it\nwould any socket and every io helper keeps working — io.Copy, bufio, encoding\nwrappers, crypto/tls. Everything the domain adds is additive, which is what\nkeeps \"plug a handler in\" a four-line exercise.\n\nA Conn is pooled and recycled once ServeConn returns. A handler MUST NOT\nretain it, nor the slice returned by Buffer, past that point — the same\ncontract the logger's builder already carries.\n\nThe connection a server hands out also implements io.ReaderFrom and\nio.WriterTo, so io.Copy in either direction reaches the socket's own copy —\nsendfile and splice on a plaintext TCP socket — and [ConnUnwrapper]. A\ndirection the group bounds keeps a bound per operation. Into the\nconnection (WriteTimeout), a source the socket sends without user space\n— a file or a socket, any syscall.Conn, alone or under an\nio.LimitedReader — still goes by the socket's own copy, one mebibyte\nunder each write deadline; any other source goes by the generic copy,\none bounded write at a time. Out of it (ReadTimeout or IdleTimeout), the\ngeneric copy, one bounded read at a time.\n\nOn a group that bounds neither reads nor writes, a plaintext socket's\nconnection also implements syscall.Conn: the socket's own RawConn, asked\nonce a connection. os.File's sendfile, and its splice in the other\ndirection, then reach the descriptor directly, and a file's copy allocates\nnothing (#970). A bounded connection, or one under a layer — TLS, a PROXY\nheader, the close tracker —, does not, and its copies go by ReaderFrom and\nWriterTo.\n\nIFACE-PLUGIN: the concrete type stays unexported in internal/service/net/server.\n",
       "file": "core/net/gen_ports.go",
       "layer": "core",
       "family": "net"
@@ -34561,7 +34561,7 @@
       "spelled": "LoopBackend",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopBackend",
       "value": "0",
-      "doc": "LoopBackendAuto takes the best backend the platform's probe reaches:\nio_uring, then epoll on Linux, kqueue on darwin, the portable backend\nelsewhere — a native backend the probe refuses falls back to it. On\nFreeBSD, OpenBSD, NetBSD and DragonFly it stays portable while no\npaired row was measured there: kqueue runs there when named,\nLoopBackendKqueue (ADR 0222).\n",
+      "doc": "LoopBackendAuto takes the best backend the platform's probe reaches:\nio_uring, then epoll on Linux, kqueue on darwin, FreeBSD, OpenBSD,\nNetBSD and DragonFly, the portable backend elsewhere — a native\nbackend the probe refuses falls back to it (ADR 0222).\n",
       "file": "core/net/loop_value.go",
       "layer": "core",
       "family": "net"
@@ -34600,7 +34600,7 @@
       "spelled": "LoopBackend",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopBackend",
       "value": "4",
-      "doc": "LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and\nDragonFly, after a staged probe (ADR 0222). LoopBackendAuto takes it on\ndarwin, where its paired gate held on macos-15; on the BSDs it runs\nonly when named.\n",
+      "doc": "LoopBackendKqueue is kqueue, on darwin, FreeBSD, OpenBSD, NetBSD and\nDragonFly, after a staged probe (ADR 0222). LoopBackendAuto takes it on\neach of them, its paired gate having held on macos-15; named, it never\nfalls back.\n",
       "file": "core/net/loop_value.go",
       "layer": "core",
       "family": "net"
@@ -64597,6 +64597,19 @@
       "family": "collections"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.(*UnlockedMap[...]).Deadline",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/kernel/collections/cache",
+      "name": "Deadline",
+      "recv": "UnlockedMap",
+      "spelled": "func(key K) (deadline time.Time, ok bool)",
+      "canonical": "func(key K) (deadline time.Time, ok bool)",
+      "doc": "Deadline returns the instant the entry under key expires, on the cache's\nclock, and whether key is present; an entry without a deadline answers the\nzero Time. It is a read, not a hit: the policy records nothing, no counter\nmoves, and an entry whose deadline has passed is reported, not reaped.\n",
+      "file": "kernel/collections/cache/unlocked.go",
+      "layer": "kernel",
+      "family": "collections"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.(*UnlockedMap[...]).Delete",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/kernel/collections/cache",
@@ -71266,7 +71279,7 @@
       "recv": "TCPTransport",
       "spelled": "func(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error)",
       "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/internal/core/app/consensus.JoinConfig) (github.com/kitsunium/sdk/internal/core/app/consensus.PositionValue, error)",
-      "doc": "Join implements Joiner: the JOIN goes to each address in turn until one\nmember answers JOIN_ACK with the position its AddLearner was appended at.\nA member that cannot answer at once refuses NOT_LEADER naming the leader's\naddress, which is tried next.\n",
+      "doc": "Join implements Joiner: the JOIN goes to each address in turn until one\nmember answers JOIN_ACK with the position its AddLearner was appended at.\nA member that cannot answer at once refuses NOT_LEADER, naming the leader\nwhen it knows one, and that leader's address only when it knows the\naddress too; a named address is tried next.\n",
       "file": "service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"
@@ -72874,6 +72887,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SameConf",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "SameConf",
+      "recv": "Raft",
+      "spelled": "func(m *core.MembershipValue) bool",
+      "canonical": "func(m *github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue) bool",
+      "doc": "SameConf reports whether m is the configuration in force, Status's\nConf, compared as a value: the index of the entry that produced it,\nand its members, retired ids and retired keys in order. A driver that\npublished m clones the configuration again only once it changed\n(#912). It reads m and keeps nothing of it.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SetApplyLag",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -72986,6 +73012,19 @@
       "spelled": "func(seq uint64, index uint64, term uint64)",
       "canonical": "func(seq uint64, index uint64, term uint64)",
       "doc": "StorageDone reports that the write seq is durable through (index, term).\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).Summary",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Summary",
+      "recv": "Raft",
+      "spelled": "func() SummaryValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/consensus/raft.SummaryValue",
+      "doc": "Summary returns the step function's view without its two memberships:\nStatus's every other field, with no configuration cloned. The event\nloop reads it at every turn; Status clones both memberships at each\ncall (#912).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -73381,8 +73420,35 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "StatusValue",
-      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
-      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
+      "spelled": "struct{SummaryValue; Conf core.MembershipValue; Committed core.MembershipValue}",
+      "canonical": "struct{github.com/kitsunium/sdk/internal/service/app/consensus/raft.SummaryValue; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue}",
+      "fields": [
+        {
+          "name": "SummaryValue",
+          "embedded": true,
+          "type": "SummaryValue"
+        },
+        {
+          "name": "Conf",
+          "type": "core.MembershipValue"
+        },
+        {
+          "name": "Committed",
+          "type": "core.MembershipValue"
+        }
+      ],
+      "doc": "StatusValue is the step function's part of a node's status: its summary\nand its two memberships. It is a copy: its memberships are cloned, so the\ncaller may keep it.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.SummaryValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "SummaryValue",
+      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
+      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
       "fields": [
         {
           "name": "Role",
@@ -73425,14 +73491,6 @@
           "type": "core.AlarmID"
         },
         {
-          "name": "Conf",
-          "type": "core.MembershipValue"
-        },
-        {
-          "name": "Committed",
-          "type": "core.MembershipValue"
-        },
-        {
           "name": "Transfer",
           "type": "core.NodeID"
         },
@@ -73457,7 +73515,7 @@
           "doc": "Appended is, on a node that does not lead, the instant of the last\nappend with entries it took from the leader of this term, zero while\nit took none (#919).\n"
         }
       ],
-      "doc": "StatusValue is the step function's part of a node's status. It is a copy:\nits memberships are cloned, so the caller may keep it.\n",
+      "doc": "SummaryValue is the step function's view without its memberships: every\nfield of a StatusValue but Conf and Committed, which Summary returns\nwithout cloning a configuration (#912).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -87783,7 +87841,7 @@
       "name": "Backlog",
       "spelled": "func(n int) GroupOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Backlog sets the depth the kernel queues established connections at before\nthe group's accept loop takes them (#978): a burst of connects past it is\ndropped by the kernel and retried by the peer, so a group that expects a\nburst — ADR 0203 measured 50 000 at once — sizes it. Zero, the default,\nkeeps the standard library's, the host's somaxconn; the kernel clamps a\nlarger value to it, and State reports the depth applied in\nListenerStateValue.Backlog, with a DegradedReason when the clamp bit. A\nnegative value fails Start with OptionValueInvalid. Both engines honour it,\nthe loop's accepted sockets sharing the listener's queue; Windows keeps the\nplatform's own and says so. A datagram group refuses it with\nPacketOptionUnsupported.\n",
+      "doc": "Backlog sets the depth the kernel queues established connections at before\nthe group's accept loop takes them (#978): a burst of connects past it is\ndropped by the kernel and retried by the peer, so a group that expects a\nburst — ADR 0203 measured 50 000 at once — sizes it. Zero, the default,\nkeeps the standard library's, the host's somaxconn; the kernel clamps a\nlarger value to it, and State reports the depth applied in\nListenerStateValue.Backlog, with a DegradedReason when the clamp bit. A\nnegative value fails Start with OptionValueInvalid. Both engines honour it,\nthe loop's accepted sockets sharing the listener's queue; Windows keeps the\nplatform's own and says so. No engine takes a connection off that queue\nwhile it cannot serve it, so the depth set is the only one: the goroutine\nengine serves each connection it accepts on a goroutine of its own, epoll\naccepts on the thread that serves; io_uring runs the group's loop under\nDEFER_TASKRUN (uring-defer-taskrun, reported missing in State where the\nkernel lacks it), so an armed accept waits for the loop to reap; the\nportable backend's acceptor accepts only while a lane waits — a TLS codec\ngroup's keeps at most one in hand (#978). As a drain begins, the queue is\nwidened to the host's somaxconn: a peer the full queue refused retries\ninto it and is served, not dropped again; State still reports the depth\nset. A datagram group refuses it with PacketOptionUnsupported.\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"
@@ -88356,7 +88414,7 @@
       "name": "Protocols",
       "spelled": "func(protos ...string) GroupOption",
       "canonical": "func(protos ...string) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them, unless the\ngroup's identity names NextProtos: the listeners then offer the identity's\nentries the list holds, in the identity's order (ADR 0195). Unset, a group\nwith TLS serves both, h2 first, and a group without serves HTTP/1.1. It is\njudged at Start: an empty list, an empty, repeated or unknown identifier,\n\"h2\" without TLS on a group not given Plaintext, an identity\nwhose NextProtos names a version the list excludes or none it includes, and\nany group that does not serve an http.Handler are refused with\nProtocolsRefused. The http1 codec given TLS, which serves HTTP/1.1 alone,\nhonours it when it names \"http/1.1\" alone and refuses any other list\nwith ProtocolsRefused (ADR 0198); any other loop group refuses it with\nLoopOptionUnsupported unless its handler or a layer honours it\n(LoopOptionHonourer).\n\nA request that arrived over HTTP/2 has no http.Hijacker: a handler that\nhijacks its connection — a WebSocket upgrade written by hand, say — serves\nHTTP/1.1 clients only, and a TLS group that relies on it for every client\nsays Protocols(\"http/1.1\"), the behaviour it had before HTTP/2 was\nnegotiated by default.\n",
+      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them, unless the\ngroup's identity names NextProtos: the listeners then offer the identity's\nentries the list holds, in the identity's order (ADR 0195). Unset, a group\nwith TLS serves both, h2 first, and a group without serves HTTP/1.1. It is\njudged at Start: an empty list, an empty, repeated or unknown identifier,\n\"h2\" without TLS on a group not given Plaintext, an identity\nwhose NextProtos names a version the list excludes or none it includes, and\nany group that does not serve an http.Handler are refused with\nProtocolsRefused. The http1 codec given TLS, which serves HTTP/1.1 alone,\nhonours it when it names \"http/1.1\" alone and refuses any other list\nwith ProtocolsRefused (ADR 0198); any other loop group refuses it with\nLoopOptionUnsupported unless its handler or a layer honours it\n(LoopOptionHonourer).\n\nOver TLS, a list naming h2 without http/1.1 fails the handshake of a client\nwhose ALPN offer names nothing the list holds with no_application_protocol\n(RFC 7301 §3.2) — the client offering http/1.1 alone included, which\ncrypto/tls would let through with no protocol (#964). A client that offers\nno ALPN completes the handshake, as RFC 7301 leaves it, and is refused at\nits first request.\n\nA request that arrived over HTTP/2 has no http.Hijacker: a handler that\nhijacks its connection — a WebSocket upgrade written by hand, say — serves\nHTTP/1.1 clients only, and a TLS group that relies on it for every client\nsays Protocols(\"http/1.1\"), the behaviour it had before HTTP/2 was\nnegotiated by default.\n",
       "file": "service/net/server/stream_group_protocols.go",
       "layer": "service",
       "family": "net"
@@ -95621,7 +95679,7 @@
       "name": "AttachPIDFile",
       "spelled": "func(ctx context.Context, path string, want coreproc.AttachValue) (proc coreproc.Process, err error)",
       "canonical": "func(ctx context.Context, path string, want github.com/kitsunium/sdk/internal/core/proc.AttachValue) (proc github.com/kitsunium/sdk/internal/core/proc.Process, err error)",
-      "doc": "AttachPIDFile reads the PID file at path and adopts the process it names, as\nAttach does. path is absolute and walked one component at a time from the\nroot; the file at its end is opened without following a symbolic link,\nwithout blocking, and must be a regular file holding one decimal PID,\nsurrounding blanks allowed. Anything else is PIDFileRefused.\n\nThe file is trustworthy when nobody but root and this process's user could\nhave made what the walk went through: every directory and the file belong to\none of them, no directory is writable by its group or others unless sticky,\nthe file by neither, and a symbolic link on the way lies in such a directory\nand belongs to one of them. The process a trustworthy file names is adopted;\nfrom any other file it must satisfy want, and a want that bounds nothing is\nAdoptionRefused. A bound want gives is checked whatever the file, and the\ncheck is proven to concern the process held, not a later one with its pid.\n\nOff Linux there is no cgroup, so a Cgroup bound is AdoptionRefused; the\nusers are read from the kernel's process record (sysctl kinfo_proc), whose\nstart time must be the same before and after the knotes are registered.\nEach directory of the walk is held open for reading there, where Linux needs\nonly the permission to search it.\n",
+      "doc": "AttachPIDFile reads the PID file at path and adopts the process it names, as\nAttach does. path is absolute and walked one component at a time from the\nroot; the file at its end is opened without following a symbolic link,\nwithout blocking, and must be a regular file holding one decimal PID,\nsurrounding blanks allowed. Anything else is PIDFileRefused.\n\nThe file is trustworthy when nobody but root and this process's user could\nhave made what the walk went through: every directory and the file belong to\none of them, no directory is writable by its group or others unless sticky,\nthe file by neither, and a symbolic link on the way lies in such a directory\nand belongs to one of them. The process a trustworthy file names is adopted;\nfrom any other file it must satisfy want, and a want that bounds nothing is\nAdoptionRefused. A bound want gives is checked whatever the file, and the\ncheck is proven to concern the process held, not a later one with its pid.\n\nOff Linux there is no cgroup, so a Cgroup bound is AdoptionRefused; the\nusers are read from the kernel's process record (sysctl kinfo_proc), whose\nstart time must be the same before and after the knotes are registered. A\nrecord the kernel has not filled yet — NetBSD's, for a process inside its\nexecve(2) — is read again every 5 ms, for a second at most on the system\nclock, and the process is AdoptionRefused if it never is.\nEach directory of the walk is held open for reading there, where Linux needs\nonly the permission to search it.\n",
       "file": "service/proc/exec/attach.go",
       "layer": "service",
       "family": "proc"
@@ -95771,9 +95829,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/proc/internal/bsdabi",
       "name": "ProcRecord",
-      "spelled": "func(goos string, goarch string, pid int, buf []byte) (start int64, ruid int, euid int, ok bool)",
-      "canonical": "func(goos string, goarch string, pid int, buf []byte) (start int64, ruid int, euid int, ok bool)",
-      "doc": "ProcRecord decodes the record ProcRequest asked for: the process's start\ntime, in microseconds since the epoch as its kernel states it, and its real\nand effective users. ok is false when buf is not that record as the layout\nof goos and goarch lays it out — shorter than it, of another size than the\nrecord states, or naming another process than pid.\n",
+      "spelled": "func(goos string, goarch string, pid int, buf []byte) (start int64, ruid int, euid int, valid bool, ok bool)",
+      "canonical": "func(goos string, goarch string, pid int, buf []byte) (start int64, ruid int, euid int, valid bool, ok bool)",
+      "doc": "ProcRecord decodes the record ProcRequest asked for: the process's start\ntime, in microseconds since the epoch as its kernel states it, and its real\nand effective users. ok is false when buf is not that record as the layout\nof goos and goarch lays it out — shorter than it, of another size than the\nrecord states, or naming another process than pid.\n\nvalid is the record's p_uvalid on NetBSD and OpenBSD, which the kernel sets\nonly for a process it does not read as a zombie: false for a process that\nhas exited and, on NetBSD, for one in the middle of its execve(2), whose\np_reflock sysctl cannot take. The start is then 0 and says nothing, and the\nusers may be those the execve is replacing. FreeBSD, DragonFly and darwin\nstate no such thing, and valid is true there.\n",
       "file": "service/proc/internal/bsdabi/proc.go",
       "layer": "service",
       "family": "proc"

@@ -521,7 +521,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 			//: surface the address that could not be bound.
 			return err
 		}
-		bound := &boundListener{group: group.name, addr: addr, ln: ln}
+		bound := &boundListener{group: group.name, addr: addr, ln: ln, sized: rep.sized}
 		s.mu.Lock()
 		s.listeners = append(s.listeners, bound)
 		//: only the first shard is reported, carrying the real shard count — N
@@ -677,7 +677,7 @@ func (s *Server) serveAdmitted(c *conn, group *StreamGroup, handler corenet.Conn
 	//: goroutine to return it to, and one peer's failure is not the server's.
 	//: A ceiling rejection lands here too, and closes the connection the same
 	//: way — which is the intended answer to "we are full".
-	err := s.admit(ctx, group.limiter, &group.conns.admitted, c, handler)
+	err := s.admit(ctx, group.limiter, &group.conns.admitted, c.handed(), handler)
 	//: the ceiling turned this connection away: the group's count says so.
 	if c.refused {
 		group.conns.rejected.Add(1)
@@ -760,8 +760,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	//: a drain stops every ring on purpose: no stall is watched from here.
 	s.stopStallWatch()
 	//: readiness is false from here on; whoever routes on it gets the grace
-	//: to stop sending while every listener still accepts and serves.
+	//: to stop sending while every listener still accepts and serves, a queue
+	//: a Backlog sized widened for the peers already on their way (#978).
 	if !stopped {
+		s.widenBacklogs()
 		s.waitGrace(ctx)
 	}
 	//: closing the stream listeners is what ends the accept loops; first, so
