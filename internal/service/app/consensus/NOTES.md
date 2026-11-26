@@ -1589,7 +1589,8 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   (`TestAnInstallRecordsItsNewestSnapshotBeforeItsAppliedPosition`). When
   the appends carried `applied` past the snapshot between `stillFresh` and
   the restore's turn (`durIdx >= m.Position.Index`), `restoreFrom` restores
-  and records nothing: the appends published `applied`, not the install,
+  nothing and records no newest snapshot size; it only raises
+  `snapState.last` to the snapshot's index: the appends published `applied`, not the install,
   and the install's `retain` records the newest snapshot after (#1554).
 - Fail a restore on its read handle's Close alone: the snapshot was read in
   full and verified, so the Close says nothing of the state restored, and
