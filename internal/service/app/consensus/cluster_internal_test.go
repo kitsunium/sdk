@@ -779,37 +779,49 @@ func isolatedPeerLags(f *testNode, h HealthValue) bool {
 	return false
 }
 
+// threeVoters reports whether h, a leader's verdict, counts both peers of a
+// three-voter cluster reachable and caught up, with one failure tolerated.
+func threeVoters(_ *testNode, h HealthValue) bool {
+	return h.FailureTolerance == 1 && h.Flags.Has(HealthQuorumReachable) && len(h.Peers) == 2 &&
+		!h.Peers[0].Flags.Has(PeerUnreachable) && !h.Peers[1].Flags.Has(PeerUnreachable) && h.Peers[0].Lag == 0
+}
+
+// followerVerdict judges a follower's verdict against the leadership it
+// follows, and returns that follower. When the leader read has kept its term
+// and f follows it in that term, the verdict must be a follower's at once:
+// no failure tolerance, no peers. HealthHasLeader and HealthReady come later
+// than Status.Leader — the verdict confirms the leader only once it answered
+// one of the follower's reads (#540, #541) — so they are waited for, within
+// the same bound; a leadership that moved between the two reads is looked
+// for again (#1544).
+func followerVerdict(t *testing.T, c *cluster) *testNode {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		l := leaderHealth(t, c, "tolerance 1 with three voters", threeVoters)
+		f := c.otherThan(l)
+		h := f.node.Health()
+		ls := l.node.Status()
+		follows := ls.Role == coreconsensus.RoleLeader && h.Status.Role == coreconsensus.RoleFollower &&
+			h.Status.Term == ls.Term && h.Status.Leader == l.id
+		if follows && (h.FailureTolerance != -1 || h.Peers != nil) {
+			t.Fatalf("follower health %+v", h)
+		}
+		if follows && h.Flags.Has(HealthHasLeader) && h.Flags.Has(HealthReady) {
+			return f
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no follower confirmed a stable leadership: leader %d %+v, follower %d %+v", l.id, ls, f.id, h)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	tok := proposeOnLeader(t, c, "a=1")
 	c.waitApplied(tok.Index, 5*time.Second)
-	threeVoters := func(_ *testNode, h HealthValue) bool {
-		return h.FailureTolerance == 1 && h.Flags.Has(HealthQuorumReachable) && len(h.Peers) == 2 &&
-			!h.Peers[0].Flags.Has(PeerUnreachable) && !h.Peers[1].Flags.Has(PeerUnreachable) && h.Peers[0].Lag == 0
-	}
-	// A follower's verdict is judged against the leadership it follows: when
-	// the leader read has kept its term and f follows it in that term, the
-	// verdict must be a follower's at once; a leadership that moved between
-	// the two reads is looked for again, within the same bound.
-	deadline := time.Now().Add(5 * time.Second)
-	var f *testNode
-	for {
-		l := leaderHealth(t, c, "tolerance 1 with three voters", threeVoters)
-		f = c.otherThan(l)
-		h := f.node.Health()
-		ls := l.node.Status()
-		if ls.Role == coreconsensus.RoleLeader && h.Status.Role == coreconsensus.RoleFollower &&
-			h.Status.Term == ls.Term && h.Status.Leader == l.id {
-			if h.FailureTolerance != -1 || h.Peers != nil || !h.Flags.Has(HealthHasLeader) || !h.Flags.Has(HealthReady) {
-				t.Fatalf("follower health %+v", h)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no stable leadership to judge a follower against: leader %d %+v, follower %+v", l.id, ls, h)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	f := followerVerdict(t, c)
 	c.net.Isolate(f.id, true)
 	defer c.net.Isolate(f.id, false)
 	proposeOnLeader(t, c, "b=2")
@@ -819,6 +831,47 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 		}
 		return isolatedPeerLags(f, h)
 	})
+}
+
+// A follower names its leader in Status from the leader's first heartbeat,
+// but its verdict confirms that leader only once the leader answered one of
+// its reads within the maximum election timeout (#540, #541): until then
+// the verdict has neither HealthHasLeader nor HealthReady, while Status
+// already names the leader at its term. The probe that brings the answer
+// waits for the leader's next round, and a loaded runner (macOS) left the
+// gap open when the follower's verdict was read, which the test took for a
+// wrong verdict (#1544). Holding the followers' probes opens that gap on
+// purpose: the verdict must still be judged once the leader answers.
+func TestHealthFollowerVerdictWaitsForItsLeadersAnswer(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	tok := proposeOnLeader(t, c, "a=1")
+	c.waitApplied(tok.Index, 5*time.Second)
+	l := leaderHealth(t, c, "tolerance 1 with three voters", threeVoters)
+	const hold = 1500 * time.Millisecond
+	for _, tn := range c.nodes {
+		if tn == l {
+			continue
+		}
+		// A probe dated in the future is never due before it: no read leaves
+		// the follower until hold has passed, and the leader's last answer
+		// ages past the maximum election timeout meanwhile.
+		if !tn.node.exec(func() { tn.node.contact.probeAt = tn.node.clk.Now().Add(hold) }) {
+			t.Fatalf("node %d stopped before its probe could be held", tn.id)
+		}
+	}
+	f := c.otherThan(l)
+	deadline := time.Now().Add(hold / 2)
+	for {
+		h := f.node.Health()
+		if h.Status.Leader == l.id && !h.Flags.Has(HealthHasLeader) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the follower %d still confirms its leader with its probes held: %+v", f.id, h)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	followerVerdict(t, c)
 }
 
 // The verdict follows the leadership: a leader elected while a voter is
