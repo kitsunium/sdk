@@ -195,6 +195,14 @@ const h2cIdleBudget = 256
 // code, 42 B a connection apart (#1572).
 const idleLoops = 1
 
+// idleBatch is how many connections connectOpenings dials before it reads
+// their first frames: the loop serves a batch's openings in one wake, where a
+// connection that waited for its own answer before the next was dialled paid
+// a round trip through the loop each — 60 000 a test, in the shard Bazel
+// gave it beside TestShards_deliversExactlyOnce (#1372). Well under the
+// listen queue, so no dial waits for an accept.
+const idleBatch = 128
+
 // idleHeapPerConn holds idleConnsH2 connections that sent opening and reports
 // the server's heap per connection. wantFrame reads the server's first frame,
 // so an HTTP/2 connection has been served by the loop. during, when not nil,
@@ -208,10 +216,7 @@ func idleHeapPerConn(t *testing.T, b corenet.LoopBackend, h corenet.LoopHandler,
 	if during != nil {
 		during()
 	}
-	fds := make([]int, 0, idleConnsH2)
-	for range idleConnsH2 {
-		fds = append(fds, connectOpening(t, sa, opening, wantFrame))
-	}
+	fds := connectOpenings(t, sa, opening, wantFrame, idleConnsH2)
 	//: every opening read by the loop before the heap is read: an HTTP/1.1
 	//: peer waits for no answer, and a loop behind its peers — linux/386 in
 	//: #1336's CI, 99 B a connection against 274 B here — had not yet
@@ -390,6 +395,41 @@ func pow10(n int) int {
 // the server's first frame so the connection has been served by the loop.
 func connectOpening(t *testing.T, sa *syscall.SockaddrInet4, opening []byte, wantFrame bool) int {
 	t.Helper()
+	fd := dialOpening(t, sa, opening)
+	//: an HTTP/2 connection is read until the loop answered it.
+	if wantFrame {
+		readFirstFrame(t, fd)
+	}
+	return fd
+}
+
+// connectOpenings is n connections of connectOpening, dialled idleBatch at a
+// time: each batch's openings are all sent before any first frame is read,
+// so the loop serves them together.
+func connectOpenings(t *testing.T, sa *syscall.SockaddrInet4, opening []byte, wantFrame bool, n int) []int {
+	t.Helper()
+	fds := make([]int, 0, n)
+	//: a batch at a time, never more dials ahead of the loop than idleBatch.
+	for len(fds) < n {
+		first := len(fds)
+		//: the batch dialled, each opening sent.
+		for range min(idleBatch, n-first) {
+			fds = append(fds, dialOpening(t, sa, opening))
+		}
+		//: the batch's answers, once all of it was sent.
+		if wantFrame {
+			//: each connection of the batch served by the loop.
+			for _, fd := range fds[first:] {
+				readFirstFrame(t, fd)
+			}
+		}
+	}
+	return fds
+}
+
+// dialOpening connects a socket and sends opening.
+func dialOpening(t *testing.T, sa *syscall.SockaddrInet4, opening []byte) int {
+	t.Helper()
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -417,9 +457,13 @@ func connectOpening(t *testing.T, sa *syscall.SockaddrInet4, opening []byte, wan
 		}
 		opening = opening[n:]
 	}
-	if !wantFrame {
-		return fd
-	}
+	return fd
+}
+
+// readFirstFrame reads the header of the server's first frame on fd, so the
+// connection has been served by the loop.
+func readFirstFrame(t *testing.T, fd int) {
+	t.Helper()
 	var hdr [9]byte
 	got := 0
 	deadline := time.Now().Add(30 * time.Second)
@@ -439,5 +483,4 @@ func connectOpening(t *testing.T, sa *syscall.SockaddrInet4, opening []byte, wan
 			t.Fatal("timeout reading the server's SETTINGS")
 		}
 	}
-	return fd
 }
