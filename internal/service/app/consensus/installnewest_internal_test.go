@@ -87,12 +87,14 @@ func TestAnInstallRecordsItsNewestSnapshotBeforeItsAppliedPosition(t *testing.T)
 	held := tok.Index
 	// Isolated while stopped: past the live logs' start, only an install
 	// can catch it up (see TestAnInstallKeepsTheTwoNewestSnapshots).
-	c.net.Isolate(lag.id, true)
-	c.kill(lag)
+	end := stopBehind(c, lag)
 	for i := 100; i < 300; i++ {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
-	compactedPast(t, c, held+1)
+	// Past the entry after the stopped node's end, not past held+1: a
+	// log based at held+1 still knows the term there, which the node
+	// holds when anything reached it past held, and feeds it by appends.
+	compactedPast(t, c, end+1)
 	lagID.Store(uint64(lag.id))
 	store.armed.Store(true)
 	c.start(lag)

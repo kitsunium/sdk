@@ -1763,6 +1763,7 @@ files:
       - memRun
       - (*memRun).end
       - (*MemoryTransport).Send
+      - (*MemoryNetwork).enqueue
       - (*MemoryTransport).Stream
       - streamCancelWatch
       - (*streamCancelWatch).Read
@@ -7875,6 +7876,19 @@ types:
         params: from, to coreconsensus.NodeID
         recv: n *MemoryNetwork
         results: "*MemoryTransport"
+      - doc: |-
+          enqueue queues a copy of frame from one node to another, on its control
+          lane or its data lane, unless that direction of the link is cut or the
+          destination never joined. The cut is read and the frame queued in one
+          section under the network's lock: a Send that took its destination, then
+          queued once the lock was released, queued its frame after a Cut or an
+          Isolate that had returned, and after the drain of the stopped node's
+          queues that followed, which delivered it at the node's restart (#1564).
+          The queue never blocks, a full lane dropping the frame, so the lock is
+          never held waiting on a receiver.
+        name: enqueue
+        params: from, to coreconsensus.NodeID, frame []byte, control bool
+        recv: n *MemoryNetwork
       - doc: |-
           admitted reports whether at admits peer: always without the admission
           model, else when one of its admitted members is peer under peer's key.

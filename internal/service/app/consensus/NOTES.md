@@ -1369,6 +1369,15 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   does not list when the test turns the admission model on
   (`MemoryNetwork.admission`): the suites never saw #542 because the double
   admitted everyone (`TestTheMemoryAdmissionModelRefusesAnUnknownSender`).
+- Queue a `MemoryTransport.Send` frame after the network's lock that read
+  the cut is released: a `Send` that took its destination before an
+  `Isolate` queued its frame after the drain of `stopHearing`, and the
+  restarted node read entries past the end `stopBehind` returned. The cut
+  is read and the frame queued in one section under that lock
+  (`MemoryNetwork.enqueue`), which a full lane never holds, since it drops
+  (#1564, `TestASendRoutedBeforeACutQueuesNothingAfterTheDrain`). The
+  exported double changes behaviour: a `Cut` or `Isolate` that returned
+  leaves nothing queued on that link by a `Send` already under way.
 - Leave a voter that came back behind a leader its configuration does not
   list with no way to hear it: a follower of a live leader answers its
   PreVote with that leader's committed record, which it admits for
