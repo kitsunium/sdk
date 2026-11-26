@@ -142,10 +142,14 @@ type MessageValue struct {
 	From NodeID
 	// To is the receiver.
 	To NodeID
-	// Term is the sender's term.
+	// Term is the sender's term. An answer stays at the term of the request it
+	// answers, even from a sender at a later term; the refusal of an older
+	// append or heartbeat from a leader that does not announce protocol 5 is
+	// at the term after its request's.
 	Term uint64
 	// LogTerm is the term of the entry at Index: the previous entry of an
-	// append, the last entry of a vote request.
+	// append, the last entry of a vote request. In the refusal of an older
+	// append, heartbeat or PreVote, it is the refuser's term.
 	LogTerm uint64
 	// Index is the previous index of an append, the last index of a vote
 	// request, the verified prefix of an acknowledgement, a read index.

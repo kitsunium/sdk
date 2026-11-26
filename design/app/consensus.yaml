@@ -1892,12 +1892,17 @@ packages:
             - doc: To is the receiver.
               name: To
               type: NodeID
-            - doc: Term is the sender's term.
+            - doc: |-
+                Term is the sender's term. An answer stays at the term of the request it
+                answers, even from a sender at a later term; the refusal of an older
+                append or heartbeat from a leader that does not announce protocol 5 is
+                at the term after its request's.
               name: Term
               type: uint64
             - doc: |-
                 LogTerm is the term of the entry at Index: the previous entry of an
-                append, the last entry of a vote request.
+                append, the last entry of a vote request. In the refusal of an older
+                append, heartbeat or PreVote, it is the refuser's term.
               name: LogTerm
               type: uint64
             - doc: |-
