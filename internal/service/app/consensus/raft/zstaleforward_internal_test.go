@@ -111,6 +111,9 @@ type lateNet struct {
 	held    []core.MessageValue
 	policy  func(m core.MessageValue) lateVerdict
 	restamp bool
+	// refused reports whether the message lateRace releases at step 7
+	// drew a refusal its sender was delivered before the held vote.
+	refused bool
 }
 
 // lateNode is a voter of members 1, 2 and 3 with the lease on.
@@ -388,8 +391,19 @@ func lateRace(n *lateNet, c core.MessageValue) (bool, string) {
 		return false, ""
 	}
 
-	// 7. The delayed message of term 2 reaches its receiver.
+	// 7. The delayed message of term 2 reaches its receiver, and its
+	//    refusal reaches its sender before the vote does (refused).
+	policy := n.policy
+	n.refused = false
+	n.policy = func(m core.MessageValue) lateVerdict {
+		v := policy(m)
+		if v == lateDeliver && m.From == c.To && m.To == c.From && m.Reject && m.Kind == lateAnswerKind(c.Kind) {
+			n.refused = true
+		}
+		return v
+	}
 	n.deliver(c)
+	n.policy = policy
 	fTerm := f.Status().Term
 
 	// 8. X's delayed vote request of term 4 reaches F.
@@ -412,6 +426,21 @@ func lateRace(n *lateNet, c core.MessageValue) (bool, string) {
 			n.now.Sub(f.lastLeaderContact), fTerm, uint8(c.Kind), pos[0], renewed.Sub(t0), n.now.Sub(t0), gs.Commit)
 	}
 	return true, ""
+}
+
+// lateAnswerKind is the kind of the answer to a message of kind k: an
+// append or a heartbeat is answered by an append's answer.
+func lateAnswerKind(k core.MessageKind) core.MessageKind {
+	switch k {
+	case core.MsgApp, core.MsgHeartbeat:
+		return core.MsgAppResp
+	case core.MsgForward:
+		return core.MsgForwardResp
+	case core.MsgForwardAdmin:
+		return core.MsgForwardAdminResp
+	default:
+		return 0
+	}
 }
 
 // lateForwardSeeds plays seeds 1 to 64 and returns how many reached the

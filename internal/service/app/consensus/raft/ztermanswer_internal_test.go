@@ -7,6 +7,7 @@ import (
 	"time"
 
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -24,6 +25,40 @@ import (
 // nodes run as a release before #1472 (termFromAnswers), which answer at
 // their own term, take the term an answer carries and announce protocol 4
 // at most.
+
+// errSetup marks a check whose fixture never reached the state it judges:
+// a control that returns it caught nothing, whatever release it ran as.
+var errSetup = errors.New("setup")
+
+// releaseMode is one release a control runs its nodes as: this one, which
+// the check must pass, or one before #1472 (termFromAnswers), which it must
+// catch.
+type releaseMode struct {
+	name   string
+	before bool
+}
+
+// releaseModes are the two releases every control runs.
+func releaseModes() []releaseMode {
+	return []releaseMode{{name: "this release"}, {name: "a release before #1472", before: true}}
+}
+
+// judgeControl fails t when err is a setup failure, when a run that must
+// pass returns an error, or when a run that must be caught returns none;
+// missed names what a run that must be caught let through.
+func judgeControl(t *testing.T, caught bool, err error, missed string) {
+	t.Helper()
+	switch {
+	case errors.Is(err, errSetup):
+		t.Fatalf("the fixture never reached the state it judges: %v", err)
+	case !caught && err != nil:
+		t.Fatal(err)
+	case caught && err == nil:
+		t.Fatalf("%s was not caught", missed)
+	case caught:
+		t.Logf("caught:\n%v", err)
+	}
+}
 
 // laterMessage is one message of a later term than its receiver's that is
 // no request of that term (termRequestKind).
@@ -80,7 +115,7 @@ func followerOfG(now time.Time, before bool) (*Raft, error) {
 	hb.Commit = 1
 	f.Step(now, hb)
 	if st := f.Status(); st.Term != 3 || st.Lead != 1 {
-		return nil, fmt.Errorf("setup: F at term %d following %d, want term 3 following G", st.Term, st.Lead)
+		return nil, fmt.Errorf("%w: F at term %d following %d, want term 3 following G", errSetup, st.Term, st.Lead)
 	}
 	f.Ready()
 	return f, nil
@@ -118,14 +153,13 @@ func checkALaterMessageNeverRaisesAFollowersTerm(before bool) error {
 // list of termRequestKind does not name. Run as a release before #1472,
 // the follower takes every one of them and grants the vote.
 func TestOnlyARequestRaisesAFollowersTerm(t *testing.T) {
-	if err := checkALaterMessageNeverRaisesAFollowersTerm(false); err != nil {
-		t.Fatal(err)
+	runCase := func(t *testing.T, c releaseMode) {
+		judgeControl(t, c.before, checkALaterMessageNeverRaisesAFollowersTerm(c.before),
+			"a release before #1472, which takes the term any message carries,")
 	}
-	err := checkALaterMessageNeverRaisesAFollowersTerm(true)
-	if err == nil {
-		t.Fatal("a release before #1472, which takes the term any message carries, was not caught")
+	for _, c := range releaseModes() {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
-	t.Logf("a release before #1472 is caught:\n%v", err)
 }
 
 // checkARefusedPreCandidateTakesTheRefusersTerm has a pre-candidate of term
@@ -147,7 +181,7 @@ func checkARefusedPreCandidateTakesTheRefusersTerm(before bool) error {
 		now := t0.Add(3 * time.Second)
 		p.Tick(now)
 		if p.role != core.RolePreCandidate {
-			return fmt.Errorf("setup: role %v, want a pre-candidate", p.role)
+			return fmt.Errorf("%w: role %v, want a pre-candidate", errSetup, p.role)
 		}
 		pre := msg(core.MsgPreVoteResp, 3, 2, c.term)
 		pre.Reject, pre.LogTerm = true, c.logTerm
@@ -167,14 +201,13 @@ func checkARefusedPreCandidateTakesTheRefusersTerm(before bool) error {
 // round (#1472). Run as a release before #1472, the pre-candidate takes
 // the term the refusal is stamped with, the one it asked for.
 func TestARefusedPreCandidateTakesTheRefusersTerm(t *testing.T) {
-	if err := checkARefusedPreCandidateTakesTheRefusersTerm(false); err != nil {
-		t.Fatal(err)
+	runCase := func(t *testing.T, c releaseMode) {
+		judgeControl(t, c.before, checkARefusedPreCandidateTakesTheRefusersTerm(c.before),
+			"a release before #1472, which takes the term the refusal is stamped with,")
 	}
-	err := checkARefusedPreCandidateTakesTheRefusersTerm(true)
-	if err == nil {
-		t.Fatal("a release before #1472, which takes the term the refusal is stamped with, was not caught")
+	for _, c := range releaseModes() {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
-	t.Logf("a release before #1472 is caught:\n%v", err)
 }
 
 // answersOf returns what r sends, in order, AfterSync included.
@@ -186,40 +219,48 @@ func answersOf(rd ReadyValue) []core.MessageValue {
 // a heartbeat of term 2 from a leader of protocol 5 and from one of a
 // previous release, and a PreVote of term 3, and a leader of term 2 deposed
 // by a heartbeat of term 4 refuse the read a follower asked it at term 2.
-// It returns an error when an answer is at another term than its
-// request's, or than the next one for the leader of a previous release, a
-// refusal does not carry X's term in LogTerm, or an append's refusal does
-// not say NOT_LEADER.
+// It returns an error when a request is not answered by exactly one
+// message, or its answer is not a refusal of the request's kind sent to its
+// sender at the request's term, or at the next one for the leader of a
+// previous release, with X's term in LogTerm, and saying NOT_LEADER for an
+// append or a heartbeat.
 func checkAnOlderTermIsAnsweredAtItsTerm(before bool) error {
 	now := t0.Add(5 * time.Second)
 	x := newTest(3, testState{term: 4}, 0, false)
 	x.cfg.termFromAnswers = before
-	for _, from := range []struct {
-		id    core.NodeID
-		flags core.MessageFlags
-	}{{2, announcementOf(Protocol5)}, {1, announcementOf(Protocol4)}} {
-		for _, kind := range []core.MessageKind{core.MsgApp, core.MsgHeartbeat} {
-			m := msg(kind, from.id, 3, 2)
-			m.Flags = from.flags
-			x.Step(now, m)
-		}
+	p5, p4 := announcementOf(Protocol5), announcementOf(Protocol4)
+	refusal := func(kind core.MessageKind, to core.NodeID, term uint64, code errs.Code) core.MessageValue {
+		return core.MessageValue{Kind: kind, To: to, Term: term, LogTerm: 4, Reject: true, Code: code}
 	}
-	x.Step(now, msg(core.MsgPreVote, 2, 3, 3))
 	var found []error
-	n := 0
-	for _, m := range answersOf(x.Ready()) {
-		switch {
-		case m.Kind == core.MsgAppResp && m.To == 1 && (m.Term != 3 || m.LogTerm != 4 || !m.Reject || m.Code != codeNotLeader):
-			found = append(found, fmt.Errorf("an append of term 2 from a leader of a previous release answered %+v, want a refusal at term 3, the next, saying NOT_LEADER, 4 in LogTerm", m))
-		case m.Kind == core.MsgAppResp && m.To == 2 && (m.Term != 2 || m.LogTerm != 4 || !m.Reject || m.Code != codeNotLeader):
-			found = append(found, fmt.Errorf("an append of term 2 answered %+v, want a refusal at term 2 saying NOT_LEADER, 4 in LogTerm", m))
-		case m.Kind == core.MsgPreVoteResp && (m.Term != 3 || m.LogTerm != 4 || !m.Reject):
-			found = append(found, fmt.Errorf("a PreVote of term 3 answered %+v, want a refusal at term 3, 4 in LogTerm", m))
+	for _, c := range []struct {
+		name string
+		kind core.MessageKind
+		from core.NodeID
+		term uint64
+		// flags is the announcement the request carries.
+		flags core.MessageFlags
+		want  core.MessageValue
+	}{
+		{"an append of term 2 from a leader of protocol 5", core.MsgApp, 2, 2, p5, refusal(core.MsgAppResp, 2, 2, codeNotLeader)},
+		{"a heartbeat of term 2 from a leader of protocol 5", core.MsgHeartbeat, 2, 2, p5, refusal(core.MsgAppResp, 2, 2, codeNotLeader)},
+		{"an append of term 2 from a leader of a previous release", core.MsgApp, 1, 2, p4, refusal(core.MsgAppResp, 1, 3, codeNotLeader)},
+		{"a heartbeat of term 2 from a leader of a previous release", core.MsgHeartbeat, 1, 2, p4, refusal(core.MsgAppResp, 1, 3, codeNotLeader)},
+		{"a PreVote of term 3", core.MsgPreVote, 2, 3, 0, refusal(core.MsgPreVoteResp, 2, 3, 0)},
+	} {
+		m := msg(c.kind, c.from, 3, c.term)
+		m.Flags = c.flags
+		x.Step(now, m)
+		out := answersOf(x.Ready())
+		if len(out) != 1 {
+			found = append(found, fmt.Errorf("%s was answered with %d messages, want 1: %+v", c.name, len(out), out))
+			continue
 		}
-		n++
-	}
-	if n != 5 {
-		found = append(found, fmt.Errorf("X sent %d answers to the three requests of older terms of protocol 5 and the two of a previous release, want 5", n))
+		got, w := out[0], c.want
+		if got.Kind != w.Kind || got.To != w.To || got.Term != w.Term || got.LogTerm != w.LogTerm || got.Reject != w.Reject || got.Code != w.Code {
+			found = append(found, fmt.Errorf("%s was answered %+v, want a refusal of kind %#x to node %d at term %d, %d in LogTerm, code %v",
+				c.name, got, uint8(w.Kind), w.To, w.Term, w.LogTerm, w.Code))
+		}
 	}
 	l := leaderOf(2, 0, nil, 0, false)
 	l.cfg.termFromAnswers = before
@@ -250,21 +291,20 @@ func checkAnOlderTermIsAnsweredAtItsTerm(before bool) error {
 // the safety review of #1472's second version). Run as a release before
 // #1472, each is at the answering node's later term.
 func TestAnOlderTermIsAnsweredAtItsTerm(t *testing.T) {
-	if err := checkAnOlderTermIsAnsweredAtItsTerm(false); err != nil {
-		t.Fatal(err)
+	runCase := func(t *testing.T, c releaseMode) {
+		judgeControl(t, c.before, checkAnOlderTermIsAnsweredAtItsTerm(c.before),
+			"a release before #1472, which answers at its own term,")
 	}
-	err := checkAnOlderTermIsAnsweredAtItsTerm(true)
-	if err == nil {
-		t.Fatal("a release before #1472, which answers at its own term, was not caught")
+	for _, c := range releaseModes() {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
-	t.Logf("a release before #1472 is caught:\n%v", err)
 }
 
 // TestAStaleLeaderStepsDownAtTheRefusersTerm is R1-18 under #1472: a leader
-// of term 2 heartbeats X, at term 4, and reads what X answers. X refuses a
-// leader of protocol 5 at term 2, NOT_LEADER, its term in LogTerm, and the
-// leader steps down at term 4 on the refusal of its own request, its lease
-// dropped; a refusal of a previous release, at X's term, steps it down
+// of term 2, holding a live lease, heartbeats X, at term 4, and reads what X
+// answers. X refuses a leader of protocol 5 at term 2, NOT_LEADER, its term
+// in LogTerm, and the leader steps down at term 4 on the refusal of its own
+// request, its lease dropped; a refusal of a previous release, at X's term, steps it down
 // there too. A leader of a previous release, which reads no LogTerm, is
 // refused at term 3, the term after its request's, and steps down there
 // (O1 of the safety review of #1472's second version): refused at its own
@@ -281,7 +321,7 @@ func TestAStaleLeaderStepsDownAtTheRefusersTerm(t *testing.T) {
 		term             uint64
 	}
 	runCase := func(t *testing.T, c tc) {
-		l := leaderOf(2, 0, nil, 0, true)
+		l := confirmedLeader(0)
 		l.cfg.termFromAnswers = c.lBefore
 		x := newTest(3, testState{term: 4}, 0, false)
 		x.cfg.termFromAnswers = c.xBefore
@@ -295,6 +335,9 @@ func TestAStaleLeaderStepsDownAtTheRefusersTerm(t *testing.T) {
 		}
 		if hb.Term != 2 {
 			t.Fatalf("setup: no heartbeat of term 2 to X: %+v", hb)
+		}
+		if !l.LeaseValid(now) {
+			t.Fatal("setup: the leader of term 2 holds no live lease before X's refusal")
 		}
 		x.Step(now, hb)
 		refusals := 0
@@ -329,11 +372,11 @@ func TestAStaleLeaderStepsDownAtTheRefusersTerm(t *testing.T) {
 // checkANextTermRefusalRaisesOnlyItsLeader has X, at term 4, refuse a
 // heartbeat of term 2 from node 1, of a previous release, which led term 2;
 // restamp, when not nil, changes the refusal in flight, the mutation the
-// check must catch. Node 1 reads it still leading term 2, then, in another
-// run, as a follower of node 2 at term 3 that has just heard it, before X's
-// vote request of term 4. It returns an error when the leader of term 2
-// does not step down past term 2 with its lease dropped, or the follower
-// leaves term 3 or node 2, or grants the vote.
+// check must catch. Node 1 reads it still leading term 2 with a live lease,
+// then, in another run, as a follower of node 2 at term 3 that has just
+// heard it, before X's vote request of term 4. It returns an error when the
+// leader of term 2 does not step down past term 2 with its lease dropped,
+// or the follower leaves term 3 or node 2, or grants the vote.
 func checkANextTermRefusalRaisesOnlyItsLeader(restamp func(*core.MessageValue)) error {
 	x := newTest(3, testState{term: 4}, 0, false)
 	hb := msg(core.MsgHeartbeat, 1, 3, 2)
@@ -346,14 +389,17 @@ func checkANextTermRefusalRaisesOnlyItsLeader(restamp func(*core.MessageValue)) 
 		}
 	}
 	if refusal.Kind != core.MsgAppResp {
-		return errors.New("X answered nothing to a heartbeat of term 2 from a leader of a previous release")
+		return fmt.Errorf("%w: X answered nothing to a heartbeat of term 2 from a leader of a previous release", errSetup)
 	}
 	if restamp != nil {
 		restamp(&refusal)
 	}
 	var found []error
-	l := leaderOf(2, 0, nil, 0, true)
+	l := confirmedLeader(0)
 	l.cfg.termFromAnswers = true
+	if !l.LeaseValid(l.now) {
+		return fmt.Errorf("%w: the leader of term 2 holds no live lease before X's refusal", errSetup)
+	}
 	l.Step(l.now, refusal)
 	if st := l.Status(); st.Role == core.RoleLeader || st.Term <= 2 || l.LeaseValid(l.now) {
 		found = append(found, fmt.Errorf("the leader of term 2 read X's refusal (term %d) and is a %v at term %d, lease valid %v", refusal.Term, st.Role, st.Term, l.LeaseValid(l.now)))
@@ -381,21 +427,28 @@ func checkANextTermRefusalRaisesOnlyItsLeader(restamp func(*core.MessageValue)) 
 // TestARefusalAtTheNextTermRaisesOnlyTheLeaderOfTheRequest: X, at term 4,
 // refuses a heartbeat of term 2 from a leader of a previous release at term
 // 3, the term after its request's (O1 of the safety review of #1472's second
-// version). Read by that node while it still leads term 2, the refusal
-// steps it down, its lease dropped; read after it followed a live leader at
+// version). Read by that node while it still leads term 2 under a live
+// lease, the refusal steps it down, its lease dropped; read after it followed a live leader at
 // term 3, the refusal is of that node's own term, a follower drops it, and
 // the node refuses X's vote of term 4 (D5). Re-stamped with X's term in
 // flight, as R1-18 answered before #1472, it raises the follower to term 4,
 // with no vote and no leader, and the follower grants that vote (D0).
 func TestARefusalAtTheNextTermRaisesOnlyTheLeaderOfTheRequest(t *testing.T) {
-	if err := checkANextTermRefusalRaisesOnlyItsLeader(nil); err != nil {
-		t.Fatal(err)
+	type tc struct {
+		name    string
+		restamp func(*core.MessageValue)
+		caught  bool
 	}
-	err := checkANextTermRefusalRaisesOnlyItsLeader(func(m *core.MessageValue) { m.Term = m.LogTerm })
-	if err == nil {
-		t.Fatal("a refusal at the refuser's term, R1-18 before #1472, was not caught")
+	runCase := func(t *testing.T, c tc) {
+		judgeControl(t, c.caught, checkANextTermRefusalRaisesOnlyItsLeader(c.restamp),
+			"a refusal at the refuser's term, R1-18 before #1472,")
 	}
-	t.Logf("a refusal at the refuser's term is caught:\n%v", err)
+	for _, c := range []tc{
+		{name: "this release"},
+		{name: "a refusal at the refuser's term", restamp: func(m *core.MessageValue) { m.Term = m.LogTerm }, caught: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
 }
 
 // TestOnlyAMembersRefusalStepsALeaderDown: a leader of term 2 reads a
@@ -424,6 +477,89 @@ func TestOnlyAMembersRefusalStepsALeaderDown(t *testing.T) {
 	for _, c := range []tc{
 		{name: "a member", from: 3, term: 50},
 		{name: "a node outside the configuration", from: 9, leads: true, term: 2},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestANotLeaderRefusalCarriesALaterTermThanItsRequest is the refuser's half
+// of refusedForLaterTerm's reach, which takes LogTerm without comparing it
+// to the leader's term: every NOT_LEADER X sends, at terms 3 to 6, to an
+// append or a heartbeat of every older term, carries in LogTerm a term past
+// its request's. A leader of protocol 5 is refused at its request's term,
+// LogTerm past it; a leader of a previous release at the term after, LogTerm
+// no lower. So a leader of protocol 5 still at the request's term reads a
+// LogTerm past its own, and a refusal whose LogTerm is the leader's term
+// reaches it only as the refusal at the next term of a frame it sent as a
+// leader of protocol 4 before its upgrade, which steps it down at its own
+// term, its vote kept (#1514; TestALeaderPastARefusalsTermDropsIt).
+func TestANotLeaderRefusalCarriesALaterTermThanItsRequest(t *testing.T) {
+	type tc struct {
+		name         string
+		xTerm, term  uint64
+		kind         core.MessageKind
+		protocol     uint32
+		wantTermNext bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		x := newTest(3, testState{term: c.xTerm}, 0, false)
+		m := msg(c.kind, 1, 3, c.term)
+		m.Flags = announcementOf(c.protocol)
+		x.Step(t0, m)
+		out := answersOf(x.Ready())
+		if len(out) != 1 {
+			t.Fatalf("X answered with %d messages, want 1: %+v", len(out), out)
+		}
+		r, want := out[0], c.term
+		if c.wantTermNext {
+			want++
+		}
+		if r.Kind != core.MsgAppResp || !r.Reject || r.Code != codeNotLeader || r.Term != want || r.LogTerm != c.xTerm || r.LogTerm < r.Term || r.LogTerm <= c.term {
+			t.Fatalf("X answered %+v, want NOT_LEADER at term %d, X's term %d in LogTerm, past the request's %d", r, want, c.xTerm, c.term)
+		}
+	}
+	var cases []tc
+	for xTerm := uint64(3); xTerm <= 6; xTerm++ {
+		for term := uint64(1); term < xTerm; term++ {
+			for _, kind := range []core.MessageKind{core.MsgApp, core.MsgHeartbeat} {
+				cases = append(cases,
+					tc{name: fmt.Sprintf("X at %d, kind %#x of term %d from a leader of protocol 5", xTerm, uint8(kind), term), xTerm: xTerm, term: term, kind: kind, protocol: Protocol5},
+					tc{name: fmt.Sprintf("X at %d, kind %#x of term %d from a leader of a previous release", xTerm, uint8(kind), term), xTerm: xTerm, term: term, kind: kind, protocol: Protocol4, wantTermNext: true})
+			}
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestALeaderPastARefusalsTermDropsIt is the reader's half: a leader of
+// term 3 reads a member's refusal. Of an older term, it is dropped before
+// stepLeader, whatever LogTerm it carries; at the leader's term, a refusal
+// of the log, which says no NOT_LEADER, steps nobody down; a NOT_LEADER
+// of the leader's term carrying a later term steps the leader down there.
+func TestALeaderPastARefusalsTermDropsIt(t *testing.T) {
+	type tc struct {
+		name          string
+		term, logTerm uint64
+		code          errs.Code
+		leads         bool
+		wantTerm      uint64
+	}
+	runCase := func(t *testing.T, c tc) {
+		l := leaderOf(3, 0, nil, 0, false)
+		m := msg(core.MsgAppResp, 2, 1, c.term)
+		m.Reject, m.Code, m.LogTerm = true, c.code, c.logTerm
+		l.Step(l.now, m)
+		if st := l.Status(); (st.Role == core.RoleLeader) != c.leads || st.Term != c.wantTerm {
+			t.Fatalf("the leader of term 3 read %+v and is a %v at term %d, want leading %v at term %d", m, st.Role, st.Term, c.leads, c.wantTerm)
+		}
+	}
+	for _, c := range []tc{
+		{name: "a NOT_LEADER of term 2 carrying 50", term: 2, logTerm: 50, code: codeNotLeader, leads: true, wantTerm: 3},
+		{name: "a NOT_LEADER of term 2 carrying 3", term: 2, logTerm: 3, code: codeNotLeader, leads: true, wantTerm: 3},
+		{name: "a refusal of the log at term 3, no NOT_LEADER", term: 3, leads: true, wantTerm: 3},
+		{name: "a NOT_LEADER of term 3 carrying 5", term: 3, logTerm: 5, code: codeNotLeader, wantTerm: 5},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
@@ -648,11 +784,22 @@ func lateAppendSetup(n *lateNet) (core.MessageValue, bool) {
 	})
 }
 
-// lateAppendSeeds plays D0's schedule over seeds 1 to 64 and returns how
-// many reached it, how many of those violated the lease, and the first
-// violation; before names the nodes run as a release before #1472.
-func lateAppendSeeds(t *testing.T, before ...core.NodeID) (int, int, string) {
-	reached, violated, first := 0, 0, ""
+// lateAppendResult is what D0's schedule measured over seeds 1 to 64.
+type lateAppendResult struct {
+	// reached counts the seeds that reached the release of the delayed
+	// heartbeat, unrefused those whose heartbeat drew no refusal F was
+	// delivered before the held vote, and violated those of the others
+	// that violated the lease; first is the first violation.
+	reached, unrefused, violated int
+	first                        string
+}
+
+// lateAppendSeeds plays D0's schedule over seeds 1 to 64; before names the
+// nodes run as a release before #1472. A seed whose refusal never reached F
+// is counted apart: its vote met a follower the refusal never reached, so
+// whatever F did with the vote judges nothing of the refusal.
+func lateAppendSeeds(t *testing.T, before ...core.NodeID) lateAppendResult {
+	var res lateAppendResult
 	for seed := uint64(1); seed <= 64; seed++ {
 		n := newLateNet(t, seed, before...)
 		c, ok := lateAppendSetup(n)
@@ -663,15 +810,19 @@ func lateAppendSeeds(t *testing.T, before ...core.NodeID) (int, int, string) {
 		if !ok {
 			continue
 		}
-		reached++
+		res.reached++
+		if !n.refused {
+			res.unrefused++
+			continue
+		}
 		if violation != "" {
-			violated++
-			if first == "" {
-				first = fmt.Sprintf("seed %d: %s", seed, violation)
+			res.violated++
+			if res.first == "" {
+				res.first = fmt.Sprintf("seed %d: %s", seed, violation)
 			}
 		}
 	}
-	return reached, violated, first
+	return res
 }
 
 // TestALeaseHoldsAcrossALateAppendAnswer is D9 (b) on D0's schedule, the
@@ -682,23 +833,41 @@ func lateAppendSeeds(t *testing.T, before ...core.NodeID) (int, int, string) {
 // the refusal is at term 2, which F drops. So does every seed when X, or F,
 // alone runs as a release before #1472: F never takes the refusal's term 4,
 // or X refuses at term 2. Run all as a release before #1472, the step
-// function before the fix, every such seed violates it, 48 of 48.
+// function before the fix, every such seed violates it, 48 of 48. In every
+// run X's refusal reaches F before the vote: a seed where it does not is a
+// schedule that no longer plays the late refusal, reported apart from a
+// violation.
 func TestALeaseHoldsAcrossALateAppendAnswer(t *testing.T) {
-	for _, before := range [][]core.NodeID{nil, {lateX}, {lateF}} {
-		reached, violated, first := lateAppendSeeds(t, before...)
-		if reached == 0 {
-			t.Fatalf("run as a release before #1472 %v: no seed reached the schedule: it no longer plays the late refusal", before)
-		}
-		if violated > 0 {
-			t.Fatalf("run as a release before #1472 %v: %d of %d seeds that reached the schedule violated the lease; first: %s", before, violated, reached, first)
-		}
-		t.Logf("run as a release before #1472 %v: %d seeds reached the schedule, no violation", before, reached)
+	type tc struct {
+		name   string
+		before []core.NodeID
+		caught bool
 	}
-	reached, violated, first := lateAppendSeeds(t, lateG, lateF, lateX)
-	if violated == 0 {
-		t.Fatalf("run all as a release before #1472, %d seeds reached the schedule and none violated the lease: it catches nothing", reached)
+	runCase := func(t *testing.T, c tc) {
+		res := lateAppendSeeds(t, c.before...)
+		switch {
+		case res.reached == 0:
+			t.Fatal("no seed reached the schedule: it no longer plays the late refusal")
+		case res.unrefused > 0:
+			t.Fatalf("%d of %d seeds that reached the schedule delivered F no refusal of its delayed heartbeat before X's vote", res.unrefused, res.reached)
+		case c.caught && res.violated == 0:
+			t.Fatalf("%d seeds reached the schedule and none violated the lease: it catches nothing", res.reached)
+		case !c.caught && res.violated > 0:
+			t.Fatalf("%d of %d seeds that reached the schedule violated the lease; first: %s", res.violated, res.reached, res.first)
+		case c.caught:
+			t.Logf("%d of %d seeds violated the lease; first: %s", res.violated, res.reached, res.first)
+		default:
+			t.Logf("%d seeds reached the schedule, no violation", res.reached)
+		}
 	}
-	t.Logf("run all as a release before #1472, %d of %d seeds violated the lease; first: %s", violated, reached, first)
+	for _, c := range []tc{
+		{name: "this release"},
+		{name: "X of a previous release", before: []core.NodeID{lateX}},
+		{name: "F of a previous release", before: []core.NodeID{lateF}},
+		{name: "all of a previous release", before: []core.NodeID{lateG, lateF, lateX}, caught: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
 }
 
 // TestLeaseReadsAreLinearizableUnderFaultsInAMixedCluster runs the client
@@ -717,14 +886,23 @@ func TestALeaseHoldsAcrossALateAppendAnswer(t *testing.T) {
 // three seed parts, and both mixes passed 400 seeds swept by
 // CONSENSUS_SIM_SEED.
 func TestLeaseReadsAreLinearizableUnderFaultsInAMixedCluster(t *testing.T) {
-	eachSeed(t, seeds(t, 8), func(t *testing.T, seed uint64) {
-		speaks := map[core.NodeID]uint32{3: Protocol4}
-		if seed%2 == 0 {
-			speaks = map[core.NodeID]uint32{1: Protocol4, 2: Protocol4}
-		}
-		opt := simOptions{seed: seed, drop: 0.03, crashRate: 0.3, lease: true, speaks: speaks}
+	type tc struct {
+		name   string
+		speaks map[core.NodeID]uint32
+	}
+	runCase := func(t *testing.T, seed uint64, c tc) {
+		opt := simOptions{seed: seed, drop: 0.03, crashRate: 0.3, lease: true, speaks: c.speaks}
 		if err := linearizableRunWith(opt); err != nil {
-			t.Fatalf("previous release %v: %v", speaks, err)
+			t.Fatalf("seed %d, %s: %v", seed, c.name, err)
 		}
+	}
+	// An odd seed runs the first mix, an even one the second.
+	mixes := []tc{
+		{name: "node 3 of a previous release", speaks: map[core.NodeID]uint32{3: Protocol4}},
+		{name: "nodes 1 and 2 of a previous release", speaks: map[core.NodeID]uint32{1: Protocol4, 2: Protocol4}},
+	}
+	eachSeed(t, seeds(t, 8), func(t *testing.T, seed uint64) {
+		c := mixes[1-seed%2]
+		t.Run(c.name, func(t *testing.T) { runCase(t, seed, c) })
 	})
 }
