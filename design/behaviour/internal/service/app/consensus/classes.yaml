@@ -10361,7 +10361,7 @@ types:
         name: restoreFrom
         params: m coreconsensus.SnapshotMetaValue, durIdx uint64
         recv: n *Node
-        results: err error
+        results: error
       - doc: |-
           codecOf is the codec a snapshot of metadata m is decoded with, refused
           VERSION_UNSUPPORTED for a metadata version or a codec this build does
