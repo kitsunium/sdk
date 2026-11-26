@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"math"
+	"strconv"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -76,7 +77,12 @@ type Config struct {
 	LogReserveBytes                                             int64
 	// MaxSnapshotStreams bounds the snapshot streams this node sends at
 	// once; 0 is 1. A peer in need beyond it waits, its transfer pending,
-	// and is served when a stream ends.
+	// and is served when a stream ends. While SnapshotStreamBytesPerSecond
+	// paces them, more than InitialTiming.ElectionTimeoutMax over ten
+	// milliseconds (200 at the default 2 s) is refused as misconfigured:
+	// streams sharing the pacer wait N slices of its rate between two
+	// reads, and past that bound a healthy stream looks stalled and is
+	// cut.
 	MaxSnapshotStreams int
 	// SnapshotStreamBytesPerSecond paces the snapshot streams this node
 	// sends, all of them together, on Clock; 0 is unlimited.
@@ -275,6 +281,13 @@ func refuseBounds(c *Config) error {
 	case c.SnapshotStreamBytesPerSecond < 0:
 		// Zero is the unlimited default; a negative rate means nothing.
 		return misconfigured("SnapshotStreamBytesPerSecond", "negative")
+	case c.SnapshotStreamBytesPerSecond > 0 && int64(c.MaxSnapshotStreams) > maxPacedStreams(c.InitialTiming.ElectionTimeoutMax):
+		// Streams sharing a pacer each wait N slices of its rate between
+		// two reads: past this many, a healthy stream's moved mark outlives
+		// its pin bound and streamDue cuts it (#1485). Refused, never
+		// clamped (ADR 0031).
+		return misconfigured("MaxSnapshotStreams", "above "+strconv.FormatInt(maxPacedStreams(c.InitialTiming.ElectionTimeoutMax), 10)+
+			", ElectionTimeoutMax over ten milliseconds, while SnapshotStreamBytesPerSecond paces them")
 	case framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead):
 		// A batch the transport cannot carry stalls every follower it is
 		// sent to (review M2).

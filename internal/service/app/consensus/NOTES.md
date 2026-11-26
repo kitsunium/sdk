@@ -1571,6 +1571,11 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   beyond it waits in raft's snapshot state, holding no pin, and
   `serveWaiting` starts it, in `nextWaiter`'s order (below), when a stream
   ends (`streamWait`, cleared by `leadershipChanged`).
+  Past `maxPacedStreams` (`ElectionTimeoutMax` over ten milliseconds, 200 at
+  the default 2 s) `MaxSnapshotStreams` is refused by `refuseBounds` while the
+  rate is set, `CONSENSUS_MISCONFIGURED` naming the bound: N streams on one
+  pacer wait N slices between two reads, and past it `streamDue` cut
+  healthy streams (#1485).
   `SnapshotStreamBytesPerSecond` paces every stream together with one token
   bucket on the node's clock (`pacer`, `node_pace.go`), never the wall
   clock: a read is cut to a tenth of the rate and paid after it, its

@@ -240,6 +240,7 @@ go_test(
         "silentload_internal_test.go",
         "snapcodec_unlinked_internal_test.go",
         "snaplimit_internal_test.go",
+        "snapshotstreambound_internal_test.go",
         "space_internal_test.go",
         "spool_internal_test.go",
         "staleleader_internal_test.go",
