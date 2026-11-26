@@ -885,19 +885,15 @@ func (n *Node) snapshotToSend() (coreconsensus.SnapshotMetaValue, bool) {
 
 // sendSnapshot streams the newest snapshot to a peer that needs one, at
 // most one transfer per peer, and asks for a cut when there is none to
-// send. It runs on the loop and launches the transfer on a background
+// send. Its one caller, serveWaiting, has checked that a stream is free
+// (a peer that must wait goes through streamSnapshots' queue first). It
+// runs on the loop and launches the transfer on a background
 // goroutine counted in n.wg, which ends when Stream returns, and a watcher
 // goroutine that cancels the stream when the node stops and ends with it;
 // a change of leadership or term cancels it too (#547). The outcome goes
 // back to raft on the loop.
 func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	if _, busy := n.sendStop[to]; busy {
-		return
-	}
-	if len(n.sendStop) >= n.cfg.MaxSnapshotStreams {
-		// Every stream allowed is in flight: the peer waits, paused in
-		// raft's snapshot state, and is served when one ends (#920).
-		n.queueStream(to)
 		return
 	}
 	meta, h, ok := n.openSnapshotFor(to)

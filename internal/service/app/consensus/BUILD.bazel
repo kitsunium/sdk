@@ -245,6 +245,7 @@ go_test(
         "storagefailed_open_internal_test.go",
         "storeexclusive_internal_test.go",
         "stream_internal_test.go",
+        "streamorder_internal_test.go",
         "stuckinstall_internal_test.go",
         "stuckleader_internal_test.go",
         "syncatopen_internal_test.go",

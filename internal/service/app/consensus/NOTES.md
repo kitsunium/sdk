@@ -1563,8 +1563,8 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   NIC and the TLS CPU of the data lane, one goroutine each, unbounded.
   `sendSnapshot` starts at most `MaxSnapshotStreams` (default 1); a peer
   beyond it waits in raft's snapshot state, holding no pin, and
-  `serveWaiting` starts it, first asked first served, when a stream ends
-  (`streamWait`, cleared by `leadershipChanged`).
+  `serveWaiting` starts it, in `nextWaiter`'s order (below), when a stream
+  ends (`streamWait`, cleared by `leadershipChanged`).
   `SnapshotStreamBytesPerSecond` paces every stream together with one token
   bucket on the node's clock (`pacer`, `node_pace.go`), never the wall
   clock: a read is cut to a tenth of the rate and paid after it, its
@@ -1577,6 +1577,41 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   data lane is `BENCH.md`'s `TCP/<device>/paced+stream` rows and the A/B
   lane's `cstream` (#1365): measure it against a cluster that keeps no state
   in its heap, or it measures that heap's collections instead.
+- Serve the snapshot streams' queue first asked first served, voters and
+  learners alike: under the default `MaxSnapshotStreams` of 1, a voter back
+  after a compaction waited behind a replacement learner's 50 GiB at
+  8 MiB/s, about 1 h 47, and the cluster ran without redundancy meanwhile
+  (O1 of #920's safety review). The owner decided on 2026-11-15 that the
+  voters are served first, without preempting a stream in flight (#1483).
+  When a slot frees, `nextWaiter` serves the first voter waiting before any
+  learner, and the first learner when no voter waits; among voters, and
+  among learners, the first to ask goes first. A stream in flight is never
+  cut for a voter: the queue is only served once a stream ends, so a voter
+  that asks while a learner's stream is in flight still waits for its end:
+  until it ends, its size over the rate when paced, plus at most `pinBound`
+  while its receiver installs. The peers one Ready names go through the
+  queue too (`streamSnapshots`), so a voter it names after a learner goes
+  first. No learner
+  starves: each learner counts the voters chosen that passed it
+  (`queuedStream.passed`, the voters chosen that asked after it), and
+  once the first learner was passed as many times as the configuration has
+  voters besides the leader, it goes before the next voter — enough for a
+  cluster that lost every other voter at once to get each back first, and
+  a voter that keeps coming back passes it no more. A waiter's role is
+  read from raft when the slot frees, never when it asked (`waiterRoles`,
+  raft's `PeerStats`): a learner promoted while it waits is served as a
+  voter, a voter removed — no longer in raft's snapshot state — is dropped
+  (`TestAVoterIsStreamedBeforeALearnerThatAskedFirst`,
+  `TestAFreedSlotServesTheFirstVoterBeforeAnEarlierLearner`,
+  `TestALearnerIsPassedAtMostAsManyTimesAsThereAreOtherVoters`,
+  `TestAWaitersRoleIsReadWhenTheSlotFrees`,
+  `TestAReadysVoterIsStreamedBeforeItsLearner`,
+  `TestAWaiterRemovedBeforeTheSlotFreesIsDropped`). Known limits: the bound
+  ignores the quorum, so a learner passed `limit` times goes before a voter
+  the commit needs (O2); a learner promoted while it waits can be served
+  after a later learner when a voter is removed in the same window,
+  unreachable under the defaults (O3); `passed` counts the voters chosen,
+  not the streams started (O4).
 - Accept an offer of the snapshot this node is restoring: it was streamed
   again and committed over the file the restore reads (#610,
   `answerRestoring`, `TestAnOfferOfTheSnapshotBeingRestoredIsRefused`).

@@ -311,14 +311,14 @@ func streamsInFlight(l *testNode) []coreconsensus.NodeID {
 func streamWaiter(t *testing.T, l *testNode) coreconsensus.NodeID {
 	t.Helper()
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		var w []coreconsensus.NodeID
+		var w []queuedStream
 		var inFlight int
 		l.node.exec(func() { w, inFlight = slices.Clone(l.node.streamWait), len(l.node.sendStop) })
 		if inFlight > 1 {
 			t.Fatalf("%d streams in flight under MaxSnapshotStreams 1", inFlight)
 		}
 		if len(w) == 1 {
-			return w[0]
+			return w[0].to
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("no learner waits for a stream: %v waiting, %d in flight", w, inFlight)

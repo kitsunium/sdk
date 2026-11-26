@@ -12930,7 +12930,7 @@ sequences:
         kind: internal
       - id: n.fetchq.push
         kind: internal
-      - id: n.sendSnapshot
+      - id: n.streamSnapshots
         kind: internal
       - id: n.answerReady
         kind: internal
@@ -12978,13 +12978,8 @@ sequences:
           key: _
           range: rd.Fetch
           value: f
-      - loop:
-          do:
-            - eval: n.sendSnapshot(to)
-              to: n.sendSnapshot
-          key: _
-          range: rd.SendSnapshot
-          value: to
+      - eval: n.streamSnapshots(rd.SendSnapshot)
+        to: n.streamSnapshots
       - eval: n.answerReady(rd)
         to: n.answerReady
       - eval: n.checkAdmission()
@@ -14686,55 +14681,150 @@ sequences:
               do:
                 - return: ctx.Err()
                   to: ctx.Err
-  - of: (*Node).queueStream
+  - of: (*Node).streamSnapshots
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).streamSnapshots
+        kind: self
+      - id: n.queueStream
+        kind: internal
+      - id: n.serveWaiting
+        kind: internal
     steps:
       - opt:
           do:
             - return: ""
-          when: slices.Contains(n.streamWait, to)
-      - set: n.streamWait
-        value: append(n.streamWait, to)
+          when: len(to) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: n.queueStream(id)
+                    to: n.queueStream
+                init:
+                  bind: _, busy
+                  eval: n.sendStop[id]
+                when: "!busy"
+          key: _
+          range: to
+          value: id
+      - eval: n.serveWaiting()
+        to: n.serveWaiting
   - of: (*Node).serveWaiting
     participants:
       - id: caller
         kind: actor
       - id: (*Node).serveWaiting
         kind: self
+      - id: n.waiterRoles
+        kind: internal
+      - id: nextWaiter
+        kind: internal
       - id: n.sendSnapshot
         kind: internal
     steps:
       - loop:
           cond: len(n.streamWait) > 0 && len(n.sendStop) < n.cfg.MaxSnapshotStreams
           do:
-            - bind: to
-              eval: n.streamWait[0]
-            - set: n.streamWait
-              value: n.streamWait[1:]
+            - bind: role, limit
+              eval: n.waiterRoles()
+              to: n.waiterRoles
+            - var:
+                name: to
+                type: coreconsensus.NodeID
+            - var:
+                name: ok
+                type: bool
+            - set: n.streamWait, to, ok
+              to: nextWaiter
+              value: nextWaiter(n.streamWait, role, limit)
             - opt:
                 do:
-                  - eval: n.sendSnapshot(to)
-                    to: n.sendSnapshot
-                when: n.awaitsSnapshot(to)
-  - of: (*Node).awaitsSnapshot
+                  - return: ""
+                when: "!ok"
+            - eval: n.sendSnapshot(to)
+              to: n.sendSnapshot
+  - of: (*Node).waiterRoles
     participants:
       - id: caller
         kind: actor
-      - id: (*Node).awaitsSnapshot
+      - id: (*Node).waiterRoles
         kind: self
-      - id: p.Flags.Has
+      - id: n.r.PeerStats
         kind: value
     steps:
+      - bind: stats
+        eval: n.r.PeerStats()
+        to: n.r.PeerStats
+      - bind: voters
+        eval: "0"
       - loop:
           do:
             - opt:
                 do:
-                  - return: p.Flags.Has(raft.StatSnapshot)
-                    to: p.Flags.Has
-                when: p.ID == to
-          key: _
-          range: n.r.PeerStats()
-          value: p
-      - return: "false"
+                  - op: ++
+                    set: voters
+                when: stats[i].Flags.Has(raft.StatVoter)
+          key: i
+          range: stats
+      - return: |-
+          func(to coreconsensus.NodeID) waiterRole {
+          		for i := range stats {
+          			if stats[i].ID == to {
+          				return roleOf(stats[i].Flags)
+          			}
+          		}
+          		return waiterGone
+          	}, voters
+  - of: roleOf
+    steps:
+      - switch:
+          cases:
+            - case: "!flags.Has(raft.StatSnapshot)"
+              do:
+                - return: waiterGone
+            - case: flags.Has(raft.StatVoter)
+              do:
+                - return: waiterVoter
+            - default: true
+              do:
+                - return: waiterLearner
+  - of: nextWaiter
+    participants:
+      - id: caller
+        kind: actor
+      - id: nextWaiter
+        kind: self
+      - id: keepWaiting
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: w, voter, learner
+        eval: keepWaiting(w, role)
+        to: keepWaiting
+      - bind: pick
+        eval: learner
+      - opt:
+          do:
+            - set: pick
+              value: voter
+            - loop:
+                do:
+                  - op: ++
+                    set: w[i].passed
+                key: i
+                range: w[:voter]
+          when: voter >= 0 && (learner < 0 || w[learner].passed < limit)
+      - opt:
+          do:
+            - return: w, 0, false
+          when: pick < 0
+      - bind: to
+        eval: w[pick].to
+      - return: slices.Delete(w, pick, pick+1), to, true
+        to: slices
   - of: (*Node).streamRate
     participants:
       - id: caller
@@ -24438,8 +24528,6 @@ sequences:
         kind: actor
       - id: (*Node).sendSnapshot
         kind: self
-      - id: n.queueStream
-        kind: internal
       - id: n.openSnapshotFor
         kind: internal
       - id: moved.Store
@@ -24456,12 +24544,6 @@ sequences:
             bind: _, busy
             eval: n.sendStop[to]
           when: busy
-      - opt:
-          do:
-            - eval: n.queueStream(to)
-              to: n.queueStream
-            - return: ""
-          when: len(n.sendStop) >= n.cfg.MaxSnapshotStreams
       - bind: meta, h, ok
         eval: n.openSnapshotFor(to)
         to: n.openSnapshotFor

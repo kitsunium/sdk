@@ -178,8 +178,10 @@ type Node struct {
 	sendStop map[coreconsensus.NodeID]context.CancelFunc
 	// streamWait are the peers in need of a snapshot beyond
 	// MaxSnapshotStreams, in the order they asked: each waits in raft's
-	// snapshot state and is served when a stream ends (#920).
-	streamWait []coreconsensus.NodeID
+	// snapshot state and is served when a stream ends (#920), a voter
+	// before a learner, a learner passed at most as many times as there
+	// are other voters (nextWaiter, #1483).
+	streamWait []queuedStream
 	// pace paces every snapshot stream together; nil when
 	// SnapshotStreamBytesPerSecond is unlimited (#920).
 	pace *pacer
@@ -1826,9 +1828,7 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 	for _, f := range rd.Fetch {
 		n.fetchq.push(f)
 	}
-	for _, to := range rd.SendSnapshot {
-		n.sendSnapshot(to)
-	}
+	n.streamSnapshots(rd.SendSnapshot)
 	n.answerReady(rd)
 	n.checkAdmission()
 	n.refreshJoin(rd)

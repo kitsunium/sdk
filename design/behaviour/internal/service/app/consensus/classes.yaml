@@ -573,6 +573,20 @@ constants:
         type: int64
         value: "10"
     name: paceSlices
+  - doc: Where a waiting peer stands for the snapshot streams' queue (waiterRole).
+    grouped: true
+    items:
+      - doc: |-
+          waiterGone no longer waits in raft's snapshot state: it left, or
+          this node no longer leads it.
+        name: waiterGone
+        type: waiterRole
+        value: iota
+      - doc: waiterLearner waits as a learner.
+        name: waiterLearner
+      - doc: waiterVoter waits as a voter.
+        name: waiterVoter
+    name: waiterGone
   - doc: |-
       cutAllowance is how many maximum election timeouts a cut on the apply
       goroutine may hold it before watchProgress counts it as a stuck apply: a
@@ -1926,14 +1940,21 @@ files:
     name: node_leadercontact.go
   - decls:
       - paceSlices
+      - waiterGone
       - pacer
+      - queuedStream
+      - waiterRole
       - newPacer
       - (*pacer).limit
       - (*pacer).charge
       - (*pacer).pay
+      - (*Node).streamSnapshots
       - (*Node).queueStream
       - (*Node).serveWaiting
-      - (*Node).awaitsSnapshot
+      - (*Node).waiterRoles
+      - roleOf
+      - nextWaiter
+      - keepWaiting
       - (*Node).streamRate
     name: node_pace.go
   - decls:
@@ -3589,6 +3610,29 @@ functions:
     name: newPacer
     params: clk clock.Timed, rate int64
     results: "*pacer"
+  - doc: roleOf is where a peer of flags stands for the queue.
+    name: roleOf
+    params: flags raft.PeerStatFlags
+    results: waiterRole
+  - doc: |-
+      nextWaiter takes from w, the peers waiting in the order they asked, the
+      one a freed slot serves, role saying where each stands now (#1483): the
+      first voter, unless the first learner was already passed limit times,
+      then that learner; the first learner when no voter waits. Among voters,
+      and among learners, the first to ask goes first. A waiter that is gone is
+      dropped, and each learner that asked before the voter served is passed
+      once more. It returns what is left of w, the peer served, and false when
+      none is left.
+    name: nextWaiter
+    params: w []queuedStream, role func(coreconsensus.NodeID) waiterRole, limit int
+    results: "[]queuedStream, coreconsensus.NodeID, bool"
+  - doc: |-
+      keepWaiting drops from w the waiters role says are gone, in place, and
+      returns what is left with the index of its first voter and of its first
+      learner, -1 for none.
+    name: keepWaiting
+    params: w []queuedStream, role func(coreconsensus.NodeID) waiterRole
+    results: kept []queuedStream, voter, learner int
   - doc: |-
       entrylessFrame is AppendMessage's frame of m, a message without entries,
       in a buffer of MessageHeaderLen bytes, the length of every such frame but
@@ -8162,9 +8206,11 @@ types:
       - doc: |-
           streamWait are the peers in need of a snapshot beyond
           MaxSnapshotStreams, in the order they asked: each waits in raft's
-          snapshot state and is served when a stream ends (#920).
+          snapshot state and is served when a stream ends (#920), a voter
+          before a learner, a learner passed at most as many times as there
+          are other voters (nextWaiter, #1483).
         name: streamWait
-        type: "[]coreconsensus.NodeID"
+        type: "[]queuedStream"
       - doc: |-
           pace paces every snapshot stream together; nil when
           SnapshotStreamBytesPerSecond is unlimited (#920).
@@ -9623,26 +9669,41 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
-          queueStream records peer to as waiting for a snapshot stream: the
-          streams in flight are at MaxSnapshotStreams. It stays in raft's snapshot
-          state, so nothing is appended to it, and holds no pin: the newest
-          snapshot at its turn is the one it is sent. Asked twice, it waits once.
-          It runs on the loop.
+          streamSnapshots starts the snapshot streams a Ready asks for, through
+          the queue: each peer named that has no stream in flight waits, then the
+          free slots serve the waiters in nextWaiter's order. A Ready that named a
+          learner before a voter, one slot free, streamed the learner first, and
+          the voter waited for its whole stream (O1 of #1483's safety review). A
+          slot is only free while nobody waits, so the peers that waited before
+          these keep their turn. It runs on the loop.
+        name: streamSnapshots
+        params: to []coreconsensus.NodeID
+        recv: n *Node
+      - doc: |-
+          queueStream records peer to as waiting for a snapshot stream, served
+          once a slot is free. It stays in raft's snapshot state, so nothing is
+          appended to it, and holds no pin: the newest snapshot at its turn is the
+          one it is sent. Asked twice, it waits once. It runs on the loop.
         name: queueStream
         params: to coreconsensus.NodeID
         recv: n *Node
       - doc: |-
-          serveWaiting starts the streams of the waiting peers, first asked first
-          served, while fewer than MaxSnapshotStreams are in flight. A peer that no
-          longer waits in raft's snapshot state — it left, or this node no longer
-          leads it — is dropped. It runs on the loop, once a stream ended.
+          serveWaiting starts the streams of the waiting peers while fewer than
+          MaxSnapshotStreams are in flight, in nextWaiter's order: a voter before a
+          learner, each as raft holds it when the slot frees. A voter's turn never
+          cuts a stream in flight: it waits for one to end like any other. A peer
+          that no longer waits in raft's snapshot state — it left, or this node no
+          longer leads it — is dropped. It runs on the loop, once a stream ended
+          or a Ready asked for streams.
         name: serveWaiting
         recv: n *Node
-      - doc: awaitsSnapshot reports whether raft holds peer to in its snapshot state.
-        name: awaitsSnapshot
-        params: to coreconsensus.NodeID
+      - doc: |-
+          waiterRoles is raft's view of the peers now, for the queue: where each
+          stands (waiterRole), and how many voters besides this leader the
+          configuration has, the passes a learner waits at most.
+        name: waiterRoles
         recv: n *Node
-        results: bool
+        results: func(coreconsensus.NodeID) waiterRole, int
       - doc: |-
           streamRate records the pace of a stream that ended: the bytes the
           transport read in it over the time from its accept to its end.
@@ -10541,7 +10602,9 @@ types:
       - doc: |-
           sendSnapshot streams the newest snapshot to a peer that needs one, at
           most one transfer per peer, and asks for a cut when there is none to
-          send. It runs on the loop and launches the transfer on a background
+          send. Its one caller, serveWaiting, has checked that a stream is free
+          (a peer that must wait goes through streamSnapshots' queue first). It
+          runs on the loop and launches the transfer on a background
           goroutine counted in n.wg, which ends when Stream returns, and a watcher
           goroutine that cancels the stream when the node stops and ends with it;
           a change of leadership or term cancels it too (#547). The outcome goes
@@ -11108,6 +11171,26 @@ types:
         recv: p *pacer
         results: error
     name: pacer
+  - doc: |-
+      queuedStream is a peer waiting for a snapshot stream, in the order it
+      asked. passed counts the voters chosen while it waited as a learner,
+      each a voter that asked after it, whether its stream started or not: a
+      learner passed as many times as the configuration has voters besides
+      this leader goes before the next voter (#1483).
+    fields:
+      - name: to
+        type: coreconsensus.NodeID
+      - name: passed
+        type: int
+    kind: struct
+    name: queuedStream
+  - doc: |-
+      waiterRole is where a waiting peer stands when a slot frees, read from
+      raft at that moment, never when it asked: a learner promoted while it
+      waits is served as a voter, a voter removed is dropped (#1483).
+    kind: named
+    name: waiterRole
+    underlying: uint8
   - doc: |-
       progressWatch is the leader's watch over its own storage and machine,
       loop-owned: the durable index and the applied index last seen moving,

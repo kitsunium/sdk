@@ -8411,6 +8411,73 @@ the wire: the acknowledgement is the order of the sender's submission ids.
   equal to a kept mark's refuses the new run until its counter passes the
   old high, at most 65 536 / 2^32 per restart: negligible, liveness only.
 
+## Amendment — the snapshot streams' queue serves the voters first, and cuts no stream for them (2026-11-15, #1483)
+
+D14's `MaxSnapshotStreams` (1 by default, #920) bounds the snapshot
+streams a leader sends at once; a peer in need beyond it waits in raft's
+snapshot state, holding no pin, and was served first asked first served
+when a stream ended, voters and learners alike. #920's safety review
+(observation O1) found the coupling this makes: a replacement learner (D19)
+receiving 50 GiB at 8 MiB/s holds the one slot for about 1 h 47, and a voter
+back after a compaction waits for its snapshot meanwhile, the cluster
+without redundancy
+([#1483](https://github.com/kitsunium/sdk/issues/1483)). The owner decided,
+on 2026-11-15, that the voters are served first, without preempting a
+stream in flight.
+
+- **The order.** When a stream ends and a slot frees, the leader serves the
+  first voter waiting before any learner, and the first learner when no
+  voter waits. Among voters, and among learners, the first to ask goes
+  first.
+- **No stream is cut.** The queue is only served once a stream ends: a voter
+  that asks while a learner's stream is in flight waits for its end, as
+  before: until it ends, its size over the rate when paced, plus at most
+  `pinBound` while its receiver installs. Only the order of the peers
+  already waiting changes. The peers one Ready names go through the queue
+  too, so a voter it names after a learner, a slot free, still goes first.
+- **No learner starves.** Each waiting learner counts the voters chosen
+  that passed it — a voter that asked after it, served first. Once the
+  first learner waiting was passed as many times as the configuration has
+  voters besides the leader, it goes before the next voter: a cluster that
+  lost every other voter at once gets each back before the learner, and a
+  voter that keeps coming back passes it no more. A learner thus waits at
+  most for the peers that asked before it and that many voters that asked
+  after it.
+- **The role when the slot frees.** A waiter's place is read from raft when
+  the slot frees, never when it asked: a learner promoted while it waits is
+  served as a voter, in the voters' order; a voter removed, or any peer
+  this leader no longer holds in its snapshot state, is dropped, as before.
+- **Known limits** (#1483's safety review). The bound ignores the quorum:
+  a learner passed `limit` times goes before a voter the commit needs, so
+  writes wait for its stream, after several failures in a row and never
+  longer than first asked first served (O2). A learner promoted while it
+  waits can be served after a learner that asked after it, when a voter is
+  removed in the same window; unreachable under the default settings,
+  `PromoteLag` below `SnapshotTrailing` (O3). `passed` counts the voters
+  chosen, not the streams started: a voter withheld its snapshot still
+  passes a learner (O4).
+- **Safety.** The order only chooses which waiting peer's stream starts
+  next. Nothing in raft changes, nor any frame, record or protocol version:
+  at most `MaxSnapshotStreams` streams run, no slot stays free while a peer
+  waits, a peer waits at most once and never with a stream in flight, every
+  peer raft holds in its snapshot state has a stream or a place in the
+  queue, and a change of leader or term still empties it. No format change,
+  no protocol raise, no raft mutation, nothing persisted.
+- **Tests.** `TestAVoterIsStreamedBeforeALearnerThatAskedFirst`: a learner's
+  stream held in flight, a second learner waiting, then a voter compacted
+  past; the voter is streamed once the slot frees, the learner after it,
+  and no stream is cut (red on the first-asked-first-served order: the
+  stream goes to the learner). `TestAFreedSlotServesTheFirstVoterBeforeAnEarlierLearner`,
+  `TestALearnerIsPassedAtMostAsManyTimesAsThereAreOtherVoters` (red
+  without the bound: the voter that keeps asking is served for ever) and
+  `TestAWaitersRoleIsReadWhenTheSlotFrees` hold the queue's rule;
+  `TestAReadysVoterIsStreamedBeforeItsLearner` (one Ready naming a learner
+  before a voter, red when each takes the free slot in the Ready's order)
+  and `TestAWaiterRemovedBeforeTheSlotFreesIsDropped` (red when a waiter is
+  never taken for gone) hold it on the node;
+  `TestTwoLearnersAreStreamedOneAfterTheOther` and the pins' tests are
+  unchanged.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -8472,6 +8539,7 @@ the wire: the acknowledgement is the order of the sender's submission ids.
 | #920, #1365 | the commit while a snapshot streams, 2026-11-15 | `BENCH.md`'s `TCP/<device>/paced+stream` rows measure the data lane's commit p99 while a stream paced at 8 MiB/s runs against the same cluster's windows without one — A, B, A under one leader, a machine that keeps no state, the learner on tmpfs —, and print B over `TCP/<device>/paced` beside it; the A/B lane's `cstream` holds when the high end of the 95 % interval of B / A is at most 1.10, `cstream-scale` publishes 2 and 32 MiB/s; test code only, no persistence, order, term, vote, sync or wire change (amendment of 2026-11-15, #920, #1365) |
 | #1472 | the owner's decision, 2026-11-15, revised the same day on its safety review (options L2 and M3), and on 2026-11-16 on the review of that revision (O1, O2); text awaiting the owner's validation | an answer stays at the term of the request it answers, R1-18's refusal of an older append or heartbeat at that term with `NOT_LEADER` and the refuser's term in `LogTerm`, a PreVote's at the term it asks for, a deposed leader's read refusals at the term they were asked at; a later term is taken only from the refusal of one's own request, by the leader of that append or heartbeat and the pre-candidate of that PreVote, so one PreVote round readmits a stuck node; protocol version 5, its announcement on `FlagNoLease`'s bit, a node of 5 answering no older append or heartbeat of a leader of a previous release; a `NOT_LEADER` refusal carries no `FlagTruncated`; no format change, no raft mutation (amendment of 2026-11-15, #1472); a leader of a previous release refused at the term after its request's, which deposes it, and a node of a previous release climbing one election timeout a term, the bound raised under the owner's rule of 2026-11-14 (amendment of 2026-11-16) |
 | #1482 | the owner's decisions, 2026-11-15 and 2026-11-16 | a forward is handled once, whatever the delay of its copy: the step function fences forwards by the order of their submission ids, per run of a forwarder and per lane, forgetting a mark of its current term only past 65 536 marks (runs per lane, about 32 768 restarts when each forwards on both lanes) and then the least recent of the node holding the most, whose new runs wait for the next term, restarts spread over several nodes fencing each of them in turn (#1540, `needs-decision`), and a node handles no forward of a term up to its durable term at start, every forward to a node carrying a term it led; the forwards turned away counted by reason; what the fence turns away is neither proposed nor answered (`OUTCOME_UNKNOWN`); a forward's answer is kept for twice the transport's resend window (22 s by default, 2 minutes at most) on the step function's clock, a gap of more than a second counted as one, at most 2^20 answers per Raft group, the oldest forgotten for each new one past them, whatever its age, so no forward is dropped for room and a copy of an answer forgotten is fenced (the owner's decision of 2026-11-16, which removed the first version's ceiling of 2^18, past which a new forward was neither proposed nor answered), the map rebuilt and the expired answers forgotten a step at a time; the 4 096 answers evicted oldest first had let a late copy be appended twice or refused `NOT_LEADER`, and an answer kept for a time let a stopped sender's copy be appended again; no format change, no protocol raise, no raft mutation (amendments of 2026-11-15, #1482, corrected 2026-11-16) |
+| #1483 | the owner's decision, 2026-11-15 | the snapshot streams' queue serves the first voter waiting before any learner when a slot frees, first asked first served within each, cuts no stream in flight for it, lets a learner be passed by at most as many voters' streams as the configuration has voters besides the leader, and reads each waiter's role when the slot frees; no format change, no protocol raise, no raft mutation, nothing persisted (amendment of 2026-11-15, #1483) |
 
 ## raft-sql-poc (owner's prior Raft)
 
