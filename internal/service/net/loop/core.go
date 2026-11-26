@@ -97,6 +97,11 @@ type ring struct {
 	seen seen
 	// draining is a ring that accepts nothing more.
 	draining bool
+	// behind is set by the backend for the batch when it left readiness or
+	// completions unreaped, or input unread for want of arena: a connection
+	// that looks silent may then have its request waiting, so the drain does
+	// not judge silence this batch (#1541).
+	behind bool
 }
 
 // seen is what a ring last published. A counter is stored to its atomic only

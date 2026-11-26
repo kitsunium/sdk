@@ -1265,12 +1265,19 @@ func (ul *uLoop) reapRings() {
 	ul.reaped, ul.arrived, ul.fanReaped = 0, 0, 0
 	n, start := len(ul.rings), max(ul.cutAt-1, 0)
 	ul.cutAt = 0
+	//: a ring this batch does not reach is behind on its completions.
+	for _, rr := range ul.rings {
+		rr.r.behind = true
+	}
 	//: each ring once, in turn.
 	for k := range n {
 		i := (start + k) % n
 		rr := ul.rings[i]
 		before := rr.r.st.completions
 		cut := rr.reapAll()
+		// Completions left in the CQ or held back by the kernel, and recvs
+		// starved of a provided buffer, wait for a later batch.
+		rr.r.behind = cut || rr.u.ready() > 0 || rr.u.overflowed() || len(rr.starved) > 0
 		ul.reaped += rr.r.st.completions - before
 		//: a secondary's, for watchFan.
 		if i > 0 {

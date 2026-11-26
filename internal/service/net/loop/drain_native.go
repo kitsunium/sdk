@@ -171,10 +171,14 @@ func (r *ring) full() bool {
 
 // drainable reports whether the drain closes the open connection c now: no
 // partial input, and either it has sent something — its request was read —
-// or it stayed silent for drainQuiet.
+// or it stayed silent for drainQuiet. Silence is judged only on a batch that
+// reaped everything ready (ring.behind unset): a connection the batch did not
+// reach may hold its request unread, and a close then would read it away
+// unanswered behind a FIN (#1541).
 func (r *ring) drainable(c *connCtl) bool {
-	//: mid-request connections finish first; fresh ones get their request in.
-	return c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.lp.tick-c.lastIO >= drainQuietTicks)
+	//: mid-request connections finish first; fresh ones get their request in,
+	//: and a silence is believed only once the batch caught up.
+	return c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || (!r.behind && r.lp.tick-c.lastIO >= drainQuietTicks))
 }
 
 // settleDrain is the drain's look at the open connections, once

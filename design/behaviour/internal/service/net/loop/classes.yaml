@@ -3782,6 +3782,13 @@ types:
       - doc: draining is a ring that accepts nothing more.
         name: draining
         type: bool
+      - doc: |-
+          behind is set by the backend for the batch when it left readiness or
+          completions unreaped, or input unread for want of arena: a connection
+          that looks silent may then have its request waiting, so the drain does
+          not judge silence this batch (#1541).
+        name: behind
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -4017,7 +4024,10 @@ types:
       - doc: |-
           drainable reports whether the drain closes the open connection c now: no
           partial input, and either it has sent something — its request was read —
-          or it stayed silent for drainQuiet.
+          or it stayed silent for drainQuiet. Silence is judged only on a batch that
+          reaped everything ready (ring.behind unset): a connection the batch did not
+          reach may hold its request unread, and a close then would read it away
+          unanswered behind a FIN (#1541).
         name: drainable
         params: c *connCtl
         recv: r *ring

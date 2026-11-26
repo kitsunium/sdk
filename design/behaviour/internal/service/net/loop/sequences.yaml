@@ -2129,7 +2129,7 @@ sequences:
       - return: len(r.free) == 0 && len(r.conns) >= r.lp.sz.tableSize
   - of: (*ring).drainable
     steps:
-      - return: c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.lp.tick-c.lastIO >= drainQuietTicks)
+      - return: c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || (!r.behind && r.lp.tick-c.lastIO >= drainQuietTicks))
   - of: (*loop).settleDrain
     participants:
       - id: caller
@@ -2745,8 +2745,12 @@ sequences:
         to: syscall
       - opt:
           do:
+            - set: el.r.behind
+              value: "true"
             - return: "0"
           when: err != nil
+      - set: el.r.behind
+        value: n == len(el.events)
       - op: +=
         set: el.r.st.completions
         value: uint64(n)
@@ -3147,6 +3151,8 @@ sequences:
           when: r.hasSpill(slot)
       - opt:
           do:
+            - set: r.behind
+              value: "true"
             - return: nil, false, false
           when: len(el.arena)-el.off < minRead
       - return: el.arena[el.off:min(len(el.arena), el.off+readChunk)], false, true
@@ -9400,6 +9406,13 @@ sequences:
         value: "0"
       - loop:
           do:
+            - set: rr.r.behind
+              value: "true"
+          key: _
+          range: ul.rings
+          value: rr
+      - loop:
+          do:
             - bind: i
               eval: (start + k) % n
             - bind: rr
@@ -9409,6 +9422,8 @@ sequences:
             - bind: cut
               eval: rr.reapAll()
               to: rr.reapAll
+            - set: rr.r.behind
+              value: cut || rr.u.ready() > 0 || rr.u.overflowed() || len(rr.starved) > 0
             - op: +=
               set: ul.reaped
               value: rr.r.st.completions - before
