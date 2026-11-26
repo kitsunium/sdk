@@ -110,8 +110,9 @@ corpus runs with the suite, with the crashers kept under
 `term-zero-append-at-a-candidate-1362` is a forged TimeoutNow then an
 append of term 0 at the candidate it made, which followed the sender at
 term 0 and wrote a HardState of term 0 over a durable term of 3 (#1362);
-`becomeFollower` never lowers the term, and
-`TestATermlessMessageNeverLowersTheTerm` (`ztermless_internal_test.go`)
+`becomeFollower` never lowers the term, the simulator fails a term lowered
+in memory at the turn that lowers it (`simNode.liveTerm`, beside the disk's
+`maxTerm`), and `TestATermlessMessageNeverLowersTheTerm` (`ztermless_internal_test.go`)
 holds it at a candidate and a pre-candidate. A residual risk is left on
 purpose: `stepTerm` still hands a peer's message of term 0 on at this
 node's own term, so a follower takes a termless append from a peer as one
