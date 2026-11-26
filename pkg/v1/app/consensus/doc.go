@@ -32,8 +32,13 @@
 // marks of the current term (runs per lane: about 32 768 restarts when
 // each run forwards on both lanes), the least recent mark of the node
 // holding the most goes, and that node's new runs wait for the next
-// term; restarts spread over several nodes fence each of them in turn
-// (#1540). The bound of 2^20 answers, about 152 MiB and 280 MiB at most
+// term, which the leader opens by handing its leadership over to a
+// voter that holds the commit and was heard, once a term at most
+// (#1540); a leader alone, with no such voter, or whose transfer
+// failed, leaves them fenced until the next election, restarts spread
+// over several nodes fencing each of them in turn, and its last
+// resorts are counted in consensus_forward_last_resorts_total by
+// action. The bound of 2^20 answers, about 152 MiB and 280 MiB at most
 // under churn, holds per Raft group: a multi node with several groups
 // adds them. None of them is a refusal, true
 // or false: the entry may or may not have been appended. Handle it as

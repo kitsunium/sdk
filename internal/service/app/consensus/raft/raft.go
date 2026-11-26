@@ -179,6 +179,11 @@ type Config struct {
 	// fwdCeiling, set by the package's own tests alone, is the bound on
 	// the forward answers kept in place of maxFwdAnswers (#1482).
 	fwdCeiling int
+	// fwdRunsSoft and fwdRunsHard, set by the package's own tests alone,
+	// are the fence's bounds on its marks in place of maxFwdRuns and
+	// maxFwdRunsHard, so that its last resort is reached with a few
+	// hundred runs (#1540, O2).
+	fwdRunsSoft, fwdRunsHard int
 	// fwdUnfenced, set by the package's own tests alone, switches the
 	// forward fence off (fwdFence): the node handles a forward whose answer
 	// it forgot as the release before #1482's did, so the fence is shown to
@@ -476,6 +481,11 @@ type Raft struct {
 	// fwdForgotten the answers fwdAnswers forgot at its bound.
 	fwdDrops     ForwardDropsValue
 	fwdForgotten uint64
+	// fwdResorts counts the fence's last resorts, fwdResortTransfers the
+	// leadership transfers they started, and fwdResortTerm is the term of
+	// the last one started, so that a term starts one at most (#1540).
+	fwdResorts, fwdResortTransfers uint64
+	fwdResortTerm                  uint64
 
 	id   core.NodeID
 	term uint64
@@ -1008,6 +1018,19 @@ type SummaryValue struct {
 	// and its forwarder answers OUTCOME_UNKNOWN (#1482,
 	// consensus_forward_answers_forgotten_total).
 	ForwardForgotten uint64
+	// ForwardLastResorts counts, since this node started, the fence's last
+	// resorts: a new run past 65 536 marks of the current term made it
+	// forget the least recent mark of the node holding the most, whose new
+	// runs wait for the next term (#1540,
+	// consensus_forward_last_resorts_total).
+	ForwardLastResorts uint64
+	// ForwardResortTransfers counts, since this node started, the
+	// leadership transfers its last resorts started, once a term at most, to
+	// a voter that holds the commit and was heard: a last resort with none
+	// leaves its forwarders fenced until the next election, and a count of
+	// last resorts climbing past it asks the operator for a transfer
+	// (#1540, consensus_forward_last_resorts_total{action="transfer"}).
+	ForwardResortTransfers uint64
 }
 
 // ForwardDropsValue counts the forwards a node neither proposed nor
@@ -1043,6 +1066,7 @@ func (r *Raft) Summary() SummaryValue {
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
 		Transfer: r.transferTo, PreVotesLost: r.preVotesLost,
 		ForwardDrops: r.fwdDrops, ForwardRuns: len(r.fwdFence.marks), ForwardForgotten: r.fwdForgotten,
+		ForwardLastResorts: r.fwdResorts, ForwardResortTransfers: r.fwdResortTransfers,
 	}
 	if r.role != core.RoleLeader && r.heard.term == r.term && r.heard.from == r.lead {
 		s.LeaderLast, s.Appended = r.heard.last, r.heard.appended
