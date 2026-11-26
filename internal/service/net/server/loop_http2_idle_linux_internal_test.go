@@ -185,20 +185,30 @@ var h2cOpening = []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\x00\x00\x00\x04\x00\x0
 // h2c by #961's original criterion.
 const h2cIdleBudget = 256
 
+// idleLoops is how many loops the idle readings run: one, so every
+// connection lands on the same ring and the tables' growth a reading
+// includes is a function of idleConnsH2 alone. On two loops it was the
+// kernel's split of the connections between them: a ring's slot table grows
+// by steps of 2 048 slots and the adapter's entries by half, so each ring
+// pays its own step, and a loaded runner that handed one loop 83 % of them
+// read 259.8 B where an idle one, handing it 99 %, read 217.5 B — the same
+// code, 42 B a connection apart (#1572).
+const idleLoops = 1
+
 // idleHeapPerConn holds idleConnsH2 connections that sent opening and reports
 // the server's heap per connection. wantFrame reads the server's first frame,
 // so an HTTP/2 connection has been served by the loop. during, when not nil,
 // runs inside the window, once the baseline is read.
 func idleHeapPerConn(t *testing.T, b corenet.LoopBackend, h corenet.LoopHandler, opening []byte, wantFrame bool, during func()) float64 {
 	t.Helper()
-	srv, addr := startLoopServer(t, b, h, Plaintext(), Loop(corenet.LoopValue{Backend: b, Loops: 2}))
+	srv, addr := startLoopServer(t, b, h, Plaintext(), Loop(corenet.LoopValue{Backend: b, Loops: idleLoops}))
 	sa := socketAddr(t, addr)
-	fds := make([]int, 0, idleConnsH2)
 	settleHeap()
 	before := heapNow()
 	if during != nil {
 		during()
 	}
+	fds := make([]int, 0, idleConnsH2)
 	for range idleConnsH2 {
 		fds = append(fds, connectOpening(t, sa, opening, wantFrame))
 	}
