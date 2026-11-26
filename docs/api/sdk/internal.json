@@ -73624,7 +73624,7 @@
         {
           "name": "ForwardResortTransfers",
           "type": "uint64",
-          "doc": "ForwardResortTransfers counts, since this node started, the\nleadership transfers its last resorts started, once a term at most, to\na voter that holds the commit and was heard (#1540,\nconsensus_forward_last_resorts_total{action=\"transfer\"}). Last resorts\nthat climb while it stays at 0 in the term name a leader with no voter\nto take over, whose forwarders stay fenced until the next election:\nan operator's transfer clears it.\n"
+          "doc": "ForwardResortTransfers counts, since this node started, the\nleadership transfers its last resorts started, once a term at most, to\na voter that holds the commit and was heard (#1540,\nconsensus_forward_last_resorts_total{action=\"transfer\"}). Last resorts\nthat climb while it stays at 0 in the term mean no last-resort\ntransfer started, which does not say that no voter could take over:\ncheck for a transfer already under way, an operator's included, and\nfor a voter that is up to date and eligible. The forwarders stay\nfenced until the next election; a transfer of the operator's\nclears it.\n"
         }
       ],
       "doc": "SummaryValue is the step function's view without its memberships: every\nfield of a StatusValue but Conf and Committed, which Summary returns\nwithout cloning a configuration (#912).\n",
