@@ -103,13 +103,12 @@ func TestAPinHoldsCompactionUnderAQuotaOfTwoReservesOrLess(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	compactedPastItsEnd(t, l, lag)
+	compactedPastItsEnd(t, c, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
 	lt.holding.Store(true)
-	hearOnlyTheLeader(c, l, lag)
-	c.start(lag)
+	restartHearingOnly(c, lag, l)
 	var offered coreconsensus.InstallOfferValue
 	select {
 	case offered = <-lt.started:

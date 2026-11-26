@@ -102,7 +102,7 @@ func valveRun(t *testing.T, id byte) (c *cluster, l, lag *testNode, v *valveTran
 	for i := range 200 {
 		propose(t, l.node, catchUpEntry("a", i))
 	}
-	compactedPastItsEnd(t, l, lag)
+	compactedPastItsEnd(t, c, l, lag)
 	mu.Lock()
 	v = valves[l.id]
 	mu.Unlock()
@@ -118,8 +118,7 @@ func valveRun(t *testing.T, id byte) (c *cluster, l, lag *testNode, v *valveTran
 		v.holding.Store(false)
 		v.flush(true)
 	})
-	hearOnlyTheLeader(c, l, lag)
-	c.start(lag)
+	restartHearingOnly(c, lag, l)
 	select {
 	case <-v.started:
 	case <-time.After(10 * time.Second):

@@ -216,7 +216,7 @@ func newHeldQueue(t *testing.T) *heldQueue {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	compactedPastItsEnd(t, l, lag)
+	compactedPastItsEnd(t, c, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
@@ -225,8 +225,7 @@ func newHeldQueue(t *testing.T) *heldQueue {
 	awaitStreamTo(t, lt, l, a.id)
 	b := c.joinThrough(t, "slot-b", a, l)
 	awaitQueue(t, l, a.id, b.id)
-	hearOnlyTheLeader(c, l, lag)
-	c.start(lag)
+	restartHearingOnly(c, lag, l)
 	awaitQueue(t, l, a.id, b.id, lag.id)
 	return &heldQueue{c: c, lt: lt, l: l, lag: lag, a: a, b: b}
 }
