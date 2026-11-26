@@ -4998,6 +4998,15 @@ sequences:
           cases:
             - comm: <-t.C
             - comm: <-ctx.Done()
+              do:
+                - return: ""
+      - opt:
+          do:
+            - select:
+                cases:
+                  - comm: <-s.graceHeld
+                  - comm: <-ctx.Done()
+          when: s.graceHeld != nil
   - of: (*Server).shutdownHTTP
     participants:
       - id: caller

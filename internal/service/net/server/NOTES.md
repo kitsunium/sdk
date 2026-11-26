@@ -263,7 +263,12 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
 - **Readiness turns false a grace before anything closes** (ADR 0196 §D2).
   `Shutdown` stores `PhaseDraining`, which `readinessOf` refuses, then
   `waitGrace` keeps every listener accepting and every connection served for
-  `WithDrainGrace`, or until ctx ends; `Serve` adds the grace to its drain
+  `WithDrainGrace`, or until ctx ends — and past it while an internal test
+  holds `Server.graceHeld`, nil otherwise: `TestDrain_arrivalsAcrossTheDrain`
+  lets go once an arrival that began in the grace was served, since a stall
+  of its clients longer than the 50 ms grace read as "0 served during it, 4
+  refused after" on a correct backend (#1385,
+  `TestDrain_arrivalsAcrossAStalledGrace`) —; `Serve` adds the grace to its drain
   budget. A loop group then takes its listen queue before its listener closes
   (the leaf's drain), and so does the portable backend on Unix, on the
   listeners it duplicated at Start (`ownListeners`, `takeQueues`), its

@@ -64,6 +64,12 @@ type Server struct {
 	// drainGrace is how long Shutdown keeps serving, readiness false, before
 	// it closes a listener.
 	drainGrace time.Duration
+	// graceHeld, nil unless an internal test sets it, keeps the grace going
+	// past drainGrace until it is closed or the budget ends: the drain test
+	// closes it once an arrival that began in the grace was served, so a
+	// stall of its clients that outlasted drainGrace is not read as a drain
+	// that serves nothing (#1385).
+	graceHeld <-chan struct{}
 
 	// phase is the lifecycle phase, read without the mutex by State.
 	phase atomic.Uint32
