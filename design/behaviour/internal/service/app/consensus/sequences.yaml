@@ -23099,6 +23099,12 @@ sequences:
         kind: value
       - id: raft
         kind: package
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: snapshotSize
+        kind: internal
+      - id: n.snapState.mu.Unlock
+        kind: value
       - id: n.am.Lock
         kind: value
       - id: n.answerCovered
@@ -23106,10 +23112,6 @@ sequences:
       - id: n.releaseApplied
         kind: internal
       - id: n.am.Unlock
-        kind: value
-      - id: n.snapState.mu.Lock
-        kind: value
-      - id: n.snapState.mu.Unlock
         kind: value
     steps:
       - bind: h, err
@@ -23163,6 +23165,13 @@ sequences:
             - set: n.sessions
               to: raft
               value: raft.NewSessionTable(m.Sessions)
+            - eval: n.snapState.mu.Lock()
+              to: n.snapState.mu.Lock
+            - set: n.snapState.newestBytes
+              to: snapshotSize
+              value: snapshotSize(&m)
+            - eval: n.snapState.mu.Unlock()
+              to: n.snapState.mu.Unlock
             - eval: n.am.Lock()
               to: n.am.Lock
             - set: n.applied, n.appliedTerm

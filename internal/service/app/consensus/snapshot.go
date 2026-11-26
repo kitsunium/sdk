@@ -65,6 +65,14 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 		// The sessions are the machine's companions: restored with it, at
 		// the same index (#918).
 		n.sessions = raft.NewSessionTable(m.Sessions)
+		// The snapshot is the node's newest before the applied position it
+		// gives is published: recorded only by the install's retain, after
+		// raft moved, a node caught up past its log still reported the
+		// newest it held before, to Promote, the unfed watch and Health
+		// (#1502). retain records it again, with its warning.
+		n.snapState.mu.Lock()
+		n.snapState.newestBytes = snapshotSize(&m)
+		n.snapState.mu.Unlock()
 		n.am.Lock()
 		n.applied, n.appliedTerm = m.Position.Index, m.Position.Term
 		n.answerCovered(m.Position.Index)
