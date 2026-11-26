@@ -80,7 +80,10 @@ step() {
   body="$(step "Stop when the target is behind main and the workflows differ")"
   [ -n "$body" ]
   [[ "$body" == *'git fetch --quiet origin main'* ]]
-  [[ "$body" == *'check-target-fresh.sh "$TARGET_SHA" origin/main'* ]]
+  [[ "$body" == *'git show "${GITHUB_SHA}:scripts/release/check-target-fresh.sh"'* ]]
+  [[ "$body" == *'bash "$check" "$TARGET_SHA" origin/main'* ]]
+  # Never the target's own tree, which may predate the script (127).
+  [[ "$body" != *'bash scripts/release/check-target-fresh.sh'* ]]
   [[ "$body" == *'stale=true'* ]]
   # No exit 1 for the stale case: it is a notice.
   [[ "$body" == *'::notice::'* ]]
@@ -90,4 +93,27 @@ step() {
   body="$(step "Compute the release token")"
   [[ "$body" == *'STALE: ${{ steps.fresh.outputs.stale }}'* ]]
   [[ "$body" == *'"${STALE:-}" = "true"'* ]]
+}
+
+@test "the script is read from the workflow's revision when the target predates it" {
+  # The target has no scripts/release at all; the workflow's revision does.
+  echo b >file.txt
+  mkdir -p scripts/release
+  cp "$CHECK" scripts/release/check-target-fresh.sh
+  echo b >.github/workflows/ci.yml
+  git add -A
+  git commit -q -m "workflow revision"
+  WFREV="$(git rev-parse HEAD)"
+  git checkout -q "$TARGET"
+  [ ! -e scripts/release/check-target-fresh.sh ]
+  loaded="$BATS_TEST_TMPDIR/loaded.sh"
+  git show "${WFREV}:scripts/release/check-target-fresh.sh" >"$loaded"
+  run bash "$loaded" "$TARGET" "$WFREV"
+  [ "$status" -eq 10 ]
+  [[ "$output" == *"Nothing is cut"* ]]
+}
+
+@test "a revision that does not hold the script fails closed" {
+  run git show "${TARGET}:scripts/release/check-target-fresh.sh"
+  [ "$status" -ne 0 ]
 }

@@ -242,8 +242,19 @@ jobs:
             echo "::error::cannot fetch origin/main to compare it with the release target"
             exit 1
           }
+          # The script is read from the revision of THIS workflow, never from the
+          # target's tree: a workflow_run executes the default branch's file on
+          # the checkout of the CI run's head, which can predate the script, and
+          # a missing file would answer 127 and fail the job instead of
+          # stopping it with a notice. Failing to load it stays a failure.
+          check="$(mktemp)"
+          trap 'rm -f "$check"' EXIT
+          git show "${GITHUB_SHA}:scripts/release/check-target-fresh.sh" >"$check" || {
+            echo "::error::cannot read scripts/release/check-target-fresh.sh at ${GITHUB_SHA}"
+            exit 1
+          }
           rc=0
-          msg="$(bash scripts/release/check-target-fresh.sh "$TARGET_SHA" origin/main)" || rc=$?
+          msg="$(bash "$check" "$TARGET_SHA" origin/main)" || rc=$?
           case "$rc" in
             0) echo "$msg" ;;
             10)
