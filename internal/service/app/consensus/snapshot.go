@@ -78,10 +78,22 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) err
 		}
 		// A machine may stop reading before the end: the rest is read, so
 		// the end is checked whatever the machine read, before applied
-		// moves.
-		//: a stream that differs from its metadata past what the machine read is refused too.
+		// moves. Refused there, the machine already accepted the stream
+		// and may hold the snapshot's state while applied stays below it:
+		// a machine that stops at the end of its value, as a json.Decoder
+		// leaving the final newline unread, then had the entries handed
+		// after the restore applied over that state a second time, and a
+		// durable one recorded a position below it. Without the digest it
+		// just refused, the engine cannot tell a whole state from a
+		// prefix: the node stops, as on a failed Apply, before the apply
+		// goroutine takes another item, and a start fails the same way.
+		//: a stream that differs from its metadata past what the machine accepted stops the node.
 		if _, err := io.Copy(io.Discard, sr); err != nil {
-			return err
+			serr := origin(coreconsensus.StateMachineFailed,
+				errs.String("why", "the machine accepted a snapshot whose end was then refused"),
+				errs.String("id", m.ID), errs.String("cause", err.Error()))
+			n.stop(serr, false)
+			return serr
 		}
 		// The sessions are the machine's companions: restored with it, at
 		// the same index (#918).

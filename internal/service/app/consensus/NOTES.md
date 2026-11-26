@@ -1655,6 +1655,21 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   that consumed the cut stream before it failed holds what it read: as for
   any failed `Restore`, the copy is removed, nothing moves, and the next
   restore replaces the state.
+- Refuse, and keep running, a restore whose `Restore` returned nil before
+  its end was refused: the machine accepted the stream and may hold the
+  snapshot's state N while `applied` stays at A. A machine that stops at the
+  end of its value, as a `json.Decoder` leaving the final newline unread,
+  then had the entries (A, match] handed after the restore applied over N
+  a second time, and a durable one recorded a position below N with that
+  state. Without the digest it just refused, the engine cannot tell a whole
+  state from a prefix, so `restoreFrom` stops the node STATE_MACHINE_FAILED
+  on the apply goroutine, before it takes another item; `restoreFailed`
+  keeps the copy, and `restoreLatest` fails the start instead of falling
+  back to an older snapshot, which a durable machine already past it would
+  skip while keeping the state it accepted. On a file log the stop writes
+  `STOP-STATE_MACHINE_FAILED`, and every later start is refused
+  STOP_MARKER_PRESENT until an operator clears it
+  (`TestARestoreWhoseSecondReadIsCutIsRefused`, its skim and framed cases).
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).
