@@ -9290,6 +9290,8 @@ sequences:
         kind: internal
       - id: rr.closeBackstop
         kind: internal
+      - id: ul.catchUp
+        kind: internal
       - id: lp.h.OnBatchEnd
         kind: value
       - id: lp.settleDrain
@@ -9342,6 +9344,8 @@ sequences:
           key: _
           range: ul.rings
           value: rr
+      - eval: ul.catchUp()
+        to: ul.catchUp
       - eval: lp.h.OnBatchEnd(lp)
         to: lp.h.OnBatchEnd
       - eval: lp.settleDrain()
@@ -9443,6 +9447,59 @@ sequences:
                 when: cut
           key: k
           range: "n"
+  - of: (*uLoop).catchUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).catchUp
+        kind: self
+      - id: rr.catchUp
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!ul.lp.draining"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: rr.r.behind
+            - set: rr.r.behind
+              to: rr.catchUp
+              value: rr.catchUp()
+          key: _
+          range: ul.rings
+          value: rr
+  - of: (*uRing).catchUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).catchUp
+        kind: self
+      - id: rr.u.flushOverflow
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: rr.u.flushOverflow()
+                    to: rr.u.flushOverflow
+                when: rr.u.deferred()
+            - bind: before
+              eval: rr.r.st.completions
+            - opt:
+                do:
+                  - return: "true"
+                when: rr.reapAll() || rr.u.overflowed()
+            - opt:
+                do:
+                  - return: len(rr.starved) > 0
+                when: rr.r.st.completions == before
+          range: reapRounds
+      - return: "true"
   - of: (*uLoop).submitLate
     participants:
       - id: caller

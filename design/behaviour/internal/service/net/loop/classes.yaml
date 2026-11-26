@@ -2284,6 +2284,8 @@ files:
       - (*uLoop).batch
       - (*uLoop).await
       - (*uLoop).reapRings
+      - (*uLoop).catchUp
+      - (*uRing).catchUp
       - (*uLoop).submitLate
       - (*uLoop).live
       - (*uRing).reapAll
@@ -6418,6 +6420,12 @@ types:
         name: pace
         recv: rr *uRing
       - doc: |-
+          catchUp is uLoop.catchUp on one ring, and reports whether it is still
+          behind.
+        name: catchUp
+        recv: rr *uRing
+        results: bool
+      - doc: |-
           reapAll reaps the ring's CQ until it is empty, a batch at a time, and
           flushes an overflow the kernel held back. Under a batch budget it reaps
           budgetChunk at a time and stops once the budget ran out, reporting
@@ -7383,6 +7391,19 @@ types:
           short: its completions and the next rings' wait for the next batch,
           which starts there (ADR 0206).
         name: reapRings
+        recv: ul *uLoop
+      - doc: |-
+          catchUp, while the loop drains, reaps what the batch's own submits posted
+          after reapRings and, on a DEFER_TASKRUN ring, the work the kernel holds for
+          this thread — a recv armed before its data came posts its completion only
+          on an enter with GETEVENTS, which a wait finding the CQ not empty skips —,
+          until an enter posts nothing, reapRounds times at most. A ring still
+          behind then is not judged silent this batch (#1541): its requests may wait
+          in that work. Under 6.13 and later one enter runs only a few dozen of
+          those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds. A ring already
+          behind — cut by the budget, not reached, or starved — is left for the next
+          batch, the budget kept (ADR 0206).
+        name: catchUp
         recv: ul *uLoop
       - doc: |-
           submitLate hands the kernel the answers endBatch queued at once, rather

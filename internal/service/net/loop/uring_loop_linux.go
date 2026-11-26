@@ -1218,6 +1218,7 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 		rr.sweep()
 		rr.closeBackstop()
 	}
+	ul.catchUp()
 	lp.h.OnBatchEnd(lp)
 	lp.settleDrain()
 	lp.endBatch()
@@ -1291,6 +1292,57 @@ func (ul *uLoop) reapRings() {
 			return
 		}
 	}
+}
+
+// catchUp, while the loop drains, reaps what the batch's own submits posted
+// after reapRings and, on a DEFER_TASKRUN ring, the work the kernel holds for
+// this thread — a recv armed before its data came posts its completion only
+// on an enter with GETEVENTS, which a wait finding the CQ not empty skips —,
+// until an enter posts nothing, reapRounds times at most. A ring still
+// behind then is not judged silent this batch (#1541): its requests may wait
+// in that work. Under 6.13 and later one enter runs only a few dozen of
+// those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds. A ring already
+// behind — cut by the budget, not reached, or starved — is left for the next
+// batch, the budget kept (ADR 0206).
+func (ul *uLoop) catchUp() {
+	//: serving: no silence is judged.
+	if !ul.lp.draining {
+		//: nothing.
+		return
+	}
+	//: every ring the batch reaped whole.
+	for _, rr := range ul.rings {
+		//: behind already: judged at a later batch.
+		if rr.r.behind {
+			continue
+		}
+		rr.r.behind = rr.catchUp()
+	}
+}
+
+// catchUp is uLoop.catchUp on one ring, and reports whether it is still
+// behind.
+func (rr *uRing) catchUp() bool {
+	//: an enter, then a reap, until neither brings anything.
+	for range reapRounds {
+		//: the deferred work runs only on this thread's GETEVENTS enter.
+		if rr.u.deferred() {
+			rr.u.flushOverflow()
+		}
+		before := rr.r.st.completions
+		//: cut by the budget, or the kernel held completions back.
+		if rr.reapAll() || rr.u.overflowed() {
+			//: behind.
+			return true
+		}
+		//: nothing came: caught up.
+		if rr.r.st.completions == before {
+			//: judged this batch.
+			return len(rr.starved) > 0
+		}
+	}
+	//: still coming after the rounds.
+	return true
 }
 
 // submitLate hands the kernel the answers endBatch queued at once, rather

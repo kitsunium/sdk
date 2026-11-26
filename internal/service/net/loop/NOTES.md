@@ -116,7 +116,13 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   put off for want of arena may leave a request unread, and the close would
   read it away unanswered behind a FIN — a take of more than `CQBatch` on one
   loop, its next batch a second late on a loaded runner (#1541,
-  `TestConformance_drainReadsBeforeItJudgesSilence`). The drain's look (`settleDrain`, then
+  `TestConformance_drainReadsBeforeItJudgesSilence`). On io_uring, while it
+  drains, `catchUp` runs before `OnBatchEnd`: it reaps what the batch's own
+  submits posted after `reapRings` and, on a DEFER_TASKRUN ring, enters with
+  GETEVENTS so the kernel runs the work a recv armed before its data left —
+  a wait that finds the CQ not empty does not enter —, until an enter posts
+  nothing, `reapRounds` times at most, else the ring stays behind
+  (`TestConformance_drainRunsDeferredWork`). The drain's look (`settleDrain`, then
   `closeSettled`) runs once `OnBatchEnd` has returned, before `endBatch`
   flushes: an answer written at `OnBatchEnd` is queued before the close is
   marked, and a closing slot finishes only once its output left (#1385).

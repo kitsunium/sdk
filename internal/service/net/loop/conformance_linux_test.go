@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -722,4 +723,106 @@ func uringDirect(t *testing.T) bool {
 	}
 	defer g.Close()
 	return strings.HasSuffix(g.State().ProbeStage, "+direct")
+}
+
+// What TestConformance_drainRunsDeferredWork queues: drainDeferredA silent
+// connections, more than one batch of the take arms (queueTakeBatch), so the
+// listener outlives that batch, then drainDeferredB with their lines.
+const (
+	drainDeferredA int = queueTakeBatch + 8
+	drainDeferredB int = 8
+)
+
+// TestConformance_drainRunsDeferredWork pins that, under DEFER_TASKRUN, the
+// drain judges no silence before the kernel ran the work its recvs left
+// (#1541 review): io_uring, one loop of one ring, uring-defer-taskrun opted
+// into — net/server's default for a group that sets Backlog —, held at every
+// batch end once the drain is asked for. Group A, silent, is queued; the
+// first batch of the take arms queueTakeBatch accepts and keeps the
+// listener; group B is queued with its lines; the second batch reaps A's
+// accepts, arms their recvs and takes the rest, those accepts completing as
+// they are submitted, so the CQ is not empty as the next batch begins. Group
+// A sends its lines while the loop is held, past drainQuiet. A recv armed
+// before its data arrived posts nothing until the thread enters with
+// GETEVENTS, and a wait that finds the CQ not empty does not enter: the
+// batch reaped the accepts, found the CQ empty and A silent, and closed A
+// behind a FIN.
+func TestConformance_drainRunsDeferredWork(t *testing.T) {
+	runCase := func(t *testing.T, b backendCase) {
+		onlyIOURing(t, b)
+		var gating atomic.Bool
+		step := make(chan struct{})
+		held := make(chan struct{}, 1)
+		h := &lineH{}
+		h.batchEnd = func(corenet.LoopIO) {
+			//: once gated, the loop holds at every batch end until stepped.
+			if gating.Load() {
+				held <- struct{}{}
+				<-step
+			}
+		}
+		g, addr := serve(t, b, h, func(c *Config) {
+			c.Value.Loops, c.Value.Rings = 1, 1
+			c.Value.Capabilities = []corenet.Capability{corenet.CapabilityURingDeferTaskrun}
+		})
+		release := func() {
+			//: let a loop held at its batch end go, and every batch after.
+			if gating.Swap(false) {
+				close(step)
+			}
+		}
+		t.Cleanup(release)
+		c0 := dial(t, addr)
+		echo(t, c0, "warm\n")
+		park := func() bool {
+			//: held at a batch end, or never.
+			select {
+			case <-held:
+				return true
+			case <-time.After(5 * time.Second):
+				return false
+			}
+		}
+		// next lets the loop run one batch and waits for it to hold again.
+		next := func() {
+			step <- struct{}{}
+			//: the batch ended.
+			if !park() {
+				t.Fatal("the loop never ended a batch")
+			}
+		}
+		gating.Store(true)
+		//: a posted no-op wakes the loop to its batch end.
+		if err := g.loops[0].Post(func(corenet.LoopIO, uintptr) {}, 0); err != nil {
+			t.Fatalf("Post: %v", err)
+		}
+		//: parked before the drain.
+		if !park() {
+			t.Fatal("the loop never reached its batch end")
+		}
+		g.ctl.drain()
+		groupA := make([]stdnet.Conn, 0, drainDeferredA)
+		//: group A, silent, in the queue.
+		for range drainDeferredA {
+			groupA = append(groupA, dial(t, addr))
+		}
+		next()
+		groupB := make([]stdnet.Conn, 0, drainDeferredB)
+		//: group B in the queue behind the rest of A, each with its line.
+		for range drainDeferredB {
+			c := dial(t, addr)
+			_, _ = c.Write([]byte("q\n"))
+			groupB = append(groupB, c)
+		}
+		next()
+		//: group A's lines reach recvs already armed: deferred work.
+		for _, c := range groupA {
+			_, _ = c.Write([]byte("q\n"))
+		}
+		// The next batch begins past drainQuiet, as on a loaded runner.
+		time.Sleep(drainQuiet + 250*time.Millisecond)
+		release()
+		shutdownServes(t, g, append(groupA, groupB...), c0)
+	}
+	eachBackend(t, runCase)
 }
