@@ -251,3 +251,108 @@ func Test_UnlockedMap_tinyLFUStaleMark(t *testing.T) {
 		})
 	}
 }
+
+// weightedStore returns a W-TinyLFU cache bound at 100 in weight — protected
+// holds 79 of it — whose entries weigh what their value says.
+func weightedStore() *UnlockedMap[string, int] {
+	return NewUnlockedMap[string, int](Config[string, int]{
+		MaxWeight: 100,
+		Policy:    PolicyTinyLFU,
+		WeightOf:  func(_ string, v int) int64 { return int64(v) },
+	})
+}
+
+// Test_UnlockedMap_tinyLFUHeavyCandidate pins that an entry heavier than
+// protected's whole share, hit in probation, stays in probation — refreshed
+// to its front — and demotes nothing: moving it would empty protected of the
+// entries that fit, and then itself.
+func Test_UnlockedMap_tinyLFUHeavyCandidate(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// heavy is the weight of the entry hit second.
+		heavy int
+		// protectedKeys is what protected holds afterwards, newest first.
+		protectedKeys []string
+		// probationHead is probation's newest entry afterwards.
+		probationHead string
+	}
+	tests := []tc{
+		{name: "heavier than protected's share", heavy: 80, protectedKeys: []string{"a"}, probationHead: "b"},
+		{name: "as heavy as protected's share", heavy: 79, protectedKeys: []string{"b"}, probationHead: "a"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		store := weightedStore()
+		store.Set("a", 10)
+		store.Set("b", c.heavy)
+		store.Set("c", 1)
+		store.Fetch("a")
+		store.Fetch("b")
+		var got []string
+		for ent := store.main.head; ent != nil; ent = ent.next {
+			got = append(got, ent.key)
+		}
+		if len(got) != len(c.protectedKeys) || (len(got) > 0 && got[0] != c.protectedKeys[0]) {
+			t.Errorf("protected holds %v, want %v", got, c.protectedKeys)
+		}
+		if head := store.probation.head; head == nil || head.key != c.probationHead {
+			t.Errorf("probation's newest is %v, want %s", head, c.probationHead)
+		}
+		if store.main.weight > store.shares.protectedWeight {
+			t.Errorf("protected weighs %d over its share %d", store.main.weight, store.shares.protectedWeight)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_UnlockedMap_tinyLFUHeavierProtected pins that a Set which makes a
+// protected entry heavier brings protected back within its share, its oldest
+// going to probation, and that an unchanged weight moves nothing.
+func Test_UnlockedMap_tinyLFUHeavierProtected(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// weight is the weight the overwritten entry takes.
+		weight int
+		// protectedWeight is protected's weight afterwards.
+		protectedWeight int64
+		// probationCount is how many entries probation holds afterwards.
+		probationCount int
+	}
+	tests := []tc{
+		{name: "the same weight", weight: 40, protectedWeight: 79, probationCount: 0},
+		{name: "a heavier entry", weight: 50, protectedWeight: 50, probationCount: 1},
+		{name: "heavier than the whole share, the bound evicts the rest", weight: 90, protectedWeight: 0, probationCount: 1},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		store := weightedStore()
+		store.Set("a", 40)
+		store.Set("b", 39)
+		store.Set("c", 1)
+		store.Fetch("a")
+		store.Fetch("b")
+		if store.main.weight != 79 {
+			t.Fatalf("protected weighs %d before the overwrite, want 79", store.main.weight)
+		}
+		store.Set("a", c.weight)
+		if store.main.weight != c.protectedWeight || store.probation.count != c.probationCount {
+			t.Errorf("protected weighs %d and probation holds %d, want %d and %d", store.main.weight, store.probation.count, c.protectedWeight, c.probationCount)
+		}
+		if store.small.count+store.probation.count+store.main.count != store.Len() {
+			t.Errorf("the lists hold %d entries, Len says %d", store.small.count+store.probation.count+store.main.count, store.Len())
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

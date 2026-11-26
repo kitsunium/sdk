@@ -351,6 +351,10 @@ func (c *UnlockedMap[K, V]) overwrite(ent *entry[K, V], val V, timed bool, at in
 		c.clearDeadline(ent)
 	}
 	c.touch(ent)
+	//: a weight that changed may take a protected entry past its share.
+	if c.weightOf != nil && c.policy == PolicyTinyLFU {
+		c.rebalanceReweighed(ent)
+	}
 	//: a heavier value may push the cache over its weight bound; a count
 	//: bound cannot move on an overwrite.
 	if c.maxWeight > 0 {

@@ -317,6 +317,9 @@ files:
       - (*UnlockedMap).countHit
       - (*UnlockedMap).retireMarks
       - (*UnlockedMap).reorderTinyLFU
+      - (*UnlockedMap).exceedsProtected
+      - (*UnlockedMap).trimProtected
+      - (*UnlockedMap).rebalanceReweighed
       - (*UnlockedMap).evictTinyLFU
       - (*UnlockedMap).contest
       - (*UnlockedMap).probate
@@ -1111,8 +1114,32 @@ types:
       - doc: |-
           reorderTinyLFU moves a window entry to the window's front, and a
           probation entry to protected's, whose oldest go back to probation while
-          it holds more than its share. Caller holds the lock.
+          it holds more than its share. A probation entry that outweighs protected's
+          whole share is refreshed in probation instead: no share could hold it, and
+          moving it would empty protected of the entries that fit. Caller holds the
+          lock.
         name: reorderTinyLFU
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          exceedsProtected reports whether ent alone is more than protected's share
+          of a bound that applies. Caller holds the lock.
+        name: exceedsProtected
+        params: ent *entry[K, V]
+        recv: c *UnlockedMap[K, V]
+        results: bool
+      - doc: |-
+          trimProtected sends protected's oldest back to probation while it holds
+          more than its share. Caller holds the lock.
+        name: trimProtected
+        recv: c *UnlockedMap[K, V]
+      - doc: |-
+          rebalanceReweighed brings the lists back within their shares after a write
+          gave a held entry a new weight: a protected entry that now outweighs the
+          whole share goes to probation's front, any other protected entry may have
+          pushed protected over its share. Only a write reweighs, so the hit path
+          never comes here. Caller holds the lock.
+        name: rebalanceReweighed
         params: ent *entry[K, V]
         recv: c *UnlockedMap[K, V]
       - doc: |-

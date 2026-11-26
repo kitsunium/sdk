@@ -123,7 +123,10 @@ func (c *UnlockedMap[K, V]) retireMarks() {
 
 // reorderTinyLFU moves a window entry to the window's front, and a
 // probation entry to protected's, whose oldest go back to probation while
-// it holds more than its share. Caller holds the lock.
+// it holds more than its share. A probation entry that outweighs protected's
+// whole share is refreshed in probation instead: no share could hold it, and
+// moving it would empty protected of the entries that fit. Caller holds the
+// lock.
 func (c *UnlockedMap[K, V]) reorderTinyLFU(ent *entry[K, V]) {
 	//: the window is an LRU.
 	if ent.queue == queueSmall {
@@ -131,10 +134,34 @@ func (c *UnlockedMap[K, V]) reorderTinyLFU(ent *entry[K, V]) {
 		//: relinked.
 		return
 	}
+	//: no share could hold it: it stays in probation, at the front.
+	if c.exceedsProtected(ent) {
+		c.probation.moveFront(ent)
+		//: relinked, protected untouched.
+		return
+	}
 	//: a second use in main earns protection.
 	c.probation.unlink(ent)
 	ent.queue = queueMain
 	c.main.pushFront(ent)
+	c.trimProtected()
+}
+
+// exceedsProtected reports whether ent alone is more than protected's share
+// of a bound that applies. Caller holds the lock.
+func (c *UnlockedMap[K, V]) exceedsProtected(ent *entry[K, V]) bool {
+	//: a count bound: one entry against a share of none.
+	if c.maxEntries > 0 && c.shares.protected < 1 {
+		//: no room for even one.
+		return true
+	}
+	//: a weight bound: the entry's weight against the share.
+	return c.maxWeight > 0 && int64(ent.weight) > c.shares.protectedWeight
+}
+
+// trimProtected sends protected's oldest back to probation while it holds
+// more than its share. Caller holds the lock.
+func (c *UnlockedMap[K, V]) trimProtected() {
 	//: protected over its share: its oldest go back to probation.
 	for c.protectedIsLarge() {
 		demoted := c.main.tail
@@ -142,6 +169,28 @@ func (c *UnlockedMap[K, V]) reorderTinyLFU(ent *entry[K, V]) {
 		demoted.queue = queueProbation
 		c.probation.pushFront(demoted)
 	}
+}
+
+// rebalanceReweighed brings the lists back within their shares after a write
+// gave a held entry a new weight: a protected entry that now outweighs the
+// whole share goes to probation's front, any other protected entry may have
+// pushed protected over its share. Only a write reweighs, so the hit path
+// never comes here. Caller holds the lock.
+func (c *UnlockedMap[K, V]) rebalanceReweighed(ent *entry[K, V]) {
+	//: only protected has a share a heavier entry can break.
+	if ent.queue != queueMain {
+		//: the window and probation answer to the bound alone.
+		return
+	}
+	//: no share could hold it: probation's front.
+	if c.exceedsProtected(ent) {
+		c.main.unlink(ent)
+		ent.queue = queueProbation
+		c.probation.pushFront(ent)
+		//: protected lost the entry.
+		return
+	}
+	c.trimProtected()
 }
 
 // evictTinyLFU evicts by W-TinyLFU's admission: while the window holds more

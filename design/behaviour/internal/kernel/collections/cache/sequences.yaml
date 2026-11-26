@@ -1364,13 +1364,13 @@ sequences:
         kind: self
       - id: c.small.moveFront
         kind: internal
+      - id: c.probation.moveFront
+        kind: internal
       - id: c.probation.unlink
         kind: internal
       - id: c.main.pushFront
         kind: internal
-      - id: c.main.unlink
-        kind: internal
-      - id: c.probation.pushFront
+      - id: c.trimProtected
         kind: internal
     steps:
       - opt:
@@ -1379,12 +1379,38 @@ sequences:
               to: c.small.moveFront
             - return: ""
           when: ent.queue == queueSmall
+      - opt:
+          do:
+            - eval: c.probation.moveFront(ent)
+              to: c.probation.moveFront
+            - return: ""
+          when: c.exceedsProtected(ent)
       - eval: c.probation.unlink(ent)
         to: c.probation.unlink
       - set: ent.queue
         value: queueMain
       - eval: c.main.pushFront(ent)
         to: c.main.pushFront
+      - eval: c.trimProtected()
+        to: c.trimProtected
+  - of: (*UnlockedMap).exceedsProtected
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: c.maxEntries > 0 && c.shares.protected < 1
+      - return: c.maxWeight > 0 && int64(ent.weight) > c.shares.protectedWeight
+  - of: (*UnlockedMap).trimProtected
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).trimProtected
+        kind: self
+      - id: c.main.unlink
+        kind: internal
+      - id: c.probation.pushFront
+        kind: internal
+    steps:
       - loop:
           cond: c.protectedIsLarge()
           do:
@@ -1396,6 +1422,35 @@ sequences:
               value: queueProbation
             - eval: c.probation.pushFront(demoted)
               to: c.probation.pushFront
+  - of: (*UnlockedMap).rebalanceReweighed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*UnlockedMap).rebalanceReweighed
+        kind: self
+      - id: c.main.unlink
+        kind: internal
+      - id: c.probation.pushFront
+        kind: internal
+      - id: c.trimProtected
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: ent.queue != queueMain
+      - opt:
+          do:
+            - eval: c.main.unlink(ent)
+              to: c.main.unlink
+            - set: ent.queue
+              value: queueProbation
+            - eval: c.probation.pushFront(ent)
+              to: c.probation.pushFront
+            - return: ""
+          when: c.exceedsProtected(ent)
+      - eval: c.trimProtected()
+        to: c.trimProtected
   - of: (*UnlockedMap).evictTinyLFU
     participants:
       - id: caller
@@ -1973,6 +2028,8 @@ sequences:
         kind: internal
       - id: c.touch
         kind: internal
+      - id: c.rebalanceReweighed
+        kind: internal
       - id: c.evictIfNeeded
         kind: internal
     steps:
@@ -1994,6 +2051,11 @@ sequences:
             else: true
       - eval: c.touch(ent)
         to: c.touch
+      - opt:
+          do:
+            - eval: c.rebalanceReweighed(ent)
+              to: c.rebalanceReweighed
+          when: c.weightOf != nil && c.policy == PolicyTinyLFU
       - opt:
           do:
             - eval: c.evictIfNeeded(ent, pending)
