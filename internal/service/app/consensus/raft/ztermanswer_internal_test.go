@@ -787,11 +787,12 @@ func lateAppendSetup(n *lateNet) (core.MessageValue, bool) {
 // lateAppendResult is what D0's schedule measured over seeds 1 to 64.
 type lateAppendResult struct {
 	// reached counts the seeds that reached the release of the delayed
-	// heartbeat, unrefused those whose heartbeat drew no refusal F was
-	// delivered before the held vote, and violated those of the others
+	// heartbeat, unvoted those where X's vote request was never held for F
+	// (a setup defect), unrefused those whose heartbeat drew no refusal F
+	// was delivered before the held vote, and violated those of the others
 	// that violated the lease; first is the first violation.
-	reached, unrefused, violated int
-	first                        string
+	reached, unrefused, unvoted, violated int
+	first                                 string
 }
 
 // lateAppendSeeds plays D0's schedule over seeds 1 to 64; before names the
@@ -811,6 +812,10 @@ func lateAppendSeeds(t *testing.T, before ...core.NodeID) lateAppendResult {
 			continue
 		}
 		res.reached++
+		if n.unvoted {
+			res.unvoted++
+			continue
+		}
 		if !n.refused {
 			res.unrefused++
 			continue
@@ -832,8 +837,10 @@ func lateAppendSeeds(t *testing.T, before ...core.NodeID) lateAppendResult {
 // of term 4 reaches F. Every seed that reaches the schedule keeps the lease:
 // the refusal is at term 2, which F drops. So does every seed when X, or F,
 // alone runs as a release before #1472: F never takes the refusal's term 4,
-// or X refuses at term 2. Run all as a release before #1472, the step
-// function before the fix, every such seed violates it, 48 of 48. In every
+// or X refuses at term 2. Run F and X together as a release before #1472,
+// the documented limit of #1472 (two nodes of the old version), or all of
+// them, the step function before the fix, every such seed violates it, 48
+// of 48. In every
 // run X's refusal reaches F before the vote: a seed where it does not is a
 // schedule that no longer plays the late refusal, reported apart from a
 // violation.
@@ -848,6 +855,8 @@ func TestALeaseHoldsAcrossALateAppendAnswer(t *testing.T) {
 		switch {
 		case res.reached == 0:
 			t.Fatal("no seed reached the schedule: it no longer plays the late refusal")
+		case res.unvoted > 0:
+			t.Fatalf("%v: in %d of %d seeds that reached the schedule X's vote request of term 4 was never held for F", errSetup, res.unvoted, res.reached)
 		case res.unrefused > 0:
 			t.Fatalf("%d of %d seeds that reached the schedule delivered F no refusal of its delayed heartbeat before X's vote", res.unrefused, res.reached)
 		case c.caught && res.violated == 0:
@@ -864,6 +873,7 @@ func TestALeaseHoldsAcrossALateAppendAnswer(t *testing.T) {
 		{name: "this release"},
 		{name: "X of a previous release", before: []core.NodeID{lateX}},
 		{name: "F of a previous release", before: []core.NodeID{lateF}},
+		{name: "F and X of a previous release", before: []core.NodeID{lateF, lateX}, caught: true},
 		{name: "all of a previous release", before: []core.NodeID{lateG, lateF, lateX}, caught: true},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })

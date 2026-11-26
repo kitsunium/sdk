@@ -114,6 +114,9 @@ type lateNet struct {
 	// refused reports whether the message lateRace releases at step 7
 	// drew a refusal its sender was delivered before the held vote.
 	refused bool
+	// unvoted reports that step 8 found no held vote request of X for F:
+	// the race never played, whatever F then did.
+	unvoted bool
 }
 
 // lateNode is a voter of members 1, 2 and 3 with the lease on.
@@ -243,7 +246,11 @@ func lateForwardSchedule(t *testing.T, seed uint64, restamp bool, before ...core
 	if !ok {
 		return false, ""
 	}
-	return lateRace(n, c)
+	ok, violation := lateRace(n, c)
+	if ok && n.unvoted {
+		t.Fatalf("seed %d: %v: X's vote request of term 4 was never held for F, so the race never played", seed, errSetup)
+	}
+	return ok, violation
 }
 
 // lateForwardSetup plays steps 1 to 3 of the forward's schedule and returns
@@ -407,7 +414,9 @@ func lateRace(n *lateNet, c core.MessageValue) (bool, string) {
 	fTerm := f.Status().Term
 
 	// 8. X's delayed vote request of term 4 reaches F.
-	n.deliver(n.take(func(m core.MessageValue) bool { return m.Kind == core.MsgVote && m.From == lateX && m.To == lateF })...)
+	votes := n.take(func(m core.MessageValue) bool { return m.Kind == core.MsgVote && m.From == lateX && m.To == lateF })
+	n.unvoted = len(votes) == 0
+	n.deliver(votes...)
 	if x.Status().Role != core.RoleLeader {
 		return true, ""
 	}
