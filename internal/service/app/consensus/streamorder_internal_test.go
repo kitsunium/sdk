@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -309,7 +310,8 @@ func TestAVoterIsStreamedBeforeALearnerThatAskedFirst(t *testing.T) {
 	releaseHeld(t, lt, l)
 	propose(t, l.node, "last=v")
 	awaitLast(t, a, b, lag)
-	if got, cut := lt.streams.Load(), lt.cancelled.Load(); got != 3 || cut != 0 {
+	//: Three streams once each returned, and none cut.
+	if got, cut := streamsReturned(t, lt, l); got != 3 || cut != 0 {
 		t.Fatalf("%d snapshot streams, %d cut, want 3 and none", got, cut)
 	}
 }
@@ -359,9 +361,33 @@ func TestAReadysVoterIsStreamedBeforeItsLearner(t *testing.T) {
 	releaseHeld(t, lt, l)
 	propose(t, l.node, "last=v")
 	awaitLast(t, a, b, lag, third)
-	if got, cut := lt.streams.Load(), lt.cancelled.Load(); got != 3 || cut != 0 {
+	//: Three streams once each returned, and none cut.
+	if got, cut := streamsReturned(t, lt, l); got != 3 || cut != 0 {
 		t.Fatalf("%d snapshot streams, %d cut, want 3 and none", got, cut)
 	}
+}
+
+// streamsReturned waits until no stream of the leader's held transport is
+// in flight, and returns how many succeeded and how many were cut. A stream
+// is counted once the receiver's answer reached the sender; the receiver
+// may apply what the leader appends after it before then: raft hears the
+// install from the receiver's own acknowledgement, which moves the peer out
+// of its snapshot state on its own. Read once the peers caught up, the
+// count missed the last stream (#1570).
+func streamsReturned(t *testing.T, lt *holdTransport, l *testNode) (got, cut int32) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); lt.inFlight.Load() != 0; time.Sleep(10 * time.Millisecond) {
+		//: A stream still running past the bound is the failure itself.
+		if time.Now().After(deadline) {
+			t.Fatalf("%d snapshot streams still in flight: %s", lt.inFlight.Load(), streamsDescribed(l))
+		}
+	}
+	return lt.streams.Load(), lt.cancelled.Load()
+}
+
+// streamsDescribed is leader l's snapshot streams, in flight and waiting.
+func streamsDescribed(l *testNode) string {
+	return fmt.Sprintf("in flight %v, waiting %v", streamsInFlight(l), queuedPeers(l))
 }
 
 // #1483, O7 of its safety review: a waiter removed before the slot frees is
@@ -369,31 +395,80 @@ func TestAReadysVoterIsStreamedBeforeItsLearner(t *testing.T) {
 // raft's PeerStats no longer names it, so when a's stream ends the voter
 // lag is streamed and nobody is left waiting. A waiter never taken for gone
 // stayed queued, and the removed peer was streamed a snapshot next.
+//
+// #1570: the streams are counted once they returned. The second case holds
+// the sender's hearing of lag's answer until the test saw lag apply the
+// write proposed after it, the order macOS ran in: raft had moved lag out
+// of its snapshot state on lag's own acknowledgement and appended to it.
+// Read as soon as a and lag caught up, the count was 1.
 func TestAWaiterRemovedBeforeTheSlotFreesIsDropped(t *testing.T) {
-	q := newHeldQueue(t)
-	l, lt, a, b, lag := q.l, q.lt, q.a, q.b, q.lag
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	retryAdmin(t, "remove the waiting learner b", func() error { return l.node.Remove(ctx, "op:test", b.id) })
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if _, ok := statOf(l, b.id); !ok {
-			break
+	type tc struct {
+		name string
+		// late holds the leader's hearing of lag's answer until lag applied
+		// "last=v".
+		late bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		q := newHeldQueue(t)
+		l, lt, a, b, lag := q.l, q.lt, q.a, q.b, q.lag
+		var heldUntilApplied atomic.Bool
+		caughtUp := make(chan struct{})
+		var once sync.Once
+		seen := func() { once.Do(func() { close(caughtUp) }) }
+		defer seen()
+		//: Only the late case holds lag's answer.
+		if c.late {
+			hold := func(to coreconsensus.NodeID) {
+				//: a's answer is not held: lag's stream waits for it.
+				if to != lag.id {
+					return
+				}
+				select {
+				//: The test saw lag apply the write: the answer comes now.
+				case <-caughtUp:
+					heldUntilApplied.Store(true)
+				//: A bound, so that a failed setup still ends.
+				case <-time.After(10 * time.Second):
+				}
+			}
+			lt.answered.Store(&hold)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("setup: raft still holds the removed b: %+v", l.node.Status())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		retryAdmin(t, "remove the waiting learner b", func() error { return l.node.Remove(ctx, "op:test", b.id) })
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			//: raft no longer names the removed b.
+			if _, ok := statOf(l, b.id); !ok {
+				break
+			}
+			//: b still named past the bound fails the setup.
+			if time.Now().After(deadline) {
+				t.Fatalf("setup: raft still holds the removed b: %+v", l.node.Status())
+			}
+		}
+		awaitQueue(t, l, a.id, b.id, lag.id)
+		releaseHeld(t, lt, l)
+		awaitStreamTo(t, lt, l, lag.id)
+		//: Nobody waits once lag's stream started.
+		if got := queuedPeers(l); len(got) != 0 {
+			t.Fatalf("%v wait once lag's stream started, want nobody: the removed b is dropped", got)
+		}
+		lt.holding.Store(false)
+		releaseHeld(t, lt, l)
+		propose(t, l.node, "last=v")
+		awaitLast(t, a, lag)
+		seen()
+		got, cut := streamsReturned(t, lt, l)
+		//: Two streams, a's and lag's, and none cut.
+		if got != 2 || cut != 0 {
+			t.Fatalf("%d snapshot streams, %d cut, want 2 — a's and lag's — and none", got, cut)
+		}
+		//: The late case forced the order it names.
+		if c.late && !heldUntilApplied.Load() {
+			t.Fatalf("setup: lag never applied the write while its answer was held: %s", streamsDescribed(l))
 		}
 	}
-	awaitQueue(t, l, a.id, b.id, lag.id)
-	releaseHeld(t, lt, l)
-	awaitStreamTo(t, lt, l, lag.id)
-	if got := queuedPeers(l); len(got) != 0 {
-		t.Fatalf("%v wait once lag's stream started, want nobody: the removed b is dropped", got)
-	}
-	lt.holding.Store(false)
-	releaseHeld(t, lt, l)
-	propose(t, l.node, "last=v")
-	awaitLast(t, a, lag)
-	if got, cut := lt.streams.Load(), lt.cancelled.Load(); got != 2 || cut != 0 {
-		t.Fatalf("%d snapshot streams, %d cut, want 2 — a's and lag's — and none", got, cut)
+	for _, c := range []tc{{name: "as it runs"}, {name: "lag's answer heard after lag applied", late: true}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
