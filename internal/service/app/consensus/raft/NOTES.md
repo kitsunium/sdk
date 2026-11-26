@@ -907,10 +907,21 @@ under coverage before touching `shard_count`.
   release whose vote request of that term was held since an earlier
   campaign uses it as well (2 362 schedules of 2 362 with F and X of a
   previous release). It closes once one of the two runs this release.
-- Take a leader of this release stepping down at its own term on a
-  `NOT_LEADER` for a defect of the term rule. A frame it sent as a leader of
-  protocol 4, delayed past its upgrade and its election at the next term,
-  is refused at that term by a member there, and the leader, now of 5,
-  reads a refusal of its own term and steps down, its vote kept (the
-  safety review of #1472's third version, O4): one more election, no term
-  moved, tracked by an issue of lot L1.
+- Step a leader of this release down on a `NOT_LEADER` whose `LogTerm` is
+  not past its term, or read one as contact or as a refusal of its log
+  (`refusedForLaterTerm`, #1514). A refuser of this release puts its own
+  term in `LogTerm` and refuses only a request of an older term, so every
+  refusal of a request this leader sent at its term, which announces 5,
+  carries a `LogTerm` past it. One whose `LogTerm` is the leader's term
+  refuses a frame the leader sent as a leader of protocol 4, delayed past
+  its upgrade and its election at the next term, and refused at that term
+  by a member there whose leader it now is: stepped down on it, the leader
+  gave up its term for nothing, one more election (the safety review of
+  #1472's third version, O4). It is dropped, the member's progress
+  untouched; a member past the leader's term still deposes it, at
+  `LogTerm` from this release and at the refusal's own term from a
+  previous release (`stepLaterAnswer`), at every step of an upgrade
+  (`TestALeaderUpgradedTo5KeepsLeadingPastItsOwnOldFrame`,
+  `TestALeaderPastARefusalsTermDropsIt`). The issue's own proposal, letting
+  it fall through to the ordinary path, counted it as contact and handed a
+  refusal of no log to `handleAppReject`.

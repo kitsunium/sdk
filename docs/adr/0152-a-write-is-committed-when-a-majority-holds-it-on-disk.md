@@ -8136,7 +8136,8 @@ R1-18 and the amendment of 2026-11-15 read as amended here.
   vote kept (the safety review's O4). Liveness alone: one more election,
   and it needs a frame of the old process read after the new one was
   elected, which a connection's order makes unlikely. No term moves and no
-  promise is involved. It is left as it is, tracked by an issue of lot L1.
+  promise is involved. Closed by the amendment of 2026-11-26 (#1514): such a
+  refusal no longer deposes it.
 - **Verification.** D0's and D1's schedules over 3 000 seeds and the eight
   mixes: no term taken from a late refusal but where both the refuser and
   the reader run a previous release, as on the amendment of 2026-11-15
@@ -8478,6 +8479,62 @@ stream in flight.
   `TestTwoLearnersAreStreamedOneAfterTheOther` and the pins' tests are
   unchanged.
 
+## Amendment — a leader of protocol 5 steps down on a `NOT_LEADER` only when it carries a later term (2026-11-26, #1514)
+
+The amendment of 2026-11-16 left one case open, O4 of its safety review
+([#1514](https://github.com/kitsunium/sdk/issues/1514)). L, of protocol 4,
+leads term g and heartbeats X; the frame is delayed. L is upgraded to 5,
+restarts and is elected at g+1. X, at g+1, then reads the old frame, which
+announces no 5, and refuses it at g+1, the term after its request's,
+`NOT_LEADER`, its own term g+1 in `LogTerm`. L, of 5 now, read a
+`NOT_LEADER` of its own term and stepped down at g+1, its vote kept: one
+more election for nothing.
+
+- **The rule.** A leader of protocol 5 reads a member's `NOT_LEADER` as
+  before — never contact, never a refusal of its log — and steps down on it
+  only when `LogTerm` is past its own term, at that term
+  (`refusedForLaterTerm`). Any other `NOT_LEADER` is dropped.
+- **Why the dropped one refuses nothing of this leader.** A refuser of this
+  release puts its own term in `LogTerm` and refuses only a request of an
+  older term than its own (`answerOlderTerm`). Refused at the leader's
+  term, a request this leader sent at that term, which announces 5, carries
+  a `LogTerm` past it. A `LogTerm` equal to the leader's term therefore
+  comes from a refuser at that term, whose leader is this one, refusing a
+  frame of an older term that announced no 5 and was refused at the term
+  after its own: one this node sent as a leader of a previous release
+  before its upgrade. A `LogTerm` below cannot come from an honest member,
+  and the transport authenticates `From`.
+- **Every case of the issue.** A leader of this release refused by a member
+  further ahead still steps down there, whatever release refuses: at
+  `LogTerm` from this release, at the refusal's own later term from a
+  previous release (`stepLaterAnswer`, unchanged). A refusal of a previous
+  release, which carries no `NOT_LEADER`, at the leader's term is a stale
+  refusal of its log, as before. A leader still of a previous release reads
+  no `LogTerm` and is unchanged: when the member is further ahead, its next
+  frame is refused at the term after its own (O7 of that review).
+- **Dropped rather than read as a refusal of the log.** #1514 proposed
+  letting such a refusal fall through to the ordinary path: contact once,
+  then `handleAppReject`. It is no refusal of this leader's log, and a
+  leader of 5 counts no `NOT_LEADER` as contact; dropping it keeps that rule
+  whole and touches no progress.
+- **Safety.** A leader that keeps leading where it stepped down changes no
+  term, no vote, no log and no commit; it holds the term it won, and its
+  lease still extends only on a confirmed round. D0 and D1 are unchanged:
+  no reader's term moves on this path. No format change, no protocol raise,
+  no raft mutation, nothing persisted.
+- **Tests.** `TestALeaderUpgradedTo5KeepsLeadingPastItsOwnOldFrame` plays
+  the case at every step of an upgrade — L restarted at 5 or still at 4, X
+  of either release, at L's term or past it — and holds that L keeps
+  leading, its progress of X unmoved and no contact counted, only when no
+  member is past its term (red on `main`: the leader of term 3 stepped down
+  at 3); `TestALeaderPastARefusalsTermDropsIt` gains the `NOT_LEADER` of
+  the leader's term carrying that term. D0's and D1's sweeps over 3 000
+  seeds and the eight mixes are identical to the amendment of 2026-11-16's,
+  and every mutation of it and of its reviews is caught, N3 now included;
+  so are three new ones: stepping down on any `NOT_LEADER`, stepping down
+  on a `LogTerm` equal to the term, and reading the dropped one as a
+  refusal of the log.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -8540,6 +8597,7 @@ stream in flight.
 | #1472 | the owner's decision, 2026-11-15, revised the same day on its safety review (options L2 and M3), and on 2026-11-16 on the review of that revision (O1, O2); text awaiting the owner's validation | an answer stays at the term of the request it answers, R1-18's refusal of an older append or heartbeat at that term with `NOT_LEADER` and the refuser's term in `LogTerm`, a PreVote's at the term it asks for, a deposed leader's read refusals at the term they were asked at; a later term is taken only from the refusal of one's own request, by the leader of that append or heartbeat and the pre-candidate of that PreVote, so one PreVote round readmits a stuck node; protocol version 5, its announcement on `FlagNoLease`'s bit, a node of 5 answering no older append or heartbeat of a leader of a previous release; a `NOT_LEADER` refusal carries no `FlagTruncated`; no format change, no raft mutation (amendment of 2026-11-15, #1472); a leader of a previous release refused at the term after its request's, which deposes it, and a node of a previous release climbing one election timeout a term, the bound raised under the owner's rule of 2026-11-14 (amendment of 2026-11-16) |
 | #1482 | the owner's decisions, 2026-11-15 and 2026-11-16 | a forward is handled once, whatever the delay of its copy: the step function fences forwards by the order of their submission ids, per run of a forwarder and per lane, forgetting a mark of its current term only past 65 536 marks (runs per lane, about 32 768 restarts when each forwards on both lanes) and then the least recent of the node holding the most, whose new runs wait for the next term, restarts spread over several nodes fencing each of them in turn (#1540, `needs-decision`), and a node handles no forward of a term up to its durable term at start, every forward to a node carrying a term it led; the forwards turned away counted by reason; what the fence turns away is neither proposed nor answered (`OUTCOME_UNKNOWN`); a forward's answer is kept for twice the transport's resend window (22 s by default, 2 minutes at most) on the step function's clock, a gap of more than a second counted as one, at most 2^20 answers per Raft group, the oldest forgotten for each new one past them, whatever its age, so no forward is dropped for room and a copy of an answer forgotten is fenced (the owner's decision of 2026-11-16, which removed the first version's ceiling of 2^18, past which a new forward was neither proposed nor answered), the map rebuilt and the expired answers forgotten a step at a time; the 4 096 answers evicted oldest first had let a late copy be appended twice or refused `NOT_LEADER`, and an answer kept for a time let a stopped sender's copy be appended again; no format change, no protocol raise, no raft mutation (amendments of 2026-11-15, #1482, corrected 2026-11-16) |
 | #1483 | the owner's decision, 2026-11-15 | the snapshot streams' queue serves the first voter waiting before any learner when a slot frees, first asked first served within each, cuts no stream in flight for it, lets a learner be passed by at most as many voters' streams as the configuration has voters besides the leader, and reads each waiter's role when the slot frees; no format change, no protocol raise, no raft mutation, nothing persisted (amendment of 2026-11-15, #1483) |
+| #1514 | Raft lot L1, 2026-11-26 | a leader of protocol 5 steps down on a member's `NOT_LEADER` only when its `LogTerm` is past the leader's term, at that term, and drops any other, never contact nor a refusal of its log, so a frame it sent as a leader of protocol 4 before its upgrade, refused at the next term after it won that term, no longer deposes it (O4 of the safety review of the amendment of 2026-11-16); no format change, no protocol raise, no raft mutation, nothing persisted (amendment of 2026-11-26, #1514) |
 
 ## raft-sql-poc (owner's prior Raft)
 

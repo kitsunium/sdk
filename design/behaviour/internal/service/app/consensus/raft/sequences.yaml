@@ -875,8 +875,11 @@ sequences:
               do:
                 - opt:
                     do:
-                      - eval: r.becomeFollower(max(r.term, m.LogTerm), 0)
-                        to: r.becomeFollower
+                      - opt:
+                          do:
+                            - eval: r.becomeFollower(m.LogTerm, 0)
+                              to: r.becomeFollower
+                          when: m.LogTerm > r.term
                       - return: ""
                     when: r.refusedForLaterTerm(m)
             - default: true

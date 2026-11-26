@@ -2698,25 +2698,35 @@ types:
         results: bool
       - doc: |-
           stepLeader handles a message of the leader's term. Any answer from a
-          member counts as contact for CheckQuorum, the lease and promotion.
+          member but the NOT_LEADER a leader of protocol 5 reads
+          (refusedForLaterTerm) counts as contact for CheckQuorum, the lease and
+          promotion.
         name: stepLeader
         params: now time.Time, m core.MessageValue
         recv: r *Raft
       - doc: |-
-          refusedForLaterTerm reports whether m is a member's refusal of this
-          leader's append or heartbeat for a later term it holds, which it answers
-          at this leader's term with its own in LogTerm (answerOlderTerm, #1472):
-          the leader then steps down at that term, the refusal of its own request
-          telling it, and a PreVote round decides (R1-18). Of all the nodes that
+          refusedForLaterTerm reports whether m is a member's NOT_LEADER, the
+          refusal of an append or a heartbeat of an older term than the refuser's,
+          which it answers at the request's term with its own in LogTerm
+          (answerOlderTerm, #1472). It is no refusal of this leader's log, and not
+          contact: taken as one, the refusals of the members it no longer leads
+          kept the leader past CheckQuorum. When LogTerm is past this leader's
+          term, the refusal is of its own request: the leader then steps down at
+          that term, and a PreVote round decides (R1-18). Of all the nodes that
           may read a refusal, the leader that sent the request is the one that
           acknowledged no round of a later leader, so the term it takes breaks no
-          lease (D5, D9 (b)). It is not contact: taken as one, the refusals of the
-          members it no longer leads kept the leader past CheckQuorum. A leader
-          below protocol 5 reads it as a refusal of its log, so it is refused at
-          the term after its request's instead (refuseOlderLeader). Only a
-          member's is read: a node outside the configuration, a removed member
-          whose frames still reach this leader, is no refuser of a request it was
-          never sent.
+          lease (D5, D9 (b)). When LogTerm is not past it, the refuser holds no
+          later term, so this leader is still the leader of the refuser's term,
+          and the request refused is of an older term: a frame this node sent as
+          a leader of a previous release before its upgrade, which announces no
+          protocol 5 and so is refused at the term after its own
+          (refuseOlderLeader), read after this node won that term. Stepped down
+          on it, the leader gave up its term for nothing, one more election (O4
+          of the safety review of #1472, #1514); that refusal is dropped. A leader
+          below protocol 5 reads every refusal as one of its log, so it is refused
+          at the term after its request's instead. Only a member's is read: a
+          node outside the configuration, a removed member whose frames still
+          reach this leader, is no refuser of a request it was never sent.
         name: refusedForLaterTerm
         params: m core.MessageValue
         recv: r *Raft

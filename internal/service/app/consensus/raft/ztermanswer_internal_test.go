@@ -483,16 +483,16 @@ func TestOnlyAMembersRefusalStepsALeaderDown(t *testing.T) {
 }
 
 // TestANotLeaderRefusalCarriesALaterTermThanItsRequest is the refuser's half
-// of refusedForLaterTerm's reach, which takes LogTerm without comparing it
-// to the leader's term: every NOT_LEADER X sends, at terms 3 to 6, to an
+// of refusedForLaterTerm's reach, which steps a leader down only on a
+// LogTerm past its term: every NOT_LEADER X sends, at terms 3 to 6, to an
 // append or a heartbeat of every older term, carries in LogTerm a term past
 // its request's. A leader of protocol 5 is refused at its request's term,
 // LogTerm past it; a leader of a previous release at the term after, LogTerm
 // no lower. So a leader of protocol 5 still at the request's term reads a
 // LogTerm past its own, and a refusal whose LogTerm is the leader's term
 // reaches it only as the refusal at the next term of a frame it sent as a
-// leader of protocol 4 before its upgrade, which steps it down at its own
-// term, its vote kept (#1514; TestALeaderPastARefusalsTermDropsIt).
+// leader of protocol 4 before its upgrade, which it drops (#1514;
+// TestALeaderUpgradedTo5KeepsLeadingPastItsOwnOldFrame).
 func TestANotLeaderRefusalCarriesALaterTermThanItsRequest(t *testing.T) {
 	type tc struct {
 		name         string
@@ -537,7 +537,9 @@ func TestANotLeaderRefusalCarriesALaterTermThanItsRequest(t *testing.T) {
 // term 3 reads a member's refusal. Of an older term, it is dropped before
 // stepLeader, whatever LogTerm it carries; at the leader's term, a refusal
 // of the log, which says no NOT_LEADER, steps nobody down; a NOT_LEADER
-// of the leader's term carrying a later term steps the leader down there.
+// of the leader's term carrying a later term steps the leader down there,
+// and one carrying the leader's own term, which refuses a frame of an older
+// term, is dropped (#1514).
 func TestALeaderPastARefusalsTermDropsIt(t *testing.T) {
 	type tc struct {
 		name          string
@@ -560,6 +562,105 @@ func TestALeaderPastARefusalsTermDropsIt(t *testing.T) {
 		{name: "a NOT_LEADER of term 2 carrying 3", term: 2, logTerm: 3, code: codeNotLeader, leads: true, wantTerm: 3},
 		{name: "a refusal of the log at term 3, no NOT_LEADER", term: 3, leads: true, wantTerm: 3},
 		{name: "a NOT_LEADER of term 3 carrying 5", term: 3, logTerm: 5, code: codeNotLeader, wantTerm: 5},
+		{name: "a NOT_LEADER of term 3 carrying 3", term: 3, logTerm: 3, code: codeNotLeader, leads: true, wantTerm: 3},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// restartedLeader is node 1 started again over the durable state of old,
+// the leader of term 2, and elected at term 3; before runs it as a release
+// before #1472 still, a restart that did not upgrade it.
+func restartedLeader(old *Raft, before bool) *Raft {
+	cfg := old.cfg
+	cfg.termFromAnswers = before
+	r := NewRaft(&cfg, &StartState{
+		HardState: core.HardState{Term: old.term, Vote: old.vote, Commit: old.log.committed},
+		Snapshot:  core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
+		Entries:   append([]core.EntryValue(nil), old.log.ents...),
+		Now:       old.now,
+	})
+	r.now = old.now.Add(5 * time.Second)
+	r.term, r.vote = old.term+1, 1
+	r.becomeLeader()
+	rd := r.Ready()
+	r.StorageDone(rd.Seq, r.log.lastIndex(), r.term)
+	r.Ready()
+	return r
+}
+
+// TestALeaderUpgradedTo5KeepsLeadingPastItsOwnOldFrame is O4 of the safety
+// review of #1472 (#1514): L leads term 2 as a release before #1472, which
+// announces no protocol 5, and heartbeats X; the frame is held in the
+// network while L is upgraded to protocol 5, restarted and elected at term
+// 3. X, at term 3, then reads it and refuses it as a previous release's,
+// at the term after its request's, 3, its own term 3 in LogTerm. That
+// refusal is of no request L sent at term 3: L keeps leading term 3, its
+// progress of X unmoved. It stepped down at its own term, its vote kept,
+// one more election for nothing. A member past L's term still deposes it
+// there, whatever release refuses; every other step of the upgrade, L or X
+// still of the previous release, reads as before.
+func TestALeaderUpgradedTo5KeepsLeadingPastItsOwnOldFrame(t *testing.T) {
+	type tc struct {
+		name             string
+		lBefore, xBefore bool
+		xTerm            uint64
+		leads            bool
+		term             uint64
+	}
+	runCase := func(t *testing.T, c tc) {
+		old := confirmedLeader(0)
+		old.cfg.termFromAnswers = true
+		now := old.now.Add(testTiming().HeartbeatInterval)
+		old.Tick(now)
+		var hb core.MessageValue
+		for _, m := range answersOf(old.Ready()) {
+			if m.Kind == core.MsgHeartbeat && m.To == 3 {
+				hb = m
+			}
+		}
+		if hb.Term != 2 || hb.Flags&core.FlagProtocol5 != 0 {
+			t.Fatalf("setup: no heartbeat of term 2 without FlagProtocol5 to X: %+v", hb)
+		}
+		l := restartedLeader(old, c.lBefore)
+		if st := l.Status(); st.Role != core.RoleLeader || st.Term != 3 {
+			t.Fatalf("setup: the restarted node is a %v at term %d, want the leader of term 3", st.Role, st.Term)
+		}
+		x := newTest(3, testState{term: c.xTerm}, 0, false)
+		x.cfg.termFromAnswers = c.xBefore
+		x.Step(l.now, hb)
+		var refusal core.MessageValue
+		for _, m := range answersOf(x.Ready()) {
+			if m.Kind == core.MsgAppResp && m.To == 1 {
+				refusal = m
+			}
+		}
+		if !refusal.Reject {
+			t.Fatalf("setup: X at term %d did not refuse the heartbeat of term 2: %+v", c.xTerm, refusal)
+		}
+		match, heard := l.prs[3].match, l.prs[3].lastHeard
+		l.Step(l.now.Add(time.Millisecond), refusal)
+		st := l.Status()
+		switch {
+		case (st.Role == core.RoleLeader) != c.leads || st.Term != c.term:
+			t.Fatalf("the leader of term 3 read X's refusal %+v and is a %v at term %d, want leading %v at term %d", refusal, st.Role, st.Term, c.leads, c.term)
+		case c.leads && l.prs[3].match != match:
+			t.Fatalf("the leader of term 3 moved X's match from %d to %d on a refusal of its old frame", match, l.prs[3].match)
+		case c.leads && !c.lBefore && refusal.Code == codeNotLeader && l.prs[3].lastHeard != heard:
+			// A NOT_LEADER is no contact to a leader of protocol 5
+			// (refusedForLaterTerm), nor a refusal of its log.
+			t.Fatalf("the leader of term 3 counted X's NOT_LEADER of its old frame as contact")
+		}
+	}
+	for _, c := range []tc{
+		{name: "upgraded, X of this release at its term", xTerm: 3, leads: true, term: 3},
+		{name: "upgraded, X of this release past its term", xTerm: 4, term: 4},
+		{name: "upgraded, X of a previous release at its term", xBefore: true, xTerm: 3, leads: true, term: 3},
+		{name: "upgraded, X of a previous release past its term", xBefore: true, xTerm: 4, term: 4},
+		{name: "not upgraded, X of this release at its term", lBefore: true, xTerm: 3, leads: true, term: 3},
+		{name: "not upgraded, X of this release past its term", lBefore: true, xTerm: 4, leads: true, term: 3},
+		{name: "not upgraded, X of a previous release at its term", lBefore: true, xBefore: true, xTerm: 3, leads: true, term: 3},
+		{name: "not upgraded, X of a previous release past its term", lBefore: true, xBefore: true, xTerm: 4, term: 4},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
