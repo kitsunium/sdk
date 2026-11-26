@@ -154,6 +154,7 @@ The Raft engine of ADR 0152 and everything it ships: the event loop over the ste
 - End a streamed snapshot's pin at a bound fixed from its stream's end
 - Shut a test's valve on the frames to a follower once its snapshot's stream ended
 - Stream a snapshot to every peer in need at once, or as fast as the link allows
+- Serve the snapshot streams' queue first asked first served, voters and learners alike
 - Accept an offer of the snapshot this node is restoring
 - Feed the log to a learner whose announced limit the newest snapshot is over
 - Leave a member's recorded `MaxSnapshotBytes` as its JOIN wrote it
