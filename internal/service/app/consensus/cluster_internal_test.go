@@ -1370,8 +1370,7 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 	// linux/386). The crash is armed before the leader can reach the
 	// restarted node: armed after, an install that published in between left
 	// nothing to crash and the wait below timed out (#304, macOS).
-	c.net.Isolate(lag.id, true)
-	c.kill(lag)
+	stopBehind(c, lag)
 	var tok coreconsensus.TokenValue
 	for i := range 200 {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
@@ -1431,8 +1430,7 @@ func TestAnInstallKeepsTheTwoNewestSnapshots(t *testing.T) {
 	// Isolated while stopped, so that what the leader sends meanwhile is not
 	// kept for its restart: past the live logs' start, only an install can
 	// catch it up (see TestInstallResumesAfterACrashAtPublication).
-	c.net.Isolate(lag.id, true)
-	c.kill(lag)
+	stopBehind(c, lag)
 	for i := 100; i < 300; i++ {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}

@@ -87,8 +87,7 @@ func TestAnInstallRecordsItsNewestSnapshotBeforeItsAppliedPosition(t *testing.T)
 	held := tok.Index
 	// Isolated while stopped: past the live logs' start, only an install
 	// can catch it up (see TestAnInstallKeepsTheTwoNewestSnapshots).
-	c.net.Isolate(lag.id, true)
-	c.kill(lag)
+	stopBehind(c, lag)
 	for i := 100; i < 300; i++ {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
