@@ -227,9 +227,49 @@ jobs:
           git config user.email "133899878+kodflow@users.noreply.github.com"
           git config user.name "kitsunium-bot"
 
+      - name: Stop when the target is behind main and the workflows differ
+        id: fresh
+        # #1497, the owner's decision of 2026-11-15. GitHub judges a tag against
+        # the default branch: a target whose .github/workflows differs from
+        # main's is refused as a workflow update, and the release App has no
+        # `workflows` permission (none is given). When main moved on while the
+        # CI run of the target was going and that move touched the workflows,
+        # this run cuts nothing and says so; the later push run releases the
+        # same range, the release base advancing only when a tag is cut.
+        run: |
+          set -uo pipefail
+          git fetch --quiet origin main || {
+            echo "::error::cannot fetch origin/main to compare it with the release target"
+            exit 1
+          }
+          # The script is read from the revision of THIS workflow, never from the
+          # target's tree: a workflow_run executes the default branch's file on
+          # the checkout of the CI run's head, which can predate the script, and
+          # a missing file would answer 127 and fail the job instead of
+          # stopping it with a notice. Failing to load it stays a failure.
+          check="$(mktemp)"
+          trap 'rm -f "$check"' EXIT
+          git show "${GITHUB_SHA}:scripts/release/check-target-fresh.sh" >"$check" || {
+            echo "::error::cannot read scripts/release/check-target-fresh.sh at ${GITHUB_SHA}"
+            exit 1
+          }
+          rc=0
+          msg="$(bash "$check" "$TARGET_SHA" origin/main)" || rc=$?
+          case "$rc" in
+            0) echo "$msg" ;;
+            10)
+              echo "::notice::$msg"
+              echo "stale=true" >> "$GITHUB_OUTPUT"
+              echo "stale_reason=$msg" >> "$GITHUB_OUTPUT"
+              ;;
+            *) exit "$rc" ;;
+          esac
+
       - name: Compute the release token
         id: compute
         env:
+          STALE: ${{ steps.fresh.outputs.stale }}
+          STALE_REASON: ${{ steps.fresh.outputs.stale_reason }}
           # Route the workflow_dispatch input through an env var rather than
           # interpolating ${{ inputs.force_bumps }} straight into the shell —
           # direct interpolation is a template-injection sink (a value like
@@ -243,6 +283,18 @@ jobs:
           # heredoc in the file GitHub parses, on top of failing the step.
           majors=/tmp/sdk-release-majors.txt
           : > "$majors"
+
+          if [ "${STALE:-}" = "true" ]; then
+            # The previous step found the target behind main with other
+            # workflows: an empty token is the recorded no-op, whose reason the
+            # summary quotes (#1497).
+            {
+              echo "majors<<SDK_RELEASE_MAJORS_EOF"
+              echo "SDK_RELEASE_MAJORS_EOF"
+              echo "reason=$STALE_REASON"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if [ -n "$FORCE_BUMPS" ]; then
             # No `|| true` on the filter either: a force input that matches
