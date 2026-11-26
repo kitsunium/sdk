@@ -7,20 +7,31 @@
 CHECK=""
 WF=""
 
+# g — every fixture git command, with hooks disabled at the one precedence that
+# wins: `core.hooksPath` is inherited from the developer's own git config, and
+# only a command-line `-c` outranks it and an injected GIT_CONFIG_KEY_* (ADR 0088).
+g() { git -c core.hooksPath="$NOHOOKS" "$@"; }
+
 setup() {
+  NOHOOKS="$BATS_TEST_TMPDIR/nohooks"
+  mkdir -p "$NOHOOKS"
   CHECK="$BATS_TEST_DIRNAME/check-target-fresh.sh"
   WF="$BATS_TEST_DIRNAME/../../.github/workflows/sdk-release.yml"
   REPO="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$REPO/.github/workflows"
   cd "$REPO"
-  git init -q -b main .
-  git config user.email t@example.invalid
-  git config user.name t
+  g init -q -b main .
+  # Every commit spawns `git maintenance run --auto --detach`, which outlives
+  # the command and can race the teardown's `rm -rf`; a throwaway repository
+  # needs no upkeep, and the setting precedes the first commit.
+  g config maintenance.auto false
+  g config user.email t@example.invalid
+  g config user.name t
   echo a >.github/workflows/ci.yml
   echo a >file.txt
-  git add -A
-  git commit -q -m base
-  TARGET="$(git rev-parse HEAD)"
+  g add -A
+  g commit -q -m base
+  TARGET="$(g rev-parse HEAD)"
 }
 
 # step <name> — the lines of the step whose `- name:` is <name>.
@@ -34,7 +45,7 @@ step() {
 
 @test "a target behind main with different workflows stops the release with a notice" {
   echo b >.github/workflows/ci.yml
-  git commit -q -am "touch a workflow"
+  g commit -q -am "touch a workflow"
   run bash "$CHECK" "$TARGET" main
   [ "$status" -eq 10 ]
   [[ "$output" == *"behind main"* ]]
@@ -43,15 +54,15 @@ step() {
 
 @test "a new workflow file on main counts as a difference" {
   echo x >.github/workflows/new.yml
-  git add -A
-  git commit -q -m "add a workflow"
+  g add -A
+  g commit -q -m "add a workflow"
   run bash "$CHECK" "$TARGET" main
   [ "$status" -eq 10 ]
 }
 
 @test "a target behind main with identical workflows lets the cut go on" {
   echo b >file.txt
-  git commit -q -am "later merge outside the workflows"
+  g commit -q -am "later merge outside the workflows"
   run bash "$CHECK" "$TARGET" main
   [ "$status" -eq 0 ]
   [[ "$output" == *"behind main"* ]]
@@ -101,19 +112,19 @@ step() {
   mkdir -p scripts/release
   cp "$CHECK" scripts/release/check-target-fresh.sh
   echo b >.github/workflows/ci.yml
-  git add -A
-  git commit -q -m "workflow revision"
-  WFREV="$(git rev-parse HEAD)"
-  git checkout -q "$TARGET"
+  g add -A
+  g commit -q -m "workflow revision"
+  WFREV="$(g rev-parse HEAD)"
+  g checkout -q "$TARGET"
   [ ! -e scripts/release/check-target-fresh.sh ]
   loaded="$BATS_TEST_TMPDIR/loaded.sh"
-  git show "${WFREV}:scripts/release/check-target-fresh.sh" >"$loaded"
+  g show "${WFREV}:scripts/release/check-target-fresh.sh" >"$loaded"
   run bash "$loaded" "$TARGET" "$WFREV"
   [ "$status" -eq 10 ]
   [[ "$output" == *"Nothing is cut"* ]]
 }
 
 @test "a revision that does not hold the script fails closed" {
-  run git show "${TARGET}:scripts/release/check-target-fresh.sh"
+  run g show "${TARGET}:scripts/release/check-target-fresh.sh"
   [ "$status" -ne 0 ]
 }
