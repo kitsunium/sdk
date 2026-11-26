@@ -1615,6 +1615,13 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
 - Accept an offer of the snapshot this node is restoring: it was streamed
   again and committed over the file the restore reads (#610,
   `answerRestoring`, `TestAnOfferOfTheSnapshotBeingRestoredIsRefused`).
+- Publish an install's applied position before its snapshot is recorded as
+  the node's newest: only the install's `retain` recorded it, after raft
+  moved, and a node caught up past its log still reported the newest
+  snapshot it held before to `Promote`, `watchUnfed` and Health, which
+  `TestALearnerWhoseLimitIsRaisedIsFedInstalledAndPromoted` read under a
+  sharded run (#1502). `restoreFrom` records it before `applied` moves
+  (`TestAnInstallRecordsItsNewestSnapshotBeforeItsAppliedPosition`).
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).
