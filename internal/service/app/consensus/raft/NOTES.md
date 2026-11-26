@@ -373,7 +373,14 @@ under coverage before touching `shard_count`.
   `TestTheLastResortTimeoutNowIsTakenByAPreviousRelease`). The tests set
   the bounds low through `Config.fwdRunsSoft` and `fwdRunsHard` (O2), as
   `fwdCeiling`. `Summary`'s `ForwardLastResorts` counts the last resorts
-  and `ForwardResortTransfers` the transfers they started. Every forward
+  and `ForwardResortTransfers` the transfers they started; the difference,
+  the driver's action `none`, counts a last resort that started no
+  transfer: no eligible voter, a transfer already under way (this one's
+  included), or one that failed this term. The target follows #662's
+  eligibility, not `PreferredLeaders`' order, which the step function does
+  not know: the driver's watch of `PreferredLeaders` may hand the
+  leadership on to a preferred node afterwards, two transfers at most and
+  no storm, since each term starts with no mark of its own. Every forward
   the fence turns away, neither proposed nor answered, is counted by cause
   in `Summary`'s `ForwardDrops` — copy, restarted, evicted —; a forward of
   a term above its receiver's, which no honest member sends, is dropped

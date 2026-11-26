@@ -2506,6 +2506,8 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_chain_refusals_total`, `consensus_snapshot_pins`, `consensus_snapshot_pin_age_seconds` | counter by leader, gauge, gauge by peer: how long each pin has held since its offer (R7-19, R7-38, #914) |
 | `consensus_stopped` | gauge by `StopReason`, set before the process exits (R7-37) |
 | `consensus_snapshot_stream_bytes_per_second` | histogram: the pace of each snapshot stream that ended (#920) |
+| `consensus_forwards_dropped_total`, `consensus_forward_runs`, `consensus_forward_answers_forgotten_total` | counter by reason (`copy`, `restarted`, `evicted`), gauge, counter: the forwards the fence turned away, the forwarder runs it marks, the answers forgotten at the table's bound before their window ended (#1482) |
+| `consensus_forward_last_resorts_total` | counter by action: the fence's last resorts, `transfer` when one started a leadership transfer, `none` when it started none — no eligible voter, a transfer already under way (this one's included), or one that failed this term (#1540) |
 
 **The product pushes stop reasons (R7-37).** A stopped node exits, so a
 scrape may never see `consensus_stopped`. The product sends the
@@ -8583,9 +8585,10 @@ amendment above, applied with it). Revisable while v0 (ADR 0040).
   `ForwardLastResorts`, and each transfer one started,
   `ForwardResortTransfers`; the driver publishes them as
   `consensus_forward_last_resorts_total` by `action`, `transfer` or
-  `none`. A count of action `none` climbing names a leader with no voter
-  to take over, or whose transfer failed this term, whose forwarders stay
-  fenced until the next election: an operator's transfer clears it.
+  `none`. `none` counts a last resort that started no transfer: no eligible voter, a transfer already under way (this one's included), or one that failed this term. A count of action `none` that climbs while
+  `transfer` stays at 0 in the term names a leader with no voter to take
+  over, whose forwarders stay fenced until the next election: an
+  operator's transfer clears it.
 - **The cost.** One leadership transfer per 65 536 runs per lane in one
   term, about 32 768 restarts when each run forwards on both lanes: a
   visible change, the leader calls an election of its own. As every
