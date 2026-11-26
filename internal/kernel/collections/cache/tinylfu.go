@@ -11,8 +11,10 @@ const (
 	// fifths divides a share in fifths.
 	fifths int = 5
 	// admitAtLeast is the estimate a candidate needs to replace a key of
-	// main: two uses — the doorkeeper's and one counted —, so a key used once,
-	// a scan's or the long tail's, never wins against one.
+	// main: an estimate of two uses — the doorkeeper's and one counted —, so a
+	// key used once, a scan's or the long tail's, is estimated below it. The
+	// sketch shares counters, so this holds for the estimate, not for the
+	// actual uses.
 	admitAtLeast uint64 = 2
 )
 
@@ -226,8 +228,10 @@ func (c *UnlockedMap[K, V]) evictTinyLFU(fresh *entry[K, V], pending *[]eviction
 
 // contest settles a candidate from the window: it moves into probation when
 // main has room for it; otherwise the sketch decides between it and main's
-// victim, and the one used less goes — the candidate when they tie, so a key
-// must have been used more than the one it replaces, and twice at least.
+// victim, and the one estimated lower goes — the candidate when they tie, so a
+// key's estimate must exceed the one it replaces, and reach two at least. The
+// estimate is the sketch's, shared between keys: no guarantee is made about
+// actual uses.
 // Caller holds the lock.
 func (c *UnlockedMap[K, V]) contest(candidate, fresh *entry[K, V], pending *[]evictionValue[K, V]) {
 	//: room in main: no contest.

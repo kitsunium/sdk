@@ -64414,7 +64414,7 @@
       "spelled": "Policy",
       "canonical": "github.com/kitsunium/sdk/internal/kernel/collections/cache.Policy",
       "value": "2",
-      "doc": "PolicyTinyLFU is W-TinyLFU (Einziger, Friedman and Manes, ACM TOS 2017):\na new key enters an LRU window holding a hundredth of the capacity; the\nkey the window pushes out moves into main when main has room, and\notherwise contests main's next victim — the least recently used of main's\nprobationary segment — and stays only when a frequency sketch says it was\nused more, and twice at least. A second use in main moves an entry into\nthe protected segment, four fifths of main. Every Set and every hit counts\nits key: the first use in a period in a doorkeeper, a Bloom filter, the\nlater ones in a count-min sketch of four-bit counters halved every ten\nuses an entry of the bound, so a key used once — a scan, the long tail —\nnever wins a contest against one used more, and the counts follow what is\nused now. A key just written is always served: the window holds it, and\nno contest is held for it, so with room for one key it replaces any other.\n",
+      "doc": "PolicyTinyLFU is W-TinyLFU (Einziger, Friedman and Manes, ACM TOS 2017):\na new key enters an LRU window holding a hundredth of the capacity; the\nkey the window pushes out moves into main when main has room, and\notherwise contests main's next victim — the least recently used of main's\nprobationary segment — and stays only when a frequency sketch estimates it\nwas used more, and twice at least. A second use in main moves an entry into\nthe protected segment, four fifths of main; an entry heavier than that\nsegment alone stays in probation. Every Set and every hit counts its key:\nthe first use in a period in a doorkeeper, a Bloom filter, the later ones in\na count-min sketch of four-bit counters halved every ten uses an entry of\nthe bound, so a key used once — a scan, the long tail — is estimated at one\nuse and does not win a contest against a key estimated higher, and the\ncounts follow what is used now. The sketch shares its counters between\nkeys: the contest compares estimates, which can run above a key's real use,\nand nothing is promised about actual uses. A key just written is always\nserved: the window holds it, and no contest is held for it, so with room for\none key it replaces any other.\n",
       "file": "kernel/collections/cache/policy.go",
       "layer": "kernel",
       "family": "collections"
@@ -79509,7 +79509,7 @@
         {
           "name": "Policy",
           "type": "kcache.Policy",
-          "doc": "Policy is the eviction policy: least recently used (the zero), S3-FIFO,\nwhich keeps a hot set through a scan, or W-TinyLFU, which admits a key\nto its main part only when it was used more than the one it replaces.\nA key just written is always kept, whatever it displaces: with room for\none key, one written once replaces one used often.\n"
+          "doc": "Policy is the eviction policy: least recently used (the zero), S3-FIFO,\nwhich keeps a hot set through a scan, or W-TinyLFU, which admits a key\nto its main part only when its estimated use is above the one it replaces.\nA key just written is always kept, whatever it displaces: with room for\none key, one written once replaces one used often.\n"
         },
         {
           "name": "LeasePoll",

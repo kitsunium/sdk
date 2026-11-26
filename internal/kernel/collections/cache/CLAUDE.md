@@ -123,7 +123,7 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
     past its share. Every `Set` of a new key and every hit counts the key in
     `frequencySketch`: its first use in an aging period sets three bits of
     the doorkeeper and no counter, so a key used once — a scan, the long
-    tail — is estimated at 1 and never wins a contest; later uses count
+    tail — is estimated at 1, below the bar of a contest; later uses count
     in the sketch; every ten increments an entry of the bound the counters
     are halved and the doorkeeper emptied. A resident entry records the
     period its key went through the doorkeeper (`entry.period`), so a hit
@@ -184,3 +184,7 @@ testable. Emits **no error codes** (`Fetch` returns `(V, bool)`).
 ```
 bazel test --config=race //internal/kernel/collections/cache:cache_test
 ```
+
+## Reference in NOTES.md
+
+`internal/kernel/collections/cache/NOTES.md`, read by a change that needs the mechanics of `PolicyTinyLFU`: `W-TinyLFU's sketch`; `The node stays one cache line`; `What a hit costs`.

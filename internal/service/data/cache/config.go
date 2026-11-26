@@ -48,7 +48,7 @@ type MemoryConfig struct {
 	MaxBytes int64
 	// Policy is the eviction policy: least recently used (the zero), S3-FIFO,
 	// which keeps a hot set through a scan, or W-TinyLFU, which admits a key
-	// to its main part only when it was used more than the one it replaces.
+	// to its main part only when its estimated use is above the one it replaces.
 	// A key just written is always kept, whatever it displaces: with room for
 	// one key, one written once replaces one used often.
 	Policy kcache.Policy

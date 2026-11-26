@@ -679,7 +679,7 @@
       "canonical": "github.com/kitsunium/sdk/pkg/v1/data/cache.Policy",
       "value": "2",
       "init": "go:github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyTinyLFU",
-      "doc": "PolicyTinyLFU admits a key into the main part of the cache only when a\nfrequency sketch says it was used more than the key it would replace, so\nneither a scan nor a long tail of keys used once displaces the hot set. A\nkey just written is always served, though: it is the window's, never\nthe loser of a contest, so with room for one key it replaces any other.\n",
+      "doc": "PolicyTinyLFU admits a key into the main part of the cache only when a\nfrequency sketch estimates it was used more than the key it would replace, so\nneither a scan nor a long tail of keys used once displaces the hot set. A\nkey just written is always served, though: it is the window's, never\nthe loser of a contest, so with room for one key it replaces any other.\n",
       "file": "cache/gen_facade.go",
       "layer": "public",
       "family": "data"

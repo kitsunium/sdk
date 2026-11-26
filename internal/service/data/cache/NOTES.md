@@ -148,8 +148,9 @@ quietly approximate.
   `newStore` and `policyConfig` read the policy off the subtest's name), and
   the internal shapes too (`forEachShape`). Under W-TinyLFU a key just written
   is always served — the window holds it, and no contest is held for it, so
-  with room for one key it replaces any other —, and in a contest one used once
-  never wins against one used more (#834).
+  with room for one key it replaces any other —, and in a contest the sketch's
+  estimate decides: a key needs an estimate of at least two, and more than the
+  main entry it contests, to win (#834).
 - **Clock.** A `clock.CoarseClock` (#814) as `MemoryConfig.Clock` makes a TTL'd
   hit's clock read an atomic load; every expiry is then late by up to its
   resolution.

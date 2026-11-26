@@ -59,15 +59,19 @@ constants:
           a new key enters an LRU window holding a hundredth of the capacity; the
           key the window pushes out moves into main when main has room, and
           otherwise contests main's next victim — the least recently used of main's
-          probationary segment — and stays only when a frequency sketch says it was
-          used more, and twice at least. A second use in main moves an entry into
-          the protected segment, four fifths of main. Every Set and every hit counts
-          its key: the first use in a period in a doorkeeper, a Bloom filter, the
-          later ones in a count-min sketch of four-bit counters halved every ten
-          uses an entry of the bound, so a key used once — a scan, the long tail —
-          never wins a contest against one used more, and the counts follow what is
-          used now. A key just written is always served: the window holds it, and
-          no contest is held for it, so with room for one key it replaces any other.
+          probationary segment — and stays only when a frequency sketch estimates it
+          was used more, and twice at least. A second use in main moves an entry into
+          the protected segment, four fifths of main; an entry heavier than that
+          segment alone stays in probation. Every Set and every hit counts its key:
+          the first use in a period in a doorkeeper, a Bloom filter, the later ones in
+          a count-min sketch of four-bit counters halved every ten uses an entry of
+          the bound, so a key used once — a scan, the long tail — is estimated at one
+          use and does not win a contest against a key estimated higher, and the
+          counts follow what is used now. The sketch shares its counters between
+          keys: the contest compares estimates, which can run above a key's real use,
+          and nothing is promised about actual uses. A key just written is always
+          served: the window holds it, and no contest is held for it, so with room for
+          one key it replaces any other.
         name: PolicyTinyLFU
     name: PolicyLRU
   - doc: |-
@@ -186,8 +190,10 @@ constants:
         value: "5"
       - doc: |-
           admitAtLeast is the estimate a candidate needs to replace a key of
-          main: two uses — the doorkeeper's and one counted —, so a key used once,
-          a scan's or the long tail's, never wins against one.
+          main: an estimate of two uses — the doorkeeper's and one counted —, so a
+          key used once, a scan's or the long tail's, is estimated below it. The
+          sketch shares counters, so this holds for the estimate, not for the
+          actual uses.
         name: admitAtLeast
         type: uint64
         value: "2"
@@ -1156,8 +1162,10 @@ types:
       - doc: |-
           contest settles a candidate from the window: it moves into probation when
           main has room for it; otherwise the sketch decides between it and main's
-          victim, and the one used less goes — the candidate when they tie, so a key
-          must have been used more than the one it replaces, and twice at least.
+          victim, and the one estimated lower goes — the candidate when they tie, so a
+          key's estimate must exceed the one it replaces, and reach two at least. The
+          estimate is the sketch's, shared between keys: no guarantee is made about
+          actual uses.
           Caller holds the lock.
         name: contest
         params: candidate, fresh *entry[K, V], pending *[]evictionValue[K, V]

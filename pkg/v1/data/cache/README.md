@@ -150,7 +150,7 @@ Initialised with `github.com/kitsunium/sdk/internal/kernel/collections/cache.Pol
 const PolicyTinyLFU Policy = 2
 ```
 
-PolicyTinyLFU admits a key into the main part of the cache only when a frequency sketch says it was used more than the key it would replace, so neither a scan nor a long tail of keys used once displaces the hot set. A key just written is always served, though: it is the window's, never the loser of a contest, so with room for one key it replaces any other.
+PolicyTinyLFU admits a key into the main part of the cache only when a frequency sketch estimates it was used more than the key it would replace, so neither a scan nor a long tail of keys used once displaces the hot set. A key just written is always served, though: it is the window's, never the loser of a contest, so with room for one key it replaces any other.
 
 Initialised with `github.com/kitsunium/sdk/internal/kernel/collections/cache.PolicyTinyLFU`.
 
@@ -724,7 +724,7 @@ type MemoryConfig struct {
 	MaxBytes   int64
 	// Policy is the eviction policy: least recently used (the zero), S3-FIFO,
 	// which keeps a hot set through a scan, or W-TinyLFU, which admits a key
-	// to its main part only when it was used more than the one it replaces.
+	// to its main part only when its estimated use is above the one it replaces.
 	// A key just written is always kept, whatever it displaces: with room for
 	// one key, one written once replaces one used often.
 	Policy     kcache.Policy

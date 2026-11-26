@@ -22,15 +22,19 @@ const (
 	// a new key enters an LRU window holding a hundredth of the capacity; the
 	// key the window pushes out moves into main when main has room, and
 	// otherwise contests main's next victim — the least recently used of main's
-	// probationary segment — and stays only when a frequency sketch says it was
-	// used more, and twice at least. A second use in main moves an entry into
-	// the protected segment, four fifths of main. Every Set and every hit counts
-	// its key: the first use in a period in a doorkeeper, a Bloom filter, the
-	// later ones in a count-min sketch of four-bit counters halved every ten
-	// uses an entry of the bound, so a key used once — a scan, the long tail —
-	// never wins a contest against one used more, and the counts follow what is
-	// used now. A key just written is always served: the window holds it, and
-	// no contest is held for it, so with room for one key it replaces any other.
+	// probationary segment — and stays only when a frequency sketch estimates it
+	// was used more, and twice at least. A second use in main moves an entry into
+	// the protected segment, four fifths of main; an entry heavier than that
+	// segment alone stays in probation. Every Set and every hit counts its key:
+	// the first use in a period in a doorkeeper, a Bloom filter, the later ones in
+	// a count-min sketch of four-bit counters halved every ten uses an entry of
+	// the bound, so a key used once — a scan, the long tail — is estimated at one
+	// use and does not win a contest against a key estimated higher, and the
+	// counts follow what is used now. The sketch shares its counters between
+	// keys: the contest compares estimates, which can run above a key's real use,
+	// and nothing is promised about actual uses. A key just written is always
+	// served: the window holds it, and no contest is held for it, so with room for
+	// one key it replaces any other.
 	PolicyTinyLFU
 )
 

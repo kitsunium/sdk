@@ -192,24 +192,14 @@ library alone — stand.
   window of a hundredth of the bound in front of a segmented LRU (probation,
   and protected at four fifths of main); the window's oldest enters main
   while main has room and otherwise contests main's victim, staying only when
-  its estimate is at least 2 and above the victim's. The estimate is TinyLFU's
-  doorkeeper — a Bloom filter that takes a key's first use in a period, four
-  bits an increment of the period — in front of a count-min sketch of
-  four-bit counters, a key's four in one 64-byte block (Caffeine's layout),
-  halved every ten increments an entry of the bound. Measured: +5.01 to +5.09
-  and +10.22 to +10.44 over seven seeds — the sketch's seed is drawn once a
-  process, `hash/maphash`, so no input targets a key's counters and two
-  caches of one process count alike. A key just written is always served: the
-  window holds it; admission refuses a key only when it leaves the window.
-  It changes no existing behaviour: `PolicyLRU` stays the zero.
-- **The node stays one cache line.** W-TinyLFU's 32-bit hash, taken once at
-  admission, and the period in which the key last went through the
-  doorkeeper take the padding after the queue byte: 63 bytes for a string
-  key and a word value. A hit counts its key off the stored hash without
-  reading the doorkeeper; S3-FIFO's counter and W-TinyLFU's protected relink
-  are inlined in `fetch` beside LRU's.
-
-The hit's cost is the A/B lane's to judge (`834-fetch-hit-s3fifo`,
-`834-fetch-hit-tinylfu`): S3-FIFO's sets a counter; W-TinyLFU's adds one
-sketch count — about 16 ns on the development VM's Zen 1, where LRU's hit
-takes 49.
+  its estimated frequency is at least 2 and above the victim's. The estimate
+  is TinyLFU's, from a frequency sketch that shares its counters between
+  keys: it is an estimate, not a count of uses. The sketch's seed is drawn
+  once a process, so no input targets a key's counters. A key just written is
+  always served: the window holds it; admission refuses a key only when it
+  leaves the window. The constraint is #834's, held to W-TinyLFU as to
+  S3-FIFO: a hit within 15 ns of LRU's. Measured: +5.01 to +5.09 and +10.22 to +10.44 over
+  seven seeds. It changes no existing behaviour: `PolicyLRU` stays the zero.
+  The sketch's layout, the node's and the hit's cost are in the package's
+  `NOTES.md`; the hit's cost is the A/B lane's to judge (`834-fetch-hit-s3fifo`,
+  `834-fetch-hit-tinylfu`).
