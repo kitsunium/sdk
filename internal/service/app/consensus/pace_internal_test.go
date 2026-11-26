@@ -281,7 +281,8 @@ func TestTwoLearnersAreStreamedOneAfterTheOther(t *testing.T) {
 			t.Fatalf("the learners never caught up: %+v, %+v, streams %d", a.node.Status(), b.node.Status(), lt.streams.Load())
 		}
 	}
-	if got := lt.streams.Load(); got != 2 {
+	//: Two streams once each returned: neither learner needed another.
+	if got, _ := streamsReturned(t, lt, l); got != 2 {
 		t.Fatalf("%d snapshot streams, want 2: a learner needed another one to catch up", got)
 	}
 	if p := lt.peak.Load(); p > 1 {

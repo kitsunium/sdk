@@ -28,6 +28,10 @@ type holdTransport struct {
 	// streamed, when set, runs after a stream that succeeded, before
 	// Stream returns.
 	streamed atomic.Pointer[func()]
+	// answered, when set, runs once a stream to a peer succeeded, before it
+	// is counted: the receiver installed it and answered, and the leader has
+	// not heard that answer yet (#1570).
+	answered atomic.Pointer[func(coreconsensus.NodeID)]
 	// drained, when set, runs once a stream's body was read to its end:
 	// before the receiver commits the install and answers it, which
 	// streamed comes after.
@@ -64,6 +68,10 @@ func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, off
 	}
 	err := t.MemoryTransport.Stream(ctx, to, offer, open)
 	if err == nil {
+		//: A hook set holds the count until it returns.
+		if f := t.answered.Load(); f != nil {
+			(*f)(to)
+		}
 		t.streams.Add(1)
 		if f := t.streamed.Load(); f != nil {
 			(*f)()
