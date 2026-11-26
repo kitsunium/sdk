@@ -261,17 +261,37 @@ func TestTheByteBoundHoldsAfterEverySet(t *testing.T) {
 // every one.
 func TestTheByteBoundHoldsWhateverTheStripeSeed(t *testing.T) {
 	t.Parallel()
-	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
+	type tc struct {
+		name    string
+		stripes int
+		policy  kcache.Policy
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
 		//: one stripe has no hash to seed.
-		if stripes == 1 {
+		if c.stripes == 1 {
 			t.Skip("one stripe: no seed picks a stripe")
 		}
+		//: a fresh store and a fresh seed each time.
 		for range 100 {
-			store := weighedBytesStore(t, stripes, policy)
+			store := weighedBytesStore(t, c.stripes, c.policy)
 			store.seed = maphash.MakeSeed()
-			holdsTheByteBound(t, store, stripes)
+			holdsTheByteBound(t, store, c.stripes)
 		}
-	})
+	}
+	var cases []tc
+	//: one case a shape and policy, named as forEachShape names them.
+	for _, stripes := range []int{1, 8} {
+		for _, policy := range []kcache.Policy{kcache.PolicyLRU, kcache.PolicyS3FIFO, kcache.PolicyTinyLFU} {
+			cases = append(cases, tc{name: "stripes=" + strconv.Itoa(stripes) + "/policy=" + strconv.Itoa(int(policy)), stripes: stripes, policy: policy})
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
 }
 
 // weighedBytesStore builds the 1 MiB store of the byte-bound tests.

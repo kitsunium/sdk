@@ -73,18 +73,42 @@ func held(t *testing.T, store *memoryStore[string]) int {
 func TestAStripeHoldsOnlyItsShareOfTheEntries(t *testing.T) {
 	t.Parallel()
 	seed := crowdedSeed(t, 17)
-	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
-		//: the scenario is four-striped; the shapes only name the policy.
-		if stripes == 1 {
-			t.Skip("the scenario is four-striped")
-		}
-		store := concrete(t, MemoryConfig{MaxEntries: 64, Stripes: expireStripes, Policy: policy, Clock: clock.NewManualClock(time.Unix(0, 0))})
+	type tc struct {
+		name   string
+		policy kcache.Policy
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		store := concrete(t, MemoryConfig{MaxEntries: 64, Stripes: expireStripes, Policy: c.policy, Clock: clock.NewManualClock(time.Unix(0, 0))})
 		store.seed = seed
 		setSweepScenario(t, store)
+		//: a stripe of 16 took 17: some key is no longer there.
 		if got := held(t, store); got >= expireKeys {
 			t.Errorf("the store holds %d of %d keys, want fewer: a stripe of 16 took 17", got, expireKeys)
 		}
-	})
+	}
+	for _, c := range seedPolicyCases() {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc{name: c.name, policy: c.policy})
+		})
+	}
+}
+
+// seedPolicyCase names one eviction policy of the seeded scenarios.
+type seedPolicyCase struct {
+	name   string
+	policy kcache.Policy
+}
+
+// seedPolicyCases lists the three eviction policies the scenarios run under.
+func seedPolicyCases() []seedPolicyCase {
+	//: every policy the store offers, by name.
+	return []seedPolicyCase{
+		{name: "lru", policy: kcache.PolicyLRU},
+		{name: "s3fifo", policy: kcache.PolicyS3FIFO},
+		{name: "tinylfu", policy: kcache.PolicyTinyLFU},
+	}
 }
 
 // TestExpireRemovesEveryDueEntryWhateverTheStripeSeed is #1405's acceptance
@@ -95,22 +119,31 @@ func TestAStripeHoldsOnlyItsShareOfTheEntries(t *testing.T) {
 func TestExpireRemovesEveryDueEntryWhateverTheStripeSeed(t *testing.T) {
 	t.Parallel()
 	seed := crowdedSeed(t, 17)
-	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
-		//: the scenario is four-striped; the shapes only name the policy.
-		if stripes == 1 {
-			t.Skip("the scenario is four-striped")
-		}
+	type tc struct {
+		name   string
+		policy kcache.Policy
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
 		manual := clock.NewManualClock(time.Unix(0, 0))
-		store := concrete(t, MemoryConfig{MaxEntries: expireKeys * expireStripes, Stripes: expireStripes, Policy: policy, Clock: manual})
+		store := concrete(t, MemoryConfig{MaxEntries: expireKeys * expireStripes, Stripes: expireStripes, Policy: c.policy, Clock: manual})
 		store.seed = seed
 		setSweepScenario(t, store)
 		manual.Advance(2 * time.Second)
 		removed, err := store.Expire(t.Context())
+		//: the twenty dated entries, no more, no fewer.
 		if err != nil || removed != 20 {
 			t.Fatalf("Expire = (%d, %v), want (20, nil)", removed, err)
 		}
+		//: the ten undated ones are all still tagged.
 		if dropped, _ := store.InvalidateTag(t.Context(), "all"); dropped != 10 {
 			t.Errorf("InvalidateTag after the sweep dropped %d, want the 10 undated entries", dropped)
 		}
-	})
+	}
+	for _, c := range seedPolicyCases() {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc{name: c.name, policy: c.policy})
+		})
+	}
 }
