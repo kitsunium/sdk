@@ -599,7 +599,11 @@ packages:
               Propose replicates data and returns, once the entry is applied
               locally, its lineage-scoped token and the value Apply returned.
               NOT_LEADER means certainly not appended; OUTCOME_UNKNOWN means it may
-              still commit, and the caller must read the state before deciding.
+              still commit, and the caller must read the state before deciding. A
+              proposal a follower forwards also meets OUTCOME_UNKNOWN, never a false
+              NOT_LEADER, when the node it went to declines a frame it may have
+              handled already: a late copy, a forward overtaken on a replaced
+              connection, a forward to a leader that restarted (#1482).
             in:
               - name: ctx
                 type: context.Context
@@ -671,7 +675,9 @@ packages:
               session and sequence with other data is SESSION_DIGEST_MISMATCH, a
               session not open or a sequence below the last one is
               SESSION_EXPIRED, and neither appends anything once the first one is
-              committed. OUTCOME_UNKNOWN is retried with the same arguments.
+              committed. OUTCOME_UNKNOWN is retried with the same arguments, the one
+              a forward meets when the node it went to declines a frame it may have
+              handled already included (#1482).
             in:
               - name: ctx
                 type: context.Context
@@ -1136,7 +1142,27 @@ packages:
               OutcomeUnknown is returned when a proposal was appended, or possibly
               delivered, and its answer was lost. The entry may still commit: never
               retry a Propose blindly, read the state through Barrier first. A
-              ProposeSession is retried with the same arguments (ADR 0241).
+              ProposeSession is retried with the same arguments (ADR 0241). A
+              proposal made on a follower, which forwards it to the leader, also
+              meets it when the node the forward went to declines a frame it may
+              have handled already (#1482): a copy that arrives after the forward
+              window, a forward its connection delivered behind a later one when
+              that connection was replaced, and any forward still sent to a leader
+              that restarted, until the next election. So does a copy of a forward
+              whose answer the leader forgot at its bound of 2^20 answers, the
+              oldest first, before the window ended, which only a load above 47 662
+              forwards a second under the defaults reaches, and, past 65 536
+              marks of the current term (runs per lane: about 32 768 restarts when
+              each run forwards on both lanes), the least recent mark of the node
+              holding the most goes, and that node's new runs wait for the next
+              term; restarts spread over several nodes fence each of them in turn
+              (#1540). No forward is dropped for room. The bound of 2^20 answers,
+              about 152 MiB and 280 MiB at most under churn, holds per Raft group:
+              a multi node with several groups adds them.
+              None of them is a refusal, true or false: nothing tells the caller
+              that the entry was not appended.
+              Once every member runs this version, a forward is never applied
+              twice.
             exit: TEMPFAIL
             name: OutcomeUnknown
             private: "core/app/consensus: the proposal was appended or possibly delivered, then the answer was lost to a leadership change, a context's end or a broken connection"
@@ -3748,7 +3774,11 @@ packages:
               Propose replicates data and returns, once the entry is applied locally,
               its token and the value Apply returned. NOT_LEADER means certainly not
               appended; OUTCOME_UNKNOWN means it may still commit: read the state through
-              Barrier before deciding, never retry blindly (D6, R1-04).
+              Barrier before deciding, never retry blindly (D6, R1-04). A proposal this
+              node forwards to the leader also meets OUTCOME_UNKNOWN, never a false
+              NOT_LEADER, when the node it went to declines a frame it may have handled
+              already: a late copy, a forward overtaken on a replaced connection, a
+              forward to a leader that restarted, until the next election (#1482).
             in:
               - name: ctx
                 type: context.Context
@@ -3780,8 +3810,9 @@ packages:
               the state machine applies it at most once, whatever the retries. A
               retry after OUTCOME_UNKNOWN, with the same arguments, through any node,
               is answered with the first one's token and, while this node holds it,
-              its value (ADR 0241). SESSION_DIGEST_MISMATCH and SESSION_EXPIRED apply
-              nothing.
+              its value (ADR 0241), the OUTCOME_UNKNOWN of a forward its leader
+              declined included (#1482). SESSION_DIGEST_MISMATCH and SESSION_EXPIRED
+              apply nothing.
             in:
               - name: ctx
                 type: context.Context
@@ -5359,6 +5390,23 @@ packages:
                 leader appended and has not committed yet; 0 does not bound them.
               name: MaxForwardBytes
               type: int64
+            - doc: |-
+                ForwardWindow is how long a forward's answer is kept after it was
+                given: a copy of the forward that arrives within it is answered with
+                that answer (#401, #1482). The driver passes twice its transport's
+                resend window, the longest after a frame first reached this node that
+                the transport may deliver it again; 0 keeps them 22 s, twice the
+                shipped TCP transport's under its defaults on Linux, and no window
+                exceeds 2 minutes. It runs on the clock Step and Tick read, a gap of
+                more than a second counted as one: time this node did not run ages
+                no answer. At most 2^20 answers are kept, the oldest forgotten first,
+                whatever its age, for each new forward past them, so none is dropped
+                for room: a copy of an answer forgotten is neither proposed nor
+                answered, as one past the window. The window is a precision only: a
+                copy that comes after it, however late, even after this node
+                restarted, is neither proposed nor answered again.
+              name: ForwardWindow
+              type: time.Duration
           unexported: true
       - doc: |-
           StartState is the durable state the driver loaded from its store at
@@ -6085,6 +6133,47 @@ packages:
                 it took none (#919).
               name: Appended
               type: time.Time
+            - doc: |-
+                ForwardDrops counts, since this node started, the forwards it neither
+                proposed nor answered, by cause, each answered OUTCOME_UNKNOWN by its
+                forwarder if it still waited (#1482, consensus_forwards_dropped_total).
+              name: ForwardDrops
+              type: ForwardDropsValue
+            - doc: |-
+                ForwardRuns is how many forwarder runs the fence keeps a mark of
+                (#1482, consensus_forward_runs).
+              name: ForwardRuns
+              type: int
+            - doc: |-
+                ForwardForgotten counts, since this node started, the answers it
+                forgot at its bound of 2^20 before their forward window ended, the
+                oldest first, so that every new forward is handled: a copy of one is
+                neither proposed nor answered, counted among ForwardDrops' Copies,
+                and its forwarder answers OUTCOME_UNKNOWN (#1482,
+                consensus_forward_answers_forgotten_total).
+              name: ForwardForgotten
+              type: uint64
+      - doc: |-
+          ForwardDropsValue counts the forwards a node neither proposed nor
+          answered, by cause (#1482).
+        name: ForwardDropsValue
+        struct:
+          fields:
+            - doc: |-
+                Copies are forwards whose run had a later one handled here: a copy of
+                one handled, or one its connection delivered behind a later one.
+              name: Copies
+              type: uint64
+            - doc: |-
+                Restarted are forwards of a run with no mark, of a term at most the
+                one this node started at.
+              name: Restarted
+              type: uint64
+            - doc: |-
+                Evicted are forwards of a run with no mark, of a term at most the
+                highest of its node's marks the fence forgot.
+              name: Evicted
+              type: uint64
       - doc: |-
           EngineValue is the engine's own replicated state: the timing contract, the
           cluster version and its generation, and the no-space alarm.
@@ -6482,6 +6571,34 @@ packages:
       answer was lost: it may still commit. Read the state through Barrier and
       decide, or carry a per-key revision in the command, because a replayed
       compare-and-swap is not harmless under ABA (D6, R1-04).
+
+      A proposal made on a follower travels to the leader as a forward, and
+      once every member runs this version no forward is applied twice,
+      whatever the delay of a copy of it, even across a restart (#1482). To
+      keep that, the node a forward went to declines a frame it may have
+      handled already, and the proposal meets OUTCOME_UNKNOWN in three cases:
+      a copy that arrives after the forward window, when the first answer
+      was lost; a forward its connection delivered behind a later one, when
+      that connection was replaced; and any forward still sent to a leader
+      that restarted, until the next election. Two bounds add their own,
+      and neither drops a new forward: the leader keeps at most 2^20
+      answers, and past them forgets the oldest, whatever its age, so a copy
+      of a forward whose answer went before the window ended, when the first
+      answer was lost, meets OUTCOME_UNKNOWN too, which only a load above
+      47 662 forwards a second under the defaults reaches; and, past 65 536
+      marks of the current term (runs per lane: about 32 768 restarts when
+      each run forwards on both lanes), the least recent mark of the node
+      holding the most goes, and that node's new runs wait for the next
+      term; restarts spread over several nodes fence each of them in turn
+      (#1540). The bound of 2^20 answers, about 152 MiB and 280 MiB at most
+      under churn, holds per Raft group: a multi node with several groups
+      adds them. None of them is a refusal, true
+      or false: the entry may or may not have been appended. Handle it as
+      any OUTCOME_UNKNOWN: read the state through Barrier before a Propose
+      is made again, and retry a ProposeSession with the same arguments.
+      The forwards declined are
+      counted by reason in consensus_forwards_dropped_total, and the answers
+      forgotten at the bound in consensus_forward_answers_forgotten_total.
 
       # Exactly once, through a client session
 
@@ -7504,7 +7621,31 @@ packages:
           - name: NotLeader
             reexport: coreconsensus.NotLeader
             type: "*errs.Error"
-          - name: OutcomeUnknown
+          - blank: true
+            doc: |-
+              OutcomeUnknown is returned when a proposal may or may not have been
+              committed: it was appended, or possibly delivered, and its answer was
+              lost. Never retry a Propose blindly, read the state through Barrier
+              first; retry a ProposeSession with the same arguments, which applies
+              it once (ADR 0241). A proposal made on a follower, which forwards it
+              to the leader, also meets it when the node the forward went to
+              declines a frame it may have handled already (#1482): a copy that
+              arrives after the forward window, a forward its connection delivered
+              behind a later one when that connection was replaced, and any forward
+              still sent to a leader that restarted, until the next election. So
+              does a copy of a forward whose answer the leader forgot at its bound
+              of 2^20 answers, the oldest first, before the window ended (a load
+              above 47 662 forwards a second under the defaults), and, past 65 536
+              marks of the current term (runs per lane: about 32 768 restarts when
+              each run forwards on both lanes), the least recent mark of the node
+              holding the most goes, and that node's new runs wait for the next
+              term; restarts spread over several nodes fence each of them in turn
+              (#1540). No forward is dropped for room. The bound of 2^20 answers,
+              about 152 MiB and 280 MiB at most under churn, holds per Raft group:
+              a multi node with several groups adds them.
+              None of them is a refusal, true or false. Once every member runs this
+              version, no forward is applied twice.
+            name: OutcomeUnknown
             reexport: coreconsensus.OutcomeUnknown
             type: "*errs.Error"
           - name: LeadershipUnconfirmed

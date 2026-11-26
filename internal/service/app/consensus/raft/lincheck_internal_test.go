@@ -664,7 +664,13 @@ func TestForwardedDuplicatesAreCaught(t *testing.T) {
 // forwardedRun runs one seed of the forwarded workload, then checks that no
 // command was applied twice and that the history is linearizable.
 func forwardedRun(seed uint64, mut mutation) error {
-	s := newSim(simOptions{seed: seed, drop: 0.03, dup: 0.25, crashRate: 0.3, mut: mut})
+	return forwardedRunOver(simOptions{seed: seed, drop: 0.03, dup: 0.25, crashRate: 0.3, mut: mut})
+}
+
+// forwardedRunOver is forwardedRun over the network and nodes opt names.
+func forwardedRunOver(opt simOptions) error {
+	seed := opt.seed
+	s := newSim(opt)
 	s.kv = newKVWorld()
 	s.kv.noLeas = true
 	for _, id := range s.ids {

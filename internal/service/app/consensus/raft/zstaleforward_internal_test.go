@@ -41,7 +41,11 @@ func checkForwardAnswerRaisesNoTerm(restamp bool) error {
 		return fmt.Errorf("setup: F at term %d following %d, want term 3 following G", st.Term, st.Lead)
 	}
 	f.Ready()
-	x := newTest(3, testState{term: 4, commit: 1, ents: ents}, 0, false)
+	// X runs since term 1, through term 2 it led, to term 4: a node that
+	// started at term 4 handles no forward of a term at most that one
+	// (fwdFence, #1482).
+	x := newTest(3, testState{term: 1, commit: 1, ents: ents}, 0, false)
+	x.term = 4
 	fwd := forwardCmd(2, 9, 10)
 	fwd.To = 3
 	x.Step(now, fwd)

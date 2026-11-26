@@ -15,7 +15,11 @@ import (
 // Propose replicates data and returns, once the entry is applied locally,
 // its token and the value Apply returned. NOT_LEADER means certainly not
 // appended; OUTCOME_UNKNOWN means it may still commit: read the state through
-// Barrier before deciding, never retry blindly (D6, R1-04).
+// Barrier before deciding, never retry blindly (D6, R1-04). A proposal this
+// node forwards to the leader also meets OUTCOME_UNKNOWN, never a false
+// NOT_LEADER, when the node it went to declines a frame it may have handled
+// already: a late copy, a forward overtaken on a replaced connection, a
+// forward to a leader that restarted, until the next election (#1482).
 func (n *Node) Propose(ctx context.Context, data []byte) (coreconsensus.TokenValue, any, error) {
 	if len(data) > n.cfg.MaxEntryBytes {
 		return coreconsensus.TokenValue{}, nil, origin(coreconsensus.EntryTooLarge, errs.Int("bytes", len(data)))

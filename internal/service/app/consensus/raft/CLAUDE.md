@@ -1,4 +1,4 @@
-<!-- updated: 2026-11-16T18:00:00Z -->
+<!-- updated: 2026-11-26T00:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -23,6 +23,9 @@ write leave in `Ready.AfterSync`.
 - Admit a forwarded command without the bounds of a local one (`admitForward`, review M2)
 - Answer a past index from the engine state as it stands: `EngineAt` reads the records `noteEngine` keeps per committed engine entry, folded into the base by `Compact` and reset by `InstallSnapshot`
 - Propose a forward each time it is delivered: the TCP transport resends a batch whose write failed on a reused connection (#377), so a frame can arrive twice
+- Drop a new forward at the forward answers' table's bound, or handle one there without the fence's mark: the bound forgets the oldest answer, and the mark, set for every forward handled, a refusal included, is what fences its copy
+- Rest the deduplication of forwards on that table's memory, or on any time: the fence (`fwdFence`) refuses every copy by the order of the submission ids
+- Forget a mark of the current term below `maxFwdRunsHard`, or choose the mark to forget by its node
 - Let a silent node campaign, on its election timer or a TimeoutNow: its candidacy is a vote for itself, and the silence grants none
 - Campaign on a TimeoutNow while the driver holds its apply stalled (`SetApplyStalled`): a leader whose apply is stuck hands over (#554) and still acknowledges, and the transfer back to it made it lead almost all the time
 - Clear a campaign's transfer issuer when it wins: `Status.HandedBy` names it while the term lasts, and the driver's watch of `PreferredLeaders` pauses after a transfer on it (#676, `TestTheStatusNamesTheLeaderThatHandedTheTermOver`)

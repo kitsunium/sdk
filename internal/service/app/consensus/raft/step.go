@@ -15,6 +15,7 @@ import (
 // it never writes again, a frame it parsed into a buffer of its own.
 func (r *Raft) Step(now time.Time, m core.MessageValue) {
 	r.now = now
+	r.fwdAnswers.advance(now, fwdClockStep)
 	if m.Group != r.cfg.Group || r.stepLeaderRecord(now, m) || !r.stepTerm(now, m) || r.stepAnyRole(now, m) {
 		return
 	}

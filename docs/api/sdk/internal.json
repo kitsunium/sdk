@@ -5558,7 +5558,7 @@
         "reason": "OUTCOME_UNKNOWN",
         "public": "The proposal may or may not have been committed"
       },
-      "doc": "OutcomeUnknown is returned when a proposal was appended, or possibly\ndelivered, and its answer was lost. The entry may still commit: never\nretry a Propose blindly, read the state through Barrier first. A\nProposeSession is retried with the same arguments (ADR 0241).\n",
+      "doc": "OutcomeUnknown is returned when a proposal was appended, or possibly\ndelivered, and its answer was lost. The entry may still commit: never\nretry a Propose blindly, read the state through Barrier first. A\nProposeSession is retried with the same arguments (ADR 0241). A\nproposal made on a follower, which forwards it to the leader, also\nmeets it when the node the forward went to declines a frame it may\nhave handled already (#1482): a copy that arrives after the forward\nwindow, a forward its connection delivered behind a later one when\nthat connection was replaced, and any forward still sent to a leader\nthat restarted, until the next election. So does a copy of a forward\nwhose answer the leader forgot at its bound of 2^20 answers, the\noldest first, before the window ended, which only a load above 47 662\nforwards a second under the defaults reaches, and, past 65 536\nmarks of the current term (runs per lane: about 32 768 restarts when\neach run forwards on both lanes), the least recent mark of the node\nholding the most goes, and that node's new runs wait for the next\nterm; restarts spread over several nodes fence each of them in turn\n(#1540). No forward is dropped for room. The bound of 2^20 answers,\nabout 152 MiB and 280 MiB at most under churn, holds per Raft group:\na multi node with several groups adds them.\nNone of them is a refusal, true or false: nothing tells the caller\nthat the entry was not appended.\nOnce every member runs this version, a forward is never applied\ntwice.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -5717,7 +5717,7 @@
       "recv": "Replicated",
       "spelled": "func(ctx context.Context, data []byte) (TokenValue, any, error)",
       "canonical": "func(ctx context.Context, data []byte) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, any, error)",
-      "doc": "Propose replicates data and returns, once the entry is applied\nlocally, its lineage-scoped token and the value Apply returned.\nNOT_LEADER means certainly not appended; OUTCOME_UNKNOWN means it may\nstill commit, and the caller must read the state before deciding.\n",
+      "doc": "Propose replicates data and returns, once the entry is applied\nlocally, its lineage-scoped token and the value Apply returned.\nNOT_LEADER means certainly not appended; OUTCOME_UNKNOWN means it may\nstill commit, and the caller must read the state before deciding. A\nproposal a follower forwards also meets OUTCOME_UNKNOWN, never a false\nNOT_LEADER, when the node it went to declines a frame it may have\nhandled already: a late copy, a forward overtaken on a replaced\nconnection, a forward to a leader that restarted (#1482).\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -5951,7 +5951,7 @@
       "recv": "SessionProposer",
       "spelled": "func(ctx context.Context, s SessionID, seq uint64, data []byte) (TokenValue, any, error)",
       "canonical": "func(ctx context.Context, s github.com/kitsunium/sdk/internal/core/app/consensus.SessionID, seq uint64, data []byte) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, any, error)",
-      "doc": "ProposeSession replicates data as command seq of session s, seq from 1\nand increasing, and returns, once it is applied, its token and the\nvalue Apply returned. A retry of the same session, sequence and data\nis answered with the first one's token, applying nothing again, and\nwith its value while the node still holds it, nil otherwise. The same\nsession and sequence with other data is SESSION_DIGEST_MISMATCH, a\nsession not open or a sequence below the last one is\nSESSION_EXPIRED, and neither appends anything once the first one is\ncommitted. OUTCOME_UNKNOWN is retried with the same arguments.\n",
+      "doc": "ProposeSession replicates data as command seq of session s, seq from 1\nand increasing, and returns, once it is applied, its token and the\nvalue Apply returned. A retry of the same session, sequence and data\nis answered with the first one's token, applying nothing again, and\nwith its value while the node still holds it, nil otherwise. The same\nsession and sequence with other data is SESSION_DIGEST_MISMATCH, a\nsession not open or a sequence below the last one is\nSESSION_EXPIRED, and neither appends anything once the first one is\ncommitted. OUTCOME_UNKNOWN is retried with the same arguments, the one\na forward meets when the node it went to declines a frame it may have\nhandled already included (#1482).\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -70247,7 +70247,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context, data []byte) (coreconsensus.TokenValue, any, error)",
       "canonical": "func(ctx context.Context, data []byte) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, any, error)",
-      "doc": "Propose replicates data and returns, once the entry is applied locally,\nits token and the value Apply returned. NOT_LEADER means certainly not\nappended; OUTCOME_UNKNOWN means it may still commit: read the state through\nBarrier before deciding, never retry blindly (D6, R1-04).\n",
+      "doc": "Propose replicates data and returns, once the entry is applied locally,\nits token and the value Apply returned. NOT_LEADER means certainly not\nappended; OUTCOME_UNKNOWN means it may still commit: read the state through\nBarrier before deciding, never retry blindly (D6, R1-04). A proposal this\nnode forwards to the leader also meets OUTCOME_UNKNOWN, never a false\nNOT_LEADER, when the node it went to declines a frame it may have handled\nalready: a late copy, a forward overtaken on a replaced connection, a\nforward to a leader that restarted, until the next election (#1482).\n",
       "file": "service/app/consensus/ops.go",
       "layer": "service",
       "family": "app"
@@ -70260,7 +70260,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context, s coreconsensus.SessionID, seq uint64, data []byte) (coreconsensus.TokenValue, any, error)",
       "canonical": "func(ctx context.Context, s github.com/kitsunium/sdk/internal/core/app/consensus.SessionID, seq uint64, data []byte) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, any, error)",
-      "doc": "ProposeSession replicates data as command seq of the open session s and\nreturns, once it is applied, its token and the value Apply returned:\nthe state machine applies it at most once, whatever the retries. A\nretry after OUTCOME_UNKNOWN, with the same arguments, through any node,\nis answered with the first one's token and, while this node holds it,\nits value (ADR 0241). SESSION_DIGEST_MISMATCH and SESSION_EXPIRED apply\nnothing.\n",
+      "doc": "ProposeSession replicates data as command seq of the open session s and\nreturns, once it is applied, its token and the value Apply returned:\nthe state machine applies it at most once, whatever the retries. A\nretry after OUTCOME_UNKNOWN, with the same arguments, through any node,\nis answered with the first one's token and, while this node holds it,\nits value (ADR 0241), the OUTCOME_UNKNOWN of a forward its leader\ndeclined included (#1482). SESSION_DIGEST_MISMATCH and SESSION_EXPIRED\napply nothing.\n",
       "file": "service/app/consensus/session.go",
       "layer": "service",
       "family": "app"
@@ -72098,8 +72098,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "Config",
-      "spelled": "struct{ID core.NodeID; Group core.GroupID; Log core.LogIdentityValue; Seed uint64; Timing core.TimingContractSpec; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxApplyLagBytes int64; MaxEntryBytes int; MaxForwardBytes int64}",
-      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; Log github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentityValue; Seed uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxApplyLagBytes int64; MaxEntryBytes int; MaxForwardBytes int64}",
+      "spelled": "struct{ID core.NodeID; Group core.GroupID; Log core.LogIdentityValue; Seed uint64; Timing core.TimingContractSpec; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxApplyLagBytes int64; MaxEntryBytes int; MaxForwardBytes int64; ForwardWindow time.Duration}",
+      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; Log github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentityValue; Seed uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxApplyLagBytes int64; MaxEntryBytes int; MaxForwardBytes int64; ForwardWindow time.Duration}",
       "fields": [
         {
           "name": "ID",
@@ -72200,6 +72200,11 @@
           "name": "MaxForwardBytes",
           "type": "int64",
           "doc": "MaxForwardBytes bounds the payload bytes of forwarded commands this\nleader appended and has not committed yet; 0 does not bound them.\n"
+        },
+        {
+          "name": "ForwardWindow",
+          "type": "time.Duration",
+          "doc": "ForwardWindow is how long a forward's answer is kept after it was\ngiven: a copy of the forward that arrives within it is answered with\nthat answer (#401, #1482). The driver passes twice its transport's\nresend window, the longest after a frame first reached this node that\nthe transport may deliver it again; 0 keeps them 22 s, twice the\nshipped TCP transport's under its defaults on Linux, and no window\nexceeds 2 minutes. It runs on the clock Step and Tick read, a gap of\nmore than a second counted as one: time this node did not run ages\nno answer. At most 2^20 answers are kept, the oldest forgotten first,\nwhatever its age, for each new forward past them, so none is dropped\nfor room: a copy of an answer forgotten is neither proposed nor\nanswered, as one past the window. The window is a precision only: a\ncopy that comes after it, however late, even after this node\nrestarted, is neither proposed nor answered again.\n"
         }
       ],
       "doc": "Config is what the step function needs from its driver. Every bound is\nalready clamped and validated by the engine.\n",
@@ -72283,6 +72288,35 @@
         }
       ],
       "doc": "FetchSpec asks for the entries [Lo, Hi) of the store for a peer, whose\npayloads the step function evicted. The driver reads them off the event\nloop and hands them back with Fetched.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ForwardDropsValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "ForwardDropsValue",
+      "spelled": "struct{Copies uint64; Restarted uint64; Evicted uint64}",
+      "canonical": "struct{Copies uint64; Restarted uint64; Evicted uint64}",
+      "fields": [
+        {
+          "name": "Copies",
+          "type": "uint64",
+          "doc": "Copies are forwards whose run had a later one handled here: a copy of\none handled, or one its connection delivered behind a later one.\n"
+        },
+        {
+          "name": "Restarted",
+          "type": "uint64",
+          "doc": "Restarted are forwards of a run with no mark, of a term at most the\none this node started at.\n"
+        },
+        {
+          "name": "Evicted",
+          "type": "uint64",
+          "doc": "Evicted are forwards of a run with no mark, of a term at most the\nhighest of its node's marks the fence forgot.\n"
+        }
+      ],
+      "doc": "ForwardDropsValue counts the forwards a node neither proposed nor\nanswered, by cause (#1482).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -73487,8 +73521,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "SummaryValue",
-      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
-      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time}",
+      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time; ForwardDrops ForwardDropsValue; ForwardRuns int; ForwardForgotten uint64}",
+      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time; ForwardDrops github.com/kitsunium/sdk/internal/service/app/consensus/raft.ForwardDropsValue; ForwardRuns int; ForwardForgotten uint64}",
       "fields": [
         {
           "name": "Role",
@@ -73553,6 +73587,21 @@
           "name": "Appended",
           "type": "time.Time",
           "doc": "Appended is, on a node that does not lead, the instant of the last\nappend with entries it took from the leader of this term, zero while\nit took none (#919).\n"
+        },
+        {
+          "name": "ForwardDrops",
+          "type": "ForwardDropsValue",
+          "doc": "ForwardDrops counts, since this node started, the forwards it neither\nproposed nor answered, by cause, each answered OUTCOME_UNKNOWN by its\nforwarder if it still waited (#1482, consensus_forwards_dropped_total).\n"
+        },
+        {
+          "name": "ForwardRuns",
+          "type": "int",
+          "doc": "ForwardRuns is how many forwarder runs the fence keeps a mark of\n(#1482, consensus_forward_runs).\n"
+        },
+        {
+          "name": "ForwardForgotten",
+          "type": "uint64",
+          "doc": "ForwardForgotten counts, since this node started, the answers it\nforgot at its bound of 2^20 before their forward window ended, the\noldest first, so that every new forward is handled: a copy of one is\nneither proposed nor answered, counted among ForwardDrops' Copies,\nand its forwarder answers OUTCOME_UNKNOWN (#1482,\nconsensus_forward_answers_forgotten_total).\n"
         }
       ],
       "doc": "SummaryValue is the step function's view without its memberships: every\nfield of a StatusValue but Conf and Committed, which Summary returns\nwithout cloning a configuration (#912).\n",
