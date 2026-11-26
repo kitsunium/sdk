@@ -2200,6 +2200,12 @@ sequences:
               do:
                 - return: misconfigured("SnapshotStreamBytesPerSecond", "negative")
                   to: misconfigured
+            - case: c.SnapshotStreamBytesPerSecond > 0 && int64(c.MaxSnapshotStreams) > maxPacedStreams(c.InitialTiming.ElectionTimeoutMax)
+              do:
+                - return: |-
+                    misconfigured("MaxSnapshotStreams", "above "+strconv.FormatInt(maxPacedStreams(c.InitialTiming.ElectionTimeoutMax), 10)+
+                    			", ElectionTimeoutMax over ten milliseconds, while SnapshotStreamBytesPerSecond paces them")
+                  to: misconfigured
             - case: framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead)
               do:
                 - return: misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
@@ -15092,6 +15098,9 @@ sequences:
         eval: n.cuttingSince.Load()
         to: n.cuttingSince.Load
       - return: since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
+  - of: maxPacedStreams
+    steps:
+      - return: int64(etMax / (time.Second / time.Duration(pinAfterStream*paceSlices)))
   - of: (*Node).streamedPin
     steps:
       - return: "sendPin{index: index, since: now.UnixNano(), until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}"

@@ -1973,6 +1973,7 @@ files:
   - decls:
       - pinAfterStream
       - pinScaleMax
+      - maxPacedStreams
       - sendPin
       - pinFollow
       - (*Node).streamedPin
@@ -3636,6 +3637,17 @@ functions:
     params: w []queuedStream, role func(coreconsensus.NodeID) waiterRole
     results: kept []queuedStream, voter, learner int
   - doc: |-
+      maxPacedStreams is the most snapshot streams a pacer can share without
+      one's moved mark outliving its pin bound. Each of N streams waits for N
+      slices of the pacer's rate between two reads, N/paceSlices seconds, and
+      streamDue cuts one that has not moved for pinAfterStream maximum election
+      timeouts: N stays below it while N*time.Second is at most
+      pinAfterStream*paceSlices*etMax, that is while N is at most etMax over
+      ten milliseconds, 200 at the default 2 s (#1485).
+    name: maxPacedStreams
+    params: etMax time.Duration
+    results: int64
+  - doc: |-
       entrylessFrame is AppendMessage's frame of m, a message without entries,
       in a buffer of MessageHeaderLen bytes, the length of every such frame but
       a forward's trace: grown from nil, the frame took four to five
@@ -5112,7 +5124,12 @@ types:
       - doc: |-
           MaxSnapshotStreams bounds the snapshot streams this node sends at
           once; 0 is 1. A peer in need beyond it waits, its transfer pending,
-          and is served when a stream ends.
+          and is served when a stream ends. While SnapshotStreamBytesPerSecond
+          paces them, more than InitialTiming.ElectionTimeoutMax over ten
+          milliseconds (200 at the default 2 s) is refused as misconfigured:
+          streams sharing the pacer wait N slices of its rate between two
+          reads, and past that bound a healthy stream looks stalled and is
+          cut.
         name: MaxSnapshotStreams
         type: int
       - doc: |-

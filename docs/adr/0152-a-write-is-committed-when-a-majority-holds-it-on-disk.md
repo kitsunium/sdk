@@ -8794,6 +8794,29 @@ this ADR keeps a majority on disk.**
 | D15 tests | deterministic simulator, linearizability, mutations | scenarios, mutations | unit tests and Kubernetes chaos E2E, outside CI (J12) |
 | D16 performance | ≥ 10 000 entries/s on disk | 7 000–9 400 durable/s | 7 980 SMS/s acknowledged from memory, not comparable (J4) |
 
+## Amendment — `MaxSnapshotStreams` has an upper bound while the streams are paced, refused at the start (2026-11-26, #1485; recommended option, awaiting the owner's confirmation)
+
+`MaxSnapshotStreams` was only clamped from below. With
+`SnapshotStreamBytesPerSecond` set, the N streams share one pacer: a read
+is cut to a slice (a tenth of a second of the rate) and its stream waits
+for the bucket to repay it, behind the N-1 others, so a stream's moved mark
+ages up to N/10 s between two reads. `streamDue` cuts a stream that has not
+moved for `pinAfterStream` (10) maximum election timeouts, and the next pin
+doubles: a healthy stream was cut, and transfers redone, once N exceeded
+`ElectionTimeoutMax` over ten milliseconds, that is 200 at the default 2 s
+and 20 at 200 ms. The bound is exact: N seconds of waiting against
+10 x 10 x `ElectionTimeoutMax`, which `TestStreamsAtTheBoundAreNeverStillLongEnoughToBeCut`
+measures on a manual clock.
+
+A larger value is refused by `NewNode` with `CONSENSUS_MISCONFIGURED`
+(field `MaxSnapshotStreams`, the bound named), never lowered in silence
+(ADR 0031). Without a pacer nothing ages a mark but the receiver, and no
+bound applies. The bound reads `InitialTiming.ElectionTimeoutMax`, as every
+other check of the configuration does; a contract committed later is not
+re-judged. Alternatives, a silent clamp with a warning and a documented
+limit alone, await the owner's confirmation; this is the recommended
+option, not a decision.
+
 ## References
 
 - Diego Ongaro, *Consensus: Bridging Theory and Practice*, Stanford PhD

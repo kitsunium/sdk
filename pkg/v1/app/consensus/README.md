@@ -1905,7 +1905,12 @@ type Config struct {
 	LogReserveBytes              int64
 	// MaxSnapshotStreams bounds the snapshot streams this node sends at
 	// once; 0 is 1. A peer in need beyond it waits, its transfer pending,
-	// and is served when a stream ends.
+	// and is served when a stream ends. While SnapshotStreamBytesPerSecond
+	// paces them, more than InitialTiming.ElectionTimeoutMax over ten
+	// milliseconds (200 at the default 2 s) is refused as misconfigured:
+	// streams sharing the pacer wait N slices of its rate between two
+	// reads, and past that bound a healthy stream looks stalled and is
+	// cut.
 	MaxSnapshotStreams           int
 	// SnapshotStreamBytesPerSecond paces the snapshot streams this node
 	// sends, all of them together, on Clock; 0 is unlimited.
