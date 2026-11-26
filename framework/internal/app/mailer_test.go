@@ -165,7 +165,7 @@ func TestRefusedAddrCannotBeTaken(t *testing.T) {
 	type tc struct {
 		name string
 		// holds is the platforms whose kernel keeps the port from a listener;
-		// empty for a case that holds on every one.
+		// unused by a case that does not bind.
 		holds []string
 		// dials is how many times the address is dialled before the check.
 		dials int
@@ -175,8 +175,9 @@ func TestRefusedAddrCannotBeTaken(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		addr := refusedAddr(t)
-		//: the BSD kernels let a listener share a port with a socket that is
-		//: not listening, so the hold is only asserted where it is known.
+		//: the BSD kernels and Windows let a listener bind a port a connection
+		//: holds (Windows unless it asks for exclusive use, which no test here
+		//: can verify), so the hold is only asserted on Linux.
 		if c.bind && !slices.Contains(c.holds, runtime.GOOS) {
 			t.Skipf("%s: the address is not held on this system", runtime.GOOS)
 		}
@@ -205,7 +206,7 @@ func TestRefusedAddrCannotBeTaken(t *testing.T) {
 		}
 	}
 	for _, c := range []tc{
-		{name: "no listener can take the address", holds: []string{"linux", "windows"}, bind: true},
+		{name: "no listener can take the address", holds: []string{"linux"}, bind: true},
 		{name: "the address is refused", dials: 0},
 		{name: "the address is still refused after a dial", dials: 2},
 	} {
