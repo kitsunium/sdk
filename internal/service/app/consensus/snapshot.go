@@ -47,6 +47,7 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) err
 		// remove the copy and leave raft where it was, the machine and
 		// applied at it (#1554); after another failure, the cause is the
 		// error returned.
+		//: a failed Close is warned, never returned in place of the outcome.
 		if cerr := h.Close(); cerr != nil {
 			n.obs.warn("consensus: snapshot handle close failed", lstr("id", m.ID), lstr("error", cerr.Error()))
 		}
