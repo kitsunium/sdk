@@ -135,27 +135,43 @@ func (e *exactlyOnce) note(seq uint32) {
 
 // TestShards_deliversExactlyOnce pins the criterion's run: 100 000 datagrams
 // from 64 source ports over four shards, each read once and its echo
-// byte-exact, with every shard reached; and the same run on Shards(1) and on
-// a group without the option, the base whose socket Shards(1) is
-// (TestShards_defaultOneSocket): one socket serves the run byte-exact as the
+// byte-exact, with every shard reached; and the same flows on Shards(1) and
+// on a group without the option, the base whose socket Shards(1) is
+// (TestShards_defaultOneSocket): one socket serves them byte-exact as the
 // base does (#977).
+//
+// The two single-socket cases send a tenth of the run, 156 datagrams a flow:
+// one socket against the base is TestShardsL3_wired's over loopback and the
+// L3 lane's at 400 000 datagrams, and at 100 000 each, lock-step, the three
+// cases were 29 s of CPU, the costliest test of the shard Bazel gave it
+// beside TestLoopHTTP2_idleMemoryAuto (#1372).
 func TestShards_deliversExactlyOnce(t *testing.T) {
-	for _, tc := range []struct {
+	type tc struct {
 		name string
+		// opts are the datagram group's options beside its address.
 		opts []GroupOption
-	}{
-		{"Shards(4)", []GroupOption{Shards(4)}},
-		{"Shards(1)", []GroupOption{Shards(1)}},
-		{"without the option", nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) { shardsRun(t, tc.opts) })
+		// perFlow is how many datagrams each of the 64 flows sends.
+		perFlow int
+	}
+	cases := []tc{
+		{name: "Shards(4)", opts: []GroupOption{Shards(4)}, perFlow: 100_000 / shardsFlows},
+		{name: "Shards(1)", opts: []GroupOption{Shards(1)}, perFlow: 10_000 / shardsFlows},
+		{name: "without the option", opts: nil, perFlow: 10_000 / shardsFlows},
+	}
+	runCase := func(t *testing.T, c tc) { shardsRun(t, c.opts, c.perFlow) }
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
-// shardsRun is TestShards_deliversExactlyOnce's run on a group with opts.
-func shardsRun(t *testing.T, opts []GroupOption) {
-	const flows, perFlow = 64, 100_000 / 64
-	total := flows * perFlow
+// shardsFlows is how many source ports TestShards_deliversExactlyOnce sends
+// from.
+const shardsFlows = 64
+
+// shardsRun is TestShards_deliversExactlyOnce's run on a group with opts:
+// perFlow datagrams from each of shardsFlows source ports.
+func shardsRun(t *testing.T, opts []GroupOption, perFlow int) {
+	total := shardsFlows * perFlow
 	tally := &exactlyOnce{seen: make([]atomic.Bool, total)}
 	srv := New()
 	srv.PacketGroup("p", append([]GroupOption{Listen("udp4", "127.0.0.1:0"), ReceiveBuffer(4 << 20)}, opts...)...).
@@ -171,7 +187,8 @@ func shardsRun(t *testing.T, opts []GroupOption) {
 	addr := srv.State().Listeners[0].Address
 	var wait sync.WaitGroup
 	start := time.Now()
-	for f := range flows {
+	//: every flow at once, each lock-step on its own source port.
+	for f := range shardsFlows {
 		wait.Go(func() { sendFlow(t, addr, uint32(f)*uint32(perFlow), perFlow) })
 	}
 	wait.Wait()
