@@ -6652,9 +6652,11 @@ sequences:
         kind: self
       - id: newInstance
         kind: internal
-      - id: u.Start
-        kind: internal
+      - id: ctx.Err
+        kind: value
       - id: u.post
+        kind: internal
+      - id: u.Start
         kind: internal
     steps:
       - bind: own
@@ -6667,6 +6669,17 @@ sequences:
       - opt:
           do:
             - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - eval: "u.post(&event{kind: evStart})"
+              to: u.post
+            - return: u, err
+          init:
+            bind: err
+            eval: ctx.Err()
+            op: =
+            to: ctx.Err
           when: err != nil
       - set: err
         to: u.Start
