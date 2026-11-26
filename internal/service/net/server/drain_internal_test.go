@@ -155,18 +155,41 @@ const drainProbeDial = 5 * time.Millisecond
 // kernel refuses a SYN only once no listener is left on the port —, so a
 // connection is judged against a date the close cannot be later than.
 // Each backend takes its listen queue before it closes the listener, so
-// what waited there is served.
+// what waited there is served. The grace lasts until one arrival that began
+// in it was served (graceHeld), so at least one crosses the drain whatever
+// the guest's scheduling took of its 50 ms.
 func TestDrain_arrivalsAcrossTheDrain(t *testing.T) {
 	for _, p := range drainProtos() {
 		for _, b := range loopBackends() {
-			t.Run(p.name+"/"+b.String(), func(t *testing.T) { drainArrivalsAcross(t, p, b) })
+			t.Run(p.name+"/"+b.String(), func(t *testing.T) { drainArrivalsAcross(t, p, b, 0) })
+		}
+	}
+}
+
+// drainStallTest is how long TestDrain_arrivalsAcrossAStalledGrace holds its
+// clients once the drain began: three times the grace drainArrivalsAcross
+// gives, as a guest whose clients were descheduled for the whole grace.
+const drainStallTest = 150 * time.Millisecond
+
+// TestDrain_arrivalsAcrossAStalledGrace is TestDrain_arrivalsAcrossTheDrain
+// with its clients held for drainStallTest once the drain began: what a
+// loaded guest does to them for longer than the grace. The drain serves
+// every arrival all the same, so the test still sees them cross: it holds
+// the grace until one that began in it was served (graceHeld), and does not
+// read a stall of its own clients as a drain that serves nothing — "0 served
+// during it, 4 refused after" on macOS's kqueue and under load on the
+// portable backend (#1385).
+func TestDrain_arrivalsAcrossAStalledGrace(t *testing.T) {
+	for _, p := range drainProtos() {
+		for _, b := range loopBackends() {
+			t.Run(p.name+"/"+b.String(), func(t *testing.T) { drainArrivalsAcross(t, p, b, drainStallTest) })
 		}
 	}
 }
 
 // drainArrivalsAcross is TestDrain_arrivalsAcrossTheDrain on protocol p and
-// backend b.
-func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
+// backend b, its clients held for stall once the drain began.
+func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend, stall time.Duration) {
 	if runtime.GOOS == "windows" {
 		// ADR 0196 §D3: a Windows listener cannot be duplicated into the
 		// portable backend's own, so its drain takes no queue and a close
@@ -174,6 +197,12 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 		t.Skip("the portable backend takes no listen queue on Windows")
 	}
 	srv := New(WithDrainGrace(50 * time.Millisecond))
+	// crossed holds the grace until an arrival that began in it was served:
+	// the grace's 50 ms are the drain's, and a client stall that outlasts
+	// them is the guest's, not a drain that serves nothing (#1385).
+	crossed := make(chan struct{})
+	var crossedOnce sync.Once
+	srv.graceHeld = crossed
 	t.Cleanup(func() { swallowErr(srv.Close()) })
 	counts := p.group(srv, b)
 	if err := srv.Start(t.Context()); err != nil {
@@ -185,6 +214,8 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 		msg        string
 	}
 	var draining atomic.Bool
+	// drainAt is when the drain began, in nanoseconds: the stall's start.
+	var drainAt atomic.Int64
 	var during, refused atomic.Int64
 	var mu sync.Mutex
 	var cuts []cut
@@ -198,8 +229,14 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
+			stalled := false
 			for {
 				began := draining.Load()
+				//: held once, as a descheduled client is, from the drain's start.
+				if began && !stalled && stall > 0 {
+					stalled = true
+					time.Sleep(time.Until(time.Unix(0, drainAt.Load()).Add(stall)))
+				}
 				//: a connection is placed by when the kernel completed it:
 				//: an h2c exchange on a slow guest (NetBSD) began 20.036 ms
 				//: before the close and was completed inside the window.
@@ -224,6 +261,7 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 					cuts = append(cuts, cut{at, failed, msg})
 				case began:
 					during.Add(1)
+					crossedOnce.Do(func() { close(crossed) })
 				}
 				mu.Unlock()
 				//: back to back, so arrivals reach the listener until it
@@ -238,6 +276,7 @@ func drainArrivalsAcross(t *testing.T, p drainProto, b corenet.LoopBackend) {
 	time.Sleep(100 * time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	drainAt.Store(time.Now().UnixNano())
 	draining.Store(true)
 	var probe drainDate
 	wg.Go(func() {
