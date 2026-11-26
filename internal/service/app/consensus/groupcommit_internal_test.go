@@ -26,6 +26,20 @@ func stableOf(tn *testNode) uint64 {
 	return stable
 }
 
+// peerAt is leader l's view of peer p, read on l's loop: zero when l does
+// not lead or does not replicate to p.
+func peerAt(l, p *testNode) raft.PeerStatValue {
+	var at raft.PeerStatValue
+	l.node.exec(func() {
+		for _, s := range l.node.r.PeerStats() {
+			if s.ID == p.id {
+				at = s
+			}
+		}
+	})
+	return at
+}
+
 // hangLogs gives every node of c a hangLog over its memory log, kept
 // across restarts, and returns the lookup.
 func hangLogs(c *cluster) func(*testNode) *hangLog {
@@ -62,6 +76,24 @@ func TestABacklogOfWritesIsSyncedAsOneGroup(t *testing.T) {
 	newClusterWith(t, c)
 	l := c.settledLeader(5 * time.Second)
 	slow := c.otherThan(l)
+	// The leader commits the settling entry with one follower, and slow
+	// may be the other, its first Sync of this term not run yet. Held
+	// then, it answers nothing of the term: the leader keeps probing it,
+	// sends it no entry past the probe and a commit clamped to its match,
+	// 0, and slow learns no commit for as long as its Sync is held, which
+	// is the engine's design, not a defect (an OpenBSD guest saw commit 0
+	// for 30 s, #1358). The hold waits until the leader replicates to it:
+	// its match covers an entry of this term, so every append carries the
+	// leader's commit and slow holds, unsynced, the entries it covers.
+	settled := l.node.Status().Commit
+	acked := time.Now().Add(groupCommitWait)
+	for peerAt(l, slow).Match < settled {
+		if time.Now().After(acked) {
+			t.Fatalf("setup: leader %d holds match %+v < %d for follower %d (%+v) within %v",
+				l.id, peerAt(l, slow), settled, slow.id, slow.node.Status(), groupCommitWait)
+		}
+		time.Sleep(time.Millisecond)
+	}
 	release := logOf(slow).hold()
 	defer release()
 	var last uint64
@@ -75,7 +107,8 @@ func TestABacklogOfWritesIsSyncedAsOneGroup(t *testing.T) {
 	learnt := time.Now().Add(groupCommitWait)
 	for slow.node.Status().Commit < last {
 		if time.Now().After(learnt) {
-			t.Fatalf("setup: the held follower learnt commit %d < %d within %v", slow.node.Status().Commit, last, groupCommitWait)
+			t.Fatalf("setup: follower %d, its Sync held since the leader's match reached %d, learnt commit %d < %d within %v (status %+v, durable through %d, leader's view %+v)",
+				slow.id, settled, slow.node.Status().Commit, last, groupCommitWait, slow.node.Status(), stableOf(slow), peerAt(l, slow))
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
