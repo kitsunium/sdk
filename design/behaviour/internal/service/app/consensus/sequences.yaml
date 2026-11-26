@@ -23123,10 +23123,14 @@ sequences:
           when: err != nil
       - defer: |-
           func() {
-          		// The handle is only read; its Close matters to the node only when
-          		// it is the one failure there was.
-          		if cerr := h.Close(); cerr != nil && err == nil {
-          			err = cerr
+          		// The handle is only read, and the pin it holds goes whatever its
+          		// Close says: the failure is said, never returned. Returned after a
+          		// full read, a verification and a restore, it made the install
+          		// remove the copy and leave raft where it was, the machine and
+          		// applied at it (#1554); after another failure, the cause is the
+          		// error returned.
+          		if cerr := h.Close(); cerr != nil {
+          			n.obs.warn("consensus: snapshot handle close failed", lstr("id", m.ID), lstr("error", cerr.Error()))
           		}
           	}()
       - opt:
