@@ -798,8 +798,12 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   #1540, recommended option (a), awaiting the owner's confirmation); a
   leader alone, with no such voter, or whose transfer failed, leaves them
   fenced until the next election. The last resorts are
-  `consensus_forward_last_resorts_total`, by action: `transfer`, or `none`
-  when it started no transfer, where an operator's transfer clears it.
+  `consensus_forward_last_resorts_total`, by action: `transfer`, or
+  `none`, which counts a last resort that started no transfer: no eligible
+  voter, a transfer already under way (this one's included), or one that
+  failed this term. `none` climbing while `transfer` stays at 0 in the
+  term names a leader with no voter to take over, which an operator's
+  transfer clears.
   Another transport states no window and gets the step function's
   default, 22 s. No forward is dropped for room: at the step function's
   bound (2^20 answers kept, raft's guide) the oldest answer is forgotten,

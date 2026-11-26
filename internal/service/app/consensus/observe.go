@@ -93,8 +93,9 @@ var (
 	// order of raft.ForwardDropsValue's fields (#1482).
 	fwdDropReasons = [3]string{"copy", "restarted", "evicted"}
 	// fwdResortActions are consensus_forward_last_resorts_total's actions:
-	// a last resort that started a leadership transfer, and one that could
-	// not (#1540).
+	// a last resort that started a leadership transfer, and one that started
+	// none — no eligible voter, a transfer already under way (the last
+	// resort's own included), or one that failed this term (#1540).
 	fwdResortActions = [2]string{"transfer", "none"}
 )
 
@@ -534,9 +535,10 @@ func (n *Node) observeLinkAborts(o *obs) {
 // fwdFence, #1482), the answers its table forgot at its bound before
 // their window ended, and the fence's last resorts, past 65 536 runs in one
 // term, by whether they started a leadership transfer (#1540): a run of
-// drops of reason evicted follows a last resort, a last resort of action
-// none leaves its forwarders fenced until the next election, and a copy of
-// an answer forgotten is a drop of reason copy.
+// drops of reason evicted follows a last resort, last resorts of action
+// none climbing while transfer stays at 0 in the term name a leader whose
+// forwarders stay fenced until the next election, and a copy of an answer
+// forgotten is a drop of reason copy.
 func (n *Node) observeForwards(st *raft.SummaryValue) {
 	o := n.obs
 	d := st.ForwardDrops

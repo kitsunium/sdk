@@ -1966,6 +1966,7 @@ files:
       - cutAllowance
       - progressWatch
       - (*Node).watchProgress
+      - (*Node).warnResortTransfer
       - (*Node).handOver
       - (*Node).watchApplied
       - (*Node).declineNoted
@@ -9777,6 +9778,12 @@ types:
         params: now time.Time
         recv: n *Node
       - doc: |-
+          warnResortTransfer logs, once each, a transfer raft started at the
+          forward fence's last resort (#1540), as handOver logs its own.
+        name: warnResortTransfer
+        params: st *raft.SummaryValue
+        recv: n *Node
+      - doc: |-
           handOver starts the transfer of a leader that makes no progress to the
           most caught-up voter, and restarts the clocks. A voter that handed over
           for its own stuck apply declines it (#674): the one the last hand-off
@@ -10063,9 +10070,10 @@ types:
           fwdFence, #1482), the answers its table forgot at its bound before
           their window ended, and the fence's last resorts, past 65 536 runs in one
           term, by whether they started a leadership transfer (#1540): a run of
-          drops of reason evicted follows a last resort, a last resort of action
-          none leaves its forwarders fenced until the next election, and a copy of
-          an answer forgotten is a drop of reason copy.
+          drops of reason evicted follows a last resort, last resorts of action
+          none climbing while transfer stays at 0 in the term name a leader whose
+          forwarders stay fenced until the next election, and a copy of an answer
+          forgotten is a drop of reason copy.
         name: observeForwards
         params: st *raft.SummaryValue
         recv: n *Node
@@ -11278,6 +11286,11 @@ types:
           another voter when there is one (#674).
         name: to
         type: coreconsensus.NodeID
+      - doc: |-
+          resorts is the count of raft's last-resort transfers last seen
+          (Summary's ForwardResortTransfers, #1540).
+        name: resorts
+        type: uint64
     kind: struct
     name: progressWatch
   - doc: |-
@@ -13580,8 +13593,9 @@ vars:
         value: "[3]string{\"copy\", \"restarted\", \"evicted\"}"
       - doc: |-
           fwdResortActions are consensus_forward_last_resorts_total's actions:
-          a last resort that started a leadership transfer, and one that could
-          not (#1540).
+          a last resort that started a leadership transfer, and one that started
+          none — no eligible voter, a transfer already under way (the last
+          resort's own included), or one that failed this term (#1540).
         name: fwdResortActions
         value: "[2]string{\"transfer\", \"none\"}"
     name: peerGauges

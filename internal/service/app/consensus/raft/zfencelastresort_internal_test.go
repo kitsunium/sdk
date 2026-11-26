@@ -41,6 +41,10 @@ type resortBench struct {
 	// the target of a transfer under way from catching up, its answers
 	// repeating the match it holds.
 	silent, frozen bool
+	// mute stops one voter's acknowledgements; lagging pins the index a
+	// voter acknowledges.
+	mute    map[core.NodeID]bool
+	lagging map[core.NodeID]uint64
 }
 
 // newResortBench makes node 1 the leader of term 2, its fence's bounds
@@ -51,6 +55,7 @@ func newResortBench(soft, hard int) *resortBench {
 	return &resortBench{
 		r: r, epochs: map[core.NodeID]uint32{}, counters: map[core.NodeID]uint32{},
 		next: 1, appended: map[string]int{}, refusedNew: map[core.NodeID]int{},
+		mute: map[core.NodeID]bool{}, lagging: map[core.NodeID]uint64{},
 	}
 }
 
@@ -92,8 +97,14 @@ func (b *resortBench) ack() {
 		return
 	}
 	for _, id := range []core.NodeID{2, 3} {
+		if b.mute[id] {
+			continue
+		}
 		a := msg(core.MsgAppResp, id, 1, b.r.term)
 		a.Index = b.r.log.lastIndex()
+		if at, ok := b.lagging[id]; ok {
+			a.Index = at
+		}
 		if pr := b.r.prs[id]; b.frozen && id == b.r.transferTo && pr != nil {
 			a.Index = pr.match
 		}
@@ -398,5 +409,65 @@ func TestTheLastResortTimeoutNowIsTakenByAPreviousRelease(t *testing.T) {
 		if f.term != 3 || f.role != core.RoleCandidate {
 			t.Fatalf("a previous release's voter on the last resort's TimeoutNow: %v at term %d, want a candidate of term 3", f.role, f.term)
 		}
+	}
+}
+
+// TestTheLastResortLeavesAnOperatorsTransferUnderWay: both voters answer,
+// and an operator's transfer to voter 3, which never catches up, runs when
+// the last resorts come: they start none and count none, and once the
+// operator's transfer failed the term still has its own, which the next
+// last resort starts. Green with the guard on a transfer under way removed
+// only while no voter could take over (the safety review of #1540, m4).
+func TestTheLastResortLeavesAnOperatorsTransferUnderWay(t *testing.T) {
+	const soft, hard, n = 16, 128, 12
+	b := newResortBench(soft, hard)
+	b.frozen = true
+	if code := b.r.TransferLeadership(b.r.now, 3); code != 0 {
+		t.Fatalf("setup: transfer refused %v", code)
+	}
+	b.restartAll(forwarders(n), 6, false)
+	st := b.r.Summary()
+	if st.ForwardLastResorts == 0 || st.ForwardResortTransfers != 0 || st.Transfer != 3 || b.timeoutNow != 0 {
+		t.Fatalf("under the operator's transfer: last resorts %d, %d transfers, transfer to %d, TimeoutNow to %d: want last resorts, none transferring, the transfer to 3 untouched",
+			st.ForwardLastResorts, st.ForwardResortTransfers, st.Transfer, b.timeoutNow)
+	}
+	for b.r.transferTo != 0 && b.r.now.Before(t0.Add(time.Minute)) {
+		b.wait(time.Second)
+	}
+	b.frozen = false
+	if b.r.role != core.RoleLeader || b.r.term != 2 || b.r.transferTo != 0 {
+		t.Fatalf("setup: the operator's transfer did not fail: %v at term %d, transfer to %d", b.r.role, b.r.term, b.r.transferTo)
+	}
+	b.restartAll(forwarders(3 * n)[n:], 10, true)
+	if st = b.r.Summary(); st.ForwardResortTransfers != 1 || b.timeoutNow == 0 || b.r.term != 2 {
+		t.Fatalf("term 2, after the operator's transfer failed: %d transfers, TimeoutNow to %d, term %d: want the term's own last-resort transfer",
+			st.ForwardResortTransfers, b.timeoutNow, b.r.term)
+	}
+}
+
+// TestTheLastResortSkipsAVoterBehindTheCommit: voter 2 answers at once but
+// holds only the leader's no-op, and voter 3, which carried the commit,
+// went silent past the minimum election timeout: no voter can take over,
+// and the last resort transfers to none, the laggard least of all (the
+// safety review of #1540, m3).
+func TestTheLastResortSkipsAVoterBehindTheCommit(t *testing.T) {
+	const soft, hard, n = 16, 128, 12
+	b := newResortBench(soft, hard)
+	b.lagging[2] = 1
+	ids := forwarders(n)
+	b.restartAll(ids, 3, false)
+	if len(b.r.fwdFence.marks) >= hard || b.r.log.committed <= 1 {
+		t.Fatalf("setup: %d marks, commit %d", len(b.r.fwdFence.marks), b.r.log.committed)
+	}
+	b.mute[3] = true
+	b.wait(1500 * time.Millisecond)
+	if b.r.role != core.RoleLeader {
+		t.Fatalf("setup: the leader stepped down with voter 2 answering")
+	}
+	b.restartAll(forwarders(2 * n)[n:], 6, false)
+	st := b.r.Summary()
+	if st.ForwardLastResorts == 0 || st.ForwardResortTransfers != 0 || st.Transfer != 0 || b.timeoutNow != 0 {
+		t.Fatalf("last resorts %d, %d transfers, transfer to %d, TimeoutNow to %d: want last resorts and no transfer to voter 2, behind the commit %d",
+			st.ForwardLastResorts, st.ForwardResortTransfers, st.Transfer, b.timeoutNow, b.r.log.committed)
 	}
 }
