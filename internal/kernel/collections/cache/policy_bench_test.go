@@ -49,6 +49,7 @@ var (
 func zipfTableFor(s float64) *zipfTable {
 	zipfTablesMu.Lock()
 	defer zipfTablesMu.Unlock()
+	//: built already: every policy and capacity shares it.
 	if t, ok := zipfTables[s]; ok {
 		return t
 	}
@@ -61,6 +62,7 @@ func zipfTableFor(s float64) *zipfTable {
 func newZipfTable(n int, s float64) *zipfTable {
 	weights := make([]float64, n)
 	total := 0.0
+	//: the unnormalised law, and its sum.
 	for k := range weights {
 		weights[k] = math.Pow(float64(k+1), -s)
 		total += weights[k]
@@ -68,14 +70,18 @@ func newZipfTable(n int, s float64) *zipfTable {
 	t := &zipfTable{threshold: make([]uint32, n), alias: make([]int32, n)}
 	small := make([]int32, 0, n)
 	large := make([]int32, 0, n)
+	//: scaled so the mean weight is 1: below it a bucket has room to lend, above it
+	//: a surplus to give.
 	for k, w := range weights {
 		weights[k] = w * float64(n) / total
+		//: a light rank is filled by a heavy one.
 		if weights[k] < 1 {
 			small = append(small, int32(k))
 		} else {
 			large = append(large, int32(k))
 		}
 	}
+	//: pair a light bucket with a heavy one until either side is out.
 	for len(small) > 0 && len(large) > 0 {
 		less := small[len(small)-1]
 		small = small[:len(small)-1]
@@ -84,6 +90,7 @@ func newZipfTable(n int, s float64) *zipfTable {
 		t.threshold[less] = uint32(weights[less] * (1 << 32))
 		t.alias[less] = more
 		weights[more] += weights[less] - 1
+		//: the heavy rank, drained of what it lent, joins the side it now belongs to.
 		if weights[more] < 1 {
 			small = append(small, more)
 		} else {
@@ -101,6 +108,7 @@ func newZipfTable(n int, s float64) *zipfTable {
 // its low half decides between the bucket and its alias.
 func (t *zipfTable) draw(u uint64) int {
 	bucket := int32((u >> 32) * uint64(len(t.alias)) >> 32)
+	//: the bucket keeps its own rank with the probability its threshold says.
 	if uint32(u) < t.threshold[bucket] {
 		return int(bucket)
 	}
@@ -163,6 +171,7 @@ type hitTrace struct {
 // newHitTrace starts cell's sequence for a cache of capacity entries.
 func newHitTrace(cell hitCell, capacity int) *hitTrace {
 	trace := &hitTrace{cell: cell, capacity: capacity, random: rand.NewPCG(uint64(cell.s*1000), 834), fresh: zipfKeys}
+	//: the loop is sequential and draws nothing.
 	if cell.workload != workloadLoop {
 		trace.table = zipfTableFor(cell.s)
 	}
@@ -173,19 +182,26 @@ func newHitTrace(cell hitCell, capacity int) *hitTrace {
 func (t *hitTrace) next() (key int, counted bool) {
 	at := t.at
 	t.at++
+	//: each workload shapes the key its own way.
 	switch t.cell.workload {
+	//: Zipf accesses, then a sweep of never-seen keys that the ratio leaves out.
 	case workloadScan:
 		phase, sweep := 4*t.capacity, 2*t.capacity
+		//: in the sweep: a fresh key that no cache can hold, not counted.
 		if at%(phase+sweep) >= phase {
 			t.fresh++
 			return t.fresh - 1, false
 		}
 		return t.table.draw(t.random.Uint64()), true
+	//: a cycle over six fifths of the capacity, in order.
 	case workloadLoop:
 		return at % (t.capacity * loopShare / 5), true
+	//: Zipf ranks moved a tenth of the key space on every shiftEvery accesses:
+	//: the hot set changes under the cache.
 	case workloadShift:
 		rank := t.table.draw(t.random.Uint64())
 		return (rank + at/shiftEvery*(zipfKeys/10)) % zipfKeys, true
+	//: a fixed Zipf order.
 	default:
 		return t.table.draw(t.random.Uint64()), true
 	}
@@ -204,8 +220,11 @@ var benchPolicies = []struct {
 // #834 measures 100 million accesses a cell — -benchtime=100000000x — and the
 // rows are named <policy>/<workload>/cap<share>%.
 func BenchmarkHitRatio(b *testing.B) {
+	//: every policy on every cell at every capacity, one row each.
 	for _, policy := range benchPolicies {
+		//: each workload of the grid.
 		for _, cell := range hitCells {
+			//: each capacity the workload runs at.
 			for _, share := range cell.shares {
 				name := fmt.Sprintf("%s/%s/cap%d%%", policy.name, cell.name, share)
 				b.Run(name, func(b *testing.B) {
@@ -213,23 +232,29 @@ func BenchmarkHitRatio(b *testing.B) {
 					c := NewCache[int, struct{}](Config[int, struct{}]{MaxEntries: capacity, Policy: policy.policy})
 					trace := newHitTrace(cell, capacity)
 					access := func(key int) bool {
+						//: a hit, answered by the cache.
 						if _, ok := c.Fetch(key); ok {
 							return true
 						}
+						//: a miss: the read-through cache stores the key.
 						c.Set(key, struct{}{})
 						return false
 					}
+					//: the warm-up fills the cache and settles the policy; nothing is counted.
 					for range hitWarmup * capacity {
 						key, _ := trace.next()
 						access(key)
 					}
 					b.ReportAllocs()
 					hits, ops := 0, 0
+					//: the measured accesses.
 					for b.Loop() {
 						key, counted := trace.next()
 						hit := access(key)
+						//: a scan's fresh keys are left out of the ratio.
 						if counted {
 							ops++
+							//: only a counted hit adds to the ratio.
 							if hit {
 								hits++
 							}
@@ -287,14 +312,17 @@ func BenchmarkSet_AtCapacity_S3FIFO(b *testing.B) {
 func BenchmarkFetch_Hit_TinyLFU(b *testing.B) {
 	keys := benchKeys(1024)
 	c := NewCache[string, int](Config[string, int]{MaxEntries: 2048, Policy: PolicyTinyLFU})
+	//: seeded, all within the bound: every read below is a hit.
 	for i, k := range keys {
 		c.Set(k, i)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	i := 0
+	//: the measured hits, over the seeded keys in turn.
 	for b.Loop() {
 		v, ok := c.Fetch(keys[i&1023])
+		//: a seeded key must hit, or the cell measures a miss.
 		if !ok {
 			b.Fatalf("miss on seeded key %q", keys[i&1023])
 		}
@@ -309,12 +337,14 @@ func BenchmarkFetch_Hit_TinyLFU(b *testing.B) {
 func BenchmarkSet_AtCapacity_TinyLFU(b *testing.B) {
 	keys := benchKeys(4096)
 	c := NewCache[string, int](Config[string, int]{MaxEntries: 512, Policy: PolicyTinyLFU})
+	//: the cache starts full, so every Set below evicts.
 	for i, k := range keys[:512] {
 		c.Set(k, i)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	i := 0
+	//: the measured inserts, over a key space eight times the bound.
 	for b.Loop() {
 		c.Set(keys[i&4095], i)
 		i++
