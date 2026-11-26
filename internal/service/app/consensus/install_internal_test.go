@@ -51,16 +51,160 @@ func refusingCluster(t *testing.T, err error) (c *cluster, refuse *atomic.Uint64
 // lagBehindAnInstall stops f, isolated, while the leader writes n entries
 // and every live log compacts past what f holds: at its restart only an
 // install catches it up. It returns the last token written.
+//
+// The wait is past the entry after f's end, which stopBehind reads once
+// the frames queued for f are dropped, never past a constant: f stops
+// holding whatever the cluster wrote before, near 63 under
+// laggingWithOwnSnapshots, and a live log still covering that end fed it
+// by appends (#1577).
 func lagBehindAnInstall(t *testing.T, c *cluster, f *testNode, n int) coreconsensus.TokenValue {
 	t.Helper()
-	c.net.Isolate(f.id, true)
-	c.kill(f)
+	end := stopBehind(c, f)
 	var tok coreconsensus.TokenValue
 	for i := range n {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
-	compactedPast(t, c, 10)
+	compactedPast(t, c, end+1)
 	return tok
+}
+
+// #1577: lagBehindAnInstall waited until every live log started past 10, a
+// constant, while the node it stopped had applied what the cluster wrote
+// before: laggingWithOwnSnapshots stops it near 63. Returned with a live
+// log still covering that end, the restarted node caught up by appends and
+// the install its callers name never ran. The live nodes' cuts are held
+// here from before the call, so their logs start where the writes before
+// it left them, past 10 and at or below the stopped node's end: the helper
+// must not return until a cut, released once its writes are applied and
+// the helper has had time to return, then a second one, moves them past
+// it.
+func TestLagBehindAnInstallReturnsOnlyPastTheStoppedNodesEnd(t *testing.T) {
+	type tc struct {
+		name                  string
+		before, during, after int
+	}
+	runCase := func(t *testing.T, tcase tc) {
+		c := newCluster(t, 3, 20)
+		l := c.settledLeader(5 * time.Second)
+		f := c.otherThan(l)
+		var tok coreconsensus.TokenValue
+		//: the writes f applies before it stops, its end far past 10.
+		for i := range tcase.before {
+			tok = proposeOnLeader(t, c, fmt.Sprintf("a%d=%d", i, i))
+		}
+		c.waitApplied(tok.Index, 10*time.Second)
+		compactedPast(t, c, 10)
+		var live []*testNode
+		var releases []func()
+		//: every node but f keeps its log where it is until the release.
+		for _, tn := range c.nodes {
+			//: f's own cuts are not held: it is the node stopped.
+			if tn != f {
+				live = append(live, tn)
+				releases = append(releases, holdCuts(t, tn.node))
+			}
+		}
+		target := tok.Index + uint64(tcase.during)
+		var mu sync.Mutex
+		returned := false
+		stop, done := make(chan struct{}), make(chan struct{})
+		t.Cleanup(func() {
+			close(stop)
+			<-done
+		})
+		go func() {
+			defer close(done)
+			//: the release waits until every live node applied the helper's writes.
+			for _, tn := range live {
+				//: polled, as nothing signals an applied index.
+				for tn.node.Status().Applied < target {
+					select {
+					//: the test ended first.
+					case <-stop:
+						return
+					//: polled again.
+					case <-time.After(5 * time.Millisecond):
+					}
+				}
+			}
+			select {
+			//: the test ended first.
+			case <-stop:
+				return
+			// A helper that does not wait on the cuts returns within its
+			// last write, long before this grace ends.
+			case <-time.After(200 * time.Millisecond):
+			}
+			mu.Lock()
+			held := returned
+			//: a helper that returned is judged with the cuts still held.
+			if !held {
+				for _, release := range releases {
+					release()
+				}
+			}
+			mu.Unlock()
+			//: the helper returned on its own: nothing more is written.
+			if held {
+				return
+			}
+			// A log compacts back to the older of its two newest snapshots:
+			// the cut the release makes is one, the writes below make the
+			// other, both past the stopped node's end.
+			for i := range tcase.after {
+				//: the test ended first.
+				if !proposeAnywhere(live, fmt.Sprintf("b%d=%d", i, i), stop) {
+					return
+				}
+			}
+		}()
+		lagBehindAnInstall(t, c, f, tcase.during)
+		mu.Lock()
+		returned = true
+		_, end := f.log.Bounds()
+		firsts := make([]uint64, len(live))
+		for i, tn := range live {
+			firsts[i], _ = tn.log.Bounds()
+		}
+		mu.Unlock()
+		for i, tn := range live {
+			//: a live log that starts at or below end+1 still knows the term at f's end.
+			if firsts[i] <= end+1 {
+				t.Errorf("lagBehindAnInstall returned with node %d's log starting at %d, at or below %d, the entry after the stopped node's end %d: it catches up by appends, not an install",
+					tn.id, firsts[i], end+1, end)
+			}
+		}
+	}
+	for _, tcase := range []tc{
+		{name: "the end of laggingWithOwnSnapshots", before: 60, during: 30, after: 30},
+	} {
+		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })
+	}
+}
+
+// proposeAnywhere proposes kv on whichever of nodes accepts it, off the
+// test's goroutine, until one does or stop is closed; it reports whether
+// one did.
+func proposeAnywhere(nodes []*testNode, kv string, stop <-chan struct{}) bool {
+	for {
+		//: each node in turn: a follower forwards, the leader proposes.
+		for _, tn := range nodes {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			_, _, err := tn.node.Propose(ctx, []byte(kv))
+			cancel()
+			//: one accepted and committed it.
+			if err == nil {
+				return true
+			}
+		}
+		select {
+		//: the test ended first.
+		case <-stop:
+			return false
+		//: tried again once an election may have settled.
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 // holdOnlyTheLeadersNewest leaves f's stopped store holding one snapshot,
@@ -347,6 +491,19 @@ func TestALeaderReplacesASnapshotItsPeerFindsCorrupt(t *testing.T) {
 	}
 	if got := lt.corrupt.Load(); got > 1 {
 		t.Fatalf("the leader streamed a snapshot its peer found corrupt %d times", got)
+	}
+	// The catch-up was an install, not appends from a live log that still
+	// covered the node's end (#1577).
+	mu.Lock()
+	var streams int64
+	//: every node's streams, whichever led while the node caught up.
+	for _, st := range streaming {
+		streams += st.streams.Load()
+	}
+	mu.Unlock()
+	//: no node streamed a snapshot: the test ran without its subject.
+	if streams == 0 {
+		t.Fatal("the lagging node caught up with no snapshot streamed to it")
 	}
 }
 
