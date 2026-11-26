@@ -10054,6 +10054,10 @@ sequences:
         kind: value
       - id: offerRefused
         kind: internal
+      - id: abandon
+        kind: internal
+      - id: ctx.Err
+        kind: value
       - id: rc.Close
         kind: value
     steps:
@@ -10115,8 +10119,17 @@ sequences:
           do:
             - return: err
           when: err != nil
+      - bind: body
+        eval: "&streamCancelWatch{ReadCloser: rc, ctx: ctx}"
       - bind: ierr
-        eval: "in(coreconsensus.InstallParams{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: rc})"
+        eval: "in(coreconsensus.InstallParams{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: body})"
+      - opt:
+          do:
+            - eval: abandon(rc.Close())
+              to: abandon
+            - return: ctx.Err()
+              to: ctx.Err
+          when: ierr != nil && body.cancelled.Load()
       - opt:
           do:
             - return: cerr
@@ -10126,6 +10139,26 @@ sequences:
             to: rc.Close
           when: cerr != nil && ierr == nil
       - return: ierr
+  - of: (*streamCancelWatch).Read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*streamCancelWatch).Read
+        kind: self
+      - id: w.ReadCloser.Read
+        kind: value
+      - id: w.cancelled.Store
+        kind: value
+    steps:
+      - bind: k, err
+        eval: w.ReadCloser.Read(p)
+        to: w.ReadCloser.Read
+      - opt:
+          do:
+            - eval: w.cancelled.Store(true)
+              to: w.cancelled.Store
+          when: err != nil && !errors.Is(err, io.EOF) && w.ctx.Err() != nil
+      - return: k, err
   - of: (*MemoryTransport).Bind
     participants:
       - id: caller

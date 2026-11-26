@@ -1921,3 +1921,10 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   commands packs them with `multi/`'s `Packer` and `Machine`, on top of
   `Replicated`, and the log, wire and apply code stay as they are (#926,
   `multi/CLAUDE.md`, `multi/BENCH.md`).
+- A snapshot stream cancelled on `MemoryTransport` ends as cancelled, as a
+  closed TCP connection does: a read of the body that fails under a
+  cancelled context returns the context's error, never the receiver's
+  `SNAPSHOT_CORRUPT`, so the sender does not read its sound snapshot back
+  nor log that a peer found it corrupt; a body that ends short with nothing
+  cancelled stays `SNAPSHOT_CORRUPT` (#1484,
+  `TestACancelledSnapshotStreamIsNotACorruptVerdict`).
