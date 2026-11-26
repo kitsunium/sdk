@@ -1641,6 +1641,20 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `consensus: snapshot handle close failed`, as `sendSnapshot` does, and
   the install carries on to `installed`
   (`TestARestoreWhoseHandleFailsToCloseStillInstalls`).
+- Hand the machine a restore's second read checked per chunk only: a `.snap`
+  cut from outside on a chunk boundary after `verifySnapshot` ended cleanly,
+  the machine was restored from that prefix and `applied` moved to the
+  snapshot's index (#1562). `restoreFrom` reads it through `snapshotReader`
+  (SNAPSHOT_CORRUPT instead of `io.EOF` when the sizes or the SHA-256 differ
+  from the metadata) and reads the rest to the end after a `Restore` that
+  stopped short, before `applied` moves
+  (`TestARestoreWhoseSecondReadIsCutIsRefused`). The SHA-256 costs nothing
+  more: the chunk reader already hashed the second read, about 190 ms per
+  256 MiB, and the comparison is lost in the noise (311 ms against 316 ms
+  for 256 MiB of random data, 1.56 s against 1.54 s for text). A machine
+  that consumed the cut stream before it failed holds what it read: as for
+  any failed `Restore`, the copy is removed, nothing moves, and the next
+  restore replaces the state.
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).

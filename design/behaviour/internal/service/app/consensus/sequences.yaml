@@ -23216,10 +23216,10 @@ sequences:
         kind: internal
       - id: verifySnapshot
         kind: internal
-      - id: newChunkReader
-        kind: internal
       - id: n.cfg.Machine.Restore
         kind: value
+      - id: io
+        kind: stdlib
       - id: raft
         kind: package
       - id: n.snapState.mu.Lock
@@ -23279,16 +23279,23 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - bind: cr
-              eval: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
-              to: newChunkReader
+            - bind: sr
+              eval: "&snapshotReader{cr: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes), meta: m}"
             - opt:
                 do:
                   - return: err
                 init:
                   bind: err
-                  eval: n.cfg.Machine.Restore(cr, m)
+                  eval: n.cfg.Machine.Restore(sr, m)
                   to: n.cfg.Machine.Restore
+                when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: _, err
+                  eval: io.Copy(io.Discard, sr)
+                  to: io
                 when: err != nil
             - set: n.sessions
               to: raft

@@ -63,8 +63,24 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) err
 		return err
 	}
 	if durIdx < m.Position.Index {
-		cr := newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
-		if err := n.cfg.Machine.Restore(cr, m); err != nil {
+		// The second read is held to what the first verified: its end is
+		// checked against the sizes and the SHA-256 of the metadata, and
+		// the machine reads SNAPSHOT_CORRUPT instead of io.EOF on a
+		// difference. Checked per chunk only, a .snap cut from outside on a
+		// chunk boundary between the two reads ended cleanly, and the
+		// machine was restored from a prefix while applied moved to the
+		// snapshot's index (#1562). The chunk reader hashes what it decodes
+		// either way: the comparison is the only cost.
+		sr := &snapshotReader{cr: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes), meta: m}
+		//: a refused restore moves nothing, applied included.
+		if err := n.cfg.Machine.Restore(sr, m); err != nil {
+			return err
+		}
+		// A machine may stop reading before the end: the rest is read, so
+		// the end is checked whatever the machine read, before applied
+		// moves.
+		//: a stream that differs from its metadata past what the machine read is refused too.
+		if _, err := io.Copy(io.Discard, sr); err != nil {
 			return err
 		}
 		// The sessions are the machine's companions: restored with it, at
