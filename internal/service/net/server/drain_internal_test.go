@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	stdnet "net"
+	"os"
 	"runtime"
 	"strconv"
 	"sync"
@@ -75,12 +76,6 @@ func TestDrain_graceUnderArrivals(t *testing.T) {
 // backend b; with lateSYN, one more client begins its dial inside the grace
 // and sends its SYN only once a probe was refused: the listener closed.
 func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend, lateSYN bool) {
-	//: Windows cannot give the order the late case forces: its contract
-	//: asserted, then skipped.
-	if lateSYN && runtime.GOOS == "windows" {
-		windowsRefusesLate(t)
-		t.Skip("Windows answers a refused SYN only after its own retransmissions, and as WSAECONNREFUSED: no probe bounded by drainProbeDial dates the close, and no refusal is judged the kernel's")
-	}
 	srv := New(WithDrainGrace(drainGraceTest))
 	t.Cleanup(func() { swallowErr(srv.Close()) })
 	counts := p.group(srv, b)
@@ -115,7 +110,7 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend, 
 		ended := time.Now()
 		//: refused once the listener may have closed: no SYN of it was
 		//: answered while the listener listened, so none was owed (#1556).
-		if s := shutAt.Load(); s != 0 && errors.Is(derr, syscall.ECONNREFUSED) && !ended.Before(time.Unix(0, s).Add(drainGraceTest)) {
+		if s := shutAt.Load(); s != 0 && dialRefused(derr) && !ended.Before(time.Unix(0, s).Add(drainGraceTest)) {
 			unanswered.Add(1)
 			t.Logf("refused once the listener may have closed, no SYN of it answered while it listened: %s began %s, ended %s", msg, t0.Format("15:04:05.000"), ended.Format("15:04:05.000"))
 			return true
@@ -219,57 +214,41 @@ func drainGraceUnderArrivals(t *testing.T, p drainProto, b corenet.LoopBackend, 
 // wsaeConnRefused is WSAECONNREFUSED (winerror.h, 10061): what Windows'
 // connectex returns for a refused connection. Package syscall's
 // ECONNREFUSED on Windows is a value of its own, never returned by a socket
-// call, and Errno.Is does not map one onto the other.
+// call, and Errno.Is does not map one onto the other: the windows job's
+// "late: no probe refused within 10s" (#1556).
 const wsaeConnRefused = syscall.Errno(10061)
 
-// windowsRefusesLate asserts the contract that keeps the late case off
-// Windows (ADR 0095). A dial to a closed loopback port, bounded by
-// drainProbeDial, times out: the stack answers the RST by sending its SYN
-// again, and connectex fails only once those retries are spent, about two
-// seconds later. The dial then fails with WSAECONNREFUSED, which
-// errors.Is(err, syscall.ECONNREFUSED) does not match. drainProbe therefore
-// never dates the close there, and the grace's judgement never takes a
-// refusal for the kernel's. Should either change, this fails, and the late
-// case can run on Windows.
-func windowsRefusesLate(t *testing.T) {
-	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	swallowErr(ln.Close())
+// dialRefused reports whether a dial failed because the kernel refused it: no
+// listener on the port. ECONNREFUSED everywhere, and WSAECONNREFUSED on
+// Windows.
+func dialRefused(err error) bool {
+	//: Windows' own errno, there only.
+	return errors.Is(err, syscall.ECONNREFUSED) || (runtime.GOOS == "windows" && errors.Is(err, wsaeConnRefused))
+}
+
+// TestDrain_refusedIsTheKernelsRefusal pins dialRefused on errors wrapped as a
+// dial wraps them: ECONNREFUSED is a refusal everywhere, WSAECONNREFUSED on
+// Windows only, and neither a timeout nor a reset is one.
+func TestDrain_refusedIsTheKernelsRefusal(t *testing.T) {
 	type tc struct {
-		name    string
-		timeout time.Duration
-		check   func(err error) string
+		name string
+		err  error
+		want bool
+	}
+	dial := func(err error) error {
+		return &stdnet.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", err)}
 	}
 	cases := []tc{
-		{name: "bounded", timeout: drainProbeDial, check: func(err error) string {
-			var ne stdnet.Error
-			//: refused within the probe's bound: the probe works here.
-			if !errors.As(err, &ne) || !ne.Timeout() {
-				return "not a timeout within " + drainProbeDial.String()
-			}
-			return ""
-		}},
-		{name: "unbounded", timeout: 10 * time.Second, check: func(err error) string {
-			//: the refusal is WSAECONNREFUSED, and only that.
-			if !errors.Is(err, wsaeConnRefused) || errors.Is(err, syscall.ECONNREFUSED) {
-				return "not WSAECONNREFUSED alone"
-			}
-			return ""
-		}},
+		{name: "ECONNREFUSED", err: dial(syscall.ECONNREFUSED), want: true},
+		{name: "WSAECONNREFUSED", err: dial(wsaeConnRefused), want: runtime.GOOS == "windows"},
+		{name: "timeout", err: dial(os.ErrDeadlineExceeded)},
+		{name: "reset", err: dial(syscall.ECONNRESET)},
+		{name: "nil"},
 	}
 	runCase := func(t *testing.T, c tc) {
-		conn, err := stdnet.DialTimeout("tcp", addr, c.timeout)
-		//: the closed port accepted.
-		if err == nil {
-			swallowErr(conn.Close())
-			t.Fatalf("%s dial to the closed port %s was accepted", c.name, addr)
-		}
-		//: the platform's contract changed.
-		if why := c.check(err); why != "" {
-			t.Fatalf("%s dial to the closed port %s: %v: %s; the late case may run on Windows now", c.name, addr, err, why)
+		//: what dialRefused says against what the platform's kernel means.
+		if got := dialRefused(c.err); got != c.want {
+			t.Fatalf("dialRefused(%v) = %v on %s, want %v", c.err, got, runtime.GOOS, c.want)
 		}
 	}
 	for _, c := range cases {
@@ -438,7 +417,7 @@ func drainArrivalsAcross(t *testing.T, c drainArrivalsCase) {
 					early = append(early, msg)
 				case derr != nil:
 					refused.Add(1)
-					if errors.Is(derr, syscall.ECONNREFUSED) && (closed.IsZero() || failed.Before(closed)) {
+					if dialRefused(derr) && (closed.IsZero() || failed.Before(closed)) {
 						closed = failed
 					}
 				case msg != "":
@@ -546,7 +525,7 @@ func drainProbe(addr string, deadline time.Time) drainDate {
 			d.accepted = start
 			resetConn(c)
 		//: no listener left on the port.
-		case errors.Is(err, syscall.ECONNREFUSED):
+		case dialRefused(err):
 			d.began, d.refused = start, end
 			return d
 		}
