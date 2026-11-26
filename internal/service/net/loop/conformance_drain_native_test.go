@@ -699,3 +699,45 @@ func shutdownServes(t *testing.T, g *Group, conns []stdnet.Conn, c0 stdnet.Conn)
 		t.Fatalf("Shutdown: %v", err)
 	}
 }
+
+// TestConformance_drainClosesTheSilentUnderPosts pins that a drain closes a
+// connection that stays silent even when every batch reaps as many events as
+// its array holds (#1541 review): one loop reaping one event a batch, a Post
+// at every batch end, so each wait reports the wake alone. The silent
+// connection must read its end once drainQuiet passed, and Shutdown must
+// return, not wait its context out (DrainTimeout).
+func TestConformance_drainClosesTheSilentUnderPosts(t *testing.T) {
+	runCase := func(t *testing.T, b backendCase) {
+		var posting atomic.Bool
+		posting.Store(true)
+		h := &lineH{}
+		h.batchEnd = func(lio corenet.LoopIO) {
+			lp, ok := lio.(*loop)
+			//: a wake for the next batch, while the test wants one.
+			if ok && posting.Load() {
+				_ = lp.Post(func(corenet.LoopIO, uintptr) {}, 0)
+			}
+		}
+		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings, c.Value.CQBatch = 1, 1, 1 })
+		t.Cleanup(func() { posting.Store(false) })
+		c0 := dial(t, addr)
+		echo(t, c0, "warm\n")
+		silent := dial(t, addr)
+		ctx, cancel := context.WithTimeout(context.Background(), 4*drainQuiet)
+		defer cancel()
+		start := time.Now()
+		err := g.Shutdown(ctx)
+		posting.Store(false)
+		//: the drain ended by itself, the silent one closed.
+		if err != nil {
+			t.Fatalf("Shutdown after %v: %v", time.Since(start), err)
+		}
+		_ = silent.SetReadDeadline(time.Now().Add(time.Second))
+		//: the silent connection read its end.
+		if _, err := silent.Read(make([]byte, 1)); !errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET) {
+			t.Fatalf("the silent connection after the drain: %v", err)
+		}
+		resetClose([]stdnet.Conn{c0, silent})
+	}
+	eachBackend(t, runCase)
+}

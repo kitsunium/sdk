@@ -290,6 +290,7 @@ func (el *epollLoop) setup() error {
 	lp := el.lp
 	lp.post = newPostQueue(el.wake)
 	el.r = newRing(lp, 0, el)
+	el.r.askUnread = true
 	lp.rings = []*ring{el.r}
 	el.armListeners()
 	//: ready to serve.
@@ -390,15 +391,11 @@ func (el *epollLoop) wait() int {
 		timeout = -1
 	}
 	n, err := syscall.EpollWait(el.epfd, el.events, timeout)
-	//: an interrupted wait is an empty batch, which reaped nothing: it is
-	//: behind on whatever is ready.
+	//: an interrupted wait is an empty batch.
 	if err != nil {
-		el.r.behind = true
 		//: nothing reaped.
 		return 0
 	}
-	// A full reap may have left readiness for the next batch.
-	el.r.behind = n == len(el.events)
 	el.r.st.completions += uint64(n)
 	//: reaped.
 	return n
@@ -637,10 +634,8 @@ func (el *epollLoop) readBuf(slot int32) (buf []byte, inSpill, ok bool) {
 		//: the spill's free tail.
 		return buf, true, true
 	}
-	//: the arena is spent: the level-triggered readiness waits a batch, and
-	//: the batch is behind on that input.
+	//: the arena is spent: the level-triggered readiness waits a batch.
 	if len(el.arena)-el.off < minRead {
-		r.behind = true
 		//: read next time.
 		return nil, false, false
 	}

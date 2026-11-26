@@ -97,11 +97,17 @@ type ring struct {
 	seen seen
 	// draining is a ring that accepts nothing more.
 	draining bool
-	// behind is set by the backend for the batch when it left readiness or
-	// completions unreaped, or input unread for want of arena: a connection
-	// that looks silent may then have its request waiting, so the drain does
-	// not judge silence this batch (#1541).
+	// behind is set by io_uring for the batch when it left completions
+	// unreaped, or work the kernel holds for the thread: a connection that
+	// looks silent may then have its request waiting, so the drain does not
+	// judge silence this batch (#1541).
 	behind bool
+	// askUnread is set by epoll and kqueue, whose connections are process
+	// descriptors the kernel reads input into: the drain asks the socket
+	// (driver.unread) whether a silent-looking connection holds unread input
+	// — a readiness the batch did not reap, a read put off for want of
+	// arena —, exactly, rather than judging the batch (#1541).
+	askUnread bool
 }
 
 // seen is what a ring last published. A counter is stored to its atomic only

@@ -384,6 +384,7 @@ func (kl *kqueueLoop) setup() error {
 	lp := kl.lp
 	lp.post = newPostQueue(kl.wake)
 	kl.r = newRing(lp, 0, kl)
+	kl.r.askUnread = true
 	lp.rings = []*ring{kl.r}
 	kl.armListeners()
 	//: ready to serve.
@@ -475,15 +476,11 @@ func (kl *kqueueLoop) wait() int {
 		ts = &kl.tick
 	}
 	n, err := syscall.Kevent(kl.kq, nil, kl.events, ts)
-	//: an interrupted wait is an empty batch, which reaped nothing: it is
-	//: behind on whatever is ready.
+	//: an interrupted wait is an empty batch.
 	if err != nil {
-		kl.r.behind = true
 		//: nothing reaped.
 		return 0
 	}
-	// A full reap may have left events for the next batch.
-	kl.r.behind = n == len(kl.events)
 	kl.r.st.completions += uint64(n)
 	//: reaped.
 	return n
@@ -772,10 +769,8 @@ func (kl *kqueueLoop) readBuf(slot int32) (buf []byte, inSpill, ok bool) {
 		//: the spill's free tail.
 		return buf, true, true
 	}
-	//: the arena is spent: the level-triggered readiness waits a batch, and
-	//: the batch is behind on that input.
+	//: the arena is spent: the level-triggered readiness waits a batch.
 	if len(kl.arena)-kl.off < kqMinRead {
-		r.behind = true
 		//: read next time.
 		return nil, false, false
 	}

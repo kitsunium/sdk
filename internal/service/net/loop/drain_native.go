@@ -169,16 +169,24 @@ func (r *ring) full() bool {
 	return len(r.free) == 0 && len(r.conns) >= r.lp.sz.tableSize
 }
 
-// drainable reports whether the drain closes the open connection c now: no
-// partial input, and either it has sent something — its request was read —
-// or it stayed silent for drainQuiet. Silence is judged only on a batch that
-// reaped everything ready (ring.behind unset): a connection the batch did not
-// reach may hold its request unread, and a close then would read it away
-// unanswered behind a FIN (#1541).
-func (r *ring) drainable(c *connCtl) bool {
-	//: mid-request connections finish first; fresh ones get their request in,
-	//: and a silence is believed only once the batch caught up.
-	return c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || (!r.behind && r.lp.tick-c.lastIO >= drainQuietTicks))
+// drainable reports whether the drain closes the open connection on slot s
+// now: no partial input, and either it has sent something — its request was
+// read — or it stayed silent for drainQuiet. A silence is believed only when
+// nothing says the request waits unread (silent): a close then would read it
+// away unanswered behind a FIN (#1541).
+func (r *ring) drainable(s int32) bool {
+	c := &r.conns[s]
+	//: mid-request connections finish first; fresh ones get their request in.
+	return c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.silent(s))
+}
+
+// silent reports whether the connection on slot s, never heard, counts as
+// silent: quiet for drainQuiet, on an io_uring ring the batch caught up on
+// (ring.behind unset), and on epoll and kqueue with no input in its socket
+// (driver.unread), asked last, of the quiet ones only.
+func (r *ring) silent(s int32) bool {
+	//: quiet long enough, caught up, and nothing unread.
+	return r.lp.tick-r.conns[s].lastIO >= drainQuietTicks && !r.behind && !(r.askUnread && r.drv.unread(r, s))
 }
 
 // settleDrain is the drain's look at the open connections, once
@@ -223,7 +231,7 @@ func (lp *loop) closeSettled(r *ring) {
 			continue
 		}
 		//: settled, heard or quiet, and waiting on nobody.
-		if r.drainable(c) && !lp.waits(r, s) {
+		if r.drainable(s) && !lp.waits(r, s) {
 			//: the handler's last word, once; the connection closes next batch.
 			if lp.drainer != nil && c.flags&fDrained == 0 {
 				c.flags |= fDrained

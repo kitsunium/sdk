@@ -2129,7 +2129,12 @@ sequences:
       - return: len(r.free) == 0 && len(r.conns) >= r.lp.sz.tableSize
   - of: (*ring).drainable
     steps:
-      - return: c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || (!r.behind && r.lp.tick-c.lastIO >= drainQuietTicks))
+      - bind: c
+        eval: "&r.conns[s]"
+      - return: c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.silent(s))
+  - of: (*ring).silent
+    steps:
+      - return: r.lp.tick-r.conns[s].lastIO >= drainQuietTicks && !r.behind && !(r.askUnread && r.drv.unread(r, s))
   - of: (*loop).settleDrain
     participants:
       - id: caller
@@ -2196,7 +2201,7 @@ sequences:
                     value: stClosing, rDrain
                   - eval: r.markDirty(s)
                     to: r.markDirty
-                when: r.drainable(c) && !lp.waits(r, s)
+                when: r.drainable(s) && !lp.waits(r, s)
             - set: s
               value: nxt
           init: s := r.lruHead
@@ -2543,6 +2548,8 @@ sequences:
       - set: el.r
         to: newRing
         value: newRing(lp, 0, el)
+      - set: el.r.askUnread
+        value: "true"
       - set: lp.rings
         value: "[]*ring{el.r}"
       - eval: el.armListeners()
@@ -2745,12 +2752,8 @@ sequences:
         to: syscall
       - opt:
           do:
-            - set: el.r.behind
-              value: "true"
             - return: "0"
           when: err != nil
-      - set: el.r.behind
-        value: n == len(el.events)
       - op: +=
         set: el.r.st.completions
         value: uint64(n)
@@ -3151,8 +3154,6 @@ sequences:
           when: r.hasSpill(slot)
       - opt:
           do:
-            - set: r.behind
-              value: "true"
             - return: nil, false, false
           when: len(el.arena)-el.off < minRead
       - return: el.arena[el.off:min(len(el.arena), el.off+readChunk)], false, true
