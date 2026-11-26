@@ -187,11 +187,11 @@ func TestANodeThatInstallsASnapshotRefusesItsRetiredKeys(t *testing.T) {
 	raiseNodesTo(t, liveNodes(c), raft.Protocol3)
 	l := c.settledLeader(5 * time.Second)
 	lag := c.otherThan(l)
-	// Isolated before it stops: the memory network keeps what it is sent
-	// while it is down and delivers it at the restart, which catches it up
-	// by appends where the test means an install (#374).
-	c.net.Isolate(lag.id, true)
-	c.kill(lag)
+	// Isolated before it stops, and what it was sent before is dropped: the
+	// memory network keeps what it is sent while it is down and delivers it
+	// at the restart, which catches it up by appends where the test means an
+	// install (#374, #1564).
+	end := stopBehind(c, lag)
 	key := [32]byte{0x99}
 	if code, why := joinOn(t, c, 991, "y", key); code != 0 {
 		t.Fatalf("setup: JOIN: %v %q", code, why)
@@ -204,7 +204,6 @@ func TestANodeThatInstallsASnapshotRefusesItsRetiredKeys(t *testing.T) {
 	// Past the entry after the stopped node's end, not only past its end:
 	// a log that starts at end+1 still feeds it by appends, which a slower
 	// runner left it to, and nothing was installed.
-	_, end := lag.log.Bounds()
 	compactedPast(t, c, end+1)
 	c.net.Isolate(lag.id, false)
 	c.start(lag)
@@ -233,6 +232,46 @@ func TestANodeThatInstallsASnapshotRefusesItsRetiredKeys(t *testing.T) {
 	err := lag.node.AddLearner(ctx, "op:add", coreconsensus.MemberValue{ID: 993, Slot: "y", SPKI: key, Address: "mem"})
 	if !errors.Is(err, coreconsensus.MembershipInvalid) {
 		t.Fatalf("the leader that installed the snapshot admitted its retired key: %v", err)
+	}
+}
+
+// stopBehind stops tn, cuts it off and drops the frames its end of the
+// network still queues, then returns the end of its log, which the caller
+// waits for the live logs to start past. Cut and dropped after the stop,
+// nothing is queued for it that its end did not count (#1564).
+func stopBehind(c *cluster, tn *testNode) uint64 {
+	//: a node already stopped is not stopped twice.
+	if tn.node != nil {
+		c.kill(tn)
+	}
+	stopHearing(c, tn)
+	_, end := tn.log.Bounds()
+	return end
+}
+
+// #1564: a node stopped isolated was still owed what the leader sent it
+// before the cut and the node had not read: the memory network keeps it and
+// delivers it at the restart, past the end the setup read, so a log that
+// started just past that end fed the node by appends and nothing was
+// installed. The frame is queued while the node is stopped and not yet
+// isolated, as one the node had not read when it stopped is.
+func TestANodeStoppedBehindIsOwedNothingSentBeforeItsCut(t *testing.T) {
+	type tc struct{ name string }
+	runCase := func(t *testing.T, _ tc) {
+		c := retiredKeyCluster(t, raft.Protocol3)
+		lag := c.otherThan(c.settledLeader(5 * time.Second))
+		c.kill(lag)
+		//: an entry the stopped node was sent and never read.
+		tok := proposeOnLeader(t, c, "owed=1")
+		end := stopBehind(c, lag)
+		tr := NewMemoryTransport(c.net, lag.id)
+		//: a frame waiting for the node is delivered at its restart.
+		if data, ctrl := len(tr.data), len(tr.ctrl); data+ctrl != 0 {
+			t.Fatalf("%d frames on the data lane and %d on the control lane wait for the stopped node, whose end %d the setup read: the entry %d they carry is delivered at its restart, so a log starting at %d feeds it by appends", data, ctrl, end, tok.Index, end+1)
+		}
+	}
+	for _, tt := range []tc{{name: "an entry sent before the cut"}} {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }
 
