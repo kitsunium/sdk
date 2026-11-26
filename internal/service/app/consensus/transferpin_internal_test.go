@@ -143,6 +143,25 @@ func hearOnlyTheLeader(c *cluster, l, lag *testNode) {
 	}
 }
 
+// streamState is what leader l holds for peer to while a test waits for
+// its offer, read on l's loop: raft's view of the peer, none off the
+// leader, and the snapshot streams in flight and waiting.
+func streamState(l *testNode, to coreconsensus.NodeID) string {
+	s := "the leader's loop stopped"
+	l.node.exec(func() {
+		var peer any = "not tracked"
+		for _, p := range l.node.r.PeerStats() {
+			if p.ID == to {
+				peer = p
+			}
+		}
+		_, inFlight := l.node.sendStop[to]
+		s = fmt.Sprintf("the leader's status %+v, its view of the peer %+v, the peer's stream in flight %v, streams in flight %d, waiting %+v",
+			l.node.Status(), peer, inFlight, len(l.node.sendStop), l.node.streamWait)
+	})
+	return s
+}
+
 // releaseHeld lets the stream the leader holds go on. The stream waits for
 // its release only while its context lives: a leader that lost its
 // leadership stops its streams (#547), and an unbounded send then blocked
@@ -451,11 +470,14 @@ func TestALeaderThatLosesItsLeadershipStopsItsSnapshotStream(t *testing.T) {
 	mu.Unlock()
 	lt.holding.Store(true)
 	hearOnlyTheLeader(c, l, lag)
+	first, _ := l.log.Bounds()
+	_, end := lag.log.Bounds()
 	c.start(lag)
 	select {
 	case <-lt.started:
 	case <-time.After(10 * time.Second):
-		t.Fatal("no snapshot offered to the lagging node")
+		t.Fatalf("no snapshot offered to the lagging node, whose log ended at %d when the leader's started at %d: %s, the transport's streams in flight %d",
+			end, first, streamState(l, lag.id), lt.inFlight.Load())
 	}
 	var to *testNode
 	for _, tn := range c.nodes {
