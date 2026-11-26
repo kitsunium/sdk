@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"hash/maphash"
 	"math/rand/v2"
 	"strconv"
 	"testing"
@@ -247,37 +248,70 @@ func TestTheCallersTagSliceIsNotRetained(t *testing.T) {
 // per-process hash seed spread the keys.
 func TestTheByteBoundHoldsAfterEverySet(t *testing.T) {
 	t.Parallel()
-	const budget = 1 << 20
 	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
-		built, err := NewWeighedMemory(MemoryConfig{MaxEntries: 1000, MaxBytes: budget, Stripes: stripes, Policy: policy},
-			func(value []byte) int64 { return int64(len(value)) })
-		if err != nil {
-			t.Fatal(err)
+		store := weighedBytesStore(t, stripes, policy)
+		holdsTheByteBound(t, store, stripes)
+	})
+}
+
+// TestTheByteBoundHoldsWhateverTheStripeSeed is #1380's reproduction: the
+// keys' spread over the stripes follows the store's hash seed, drawn per
+// process, so the run that failed one time in a hundred was a seed. The seed
+// is set here, a hundred of them at each shape, and the bound is held to
+// every one.
+func TestTheByteBoundHoldsWhateverTheStripeSeed(t *testing.T) {
+	t.Parallel()
+	forEachShape(t, func(t *testing.T, stripes int, policy kcache.Policy) {
+		//: one stripe has no hash to seed.
+		if stripes == 1 {
+			t.Skip("one stripe: no seed picks a stripe")
 		}
-		store := built.(*memoryStore[[]byte])
-		random := rand.New(rand.NewPCG(uint64(stripes), 11))
-		for i := range 600 {
-			value := make([]byte, 1024+random.IntN(255*1024))
-			if err := store.Set(t.Context(), "k"+strconv.Itoa(random.IntN(200)), corecache.EntryValue[[]byte]{Value: value}); err != nil {
-				//: a value over one stripe's share is refused; that is the bound.
-				if stripes > 1 {
-					continue
-				}
-				t.Fatalf("Set %d: %v", i, err)
-			}
-			var held int64
-			for at, stripe := range store.stripes {
-				weight := stripe.lru.Stats().Weight
-				if share := shareOf64(budget, len(store.stripes), at); weight > share {
-					t.Fatalf("after Set %d stripe %d holds %d bytes, over its share of %d", i, at, weight, share)
-				}
-				held += weight
-			}
-			if held > budget {
-				t.Fatalf("after Set %d the store holds %d bytes, over %d", i, held, budget)
-			}
+		for range 100 {
+			store := weighedBytesStore(t, stripes, policy)
+			store.seed = maphash.MakeSeed()
+			holdsTheByteBound(t, store, stripes)
 		}
 	})
+}
+
+// weighedBytesStore builds the 1 MiB store of the byte-bound tests.
+func weighedBytesStore(t *testing.T, stripes int, policy kcache.Policy) *memoryStore[[]byte] {
+	t.Helper()
+	built, err := NewWeighedMemory(MemoryConfig{MaxEntries: 1000, MaxBytes: 1 << 20, Stripes: stripes, Policy: policy},
+		func(value []byte) int64 { return int64(len(value)) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return built.(*memoryStore[[]byte])
+}
+
+// holdsTheByteBound sets 600 values of 1 KiB to 256 KiB and reads the bound
+// off the stripes' primitives after every Set.
+func holdsTheByteBound(t *testing.T, store *memoryStore[[]byte], stripes int) {
+	t.Helper()
+	const budget = 1 << 20
+	random := rand.New(rand.NewPCG(uint64(stripes), 11))
+	for i := range 600 {
+		value := make([]byte, 1024+random.IntN(255*1024))
+		if err := store.Set(t.Context(), "k"+strconv.Itoa(random.IntN(200)), corecache.EntryValue[[]byte]{Value: value}); err != nil {
+			//: a value over one stripe's share is refused; that is the bound.
+			if stripes > 1 {
+				continue
+			}
+			t.Fatalf("Set %d: %v", i, err)
+		}
+		var held int64
+		for at, stripe := range store.stripes {
+			weight := stripe.lru.Stats().Weight
+			if share := shareOf64(budget, len(store.stripes), at); weight > share {
+				t.Fatalf("after Set %d stripe %d holds %d bytes, over its share of %d", i, at, weight, share)
+			}
+			held += weight
+		}
+		if held > budget {
+			t.Fatalf("after Set %d the store holds %d bytes, over %d", i, held, budget)
+		}
+	}
 }
 
 // TestFetchManyReadsARepeatOnce pins the port's read-once rule on the memory
