@@ -850,8 +850,11 @@ packages:
               name: MaxBytes
               type: int64
             - doc: |-
-                Policy is the eviction policy: least recently used (the zero), or
-                S3-FIFO, which keeps a hot set through a scan.
+                Policy is the eviction policy: least recently used (the zero), S3-FIFO,
+                which keeps a hot set through a scan, or W-TinyLFU, which admits a key
+                to its main part only when its estimated use is above the one it replaces.
+                A key just written is always kept, whatever it displaces: with room for
+                one key, one written once replaces one used often.
               name: Policy
               type: kcache.Policy
             - doc: |-
@@ -1088,8 +1091,8 @@ packages:
                 name: V
       - alias:
           - doc: |-
-              Policy chooses the entry a full cache evicts: [PolicyLRU], the zero, or
-              [PolicyS3FIFO].
+              Policy chooses the entry a full cache evicts: [PolicyLRU], the zero,
+              [PolicyS3FIFO] or [PolicyTinyLFU].
             name: Policy
             target: kcache.Policy
       - const:
@@ -1108,6 +1111,17 @@ packages:
             type: Policy
             typed: true
             value: "1"
+          - doc: |-
+              PolicyTinyLFU admits a key into the main part of the cache only when a
+              frequency sketch estimates it was used more than the key it would replace, so
+              neither a scan nor a long tail of keys used once displaces the hot set. A
+              key just written is always served, though: it is the window's, never
+              the loser of a contest, so with room for one key it replaces any other.
+            name: PolicyTinyLFU
+            reexport: kcache.PolicyTinyLFU
+            type: Policy
+            typed: true
+            value: "2"
       - alias:
           - doc: |-
               Striped spreads keys over independent [Cache]s, each behind its own lock,

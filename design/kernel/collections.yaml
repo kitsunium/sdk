@@ -19,10 +19,16 @@ packages:
       Package cache — the read-only counters snapshot.
 
       Package cache — the S3-FIFO side of the policy: admission into the small
-      or main queue, the hit counter, and the walk that picks a victim.
+      or main queue, and the walk that picks a victim.
 
       Package cache — the S3-FIFO ghost: the hashes of the keys probation
       evicted, bounded.
+
+      Package cache — the W-TinyLFU side of the policy: the window, the
+      probation and protected segments, and the admission contest.
+
+      Package cache — the frequency sketch W-TinyLFU admits by: four-bit
+      counters, a key's four in one cache line, halved as they age.
 
       Package cache — the intrusive list each queue is.
 
@@ -47,14 +53,37 @@ packages:
       - blockDoc: ""
         doc: |-
           PolicyS3FIFO is S3-FIFO (Yang et al., SOSP 2023): a new key enters a small
-          probationary FIFO holding a tenth of the capacity; one hit there promotes
-          it to the main FIFO when it reaches the tail, none sends its key to a
-          bounded ghost set, and a key the ghost remembers is admitted straight into
-          main. A one-time scan therefore churns the small queue and leaves the hot
-          set in main. A hit only sets a counter — it moves nothing.
+          probationary FIFO holding a fiftieth of the capacity; one hit there
+          promotes it to the main FIFO when it reaches the tail, none sends its key
+          to a ghost set holding a quarter of the capacity in hashes, and a key the
+          ghost remembers is admitted straight into main. A one-time scan therefore
+          churns the small queue and leaves the hot set in main. A hit only sets a
+          counter — it moves nothing.
         name: PolicyS3FIFO
         type: Policy
         value: "1"
+      - blockDoc: ""
+        doc: |-
+          PolicyTinyLFU is W-TinyLFU (Einziger, Friedman and Manes, ACM TOS 2017):
+          a new key enters an LRU window holding a hundredth of the capacity; the
+          key the window pushes out moves into main when main has room, and
+          otherwise contests main's next victim — the least recently used of main's
+          probationary segment — and stays only when a frequency sketch estimates it
+          was used more, and twice at least. A second use in main moves an entry into
+          the protected segment, four fifths of main; an entry heavier than that
+          segment alone stays in probation. Every Set and every hit counts its key:
+          the first use in a period in a doorkeeper, a Bloom filter, the later ones in
+          a count-min sketch of four-bit counters halved every ten uses an entry of
+          the bound, so a key used once — a scan, the long tail — is estimated at one
+          use and does not win a contest against a key estimated higher, and the
+          counts follow what is used now. The sketch shares its counters between
+          keys: the contest compares estimates, which can run above a key's real use,
+          and nothing is promised about actual uses. A key just written is always
+          served: the window holds it, and no contest is held for it, so with room for
+          one key it replaces any other.
+        name: PolicyTinyLFU
+        type: Policy
+        value: "2"
     functions:
       - doc: NewCache builds a Cache from cfg. A nil cfg.Clock defaults to clock.System.
         in:
@@ -111,7 +140,8 @@ packages:
         methods:
           - doc: |-
               Fetch returns the value for key and whether it was present and unexpired. A
-              hit promotes the entry to most-recently-used (hence Fetch, not a pure Get).
+              hit is recorded by the policy — under LRU it promotes the entry to
+              most-recently-used —, hence Fetch, not a pure Get.
             in:
               - name: key
                 type: K
@@ -201,7 +231,7 @@ packages:
         name: Config
         struct:
           fields:
-            - doc: MaxEntries caps the live entry count (LRU eviction above it). 0 = unbounded.
+            - doc: MaxEntries caps the live entry count (the policy evicts above it). 0 = unbounded.
               name: MaxEntries
               type: int
             - doc: DefaultTTL applies to Set entries (SetTTL overrides per-entry). 0 = no expiry.
@@ -262,9 +292,9 @@ packages:
               name: Policy
               type: Policy
       - doc: |-
-          Policy chooses which entry a full Cache evicts. The zero value is
-          PolicyLRU, today's behaviour; an unknown value runs as PolicyLRU, and
-          Stats says which policy runs.
+          Policy chooses which entry a full Cache evicts: PolicyLRU, PolicyS3FIFO or
+          PolicyTinyLFU. The zero value is PolicyLRU, today's behaviour; an unknown
+          value runs as PolicyLRU, and Stats says which policy runs.
         name: Policy
         underlying: uint8
       - doc: |-
@@ -275,8 +305,8 @@ packages:
 
           Each stripe holds an equal share of MaxEntries and MaxWeight, at least one
           unit when the bound is set: the policy is exact within a stripe and
-          approximate across them — the victim is the least-recently-used entry of
-          the stripe that overflowed, not of the whole cache. OnEvict fires per
+          approximate across them — the victim is the policy's victim in the stripe
+          that overflowed, not in the whole cache. OnEvict fires per
           stripe, outside that stripe's lock, as a Cache fires it. With one stripe a
           Striped behaves exactly as one Cache.
 
@@ -365,7 +395,7 @@ packages:
           - constraint: any
             name: V
       - doc: |-
-          UnlockedMap is the cache without its lock: the same LRU or S3-FIFO policy, TTL,
+          UnlockedMap is the cache without its lock: the same eviction policy, TTL,
           bounds, sweep and counters as Cache, for a caller that already serialises
           every call under a lock of its own — a store that keeps more state beside
           the entries, which a second lock inside would only slow down. It is NOT

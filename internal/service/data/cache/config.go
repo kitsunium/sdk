@@ -46,8 +46,11 @@ type MemoryConfig struct {
 	// CACHE_ENTRY_REJECTED at Set. Negative is refused, and so is a positive
 	// MaxBytes given to [NewMemory], which has no weigher to measure it with.
 	MaxBytes int64
-	// Policy is the eviction policy: least recently used (the zero), or
-	// S3-FIFO, which keeps a hot set through a scan.
+	// Policy is the eviction policy: least recently used (the zero), S3-FIFO,
+	// which keeps a hot set through a scan, or W-TinyLFU, which admits a key
+	// to its main part only when its estimated use is above the one it replaces.
+	// A key just written is always kept, whatever it displaces: with room for
+	// one key, one written once replaces one used often.
 	Policy kcache.Policy
 	// LeasePoll is how often LoadLeased reads the store again while another
 	// process holds a key's lease. 0 means 25ms, the file locker's own poll;

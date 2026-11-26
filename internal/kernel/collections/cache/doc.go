@@ -15,10 +15,16 @@
 // Package cache — the read-only counters snapshot.
 //
 // Package cache — the S3-FIFO side of the policy: admission into the small
-// or main queue, the hit counter, and the walk that picks a victim.
+// or main queue, and the walk that picks a victim.
 //
 // Package cache — the S3-FIFO ghost: the hashes of the keys probation
 // evicted, bounded.
+//
+// Package cache — the W-TinyLFU side of the policy: the window, the
+// probation and protected segments, and the admission contest.
+//
+// Package cache — the frequency sketch W-TinyLFU admits by: four-bit
+// counters, a key's four in one cache line, halved as they age.
 //
 // Package cache — the intrusive list each queue is.
 //
