@@ -343,6 +343,7 @@ func lenFromAThirdGoroutine(t *testing.T, q ring.Queue[int]) {
 	var wg sync.WaitGroup
 	done := make(chan struct{})
 	wg.Go(func() {
+		//: the writer offers every item in order, retrying until it fits.
 		for i := range items {
 			//: a full ring yields to the reader.
 			for q.TryWrite(i) != nil {
@@ -352,6 +353,8 @@ func lenFromAThirdGoroutine(t *testing.T, q ring.Queue[int]) {
 	})
 	wg.Go(func() {
 		defer close(done)
+		//: the reader drains exactly as many items as were written, then
+		//: signals the sampler that no more movement is coming.
 		for read := 0; read < items; {
 			//: an empty ring yields to the writer.
 			if _, err := q.TryRead(); err != nil {
@@ -362,10 +365,15 @@ func lenFromAThirdGoroutine(t *testing.T, q ring.Queue[int]) {
 		}
 	})
 	bad, outside := 0, false
+	//: sample Len for as long as either side still moves items.
 	for running := true; running; {
+		//: poll without blocking, so a snapshot is taken between any two
+		//: moves.
 		select {
+		//: the reader is finished: leave after this pass.
 		case <-done:
 			running = false
+		//: the ring is still in motion: take one more snapshot.
 		default:
 			//: one snapshot outside the bounds is enough to report.
 			if n := q.Len(); n < 0 || n > q.Capacity() {
@@ -375,6 +383,8 @@ func lenFromAThirdGoroutine(t *testing.T, q ring.Queue[int]) {
 		}
 	}
 	wg.Wait()
+	//: report once, after both goroutines are joined, so a failure never
+	//: races with them.
 	if outside {
 		t.Errorf("Len = %d while both sides ran, outside [0, %d]", bad, q.Capacity())
 	}
