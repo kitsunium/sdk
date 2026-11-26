@@ -74,7 +74,7 @@ write leave in `Ready.AfterSync`.
 - Answer an append or a heartbeat of an older term from a leader that does not announce protocol 5 at its own term, at the refuser's, or not at all (`refuseOlderLeader`, `announcesProtocol5`, #1472), or flag a `NOT_LEADER` refusal `FlagTruncated` (`truncatedReport`)
 - Expect a node of a previous release to climb to a member's term faster than one election timeout a term (`gapBound`, #1472)
 - Read the class between two nodes of a previous release as closed: it closes once one of the two runs this release (#1472)
-- Take a leader of this release stepping down at its own term on a `NOT_LEADER` for a defect of the term rule: a frame it sent as a leader of protocol 4, delayed past its upgrade, is refused at the next term (#1472)
+- Step a leader of this release down on a `NOT_LEADER` whose `LogTerm` is not past its term, or read one as contact or as a refusal of its log: it refuses a frame the leader sent as a leader of protocol 4 before its upgrade, refused at the next term after it won that term (`refusedForLaterTerm`, #1514)
 
 ## Reference in NOTES.md
 
