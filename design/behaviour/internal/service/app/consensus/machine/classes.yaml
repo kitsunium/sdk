@@ -32,6 +32,20 @@ constants:
         value: "\"kit_consensus_applied\""
     name: DefaultPositionTable
   - doc: |-
+      readBackTimeout bounds the read back of a Restore whose transaction
+      reported a failure: the wait for the position row's lock, which a COMMIT
+      still in flight holds. It exceeds the 10 s after which MySQL's
+      semi-synchronous replication gives up on its replica and lets a held
+      COMMIT end (rpl_semi_sync_master_timeout's default), and a healthy
+      server's group fsync by far; past it the outcome is unknown and the
+      engine stops the node, the safe side, rather than keep the apply
+      goroutine waiting on a server that may never answer.
+    items:
+      - name: readBackTimeout
+        type: time.Duration
+        value: 15 * time.Second
+    name: readBackTimeout
+  - doc: |-
       maxTableName bounds a position table's name: PostgreSQL's 63 bytes, the
       shortest identifier limit of the three dialects.
     items:
@@ -95,6 +109,7 @@ files:
     name: machine_compliance.go
   - decls:
       - DefaultPositionTable
+      - readBackTimeout
       - maxTableName
       - sqlSnapshotMagic
       - positionColumns
@@ -225,6 +240,7 @@ imports:
   stdsql: database/sql
   strings: strings
   sync: sync
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/app/consensus/machine
@@ -353,6 +369,13 @@ types:
       - doc: snapIso is the isolation a snapshot's transaction reads at.
         name: snapIso
         type: stdsql.IsolationLevel
+      - doc: |-
+          lockRow takes the position row's lock without changing it, and
+          lockIso is the isolation its read back runs at (readBack).
+        name: lockRow
+        type: string
+      - name: lockIso
+        type: stdsql.IsolationLevel
       - name: mu
         type: sync.Mutex
       - name: li
@@ -397,8 +420,19 @@ types:
         recv: m *SQL
         results: error
       - doc: |-
-          readBack reads the position row in a read-only transaction of its own;
-          a database with no row answers an error, as one that cannot be read.
+          readBack reads the position row as the primary holds it once no
+          transaction can still commit over it: in a read-write transaction, so
+          that a transactor with a ReadReplica does not route it to a replica that
+          has not replayed the COMMIT, which first takes the row's lock, which the
+          restore's transaction holds until the server ends it, then reads the
+          row, at READ COMMITTED, as the holder left it, then rolls back; within
+          readBackTimeout. Read on a replica, or without the lock while a COMMIT
+          was in flight, it saw the old position and the restore was taken for a
+          refusal over the snapshot's state (#1607). PostgreSQL and MySQL make the
+          UPDATE wait for the holder and read the version it committed; SQLite
+          commits in the call, so nothing is in flight there. A database with no
+          row, a wait that ends, or any failure answers an error: the outcome is
+          unknown.
         name: readBack
         recv: m *SQL
         results: coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error

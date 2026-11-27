@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
@@ -16,6 +17,16 @@ import (
 
 // DefaultPositionTable is the table SQLConfig.Table names when it is empty.
 const DefaultPositionTable string = "kit_consensus_applied"
+
+// readBackTimeout bounds the read back of a Restore whose transaction
+// reported a failure: the wait for the position row's lock, which a COMMIT
+// still in flight holds. It exceeds the 10 s after which MySQL's
+// semi-synchronous replication gives up on its replica and lets a held
+// COMMIT end (rpl_semi_sync_master_timeout's default), and a healthy
+// server's group fsync by far; past it the outcome is unknown and the
+// engine stops the node, the safe side, rather than keep the apply
+// goroutine waiting on a server that may never answer.
+const readBackTimeout time.Duration = 15 * time.Second
 
 // maxTableName bounds a position table's name: PostgreSQL's 63 bytes, the
 // shortest identifier limit of the three dialects.
@@ -65,6 +76,10 @@ type SQL struct {
 	sel, upd, ins string
 	// snapIso is the isolation a snapshot's transaction reads at.
 	snapIso stdsql.IsolationLevel
+	// lockRow takes the position row's lock without changing it, and
+	// lockIso is the isolation its read back runs at (readBack).
+	lockRow string
+	lockIso stdsql.IsolationLevel
 
 	mu  sync.Mutex
 	li  coreconsensus.LogIdentityValue
@@ -84,12 +99,13 @@ func NewSQL(ctx context.Context, cfg SQLConfig) (*SQL, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	m := &SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead}
+	m := &SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead, lockIso: stdsql.LevelReadCommitted}
 	if cfg.Dialect == coresql.DialectSQLite {
 		//: SQLite isolates a transaction serialisably and knows no other level.
-		m.snapIso = stdsql.LevelSerializable
+		m.snapIso, m.lockIso = stdsql.LevelSerializable, stdsql.LevelDefault
 	}
 	t := cfg.Dialect.QuoteIdent(cfg.Table)
+	m.lockRow = "UPDATE " + t + " SET id = id WHERE id = 1"
 	ph := cfg.Dialect.Placeholder
 	m.sel = "SELECT " + positionColumns + " FROM " + t + " WHERE id = 1"
 	m.upd = "UPDATE " + t + " SET cluster = " + ph(1) + ", epoch = " + ph(2) + ", predecessor = " + ph(3) +
@@ -237,9 +253,13 @@ func (m *SQL) AppliedPosition() (coreconsensus.LogIdentityValue, coreconsensus.P
 // database and the position as they were: whatever fails in the
 // transaction rolls it back, and the position the machine reports
 // moves only once it committed. A transaction that returned an error
-// is judged on the position row, read back in a transaction of its
-// own, because a COMMIT whose acknowledgement was lost committed
-// although it reports a failure: the snapshot's position is a restore
+// is judged on the position row, because a COMMIT whose
+// acknowledgement was lost, or that the server still runs, commits
+// although it reports a failure. The row is read back on the primary,
+// in a read-write transaction that a ReadReplica never serves: it
+// first takes the row's lock, which waits for a COMMIT in flight,
+// then reads the row at READ COMMITTED and rolls back, within 15
+// seconds. The snapshot's position is a restore
 // that took effect, and Restore returns nil; the position before, a
 // refusal; anything else, or no answer, an outcome the machine cannot
 // name, after which AppliedPosition and Snapshot refuse and
@@ -303,12 +323,30 @@ func (m *SQL) restoreOutcome(meta *coreconsensus.SnapshotMetaValue, cause error)
 	return m.unknown
 }
 
-// readBack reads the position row in a read-only transaction of its own;
-// a database with no row answers an error, as one that cannot be read.
+// readBack reads the position row as the primary holds it once no
+// transaction can still commit over it: in a read-write transaction, so
+// that a transactor with a ReadReplica does not route it to a replica that
+// has not replayed the COMMIT, which first takes the row's lock, which the
+// restore's transaction holds until the server ends it, then reads the
+// row, at READ COMMITTED, as the holder left it, then rolls back; within
+// readBackTimeout. Read on a replica, or without the lock while a COMMIT
+// was in flight, it saw the old position and the restore was taken for a
+// refusal over the snapshot's state (#1607). PostgreSQL and MySQL make the
+// UPDATE wait for the holder and read the version it committed; SQLite
+// commits in the call, so nothing is in flight there. A database with no
+// row, a wait that ends, or any failure answers an error: the outcome is
+// unknown.
 func (m *SQL) readBack() (coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error) {
 	var li coreconsensus.LogIdentityValue
 	var pos coreconsensus.PositionValue
-	err := m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{Isolation: m.snapIso, ReadOnly: true}, func(ctx context.Context, ex coresql.Executor) error {
+	ctx, cancel := context.WithTimeout(context.Background(), readBackTimeout)
+	defer cancel()
+	read := false
+	err := m.cfg.Transactor.Transact(ctx, coresql.TxOptionsValue{Isolation: m.lockIso}, func(ctx context.Context, ex coresql.Executor) error {
+		//: the row's lock, waited for behind a COMMIT in flight.
+		if _, err := ex.ExecContext(ctx, m.lockRow); err != nil {
+			return err
+		}
 		var found bool
 		var err error
 		li, pos, found, err = m.readPosition(ctx, ex)
@@ -316,8 +354,18 @@ func (m *SQL) readBack() (coreconsensus.LogIdentityValue, coreconsensus.Position
 		if err == nil && !found {
 			return origin(coreconsensus.StateMachineFailed, errs.String("why", "the position row is not there"))
 		}
-		return err
+		//: a read that failed.
+		if err != nil {
+			return err
+		}
+		read = true
+		// The read is all this transaction is for: an error rolls it back.
+		return origin(coreconsensus.StateMachineFailed, errs.String("why", "a read back rolls back"))
 	})
+	//: the read happened under the lock; the rollback that followed decides nothing.
+	if read {
+		return li, pos, nil
+	}
 	return li, pos, err
 }
 

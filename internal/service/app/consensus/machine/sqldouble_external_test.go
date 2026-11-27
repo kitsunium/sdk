@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
@@ -58,6 +59,39 @@ type memDB struct {
 	fmu    sync.Mutex
 	failAt int64
 	failed bool
+	// lock is the position row's lock, one slot: a transaction that
+	// updates the row holds it until it ends, as a server's row lock.
+	lockOnce sync.Once
+	lock     chan struct{}
+	// inflight, when set, has the next read-write commit that holds the
+	// row lock answer an error at once and commit after that delay: a
+	// COMMIT the server still runs when the client gives up. committedLate
+	// is closed once it committed.
+	inflight      time.Duration
+	committedLate chan struct{}
+}
+
+// rowLock returns the position row's lock.
+func (d *memDB) rowLock() chan struct{} {
+	d.lockOnce.Do(func() { d.lock = make(chan struct{}, 1) })
+	return d.lock
+}
+
+// armInflight has the next read-write commit holding the row lock commit
+// delay after it answered an error.
+func (d *memDB) armInflight(delay time.Duration) {
+	d.fmu.Lock()
+	d.inflight, d.committedLate = delay, make(chan struct{})
+	d.fmu.Unlock()
+}
+
+// takeInflight disarms and returns the delay armed, zero when none.
+func (d *memDB) takeInflight() (time.Duration, chan struct{}) {
+	d.fmu.Lock()
+	defer d.fmu.Unlock()
+	delay, done := d.inflight, d.committedLate
+	d.inflight = 0
+	return delay, done
 }
 
 // crashNow reports whether a position write at idx fails, and disarms it.
@@ -107,6 +141,40 @@ type memConn struct {
 	db       *memDB
 	tx       *dbState
 	readOnly bool
+	// locked is set while the transaction holds the position row's lock.
+	locked bool
+}
+
+// lockRow takes the position row's lock for the transaction, waiting for
+// the one that holds it to end or for ctx, then reads the row as committed
+// now: a statement that waited on a row lock works on the version the
+// holder left, as READ COMMITTED does.
+func (c *memConn) lockRow(ctx context.Context) error {
+	//: a transaction takes the lock once.
+	if c.tx == nil || c.locked {
+		return nil
+	}
+	select {
+	//: the lock is free, or its holder ended.
+	case c.db.rowLock() <- struct{}{}:
+	//: the caller's deadline.
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	c.locked = true
+	c.db.mu.Lock()
+	c.tx.pos = append([]driver.Value(nil), c.db.committed.pos...)
+	c.db.mu.Unlock()
+	return nil
+}
+
+// unlockRow lets the row's lock go at the transaction's end.
+func (c *memConn) unlockRow() {
+	//: only a holder lets it go.
+	if c.locked {
+		c.locked = false
+		<-c.db.rowLock()
+	}
 }
 
 func (c *memConn) Prepare(string) (driver.Stmt, error) {
@@ -128,6 +196,23 @@ func (c *memConn) BeginTx(_ context.Context, opts driver.TxOptions) (driver.Tx, 
 type memTx struct{ c *memConn }
 
 func (t memTx) Commit() error {
+	//: an armed commit of a row-lock holder answers before it commits.
+	if !t.c.readOnly && t.c.locked {
+		//: armed.
+		if delay, done := t.c.db.takeInflight(); delay > 0 {
+			s, d := *t.c.tx, t.c.db
+			t.c.tx, t.c.locked = nil, false
+			go func() {
+				time.Sleep(delay)
+				d.mu.Lock()
+				d.committed = s
+				d.mu.Unlock()
+				<-d.rowLock()
+				close(done)
+			}()
+			return errors.New("the connection broke while COMMIT was in flight")
+		}
+	}
 	//: a read-only transaction has nothing to write back.
 	if !t.c.readOnly {
 		t.c.db.mu.Lock()
@@ -135,10 +220,15 @@ func (t memTx) Commit() error {
 		t.c.db.mu.Unlock()
 	}
 	t.c.tx = nil
+	t.c.unlockRow()
 	return nil
 }
 
-func (t memTx) Rollback() error { t.c.tx = nil; return nil }
+func (t memTx) Rollback() error {
+	t.c.tx = nil
+	t.c.unlockRow()
+	return nil
+}
 
 // state runs fn on the transaction's state, or on the committed state in
 // a statement of its own.
@@ -164,10 +254,22 @@ func values(args []driver.NamedValue) []driver.Value {
 	return v
 }
 
-func (c *memConn) ExecContext(_ context.Context, q string, args []driver.NamedValue) (driver.Result, error) {
+func (c *memConn) ExecContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Result, error) {
+	//: a write of the position row takes its lock first.
+	if strings.HasPrefix(q, "UPDATE \""+machine.DefaultPositionTable+"\"") {
+		//: a deadline met waiting is the statement's error.
+		if err := c.lockRow(ctx); err != nil {
+			return nil, err
+		}
+	}
 	var n int64
 	err := c.state(func(s *dbState) error {
 		switch {
+		case strings.HasPrefix(q, "UPDATE \""+machine.DefaultPositionTable+"\" SET id = id"):
+			//: the row lock alone.
+			if s.pos != nil {
+				n = 1
+			}
 		case strings.HasPrefix(q, "CREATE TABLE IF NOT EXISTS"):
 		case strings.HasPrefix(q, "INSERT INTO \""+machine.DefaultPositionTable+"\""):
 			s.pos, n = values(args), 1

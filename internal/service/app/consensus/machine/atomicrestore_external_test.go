@@ -3,6 +3,7 @@ package machine_test
 import (
 	"bytes"
 	"context"
+	stdsql "database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcconsensus "github.com/kitsunium/sdk/internal/service/app/consensus"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/machine"
+	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
 )
 
 // errLoadCut is the failure a Load armed to fail returns half way.
@@ -454,6 +456,103 @@ func TestAnSQLRestoreWhoseCommitAcknowledgementIsLostIsJudgedOnTheDatabase(t *te
 	for _, c := range []tc{
 		{name: "the commit held, read back"},
 		{name: "the read back fails too", blind: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// A Restore whose transaction reports a failure is read back on the
+// primary, under the position row's lock: read on a replica that has not
+// yet replayed the COMMIT, it saw the old position, and read without the
+// lock while the COMMIT was still in flight, it saw it too; both refused,
+// the server held the snapshot's state, and the next batch was applied
+// over it (#1607). The read back waits for the COMMIT, then reports the
+// snapshot's position, and the next batch follows it.
+func TestAnSQLRestoreIsReadBackOnThePrimaryUnderTheRowLock(t *testing.T) {
+	type tc struct {
+		name string
+		// replica routes read-only transactions to a replica left at the
+		// old position, and loses the restore's COMMIT acknowledgement.
+		replica bool
+		// inflight has the restore's COMMIT answer an error, then commit
+		// on the server after the delay.
+		inflight time.Duration
+	}
+	runCase := func(t *testing.T, c tc) {
+		_, srcTM := newDB(t)
+		from := mustSQL(t, entriesConfig(srcTM))
+		from.ApplyBatch(commands(1, 6), make([]any, 6))
+		snap, err := from.Snapshot()
+		//: the snapshot opens.
+		if err != nil {
+			t.Fatalf("Snapshot() = %v", err)
+		}
+		var body bytes.Buffer
+		_, err = snap.WriteTo(&body)
+		snap.Release()
+		//: the snapshot writes.
+		if err != nil {
+			t.Fatalf("WriteTo() = %v", err)
+		}
+		primary := &memDB{}
+		var tm coresql.Transactor = transactorOver(t, primary)
+		var la *lostAck
+		var replica *memDB
+		//: the replica case reads read-only transactions on a replica.
+		if c.replica {
+			replica = &memDB{}
+			pdb, rdb := stdsql.OpenDB(primary), stdsql.OpenDB(replica)
+			t.Cleanup(func() { _ = pdb.Close(); _ = rdb.Close() })
+			rt, err := svcsql.NewTransactor(svcsql.Config{DB: pdb, ReadReplica: rdb, Dialect: coresql.DialectSQLite, Pool: svcsql.PoolConfig{MaxOpen: 4}})
+			//: the transactor builds.
+			if err != nil {
+				t.Fatalf("NewTransactor() = %v", err)
+			}
+			la = &lostAck{Transactor: rt}
+			tm = la
+		}
+		m := mustSQL(t, entriesConfig(tm))
+		m.ApplyBatch(commands(1, 2), make([]any, 2))
+		//: the replica holds what the primary held before the restore.
+		if replica != nil {
+			primary.mu.Lock()
+			replica.committed = primary.committed.clone()
+			primary.mu.Unlock()
+			la.armed.Store(true)
+		}
+		//: the in-flight case's COMMIT lands after its answer.
+		if c.inflight > 0 {
+			primary.armInflight(c.inflight)
+		}
+		meta := coreconsensus.SnapshotMetaValue{
+			Position: coreconsensus.PositionValue{Term: 2, Index: 6},
+			Log:      coreconsensus.LogIdentityValue{Cluster: testCluster, Epoch: 1},
+		}
+		err = m.Restore(bytes.NewReader(body.Bytes()), meta)
+		//: the setup's failure happened.
+		if la != nil && !la.lost.Load() {
+			t.Fatal("setup: no acknowledgement was lost")
+		}
+		//: the restore took effect on the primary, and says so.
+		if err != nil {
+			t.Fatalf("a restore the primary committed returned %v", err)
+		}
+		li, pos, perr := m.AppliedPosition()
+		//: the position is the snapshot's.
+		if perr != nil || pos != meta.Position || li != meta.Log {
+			t.Fatalf("AppliedPosition = %+v %+v %v, want %+v %+v", li, pos, perr, meta.Log, meta.Position)
+		}
+		m.ApplyBatch(commands(7, 7), make([]any, 1))
+		rows := primary.rows()
+		//: the next batch follows the snapshot's six rows, once each.
+		if len(rows) != 7 || rows[5].idx != 6 || rows[6].idx != 7 {
+			t.Errorf("the primary holds %+v, want rows 1..7", rows)
+		}
+	}
+	//: each case restores a machine of its own.
+	for _, c := range []tc{
+		{name: "a replica behind the primary", replica: true},
+		{name: "a COMMIT still in flight", inflight: 50 * time.Millisecond},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}

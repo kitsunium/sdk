@@ -1767,7 +1767,8 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   is refused still stop it, and so does a durable one whose
   `AppliedPosition` moved across the refusal or failed (`keptPosition`):
   `SQL` names no position after a COMMIT whose outcome it could not read
-  back (`restoreOutcome`; an acknowledgement lost after the server
+  back on the primary under the position row's lock (`restoreOutcome`,
+  `readBack`; an acknowledgement lost after the server
   committed had it refuse with the old position over the snapshot's
   state). A machine that declares the sibling and breaks its contract
   otherwise diverges unseen: the engine has nothing more to check it with

@@ -4863,9 +4863,13 @@ packages:
               database and the position as they were: whatever fails in the
               transaction rolls it back, and the position the machine reports
               moves only once it committed. A transaction that returned an error
-              is judged on the position row, read back in a transaction of its
-              own, because a COMMIT whose acknowledgement was lost committed
-              although it reports a failure: the snapshot's position is a restore
+              is judged on the position row, because a COMMIT whose
+              acknowledgement was lost, or that the server still runs, commits
+              although it reports a failure. The row is read back on the primary,
+              in a read-write transaction that a ReadReplica never serves: it
+              first takes the row's lock, which waits for a COMMIT in flight,
+              then reads the row at READ COMMITTED and rolls back, within 15
+              seconds. The snapshot's position is a restore
               that took effect, and Restore returns nil; the position before, a
               refusal; anything else, or no answer, an outcome the machine cannot
               name, after which AppliedPosition and Snapshot refuse and

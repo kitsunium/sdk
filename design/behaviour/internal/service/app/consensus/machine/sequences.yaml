@@ -429,15 +429,17 @@ sequences:
             to: cfg.validate
           when: err != nil
       - bind: m
-        eval: "&SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead}"
+        eval: "&SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead, lockIso: stdsql.LevelReadCommitted}"
       - opt:
           do:
-            - set: m.snapIso
-              value: stdsql.LevelSerializable
+            - set: m.snapIso, m.lockIso
+              value: stdsql.LevelSerializable, stdsql.LevelDefault
           when: cfg.Dialect == coresql.DialectSQLite
       - bind: t
         eval: cfg.Dialect.QuoteIdent(cfg.Table)
         to: cfg.Dialect.QuoteIdent
+      - set: m.lockRow
+        value: "\"UPDATE \" + t + \" SET id = id WHERE id = 1\""
       - bind: ph
         eval: cfg.Dialect.Placeholder
       - set: m.sel
@@ -720,6 +722,8 @@ sequences:
         kind: actor
       - id: (*SQL).readBack
         kind: self
+      - id: context
+        kind: stdlib
       - id: m.cfg.Transactor.Transact
         kind: value
     steps:
@@ -729,9 +733,19 @@ sequences:
       - var:
           name: pos
           type: coreconsensus.PositionValue
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), readBackTimeout)
+        to: context
+      - defer: cancel()
+      - bind: read
+        eval: "false"
       - bind: err
         eval: |-
-          m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{Isolation: m.snapIso, ReadOnly: true}, func(ctx context.Context, ex coresql.Executor) error {
+          m.cfg.Transactor.Transact(ctx, coresql.TxOptionsValue{Isolation: m.lockIso}, func(ctx context.Context, ex coresql.Executor) error {
+          		//: the row's lock, waited for behind a COMMIT in flight.
+          		if _, err := ex.ExecContext(ctx, m.lockRow); err != nil {
+          			return err
+          		}
           		var found bool
           		var err error
           		li, pos, found, err = m.readPosition(ctx, ex)
@@ -739,9 +753,19 @@ sequences:
           		if err == nil && !found {
           			return origin(coreconsensus.StateMachineFailed, errs.String("why", "the position row is not there"))
           		}
-          		return err
+          		//: a read that failed.
+          		if err != nil {
+          			return err
+          		}
+          		read = true
+          		// The read is all this transaction is for: an error rolls it back.
+          		return origin(coreconsensus.StateMachineFailed, errs.String("why", "a read back rolls back"))
           	})
         to: m.cfg.Transactor.Transact
+      - opt:
+          do:
+            - return: li, pos, nil
+          when: read
       - return: li, pos, err
   - of: (*SQL).RestoresAtomically
   - of: (*SQL).writePosition

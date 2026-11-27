@@ -33,7 +33,8 @@ never `service/app/consensus`, so the engine's own tests may use it.
 
 - `sqldouble_external_test.go` — the SQL double: a database/sql driver over
   memory, snapshot isolation by copy (a read-only transaction's commit
-  writes nothing back), that knows the position table and the
+  writes nothing back), the position row's lock (`armInflight`: a COMMIT
+  that answers an error and commits later), that knows the position table and the
   tests' `entries` table and fails any other statement; `armCrash` fails the
   next position write at or past an index, once.
 - `cluster_external_test.go` — three nodes over the memory transport, built
@@ -54,8 +55,10 @@ never `service/app/consensus`, so the engine's own tests may use it.
 - Write to the database in `Restore` outside its one transaction, or move
   `m.li`/`m.pos` before it committed: `SQL` is an `AtomicRestorer`, and the
   engine keeps a node running on the state a refused restore left (#1607).
-- Return a refusal from `Restore` without reading the position back: a
-  COMMIT whose acknowledgement was lost committed (`restoreOutcome`); an
+- Return a refusal from `Restore` without reading the position back, or
+  read it back read-only (a `ReadReplica` serves it) or without the row's
+  lock (a COMMIT in flight): a COMMIT whose acknowledgement was lost
+  committed (`restoreOutcome`, `readBack`); an
   outcome it cannot read stays in `unknown`, which refuses
   `AppliedPosition` and `Snapshot` and panics `ApplyBatch`.
 - Write the position outside the batch's transaction: a crash between the
