@@ -3,6 +3,10 @@ package consensus
 import (
 	"errors"
 	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -67,6 +71,98 @@ func benchHeadingAt(doc, heading string) int {
 		return i + 1
 	}
 	return -1
+}
+
+// benchGitLocators are the variables that decide which repository, index and
+// object store a git command reads, and how far up it looks for one. Any of
+// them, inherited from a hook or a wrapper, makes `git -C dir` read another
+// tree than dir (#1487).
+var benchGitLocators = []string{
+	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+	"GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+}
+
+// benchGitEnv is the environment of every git command the bench and its
+// stamp run: the process's own without the benchGitLocators, then extra.
+func benchGitEnv(extra ...string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		//: a locator is dropped so that -C names the tree git reads.
+		if slices.Contains(benchGitLocators, name) {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, extra...)
+}
+
+// benchGit runs git in dir under benchGitEnv(extra...) and returns its
+// trimmed output.
+func benchGit(dir string, extra []string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = benchGitEnv(extra...)
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// benchWorkspace is the workspace root: BUILD_WORKSPACE_DIRECTORY under
+// `bazel run`, whose working directory is the runfiles tree and not the
+// checkout, git's top level under `go test`, "" when neither answers.
+func benchWorkspace() string {
+	if root := os.Getenv("BUILD_WORKSPACE_DIRECTORY"); root != "" {
+		return root
+	}
+	//: the working directory is the package's, inside the checkout.
+	if v, err := benchGit(".", nil, "rev-parse", "--show-toplevel"); err == nil && v != "" {
+		return v
+	}
+	return ""
+}
+
+// benchTreeStamps is the branch and the commit stamp of the workspace the
+// bench ran in, "unknown" for each git does not answer: read in the
+// workspace and not in the working directory, which under `bazel run` is
+// not the repository (#1487).
+func benchTreeStamps() (branch, commit string) {
+	dir := benchWorkspace()
+	//: no workspace answers: the working directory is the last place to ask.
+	if dir == "" {
+		dir = "."
+	}
+	branch, err := benchGit(dir, nil, "rev-parse", "--abbrev-ref", "HEAD")
+	//: a branch git does not name is not guessed.
+	if err != nil || branch == "" {
+		branch = "unknown"
+	}
+	return branch, benchCommitStamp(dir)
+}
+
+// benchCommitStamp is the commit a bench run is dated by, in the git tree
+// at dir: the HEAD's short SHA when the tree is that commit, "uncommitted
+// tree on <sha>" when anything differs from it — a modified, staged or
+// untracked file — because a bench measured on such a tree did not run on
+// the SHA (#1487), and "unknown" without a git tree. extra is added to the
+// git environment, which holds no repository locator. It sits in this file
+// for the same reason as keepHandRun: the generator's lane and
+// consensus_test both compile it.
+func benchCommitStamp(dir string, extra ...string) string {
+	sha, err := benchGit(dir, extra, "rev-parse", "--short", "HEAD")
+	//: no HEAD to name: not a git tree, or one without a commit.
+	if err != nil {
+		return "unknown"
+	}
+	status, err := benchGit(dir, extra, "status", "--porcelain", "--untracked-files=all")
+	//: a tree whose state cannot be read is not claimed to be the commit.
+	if err != nil {
+		return sha + " (tree state unknown)"
+	}
+	//: any line is a path that differs from HEAD.
+	if status != "" {
+		return "uncommitted tree on " + sha
+	}
+	return sha
 }
 
 // A run that measures some sections alone rewrites each in place and keeps
@@ -200,4 +296,178 @@ func TestTheBenchGeneratorWritesNothingOverAReportItCannotRead(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
+}
+
+// The generator dated a run by the HEAD of the tree, so a bench measured
+// on uncommitted work read "at <sha>" for a commit the bench did not run
+// on (#1487): a clean tree is the commit, any change, a staged one or a
+// file git does not track included, is "uncommitted tree on <sha>".
+func TestTheBenchStampNamesTheTreeTheBenchRanOn(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed: the stamp reads a git tree")
+	}
+	type tc struct {
+		name string
+		// edit changes the tree after its one commit.
+		edit func(t *testing.T, dir string)
+		// dirty is whether the stamp must say the tree is not the commit.
+		dirty bool
+	}
+	cases := []tc{
+		{name: "a clean tree", edit: func(*testing.T, string) {}},
+		{name: "a tracked file modified", dirty: true, edit: func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "tracked.go"), []byte("package x // edited\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "a file git does not track", dirty: true, edit: func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "bench_test.go"), []byte("package x\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "a change staged and not committed", dirty: true, edit: func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "staged.go"), []byte("package x\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			gitIn(t, dir, "add", "staged.go")
+		}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		dir := t.TempDir()
+		gitIn(t, dir, "init", "-q")
+		if err := os.WriteFile(filepath.Join(dir, "tracked.go"), []byte("package x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, dir, "add", "tracked.go")
+		gitIn(t, dir, "-c", "user.name=bench", "-c", "user.email=bench@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "one")
+		sha := strings.TrimSpace(gitIn(t, dir, "rev-parse", "--short", "HEAD"))
+		c.edit(t, dir)
+		want := sha
+		if c.dirty {
+			want = "uncommitted tree on " + sha
+		}
+		if got := benchCommitStamp(dir); got != want {
+			t.Fatalf("benchCommitStamp = %q, want %q", got, want)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+	t.Run("not a git tree", func(t *testing.T) {
+		dir := t.TempDir()
+		// No parent of dir may be a repository the stamp could find.
+		t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+		if got := benchCommitStamp(dir); got != "unknown" {
+			t.Fatalf("benchCommitStamp outside a repository = %q, want unknown", got)
+		}
+	})
+}
+
+// A git command of the stamp read the repository its environment named,
+// not the one -C gave it: a hook's GIT_DIR, GIT_INDEX_FILE or GIT_WORK_TREE
+// made a clean tree read as another commit or as a dirty one (#1487). Every
+// locator is cleared from the commands' one environment.
+func TestTheBenchStampIgnoresTheRepositoryTheEnvironmentNames(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed: the stamp reads a git tree")
+	}
+	type tc struct {
+		name string
+		// env gives the variable and its value, other being a second tree.
+		env func(dir, other string) (key, value string)
+	}
+	cases := []tc{
+		{name: "GIT_DIR", env: func(_, other string) (string, string) { return "GIT_DIR", filepath.Join(other, ".git") }},
+		{name: "GIT_WORK_TREE", env: func(_, other string) (string, string) { return "GIT_WORK_TREE", other }},
+		{name: "GIT_INDEX_FILE", env: func(_, other string) (string, string) {
+			return "GIT_INDEX_FILE", filepath.Join(other, ".git", "index")
+		}},
+		{name: "GIT_COMMON_DIR", env: func(_, other string) (string, string) { return "GIT_COMMON_DIR", filepath.Join(other, ".git") }},
+	}
+	commit := func(t *testing.T, dir, file string) string {
+		gitIn(t, dir, "init", "-q")
+		if err := os.WriteFile(filepath.Join(dir, file), []byte("package x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, dir, "add", file)
+		gitIn(t, dir, "-c", "user.name=bench", "-c", "user.email=bench@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-q", "-m", file)
+		return strings.TrimSpace(gitIn(t, dir, "rev-parse", "--short", "HEAD"))
+	}
+	runCase := func(t *testing.T, c tc) {
+		dir, other := t.TempDir(), t.TempDir()
+		want := commit(t, dir, "tracked.go")
+		commit(t, other, "elsewhere.go")
+		key, value := c.env(dir, other)
+		t.Setenv(key, value)
+		if got := benchCommitStamp(dir); got != want {
+			t.Fatalf("with %s=%s, benchCommitStamp = %q, want the clean tree's %q", key, value, got, want)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// Under `bazel run` the working directory is the runfiles tree, not the
+// checkout: the stamp and the branch were read there and always said
+// "unknown" (#1487). They are read in BUILD_WORKSPACE_DIRECTORY, and, under
+// `go test`, in git's top level.
+func TestTheBenchStampsAreReadInTheWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed: the stamp reads a git tree")
+	}
+	type tc struct {
+		name string
+		// edit changes the workspace after its one commit.
+		edit func(t *testing.T, root string)
+		// dirty is whether the stamp must say the tree is not the commit.
+		dirty bool
+	}
+	cases := []tc{
+		{name: "a clean workspace", edit: func(*testing.T, string) {}},
+		{name: "a workspace with a file git does not track", dirty: true, edit: func(t *testing.T, root string) {
+			if err := os.WriteFile(filepath.Join(root, "new_test.go"), []byte("package x\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		root, cwd := t.TempDir(), t.TempDir()
+		gitIn(t, root, "init", "-q", "-b", "stamped")
+		if err := os.WriteFile(filepath.Join(root, "tracked.go"), []byte("package x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, root, "add", "tracked.go")
+		gitIn(t, root, "-c", "user.name=bench", "-c", "user.email=bench@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "one")
+		sha := strings.TrimSpace(gitIn(t, root, "rev-parse", "--short", "HEAD"))
+		c.edit(t, root)
+		want := sha
+		if c.dirty {
+			want = "uncommitted tree on " + sha
+		}
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", root)
+		// The runfiles tree: a directory that is no part of the workspace.
+		t.Chdir(cwd)
+		branch, commit := benchTreeStamps()
+		if branch != "stamped" || commit != want {
+			t.Fatalf("benchTreeStamps from %s = %q, %q; want %q, %q", cwd, branch, commit, "stamped", want)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// gitIn runs git in dir, in the bench's own git environment, and fails the
+// test on an error.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = benchGitEnv()
+	out, err := cmd.CombinedOutput()
+	//: a failed git leaves the test nothing to judge.
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
 }

@@ -1763,6 +1763,7 @@ files:
       - memRun
       - (*memRun).end
       - (*MemoryTransport).Send
+      - (*MemoryNetwork).enqueue
       - (*MemoryTransport).Stream
       - streamCancelWatch
       - (*streamCancelWatch).Read
@@ -1974,6 +1975,7 @@ files:
   - decls:
       - pinAfterStream
       - pinScaleMax
+      - maxPacedStreams
       - sendPin
       - pinFollow
       - (*Node).streamedPin
@@ -3637,6 +3639,17 @@ functions:
     params: w []queuedStream, role func(coreconsensus.NodeID) waiterRole
     results: kept []queuedStream, voter, learner int
   - doc: |-
+      maxPacedStreams is the most snapshot streams a pacer can share without
+      one's moved mark outliving its pin bound. Each of N streams waits for N
+      slices of the pacer's rate between two reads, N/paceSlices seconds, and
+      streamDue cuts one that has not moved for pinAfterStream maximum election
+      timeouts: N stays below it while N*time.Second is at most
+      pinAfterStream*paceSlices*etMax, that is while N is at most etMax over
+      ten milliseconds, 200 at the default 2 s (#1485).
+    name: maxPacedStreams
+    params: etMax time.Duration
+    results: int64
+  - doc: |-
       entrylessFrame is AppendMessage's frame of m, a message without entries,
       in a buffer of MessageHeaderLen bytes, the length of every such frame but
       a forward's trace: grown from nil, the frame took four to five
@@ -5113,7 +5126,12 @@ types:
       - doc: |-
           MaxSnapshotStreams bounds the snapshot streams this node sends at
           once; 0 is 1. A peer in need beyond it waits, its transfer pending,
-          and is served when a stream ends.
+          and is served when a stream ends. While SnapshotStreamBytesPerSecond
+          paces them, more than InitialTiming.ElectionTimeoutMax over ten
+          milliseconds (200 at the default 2 s) is refused as misconfigured:
+          streams sharing the pacer wait N slices of its rate between two
+          reads, and past that bound a healthy stream looks stalled and is
+          cut.
         name: MaxSnapshotStreams
         type: int
       - doc: |-
@@ -7859,6 +7877,19 @@ types:
         params: from, to coreconsensus.NodeID
         recv: n *MemoryNetwork
         results: "*MemoryTransport"
+      - doc: |-
+          enqueue queues a copy of frame from one node to another, on its control
+          lane or its data lane, unless that direction of the link is cut or the
+          destination never joined. The cut is read and the frame queued in one
+          section under the network's lock: a Send that took its destination, then
+          queued once the lock was released, queued its frame after a Cut or an
+          Isolate that had returned, and after the drain of the stopped node's
+          queues that followed, which delivered it at the node's restart (#1564).
+          The queue never blocks, a full lane dropping the frame, so the lock is
+          never held waiting on a receiver.
+        name: enqueue
+        params: from, to coreconsensus.NodeID, frame []byte, control bool
+        recv: n *MemoryNetwork
       - doc: |-
           admitted reports whether at admits peer: always without the admission
           model, else when one of its admitted members is peer under peer's key.

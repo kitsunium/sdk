@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -332,22 +333,52 @@ func sessionRun(seed uint64, unchecked, noDedupe bool) (*sessClients, error) {
 // knows before any append; with that check off, every copy is appended and
 // the apply's fold alone keeps each command applied once.
 func TestBlindSessionRetriesAreAppliedOnce(t *testing.T) {
-	for _, unchecked := range []bool{false, true} {
+	type tc struct {
+		name      string
+		unchecked bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Parallel()
+		var mu sync.Mutex
 		var retries, skipped, known int
-		for _, seed := range seeds(t, 6) {
-			c, err := sessionRun(seed, unchecked, false)
-			if err != nil {
-				t.Fatalf("leader's check off %v: %v", unchecked, err)
-			}
-			retries, skipped, known = retries+c.retries, skipped+c.skipped, known+c.known
+		// The seeds side by side, as every seed loop of the package runs
+		// (eachSeed): one after the other, the twelve runs were one serial
+		// thread of 11 to 13 s under -race and coverage, which a loaded
+		// runner starves, in shard 5 of 27 (#1413).
+		ran := t.Run("seeds", func(t *testing.T) {
+			eachSeed(t, seeds(t, 6), func(t *testing.T, seed uint64) {
+				r, err := sessionRun(seed, c.unchecked, false)
+				//: a run that applied a command twice, or left a history that is not linearizable, fails.
+				if err != nil {
+					t.Fatalf("leader's check off %v: %v", c.unchecked, err)
+				}
+				mu.Lock()
+				retries, skipped, known = retries+r.retries, skipped+r.skipped, known+r.known
+				mu.Unlock()
+			})
+		})
+		//: a failed seed already failed the case: its counts are not judged.
+		if !ran {
+			return
 		}
-		t.Logf("leader's check off %v: retries %d, copies skipped at apply %d, answered from the table %d", unchecked, retries, skipped, known)
+		t.Logf("leader's check off %v: retries %d, copies skipped at apply %d, answered from the table %d", c.unchecked, retries, skipped, known)
+		//: each arm must have put its own mechanism to the test.
 		switch {
-		case !unchecked && known == 0:
+		//: with the leader's check on, some retry is answered from its table.
+		case !c.unchecked && known == 0:
 			t.Fatal("no retry was answered from the leader's table")
-		case unchecked && skipped == 0:
+		//: with it off, some copy reaches the apply's fold.
+		case c.unchecked && skipped == 0:
 			t.Fatal("with the leader's check off no copy was appended: the apply's fold was never put to the test")
 		}
+	}
+	cases := []tc{
+		{name: "leader's check on"},
+		{name: "leader's check off", unchecked: true},
+	}
+	//: both arms, side by side.
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

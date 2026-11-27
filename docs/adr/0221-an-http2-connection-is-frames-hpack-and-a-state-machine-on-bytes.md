@@ -416,3 +416,17 @@ twin now hold h2c to 256 B (`h2cIdleBudget`), the HTTP/1.1 reading logged
 beside it; `TestConnHasNoPointer` holds the entry to 80 bytes. The drain part of
 the criterion is unchanged: ADR 0196's suite runs on h2c (the amendment of
 2026-11-13).
+
+## Amendment 2026-11-26 — an idle reading on one loop (#1572)
+
+Under Bazel's coverage step `TestLoopHTTP2_idleMemory/epoll` read 260 B, past
+the 256 B, with no change to the code it measures: the same test reads 217.5 B
+on 14339e512 and on 31e4a4778. A reading includes the tables' growth, and on two
+loops each ring grows its own: the slot table by steps of 2 048 slots, the
+adapter's entries by half. Which share of the 10 000 connections each loop
+takes is the kernel's, and the scheduler's: an idle machine handed one loop
+99 % of them (217.5 B), two CPUs shared with two busy loops 83 % (259.8 B, the
+CI's figure to the byte). The readings now run on one loop (`idleLoops`), so
+every connection lands on one ring and the growth a reading includes is a
+function of the 10 000 alone: 225 B on epoll and 236 B on io_uring, loaded or
+not. The budget is unchanged.

@@ -3514,7 +3514,7 @@
       "code": {
         "value": "0.2.57.10"
       },
-      "doc": "CodeStateMachineFailed identifies a node whose Apply panicked or could not\ncomplete — the entry IS committed — or whose Restore returned nil on\na snapshot whose end the engine then refused.\n",
+      "doc": "CodeStateMachineFailed identifies a node whose Apply panicked or could not\ncomplete — the entry IS committed — or whose Restore returned nil on\na snapshot whose end the engine then refused. Before an operator\nclears the stop marker this leaves, a DurableStateMachine must be\nverified or rebuilt: the next start trusts its AppliedPosition.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -6464,7 +6464,7 @@
         "reason": "STATE_MACHINE_FAILED",
         "public": "The replicated state machine failed and the node stopped"
       },
-      "doc": "StateMachineFailed stops the node when Apply panics or cannot complete.\nThe entry IS committed: this never means \"not written\". It also stops\nthe node, or fails its start, when Restore returned nil on a snapshot\nwhose end the engine then refused: the machine may hold that state\nwhile the applied position stays below it.\n",
+      "doc": "StateMachineFailed stops the node when Apply panics or cannot complete.\nThe entry IS committed: this never means \"not written\". It also stops\nthe node, or fails its start, when Restore returned nil on a snapshot\nwhose end the engine then refused: the machine may hold that state\nwhile the applied position stays below it. Whatever failed the read\nafter that nil, an I/O error included, is this code: the failing\ncause survives only in the stop's text, and the stop marker is\npermanent. Before an operator clears that marker, a\nDurableStateMachine must be verified or rebuilt, because the next\nstart trusts its AppliedPosition.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -69005,7 +69005,7 @@
         {
           "name": "MaxSnapshotStreams",
           "type": "int",
-          "doc": "MaxSnapshotStreams bounds the snapshot streams this node sends at\nonce; 0 is 1. A peer in need beyond it waits, its transfer pending,\nand is served when a stream ends.\n"
+          "doc": "MaxSnapshotStreams bounds the snapshot streams this node sends at\nonce; 0 is 1. A peer in need beyond it waits, its transfer pending,\nand is served when a stream ends. While SnapshotStreamBytesPerSecond\npaces them, more than InitialTiming.ElectionTimeoutMax over ten\nmilliseconds (200 at the default 2 s) is refused as misconfigured:\nstreams sharing the pacer wait N slices of its rate between two\nreads, and past that bound a healthy stream looks stalled and is\ncut.\n"
         },
         {
           "name": "SnapshotStreamBytesPerSecond",

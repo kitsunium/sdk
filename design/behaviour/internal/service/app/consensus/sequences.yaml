@@ -2200,6 +2200,12 @@ sequences:
               do:
                 - return: misconfigured("SnapshotStreamBytesPerSecond", "negative")
                   to: misconfigured
+            - case: c.SnapshotStreamBytesPerSecond > 0 && int64(c.MaxSnapshotStreams) > maxPacedStreams(c.InitialTiming.ElectionTimeoutMax)
+              do:
+                - return: |-
+                    misconfigured("MaxSnapshotStreams", "above "+strconv.FormatInt(maxPacedStreams(c.InitialTiming.ElectionTimeoutMax), 10)+
+                    			", ElectionTimeoutMax over ten milliseconds, while SnapshotStreamBytesPerSecond paces them")
+                  to: misconfigured
             - case: framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead)
               do:
                 - return: misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
@@ -10015,32 +10021,40 @@ sequences:
         kind: actor
       - id: (*MemoryTransport).Send
         kind: self
-      - id: t.net.route
-        kind: internal
       - id: wire
         kind: package
+      - id: t.net.enqueue
+        kind: internal
     steps:
-      - bind: dst
-        eval: t.net.route(t.id, to)
-        to: t.net.route
       - opt:
           do:
             - return: ""
-          when: dst == nil || !t.net.admitted(t, to)
+          when: "!t.net.admitted(t, to)"
+      - bind: lane, err
+        eval: wire.Lane(frame)
+        to: wire
+      - eval: t.net.enqueue(t.id, to, frame, err == nil && lane == coreconsensus.LaneControl)
+        to: t.net.enqueue
+  - of: (*MemoryNetwork).enqueue
+    steps:
+      - lock:
+          mutex: n.mu
+      - bind: dst
+        eval: n.nodes[to]
+      - opt:
+          do:
+            - return: ""
+          when: n.cut[[2]coreconsensus.NodeID{from, to}] || dst == nil
       - bind: q
         eval: dst.data
       - opt:
           do:
             - set: q
               value: dst.ctrl
-          init:
-            bind: lane, err
-            eval: wire.Lane(frame)
-            to: wire
-          when: err == nil && lane == coreconsensus.LaneControl
+          when: control
       - select:
           cases:
-            - comm: "q <- memFrame{from: t.id, frame: bytes.Clone(frame)}"
+            - comm: "q <- memFrame{from: from, frame: bytes.Clone(frame)}"
             - default: true
   - of: (*MemoryTransport).Stream
     participants:
@@ -15099,6 +15113,9 @@ sequences:
         eval: n.cuttingSince.Load()
         to: n.cuttingSince.Load
       - return: since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
+  - of: maxPacedStreams
+    steps:
+      - return: int64(etMax / (time.Second / time.Duration(pinAfterStream*paceSlices)))
   - of: (*Node).streamedPin
     steps:
       - return: "sendPin{index: index, since: now.UnixNano(), until: now.Add(n.pinBound(to)), follow: &pinFollow{at: index, lag: last - min(last, index)}}"

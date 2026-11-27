@@ -1369,6 +1369,15 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   does not list when the test turns the admission model on
   (`MemoryNetwork.admission`): the suites never saw #542 because the double
   admitted everyone (`TestTheMemoryAdmissionModelRefusesAnUnknownSender`).
+- Queue a `MemoryTransport.Send` frame after the network's lock that read
+  the cut is released: a `Send` that took its destination before an
+  `Isolate` queued its frame after the drain of `stopHearing`, and the
+  restarted node read entries past the end `stopBehind` returned. The cut
+  is read and the frame queued in one section under that lock
+  (`MemoryNetwork.enqueue`), which a full lane never holds, since it drops
+  (#1564, `TestASendRoutedBeforeACutQueuesNothingAfterTheDrain`). The
+  exported double changes behaviour: a `Cut` or `Isolate` that returned
+  leaves nothing queued on that link by a `Send` already under way.
 - Leave a voter that came back behind a leader its configuration does not
   list with no way to hear it: a follower of a live leader answers its
   PreVote with that leader's committed record, which it admits for
@@ -1571,6 +1580,11 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   beyond it waits in raft's snapshot state, holding no pin, and
   `serveWaiting` starts it, in `nextWaiter`'s order (below), when a stream
   ends (`streamWait`, cleared by `leadershipChanged`).
+  Past `maxPacedStreams` (`ElectionTimeoutMax` over ten milliseconds, 200 at
+  the default 2 s) `MaxSnapshotStreams` is refused by `refuseBounds` while the
+  rate is set, `CONSENSUS_MISCONFIGURED` naming the bound: N streams on one
+  pacer wait N slices between two reads, and past it `streamDue` cut
+  healthy streams (#1485).
   `SnapshotStreamBytesPerSecond` paces every stream together with one token
   bucket on the node's clock (`pacer`, `node_pace.go`), never the wall
   clock: a read is cut to a tenth of the rate and paid after it, its

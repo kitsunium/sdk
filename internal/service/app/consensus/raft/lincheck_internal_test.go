@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"math/bits"
 	"slices"
 	"strings"
 	"testing"
@@ -57,9 +58,28 @@ func linearizable(ops []kvOp) (bool, string) {
 // the unmutated workload, whose history is long, was searched in 25 s of
 // one thread under coverage, 6 s now. It held the coverage shard that runs
 // it, //internal/service/app/consensus/raft:raft_test shard 5 of 27, past
-// its 60 s on the CI runner (#1413). The search, and what it memoizes, are
-// unchanged.
+// its 60 s on the CI runner (#1413).
+//
+// Each step of the search then still read every operation of the history
+// twice, placed or not, to find the earliest return and the candidates,
+// and seed 6 still took 6.8 s of one thread under coverage, 1.9 s scanned
+// as below, with the shard at 80 s on two loaded CPUs. The operations are
+// sorted by call and each returns at or after its call, so a scan starts
+// at the first operation not placed yet and stops at the first one called
+// after the earliest return: none past it can return earlier, nor come
+// first. The search, the candidates it tries, their order and what it
+// memoizes are unchanged. A known operation returning before its call,
+// which no run records, is never a candidate under either scan: the
+// earliest return is at or before its own, so the history has no
+// linearization either way.
 func linearizableKey(ops []kvOp) bool {
+	return linearizableKeyScan(ops, true)
+}
+
+// linearizableKeyScan is linearizableKey's search; bounded false scans
+// every operation at each step, as the search did before #1413, so a test
+// can hold the bounded scans to the same answers.
+func linearizableKeyScan(ops []kvOp, bounded bool) bool {
 	slices.SortFunc(ops, func(a, b kvOp) int {
 		switch {
 		case a.call < b.call:
@@ -79,6 +99,22 @@ func linearizableKey(ops []kvOp) bool {
 			required++
 		}
 	}
+	// firstOpen is the first operation not placed yet: every one before it
+	// is placed, so a scan starts there.
+	firstOpen := func() int {
+		//: the whole scan starts at the first operation.
+		if !bounded {
+			return 0
+		}
+		//: the first word with a bit clear holds the first operation open.
+		for w, word := range done {
+			//: a word with every operation placed is passed over.
+			if word != math.MaxUint64 {
+				return min(w*64+bits.TrailingZeros64(^word), n)
+			}
+		}
+		return n
+	}
 	memo := map[string]bool{}
 	var search func(state string, left int) bool
 	search = func(state string, left int) bool {
@@ -97,12 +133,27 @@ func linearizableKey(ops []kvOp) bool {
 		// The earliest return among the operations still to place: nothing
 		// called after it can come first.
 		minRet := int64(math.MaxInt64)
-		for i, o := range ops {
+		lo := firstOpen()
+		//: the operations from the first open one, in call order.
+		for i := lo; i < n; i++ {
+			o := &ops[i]
+			//: called after the earliest return so far: so are the rest, and each returns later still.
+			if bounded && o.call > minRet {
+				break
+			}
+			//: an open operation returning earlier lowers the bound.
 			if !placed(i) && o.ret < minRet {
 				minRet = o.ret
 			}
 		}
-		for i, o := range ops {
+		//: the candidates, in call order, from the first open operation.
+		for i := lo; i < n; i++ {
+			o := &ops[i]
+			//: called after the earliest return: neither it nor any later one can come first.
+			if bounded && o.call > minRet {
+				break
+			}
+			//: a placed operation, or one called after the earliest return, is no candidate.
 			if placed(i) || o.call > minRet {
 				continue
 			}
@@ -432,7 +483,7 @@ func (w *kvWorld) history() []kvOp {
 // TestLinearizableUnderFaults runs clients reading through ReadIndex, on
 // every node, with partitions, drops and crashes, and checks the history.
 func TestLinearizableUnderFaults(t *testing.T) {
-	eachSeed(t, seeds(t, 12), func(t *testing.T, seed uint64) {
+	eachSeed(t, seeds(t, linearizableUnderFaultsSeeds), func(t *testing.T, seed uint64) {
 		if err := linearizableRun(seed, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -505,9 +556,13 @@ func linearizableRunWith(opt simOptions) error {
 }
 
 // simLinearizableSeeds is how many seeds, from 1, checkSimLinearizable
-// runs. TestChecksPassUnmutated runs the same seeds, one parallel subtest
-// each.
+// runs. Unmutated, they are runs of TestLinearizableUnderFaults, which
+// TestChecksPassUnmutated therefore does not run again (#1413).
 const simLinearizableSeeds = 8
+
+// linearizableUnderFaultsSeeds is how many seeds, from 1,
+// TestLinearizableUnderFaults runs: at least simLinearizableSeeds.
+const linearizableUnderFaultsSeeds = 12
 
 func checkSimLinearizable(mut mutation) error {
 	for seed := uint64(1); seed <= simLinearizableSeeds; seed++ {

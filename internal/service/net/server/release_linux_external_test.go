@@ -8,12 +8,19 @@ import (
 	"github.com/kitsunium/sdk/internal/service/net/server"
 )
 
+// serverListeners is nil here: the kernel's table names the sockets by inode.
+func serverListeners(t *testing.T, _ string) []int {
+	t.Helper()
+	//: the table is read after Close, whole.
+	return nil
+}
+
 // releasedAfterClose holds that Close released addr: no listening socket of
 // this process is left on it, read in the kernel's tables by inode
 // (/proc/self/fd). A rebind would also answer for sockets that are not this
 // process's to release — a copy of the descriptor table a concurrent fork
 // holds until its exec, a port another process drew in between (#1386).
-func releasedAfterClose(t *testing.T, addr string) {
+func releasedAfterClose(t *testing.T, addr string, _ []int) {
 	t.Helper()
 	if n := server.OwnListenersOn(t, addr); n != 0 {
 		t.Fatalf("%d listening sockets of this process still on %s after Close", n, addr)

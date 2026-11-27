@@ -552,36 +552,34 @@ var checks = map[string]func(mutation) error{
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
-	runCase := func(t *testing.T, seed uint64) {
-		//: an unmutated seed whose history is not linearizable fails.
-		if err := linearizableRun(seed, 0); err != nil {
-			t.Errorf("simulated linearizability: %v", err)
+	runCase := func(t *testing.T, name string, c func(mutation) error) {
+		t.Parallel()
+		//: the linearizability check's unmutated runs are TestLinearizableUnderFaults's.
+		if name == "simulated linearizability" {
+			// checkSimLinearizable(0) is linearizableRun(seed, 0) for the
+			// seeds 1 to simLinearizableSeeds, and TestLinearizableUnderFaults
+			// runs those very runs, each a deterministic simulation, among
+			// its seeds 1 to linearizableUnderFaultsSeeds. Run here again,
+			// they were 7 of this test's 9 CPU-seconds under -race and
+			// coverage, four threads of them beside three seed parts in
+			// shard 5 of 27, which overran its 60 s on the CI runner
+			// (#1413). The mutated runs stay TestMutationsAreCaught's.
+			//: fewer seeds there would leave some of these runs unrun.
+			if simLinearizableSeeds > linearizableUnderFaultsSeeds {
+				t.Fatalf("TestLinearizableUnderFaults runs %d seeds, fewer than the %d of checkSimLinearizable", linearizableUnderFaultsSeeds, simLinearizableSeeds)
+			}
+			return
+		}
+		//: any other check runs whole.
+		if err := c(0); err != nil {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
-	// One parallel subtest per check: they share no state, and the two
-	// simulated ones are most of the target's serial CPU (#304, eachSeed).
+	// One parallel subtest per check: they share no state, and the
+	// simulated one is most of the target's serial CPU (#304, eachSeed).
 	//: every check passes on the unmutated node.
 	for name, c := range checks {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			//: the linearizability check runs its seeds side by side.
-			if name == "simulated linearizability" {
-				// Its seeds one after the other took 40 of the 60 s a
-				// Bazel coverage shard has under -race, and timed it out
-				// on the CI runner: the same seeds, in parallel.
-				all := make([]uint64, simLinearizableSeeds)
-				//: the seeds 1 to simLinearizableSeeds, as checkSimLinearizable runs them.
-				for i := range all {
-					all[i] = uint64(i + 1)
-				}
-				eachSeed(t, all, runCase)
-				return
-			}
-			//: any other check runs whole.
-			if err := c(0); err != nil {
-				t.Errorf("%s: %v", name, err)
-			}
-		})
+		t.Run(name, func(t *testing.T) { runCase(t, name, c) })
 	}
 }
 

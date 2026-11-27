@@ -111,6 +111,7 @@ go_test(
         "zwindowfencelive_internal_test.go",
         "zwindowfencemarks_internal_test.go",
         "zwindowforward_internal_test.go",
+        "zzlinscan_internal_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":raft"],

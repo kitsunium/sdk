@@ -147,6 +147,18 @@ runs them as parallel subtests (`eachSeed`) — never fewer seeds (#126, #304).
 A new heavy suite follows the same shape; measure every shard side by side
 under coverage before touching `shard_count`.
 
+Under `bazel coverage` the race build counts atomically, and the counters
+are shared: shard 5 of 27 took 15 CPU-seconds under `-race`, 42 under
+`-race -cover` with its seeds one at a time and 77 with them on four
+threads (#1413). Serial seeds are no remedy, a loaded runner starves them (80 s
+against 60 s on four threads, on two CPUs two busy loops share): a shard is
+made cheaper by running less. #1413 took three things out of shard 5: the
+checker's scans of every operation at each step of its search
+(`linearizableKey`, held to the whole scans by
+`TestTheBoundedScansAnswerAsTheWholeScans`), `TestChecksPassUnmutated`'s
+second run of eight of `TestLinearizableUnderFaults`'s twelve seeds, and the
+serial seed loop of `TestBlindSessionRetriesAreAppliedOnce`, now `eachSeed`.
+
 ## Do NOT
 
 - Copy an appended entry's `Data` out of the message `Step` was handed: the

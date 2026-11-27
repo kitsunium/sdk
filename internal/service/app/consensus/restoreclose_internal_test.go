@@ -167,16 +167,18 @@ func TestARestoreWhoseHandleFailsToCloseStillInstalls(t *testing.T) {
 			tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 		}
 		c.waitApplied(tok.Index, 10*time.Second)
-		held := tok.Index
 		// Isolated while stopped: past the live logs' start, only an install
 		// can catch it up (see TestAnInstallKeepsTheTwoNewestSnapshots).
-		c.net.Isolate(lag.id, true)
-		c.kill(lag)
+		end := stopBehind(c, lag)
 		//: the state the install carries, past the logs the others keep.
 		for i := 100; i < 300; i++ {
 			tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 		}
-		compactedPast(t, c, held+1)
+		// Past the entry after the stopped node's end, not past the last
+		// entry it applied plus one: a log based there still knows the term
+		// at the node's end when anything reached it past that entry, and
+		// feeds it by appends.
+		compactedPast(t, c, end+1)
 		lagID.Store(uint64(lag.id))
 		c.start(lag)
 		// Armed once started: the start's own restore reads a handle that

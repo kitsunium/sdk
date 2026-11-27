@@ -375,6 +375,9 @@ func proposeOnLeader(t *testing.T, c *cluster, kv string) coreconsensus.TokenVal
 // compactedPast waits until the log of every live node starts past index:
 // whichever of them leads when the stopped node comes back, it can only
 // catch that node up by an install, which is what the callers exercise.
+// A caller passes the end stopBehind returned plus one: a log that starts
+// at end+1 is based at end, still knows the term there, and feeds the node
+// by appends (#1564, #1577).
 func compactedPast(t *testing.T, c *cluster, index uint64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -1370,13 +1373,14 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 	// linux/386). The crash is armed before the leader can reach the
 	// restarted node: armed after, an install that published in between left
 	// nothing to crash and the wait below timed out (#304, macOS).
-	c.net.Isolate(lag.id, true)
-	c.kill(lag)
+	end := stopBehind(c, lag)
 	var tok coreconsensus.TokenValue
 	for i := range 200 {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
-	compactedPast(t, c, 10)
+	// Past the entry after the stopped node's end: a log based at that
+	// entry still knows the term at the node's end and feeds it by appends.
+	compactedPast(t, c, end+1)
 	c.start(lag)
 	lag.node.crashAfterPublish.Store(true)
 	c.net.Isolate(lag.id, false)
@@ -1431,12 +1435,14 @@ func TestAnInstallKeepsTheTwoNewestSnapshots(t *testing.T) {
 	// Isolated while stopped, so that what the leader sends meanwhile is not
 	// kept for its restart: past the live logs' start, only an install can
 	// catch it up (see TestInstallResumesAfterACrashAtPublication).
-	c.net.Isolate(lag.id, true)
-	c.kill(lag)
+	end := stopBehind(c, lag)
 	for i := 100; i < 300; i++ {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
-	compactedPast(t, c, held+1)
+	// Past the entry after the stopped node's end, not past held+1: a
+	// log based at held+1 still knows the term there, which the node
+	// holds when anything reached it past held, and feeds it by appends.
+	compactedPast(t, c, end+1)
 	c.start(lag)
 	c.net.Isolate(lag.id, false)
 	c.waitApplied(tok.Index, 10*time.Second)

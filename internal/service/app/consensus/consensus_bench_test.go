@@ -226,18 +226,6 @@ type benchDevice struct {
 	Name, Dir, Device, FS, Skip string
 }
 
-// benchWorkspace is the workspace root: BUILD_WORKSPACE_DIRECTORY under
-// `bazel run`, git's top level under `go test`, "" when neither answers.
-func benchWorkspace() string {
-	if root := os.Getenv("BUILD_WORKSPACE_DIRECTORY"); root != "" {
-		return root
-	}
-	if v, ok := benchCmd("git", "rev-parse", "--show-toplevel"); ok {
-		return v
-	}
-	return ""
-}
-
 // benchDevices is what CONSENSUS_BENCH_DEVICES names, else the data disk
 // (.bench/consensus under the workspace, the disk the checkout is on) and
 // the tmpfs at /dev/shm where one is mounted.
@@ -1170,8 +1158,10 @@ func collectBenchEnvelope() benchEnvelope {
 		osName = strings.Trim(v, `"`)
 	}
 	kernel, kok := benchCmd("uname", "-sr")
-	branch, bok := benchCmd("git", "rev-parse", "--abbrev-ref", "HEAD")
-	commit, cok := benchCmd("git", "rev-parse", "--short", "HEAD")
+	// The stamp says "uncommitted tree on <sha>" for a tree that is not the
+	// commit, the case of a bench run on work not yet committed (#1487); both
+	// read the workspace, not the runfiles tree `bazel run` starts in.
+	branch, commit := benchTreeStamps()
 	bt := "1s"
 	if f := flag.Lookup("test.benchtime"); f != nil {
 		bt = f.Value.String()
@@ -1179,7 +1169,7 @@ func collectBenchEnvelope() benchEnvelope {
 	return benchEnvelope{
 		CPU: or(cpu, ok), Cores: fmt.Sprint(runtime.NumCPU()), RAM: ram, OS: osName, Kernel: or(kernel, kok),
 		Arch: runtime.GOARCH, Go: runtime.Version() + " " + runtime.GOOS + "/" + runtime.GOARCH,
-		Branch: or(branch, bok), Commit: or(commit, cok), At: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		Branch: branch, Commit: commit, At: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		BenchTime: bt,
 	}
 }
@@ -1424,12 +1414,12 @@ func (rep *benchReport) streamSection(env benchEnvelope) string {
 		csWindowA.Seconds(), csSettle.Seconds())
 	b.WriteString("**B / A** — B's p99 over the p99 of both A pooled — is the ratio #920 bounds: one cluster, so it never compares two runs, and the order A B A cancels a linear drift. ")
 	b.WriteString("B / `TCP/<device>/paced`, the ratio #1365 asks for, divides by that row of the same generation, another cluster at another time ")
-	b.WriteString("(measured again just before the op when this section is rewritten alone): printed against the same bound, for information. ")
+	b.WriteString("(measured again just before the op when this section is rewritten alone): printed for information. ")
 	fmt.Fprintf(&b, "The rate is fixed before measuring at %d MiB/s, the rate a hand-run bench missed the bound at. ", csJudgedRate>>20)
 	b.WriteString("The leader's fdatasync, the collections and the scheduling delay of each window tell a disk, a collection or the scheduler apart from the stream. ")
-	b.WriteString("One op is one measure on this host: the verdict is the A/B lane's, below. ")
+	fmt.Fprintf(&b, "One op is one measure on this host, and a ratio of this table is a reading, never a verdict against the %.2f bound: the verdict is the runner's A/B lane (`%s/`, `<suite>-<base>.verdict.md`), below. ", csBound, benchVerdictDir)
 	b.WriteString(env.measuredOn() + "\n\n")
-	fmt.Fprintf(&b, "| Row | Rate | Snapshot | Commits A / B | commit p99, A | commit p99, B | B / A, bound %.2f | `TCP/<device>/paced` commit p99 | B / `TCP/<device>/paced`, bound %.2f | fdatasync p99, A / B | GC cycles, A / B | sched p99, A / B | Stream through B |\n", csBound, csBound)
+	b.WriteString("| Row | Rate | Snapshot | Commits A / B | commit p99, A | commit p99, B | B / A, this host's reading | `TCP/<device>/paced` commit p99 | B / `TCP/<device>/paced`, this host's reading | fdatasync p99, A / B | GC cycles, A / B | sched p99, A / B | Stream through B |\n")
 	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range rep.streams {
 		b.WriteString(r.line())
@@ -1459,17 +1449,15 @@ func (r benchStreamRow) line() string {
 		a.gcCycles, s.gcCycles, a.sched.quantile(0.99)*1e6, s.sched.quantile(0.99)*1e6, s.streamRate(), float64(r.res.left)/(1<<20))
 }
 
-// streamRatio is num over den against csBound: the ratio and whether this
-// run met it.
+// streamRatio is num over den, this host's reading and nothing more: the
+// verdict on the bound is the A/B lane's, on the runner, never one
+// measured on this host's disk or a shared VM (#1487).
 func streamRatio(num, den float64) string {
+	//: no baseline to divide by.
 	if den <= 0 {
 		return "—"
 	}
-	ratio := num / den
-	if ratio <= csBound {
-		return fmt.Sprintf("%.3f, met", ratio)
-	}
-	return fmt.Sprintf("%.3f, **not met**", ratio)
+	return fmt.Sprintf("%.3f", num/den)
 }
 
 // streamVerdictsText is the A/B lane's verdicts on the stream rows, as
