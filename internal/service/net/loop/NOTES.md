@@ -151,10 +151,16 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   6.12 host (`TestURingTaskrunFlag_raisedOverNoWork`). A raised flag
   therefore vetoes `heldBatches` (`reapRounds`, 4) batches running that
   reap nothing on the ring, then the ring is caught up whatever it reads
-  (`uRing.heldIdle`, started again by any reap that brings something): work
-  truly held in `retry_llist` runs 20 at a time on every GETEVENTS enter,
-  some 400 works in those batches, while a stale flag costs a quiet ring 4
-  ticks, far under `drainQuiet` (`TestURingCatchUp_staleFlagQuietRing`).
+  (`uRing.heldIdle`, started again by any reap that brings something, and by
+  a round that reads the flag clear): what keeps a held recv from crossing
+  that bound is the drain's plain wait, each batch's first step, which runs
+  the local work until one completion posts (`io_cqring_wait_schedule`
+  answers 1 while any is pending, v6.13:2487), so a recv held behind works
+  that post nothing runs by the next batch's wait at the latest and its
+  completion starts the count again; every GETEVENTS enter besides runs at
+  least 20 works. A stale flag costs a quiet ring 4 ticks, far under
+  `drainQuiet` (`TestURingCatchUp_staleFlagQuietRing`,
+  `TestURingCatchUp_heldCountRestarts`, `TestURingCatchUp_flagClearRestartsCount`).
   Before 6.13 an enter runs every work queued when it started and the flag
   only adds a round when work came meanwhile. A ring without the flag — a
   secondary, a loop without `uring-defer-taskrun`, the row switched off by

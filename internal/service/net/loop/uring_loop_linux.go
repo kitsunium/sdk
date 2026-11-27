@@ -67,11 +67,14 @@ const (
 	// linked SQE's next, on 6.8 any enter, from 6.12 one short of
 	// min_events, as the grouped wait asks — leaves it raised over an
 	// empty list until the next work comes (#1595). Work truly held in
-	// retry_llist runs IO_LOCAL_TW_DEFAULT_MAX (20) at a time on every
-	// GETEVENTS enter: a batch enters once to wait and reapRounds times to
-	// catch up, so heldBatches batches reaping nothing ran some 400 works
-	// that posted nothing, while a stale flag costs a quiet ring heldBatches
-	// ticks, far under drainQuiet.
+	// retry_llist is not what the bound lets through: the drain's plain wait,
+	// each batch's first step, runs the local work until one completion
+	// posts (io_cqring_wait_schedule answers 1 while any is pending), so a
+	// recv held behind works that post nothing is run by the next batch's
+	// wait at the latest, and its completion starts the count again. Each
+	// GETEVENTS enter besides runs at least IO_LOCAL_TW_DEFAULT_MAX (20)
+	// works. A stale flag costs a quiet ring heldBatches ticks, far under
+	// drainQuiet.
 	heldBatches int = reapRounds
 	// staleFill is the byte a provided buffer is overwritten with under the
 	// fill hook: a stale byte read back shows as it.
@@ -1421,7 +1424,10 @@ func (rr *uRing) readHeld() bool {
 
 // countHeld counts a catch-up that ended behind: one batch more held on
 // IORING_SQ_TASKRUN alone when its rounds reaped nothing since start, the
-// count started again when they reaped anything.
+// count started again when they reaped anything — also when a round reads the
+// flag clear (readHeld). The count is what the drain's wait leaves to guard
+// against, not the protection itself: that wait runs the local work until a
+// completion posts.
 func (rr *uRing) countHeld(start uint64) {
 	//: nothing reaped: the flag alone kept the ring behind.
 	if rr.r.st.completions == start {
