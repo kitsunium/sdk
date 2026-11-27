@@ -4415,7 +4415,7 @@ sequences:
         value: st.lane.AppendCredits(&e.conn, st.out)
       - bind: out
         eval: st.out[off:]
-      - eval: a.writeClose(io, slot.ref, out, st.lane.Closing(&e.conn) || st.lane.Done(&e.conn))
+      - eval: a.writeClose(io, slot.ref, out, a.ends(st, e))
         to: a.writeClose
       - set: st.out
         value: st.out[:off]
@@ -4720,8 +4720,6 @@ sequences:
         kind: self
       - id: st.writeGoAway
         kind: internal
-      - id: swallowErr
-        kind: internal
     steps:
       - opt:
           do:
@@ -4731,11 +4729,6 @@ sequences:
             - eval: st.writeGoAway(io, ref, e)
               to: st.writeGoAway
           when: e.flags&entryGoAway == 0 && !st.lane.Closing(&e.conn)
-      - opt:
-          do:
-            - eval: swallowErr(io.Close(ref))
-              to: swallowErr
-          when: st.lane.Done(&e.conn) && e.activeAt != st.lane.epoch
   - of: (*laneState).writeGoAway
     participants:
       - id: caller
@@ -6150,7 +6143,10 @@ sequences:
           do:
             - eval: swallowErr(io.Close(ref))
               to: swallowErr
-          when: e.flags&entryEnded != 0 || st.lane.Closing(&e.conn) || st.lane.Done(&e.conn)
+          when: e.flags&entryEnded != 0 || a.ends(st, e)
+  - of: (*LoopHandler).ends
+    steps:
+      - return: st.lane.Closing(&e.conn) || (st.lane.Done(&e.conn) && !a.draining.Load())
   - of: (*laneState).endBatch
     participants:
       - id: caller

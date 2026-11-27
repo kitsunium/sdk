@@ -990,6 +990,7 @@ files:
       - (*laneState).credit
       - (*laneState).writeAll
       - (*LoopHandler).closeIfDone
+      - (*LoopHandler).ends
       - (*laneState).endBatch
     name: loop_serve.go
 functions:
@@ -1209,7 +1210,8 @@ functions:
     results: int
   - doc: |-
       runDrainGoAway is the op the drain posts: on the lane's thread, it writes
-      GOAWAY on every HTTP/2 connection and closes those with no open stream.
+      GOAWAY on every HTTP/2 connection; the engine's drain closes them once
+      nothing is in flight (ends).
     name: runDrainGoAway
     params: io corenet.LoopIO, key uintptr
   - doc: |-
@@ -2414,10 +2416,24 @@ types:
         recv: a *LoopHandler
       - doc: |-
           closeIfDone closes ref when its output was refused, a protocol error ended
-          it, or a GOAWAY went out and no stream is left open.
+          it, or a GOAWAY went out and no stream is left open (ends).
         name: closeIfDone
         params: io corenet.LoopIO, ref corenet.LoopConnRef, st *laneState
-        recv: "*LoopHandler"
+        recv: a *LoopHandler
+      - doc: |-
+          ends reports whether the adapter closes e's connection itself: a
+          connection error ended it, or a GOAWAY went out and no stream is left open
+          while the group serves. Once the drain has begun, a connection with nothing
+          more to serve is the engine's to close, as Draining's contract has it: its
+          close is the drain's, which shuts the writing side first and reads on
+          (lingers), so the GOAWAY is read whenever the client reads. Closed here, the
+          close raced the engine's drain: run before the engine knew of it, by the
+          announcement Draining posts, it closed at once, and a client frame arriving
+          after it reset the connection with the GOAWAY unread (#1609).
+        name: ends
+        params: st *laneState, e *connEntry
+        recv: a *LoopHandler
+        results: bool
     name: LoopHandler
   - doc: |-
       connEntry is one connection of a lane. An idle HTTP/2 connection holds this
@@ -2746,14 +2762,13 @@ types:
         params: io corenet.LoopIO
         recv: st *laneState
       - doc: |-
-          announceConn writes GOAWAY(NO_ERROR) on one connection and closes it when
-          nothing is in flight. A connection the batch fed is left to the batch's
-          end: the answers it was given wait in the batch's output, written at
-          OnBatchEnd, which then closes it (closeIfDone); a close here would refuse
-          them, and its streams, answered already, no longer count as in flight
-          (#1385). Its GOAWAY joins that output, behind it: the batch's output may
-          open with the server's SETTINGS, which RFC 9113 §3.4 makes the
-          connection's first frame, and written at once the GOAWAY came first.
+          announceConn writes GOAWAY(NO_ERROR) on one connection, and leaves its
+          close to the engine's drain (ends): InFlight keeps it while a stream is
+          open, and the drain closes it once nothing is in flight and its output has
+          left. A connection the batch fed has its GOAWAY join the batch's output,
+          behind it: the batch's output may open with the server's SETTINGS, which
+          RFC 9113 §3.4 makes the connection's first frame, and written at once the
+          GOAWAY came first (#1385).
         name: announceConn
         params: io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry
         recv: st *laneState

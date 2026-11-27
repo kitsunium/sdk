@@ -50,9 +50,10 @@ func frameTypes(out []byte) []corehttp2.FrameType {
 // TestLoopHandler_drainAnnouncedMidBatchKeepsTheBatchsAnswers pins #1385 on
 // the adapter: the drain's GOAWAY, run on the lane's thread in the batch that
 // fed a request, after it was served and before OnBatchEnd wrote its answer,
-// leaves the connection to the batch's end, which writes the answer and then
-// closes it. The announcement closed it at once — its stream, answered in the
-// protocol's state, no longer in flight — and the answer was refused.
+// leaves the connection to the batch's end, which writes the answer, and its
+// close to the engine's drain (#1609). The announcement closed it at once —
+// its stream, answered in the protocol's state, no longer in flight — and
+// the answer was refused.
 func TestLoopHandler_drainAnnouncedMidBatchKeepsTheBatchsAnswers(t *testing.T) {
 	type tc struct {
 		name string
@@ -102,8 +103,10 @@ func TestLoopHandler_drainAnnouncedMidBatchKeepsTheBatchsAnswers(t *testing.T) {
 		if slices.Index(order, corehttp2.FrameGoAway) < slices.Index(order, corehttp2.FrameData) {
 			t.Fatalf("the connection's frames %v, want the GOAWAY behind the answer", order)
 		}
-		if !io.closed[ref] {
-			t.Fatal("the drained connection, its stream answered, was left open")
+		// Its close is the engine's drain's (#1609): the adapter leaves it
+		// open, no longer in flight, for the drain to close with a linger.
+		if io.closed[ref] {
+			t.Fatal("the adapter closed the drained connection: its close is the engine's drain's")
 		}
 		if a.InFlight(0, ref) {
 			t.Fatal("the drained connection is still in flight")
@@ -139,8 +142,8 @@ func (o *sentJobs) Send(_ corenet.LoopIO, job corenet.LoopJobValue) error {
 // drain's GOAWAY behind the connection's SETTINGS, the worker's answer comes
 // back. Written and closed at once, it went out ahead of the SETTINGS and the
 // GOAWAY, and its close refused them at the batch's end; it now joins the
-// batch's output, and the batch's end writes it in order — SETTINGS first —,
-// then closes.
+// batch's output, and the batch's end writes it in order — SETTINGS first —;
+// the close is the engine's drain's (#1609).
 func TestLoopHandler_aWorkersAnswerInTheDrainingBatchFollowsItsOutput(t *testing.T) {
 	type tc struct {
 		name string
@@ -186,8 +189,12 @@ func TestLoopHandler_aWorkersAnswerInTheDrainingBatchFollowsItsOutput(t *testing
 		if !hasFrame(io.out[ref], corehttp2.FrameGoAway, 0) {
 			t.Fatalf("the connection's frames %v, want a GOAWAY", order)
 		}
-		if !io.closed[ref] {
-			t.Fatal("the drained connection, its stream answered, was left open")
+		// Its close is the engine's drain's (#1609), once no longer in flight.
+		if io.closed[ref] {
+			t.Fatal("the adapter closed the drained connection: its close is the engine's drain's")
+		}
+		if a.InFlight(0, ref) {
+			t.Fatal("the drained connection, its stream answered, is still in flight")
 		}
 	}
 	for _, c := range []tc{{name: "draining", draining: true}, {name: "serving"}} {
@@ -202,7 +209,8 @@ func TestLoopHandler_aWorkersAnswerInTheDrainingBatchFollowsItsOutput(t *testing
 // preface made it HTTP/2 with no GOAWAY to come, nothing in flight, and the
 // drain closed it silent: the client saw EOF where #961's fourth criterion
 // promises GOAWAY(NO_ERROR) before a clean close. Its GOAWAY now follows the
-// batch's SETTINGS, any answer the batch gave it, and the batch's end closes it.
+// batch's SETTINGS and any answer the batch gave it, and the engine's drain
+// closes it, nothing in flight.
 func TestLoopHandler_aConnectionKnownAsHTTP2AfterTheAnnouncementGetsItsGoAway(t *testing.T) {
 	type tc struct {
 		name string
@@ -263,9 +271,13 @@ func TestLoopHandler_aConnectionKnownAsHTTP2AfterTheAnnouncementGetsItsGoAway(t 
 				t.Fatalf("the connection's frames %v, want the GOAWAY behind the answer", order)
 			}
 		}
-		//: nothing in flight: the batch's end closed it, after its output.
-		if !io.closed[ref] {
-			t.Fatal("the drained connection, nothing in flight, was left open")
+		//: nothing in flight: left to the engine's drain, which closes it
+		//: with a linger (#1609).
+		if io.closed[ref] {
+			t.Fatal("the adapter closed the drained connection: its close is the engine's drain's")
+		}
+		if a.InFlight(0, ref) {
+			t.Fatal("the drained connection, nothing in flight, is still in flight")
 		}
 	}
 	for _, c := range []tc{
