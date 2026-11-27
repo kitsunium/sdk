@@ -84,6 +84,7 @@ func TestAnInstallPublishesItsAppliedPositionWithItsConfiguration(t *testing.T) 
 		<-held
 		var applied uint64
 		var conf coreconsensus.MembershipValue
+		var snapAt uint64
 		observed := make(chan struct{})
 		// Queued while the loop is held and before the restore ends, so
 		// ahead of installed's exec: execc is a FIFO.
@@ -99,6 +100,7 @@ func TestAnInstallPublishesItsAppliedPositionWithItsConfiguration(t *testing.T) 
 			n.am.Unlock()
 			//: the snapshot covers the removal.
 			if at >= removal {
+				snapAt = at
 				break
 			}
 			//: a restore that never ends fails here, not in the cleanup.
@@ -109,9 +111,25 @@ func TestAnInstallPublishesItsAppliedPositionWithItsConfiguration(t *testing.T) 
 		}
 		close(free)
 		<-observed
-		//: Applied covers the removal, so the configuration must too.
-		if applied >= removal && !conf.IsRetiredKey(key) {
-			t.Fatalf("Status().Applied is %d, past the removal at %d, and Membership() is the configuration at %d, which does not hold the removed member's key retired: %v", applied, removal, conf.Index, conf.RetiredKeys)
+		//: while the install is held the published position stays under the removal: it never runs ahead of the configuration.
+		if applied >= removal {
+			t.Fatalf("Status().Applied is %d, at or past the removal at %d, while the install is held and raft is still on the configuration at %d", applied, removal, conf.Index)
+		}
+		//: once the install is done the hold is let go and the published position joins the applied one.
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
+			pub := n.Status().Applied
+			//: the published position has caught up with what the install applied.
+			if pub >= snapAt {
+				//: and the configuration it publishes holds the removed member's key retired.
+				if !n.Membership().IsRetiredKey(key) {
+					t.Fatalf("Status().Applied is %d, past the removal at %d, and Membership() does not hold the removed member's key retired", pub, removal)
+				}
+				break
+			}
+			//: a hold never let go keeps the published position below the applied one.
+			if time.Now().After(deadline) {
+				t.Fatalf("Status().Applied is %d, below the %d the install applied, after it ended", pub, snapAt)
+			}
 		}
 	}
 	for _, tt := range []tc{{name: "a removal the snapshot covers"}} {
