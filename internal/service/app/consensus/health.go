@@ -53,11 +53,18 @@ const (
 
 // The answers a HealthValue carries.
 const (
-	// HealthReady is the readiness answer: running, a leader known,
-	// everything known committed applied, and not refusing the current
-	// leader's chain (D4).
+	// HealthReady is the readiness answer: running, a leader known and
+	// confirmed (HealthHasLeader), everything known committed applied,
+	// and not refusing the current leader's chain (D4).
 	HealthReady HealthFlags = 1 << iota
-	// HealthHasLeader is set when a leader is known in the current term.
+	// HealthHasLeader is set when this node leads, or when it follows a
+	// leader it knows hears it: Status.Leader names one and that leader
+	// answered a read of this node within ElectionTimeoutMax. A
+	// follower sends such a read to its leader on a tick, at most every
+	// half ElectionTimeoutMin, so the flag can lag Status.Leader (a
+	// leader named but not yet confirmed, or silent for longer than
+	// ElectionTimeoutMax, clears it) (#540, #541). Never set on a
+	// stopped node. HealthReady requires it.
 	HealthHasLeader
 	// HealthQuorumReachable is set on a leader a majority answered within
 	// the minimum election timeout; never elsewhere.
