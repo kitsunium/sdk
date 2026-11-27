@@ -432,15 +432,31 @@ func cutsSettled(t *testing.T, tn *testNode) {
 }
 
 // streamingTransport is a node's end of a memory network that counts the
-// snapshot streams the node sends, and those its peer refused as corrupt.
+// snapshot bodies the node opens for the peer it watches, and the streams
+// its peers refused as corrupt. A body is opened only once the peer
+// accepted the offer: a stream refused before, on a route still cut or an
+// offer turned down, opens none (#1577).
 type streamingTransport struct {
 	*MemoryTransport
-	streams, corrupt atomic.Int64
+	opened, corrupt atomic.Int64
+	watch           atomic.Uint64
 }
 
-// Stream implements Transport, counting the stream and its verdict.
+// Stream implements Transport, counting the bodies opened for the watched
+// peer and the stream's verdict.
 func (t *streamingTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
-	t.streams.Add(1)
+	//: only a body streamed to the watched peer counts.
+	if uint64(to) == t.watch.Load() {
+		inner := open
+		open = func(off int64) (io.ReadCloser, error) {
+			rc, err := inner(off)
+			//: a body that opened is one streamed to the peer.
+			if err == nil {
+				t.opened.Add(1)
+			}
+			return rc, err
+		}
+	}
 	err := t.MemoryTransport.Stream(ctx, to, offer, open)
 	if errors.Is(err, coreconsensus.SnapshotCorrupt) {
 		t.corrupt.Add(1)
@@ -481,6 +497,10 @@ func TestALeaderReplacesASnapshotItsPeerFindsCorrupt(t *testing.T) {
 	l.snaps.mu.Unlock()
 	mu.Lock()
 	lt := streaming[l.id]
+	//: from the restart on, every node counts the bodies it opens for the lagging node.
+	for _, st := range streaming {
+		st.watch.Store(uint64(f.id))
+	}
 	mu.Unlock()
 	c.start(f)
 	c.net.Isolate(f.id, false)
@@ -493,17 +513,19 @@ func TestALeaderReplacesASnapshotItsPeerFindsCorrupt(t *testing.T) {
 		t.Fatalf("the leader streamed a snapshot its peer found corrupt %d times", got)
 	}
 	// The catch-up was an install, not appends from a live log that still
-	// covered the node's end (#1577).
+	// covered the node's end (#1577): a snapshot body was opened for the
+	// node after its restart. A stream counted as it began also counted
+	// one refused on the route still cut, which streamed nothing.
 	mu.Lock()
-	var streams int64
-	//: every node's streams, whichever led while the node caught up.
+	var opened int64
+	//: every node's bodies, whichever led while the node caught up.
 	for _, st := range streaming {
-		streams += st.streams.Load()
+		opened += st.opened.Load()
 	}
 	mu.Unlock()
 	//: no node streamed a snapshot: the test ran without its subject.
-	if streams == 0 {
-		t.Fatal("the lagging node caught up with no snapshot streamed to it")
+	if opened == 0 {
+		t.Fatal("the lagging node caught up with no snapshot body opened for it")
 	}
 }
 
