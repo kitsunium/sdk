@@ -656,7 +656,13 @@ that needs its group EMPTY once the leader is reaped
 (`Test_handle_signalGroupAllowGone`): a forked `sleep` outlives the kill as
 an orphaned zombie only init reaps, and darwin answers a zombie-only group
 whose leader was collected with `EPERM`, a refusal `Stop` cannot read as gone
-(§Stop);
+(§Stop); and a fixture whose members must honour a signal sent once the
+marker is there forks a subshell, never a program (`startForkingLeader`):
+NetBSD's sh vforks `sleep 30 &`, the kernel wakes the shell before the
+child's exec hooks clear its pending signals (`kern_exec.c`
+`execve_runproc`, kern/58091), so the shell's marker could precede the loss
+and `Test_handle_StopReturnsAtOnceOnAGroupThatHonoursSIGTERM` waited out its
+30 s grace on one NetBSD run in two (#1590);
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
 `Test_applyNice` and `Test_applyPostStart` apply every niceness to a
 disposable child (`niceChild`: a shell blocked on a pipe the test closes, so
