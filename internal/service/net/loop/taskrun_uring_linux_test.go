@@ -373,3 +373,109 @@ func TestURingCatchUp_staleFlagQuietRing(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
+
+// TestURingCatchUp_heldCountRestarts holds the count of batches that
+// IORING_SQ_TASKRUN alone kept a ring behind to consecutive ones (#1595): on
+// a ring whose flag stays raised over no work, a completion reaped by
+// reapRings between two batches (heldMark differs at the next catchUp), or by
+// the catch-up's own rounds before they end behind (countHeld's else), starts
+// the count again, so the ring is caught up heldBatches batches after the
+// last completion and not before.
+func TestURingCatchUp_heldCountRestarts(t *testing.T) {
+	type tc struct {
+		name string
+		// between is true when the completion is reaped between two batches,
+		// as reapRings does; false when the catch-up's own reap takes it.
+		between bool
+		// behind is how many batches after the completion's own stay behind.
+		behind int
+	}
+	runCase := func(t *testing.T, c tc) {
+		u := openWaitRing(t, setupSingleIssuer|setupSubmitAll|setupDeferTaskrun|setupTaskrunFlag)
+		//: the construction the kernel did not reproduce.
+		if !staleTaskrun(t, u) {
+			t.Skipf("kernel %s: IORING_SQ_TASKRUN not raised over no work", kernelRelease())
+		}
+		ul := &uLoop{lp: &loop{draining: true, sz: sizing{cqBatch: 64}}}
+		rr := &uRing{ul: ul, u: u}
+		rr.r = newRing(ul.lp, 0, rr)
+		//: two batches behind on the flag alone.
+		for range 2 {
+			//: not caught up.
+			if behind, cut := rr.catchUp(); !behind || cut {
+				t.Fatalf("%s: stale flag, catchUp = behind %v, cut %v, want behind", kernelRelease(), behind, cut)
+			}
+		}
+		s := u.get()
+		s.opcode, s.userData = opNop, udPack(udOrphanClose, 0, 0)
+		u.submit()
+		//: the completion waits in the CQ.
+		if n := u.ready(); n != 1 {
+			t.Fatalf("%d completions after the NOP, want 1", n)
+		}
+		//: reaped before the next batch, as reapRings does.
+		if c.between {
+			rr.reapAll()
+		}
+		n := 0
+		//: batches until caught up, bounded.
+		for ; n <= 3*heldBatches; n++ {
+			//: caught up.
+			if behind, _ := rr.catchUp(); !behind {
+				break
+			}
+		}
+		//: the batch that reaped it, when the catch-up did, counts as behind.
+		if n != c.behind {
+			t.Fatalf("%s: %d batches behind after the completion, want %d", kernelRelease(), n, c.behind)
+		}
+	}
+	//: each case.
+	for _, c := range []tc{
+		{"reaped between batches: the count starts again", true, heldBatches},
+		{"reaped in the rounds: the count starts again", false, heldBatches + 1},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestURingCatchUp_flagClearRestartsCount holds that a round reading
+// IORING_SQ_TASKRUN clear ends the episode the count belongs to (#1595): the
+// flag is exact then, and a count left at the bound would make the next
+// episode run on the base rule, the flag vetoing nothing. A raised flag
+// leaves the count to grow.
+func TestURingCatchUp_flagClearRestartsCount(t *testing.T) {
+	type tc struct {
+		name  string
+		stale bool
+		from  int
+		want  int
+	}
+	runCase := func(t *testing.T, c tc) {
+		u := openWaitRing(t, setupSingleIssuer|setupSubmitAll|setupDeferTaskrun|setupTaskrunFlag)
+		//: raised over no work, when the case needs it.
+		if c.stale && !staleTaskrun(t, u) {
+			t.Skipf("kernel %s: IORING_SQ_TASKRUN not raised over no work", kernelRelease())
+		}
+		//: a fresh ring holds no work, and says so.
+		if !c.stale && u.workHeld() {
+			t.Fatalf("%s: IORING_SQ_TASKRUN raised on a fresh ring", kernelRelease())
+		}
+		ul := &uLoop{lp: &loop{draining: true, sz: sizing{cqBatch: 64}}}
+		rr := &uRing{ul: ul, u: u}
+		rr.r = newRing(ul.lp, 0, rr)
+		rr.heldIdle = c.from
+		rr.catchUp()
+		//: the count after one batch.
+		if rr.heldIdle != c.want {
+			t.Fatalf("%s: heldIdle after one batch = %d, want %d", kernelRelease(), rr.heldIdle, c.want)
+		}
+	}
+	//: each case.
+	for _, c := range []tc{
+		{"flag clear: the count starts again", false, heldBatches - 1, 0},
+		{"flag raised: the count grows", true, 1, 2},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}

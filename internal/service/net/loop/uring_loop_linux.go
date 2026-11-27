@@ -1381,8 +1381,7 @@ func (rr *uRing) catchUp() (behind, cut bool) {
 		//: which leaves IORING_SQ_TASKRUN raised over the works it did not
 		//: run.
 		if rr.u.deferred() {
-			rr.u.flushOverflow()
-			held = rr.u.workHeld()
+			held = rr.readHeld()
 		}
 		before := rr.r.st.completions
 		//: cut by the budget: behind, and the next batch does not wait.
@@ -1404,6 +1403,20 @@ func (rr *uRing) catchUp() (behind, cut bool) {
 	rr.countHeld(start)
 	//: still coming, or still held, after the rounds.
 	return true, false
+}
+
+// readHeld flushes the overflow and reports IORING_SQ_TASKRUN. A flagged ring
+// reading it clear ends the episode the count belongs to: clear, the flag is
+// exact, and the count does not carry a raised flag from one episode to the
+// next.
+func (rr *uRing) readHeld() bool {
+	rr.u.flushOverflow()
+	held := rr.u.workHeld()
+	//: clear on a ring that has the flag: whatever kept it behind is over.
+	if !held && rr.u.taskrunFlagged() {
+		rr.heldIdle = 0
+	}
+	return held
 }
 
 // countHeld counts a catch-up that ended behind: one batch more held on

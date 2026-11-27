@@ -2336,6 +2336,7 @@ files:
       - (*uLoop).catchUp
       - (*uLoop).cutBehind
       - (*uRing).catchUp
+      - (*uRing).readHeld
       - (*uRing).countHeld
       - caughtUp
       - (*uring).taskrunFlagged
@@ -6547,6 +6548,14 @@ types:
         name: catchUp
         recv: rr *uRing
         results: behind, cut bool
+      - doc: |-
+          readHeld flushes the overflow and reports IORING_SQ_TASKRUN. A flagged ring
+          reading it clear ends the episode the count belongs to: clear, the flag is
+          exact, and the count does not carry a raised flag from one episode to the
+          next.
+        name: readHeld
+        recv: rr *uRing
+        results: bool
       - doc: |-
           countHeld counts a catch-up that ended behind: one batch more held on
           IORING_SQ_TASKRUN alone when its rounds reaped nothing since start, the

@@ -9601,9 +9601,7 @@ sequences:
         kind: actor
       - id: (*uRing).catchUp
         kind: self
-      - id: rr.u.flushOverflow
-        kind: internal
-      - id: rr.u.workHeld
+      - id: rr.readHeld
         kind: internal
       - id: rr.countHeld
         kind: internal
@@ -9621,11 +9619,9 @@ sequences:
               eval: "false"
             - opt:
                 do:
-                  - eval: rr.u.flushOverflow()
-                    to: rr.u.flushOverflow
                   - set: held
-                    to: rr.u.workHeld
-                    value: rr.u.workHeld()
+                    to: rr.readHeld
+                    value: rr.readHeld()
                 when: rr.u.deferred()
             - bind: before
               eval: rr.r.st.completions
@@ -9645,6 +9641,28 @@ sequences:
       - eval: rr.countHeld(start)
         to: rr.countHeld
       - return: true, false
+  - of: (*uRing).readHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).readHeld
+        kind: self
+      - id: rr.u.flushOverflow
+        kind: internal
+      - id: rr.u.workHeld
+        kind: internal
+    steps:
+      - eval: rr.u.flushOverflow()
+        to: rr.u.flushOverflow
+      - bind: held
+        eval: rr.u.workHeld()
+        to: rr.u.workHeld
+      - opt:
+          do:
+            - set: rr.heldIdle
+              value: "0"
+          when: "!held && rr.u.taskrunFlagged()"
+      - return: held
   - of: (*uRing).countHeld
     steps:
       - alt:
