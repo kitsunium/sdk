@@ -1836,6 +1836,7 @@ files:
       - (*ring).settleAfterWrite
       - (*ring).drainClose
       - (*ring).lingers
+      - (*ring).dropSpill
       - (*ring).sent
       - (*ring).fail
       - (*ring).finish
@@ -3953,9 +3954,11 @@ types:
         recv: r *ring
       - doc: |-
           drainClose reports whether c is a close of r's drain: the drain's own, or
-          the handler's clean close while r drains — an HTTP/2 adapter's after the
-          drain's GOAWAY (#1609), an HTTP/1.1 answer's Connection: close —, whose
-          output the peer has yet to read just the same.
+          the handler's clean close while the loop drains — an HTTP/2 adapter's after
+          the drain's GOAWAY (#1609), an HTTP/1.1 answer's Connection: close —, whose
+          output the peer has yet to read just the same. The loop's drain, not the
+          ring's: io_uring's accept watchdog stops a ring accepting (ring.draining)
+          with no drain begun, and only a drain's closeSettled ends a linger.
         name: drainClose
         params: c *connCtl
         recv: r *ring
@@ -3974,6 +3977,14 @@ types:
         params: slot int32
         recv: r *ring
         results: bool
+      - doc: |-
+          dropSpill returns c's spill once the batch is over: a lingering slot reads
+          and drops, and a handler's close keeps the input it had not consumed —
+          read into that spill, the lingering bytes went to the handler after its
+          close, and each refreshed the linger's bound (#1609 review).
+        name: dropSpill
+        params: c *connCtl
+        recv: r *ring
       - doc: |-
           sent records that some of slot's output was sent, and fires OnWritable when
           a producer waits and the output fell under the low-water mark. The byte

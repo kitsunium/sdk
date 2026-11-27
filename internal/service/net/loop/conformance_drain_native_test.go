@@ -801,3 +801,79 @@ func TestConformance_drainClosesTheSilentUnderPosts(t *testing.T) {
 	}
 	eachBackend(t, runCase)
 }
+
+// TestConformance_drainLingerDropsTheSpill pins the linger of a handler's
+// close while the ring drains (#1609 review): the connection closed by its
+// handler keeps the input it had not consumed, a partial line, in its spill.
+// Lingering, the slot reads on and drops; read into that spill, the bytes went
+// to the handler again — OnData after its Close — and each refreshed the
+// linger's bound, so a client trickling bytes held the drain to its context
+// (DrainTimeout). No OnData follows the Close, and Shutdown returns once
+// drainLinger passed.
+func TestConformance_drainLingerDropsTheSpill(t *testing.T) {
+	runCase := func(t *testing.T, b backendCase) {
+		var closedAt, after atomic.Int64
+		h := &lineH{}
+		h.onData = func(_ corenet.LoopIO, _ corenet.LoopConnRef, buf []byte) {
+			//: an OnData once the handler closed is the defect.
+			if closedAt.Load() != 0 {
+				after.Add(1)
+			}
+			//: the CLOSE line: the handler closes in this callback.
+			if strings.Contains(string(buf), "CLOSE\n") {
+				closedAt.Store(time.Now().UnixNano())
+			}
+		}
+		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings = 1, 1 })
+		c := dial(t, addr)
+		echo(t, c, "warm\n")
+		//: a partial line: the spill holds it, and the drain leaves the
+		//: connection to its handler.
+		_, _ = c.Write([]byte("par"))
+		time.Sleep(100 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		start := time.Now()
+		shut := make(chan error, 1)
+		go func() { shut <- g.Shutdown(ctx) }()
+		time.Sleep(100 * time.Millisecond)
+		//: the handler's close while the ring drains, a partial line left behind.
+		_, _ = c.Write([]byte("tial\nCLOSE\nxy"))
+		stop := make(chan struct{})
+		trickled := make(chan struct{})
+		go func() {
+			defer close(trickled)
+			tick := time.NewTicker(200 * time.Millisecond)
+			defer tick.Stop()
+			//: a byte every 200 ms, well inside drainLinger, until told.
+			for {
+				select {
+				case <-stop:
+					return
+				case <-tick.C:
+					//: the server may have closed: the write's failure ends it.
+					if _, err := c.Write([]byte("z")); err != nil {
+						return
+					}
+				}
+			}
+		}()
+		err := <-shut
+		elapsed := time.Since(start)
+		close(stop)
+		<-trickled
+		//: the drain ended by itself, the linger bounded.
+		if err != nil {
+			t.Fatalf("Shutdown after %v: %v", elapsed, err)
+		}
+		if elapsed > 1500*time.Millisecond {
+			t.Fatalf("Shutdown took %v, want the linger's bound (%v) and a margin", elapsed, drainLinger)
+		}
+		//: nothing reached the handler after its close.
+		if n := after.Load(); n != 0 {
+			t.Fatalf("%d OnData after the handler's Close", n)
+		}
+		resetClose([]stdnet.Conn{c})
+	}
+	eachBackend(t, runCase)
+}

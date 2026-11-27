@@ -167,7 +167,16 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   drains lingers the same (`ring.drainClose`): the HTTP/2 adapter writes the
   drain's GOAWAY and closes, and closed at once, a client frame still to come
   or unread reset the connection and took the GOAWAY with it, the answer's
-  tail first on a slow reader (#1609, `TestLoopHTTP2_drainLateReader`). A
+  tail first on a slow reader (#1609, `TestLoopHTTP2_drainLateReader`). The
+  loop's drain, `lp.draining`, not the ring's: io_uring's accept watchdog
+  sets `ring.draining` alone, and with no drain's `closeSettled` a linger
+  there never ended. Lingering, a slot returns its spill (`dropSpill`), and
+  `deliverSpill`, as `deliver`, drops what a slot no longer open reads: a
+  handler's close keeps the input it had not consumed, and read into that
+  spill, the lingering bytes reached the handler after its close and each
+  refreshed the linger's bound, a trickling client holding the drain to its
+  context (`TestConformance_drainLingerDropsTheSpill`,
+  `TestLingers_aHandlersCloseLingersInTheLoopsDrain`). A
   closing slot whose output left through
   the writable path — a write refused for room, resumed on the event — is
   settled at the batch's end (`settleAfterWrite`, epoll and kqueue; io_uring's

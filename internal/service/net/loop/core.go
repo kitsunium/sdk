@@ -454,6 +454,12 @@ func (r *ring) spillRoom(slot int32, want int) []byte {
 // the handler with the rest of the spill.
 func (r *ring) deliverSpill(slot int32, n int) {
 	c := &r.conns[slot]
+	//: a closing or dead connection reads nothing more, as deliver: the bytes
+	//: read past the spill's length are dropped, the bound of a linger kept.
+	if c.state != stOpen {
+		//: dropped.
+		return
+	}
 	c.spill.len += int32(n)
 	c.lastIO = r.lp.tick
 	c.flags |= fHeard
@@ -586,12 +592,14 @@ func (r *ring) settleAfterWrite(slot int32) {
 }
 
 // drainClose reports whether c is a close of r's drain: the drain's own, or
-// the handler's clean close while r drains — an HTTP/2 adapter's after the
-// drain's GOAWAY (#1609), an HTTP/1.1 answer's Connection: close —, whose
-// output the peer has yet to read just the same.
+// the handler's clean close while the loop drains — an HTTP/2 adapter's after
+// the drain's GOAWAY (#1609), an HTTP/1.1 answer's Connection: close —, whose
+// output the peer has yet to read just the same. The loop's drain, not the
+// ring's: io_uring's accept watchdog stops a ring accepting (ring.draining)
+// with no drain begun, and only a drain's closeSettled ends a linger.
 func (r *ring) drainClose(c *connCtl) bool {
 	//: closing, by the drain or by its handler while the ring drains.
-	return c.state == stClosing && (c.reason == rDrain || (c.reason == rNone && r.draining))
+	return c.state == stClosing && (c.reason == rDrain || (c.reason == rNone && r.lp.draining))
 }
 
 // lingers reports whether slot, its output gone, still lingers before its
@@ -614,12 +622,27 @@ func (r *ring) lingers(slot int32) bool {
 	if c.linger == lingerNone {
 		c.linger = lingerHalf
 		c.lastIO = r.lp.tick
+		r.dropSpill(c)
 		r.drv.halfClose(r, slot)
 		//: lingering.
 		return true
 	}
 	//: until the bound.
 	return r.lp.tick-c.lastIO < drainLingerTicks
+}
+
+// dropSpill returns c's spill once the batch is over: a lingering slot reads
+// and drops, and a handler's close keeps the input it had not consumed —
+// read into that spill, the lingering bytes went to the handler after its
+// close, and each refreshed the linger's bound (#1609 review).
+func (r *ring) dropSpill(c *connCtl) {
+	//: no spill: nothing held.
+	if c.spill.empty() {
+		//: done.
+		return
+	}
+	r.lp.deferred = append(r.lp.deferred, c.spill)
+	c.spill = chunkRef{idx: noChunk}
 }
 
 // sent records that some of slot's output was sent, and fires OnWritable when

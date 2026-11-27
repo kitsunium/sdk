@@ -897,6 +897,10 @@ sequences:
     steps:
       - bind: c
         eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.state != stOpen
       - op: +=
         set: c.spill.len
         value: int32(n)
@@ -1067,13 +1071,15 @@ sequences:
           when: (c.state == stClosing || c.flags&fPeerDone != 0) && !c.sending()
   - of: (*ring).drainClose
     steps:
-      - return: c.state == stClosing && (c.reason == rDrain || (c.reason == rNone && r.draining))
+      - return: c.state == stClosing && (c.reason == rDrain || (c.reason == rNone && r.lp.draining))
   - of: (*ring).lingers
     participants:
       - id: caller
         kind: actor
       - id: (*ring).lingers
         kind: self
+      - id: r.dropSpill
+        kind: internal
       - id: r.drv.halfClose
         kind: internal
     steps:
@@ -1089,11 +1095,23 @@ sequences:
               value: lingerHalf
             - set: c.lastIO
               value: r.lp.tick
+            - eval: r.dropSpill(c)
+              to: r.dropSpill
             - eval: r.drv.halfClose(r, slot)
               to: r.drv.halfClose
             - return: "true"
           when: c.linger == lingerNone
       - return: r.lp.tick-c.lastIO < drainLingerTicks
+  - of: (*ring).dropSpill
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.spill.empty()
+      - set: r.lp.deferred
+        value: append(r.lp.deferred, c.spill)
+      - set: c.spill
+        value: "chunkRef{idx: noChunk}"
   - of: (*ring).sent
     participants:
       - id: caller
