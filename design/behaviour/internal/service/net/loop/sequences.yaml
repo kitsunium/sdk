@@ -2127,6 +2127,21 @@ sequences:
   - of: (*ring).full
     steps:
       - return: len(r.free) == 0 && len(r.conns) >= r.lp.sz.tableSize
+  - of: (*ring).setBehind
+    steps:
+      - opt:
+          do:
+            - op: "|="
+              set: r.silence
+              value: silenceBehind
+            - return: ""
+          when: b
+      - op: "&^="
+        set: r.silence
+        value: silenceBehind
+  - of: (*ring).behind
+    steps:
+      - return: r.silence&silenceBehind != 0
   - of: (*ring).drainable
     steps:
       - bind: c
@@ -2134,7 +2149,7 @@ sequences:
       - return: c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.silent(s))
   - of: (*ring).silent
     steps:
-      - return: r.lp.tick-r.conns[s].lastIO >= drainQuietTicks && !r.behind && !(r.askUnread && r.drv.unread(r, s))
+      - return: r.lp.tick-r.conns[s].lastIO >= drainQuietTicks && !r.behind() && (r.silence&silenceAsk == 0 || !r.drv.unread(r, s))
   - of: (*loop).settleDrain
     participants:
       - id: caller
@@ -2548,8 +2563,8 @@ sequences:
       - set: el.r
         to: newRing
         value: newRing(lp, 0, el)
-      - set: el.r.askUnread
-        value: "true"
+      - set: el.r.silence
+        value: silenceAsk
       - set: lp.rings
         value: "[]*ring{el.r}"
       - eval: el.armListeners()
@@ -9400,6 +9415,8 @@ sequences:
         kind: actor
       - id: (*uLoop).reapRings
         kind: self
+      - id: rr.r.setBehind
+        kind: internal
       - id: rr.reapAll
         kind: internal
     steps:
@@ -9411,8 +9428,8 @@ sequences:
         value: "0"
       - loop:
           do:
-            - set: rr.r.behind
-              value: "true"
+            - eval: rr.r.setBehind(true)
+              to: rr.r.setBehind
           key: _
           range: ul.rings
           value: rr
@@ -9427,8 +9444,8 @@ sequences:
             - bind: cut
               eval: rr.reapAll()
               to: rr.reapAll
-            - set: rr.r.behind
-              value: cut || rr.u.ready() > 0 || rr.u.overflowed() || len(rr.starved) > 0
+            - eval: rr.r.setBehind(cut || rr.u.ready() > 0 || rr.u.overflowed() || len(rr.starved) > 0)
+              to: rr.r.setBehind
             - op: +=
               set: ul.reaped
               value: rr.r.st.completions - before
@@ -9454,7 +9471,7 @@ sequences:
         kind: actor
       - id: (*uLoop).catchUp
         kind: self
-      - id: rr.catchUp
+      - id: rr.r.setBehind
         kind: internal
     steps:
       - opt:
@@ -9466,10 +9483,9 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: rr.r.behind
-            - set: rr.r.behind
-              to: rr.catchUp
-              value: rr.catchUp()
+                when: rr.r.behind()
+            - eval: rr.r.setBehind(rr.catchUp())
+              to: rr.r.setBehind
           key: _
           range: ul.rings
           value: rr

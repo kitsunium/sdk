@@ -115,10 +115,10 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   away unanswered behind a FIN — a take of more than `CQBatch` on one loop,
   its next batch a second late on a loaded runner (#1541,
   `TestConformance_drainReadsBeforeItJudgesSilence`). epoll and kqueue ask
-  the socket (`askUnread`, `driver.unread`: SIOCINQ, a peek), exactly, so a
+  the socket (`silenceAsk`, `driver.unread`: SIOCINQ, a peek), exactly, so a
   reap that only filled its array never holds a silent one open
   (`TestConformance_drainClosesTheSilentUnderPosts`, `CQBatch` 1 and a Post
-  a batch); io_uring judges the ring (`ring.behind`: completions left,
+  a batch); io_uring judges the ring (`silenceBehind`: completions left,
   overflowed, a starved recv, a ring not reached). On io_uring, while it
   drains, `catchUp` runs before `OnBatchEnd`: it reaps what the batch's own
   submits posted after `reapRings` and, on a DEFER_TASKRUN ring, enters with

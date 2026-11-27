@@ -292,6 +292,18 @@ constants:
         type: int
         value: "2048"
     name: lowWaterDiv
+  - doc: The bits of ring.silence.
+    grouped: true
+    items:
+      - doc: |-
+          silenceAsk asks the socket whether a silent-looking connection holds
+          unread input.
+        name: silenceAsk
+        type: uint8
+        value: 1 << iota
+      - doc: silenceBehind marks a batch that may have left a request unseen.
+        name: silenceBehind
+    name: silenceAsk
   - doc: |-
       loopDebug reports whether the loopdebug build tag compiled the thread
       check in.
@@ -1790,6 +1802,7 @@ files:
     name: conn.go
   - decls:
       - lowWaterDiv
+      - silenceAsk
       - driver
       - shared
       - ring
@@ -1885,6 +1898,8 @@ files:
       - (*listenerSet).close
       - doneOutside
       - (*ring).full
+      - (*ring).setBehind
+      - (*ring).behind
       - (*ring).drainable
       - (*ring).silent
       - (*loop).settleDrain
@@ -3786,20 +3801,16 @@ types:
         name: draining
         type: bool
       - doc: |-
-          behind is set by io_uring for the batch when it left completions
-          unreaped, or work the kernel holds for the thread: a connection that
-          looks silent may then have its request waiting, so the drain does not
-          judge silence this batch (#1541).
-        name: behind
-        type: bool
-      - doc: |-
-          askUnread is set by epoll and kqueue, whose connections are process
-          descriptors the kernel reads input into: the drain asks the socket
-          (driver.unread) whether a silent-looking connection holds unread input
-          — a readiness the batch did not reap, a read put off for want of
-          arena —, exactly, rather than judging the batch (#1541).
-        name: askUnread
-        type: bool
+          silence is how the drain believes a connection silent on this ring
+          (#1541): silenceAsk, set by epoll and kqueue, whose connections are
+          process descriptors the kernel reads input into, has the drain ask the
+          socket (driver.unread) whether a silent-looking connection holds unread
+          input — a readiness the batch did not reap, a read put off for want of
+          arena —; silenceBehind, set by io_uring for the batch when it left
+          completions unreaped or work the kernel holds for the thread, has it
+          judge no silence this batch.
+        name: silence
+        type: uint8
     kind: struct
     methods:
       - doc: |-
@@ -4032,6 +4043,14 @@ types:
         name: full
         recv: r *ring
         results: bool
+      - doc: setBehind records whether the batch is behind on the ring (silenceBehind).
+        name: setBehind
+        params: b bool
+        recv: r *ring
+      - doc: behind reports silenceBehind.
+        name: behind
+        recv: r *ring
+        results: bool
       - doc: |-
           drainable reports whether the drain closes the open connection on slot s
           now: no partial input, and either it has sent something — its request was
@@ -4045,7 +4064,7 @@ types:
       - doc: |-
           silent reports whether the connection on slot s, never heard, counts as
           silent: quiet for drainQuiet, on an io_uring ring the batch caught up on
-          (ring.behind unset), and on epoll and kqueue with no input in its socket
+          (silenceBehind unset), and on epoll and kqueue with no input in its socket
           (driver.unread), asked last, of the quiet ones only.
         name: silent
         params: s int32

@@ -290,7 +290,7 @@ func (el *epollLoop) setup() error {
 	lp := el.lp
 	lp.post = newPostQueue(el.wake)
 	el.r = newRing(lp, 0, el)
-	el.r.askUnread = true
+	el.r.silence = silenceAsk
 	lp.rings = []*ring{el.r}
 	el.armListeners()
 	//: ready to serve.

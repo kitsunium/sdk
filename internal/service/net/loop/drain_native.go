@@ -169,6 +169,23 @@ func (r *ring) full() bool {
 	return len(r.free) == 0 && len(r.conns) >= r.lp.sz.tableSize
 }
 
+// setBehind records whether the batch is behind on the ring (silenceBehind).
+func (r *ring) setBehind(b bool) {
+	//: behind, or caught up.
+	if b {
+		r.silence |= silenceBehind
+		//: set.
+		return
+	}
+	r.silence &^= silenceBehind
+}
+
+// behind reports silenceBehind.
+func (r *ring) behind() bool {
+	//: the bit.
+	return r.silence&silenceBehind != 0
+}
+
 // drainable reports whether the drain closes the open connection on slot s
 // now: no partial input, and either it has sent something — its request was
 // read — or it stayed silent for drainQuiet. A silence is believed only when
@@ -182,11 +199,11 @@ func (r *ring) drainable(s int32) bool {
 
 // silent reports whether the connection on slot s, never heard, counts as
 // silent: quiet for drainQuiet, on an io_uring ring the batch caught up on
-// (ring.behind unset), and on epoll and kqueue with no input in its socket
+// (silenceBehind unset), and on epoll and kqueue with no input in its socket
 // (driver.unread), asked last, of the quiet ones only.
 func (r *ring) silent(s int32) bool {
 	//: quiet long enough, caught up, and nothing unread.
-	return r.lp.tick-r.conns[s].lastIO >= drainQuietTicks && !r.behind && !(r.askUnread && r.drv.unread(r, s))
+	return r.lp.tick-r.conns[s].lastIO >= drainQuietTicks && !r.behind() && (r.silence&silenceAsk == 0 || !r.drv.unread(r, s))
 }
 
 // settleDrain is the drain's look at the open connections, once
