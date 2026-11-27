@@ -566,9 +566,12 @@ contending on one accept queue. Zero means one per core; one disables it.
   and `bindLoopAddress` keep theirs. `shards_draw_linux_internal_test.go`:
   the kernel's contract (`TestReuseport_enabledAfterBindAdmitsJoins`), 128
   starts beside a holder of an eighth of the range for each of the
-  spellings `"0"`, `""` and `"00"` — `drawnPort` reads a port as Go's
-  `parsePort` does, so every spelling Go binds as port 0 is a draw
-  (`Test_drawnPort`) —, and a child in a user and network namespace of its
+  spellings `"0"`, `""` and `"00"` — `drawnPort` asks the bind's own
+  resolver, `DefaultResolver.LookupPort`, so every spelling the bind reads as
+  port 0 is a draw: digits after one sign with no lookup (`parsePort`), and
+  under cgo what glibc's `strtoul` reads as 0, `" 0"`, `"\t00"` and
+  `" 65536"` cut to 16 bits among them, which the Go resolver refuses
+  (`Test_drawnPort`, against a loopback bind) —, and a child in a user and network namespace of its
   own whose range is one or two ports, skipped where the host refuses one.
   The child writes the sysctl only when `drawChildDecision` admits it: a
   case index the constants build, never a range from the environment; the

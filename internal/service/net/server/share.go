@@ -75,7 +75,7 @@ func shareRefusalFor(group *StreamGroup, familyRefusal *errs.Error, reusePort bo
 // (udp_lib_lport_inuse, net/ipv4/udp.c). A stream's draw never shares a port
 // with a bound socket (inet_csk_find_open_port,
 // net/ipv4/inet_connection_sock.c), so nothing is probed there either.
-func mustProbe(addr corenet.AddressValue, count int, share bool) bool {
+func mustProbe(ctx context.Context, addr corenet.AddressValue, count int, share bool) bool {
 	//: one socket binds without SO_REUSEPORT and is refused by the kernel
 	//: itself; a shared address is not probed on purpose.
 	if count <= 1 || share {
@@ -85,7 +85,7 @@ func mustProbe(addr corenet.AddressValue, count int, share bool) bool {
 	_, port, err := stdnet.SplitHostPort(addr.Addr)
 	//: a fresh ephemeral port, in any spelling Go binds as port 0
 	//: (drawnPort), or an address the bind will refuse itself.
-	if err != nil || drawnPort(port) {
+	if err != nil || drawnPort(ctx, addr.Network, port) {
 		//: no probe.
 		return false
 	}

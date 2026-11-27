@@ -55,7 +55,9 @@ func Test_shareRefusalFor(t *testing.T) {
 }
 
 // Test_mustProbe pins the probe's scope: an address several sockets share
-// without ShareAddress, naming its port.
+// without ShareAddress, naming its port. A port only a resolver reads — a
+// blank before it, which glibc's strtoul skips (#1585) — is probed exactly
+// where the bind would not draw it.
 func Test_mustProbe(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -64,6 +66,9 @@ func Test_mustProbe(t *testing.T) {
 		count int
 		share bool
 		want  bool
+		// resolved is a port the resolver in use reads: it is probed unless
+		// a loopback bind of it draws.
+		resolved string
 	}
 	tests := []tc{
 		{name: "shards on a named port", addr: "127.0.0.1:8080", count: 4, want: true},
@@ -73,21 +78,46 @@ func Test_mustProbe(t *testing.T) {
 		{name: "an empty port, Go's port 0", addr: "[::1]:", count: 4},
 		{name: "port 00, Go's port 0", addr: "127.0.0.1:00", count: 4},
 		{name: "no port", addr: "localhost", count: 4},
+		{name: "a blank before port 0", addr: "127.0.0.1: 0", count: 4, resolved: " 0"},
+		{name: "a tab before port 00", addr: "127.0.0.1:\t00", count: 4, resolved: "\t00"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Parallel()
+		want := c.want
+		//: the bind's own reading decides.
+		if c.resolved != "" {
+			want = !loopbackDraws(c.resolved)
+		}
+		//: the predicate's answer.
+		if got := mustProbe(t.Context(), corenet.AddressValue{Network: "tcp", Addr: c.addr}, c.count, c.share); got != want {
+			t.Fatalf("mustProbe(%q) = %v, want %v", c.addr, got, want)
+		}
 	}
 	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			if got := mustProbe(corenet.AddressValue{Network: "tcp", Addr: c.addr}, c.count, c.share); got != c.want {
-				t.Fatalf("mustProbe = %v, want %v", got, c.want)
-			}
-		})
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
+// loopbackDraws reports whether a loopback datagram bind of port draws a port,
+// read by the resolver this binary uses: cgo's getaddrinfo reads " 0" with
+// strtoul, which skips leading blanks, the Go resolver looks it up as a name and
+// refuses it. Each port passed here is 0 wherever it binds, so a bind that
+// succeeds drew.
+func loopbackDraws(port string) bool {
+	pc, err := stdnet.ListenPacket("udp4", "127.0.0.1:"+port)
+	//: refused by the resolver: no draw.
+	if err != nil {
+		return false
+	}
+	_ = pc.Close()
+	return true
+}
+
 // Test_drawnPort pins the spellings of port 0 (#1585): each port the standard
-// library binds as port 0 is a draw, and nothing else is. Where Go reads the
-// port without a resolver, its own LookupPort is asked too, so the predicate
-// cannot drift from the bind.
+// library binds as port 0 is a draw, and nothing else is. A port only a
+// resolver reads is judged against a loopback bind of it, so the predicate is
+// held to the bind under cgo's getaddrinfo and the Go resolver alike; every
+// other is asked of LookupPort too.
 func Test_drawnPort(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -97,6 +127,9 @@ func Test_drawnPort(t *testing.T) {
 		// named is a string Go reads as a service name, which LookupPort
 		// would resolve.
 		named bool
+		// resolved is a port only a resolver reads, zero wherever it binds:
+		// a draw exactly where a loopback bind of it draws.
+		resolved bool
 	}
 	tests := []tc{
 		{name: "0", port: "0", want: true},
@@ -109,12 +142,22 @@ func Test_drawnPort(t *testing.T) {
 		{name: "a leading zero", port: "080"},
 		{name: "two signs", port: "+-0", named: true},
 		{name: "a service name", port: "domain", named: true},
+		{name: "a blank before 0, cgo's strtoul", port: " 0", resolved: true},
+		{name: "a tab before 00, cgo's strtoul", port: "\t00", resolved: true},
+		{name: "a blank before a signed 0", port: " +0", resolved: true},
+		{name: "a blank before 65536, cut to 16 bits by glibc", port: " 65536", resolved: true},
+		{name: "a blank before a named port", port: " 8080"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Parallel()
+		want := c.want
+		//: the bind's own reading decides.
+		if c.resolved {
+			want = loopbackDraws(c.port)
+		}
 		//: the predicate's answer.
-		if got := drawnPort(c.port); got != c.want {
-			t.Fatalf("drawnPort(%q) = %v, want %v", c.port, got, c.want)
+		if got := drawnPort(t.Context(), "udp", c.port); got != want {
+			t.Fatalf("drawnPort(%q) = %v, want %v", c.port, got, want)
 		}
 		//: a name is the resolver's, not asked here.
 		if c.named {
@@ -122,8 +165,8 @@ func Test_drawnPort(t *testing.T) {
 		}
 		n, err := stdnet.LookupPort("udp", c.port)
 		//: Go's own reading of the port agrees.
-		if (err == nil && n == 0) != c.want {
-			t.Fatalf("LookupPort(%q) = %d, %v; drawnPort says %v", c.port, n, err, c.want)
+		if (err == nil && n == 0) != want {
+			t.Fatalf("LookupPort(%q) = %d, %v; drawnPort says %v", c.port, n, err, want)
 		}
 	}
 	for _, c := range tests {

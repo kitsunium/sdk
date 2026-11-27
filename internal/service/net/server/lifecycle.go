@@ -5,7 +5,6 @@ import (
 	"errors"
 	stdnet "net"
 	"slices"
-	"strings"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -256,7 +255,7 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 	spec := socketSpec{reuse: reuseOf(count, share), receiveBuffer: group.limits.ReceiveBuffer, sendBuffer: group.limits.SendBuffer}
 	//: an address another process holds is refused before the shards could
 	//: join it (#1330).
-	if mustProbe(addr, count, share) {
+	if mustProbe(ctx, addr, count, share) {
 		//: AddressInUse, naming it.
 		if err := probeAddress(ctx, addr, false); err != nil {
 			//: Start unwinds whatever is already bound.
@@ -320,7 +319,7 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 // when the second joins (reuseport_add_sock, net/core/sock_reuseport.c).
 func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec, first bool) (stdnet.PacketConn, bindReport, error) {
 	//: a shard joining a port, a named port, or one socket alone: as asked.
-	if !first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(addr) {
+	if !first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(ctx, addr) {
 		//: the bind as the spec says.
 		return listenPacket(ctx, addr, spec)
 	}
@@ -344,26 +343,26 @@ func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec
 }
 
 // portZero reports whether addr asks the kernel to draw its port.
-func portZero(addr corenet.AddressValue) bool {
+func portZero(ctx context.Context, addr corenet.AddressValue) bool {
 	_, port, err := stdnet.SplitHostPort(addr.Addr)
 	//: port 0, or an address the bind will refuse itself.
-	return err == nil && drawnPort(port)
+	return err == nil && drawnPort(ctx, addr.Network, port)
 }
 
-// drawnPort reports whether the standard library binds port as port 0, the
-// kernel's draw (#1585). It reads port as Go's parsePort does (net/port.go,
-// Go 1.27.3) without a resolver: an empty port is 0 (golang.org/issue/13610),
-// one leading sign is read, and the digits that remain are a value; "0",
-// "", "00", "+0", "-0" and a lone sign are all 0. A string with another
-// character is a nonzero number or a service name the bind looks up, a port
-// it names: neither is a draw.
-func drawnPort(port string) bool {
-	//: parsePort's one sign.
-	if port != "" && (port[0] == '+' || port[0] == '-') {
-		port = port[1:]
-	}
-	//: only zeros, or nothing, remain.
-	return strings.Trim(port, "0") == ""
+// drawnPort reports whether the bind reads port as port 0, the kernel's draw
+// (#1585). It asks the resolver the bind asks, the standard library's
+// DefaultResolver.LookupPort (internetAddrList, net/ipsock.go), so the answer
+// is the bind's by construction. A port of digits after at most one sign is
+// read by parsePort (net/port.go) with no resolver, no file and no network:
+// "0", "", "00", "+0", "-0" and a lone sign are 0. Any other string is looked
+// up: the Go resolver reads it as a service name, cgo's getaddrinfo with
+// glibc's strtoul, which skips leading blanks and is cut to 16 bits (" 0",
+// "\t00" and " 65536" draw there) — a lookup the bind would make itself. A
+// port the lookup refuses is no draw: the bind refuses it too.
+func drawnPort(ctx context.Context, network, port string) bool {
+	n, err := stdnet.DefaultResolver.LookupPort(ctx, network, port)
+	//: the bind's port 0, nothing else.
+	return err == nil && n == 0
 }
 
 // pinPort returns addr with the port pc bound, so the other shards of an address
@@ -558,7 +557,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 	share := group.kinds.has(corenet.OptionShareAddress)
 	//: an address another process holds is refused before the shards could
 	//: join it (#1330).
-	if mustProbe(addr, count, share) {
+	if mustProbe(ctx, addr, count, share) {
 		//: AddressInUse, naming it.
 		if err := probeAddress(ctx, addr, true); err != nil {
 			//: Start unwinds whatever is already bound.

@@ -4191,7 +4191,7 @@ sequences:
                   eval: probeAddress(ctx, addr, false)
                   to: probeAddress
                 when: err != nil
-          when: mustProbe(addr, count, share)
+          when: mustProbe(ctx, addr, count, share)
       - bind: degraded, reason
         eval: batchDegradation(group.limits)
         to: batchDegradation
@@ -4271,7 +4271,7 @@ sequences:
           do:
             - return: listenPacket(ctx, addr, spec)
               to: listenPacket
-          when: "!first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(addr)"
+          when: "!first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(ctx, addr)"
       - bind: alone
         eval: spec
       - set: alone.reuse
@@ -4310,15 +4310,20 @@ sequences:
       - bind: _, port, err
         eval: stdnet.SplitHostPort(addr.Addr)
         to: stdnet
-      - return: err == nil && drawnPort(port)
+      - return: err == nil && drawnPort(ctx, addr.Network, port)
   - of: drawnPort
+    participants:
+      - id: caller
+        kind: actor
+      - id: drawnPort
+        kind: self
+      - id: stdnet.DefaultResolver.LookupPort
+        kind: value
     steps:
-      - opt:
-          do:
-            - set: port
-              value: port[1:]
-          when: port != "" && (port[0] == '+' || port[0] == '-')
-      - return: strings.Trim(port, "0") == ""
+      - bind: n, err
+        eval: stdnet.DefaultResolver.LookupPort(ctx, network, port)
+        to: stdnet.DefaultResolver.LookupPort
+      - return: err == nil && n == 0
   - of: pinPort
     participants:
       - id: caller
@@ -4630,7 +4635,7 @@ sequences:
                   eval: probeAddress(ctx, addr, true)
                   to: probeAddress
                 when: err != nil
-          when: mustProbe(addr, count, share)
+          when: mustProbe(ctx, addr, count, share)
       - bind: opened
         eval: "0"
       - bind: target
@@ -9454,7 +9459,7 @@ sequences:
                   eval: probeAddress(ctx, addr, true)
                   to: probeAddress
                 when: err != nil
-          when: mustProbe(addr, count, share)
+          when: mustProbe(ctx, addr, count, share)
       - bind: target
         eval: addr
       - bind: lns
@@ -15360,7 +15365,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: err != nil || drawnPort(port)
+          when: err != nil || drawnPort(ctx, addr.Network, port)
       - return: "true"
   - of: probeAddress
     participants:
