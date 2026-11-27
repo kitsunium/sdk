@@ -12,6 +12,13 @@ import "syscall"
 // it in include/asm-generic/socket.h as 15.
 const soReusePort int = 0xf
 
+// reuseportDrawJoins is whether a port-0 draw with SO_REUSEPORT set may be
+// given a port a reuseport socket of the same user holds, and join its group:
+// on Linux it may (udp_lib_lport_inuse, udp_reuseport_add_sock,
+// net/ipv4/udp.c), so the first shard of such an address draws without the
+// option and is given it once bound (listenShard, #1585).
+const reuseportDrawJoins = true
+
 // reusePortSupported reports whether this platform can bind several listeners
 // to one address.
 func reusePortSupported() bool {
@@ -19,8 +26,10 @@ func reusePortSupported() bool {
 	return true
 }
 
-// setReusePort enables SO_REUSEPORT on a socket about to be bound.
+// setReusePort enables SO_REUSEPORT on a socket about to be bound, or on the
+// bound first shard of a drawn port (reuseAfterBind).
 func setReusePort(fd uintptr) error {
-	//: must be set before bind, which is why it runs from the Control hook.
+	//: before bind for a socket joining a port; after it, the kernel reads it
+	//: when the next socket binds beside it.
 	return syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, soReusePort, 1)
 }

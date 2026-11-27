@@ -828,6 +828,16 @@ constants:
         value: "0xf"
     name: soReusePort
   - doc: |-
+      reuseportDrawJoins is whether a port-0 draw with SO_REUSEPORT set may be
+      given a port a reuseport socket of the same user holds, and join its group:
+      on Linux it may (udp_lib_lport_inuse, udp_reuseport_add_sock,
+      net/ipv4/udp.c), so the first shard of such an address draws without the
+      option and is given it once bound (listenShard, #1585).
+    items:
+      - name: reuseportDrawJoins
+        value: "true"
+    name: reuseportDrawJoins
+  - doc: |-
       destinationUnavailable is the udp-pktinfo row's reason where the socket cannot
       name a datagram's destination (ADR 0029 D5: stated, never silent).
     items:
@@ -1338,6 +1348,10 @@ files:
       - (*Server).bindPacketAll
       - (*Server).bindPacketGroup
       - (*Server).bindPacketShards
+      - listenShard
+      - portZero
+      - lookupPort
+      - drawnPort
       - pinPort
       - (*Server).adoptPacketSockets
       - batchDegradation
@@ -1826,6 +1840,7 @@ files:
       - defaultMaxPacketSize
       - packetNetworks
       - listenPacket
+      - reuseAfterBind
       - boundPacketConn
       - (*boundPacketConn).finish
       - handoverSource
@@ -1929,6 +1944,7 @@ files:
     name: reply_queue.go
   - decls:
       - soReusePort
+      - reuseportDrawJoins
       - reusePortSupported
       - setReusePort
     name: reuseport_linux.go
@@ -2601,6 +2617,44 @@ functions:
     params: groups []*StreamGroup
     results: error
   - doc: |-
+      listenShard binds one shard of a datagram address. The first shard of an
+      address asked as port 0 asks the kernel for its port without SO_REUSEPORT
+      and is given the option once bound (#1585): Linux's draw, udp_lib_get_port,
+      skips only the ports whose holders the new socket cannot share
+      (udp_lib_lport_inuse, net/ipv4/udp.c), so a socket drawing with
+      SO_REUSEPORT set may be given a port a reuseport socket of the same user
+      holds, and join its group (udp_reuseport_add_sock) — another program's
+      socket would then read part of the group's datagrams. Drawn without the
+      option, the port is one nobody holds at the instant of the draw; set
+      afterwards, the option admits the shards that follow, the group created
+      when the second joins (reuseport_add_sock, net/core/sock_reuseport.c).
+    name: listenShard
+    params: ctx context.Context, addr corenet.AddressValue, spec socketSpec, first bool
+    results: stdnet.PacketConn, bindReport, error
+  - doc: |-
+      portZero reports whether addr asks the kernel to draw its port, and the
+      error of the port's lookup when it failed: the answer is then unknown. An
+      address SplitHostPort refuses is no draw and no error, the bind refuses it.
+    name: portZero
+    params: ctx context.Context, addr corenet.AddressValue
+    results: bool, error
+  - doc: |-
+      drawnPort reports whether the bind reads port as port 0, the kernel's draw
+      (#1585). It asks the resolver the bind asks, the standard library's
+      DefaultResolver.LookupPort (internetAddrList, net/ipsock.go), so the answer
+      is the bind's by construction. A port of digits after at most one sign is
+      read by parsePort (net/port.go) with no resolver, no file and no network:
+      "0", "", "00", "+0", "-0" and a lone sign are 0. Any other string is looked
+      up: the Go resolver reads it as a service name, cgo's getaddrinfo with
+      glibc's strtoul, which skips leading blanks and is cut to 16 bits (" 0",
+      "\t00" and " 65536" draw there) — a lookup the bind would make itself. A
+      port the lookup refuses is no draw, and its error is returned: a caller that
+      binds must not bind on a lookup that failed, since the bind's own lookup may
+      still succeed (a context ending between the two) and read port 0.
+    name: drawnPort
+    params: ctx context.Context, network, port string
+    results: bool, error
+  - doc: |-
       pinPort returns addr with the port pc bound, so the other shards of an address
       asked as ":0" join it instead of drawing their own.
     name: pinPort
@@ -2664,8 +2718,10 @@ functions:
   - doc: |-
       reusePortControl enables SO_REUSEPORT before the socket is bound.
 
-      The option MUST be set before bind, which is precisely what net.ListenConfig's
-      Control hook exists for; setting it afterwards has no effect.
+      The option is set before bind, which is precisely what net.ListenConfig's
+      Control hook exists for: a socket joining a port must carry it when it
+      binds. Set afterwards, it only admits the sockets that bind after it
+      (reuseAfterBind, #1585).
       The network and address parameters are part of net.ListenConfig.Control's
       signature. They are read only to keep the intent explicit: the option applies
       identically whatever address is about to be bound, so neither is consulted.
@@ -3333,6 +3389,14 @@ functions:
     name: listenPacket
     params: ctx context.Context, addr corenet.AddressValue, spec socketSpec
     results: pc stdnet.PacketConn, rep bindReport, err error
+  - doc: |-
+      reuseAfterBind sets SO_REUSEPORT on a bound datagram socket, so the shards
+      that follow can join its port (#1585): Linux reads the option of a bound
+      socket when another binds beside it, and creates the reuseport group then
+      (reuseport_add_sock, net/core/sock_reuseport.c).
+    name: reuseAfterBind
+    params: pc stdnet.PacketConn
+    results: error
   - doc: packetSize returns the group's datagram ceiling.
     name: packetSize
     params: limits corenet.LimitsValue
@@ -3485,7 +3549,9 @@ functions:
       to one address.
     name: reusePortSupported
     results: bool
-  - doc: setReusePort enables SO_REUSEPORT on a socket about to be bound.
+  - doc: |-
+      setReusePort enables SO_REUSEPORT on a socket about to be bound, or on the
+      bound first shard of a drawn port (reuseAfterBind).
     name: setReusePort
     params: fd uintptr
     results: error
@@ -3542,9 +3608,15 @@ functions:
       mustProbe reports whether an address about to be opened as count sockets is
       probed first (#1330): only when the sockets share it through SO_REUSEPORT
       without the group asking to share it with others, and only when it names a
-      port — an address asked as port 0 draws one nobody holds.
+      port. An address asked as port 0 has its first shard draw the port without
+      SO_REUSEPORT (listenShard, #1585), which the kernel gives a port nobody
+      holds at the instant of the draw: a draw with SO_REUSEPORT set may, on
+      Linux, be given a port a reuseport socket of the same user holds
+      (udp_lib_lport_inuse, net/ipv4/udp.c). A stream's draw never shares a port
+      with a bound socket (inet_csk_find_open_port,
+      net/ipv4/inet_connection_sock.c), so nothing is probed there either.
     name: mustProbe
-    params: addr corenet.AddressValue, count int, share bool
+    params: ctx context.Context, addr corenet.AddressValue, count int, share bool
     results: bool
   - doc: |-
       probeAddress binds addr once, plainly — no SO_REUSEPORT, the options the
@@ -9250,6 +9322,13 @@ vars:
           	"frame_settings_window_size_too_big": corehttp2.ErrorTypeFlowControl,
           }
     name: netHTTPFrameErrors
+  - doc: |-
+      lookupPort is the resolver call drawnPort and the bind share, a variable so
+      a test can make the lookup fail while the context is alive.
+    items:
+      - name: lookupPort
+        value: stdnet.DefaultResolver.LookupPort
+    name: lookupPort
   - grouped: true
     items:
       - doc: |-

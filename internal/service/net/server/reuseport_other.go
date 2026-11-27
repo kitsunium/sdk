@@ -2,6 +2,9 @@
 
 package server
 
+// reuseportDrawJoins is false where no socket shares a port: nothing joins.
+const reuseportDrawJoins = false
+
 // reusePortSupported reports whether this platform can bind several listeners
 // to one address.
 func reusePortSupported() bool {

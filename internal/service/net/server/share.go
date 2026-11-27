@@ -68,8 +68,14 @@ func shareRefusalFor(group *StreamGroup, familyRefusal *errs.Error, reusePort bo
 // mustProbe reports whether an address about to be opened as count sockets is
 // probed first (#1330): only when the sockets share it through SO_REUSEPORT
 // without the group asking to share it with others, and only when it names a
-// port — an address asked as port 0 draws one nobody holds.
-func mustProbe(addr corenet.AddressValue, count int, share bool) bool {
+// port. An address asked as port 0 has its first shard draw the port without
+// SO_REUSEPORT (listenShard, #1585), which the kernel gives a port nobody
+// holds at the instant of the draw: a draw with SO_REUSEPORT set may, on
+// Linux, be given a port a reuseport socket of the same user holds
+// (udp_lib_lport_inuse, net/ipv4/udp.c). A stream's draw never shares a port
+// with a bound socket (inet_csk_find_open_port,
+// net/ipv4/inet_connection_sock.c), so nothing is probed there either.
+func mustProbe(ctx context.Context, addr corenet.AddressValue, count int, share bool) bool {
 	//: one socket binds without SO_REUSEPORT and is refused by the kernel
 	//: itself; a shared address is not probed on purpose.
 	if count <= 1 || share {
@@ -77,8 +83,16 @@ func mustProbe(addr corenet.AddressValue, count int, share bool) bool {
 		return false
 	}
 	_, port, err := stdnet.SplitHostPort(addr.Addr)
-	//: a fresh ephemeral port, or an address the bind will refuse itself.
-	if err != nil || port == "0" {
+	//: a fresh ephemeral port, in any spelling Go binds as port 0
+	//: (drawnPort), or an address the bind will refuse itself.
+	if err != nil {
+		//: no probe.
+		return false
+	}
+	drawn, lerr := drawnPort(ctx, addr.Network, port)
+	//: a draw, as the bind reads it; a lookup that failed is no draw here, and
+	//: costs one probe at worst, never a socket.
+	if lerr == nil && drawn {
 		//: no probe.
 		return false
 	}
