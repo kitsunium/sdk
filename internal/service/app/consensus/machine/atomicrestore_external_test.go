@@ -339,3 +339,122 @@ func TestAnSQLFollowerWhoseInstallLoadFailsKeepsRunning(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
+
+// lostAck is a Transactor whose next read-write Transact once armed runs
+// and commits, then returns an error: the COMMIT reached the database and
+// its acknowledgement was lost, which database/sql cannot tell from a
+// COMMIT refused. With blind set, every Transact after it fails without
+// running, so nothing can read what the database holds.
+type lostAck struct {
+	coresql.Transactor
+	armed atomic.Bool
+	blind atomic.Bool
+	// lost is set once a commit's acknowledgement was lost.
+	lost atomic.Bool
+}
+
+// Transact runs fn through the inner transactor, then loses its answer
+// once armed.
+func (l *lostAck) Transact(ctx context.Context, opts coresql.TxOptionsValue, fn coresql.TxFunc) error {
+	//: a blind transactor reaches nothing once the acknowledgement was lost.
+	if l.blind.Load() && l.lost.Load() {
+		return errors.New("the database cannot be reached")
+	}
+	err := l.Transactor.Transact(ctx, opts, fn)
+	//: the armed read-write transaction committed, and its answer is lost.
+	if err == nil && !opts.ReadOnly && l.armed.CompareAndSwap(true, false) {
+		l.lost.Store(true)
+		return errors.New("the connection broke after COMMIT was sent")
+	}
+	return err
+}
+
+// A Restore whose COMMIT reached the database but whose acknowledgement was
+// lost restored the snapshot: the machine reads the position back and
+// reports it, and the next batch follows the snapshot's state. Returned as
+// a refusal with the old position, the node kept running and applied the
+// entries after the old position over the snapshot's state (#1607). When
+// the position cannot be read back the outcome is unknown: the machine
+// reports no position, so the engine stops the node, and applies nothing.
+func TestAnSQLRestoreWhoseCommitAcknowledgementIsLostIsJudgedOnTheDatabase(t *testing.T) {
+	type tc struct {
+		name string
+		// blind fails the read back.
+		blind bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		_, srcTM := newDB(t)
+		from := mustSQL(t, entriesConfig(srcTM))
+		from.ApplyBatch(commands(1, 6), make([]any, 6))
+		snap, err := from.Snapshot()
+		//: the snapshot opens.
+		if err != nil {
+			t.Fatalf("Snapshot() = %v", err)
+		}
+		var body bytes.Buffer
+		_, err = snap.WriteTo(&body)
+		snap.Release()
+		//: the snapshot writes.
+		if err != nil {
+			t.Fatalf("WriteTo() = %v", err)
+		}
+		d, tm := newDB(t)
+		la := &lostAck{Transactor: tm}
+		la.blind.Store(c.blind)
+		m := mustSQL(t, entriesConfig(la))
+		m.ApplyBatch(commands(1, 2), make([]any, 2))
+		meta := coreconsensus.SnapshotMetaValue{
+			Position: coreconsensus.PositionValue{Term: 2, Index: 6},
+			Log:      coreconsensus.LogIdentityValue{Cluster: testCluster, Epoch: 1},
+		}
+		la.armed.Store(true)
+		err = m.Restore(bytes.NewReader(body.Bytes()), meta)
+		//: the acknowledgement was lost.
+		if !la.lost.Load() {
+			t.Fatal("setup: no acknowledgement was lost")
+		}
+		//: a read back that cannot reach the database leaves the outcome unknown.
+		if c.blind {
+			//: a refusal.
+			if err == nil {
+				t.Fatal("a restore whose outcome is unknown returned nil")
+			}
+			//: and no position: the engine cannot take it for one kept.
+			if _, pos, perr := m.AppliedPosition(); perr == nil {
+				t.Errorf("a restore whose outcome is unknown left AppliedPosition %+v, nil", pos)
+			}
+			func() {
+				defer func() {
+					//: an apply over an unknown state panics.
+					if r := recover(); r == nil {
+						t.Error("a batch was applied over a state whose restore is unknown")
+					}
+				}()
+				m.ApplyBatch(commands(7, 7), make([]any, 1))
+			}()
+			return
+		}
+		//: the restore took effect, and says so.
+		if err != nil {
+			t.Fatalf("a restore whose commit held returned %v", err)
+		}
+		li, pos, perr := m.AppliedPosition()
+		//: the position is the snapshot's.
+		if perr != nil || pos != meta.Position || li != meta.Log {
+			t.Fatalf("after a restore whose commit held, AppliedPosition = %+v %+v %v, want %+v %+v", li, pos, perr, meta.Log, meta.Position)
+		}
+		m.ApplyBatch(commands(7, 7), make([]any, 1))
+		rows := d.rows()
+		//: the next batch follows the snapshot's six rows, once each.
+		if len(rows) != 7 || rows[5].idx != 6 || rows[6].idx != 7 {
+			t.Errorf("after a lost acknowledgement and one more batch the database holds %+v, want rows 1..7", rows)
+		}
+	}
+	//: each case restores a machine of its own.
+	for _, c := range []tc{
+		{name: "the commit held, read back"},
+		{name: "the read back fails too", blind: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}

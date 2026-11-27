@@ -69,6 +69,11 @@ type SQL struct {
 	mu  sync.Mutex
 	li  coreconsensus.LogIdentityValue
 	pos coreconsensus.PositionValue
+	// unknown is set when a Restore's outcome could not be read back: the
+	// database holds the old state or the snapshot's, and the machine does
+	// not know which. Until a Restore succeeds, AppliedPosition and
+	// Snapshot return it and ApplyBatch panics with it (#1607).
+	unknown error
 }
 
 // NewSQL builds an SQL machine: it creates the position table when it is
@@ -174,13 +179,18 @@ func (m *SQL) Apply(e coreconsensus.EntryValue) any {
 
 // ApplyBatch applies es in one transaction, writes the position of the
 // last one in that same transaction, commits, then fills results. It
-// panics when the batch cannot complete (D3).
+// panics when the batch cannot complete (D3), and when a Restore's
+// outcome is unknown.
 func (m *SQL) ApplyBatch(es []coreconsensus.EntryValue, results []any) {
 	if len(es) == 0 {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	//: D3: a state the machine cannot name is never applied over.
+	if m.unknown != nil {
+		panic(m.unknown)
+	}
 	last := es[len(es)-1]
 	li := m.li
 	if !li.Same(coreconsensus.LogIdentityValue{Cluster: last.Token.Cluster, Epoch: last.Token.Epoch}) {
@@ -208,10 +218,15 @@ func (m *SQL) ApplyBatch(es []coreconsensus.EntryValue, results []any) {
 }
 
 // AppliedPosition returns the log identity and the position the database
-// holds applied.
+// holds applied. After a Restore whose outcome is unknown it returns
+// STATE_MACHINE_FAILED, until a Restore succeeds.
 func (m *SQL) AppliedPosition() (coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	//: a restore whose outcome is unknown names no position.
+	if m.unknown != nil {
+		return coreconsensus.LogIdentityValue{}, coreconsensus.PositionValue{}, m.unknown
+	}
 	return m.li, m.pos, nil
 }
 
@@ -221,7 +236,14 @@ func (m *SQL) AppliedPosition() (coreconsensus.LogIdentityValue, coreconsensus.P
 // both refused before the transaction opens. A refusal leaves the
 // database and the position as they were: whatever fails in the
 // transaction rolls it back, and the position the machine reports
-// moves only once it committed.
+// moves only once it committed. A transaction that returned an error
+// is judged on the position row, read back in a transaction of its
+// own, because a COMMIT whose acknowledgement was lost committed
+// although it reports a failure: the snapshot's position is a restore
+// that took effect, and Restore returns nil; the position before, a
+// refusal; anything else, or no answer, an outcome the machine cannot
+// name, after which AppliedPosition and Snapshot refuse and
+// ApplyBatch panics, so that the engine stops the node.
 func (m *SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
 	var head [len(sqlSnapshotMagic) + 1]byte
 	if _, err := io.ReadFull(r, head[:]); err != nil {
@@ -244,16 +266,66 @@ func (m *SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
 		}
 		return m.writePosition(ctx, ex, meta.Log, meta.Position)
 	})
+	//: a failed transaction is judged on what the database holds.
 	if err != nil {
-		return failed("restore", err)
+		return m.restoreOutcome(&meta, err)
 	}
-	m.li, m.pos = meta.Log, meta.Position
+	m.li, m.pos, m.unknown = meta.Log, meta.Position, nil
 	return nil
 }
 
+// restoreOutcome judges a Restore whose transaction returned cause on the
+// position the database holds, read back in a transaction of its own: a
+// COMMIT whose acknowledgement was lost committed although database/sql
+// reports it failed, and returned as a refusal with the old position, the
+// engine applied the entries after that position over the snapshot's state
+// (#1607). The snapshot's position is a restore that took effect, nil; the
+// old one a refusal that left the state as it was; anything else, or no
+// answer, an outcome the machine cannot name, kept in unknown so that the
+// engine, reading AppliedPosition back, stops the node. The caller holds mu.
+func (m *SQL) restoreOutcome(meta *coreconsensus.SnapshotMetaValue, cause error) error {
+	li, pos, rerr := m.readBack()
+	//: the transaction committed: the snapshot is the state.
+	if rerr == nil && li == meta.Log && pos == meta.Position {
+		m.li, m.pos, m.unknown = meta.Log, meta.Position, nil
+		return nil
+	}
+	//: the transaction rolled back: the state is the one before.
+	if rerr == nil && li == m.li && pos == m.pos {
+		return failed("restore", cause)
+	}
+	f := []errs.FieldValue{errs.String("op", "restore"), errs.String("why", "the outcome of the restore's transaction is unknown"), errs.String("cause", cause.Error())}
+	//: the read back's own failure is kept beside the cause.
+	if rerr != nil {
+		f = append(f, errs.String("readback", rerr.Error()))
+	}
+	m.unknown = origin(coreconsensus.StateMachineFailed, f...)
+	return m.unknown
+}
+
+// readBack reads the position row in a read-only transaction of its own;
+// a database with no row answers an error, as one that cannot be read.
+func (m *SQL) readBack() (coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error) {
+	var li coreconsensus.LogIdentityValue
+	var pos coreconsensus.PositionValue
+	err := m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{Isolation: m.snapIso, ReadOnly: true}, func(ctx context.Context, ex coresql.Executor) error {
+		var found bool
+		var err error
+		li, pos, found, err = m.readPosition(ctx, ex)
+		//: a position row that is not there names no outcome.
+		if err == nil && !found {
+			return origin(coreconsensus.StateMachineFailed, errs.String("why", "the position row is not there"))
+		}
+		return err
+	})
+	return li, pos, err
+}
+
 // RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its
-// Restore is one transaction, which a failed Transact did not commit,
-// so the engine keeps a node running when it refuses. It does nothing.
+// Restore is one transaction, whose outcome it reads back when the
+// transaction reports a failure, so the engine keeps a node running
+// when it refuses. A type that embeds SQL inherits the marker, and
+// must keep its own Restore atomic. It does nothing.
 func (m *SQL) RestoresAtomically() {}
 
 // writePosition updates the one position row inside the transaction ex

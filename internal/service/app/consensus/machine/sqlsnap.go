@@ -33,12 +33,20 @@ type writeReq struct {
 	done chan struct{}
 }
 
-// Snapshot opens the read-only transaction the view is read from and
+// Snapshot refuses with STATE_MACHINE_FAILED after a Restore whose
+// outcome is unknown. Otherwise it opens the read-only transaction the view is read from and
 // reads the position in it, so that the database pins its view now.
 // It starts one goroutine, which holds that transaction and serves
 // WriteTo in it: the goroutine ends at Release, or at once when the
 // transaction does not open, and Snapshot waits for it then.
 func (m *SQL) Snapshot() (coreconsensus.Snapshot, error) {
+	m.mu.Lock()
+	unknown := m.unknown
+	m.mu.Unlock()
+	//: a state the machine cannot name is never captured.
+	if unknown != nil {
+		return nil, unknown
+	}
 	s := &sqlSnapshot{m: m, write: make(chan *writeReq), release: make(chan struct{}), done: make(chan struct{})}
 	ready := make(chan error, 1)
 	go s.hold(ready)

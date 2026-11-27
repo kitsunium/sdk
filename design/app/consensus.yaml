@@ -816,16 +816,21 @@ packages:
           AppliedPosition reports included. The engine recognises it by a type
           assertion on the machine. At an install, its refusal does not stop
           the node and leaves no marker: the install is refused as any failed
-          one, its copy removed, and the node goes on from the state it had
+          one, its copy removed (kept on a node with no table), and the node goes on from the state it had
           applied, through a later offer or the appends of a leader that still
           holds what it lacks. At a start, its refusal falls back to an older
           snapshot or to a replay of the log, as for a snapshot the engine
           refused on its checksums. VERSION_UNSUPPORTED still stops the node
           and refuses a start (D18), and a Restore that returned nil on a
           stream whose end the engine then refused still stops it: the machine
-          accepted that state. A machine that declares the sibling and breaks
-          its contract leaves the node, unseen, on a state no correct node
-          holds.
+          accepted that state. A durable AtomicRestorer whose AppliedPosition
+          moved across a refused Restore, or failed before or after it, is
+          stopped as a DurableStateMachine is, with its marker: the one breach
+          the engine sees. Any other breach leaves the node, unseen, on a state
+          no correct node holds. The marker is a method, so a type that embeds
+          an AtomicRestorer, machine.SQL included, inherits it, and with it the
+          promise: one that redefines Restore must keep it atomic, or not
+          embed the machine.
         embeds:
           - StateMachine
         methods:
@@ -4819,7 +4824,8 @@ packages:
           - doc: |-
               ApplyBatch applies es in one transaction, writes the position of the
               last one in that same transaction, commits, then fills results. It
-              panics when the batch cannot complete (D3).
+              panics when the batch cannot complete (D3), and when a Restore's
+              outcome is unknown.
             in:
               - name: es
                 type: "[]coreconsensus.EntryValue"
@@ -4829,7 +4835,8 @@ packages:
             recv: pointer
           - doc: |-
               AppliedPosition returns the log identity and the position the database
-              holds applied.
+              holds applied. After a Restore whose outcome is unknown it returns
+              STATE_MACHINE_FAILED, until a Restore succeeds.
             name: AppliedPosition
             out:
               - type: coreconsensus.LogIdentityValue
@@ -4837,7 +4844,8 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
-              Snapshot opens the read-only transaction the view is read from and
+              Snapshot refuses with STATE_MACHINE_FAILED after a Restore whose
+              outcome is unknown. Otherwise it opens the read-only transaction the view is read from and
               reads the position in it, so that the database pins its view now.
               It starts one goroutine, which holds that transaction and serves
               WriteTo in it: the goroutine ends at Release, or at once when the
@@ -4854,7 +4862,14 @@ packages:
               both refused before the transaction opens. A refusal leaves the
               database and the position as they were: whatever fails in the
               transaction rolls it back, and the position the machine reports
-              moves only once it committed.
+              moves only once it committed. A transaction that returned an error
+              is judged on the position row, read back in a transaction of its
+              own, because a COMMIT whose acknowledgement was lost committed
+              although it reports a failure: the snapshot's position is a restore
+              that took effect, and Restore returns nil; the position before, a
+              refusal; anything else, or no answer, an outcome the machine cannot
+              name, after which AppliedPosition and Snapshot refuse and
+              ApplyBatch panics, so that the engine stops the node.
             in:
               - name: r
                 type: io.Reader
@@ -4866,8 +4881,10 @@ packages:
             recv: pointer
           - doc: |-
               RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its
-              Restore is one transaction, which a failed Transact did not commit,
-              so the engine keeps a node running when it refuses. It does nothing.
+              Restore is one transaction, whose outcome it reads back when the
+              transaction reports a failure, so the engine keeps a node running
+              when it refuses. A type that embeds SQL inherits the marker, and
+              must keep its own Restore atomic. It does nothing.
             name: RestoresAtomically
             recv: pointer
         name: SQL

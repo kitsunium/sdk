@@ -2313,6 +2313,9 @@ files:
       - Latest
       - (*Node).restoreFrom
       - (*Node).restoresAtomically
+      - machinePosition
+      - (*Node).atomicPosition
+      - (*Node).keptPosition
       - (*Node).restoreRefused
       - idNamesPosition
       - (*Node).codecOf
@@ -10535,6 +10538,24 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
+          atomicPosition reads the position a durable AtomicRestorer holds before
+          its Restore, the one a refusal must leave (keptPosition); nil for any
+          other machine, which has none to compare or is not trusted with one.
+        name: atomicPosition
+        recv: n *Node
+        results: "*machinePosition"
+      - doc: |-
+          keptPosition reports whether an AtomicRestorer's refused Restore left the
+          position pre it held before the call: the one breach of its contract the
+          engine can see. A volatile one has nothing to compare and is believed; a
+          durable one whose position moved, or that names none before or after,
+          broke the contract or does not know its state, and is stopped as a
+          machine that may have written its disk (#1607).
+        name: keptPosition
+        params: pre *machinePosition
+        recv: n *Node
+        results: bool
+      - doc: |-
           restoreRefused is what a Restore that returned err leaves the node. The
           engine cannot tell a machine that read aside and kept its state from one
           that decoded part of the stream into its live state and failed: the
@@ -10542,10 +10563,15 @@ types:
           unless it is an AtomicRestorer, whose refusal left its state as it was
           (#1607). Such a refusal is returned as is, as every refusal was before
           #1582: an install is refused, restoreItem answers it, restoreFailed
-          removes the copy and raft stays where it was, so the entries handed
-          after the restore continue the state the machine holds; a start falls
-          back to an older snapshot or a replay (refusesStart). Neither stops the
-          node, as a transient failure of a database would for good.
+          removes the copy, or keeps it on a node with no table, and raft stays
+          where it was, so the entries handed after the restore continue the state
+          the machine holds; a start falls back to an older snapshot or a replay
+          (refusesStart). Neither stops the node, as a transient failure of a
+          database would for good. A durable AtomicRestorer whose AppliedPosition
+          moved across the refusal, or failed before or after it, broke its
+          contract or lost track of its state (machine.SQL after a COMMIT whose
+          outcome it could not read back): it is stopped as a durable machine,
+          with its marker (keptPosition).
           At an install, on the apply goroutine, the refusal stops the node before
           the restore is answered, so the goroutine takes no item after it and no
           entry is applied, and no Barrier released, over that prefix: stopped from
@@ -10564,7 +10590,7 @@ types:
           Restore, on its metadata or checksums, touched no machine and is not
           judged here.
         name: restoreRefused
-        params: m *coreconsensus.SnapshotMetaValue, err error, install bool
+        params: m *coreconsensus.SnapshotMetaValue, err error, install bool, pre *machinePosition
         recv: n *Node
         results: error
       - doc: |-
@@ -12250,6 +12276,19 @@ types:
         recv: c *chunkReader
         results: error
     name: chunkReader
+  - doc: machinePosition is what a DurableStateMachine's AppliedPosition answered.
+    fields:
+      - doc: d is the machine asked, read again after the refusal.
+        name: d
+        type: coreconsensus.DurableStateMachine
+      - name: li
+        type: coreconsensus.LogIdentityValue
+      - name: pos
+        type: coreconsensus.PositionValue
+      - name: err
+        type: error
+    kind: struct
+    name: machinePosition
   - doc: ctxReader reads r until ctx is done, then answers ctx's error.
     fields:
       - name: ctx

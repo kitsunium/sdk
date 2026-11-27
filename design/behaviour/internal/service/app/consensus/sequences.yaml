@@ -23362,6 +23362,8 @@ sequences:
         kind: internal
       - id: verifySnapshot
         kind: internal
+      - id: n.atomicPosition
+        kind: internal
       - id: n.cfg.Machine.Restore
         kind: value
       - id: n.restoreRefused
@@ -23431,9 +23433,12 @@ sequences:
           do:
             - bind: sr
               eval: "&snapshotReader{cr: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes), meta: m}"
+            - bind: pre
+              eval: n.atomicPosition()
+              to: n.atomicPosition
             - opt:
                 do:
-                  - return: n.restoreRefused(&m, err, install)
+                  - return: n.restoreRefused(&m, err, install, pre)
                     to: n.restoreRefused
                 init:
                   bind: err
@@ -23489,6 +23494,42 @@ sequences:
       - bind: _, ok
         eval: n.cfg.Machine.(coreconsensus.AtomicRestorer)
       - return: ok
+  - of: (*Node).atomicPosition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).atomicPosition
+        kind: self
+      - id: d.AppliedPosition
+        kind: value
+    steps:
+      - bind: d, ok
+        eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
+      - opt:
+          do:
+            - return: nil
+          when: "!ok || !n.restoresAtomically()"
+      - bind: li, pos, err
+        eval: d.AppliedPosition()
+        to: d.AppliedPosition
+      - return: "&machinePosition{d: d, li: li, pos: pos, err: err}"
+  - of: (*Node).keptPosition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).keptPosition
+        kind: self
+      - id: pre.d.AppliedPosition
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: pre == nil
+      - bind: li, pos, err
+        eval: pre.d.AppliedPosition()
+        to: pre.d.AppliedPosition
+      - return: pre.err == nil && err == nil && li == pre.li && pos == pre.pos
   - of: (*Node).restoreRefused
     participants:
       - id: caller
@@ -23504,6 +23545,13 @@ sequences:
     steps:
       - bind: _, durable
         eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
+      - bind: why
+        eval: "\"a durable machine refused a restore it may have written\""
+      - opt:
+          do:
+            - set: why
+              value: "\"an AtomicRestorer refused a restore and moved its position, or named none\""
+          when: n.restoresAtomically()
       - switch:
           cases:
             - case: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
@@ -23514,7 +23562,7 @@ sequences:
                         to: n.stop
                     when: install
                 - return: err
-            - case: n.restoresAtomically()
+            - case: n.restoresAtomically() && n.keptPosition(pre)
               do:
                 - return: err
             - case: durable
@@ -23522,7 +23570,7 @@ sequences:
                 - bind: serr
                   eval: |-
                     origin(coreconsensus.StateMachineFailed,
-                    			errs.String("why", "a durable machine refused a restore it may have written"),
+                    			errs.String("why", why),
                     			errs.String("id", m.ID), errs.String("cause", err.Error()))
                   to: origin
                 - eval: n.stop(serr, false)

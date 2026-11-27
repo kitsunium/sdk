@@ -62,6 +62,9 @@ func (atomicRestore) RestoresAtomically() {}
 type orderedDurable struct {
 	*partialDurable
 	ord applyOrder
+	// breaks moves the position to the snapshot's on a refused restore:
+	// an AtomicRestorer that breaks its contract where the engine sees it.
+	breaks bool
 }
 
 // Apply implements StateMachine, checking the entry's order.
@@ -77,6 +80,12 @@ func (o *orderedDurable) Restore(r io.Reader, meta coreconsensus.SnapshotMetaVal
 	if err == nil {
 		o.ord.last.Store(meta.Position.Index)
 	}
+	//: a machine that breaks its contract moves its position on a refusal.
+	if err != nil && o.breaks {
+		o.pmu.Lock()
+		o.li, o.pos = meta.Log, meta.Position
+		o.pmu.Unlock()
+	}
 	return err
 }
 
@@ -91,13 +100,16 @@ func (atomicDurable) RestoresAtomically() {}
 // install as before #1582 and the node keeps running, with no marker, every
 // entry applied in order after the state it held, until a later offer
 // restores it (#1607). The same machine without the declaration stops as
-// #1582 decided, and an AtomicRestorer that refuses its version still
-// stops on it (D18): the two paths are apart.
+// #1582 decided, an AtomicRestorer that refuses its version still stops on
+// it (D18), and a durable one whose position moved across its refusal is
+// stopped with its marker: the paths are apart.
 func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 	type tc struct {
 		name    string
 		atomic  bool
 		durable bool
+		// breaks has the durable machine move its position on the refusal.
+		breaks bool
 		// version has the machine refuse VERSION_UNSUPPORTED.
 		version bool
 		// code is the stop's code when the node must stop, 0 when it must
@@ -131,7 +143,7 @@ func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 			switch {
 			//: a durable machine that declares its restore atomic.
 			case tcase.durable && tcase.atomic:
-				o := &orderedDurable{partialDurable: &partialDurable{partialRestore: p}}
+				o := &orderedDurable{partialDurable: &partialDurable{partialRestore: p}, breaks: tcase.breaks}
 				order.Store(&o.ord)
 				cfg.Machine, cfg.Durability = atomicDurable{o}, DurabilityDurable
 			//: a durable machine that does not.
@@ -253,6 +265,7 @@ func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 		{name: "the same volatile machine undeclared stops unmarked", code: coreconsensus.CodeStateMachineFailed},
 		{name: "the same durable machine undeclared stops marked", durable: true, code: coreconsensus.CodeStateMachineFailed, marked: true},
 		{name: "an AtomicRestorer that refuses its version stops on it, marked", atomic: true, version: true, code: coreconsensus.CodeVersionUnsupported, marked: true},
+		{name: "a durable AtomicRestorer whose refusal moved its position stops marked", atomic: true, durable: true, breaks: true, code: coreconsensus.CodeStateMachineFailed, marked: true},
 	} {
 		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })
 	}
@@ -260,12 +273,16 @@ func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 
 // A durable AtomicRestorer whose Restore is refused at a start kept the
 // state it held: the start falls back as before #1582, leaves no marker,
-// and applies nothing out of order; the same machine undeclared fails the
-// start and leaves the marker #1582 decided (#1607).
+// and applies nothing out of order, a refusal coded STATE_MACHINE_FAILED,
+// as machine.SQL's, included; the same machine undeclared fails the start
+// and leaves the marker #1582 decided (#1607).
 func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 	type tc struct {
 		name   string
 		atomic bool
+		// smf has the machine refuse STATE_MACHINE_FAILED, as machine.SQL
+		// does, rather than SNAPSHOT_CORRUPT.
+		smf bool
 	}
 	runCase := func(t *testing.T, tcase tc) {
 		b := newDurableBench(t, coreconsensus.ClusterID{9, 6, 0, 7})
@@ -292,6 +309,10 @@ func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 		// A machine that holds no position: the start restores the
 		// snapshot into it, and the first restore fails, reading aside.
 		p := &partialRestore{kv: newKV(), armed: &armed, node: new(atomic.Pointer[Node]), failed: make(chan struct{})}
+		//: the SQL-like case refuses on the code a database's failure carries.
+		if tcase.smf {
+			p.refusal = origin(coreconsensus.StateMachineFailed, errs.String("why", "the test's database refused the restore"))
+		}
 		o := &orderedDurable{partialDurable: &partialDurable{partialRestore: p}}
 		var m coreconsensus.StateMachine = o
 		//: the declared case's machine says its restore is atomic.
@@ -372,6 +393,7 @@ func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 	//: each case runs its own bench.
 	for _, tcase := range []tc{
 		{name: "a durable AtomicRestorer refused at a start falls back and runs", atomic: true},
+		{name: "a durable AtomicRestorer refused STATE_MACHINE_FAILED at a start falls back and runs", atomic: true, smf: true},
 		{name: "the same machine undeclared fails the start and leaves its marker"},
 	} {
 		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })

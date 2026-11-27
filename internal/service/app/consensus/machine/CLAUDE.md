@@ -46,13 +46,18 @@ never `service/app/consensus`, so the engine's own tests may use it.
 - `atomicrestore_external_test.go` — a `Restore` whose `Load` fails half
   way, or whose position write fails, leaves the rows and the position as
   they were; a follower whose install's `Load` fails keeps running and a
-  later offer restores it (#1607).
+  later offer restores it; a lost COMMIT acknowledgement (`lostAck`) is
+  read back (#1607).
 
 ## Do NOT
 
 - Write to the database in `Restore` outside its one transaction, or move
   `m.li`/`m.pos` before it committed: `SQL` is an `AtomicRestorer`, and the
   engine keeps a node running on the state a refused restore left (#1607).
+- Return a refusal from `Restore` without reading the position back: a
+  COMMIT whose acknowledgement was lost committed (`restoreOutcome`); an
+  outcome it cannot read stays in `unknown`, which refuses
+  `AppliedPosition` and `Snapshot` and panics `ApplyBatch`.
 - Write the position outside the batch's transaction: a crash between the
   two replays the batch or skips it, the defect this package exists for.
 - Recover a failed batch: it panics, the node stops STATE_MACHINE_FAILED

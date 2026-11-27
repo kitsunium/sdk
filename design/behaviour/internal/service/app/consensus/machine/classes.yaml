@@ -109,6 +109,8 @@ files:
       - (*SQL).ApplyBatch
       - (*SQL).AppliedPosition
       - (*SQL).Restore
+      - (*SQL).restoreOutcome
+      - (*SQL).readBack
       - (*SQL).RestoresAtomically
       - (*SQL).writePosition
       - (*SQL).readPosition
@@ -357,6 +359,13 @@ types:
         type: coreconsensus.LogIdentityValue
       - name: pos
         type: coreconsensus.PositionValue
+      - doc: |-
+          unknown is set when a Restore's outcome could not be read back: the
+          database holds the old state or the snapshot's, and the machine does
+          not know which. Until a Restore succeeds, AppliedPosition and
+          Snapshot return it and ApplyBatch panics with it (#1607).
+        name: unknown
+        type: error
     kind: struct
     methods:
       - name: Apply
@@ -373,6 +382,26 @@ types:
         params: r io.Reader, meta coreconsensus.SnapshotMetaValue
         recv: m *SQL
         results: error
+      - doc: |-
+          restoreOutcome judges a Restore whose transaction returned cause on the
+          position the database holds, read back in a transaction of its own: a
+          COMMIT whose acknowledgement was lost committed although database/sql
+          reports it failed, and returned as a refusal with the old position, the
+          engine applied the entries after that position over the snapshot's state
+          (#1607). The snapshot's position is a restore that took effect, nil; the
+          old one a refusal that left the state as it was; anything else, or no
+          answer, an outcome the machine cannot name, kept in unknown so that the
+          engine, reading AppliedPosition back, stops the node. The caller holds mu.
+        name: restoreOutcome
+        params: meta *coreconsensus.SnapshotMetaValue, cause error
+        recv: m *SQL
+        results: error
+      - doc: |-
+          readBack reads the position row in a read-only transaction of its own;
+          a database with no row answers an error, as one that cannot be read.
+        name: readBack
+        recv: m *SQL
+        results: coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error
       - name: RestoresAtomically
         recv: m *SQL
       - doc: |-

@@ -2810,7 +2810,7 @@
       "name": "AtomicRestorer",
       "spelled": "interface{RestoresAtomically(); StateMachine}",
       "canonical": "interface{RestoresAtomically(); github.com/kitsunium/sdk/internal/core/app/consensus.StateMachine}",
-      "doc": "AtomicRestorer is the sibling of a state machine whose Restore is\natomic: a Restore that returns an error leaves the state exactly as\nit was before the call, the position a DurableStateMachine's\nAppliedPosition reports included. The engine recognises it by a type\nassertion on the machine. At an install, its refusal does not stop\nthe node and leaves no marker: the install is refused as any failed\none, its copy removed, and the node goes on from the state it had\napplied, through a later offer or the appends of a leader that still\nholds what it lacks. At a start, its refusal falls back to an older\nsnapshot or to a replay of the log, as for a snapshot the engine\nrefused on its checksums. VERSION_UNSUPPORTED still stops the node\nand refuses a start (D18), and a Restore that returned nil on a\nstream whose end the engine then refused still stops it: the machine\naccepted that state. A machine that declares the sibling and breaks\nits contract leaves the node, unseen, on a state no correct node\nholds.\n",
+      "doc": "AtomicRestorer is the sibling of a state machine whose Restore is\natomic: a Restore that returns an error leaves the state exactly as\nit was before the call, the position a DurableStateMachine's\nAppliedPosition reports included. The engine recognises it by a type\nassertion on the machine. At an install, its refusal does not stop\nthe node and leaves no marker: the install is refused as any failed\none, its copy removed (kept on a node with no table), and the node goes on from the state it had\napplied, through a later offer or the appends of a leader that still\nholds what it lacks. At a start, its refusal falls back to an older\nsnapshot or to a replay of the log, as for a snapshot the engine\nrefused on its checksums. VERSION_UNSUPPORTED still stops the node\nand refuses a start (D18), and a Restore that returned nil on a\nstream whose end the engine then refused still stops it: the machine\naccepted that state. A durable AtomicRestorer whose AppliedPosition\nmoved across a refused Restore, or failed before or after it, is\nstopped as a DurableStateMachine is, with its marker: the one breach\nthe engine sees. Any other breach leaves the node, unseen, on a state\nno correct node holds. The marker is a method, so a type that embeds\nan AtomicRestorer, machine.SQL included, inherits it, and with it the\npromise: one that redefines Restore must keep it atomic, or not\nembed the machine.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -71795,7 +71795,7 @@
       "recv": "SQL",
       "spelled": "func() (coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error)",
       "canonical": "func() (github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentityValue, github.com/kitsunium/sdk/internal/core/app/consensus.PositionValue, error)",
-      "doc": "AppliedPosition returns the log identity and the position the database\nholds applied.\n",
+      "doc": "AppliedPosition returns the log identity and the position the database\nholds applied. After a Restore whose outcome is unknown it returns\nSTATE_MACHINE_FAILED, until a Restore succeeds.\n",
       "file": "service/app/consensus/machine/sql.go",
       "layer": "service",
       "family": "app"
@@ -71821,7 +71821,7 @@
       "recv": "SQL",
       "spelled": "func(es []coreconsensus.EntryValue, results []any)",
       "canonical": "func(es []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, results []any)",
-      "doc": "ApplyBatch applies es in one transaction, writes the position of the\nlast one in that same transaction, commits, then fills results. It\npanics when the batch cannot complete (D3).\n",
+      "doc": "ApplyBatch applies es in one transaction, writes the position of the\nlast one in that same transaction, commits, then fills results. It\npanics when the batch cannot complete (D3), and when a Restore's\noutcome is unknown.\n",
       "file": "service/app/consensus/machine/sql.go",
       "layer": "service",
       "family": "app"
@@ -71834,7 +71834,7 @@
       "recv": "SQL",
       "spelled": "func(r io.Reader, meta coreconsensus.SnapshotMetaValue) error",
       "canonical": "func(r io.Reader, meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
-      "doc": "Restore replaces the state with a snapshot's: Truncate, Load and the\nsnapshot's position, in one transaction. A snapshot no SQL machine\nwrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED,\nboth refused before the transaction opens. A refusal leaves the\ndatabase and the position as they were: whatever fails in the\ntransaction rolls it back, and the position the machine reports\nmoves only once it committed.\n",
+      "doc": "Restore replaces the state with a snapshot's: Truncate, Load and the\nsnapshot's position, in one transaction. A snapshot no SQL machine\nwrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED,\nboth refused before the transaction opens. A refusal leaves the\ndatabase and the position as they were: whatever fails in the\ntransaction rolls it back, and the position the machine reports\nmoves only once it committed. A transaction that returned an error\nis judged on the position row, read back in a transaction of its\nown, because a COMMIT whose acknowledgement was lost committed\nalthough it reports a failure: the snapshot's position is a restore\nthat took effect, and Restore returns nil; the position before, a\nrefusal; anything else, or no answer, an outcome the machine cannot\nname, after which AppliedPosition and Snapshot refuse and\nApplyBatch panics, so that the engine stops the node.\n",
       "file": "service/app/consensus/machine/sql.go",
       "layer": "service",
       "family": "app"
@@ -71847,7 +71847,7 @@
       "recv": "SQL",
       "spelled": "func()",
       "canonical": "func()",
-      "doc": "RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its\nRestore is one transaction, which a failed Transact did not commit,\nso the engine keeps a node running when it refuses. It does nothing.\n",
+      "doc": "RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its\nRestore is one transaction, whose outcome it reads back when the\ntransaction reports a failure, so the engine keeps a node running\nwhen it refuses. A type that embeds SQL inherits the marker, and\nmust keep its own Restore atomic. It does nothing.\n",
       "file": "service/app/consensus/machine/sql.go",
       "layer": "service",
       "family": "app"
@@ -71860,7 +71860,7 @@
       "recv": "SQL",
       "spelled": "func() (coreconsensus.Snapshot, error)",
       "canonical": "func() (github.com/kitsunium/sdk/internal/core/app/consensus.Snapshot, error)",
-      "doc": "Snapshot opens the read-only transaction the view is read from and\nreads the position in it, so that the database pins its view now.\nIt starts one goroutine, which holds that transaction and serves\nWriteTo in it: the goroutine ends at Release, or at once when the\ntransaction does not open, and Snapshot waits for it then.\n",
+      "doc": "Snapshot refuses with STATE_MACHINE_FAILED after a Restore whose\noutcome is unknown. Otherwise it opens the read-only transaction the view is read from and\nreads the position in it, so that the database pins its view now.\nIt starts one goroutine, which holds that transaction and serves\nWriteTo in it: the goroutine ends at Release, or at once when the\ntransaction does not open, and Snapshot waits for it then.\n",
       "file": "service/app/consensus/machine/sqlsnap.go",
       "layer": "service",
       "family": "app"

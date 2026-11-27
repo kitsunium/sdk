@@ -221,7 +221,7 @@ type SQL struct{}
 func (*SQL) AppliedPosition() (coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error)
 ```
 
-AppliedPosition returns the log identity and the position the database holds applied.
+AppliedPosition returns the log identity and the position the database holds applied. After a Restore whose outcome is unknown it returns STATE\_MACHINE\_FAILED, until a Restore succeeds.
 
 <a name="SQL.Apply"></a>
 ### func \(SQL\) [Apply](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/machine/sql.go>)
@@ -239,7 +239,7 @@ Apply applies one committed command: ApplyBatch of one entry.
 func (*SQL) ApplyBatch(es []coreconsensus.EntryValue, results []any)
 ```
 
-ApplyBatch applies es in one transaction, writes the position of the last one in that same transaction, commits, then fills results. It panics when the batch cannot complete (D3).
+ApplyBatch applies es in one transaction, writes the position of the last one in that same transaction, commits, then fills results. It panics when the batch cannot complete (D3), and when a Restore's outcome is unknown.
 
 <a name="SQL.Restore"></a>
 ### func \(SQL\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/machine/sql.go>)
@@ -248,7 +248,7 @@ ApplyBatch applies es in one transaction, writes the position of the last one in
 func (*SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error
 ```
 
-Restore replaces the state with a snapshot's: Truncate, Load and the snapshot's position, in one transaction. A snapshot no SQL machine wrote is SNAPSHOT\_CORRUPT, one of a newer format VERSION\_UNSUPPORTED, both refused before the transaction opens. A refusal leaves the database and the position as they were: whatever fails in the transaction rolls it back, and the position the machine reports moves only once it committed.
+Restore replaces the state with a snapshot's: Truncate, Load and the snapshot's position, in one transaction. A snapshot no SQL machine wrote is SNAPSHOT\_CORRUPT, one of a newer format VERSION\_UNSUPPORTED, both refused before the transaction opens. A refusal leaves the database and the position as they were: whatever fails in the transaction rolls it back, and the position the machine reports moves only once it committed. A transaction that returned an error is judged on the position row, read back in a transaction of its own, because a COMMIT whose acknowledgement was lost committed although it reports a failure: the snapshot's position is a restore that took effect, and Restore returns nil; the position before, a refusal; anything else, or no answer, an outcome the machine cannot name, after which AppliedPosition and Snapshot refuse and ApplyBatch panics, so that the engine stops the node.
 
 <a name="SQL.RestoresAtomically"></a>
 ### func \(SQL\) [RestoresAtomically](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/machine/sql.go>)
@@ -257,7 +257,7 @@ Restore replaces the state with a snapshot's: Truncate, Load and the snapshot's 
 func (*SQL) RestoresAtomically()
 ```
 
-RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its Restore is one transaction, which a failed Transact did not commit, so the engine keeps a node running when it refuses. It does nothing.
+RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its Restore is one transaction, whose outcome it reads back when the transaction reports a failure, so the engine keeps a node running when it refuses. A type that embeds SQL inherits the marker, and must keep its own Restore atomic. It does nothing.
 
 <a name="SQL.Snapshot"></a>
 ### func \(SQL\) [Snapshot](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/machine/sqlsnap.go>)
@@ -266,7 +266,7 @@ RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its Restore is o
 func (*SQL) Snapshot() (coreconsensus.Snapshot, error)
 ```
 
-Snapshot opens the read-only transaction the view is read from and reads the position in it, so that the database pins its view now. It starts one goroutine, which holds that transaction and serves WriteTo in it: the goroutine ends at Release, or at once when the transaction does not open, and Snapshot waits for it then.
+Snapshot refuses with STATE\_MACHINE\_FAILED after a Restore whose outcome is unknown. Otherwise it opens the read-only transaction the view is read from and reads the position in it, so that the database pins its view now. It starts one goroutine, which holds that transaction and serves WriteTo in it: the goroutine ends at Release, or at once when the transaction does not open, and Snapshot waits for it then.
 
 <a name="SQLConfig"></a>
 ## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/machine/gen_facade.go>)
