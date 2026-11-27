@@ -9605,7 +9605,16 @@ sequences:
         kind: internal
       - id: rr.u.workHeld
         kind: internal
+      - id: rr.countHeld
+        kind: internal
     steps:
+      - bind: start
+        eval: rr.r.st.completions
+      - opt:
+          do:
+            - set: rr.heldIdle
+              value: "0"
+          when: start != rr.heldMark
       - loop:
           do:
             - bind: held
@@ -9631,12 +9640,27 @@ sequences:
             - opt:
                 do:
                   - return: len(rr.starved) > 0, false
-                when: caughtUp(rr.r.st.completions != before, rr.u.taskrunFlagged(), held)
+                when: caughtUp(rr.r.st.completions != before, rr.u.taskrunFlagged(), held, rr.heldIdle)
           range: reapRounds
+      - eval: rr.countHeld(start)
+        to: rr.countHeld
       - return: true, false
+  - of: (*uRing).countHeld
+    steps:
+      - alt:
+          - do:
+              - op: ++
+                set: rr.heldIdle
+            when: rr.r.st.completions == start
+          - do:
+              - set: rr.heldIdle
+                value: "0"
+            else: true
+      - set: rr.heldMark
+        value: rr.r.st.completions
   - of: caughtUp
     steps:
-      - return: "!reaped && (!flagged || !held)"
+      - return: "!reaped && (!flagged || !held || idle >= heldBatches)"
   - of: (*uring).taskrunFlagged
     steps:
       - return: u.setup&setupTaskrunFlag != 0

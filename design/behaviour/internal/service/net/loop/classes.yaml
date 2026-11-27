@@ -1424,6 +1424,23 @@ constants:
         type: int
         value: "4"
       - doc: |-
+          heldBatches bounds the batches running in which IORING_SQ_TASKRUN alone
+          keeps a ring behind while its catch-up reaps nothing. The flag is
+          exact one way only: clear, the kernel holds no task work; raised, it
+          may hold none, the kernel clearing it only on entering
+          __io_run_local_work, so a work queued and run in the same pass — a
+          linked SQE's next, on 6.8 any enter, from 6.12 one short of
+          min_events, as the grouped wait asks — leaves it raised over an
+          empty list until the next work comes (#1595). Work truly held in
+          retry_llist runs IO_LOCAL_TW_DEFAULT_MAX (20) at a time on every
+          GETEVENTS enter: a batch enters once to wait and reapRounds times to
+          catch up, so heldBatches batches reaping nothing ran some 400 works
+          that posted nothing, while a stale flag costs a quiet ring heldBatches
+          ticks, far under drainQuiet.
+        name: heldBatches
+        type: int
+        value: reapRounds
+      - doc: |-
           staleFill is the byte a provided buffer is overwritten with under the
           fill hook: a stale byte read back shows as it.
         name: staleFill
@@ -2319,6 +2336,7 @@ files:
       - (*uLoop).catchUp
       - (*uLoop).cutBehind
       - (*uRing).catchUp
+      - (*uRing).countHeld
       - caughtUp
       - (*uring).taskrunFlagged
       - (*uring).workHeld
@@ -3248,7 +3266,9 @@ functions:
   - doc: |-
       caughtUp is one catch-up round's verdict: caught up when the round reaped
       nothing and, on a ring set up with TASKRUN_FLAG, the enter left no task
-      work held (IORING_SQ_TASKRUN clear). From 6.13 one GETEVENTS enter runs
+      work held (IORING_SQ_TASKRUN clear), or the flag already kept the ring
+      behind idle — heldBatches batches running that reaped nothing —: the flag
+      may stay raised over no work, so it vetoes a bounded number of batches. From 6.13 one GETEVENTS enter runs
       IO_LOCAL_TW_DEFAULT_MAX works whether they post a completion or not — a
       poll wake-up that falls back to EAGAIN posts none — and leaves the rest in
       retry_llist, the flag raised (io_run_local_work_continue): a round can reap
@@ -3256,7 +3276,7 @@ functions:
       flag keeps the reap's word alone; before 6.13 an enter runs every work
       queued when it started, and the reap's word is exact there.
     name: caughtUp
-    params: reaped, flagged, held bool
+    params: reaped, flagged, held bool, idle int
     results: bool
   - doc: |-
       reapShape is how many completions one reap takes and how many reaps a
@@ -6301,6 +6321,15 @@ types:
         name: starvedSeen
         type: uint64
       - doc: |-
+          heldIdle is how many batches running the catch-up reaped nothing and
+          ended behind on IORING_SQ_TASKRUN alone (heldBatches); heldMark the
+          ring's completions when it last counted, so a reap that brought
+          anything since starts the count again.
+        name: heldIdle
+        type: int
+      - name: heldMark
+        type: uint64
+      - doc: |-
           promise is rearmStarved's scratch: each group's buffers not yet
           promised to a re-armed recv.
         name: promise
@@ -6518,6 +6547,13 @@ types:
         name: catchUp
         recv: rr *uRing
         results: behind, cut bool
+      - doc: |-
+          countHeld counts a catch-up that ended behind: one batch more held on
+          IORING_SQ_TASKRUN alone when its rounds reaped nothing since start, the
+          count started again when they reaped anything.
+        name: countHeld
+        params: start uint64
+        recv: rr *uRing
       - doc: |-
           reapAll reaps the ring's CQ until it is empty, a batch at a time, and
           flushes an overflow the kernel held back. Under a batch budget it reaps

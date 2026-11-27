@@ -20,30 +20,39 @@ import (
 
 // TestCatchUpVerdict holds one catch-up round's verdict to what it reaped
 // and to IORING_SQ_TASKRUN after the enter: a round that reaped nothing on a
-// TASKRUN_FLAG ring whose kernel still holds work is not caught up; a ring
-// without the flag keeps the reap's word.
+// TASKRUN_FLAG ring whose kernel still holds work is not caught up, unless
+// the flag already kept the ring behind heldBatches batches that reaped
+// nothing — it may stay raised over no work (#1595, D1); a ring without the
+// flag keeps the reap's word.
 func TestCatchUpVerdict(t *testing.T) {
 	type tc struct {
 		name                  string
 		reaped, flagged, held bool
+		idle                  int
 		want                  bool
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Parallel()
 		//: the verdict.
-		if got := caughtUp(c.reaped, c.flagged, c.held); got != c.want {
-			t.Fatalf("caughtUp(reaped=%v, flagged=%v, held=%v) = %v, want %v", c.reaped, c.flagged, c.held, got, c.want)
+		if got := caughtUp(c.reaped, c.flagged, c.held, c.idle); got != c.want {
+			t.Fatalf("caughtUp(reaped=%v, flagged=%v, held=%v, idle=%d) = %v, want %v", c.reaped, c.flagged, c.held, c.idle, got, c.want)
 		}
 	}
 	//: each case.
 	for _, c := range []tc{
-		{"nothing reaped, flag clear", false, true, false, true},
-		{"nothing reaped, work held", false, true, true, false},
-		{"reaped, work held", true, true, true, false},
-		{"reaped, flag clear", true, true, false, false},
-		{"no flag, nothing reaped", false, false, false, true},
-		{"no flag, nothing reaped, the word ignored", false, false, true, true},
-		{"no flag, reaped", true, false, false, false},
+		{"nothing reaped, flag clear", false, true, false, 0, true},
+		{"nothing reaped, work held", false, true, true, 0, false},
+		{"reaped, work held", true, true, true, 0, false},
+		{"reaped, flag clear", true, true, false, 0, false},
+		{"no flag, nothing reaped", false, false, false, 0, true},
+		{"no flag, nothing reaped, the word ignored", false, false, true, 0, true},
+		{"no flag, reaped", true, false, false, 0, false},
+		{"work held, one batch short of the bound", false, true, true, heldBatches - 1, false},
+		{"work held, at the bound: caught up", false, true, true, heldBatches, true},
+		{"work held, past the bound: caught up", false, true, true, heldBatches + 1, true},
+		{"reaped at the bound: another round", true, true, true, heldBatches, false},
+		{"flag clear at the bound: caught up", false, true, false, heldBatches, true},
+		{"no flag at the bound, reaped", true, false, false, heldBatches, false},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
@@ -221,4 +230,146 @@ func kernelAtLeast(major, minor int) bool {
 	}
 	//: by major, then minor.
 	return got[0] > major || (got[0] == major && got[1] >= minor)
+}
+
+// staleTaskrun runs, on u, the construction that leaves IORING_SQ_TASKRUN
+// raised over no work (#1595, D1): a recv linked to a NOP, armed on an empty
+// socket, its byte written after, then one enter that waits for two
+// completions. The kernel clears the flag only on entering
+// __io_run_local_work; the recv's flush queues the NOP on the emptied list,
+// which raises it, and, one event short of min_events (6.12 and later; any
+// enter on 6.8), the same pass runs the NOP. It reaps both completions,
+// enters once more with GETEVENTS and min_complete zero, as the catch-up's
+// rounds do, and reports whether the flag still reads raised over an empty
+// CQ.
+func staleTaskrun(t *testing.T, u *uring) bool {
+	t.Helper()
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
+	//: no pair.
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { syscall.Close(fds[0]); syscall.Close(fds[1]) })
+	var buf [16]byte
+	s := u.get()
+	s.opcode, s.fd, s.flags = opRecv, int32(fds[0]), sqeIOLink
+	s.addr, s.len = uint64(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf))
+	u.get().opcode = opNop
+	u.submit()
+	//: the recv waits for its byte, the NOP behind it.
+	if n := u.ready(); n != 0 {
+		t.Fatalf("%d completions before any byte", n)
+	}
+	//: the wake-up queues the recv's task work.
+	if _, err := syscall.Write(fds[1], []byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	ts := kernelTimespec{sec: 5}
+	arg := getEventsArg{ts: uint64(uintptr(unsafe.Pointer(&ts)))}
+	fd, reg := u.enterTarget()
+	_, errno := uringEnterWait(fd, 0, 2, enterGetEvents|enterExtArg|reg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
+	//: woken on both, or at the bound.
+	if errno != 0 && errno != errnoETIME {
+		t.Fatalf("enter: %v", errno)
+	}
+	//: the recv and the NOP.
+	if n := u.reap(16, func(*cqe) {}); n != 2 {
+		t.Fatalf("%s: %d completions, want the recv and its linked NOP", kernelRelease(), n)
+	}
+	runtime.KeepAlive(&buf)
+	u.flushOverflow()
+	//: raised, with nothing in the CQ.
+	return u.workHeld() && u.ready() == 0
+}
+
+// TestURingTaskrunFlag_raisedOverNoWork pins, on the kernel it runs on, that
+// IORING_SQ_TASKRUN may stay raised with no task work held (#1595, D1): the
+// flag is exact one way only — clear, no work is held —, so the drain's
+// catch-up cannot take a raised flag for held work forever. A ring without
+// TASKRUN_FLAG never raises it. A kernel that clears it over the
+// construction is said, and the case skipped.
+func TestURingTaskrunFlag_raisedOverNoWork(t *testing.T) {
+	type tc struct {
+		name  string
+		flags uint32
+		want  bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		u := openWaitRing(t, c.flags)
+		got := staleTaskrun(t, u)
+		//: the kernel did not leave it raised: nothing to pin here.
+		if c.want && !got {
+			t.Skipf("kernel %s clears IORING_SQ_TASKRUN over a recv linked to a NOP", kernelRelease())
+		}
+		//: the word as the kernel left it.
+		if got != c.want {
+			t.Fatalf("%s: IORING_SQ_TASKRUN raised over no work = %v, want %v", kernelRelease(), got, c.want)
+		}
+		t.Logf("%s: IORING_SQ_TASKRUN raised over no work = %v", kernelRelease(), got)
+	}
+	deferred := setupSingleIssuer | setupSubmitAll | setupDeferTaskrun
+	//: each case.
+	for _, c := range []tc{
+		{"taskrun flag: raised, nothing held", deferred | setupTaskrunFlag, true},
+		{"no flag: never raised", deferred, false},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestURingCatchUp_staleFlagQuietRing drains a quiet ring, batch after
+// batch, a tick each, one connection open on it and never heard. With
+// IORING_SQ_TASKRUN left raised over no work (staleTaskrun) the catch-up
+// takes the flag for held work only heldBatches batches running that reap
+// nothing; the ring is then caught up, and the connection drainable once it
+// stayed silent drainQuiet, not left open until the Shutdown's deadline
+// (#1595, D1). A ring whose flag reads clear is caught up at its first
+// batch.
+func TestURingCatchUp_staleFlagQuietRing(t *testing.T) {
+	type tc struct {
+		name   string
+		flags  uint32
+		stale  bool
+		caught int64
+	}
+	runCase := func(t *testing.T, c tc) {
+		u := openWaitRing(t, c.flags)
+		//: the construction the kernel did not reproduce.
+		if staleTaskrun(t, u) != c.stale {
+			t.Skipf("kernel %s: IORING_SQ_TASKRUN raised over no work != %v", kernelRelease(), c.stale)
+		}
+		ul := &uLoop{lp: &loop{draining: true, sz: sizing{cqBatch: 64}}}
+		rr := &uRing{ul: ul, u: u}
+		rr.r = newRing(ul.lp, 0, rr)
+		ul.rings = []*uRing{rr}
+		rr.r.conns = []connCtl{{state: stOpen, spill: chunkRef{idx: noChunk}}}
+		caught, closed := int64(-1), int64(-1)
+		//: a batch a tick, until the connection may close or drainQuiet passed.
+		for tick := int64(0); tick <= drainQuietTicks && closed < 0; tick++ {
+			ul.lp.tick = tick
+			ul.reapRings()
+			ul.catchUp()
+			//: the first batch the ring is caught up.
+			if caught < 0 && !rr.r.behind() {
+				caught = tick
+			}
+			//: the drain's look.
+			if rr.r.drainable(0) {
+				closed = tick
+			}
+		}
+		//: caught up within the bound, closed at drainQuiet.
+		if caught != c.caught || closed != drainQuietTicks {
+			t.Fatalf("%s: caught up at batch %d (want %d), drainable at tick %d (want %d, drainQuiet)",
+				kernelRelease(), caught, c.caught, closed, drainQuietTicks)
+		}
+	}
+	deferred := setupSingleIssuer | setupSubmitAll | setupDeferTaskrun
+	//: each case.
+	for _, c := range []tc{
+		{"stale flag: caught up after heldBatches batches", deferred | setupTaskrunFlag, true, int64(heldBatches)},
+		{"no flag: caught up at once", deferred, false, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
 }
