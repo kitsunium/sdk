@@ -1682,8 +1682,18 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   back to an older snapshot, which a durable machine already past it would
   skip while keeping the state it accepted. On a file log the stop writes
   `STOP-STATE_MACHINE_FAILED`, and every later start is refused
-  STOP_MARKER_PRESENT until an operator clears it
-  (`TestARestoreWhoseSecondReadIsCutIsRefused`, its skim and framed cases).
+  STOP_MARKER_PRESENT until an operator clears it. The stop itself is held by
+  `TestARestoreWhoseSecondReadIsCutIsRefused` (its skim and framed cases), on
+  a memory log, which writes no marker; the marker's write for
+  STATE_MACHINE_FAILED and the refusal of the next start are held by
+  `TestDataDirLockAndStopMarkers`, on a file log, apart from the install.
+  Before an operator clears that marker, a `DurableStateMachine` must be
+  verified or rebuilt: the next start trusts its `AppliedPosition`, and the
+  machine accepted a state the engine never vouched for. The cause is not
+  kept as a code: an EIO met by the `io.Copy` that follows a nil `Restore`
+  becomes STATE_MACHINE_FAILED, STORAGE_FAILED survives only in the
+  stop's `cause` text, and the marker is permanent, not limited to the
+  start in progress.
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).

@@ -63,7 +63,9 @@ packages:
           - doc: |-
               CodeStateMachineFailed identifies a node whose Apply panicked or could not
               complete — the entry IS committed — or whose Restore returned nil on
-              a snapshot whose end the engine then refused.
+              a snapshot whose end the engine then refused. Before an operator
+              clears the stop marker this leaves, a DurableStateMachine must be
+              verified or rebuilt: the next start trusts its AppliedPosition.
             name: CodeStateMachineFailed
             value: "0x00_02_39_0A"
         type: errs.Code
@@ -1235,7 +1237,12 @@ packages:
               The entry IS committed: this never means "not written". It also stops
               the node, or fails its start, when Restore returned nil on a snapshot
               whose end the engine then refused: the machine may hold that state
-              while the applied position stays below it.
+              while the applied position stays below it. Whatever failed the read
+              after that nil, an I/O error included, is this code: the failing
+              cause survives only in the stop's text, and the stop marker is
+              permanent. Before an operator clears that marker, a
+              DurableStateMachine must be verified or rebuilt, because the next
+              start trusts its AppliedPosition.
             exit: UNAVAILABLE
             name: StateMachineFailed
             private: "core/app/consensus: Apply panicked or could not complete; the entry is committed and the node stopped applying"
