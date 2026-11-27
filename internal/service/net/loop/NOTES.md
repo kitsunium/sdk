@@ -222,6 +222,18 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   `TestURingBudget_cutsBatches` checks the cut on a ring and on a secondary,
   `BenchmarkURingBatchBudget` measures a held burst's first, median and last
   echo.
+- **The budget test times an echo at the client's socket, not at its reader
+  (#1596).** `TestURingBudget_cutsBatches` judges the first echo by its
+  `SO_TIMESTAMPNS` receive stamp (`burstStamped`, `readStamped`): its readers
+  are goroutines of the same process, and under `GOMAXPROCS=1` they share the
+  one P with the loop (locked to its thread, no `Gosched` without a spare P,
+  ADR 0199) and with each other. Measured on 6.12, race on: with a 2 ms budget
+  the kernel held the first echo 3.7 ms after the release, against 48 ms (one
+  ring) and 110 ms (two) without, while the readers read it 35 to 107 ms
+  after, which failed 3 runs in 5. The loop still lets them run (sysmon
+  preempts it: 20 to 30 ms gaps between its batch ends, as long without a
+  budget); the stamp leaves out the local readers' scheduling delay alone, and a remote client's own reading adds the network and its host on top. The benchmark keeps the
+  reader's clock.
 - `WriteFile` (#982, `corenet.LoopFileWriter`): head then n bytes of a file, the
   descriptor duplicated (the engine's copy, so an SQE can name it until the file
   is over). Epoll: `sendfile`, one 1 MiB step a turn, EPOLLOUT between. io_uring:
