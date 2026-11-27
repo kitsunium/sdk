@@ -73,6 +73,10 @@ const (
 	// mSnapshotStreamRate is the pace of each snapshot stream that ended,
 	// in bytes a second (#920).
 	mSnapshotStreamRate = "consensus_snapshot_stream_bytes_per_second"
+	// mSnapshotRateShort counts, by peer, the rises of
+	// PeerSnapshotRateShort: a stream that would end after the writes lift
+	// its pin (#1486).
+	mSnapshotRateShort = "consensus_snapshot_rate_short_total"
 )
 
 // departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads

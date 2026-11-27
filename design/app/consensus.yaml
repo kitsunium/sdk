@@ -2541,6 +2541,26 @@ packages:
         name: PeerLeaderUnconfirmed
         type: PeerFlags
         value: "64"
+      - blockDoc: The facts a PeerHealthValue carries.
+        doc: |-
+          PeerSnapshotRateShort is set while the snapshot stream to the peer looks
+          too slow to end before the writes bring the log to the band where its pin
+          stops holding compaction back, after which the peer needs another
+          snapshot, the loop of #550. It rises once the transfer's estimated time,
+          at the stream's rate over the last four maximum election timeouts,
+          exceeds the time the writes take to fill the log to that band, at their
+          rate over the same window; it falls once the transfer would end within
+          three quarters of that time. Once the pin was lifted it holds nothing,
+          and the flag stays up to the stream's last byte. A raised flag thus does
+          not always mean that the transfer outlasts the fill at this instant. A
+          stream that did not move over the window is left to its pin bound. Each
+          rise adds one to consensus_snapshot_rate_short_total by peer and logs a
+          Warn line naming the peer, both times and the rate; the package guide
+          says what to do: raise SnapshotStreamBytesPerSecond, raise MaxLogBytes,
+          or lower the write load (#1486).
+        name: PeerSnapshotRateShort
+        type: PeerFlags
+        value: "128"
       - blockDoc: The answers a HealthValue carries.
         doc: |-
           HealthReady is the readiness answer: running, a leader known and
@@ -3356,7 +3376,7 @@ packages:
             - doc: |-
                 Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
                 PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
-                PeerLeaderUnconfirmed.
+                PeerLeaderUnconfirmed, PeerSnapshotRateShort.
               name: Flags
               type: PeerFlags
             - doc: Match is the highest index the peer holds durably, as acknowledged.
@@ -7317,6 +7337,17 @@ packages:
             reexport: svcconsensus.PeerLeaderUnconfirmed
             type: svcconsensus.PeerFlags
             value: "64"
+          - doc: |-
+              PeerSnapshotRateShort is set while the snapshot stream to the peer looks
+              too slow to end before the writes lift its pin, after which the peer
+              needs another snapshot: it rises once the estimated transfer time
+              exceeds the log's fill time, falls once the transfer would end within
+              three quarters of it, and stays up to the stream's last byte once the
+              pin was lifted (#1486).
+            name: PeerSnapshotRateShort
+            reexport: svcconsensus.PeerSnapshotRateShort
+            type: svcconsensus.PeerFlags
+            value: "128"
         doc: The facts a PeerHealthValue carries, read with PeerFlags.Has.
       - const:
           - name: ReadIndex

@@ -197,6 +197,9 @@ type Node struct {
 	// receiver still answering when its stream's pin fell due was slow to
 	// install, not stuck (#610).
 	pinScale map[coreconsensus.NodeID]uint8
+	// logRate is the window over the log's bytes the writes' rate is read
+	// from, sampled at each tick (watchRateShort, #1486).
+	logRate rateWindow
 	// tooLarge is, per learner, the newest snapshot it was found too small
 	// to install, so that it is said once per snapshot (#591).
 	tooLarge map[coreconsensus.NodeID]string

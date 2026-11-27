@@ -2506,6 +2506,7 @@ written before the code. **They are spelled as Prometheus exposes them
 | `consensus_chain_refusals_total`, `consensus_snapshot_pins`, `consensus_snapshot_pin_age_seconds` | counter by leader, gauge, gauge by peer: how long each pin has held since its offer (R7-19, R7-38, #914) |
 | `consensus_stopped` | gauge by `StopReason`, set before the process exits (R7-37) |
 | `consensus_snapshot_stream_bytes_per_second` | histogram: the pace of each snapshot stream that ended (#920) |
+| `consensus_snapshot_rate_short_total` | counter by peer: the rises of `PeerSnapshotRateShort`, a snapshot stream whose rate would end it after the writes bring the log to the band where its pin stops holding (amended 2026-11-27, [#1486](https://github.com/kitsunium/sdk/issues/1486)) |
 | `consensus_forwards_dropped_total`, `consensus_forward_runs`, `consensus_forward_answers_forgotten_total` | counter by reason (`copy`, `restarted`, `evicted`), gauge, counter: the forwards the fence turned away, the forwarder runs it marks, the answers forgotten at the table's bound before their window ended (#1482) |
 | `consensus_forward_last_resorts_total` | counter by action: the fence's last resorts, `transfer` when one started a leadership transfer, `none` when it started none — no eligible voter, a transfer already under way (this one's included), or one that failed this term (#1540) |
 

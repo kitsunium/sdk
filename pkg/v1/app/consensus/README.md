@@ -692,6 +692,15 @@ The facts a PeerHealthValue carries, read with PeerFlags.Has.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshot`.
 
+<a name="PeerSnapshotRateShort"></a>
+```go
+const PeerSnapshotRateShort svcconsensus.PeerFlags = 128
+```
+
+PeerSnapshotRateShort is set while the snapshot stream to the peer looks too slow to end before the writes lift its pin, after which the peer needs another snapshot: it rises once the estimated transfer time exceeds the log's fill time, falls once the transfer would end within three quarters of it, and stays up to the stream's last byte once the pin was lifted (#1486).
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshotRateShort`.
+
 <a name="PeerStranded"></a>
 ```go
 const PeerStranded svcconsensus.PeerFlags = 8
@@ -3733,7 +3742,7 @@ type PeerHealthValue struct {
 	ID           coreconsensus.NodeID
 	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
 	// PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
-	// PeerLeaderUnconfirmed.
+	// PeerLeaderUnconfirmed, PeerSnapshotRateShort.
 	Flags        PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match        uint64
