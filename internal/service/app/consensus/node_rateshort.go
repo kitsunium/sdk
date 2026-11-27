@@ -27,13 +27,21 @@ const rateSamples = 8
 // (#1486).
 const rateShortClear float64 = 0.75
 
-// rateWindow is a sliding window over a growing count — the bytes a stream
-// sent, the bytes the log holds — sampled on the loop: the samples at, in
-// Unix nanoseconds, and v, a ring of rateSamples whose next slot is head,
-// n of them taken.
+// rateWindow is a sliding window over a count that may also fall — the
+// bytes a stream sent, the bytes the log holds, which a compaction shrinks —
+// sampled on the loop: the samples at, in Unix nanoseconds (the wall
+// clock's, as a pin's moved and since), and acc, the growth the count
+// gained from one sample to the next summed since the window's first, a
+// ring of rateSamples whose next slot is head, n of them taken; last is the
+// count at the newest sample. Only growth is summed: a compaction costs the
+// write rate the writes of the one interval it falls in, and never reads as
+// a window without writes, which lowered PeerSnapshotRateShort for a window
+// after each compaction of a stream it held for, then raised and counted it
+// again (D1 of #1486's review).
 type rateWindow struct {
 	at   [rateSamples]int64
-	v    [rateSamples]int64
+	acc  [rateSamples]int64
+	last int64
 	head int
 	n    int
 }
@@ -55,14 +63,18 @@ func (w *rateWindow) add(now time.Time, v int64, span time.Duration) {
 	if w.n > 0 && t-w.at[(w.head+rateSamples-1)%rateSamples] < int64(span)/rateSamples {
 		return
 	}
-	w.at[w.head], w.v[w.head] = t, v
+	var acc int64
+	//: the growth since the newest sample, summed; none before the first.
+	if w.n > 0 {
+		acc = w.acc[(w.head+rateSamples-1)%rateSamples] + max(v-w.last, 0)
+	}
+	w.at[w.head], w.acc[w.head], w.last = t, acc, v
 	w.head = (w.head + 1) % rateSamples
 	w.n = min(w.n+1, rateSamples)
 }
 
 // rate is the count's growth a second from the oldest sample to the newest,
-// never below 0 — a compaction that shrank the log writes nothing —, and
-// false until the ring is full.
+// its falls left out, and false until the ring is full.
 func (w *rateWindow) rate() (float64, bool) {
 	//: a window that does not span its samples yet.
 	if w.n < rateSamples {
@@ -74,7 +86,7 @@ func (w *rateWindow) rate() (float64, bool) {
 	if dt <= 0 {
 		return 0, false
 	}
-	return float64(max(w.v[newest]-w.v[oldest], 0)) / time.Duration(dt).Seconds(), true
+	return float64(w.acc[newest]-w.acc[oldest]) / time.Duration(dt).Seconds(), true
 }
 
 // tightFrom is the fewest bytes at which the log is tight (logTight): past
@@ -88,8 +100,9 @@ func (n *Node) tightFrom() int64 {
 // watchRateShort judges, at a tick, whether each snapshot stream in flight
 // would end before the writes bring the log to tightFrom, where its pin
 // stops holding compaction back (#1486). The stream's rate R is its bytes
-// sent over the sliding window, the writes' rate the log's bytes over the
-// same window, both rateWindowTimeouts of etMax: it raises
+// sent over the sliding window from its accept, the writes' rate the log's
+// growth over the same window, compactions left out (rateWindow), both
+// rateWindowTimeouts of etMax: it raises
 // PeerSnapshotRateShort for the stream once (EncodedSize less the bytes
 // sent) over R exceeds (tightFrom less the log's bytes) over the write rate,
 // adds one to consensus_snapshot_rate_short_total and logs it at Warn; it
@@ -120,14 +133,29 @@ func (n *Node) watchRateShort(now time.Time, etMax time.Duration) {
 			n.sending[to] = pin
 		}
 		sent := pin.progress.Load()
-		pin.rate.sent.add(now, sent, span)
-		r, ok := pin.rate.sent.rate()
+		r, ok := pin.rate.sample(now, sent, span)
 		//: either window not full yet, or a stream that did not move.
-		if !full || !ok || r <= 0 {
+		if !full || !ok {
 			continue
 		}
 		n.judgeRateShort(to, pin.rate, float64(max(pin.size-sent, 0))/r, fillSeconds(n.tightFrom()-b, write), r)
 	}
+}
+
+// sample adds sent, the stream's progress at now, to its window and returns
+// the stream's rate, false until the window is full or while the stream
+// did not move over it. The window starts again at the first sample past
+// 0, the accept, which stores a resumed stream's offset at once: that jump
+// is no rate, and a window spanning the offer's wait would read a fraction
+// of the stream's.
+func (s *rateWatch) sample(now time.Time, sent int64, span time.Duration) (float64, bool) {
+	//: the accept: the window starts there.
+	if s.sent.n > 0 && s.sent.last == 0 && sent > 0 {
+		s.sent = rateWindow{}
+	}
+	s.sent.add(now, sent, span)
+	r, ok := s.sent.rate()
+	return r, ok && r > 0
 }
 
 // fillSeconds is how long writes at rate bytes a second take to add left

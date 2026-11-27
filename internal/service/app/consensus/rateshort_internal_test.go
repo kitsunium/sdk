@@ -26,10 +26,15 @@ func (byteLog) freeBytes() int64 { return -1 }
 // ratePhase is a stretch of a rate-short scenario: for dur, the stream
 // moves at stream bytes a second and the log grows at write bytes a second;
 // at its end the peer's PeerSnapshotRateShort is short, and rises have been
-// counted and logged in all.
+// counted and logged in all. At its first tick the stream jumps by jump
+// bytes, the offset a resumed stream's accept stores at once, and, when
+// compact is set, the log falls to compactTo bytes, a compaction.
 type ratePhase struct {
 	dur           time.Duration
 	stream, write int64
+	jump          int64
+	compact       bool
+	compactTo     int64
 	short         bool
 	rises         int
 }
@@ -58,6 +63,9 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 		// requires the stream still in flight then: the pin no longer
 		// holds while the transfer goes on, #550's loop.
 		tight bool
+		// rate, when set, bounds the rate the last Warn line gives, in
+		// bytes a second.
+		rate [2]uint64
 	}
 	runCase := func(t *testing.T, c tc) {
 		mc := clock.NewManualClock(time.Unix(1_700_000_000, 0))
@@ -76,8 +84,16 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 			return ph.Flags.Has(PeerSnapshotRateShort)
 		}
 		var sentAcc, logAcc float64
-		step := func(p ratePhase) {
+		step := func(p ratePhase, first bool) {
 			mc.Advance(tick)
+			//: the phase's first tick: the accept's offset, the compaction.
+			if first {
+				sentAcc += float64(p.jump)
+				//: a compaction shrinks the log.
+				if p.compact {
+					logAcc = float64(p.compactTo)
+				}
+			}
 			sentAcc += float64(p.stream) * tick.Seconds()
 			logAcc += float64(p.write) * tick.Seconds()
 			progress.Store(min(int64(sentAcc), size))
@@ -98,8 +114,8 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 		//: each phase in turn, judged at its end.
 		for i, p := range c.phases {
 			//: the phase's ticks.
-			for range int(p.dur / tick) {
-				step(p)
+			for k := range int(p.dur / tick) {
+				step(p, k == 0)
 			}
 			//: the flag in Health.Peers.
 			if got := short(); got != p.short {
@@ -121,6 +137,14 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 				t.Fatalf("the line does not name the peer, both times and the rate: %v", line)
 			}
 		}
+		//: the rate the last line gives, within its bounds.
+		if c.rate != [2]uint64{} {
+			got, err := strconv.ParseUint(lg.lines[len(lg.lines)-1]["rate"], 10, 64)
+			//: a rate outside the stream's own pace.
+			if err != nil || got < c.rate[0] || got > c.rate[1] {
+				t.Fatalf("the line gives rate %q, want within %v", lg.lines[len(lg.lines)-1]["rate"], c.rate)
+			}
+		}
 		//: the scenario carried on until the pin stops holding.
 		if c.tight {
 			last := c.phases[len(c.phases)-1]
@@ -130,7 +154,7 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 				if i > 100_000 {
 					t.Fatal("the log never turned tight")
 				}
-				step(last)
+				step(last, false)
 			}
 			//: #550: the pin is lifted while the stream still has bytes to send.
 			if sent := progress.Load(); sent >= size {
@@ -183,6 +207,39 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 			},
 		},
 		{
+			// The log grows to 400 KiB while the stream is up, then a
+			// compaction shrinks it to 100 KiB while the stream goes on: it
+			// is no window without writes. The flag fell for a window, then
+			// rose and was counted, and logged, again (D1 of the review).
+			name: "compaction after the rise",
+			phases: []ratePhase{
+				{dur: time.Second, stream: 100 << 10, write: 20 << 10, short: true, rises: 1},
+				{dur: 2 * time.Second, stream: 100 << 10, write: 190 << 10, short: true, rises: 1},
+				{dur: 2 * time.Second, stream: 100 << 10, write: 20 << 10, compact: true, compactTo: 100 << 10, short: true, rises: 1},
+			},
+		},
+		{
+			// The offer waits 350 ms, then the stream moves at 300 KiB/s,
+			// about 34 s against 38 s: never raised. The window spanning
+			// the wait read a seventh of the rate after the accept, and
+			// raised it.
+			name: "an offer that waited, then a stream fast enough",
+			phases: []ratePhase{
+				{dur: 350 * time.Millisecond, write: 20 << 10},
+				{dur: 2 * time.Second, stream: 300 << 10, write: 20 << 10},
+			},
+		},
+		{
+			// A stream resumed at 4 MiB: the accept stores the offset at
+			// once, which is no rate; the line gives the stream's own.
+			name: "resumed",
+			phases: []ratePhase{
+				{dur: 200 * time.Millisecond, write: 20 << 10},
+				{dur: time.Second, stream: 100 << 10, write: 20 << 10, jump: 4 << 20, short: true, rises: 1},
+			},
+			rate: [2]uint64{90 << 10, 110 << 10},
+		},
+		{
 			// #550's loop on the base: the pin stops holding mid-stream.
 			name:   "the pin lifts mid-stream",
 			phases: []ratePhase{{dur: time.Second, stream: 100 << 10, write: 20 << 10, short: true, rises: 1}},
@@ -221,6 +278,80 @@ func TestTightFromIsWhereTheLogTurnsTight(t *testing.T) {
 		{name: "odd half", max: 1<<20 + 1, res: 600 << 10},
 		{name: "three reserves", max: 3 << 20, res: 1 << 20},
 		{name: "large quota", max: 1 << 30, res: 1 << 20},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// #1486: two streams in flight under one write rate are judged each on its
+// own rate: the slow one is flagged, counted and logged under its peer, the
+// fast one is not, whichever peer is which.
+func TestOnlyTheStreamTooSlowIsFlagged(t *testing.T) {
+	const (
+		size  = 10 << 20
+		tick  = 10 * time.Millisecond
+		etMax = 100 * time.Millisecond
+	)
+	type tc struct {
+		name       string
+		slow, fast coreconsensus.NodeID
+	}
+	runCase := func(t *testing.T, c tc) {
+		mc := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		meter := svcmetrics.NewMeter()
+		lg := &attrLogger{}
+		bytes := new(atomic.Int64)
+		n := &Node{
+			clk: mc, obs: newObs(&Config{Meter: meter, Logger: lg, Group: 1}),
+			cfg:     Config{Log: byteLog{MemoryLog: NewMemoryLog(), bytes: bytes}, MaxLogBytes: 1 << 20, LogReserveBytes: 128 << 10},
+			sending: map[coreconsensus.NodeID]sendPin{},
+		}
+		rates := map[coreconsensus.NodeID]int64{c.slow: 100 << 10, c.fast: 1 << 20}
+		progress := map[coreconsensus.NodeID]*atomic.Int64{}
+		//: one stream to each peer.
+		for to := range rates {
+			progress[to] = new(atomic.Int64)
+			n.sending[to] = sendPin{index: 10, sent: new(atomic.Int64), moved: new(atomic.Int64), progress: progress[to], size: size}
+		}
+		//: two seconds of the loop's ticks.
+		for k := 1; k <= int(2*time.Second/tick); k++ {
+			mc.Advance(tick)
+			//: each stream at its own rate.
+			for to, r := range rates {
+				progress[to].Store(int64(float64(r) * tick.Seconds() * float64(k)))
+			}
+			bytes.Store(int64(float64(20<<10) * tick.Seconds() * float64(k)))
+			n.watchRateShort(mc.Now(), etMax)
+		}
+		//: each peer's flag, and its counter.
+		for to := range rates {
+			ph := n.peerHealth(&raft.PeerStatValue{ID: to, Flags: raft.StatSnapshot}, mc.Now(), 0, time.Second)
+			want := to == c.slow
+			//: the flag of this peer.
+			if got := ph.Flags.Has(PeerSnapshotRateShort); got != want {
+				t.Fatalf("peer %d: PeerSnapshotRateShort %v, want %v", to, got, want)
+			}
+			var count int64
+			//: the counter's series of this peer.
+			for _, p := range meter.Collect().Sums[mSnapshotRateShort].Points {
+				//: this peer's.
+				if hasAttr(p.Attrs, "peer", to.String()) {
+					count += p.Value
+				}
+			}
+			//: one rise for the slow stream, none for the fast.
+			if want != (count == 1) || count > 1 {
+				t.Fatalf("peer %d: %d rises counted, want slow=%v", to, count, want)
+			}
+		}
+		//: one line, naming the slow peer.
+		if len(lg.lines) != 1 || lg.lines[0]["peer"] != strconv.FormatUint(uint64(c.slow), 10) {
+			t.Fatalf("Warn lines %v, want one naming peer %d", lg.lines, c.slow)
+		}
+	}
+	for _, c := range []tc{
+		{name: "slow peer 2", slow: 2, fast: 3},
+		{name: "slow peer 3", slow: 3, fast: 2},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}

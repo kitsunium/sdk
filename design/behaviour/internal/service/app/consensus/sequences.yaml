@@ -15247,8 +15247,16 @@ sequences:
           do:
             - return: ""
           when: w.n > 0 && t-w.at[(w.head+rateSamples-1)%rateSamples] < int64(span)/rateSamples
-      - set: w.at[w.head], w.v[w.head]
-        value: t, v
+      - var:
+          name: acc
+          type: int64
+      - opt:
+          do:
+            - set: acc
+              value: w.acc[(w.head+rateSamples-1)%rateSamples] + max(v-w.last, 0)
+          when: w.n > 0
+      - set: w.at[w.head], w.acc[w.head], w.last
+        value: t, acc, v
       - set: w.head
         value: (w.head + 1) % rateSamples
       - set: w.n
@@ -15267,7 +15275,7 @@ sequences:
           do:
             - return: 0, false
           when: dt <= 0
-      - return: float64(max(w.v[newest]-w.v[oldest], 0)) / time.Duration(dt).Seconds(), true
+      - return: float64(w.acc[newest]-w.acc[oldest]) / time.Duration(dt).Seconds(), true
   - of: (*Node).tightFrom
     steps:
       - bind: m, r
@@ -15287,9 +15295,7 @@ sequences:
         kind: internal
       - id: pin.progress.Load
         kind: value
-      - id: pin.rate.sent.add
-        kind: internal
-      - id: pin.rate.sent.rate
+      - id: pin.rate.sample
         kind: internal
       - id: n.judgeRateShort
         kind: internal
@@ -15326,20 +15332,40 @@ sequences:
             - bind: sent
               eval: pin.progress.Load()
               to: pin.progress.Load
-            - eval: pin.rate.sent.add(now, sent, span)
-              to: pin.rate.sent.add
             - bind: r, ok
-              eval: pin.rate.sent.rate()
-              to: pin.rate.sent.rate
+              eval: pin.rate.sample(now, sent, span)
+              to: pin.rate.sample
             - opt:
                 do:
                   - continue: true
-                when: "!full || !ok || r <= 0"
+                when: "!full || !ok"
             - eval: n.judgeRateShort(to, pin.rate, float64(max(pin.size-sent, 0))/r, fillSeconds(n.tightFrom()-b, write), r)
               to: n.judgeRateShort
           key: to
           range: n.sending
           value: pin
+  - of: (*rateWatch).sample
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rateWatch).sample
+        kind: self
+      - id: s.sent.add
+        kind: internal
+      - id: s.sent.rate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: s.sent
+              value: rateWindow{}
+          when: s.sent.n > 0 && s.sent.last == 0 && sent > 0
+      - eval: s.sent.add(now, sent, span)
+        to: s.sent.add
+      - bind: r, ok
+        eval: s.sent.rate()
+        to: s.sent.rate
+      - return: r, ok && r > 0
   - of: fillSeconds
     participants:
       - id: caller

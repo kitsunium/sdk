@@ -1619,7 +1619,17 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   (`node_rateshort.go`), on the loop's tick from `watchPins`, measures R as
   the stream's `progress` and the write rate as the log's `logBytes` over
   one sliding window of `rateWindowTimeouts` (4) maximum election timeouts,
-  `rateSamples` (8) samples at most; it raises `PeerSnapshotRateShort` once
+  `rateSamples` (8) samples at most. Each `rateWindow` sums the growth from
+  one sample to the next and leaves the falls out: read as the difference
+  of its newest and oldest samples, a compaction during the stream read as
+  a window without writes, and the flag fell for a window, then rose and was
+  counted and logged again, once per compaction (D1 of #1486's review). A
+  stream's window starts at its first sample past 0, the accept, which
+  stores a resumed stream's offset at once: a window spanning the offer's
+  wait read a fraction of R, and one spanning the offset a rate the stream
+  never had. The samples are stamped with the wall clock's Unix
+  nanoseconds, as a pin's `moved` and `since`: a clock stepped back
+  freezes a window, one stepped forward dilutes it, for one window. It raises `PeerSnapshotRateShort` once
   (`EncodedSize` less the bytes sent) over R exceeds (`tightFrom` less the
   log's bytes) over the write rate, adds one to
   `consensus_snapshot_rate_short_total` by peer and logs the peer, both
@@ -1632,8 +1642,16 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   line gives, with the other streams' share of the pacer), raise
   `MaxLogBytes` so the band is further away, or lower the write load while
   the follower installs. Left alone, the follower installs snapshot after
-  snapshot and never catches up while the writes last
+  snapshot and never catches up while the writes last. The signal is
+  sufficient for #550's loop, not necessary: it counts the transfer alone,
+  and the receiver's Restore and its catch-up by appends follow it, while a
+  log turning tight then lifts the pin as well (`pinAt`). A stream that ends
+  just within the fill raises nothing and may still loop: leave a margin
+  for the install and the catch-up. `PeerSnapshotRateShort` takes the last
+  of `PeerFlags`' eight bits: the next fact of a peer widens the type to a
+  `uint16`, a change of the public API that v0 admits (ADR 0040)
   (`TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged`,
+  `TestOnlyTheStreamTooSlowIsFlagged`,
   `TestTightFromIsWhereTheLogTurnsTight`).
 - Serve the snapshot streams' queue first asked first served, voters and
   learners alike: under the default `MaxSnapshotStreams` of 1, a voter back

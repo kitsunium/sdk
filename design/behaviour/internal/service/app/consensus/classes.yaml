@@ -2048,6 +2048,7 @@ files:
       - (*rateWindow).rate
       - (*Node).tightFrom
       - (*Node).watchRateShort
+      - (*rateWatch).sample
       - fillSeconds
       - (*Node).judgeRateShort
       - secondsText
@@ -10001,8 +10002,9 @@ types:
           watchRateShort judges, at a tick, whether each snapshot stream in flight
           would end before the writes bring the log to tightFrom, where its pin
           stops holding compaction back (#1486). The stream's rate R is its bytes
-          sent over the sliding window, the writes' rate the log's bytes over the
-          same window, both rateWindowTimeouts of etMax: it raises
+          sent over the sliding window from its accept, the writes' rate the log's
+          growth over the same window, compactions left out (rateWindow), both
+          rateWindowTimeouts of etMax: it raises
           PeerSnapshotRateShort for the stream once (EncodedSize less the bytes
           sent) over R exceeds (tightFrom less the log's bytes) over the write rate,
           adds one to consensus_snapshot_rate_short_total and logs it at Warn; it
@@ -11483,15 +11485,24 @@ types:
     kind: struct
     name: progressWatch
   - doc: |-
-      rateWindow is a sliding window over a growing count — the bytes a stream
-      sent, the bytes the log holds — sampled on the loop: the samples at, in
-      Unix nanoseconds, and v, a ring of rateSamples whose next slot is head,
-      n of them taken.
+      rateWindow is a sliding window over a count that may also fall — the
+      bytes a stream sent, the bytes the log holds, which a compaction shrinks —
+      sampled on the loop: the samples at, in Unix nanoseconds (the wall
+      clock's, as a pin's moved and since), and acc, the growth the count
+      gained from one sample to the next summed since the window's first, a
+      ring of rateSamples whose next slot is head, n of them taken; last is the
+      count at the newest sample. Only growth is summed: a compaction costs the
+      write rate the writes of the one interval it falls in, and never reads as
+      a window without writes, which lowered PeerSnapshotRateShort for a window
+      after each compaction of a stream it held for, then raised and counted it
+      again (D1 of #1486's review).
     fields:
       - name: at
         type: "[rateSamples]int64"
-      - name: v
+      - name: acc
         type: "[rateSamples]int64"
+      - name: last
+        type: int64
       - name: head
         type: int
       - name: "n"
@@ -11506,8 +11517,7 @@ types:
         recv: w *rateWindow
       - doc: |-
           rate is the count's growth a second from the oldest sample to the newest,
-          never below 0 — a compaction that shrank the log writes nothing —, and
-          false until the ring is full.
+          its falls left out, and false until the ring is full.
         name: rate
         recv: w *rateWindow
         results: float64, bool
@@ -11523,6 +11533,18 @@ types:
       - name: short
         type: bool
     kind: struct
+    methods:
+      - doc: |-
+          sample adds sent, the stream's progress at now, to its window and returns
+          the stream's rate, false until the window is full or while the stream
+          did not move over it. The window starts again at the first sample past
+          0, the accept, which stores a resumed stream's offset at once: that jump
+          is no rate, and a window spanning the offer's wait would read a fraction
+          of the stream's.
+        name: sample
+        params: now time.Time, sent int64, span time.Duration
+        recv: s *rateWatch
+        results: float64, bool
     name: rateWatch
   - doc: |-
       sendPin is a snapshot that pins compaction for a peer. While it streams,
