@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	stdnet "net"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -102,22 +104,115 @@ func ownSocketInodes(t *testing.T) map[string]bool {
 	return own
 }
 
+// socketInode is the inode of the socket under sock, read from its
+// descriptor's /proc/self/fd entry: the number /proc/net prints. A socket
+// that offers no descriptor fails the test, so none is left uncounted.
+func socketInode(t *testing.T, sock any) string {
+	t.Helper()
+	sc, ok := sock.(syscall.Conn)
+	//: every socket the server binds is the standard library's, which offers one.
+	if !ok {
+		t.Fatalf("%T offers no descriptor", sock)
+	}
+	rc, err := sc.SyscallConn()
+	//: the descriptor is read through the connection's raw handle, which a closed socket refuses.
+	if err != nil {
+		t.Fatalf("%T: %v", sock, err)
+	}
+	var link string
+	var lerr error
+	err = rc.Control(func(fd uintptr) { link, lerr = os.Readlink("/proc/self/fd/" + strconv.FormatUint(uint64(fd), 10)) })
+	inode, ok := strings.CutPrefix(link, "socket:[")
+	//: a descriptor that is no socket, or one closed under the test.
+	if err = errors.Join(err, lerr); err != nil || !ok {
+		t.Fatalf("%T: descriptor %q: %v", sock, link, err)
+	}
+	return strings.TrimSuffix(inode, "]")
+}
+
+// serverSocketInodes is the inodes of the sockets srv holds: its stream
+// listeners — the goroutine engine's and a loop group's — and its datagram
+// shards.
+func serverSocketInodes(t *testing.T, srv *Server) map[string]bool {
+	t.Helper()
+	srv.mu.RLock()
+	defer srv.mu.RUnlock()
+	inodes := make(map[string]bool, len(srv.listeners)+len(srv.packetConns))
+	//: every stream listener's socket belongs to the server.
+	for _, b := range srv.listeners {
+		inodes[socketInode(t, b.ln)] = true
+	}
+	//: every datagram socket's too, one per shard.
+	for _, b := range srv.packetConns {
+		inodes[socketInode(t, b.pc)] = true
+	}
+	return inodes
+}
+
+// tableReads bounds how often kernelSocketsOn reads a table again because a
+// socket it holds was missing from the read: a torn read skips a row only
+// when a socket was hashed or unhashed ahead of it between two read calls.
+const tableReads = 50
+
 // kernelSocketsOn counts the sockets the kernel lists in state (0A a
 // listening TCP socket, 07 a bound UDP one) on addr, the address State
-// reports, held by this process: the count no view of the server's own can
-// flatter. The kernel's tables are the host's, so a socket of another suite
-// on the same port number — 127.0.0.1:P while the server is on [::1]:P,
-// both drawn by the kernel — is no shard of this server's (#1378).
-func kernelSocketsOn(t *testing.T, proto, addr, state string) int {
+// reports, whose inode is in held — open sockets of proto, the server's own
+// (serverSocketInodes) and any the test adds: the count no view of the
+// server's own can flatter. The kernel's tables are the host's, so a socket
+// of another suite on the same port number — 127.0.0.1:P while the server is
+// on [::1]:P, both drawn by the kernel — is no shard of this server's
+// (#1378); nor is a socket of this process's on the very address, which a
+// reuseport UDP socket bound to port 0 may be
+// (TestKernelSocketsOn_countsThisServersOnly).
+//
+// A table is not read at once: each read call starts again at the row of the
+// position reached, counted from the first bucket (udp_seq_start,
+// net/ipv4/udp.c), so a socket hashed or unhashed ahead of a row between two
+// calls lists that row twice or not at all
+// (TestKernelSocketsOn_readsATornTableOnce). An inode is therefore counted
+// once, and a read missing a socket of held is read again.
+func kernelSocketsOn(t *testing.T, proto, addr, state string, held map[string]bool) int {
 	t.Helper()
-	want, own := procHexAddrPort(t, addr), ownSocketInodes(t)
-	n := 0
-	for _, s := range procSockets(t, proto) {
-		if s.state == state && s.local == want && own[s.inode] {
-			n++
+	want := procHexAddrPort(t, addr)
+	//: a read of the table can tear, so it is repeated a bounded number of times.
+	for range tableReads {
+		listed, on := make(map[string]bool, len(held)), make(map[string]bool, len(held))
+		//: every row of the table is judged, so one that is not the server's is skipped.
+		for _, s := range procSockets(t, proto) {
+			//: a row of another socket's.
+			if !held[s.inode] {
+				continue
+			}
+			listed[s.inode] = true
+			//: in the state, on the address; a row a torn read repeats is one socket.
+			if s.state == state && s.local == want {
+				on[s.inode] = true
+			}
+		}
+		//: every socket held is listed: the read skipped none of theirs.
+		if len(listed) == len(held) {
+			return len(on)
 		}
 	}
-	return n
+	t.Fatalf("%d reads of the %s table, each missing a socket of the %d held", tableReads, proto, len(held))
+	return 0
+}
+
+// processSocketsOn counts the sockets of this process (/proc/self/fd) the
+// kernel lists in state on addr, each inode once, in one read: how a socket
+// still held after Close, or one beside the server's, is counted. A torn
+// read may miss one of them; it cannot add one.
+func processSocketsOn(t *testing.T, proto, addr, state string) int {
+	t.Helper()
+	want, own := procHexAddrPort(t, addr), ownSocketInodes(t)
+	on := make(map[string]bool)
+	for _, s := range procSockets(t, proto) {
+		//: a socket of this process in the state, on the address.
+		if s.state == state && s.local == want && own[s.inode] {
+			on[s.inode] = true
+		}
+	}
+	return len(on)
 }
 
 // portOf is the port of a host:port address.
@@ -237,8 +332,15 @@ func TestShards_portZeroIsOnePort(t *testing.T) {
 						t.Errorf("shard %d on %s, State reports %s", i, a, reported)
 					}
 				}
-				if n := kernelSocketsOn(t, p.proto, reported, p.state); n != p.want {
-					t.Fatalf("the kernel lists %d sockets of this process on %s, want %d — every shard on the reported address", n, reported, p.want)
+				n := kernelSocketsOn(t, p.proto, reported, p.state, serverSocketInodes(t, srv))
+				//: other sockets of this process on the address are no shard,
+				//: and are named for whoever reads the run (#1378).
+				if all := processSocketsOn(t, p.proto, reported, p.state); all > n {
+					t.Logf("%d other sockets of this process on %s, not the server's", all-n, reported)
+				}
+				//: every shard of the server's on the reported address, and no other.
+				if n != p.want {
+					t.Fatalf("the kernel lists %d sockets of the server on %s, want %d — every shard on the reported address", n, reported, p.want)
 				}
 			})
 		}
@@ -251,42 +353,61 @@ func TestShards_portZeroIsOnePort(t *testing.T) {
 // listened on [::1] — is in the kernel's tables, and no shard of this
 // server's. The stray is this process's own, on 127.0.0.2 (Linux routes
 // 127/8 to the loopback), so the address is what the count must tell apart.
+//
+// The second case is the datagram run's fifth socket (#1378, reopened): a
+// reuseport UDP socket of this process on the server's very address. Linux
+// gives a socket bound to port 0 with SO_REUSEPORT a port a reuseport socket
+// of the same uid already holds (net/ipv4/udp.c, udp_lib_lport_inuse: such a
+// holder is left out of the bitmap of ports in use), and the newcomer joins
+// its group, so another suite's socket can sit on the address the server
+// reports. It is this process's, on the address: only the server's own
+// descriptors tell it apart.
 func TestKernelSocketsOn_countsThisServersOnly(t *testing.T) {
 	type tc struct {
 		name string
-		// shards is how many listeners the server binds on its address.
+		// proto is the kernel's table: tcp for a stream group, udp for a
+		// datagram one.
+		proto string
+		// shards is how many sockets the server binds on its address.
 		shards int
-		// strayHost is the address the stray listens on, at the server's
+		// strayHost is the address the stray is bound on, at the server's
 		// port.
 		strayHost string
 	}
-	cases := []tc{{name: "four shards and a stray on 127.0.0.2", shards: 4, strayHost: "127.0.0.2"}}
+	cases := []tc{
+		{name: "four stream shards and a stray on 127.0.0.2", proto: "tcp", shards: 4, strayHost: "127.0.0.2"},
+		{name: "four datagram shards and a reuseport stray on their address", proto: "udp", shards: 4, strayHost: "127.0.0.1"},
+	}
 	runCase := func(t *testing.T, c tc) {
 		srv := New()
-		srv.Group("s", Listen("tcp", "127.0.0.1:0"), Plaintext(), Shards(c.shards)).
-			Handle(corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error { return nil }))
+		state := "0A"
+		//: the server and its stray, of the case's kind.
+		switch c.proto {
+		//: a datagram group, and a socket that joins its SO_REUSEPORT group.
+		case "udp":
+			state = "07"
+			srv.PacketGroup("p", Listen("udp", "127.0.0.1:0"), Shards(c.shards)).
+				HandleFunc(func(context.Context, corenet.Packet) error { return nil })
+		//: a stream group, and a plain listener at another address.
+		default:
+			srv.Group("s", Listen("tcp", "127.0.0.1:0"), Plaintext(), Shards(c.shards)).
+				Handle(corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error { return nil }))
+		}
 		if err := srv.Start(t.Context()); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		t.Cleanup(func() { swallowErr(srv.Close()) })
 		reported := srv.State().Listeners[0].Address
 		port := portOf(t, reported)
-		stray, err := stdnet.Listen("tcp", stdnet.JoinHostPort(c.strayHost, strconv.Itoa(port)))
-		if err != nil {
-			t.Skipf("no listener on %s:%d beside the server: %v", c.strayHost, port, err)
-		}
+		strayAddr := stdnet.JoinHostPort(c.strayHost, strconv.Itoa(port))
+		stray := bindStray(t, c.proto, strayAddr)
 		defer func() { _ = stray.Close() }()
-		onPort := 0
-		for _, s := range procSockets(t, "tcp") {
-			if s.state == "0A" && strings.HasSuffix(s.local, ":"+procHexPort(port)) {
-				onPort++
-			}
-		}
 		//: the stray is in the kernel's table, on the port: what #1378's count read.
-		if onPort < c.shards+1 {
-			t.Fatalf("the kernel lists %d listening sockets on port %d, want the %d shards and the stray", onPort, port, c.shards)
+		if n := kernelSocketsOn(t, c.proto, strayAddr, state, map[string]bool{socketInode(t, stray): true}); n != 1 {
+			t.Fatalf("the kernel lists the stray %d times on %s, want once", n, strayAddr)
 		}
-		if n := kernelSocketsOn(t, "tcp", reported, "0A"); n != c.shards {
+		//: the server's shards alone, the stray left out.
+		if n := kernelSocketsOn(t, c.proto, reported, state, serverSocketInodes(t, srv)); n != c.shards {
 			t.Fatalf("kernelSocketsOn counts %d sockets on %s, want the %d shards alone", n, reported, c.shards)
 		}
 	}
@@ -295,10 +416,109 @@ func TestKernelSocketsOn_countsThisServersOnly(t *testing.T) {
 	}
 }
 
+// TestKernelSocketsOn_readsATornTableOnce holds the other reading of #1378's
+// fifth socket: no socket at all, but a row read twice. /proc/net/udp is read
+// in several calls, each resuming at the row of the position reached
+// (udp_seq_start, net/ipv4/udp.c); a socket hashed ahead of the shards'
+// rows between two calls lists one of them again, one unhashed skips one,
+// and the host's other suites bind and close sockets all the time. Here a
+// socket is bound and closed again and again on the server's port at
+// 127.0.0.2 — the shards' own bucket, at its head —, while more and more
+// holders on that port, at 127.0.0.3 on, move the shards' rows across the
+// boundaries of the reads; every count must still be the four shards.
+func TestKernelSocketsOn_readsATornTableOnce(t *testing.T) {
+	type tc struct {
+		name string
+		// shards is how many sockets the datagram group binds.
+		shards int
+		// holders is how many sockets are added ahead of the shards' rows,
+		// one at a time; reads is how many counts are taken after each.
+		holders, reads int
+	}
+	cases := []tc{{name: "four datagram shards under churn in their bucket", shards: 4, holders: 40, reads: 25}}
+	runCase := func(t *testing.T, c tc) {
+		srv := New()
+		srv.PacketGroup("p", Listen("udp4", "127.0.0.1:0"), Shards(c.shards)).
+			HandleFunc(func(context.Context, corenet.Packet) error { return nil })
+		//: a server that does not start leaves nothing to count.
+		if err := srv.Start(t.Context()); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		t.Cleanup(func() { swallowErr(srv.Close()) })
+		reported := srv.State().Listeners[0].Address
+		port := strconv.Itoa(portOf(t, reported))
+		ours := serverSocketInodes(t, srv)
+		stop := make(chan struct{})
+		churned := make(chan struct{})
+		go func() {
+			defer close(churned)
+			//: the churn runs until the test ends.
+			for {
+				//: the loop polls for the stop signal without blocking.
+				select {
+				//: the test is over, so the churn stops.
+				case <-stop:
+					return
+				//: a socket hashed then unhashed ahead of the shards' rows.
+				default:
+				}
+				//: a bind that fails changes no row, and the loop goes on.
+				if pc, err := stdnet.ListenPacket("udp4", stdnet.JoinHostPort("127.0.0.2", port)); err == nil {
+					_ = pc.Close()
+				}
+			}
+		}()
+		defer func() { close(stop); <-churned }()
+		//: each holder joins the bucket ahead of the shards, one more per pass.
+		for i := range c.holders {
+			holder, err := stdnet.ListenPacket("udp4", stdnet.JoinHostPort("127.0.0."+strconv.Itoa(3+i), port))
+			//: an address the host does not route to the loopback.
+			if err != nil {
+				t.Skipf("no holder beside the server: %v", err)
+			}
+			defer func() { _ = holder.Close() }()
+			//: each pass reads the table again under the churn.
+			for range c.reads {
+				//: every read counts the shards once each, whatever the churn.
+				if n := kernelSocketsOn(t, "udp", reported, "07", ours); n != c.shards {
+					t.Fatalf("kernelSocketsOn counts %d sockets on %s with %d holders ahead, want the %d shards", n, reported, i+1, c.shards)
+				}
+			}
+		}
+	}
+	//: each case runs as its own subtest.
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// bindStray binds the stray of TestKernelSocketsOn_countsThisServersOnly on
+// addr: a plain TCP listener, or a UDP socket with SO_REUSEPORT, which joins
+// the server's group when addr is the server's own. The test skips when the
+// host will not bind it.
+func bindStray(t *testing.T, proto, addr string) io.Closer {
+	t.Helper()
+	var lc stdnet.ListenConfig
+	var stray io.Closer
+	var err error
+	//: the stray of the case's kind.
+	if proto == "udp" {
+		lc.Control = reusePortControl
+		stray, err = lc.ListenPacket(t.Context(), proto, addr)
+	} else {
+		stray, err = lc.Listen(t.Context(), proto, addr)
+	}
+	//: an address the host does not route to the loopback.
+	if err != nil {
+		t.Skipf("no %s socket on %s beside the server: %v", proto, addr, err)
+	}
+	return stray
+}
+
 // OwnListenersOn is kernelSocketsOn's count of this process's listening TCP
 // sockets on addr, for the external suite (TestServer_Close, #1386).
 func OwnListenersOn(t *testing.T, addr string) int {
 	t.Helper()
 	//: the state of a listening TCP socket.
-	return kernelSocketsOn(t, "tcp", addr, "0A")
+	return processSocketsOn(t, "tcp", addr, "0A")
 }
