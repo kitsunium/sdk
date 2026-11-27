@@ -358,7 +358,7 @@ func TestPacketLane_refusalNamesTheKernel(t *testing.T) {
 // whole window was interrupted (#1580). The kernel cannot be made to deliver the
 // signal at that instant, so the enter is the test's.
 func TestWaitWindow_interrupted(t *testing.T) {
-	const window = 50 * time.Millisecond
+	const window = 500 * time.Millisecond
 	type tc struct {
 		name    string
 		answers []syscall.Errno
