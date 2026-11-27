@@ -4787,7 +4787,7 @@ sequences:
       - id: startPacket
         kind: internal
     steps:
-      - return: startPacket(cfg, "")
+      - return: startPacket(cfg, "", 0)
         to: startPacket
   - of: startPacket
     participants:
@@ -4799,7 +4799,7 @@ sequences:
         kind: internal
     steps:
       - bind: lp
-        eval: "&packetLane{cfg: *cfg, failStage: failStage, efd: -1, done: make(chan struct{})}"
+        eval: "&packetLane{cfg: *cfg, failStage: failStage, failErrno: failErrno, efd: -1, done: make(chan struct{})}"
       - bind: ready
         eval: make(chan error, 1)
       - go: lp.run(ready)
@@ -4891,12 +4891,10 @@ sequences:
           do:
             - send:
                 chan: ready
-                value: |-
-                  errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{},
-                  			errs.String("group", lp.cfg.Group), errs.String("stage", stage), errs.String("reason", why))
+                value: refusal(lp.cfg.Group, stage, why, errno)
             - return: ""
           init:
-            bind: stage, why
+            bind: stage, why, errno
             eval: lp.setup()
             to: lp.setup
           when: stage != ""
@@ -4905,6 +4903,24 @@ sequences:
           value: nil
       - eval: lp.serve()
         to: lp.serve
+  - of: refusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: refusal
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: fields
+        eval: "[]errs.FieldValue{errs.String(\"group\", group), errs.String(\"stage\", stage), errs.String(\"reason\", why)}"
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.Int("errno", int(errno)))
+          when: errno != 0
+      - return: errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{}, fields...)
+        to: errs
   - of: (*packetLane).setup
     participants:
       - id: caller
@@ -4926,9 +4942,9 @@ sequences:
         value: "kernelTimespec{nsec: packetTick}"
       - opt:
           do:
-            - return: stage, why
+            - return: stage, why, errno
           init:
-            bind: stage, why
+            bind: stage, why, errno
             eval: lp.openRing()
             to: lp.openRing
           when: stage != ""
@@ -4938,7 +4954,7 @@ sequences:
         value: uint64(packetCtrlRoom)
       - opt:
           do:
-            - return: "\"recvmsg\", why + lp.failStage"
+            - return: "\"recvmsg\", why + lp.failStage, 0"
           init:
             bind: why
             eval: lp.selfTest()
@@ -4946,21 +4962,21 @@ sequences:
           when: why != "" || lp.failStage == "recvmsg"
       - opt:
           do:
-            - return: "\"arena\", why"
+            - return: "\"arena\", why, errno"
           init:
-            bind: why
+            bind: why, errno
             eval: lp.mapArenas()
             to: lp.mapArenas
           when: why != ""
       - opt:
           do:
-            - return: stage, why
+            - return: stage, why, errno
           init:
-            bind: stage, why
+            bind: stage, why, errno
             eval: lp.armSocket()
             to: lp.armSocket
           when: stage != ""
-      - return: "\"\", \"\""
+      - return: "\"\", \"\", 0"
   - of: (*packetLane).openRing
     participants:
       - id: caller
@@ -4969,9 +4985,9 @@ sequences:
         kind: self
       - id: openURing
         kind: internal
-      - id: ring.supports
+      - id: lp.answer
         kind: internal
-      - id: ring.setupBuffers
+      - id: ring.supports
         kind: internal
     steps:
       - bind: ring, step, errno
@@ -4985,28 +5001,48 @@ sequences:
           when: errno == syscall.EINVAL
       - opt:
           do:
-            - return: "\"setup\", step + \": \" + errno.Error()"
+            - set: lp.u
+              value: ring
+          when: ring != nil
+      - set: errno
+        to: lp.answer
+        value: lp.answer("setup", errno)
+      - opt:
+          do:
+            - return: "\"setup\", step + \": \" + errno.Error(), errno"
           when: errno != 0 || lp.failStage == "setup"
-      - set: lp.u
-        value: ring
       - bind: ok, perr
         eval: ring.supports(opRecvmsg, opSendmsg, opAsyncCancel, opPollAdd)
         to: ring.supports
+      - set: perr
+        to: lp.answer
+        value: lp.answer("probe", perr)
       - opt:
           do:
-            - return: "\"probe\", \"REGISTER_PROBE: RECVMSG, SENDMSG, ASYNC_CANCEL or POLL_ADD unsupported\""
-          when: perr != 0 || !ok || lp.failStage == "probe"
+            - return: "\"probe\", \"REGISTER_PROBE: \" + perr.Error(), perr"
+          when: perr != 0
+      - opt:
+          do:
+            - return: "\"probe\", \"REGISTER_PROBE: RECVMSG, SENDMSG, ASYNC_CANCEL or POLL_ADD unsupported\", 0"
+          when: "!ok || lp.failStage == \"probe\""
       - bind: size
         eval: uint32(recvmsgOutBytes + packetNameRoom + packetCtrlRoom + max(packetPayloadRoom, lp.cfg.Ceiling+1))
       - opt:
           do:
-            - return: "\"buf_ring\", \"IORING_REGISTER_PBUF_RING: \" + errno.Error()"
+            - return: "\"buf_ring\", \"IORING_REGISTER_PBUF_RING: \" + errno.Error(), errno"
           init:
             bind: errno
-            eval: ring.setupBuffers(packetBufs, size, packetBufs, false)
-            to: ring.setupBuffers
+            eval: lp.answer("buf_ring", ring.setupBuffers(packetBufs, size, packetBufs, false))
+            to: lp.answer
           when: errno != 0 || lp.failStage == "buf_ring"
-      - return: "\"\", \"\""
+      - return: "\"\", \"\", 0"
+  - of: (*packetLane).answer
+    steps:
+      - opt:
+          do:
+            - return: lp.failErrno
+          when: lp.failErrno != 0 && lp.failStage == stage
+      - return: errno
   - of: (*packetLane).armSocket
     participants:
       - id: caller
@@ -5031,7 +5067,7 @@ sequences:
         to: socketFamily
       - opt:
           do:
-            - return: "\"socket\", ferr"
+            - return: "\"socket\", ferr, 0"
           when: ferr != ""
       - set: lp.family
         value: family
@@ -5040,7 +5076,7 @@ sequences:
         to: syscall
       - opt:
           do:
-            - return: "\"eventfd\", e.Error()"
+            - return: "\"eventfd\", e.Error(), e"
           when: e != 0
       - set: lp.efd
         value: int(efd)
@@ -5052,7 +5088,7 @@ sequences:
         to: lp.armWake
       - eval: lp.u.submit()
         to: lp.u.submit
-      - return: "\"\", \"\""
+      - return: "\"\", \"\", 0"
   - of: (*packetLane).mapArenas
     participants:
       - id: caller
@@ -5069,7 +5105,7 @@ sequences:
         to: syscall
       - opt:
           do:
-            - return: "\"mmap: \" + err.Error()"
+            - return: "\"mmap: \" + err.Error(), errnoOfErr(err)"
           when: err != nil
       - set: lp.arena
         value: out
@@ -5089,7 +5125,7 @@ sequences:
         value: make([]pendingReply, 0, packetReplies)
       - set: lp.recycle
         value: make([]uint16, 0, packetBufs)
-      - return: "\"\""
+      - return: "\"\", 0"
   - of: (*packetLane).selfTest
     participants:
       - id: caller

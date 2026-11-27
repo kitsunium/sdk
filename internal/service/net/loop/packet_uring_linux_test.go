@@ -9,7 +9,9 @@ import (
 	"errors"
 	stdnet "net"
 	"net/netip"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -134,9 +136,31 @@ func requireLane(t *testing.T, err error) {
 	t.Helper()
 	//: a lane that must run io_uring.
 	if strings.Contains(requiredBackends, "iouring") {
-		t.Fatalf("io_uring required, the datagram lane refused: %v", err)
+		t.Fatalf("io_uring required, the datagram lane refused: %s", laneRefusal(err))
 	}
-	t.Skipf("io_uring datagram lane unavailable here: %v", err)
+	t.Skipf("io_uring datagram lane unavailable here: %s", laneRefusal(err))
+}
+
+// laneRefusal renders a lane's refusal with what its Error leaves out: the
+// probe's stage, reason and errno — the fields server's State row is read
+// from —, then the kernel's release and RLIMIT_MEMLOCK, against which a kernel
+// from 6.14 charges every ring an unprivileged process sets up, summed over
+// every process of its user (#1580).
+func laneRefusal(err error) string {
+	var b strings.Builder
+	b.WriteString(err.Error())
+	//: every field the refusal carries, in order.
+	for _, f := range errs.FieldsOf(err) {
+		b.WriteString("; " + f.Key() + "=" + f.StringValue())
+	}
+	memlock := "unknown"
+	var lim syscall.Rlimit
+	//: the limit, when the kernel tells it.
+	if syscall.Getrlimit(rlimitMemlock, &lim) == nil {
+		memlock = strconv.FormatUint(lim.Cur, 10) + "/" + strconv.FormatUint(lim.Max, 10)
+	}
+	b.WriteString("; kernel=" + kernelRelease() + "; RLIMIT_MEMLOCK=" + memlock)
+	return b.String()
 }
 
 // client dials the lane's socket from 127.0.0.1.
@@ -263,7 +287,7 @@ func TestPacketLane_failStage(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			_, fd := udpServer(t)
 			var c laneCounters
-			_, err := startPacket(&PacketConfig{Group: "dg", FD: fd, Ceiling: 8192, Handler: &echoLane{}, Counters: c.of()}, stage)
+			_, err := startPacket(&PacketConfig{Group: "dg", FD: fd, Ceiling: 8192, Handler: &echoLane{}, Counters: c.of()}, stage, 0)
 			var e *errs.Error
 			//: refused, by name.
 			if !errors.As(err, &e) || !errs.HasCode(err, corenet.CodeLoopBackendUnavailable) || stageOf(e) != stage {
@@ -276,6 +300,68 @@ func TestPacketLane_failStage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPacketLane_refusalNamesTheKernel refuses at each stage that asks the
+// kernel with the errno a loaded host answers there — ENOMEM, a kernel from
+// 6.14 charging the ring to RLIMIT_MEMLOCK, and EAGAIN — and requires the
+// refusal to name it: the errno field, the reason in the kernel's words,
+// never "unsupported", and the ring the stage opened closed. The suite's
+// failure message (laneRefusal) carries all of it (#1580).
+func TestPacketLane_refusalNamesTheKernel(t *testing.T) {
+	type tc struct {
+		name  string
+		stage string
+		errno syscall.Errno
+	}
+	runCase := func(t *testing.T, c tc) {
+		_, fd := udpServer(t)
+		before := openFDs(t)
+		var lc laneCounters
+		_, err := startPacket(&PacketConfig{Group: "dg", FD: fd, Ceiling: 8192, Handler: &echoLane{}, Counters: lc.of()}, c.stage, c.errno)
+		//: refused, by the documented code.
+		if !errs.HasCode(err, corenet.CodeLoopBackendUnavailable) {
+			t.Fatalf("err = %v, want LoopBackendUnavailable", err)
+		}
+		got := map[string]string{}
+		//: the refusal's fields, by key.
+		for _, f := range errs.FieldsOf(err) {
+			got[f.Key()] = f.StringValue()
+		}
+		//: the stage, the errno and the kernel's words.
+		if got["stage"] != c.stage || got["errno"] != strconv.Itoa(int(c.errno)) || !strings.Contains(got["reason"], c.errno.Error()) {
+			t.Fatalf("refusal %s: want stage %q, errno %d and a reason naming %q", laneRefusal(err), c.stage, int(c.errno), c.errno.Error())
+		}
+		msg := laneRefusal(err)
+		//: the failure message says what the rendering hides.
+		if !strings.Contains(msg, "stage="+c.stage) || !strings.Contains(msg, "RLIMIT_MEMLOCK=") || !strings.Contains(msg, "kernel=") {
+			t.Fatalf("laneRefusal = %q, want the stage, the kernel and RLIMIT_MEMLOCK", msg)
+		}
+		//: the handed descriptor and the stage's ring are closed.
+		if after := openFDs(t); after >= before {
+			t.Fatalf("descriptors open: %d before the refusal, %d after: the ring or the socket outlived it", before, after)
+		}
+	}
+	for _, c := range []tc{
+		{name: "setup ENOMEM", stage: "setup", errno: syscall.ENOMEM},
+		{name: "setup EAGAIN", stage: "setup", errno: syscall.EAGAIN},
+		{name: "probe ENOMEM", stage: "probe", errno: syscall.ENOMEM},
+		{name: "buf_ring ENOMEM", stage: "buf_ring", errno: syscall.ENOMEM},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// openFDs is how many descriptors the process holds.
+func openFDs(t *testing.T) int {
+	t.Helper()
+	ents, err := os.ReadDir("/proc/self/fd")
+	//: no table to read.
+	if err != nil {
+		t.Fatal(err)
+	}
+	//: the count.
+	return len(ents)
 }
 
 // stageOf is the stage field of e.
@@ -363,8 +449,8 @@ func TestPacketLane_allocs(t *testing.T) {
 	}
 	defer lp.release()
 	//: no lane here.
-	if stage, why := lp.setup(); stage != "" {
-		requireLane(t, errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{}, errs.String("stage", stage), errs.String("reason", why)))
+	if stage, why, errno := lp.setup(); stage != "" {
+		requireLane(t, refusal("", stage, why, errno))
 	}
 	name := make([]byte, packetNameRoom)
 	binary.LittleEndian.PutUint16(name, afInet)
