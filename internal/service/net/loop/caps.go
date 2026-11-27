@@ -68,6 +68,7 @@ var (
 		{corenet.CapabilityTCPKeepAlive, classKernel},
 		{corenet.CapabilityTCPUserTimeout, classKernel},
 		{corenet.CapabilityURingSockGetsockopt, classKernel},
+		{corenet.CapabilityURingTaskrunFlag, classKernel},
 		{corenet.CapabilityURingDeferTaskrun, classCode},
 		{corenet.CapabilityURingNoSQArray, classCode},
 		{corenet.CapabilityURingRingFDs, classCode},

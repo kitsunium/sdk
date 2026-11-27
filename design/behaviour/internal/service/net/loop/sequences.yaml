@@ -7654,6 +7654,12 @@ sequences:
           value: d
       - opt:
           do:
+            - op: "|="
+              set: flags
+              value: setupTaskrunFlag
+          when: "!ul.sw.disabled(corenet.CapabilityURingTaskrunFlag)"
+      - opt:
+          do:
             - op: "&^="
               set: flags
               value: setupSQRewind
@@ -7817,6 +7823,8 @@ sequences:
         kind: internal
       - id: layoutFlags
         kind: internal
+      - id: ul.settleTaskrunFlag
+        kind: internal
       - id: sw.wants
         kind: internal
       - id: ul.reportMinTimeout
@@ -7852,11 +7860,37 @@ sequences:
             - set: ul.primary
               value: base&^setupCoopTaskrun | setupDeferTaskrun
           when: found&setupDeferTaskrun != 0 && sw.wants(corenet.CapabilityURingDeferTaskrun)
+      - eval: ul.settleTaskrunFlag(found)
+        to: ul.settleTaskrunFlag
       - set: ul.uses.multishot
         to: sw.wants
         value: sw.wants(corenet.CapabilityURingMultishotRecv)
       - eval: ul.reportMinTimeout(features)
         to: ul.reportMinTimeout
+  - of: (*uLoop).settleTaskrunFlag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).settleTaskrunFlag
+        kind: self
+      - id: ul.rep.set
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: found&setupTaskrunFlag == 0 || !ul.sw.wants(corenet.CapabilityURingTaskrunFlag)
+      - opt:
+          do:
+            - eval: "ul.rep.set(corenet.CapabilityURingTaskrunFlag, statusAvailable, \"read on a DEFER_TASKRUN ring only: uring-defer-taskrun not in use\")"
+              to: ul.rep.set
+            - return: ""
+          when: ul.primary&setupDeferTaskrun == 0
+      - op: "|="
+        set: ul.primary
+        value: setupTaskrunFlag
+      - eval: ul.rep.set(corenet.CapabilityURingTaskrunFlag, statusOn, "")
+        to: ul.rep.set
   - of: layoutFlags
     steps:
       - var:
@@ -9569,13 +9603,20 @@ sequences:
         kind: self
       - id: rr.u.flushOverflow
         kind: internal
+      - id: rr.u.workHeld
+        kind: internal
     steps:
       - loop:
           do:
+            - bind: held
+              eval: "false"
             - opt:
                 do:
                   - eval: rr.u.flushOverflow()
                     to: rr.u.flushOverflow
+                  - set: held
+                    to: rr.u.workHeld
+                    value: rr.u.workHeld()
                 when: rr.u.deferred()
             - bind: before
               eval: rr.r.st.completions
@@ -9590,9 +9631,18 @@ sequences:
             - opt:
                 do:
                   - return: len(rr.starved) > 0, false
-                when: rr.r.st.completions == before
+                when: caughtUp(rr.r.st.completions != before, rr.u.taskrunFlagged(), held)
           range: reapRounds
       - return: true, false
+  - of: caughtUp
+    steps:
+      - return: "!reaped && (!flagged || !held)"
+  - of: (*uring).taskrunFlagged
+    steps:
+      - return: u.setup&setupTaskrunFlag != 0
+  - of: (*uring).workHeld
+    steps:
+      - return: atomic.LoadUint32(u.sqFlags)&sqTaskrun != 0
   - of: (*uLoop).submitLate
     participants:
       - id: caller

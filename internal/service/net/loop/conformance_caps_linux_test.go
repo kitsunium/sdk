@@ -38,6 +38,10 @@ func probeCap(backend corenet.LoopBackend, c corenet.Capability) func() error {
 		if class, _ := capClassOf(c); class == classCode {
 			v.Capabilities = []corenet.Capability{c}
 		}
+		//: TASKRUN_FLAG is on only on a DEFER_TASKRUN ring (#1595).
+		if c == corenet.CapabilityURingTaskrunFlag {
+			v.Capabilities = []corenet.Capability{corenet.CapabilityURingDeferTaskrun}
+		}
 		g, err := Start(Config{Group: "probe", Value: v, Handler: &lineH{}, Log: io.Discard})
 		if err != nil {
 			return err
@@ -64,6 +68,7 @@ func init() {
 		corenet.CapabilityURingPbufInc, corenet.CapabilityURingRecvBundle,
 		corenet.CapabilityURingDeferTaskrun, corenet.CapabilityURingNoSQArray,
 		corenet.CapabilityURingRingFDs, corenet.CapabilityURingSQRewind,
+		corenet.CapabilityURingTaskrunFlag,
 	} {
 		capProbes[string(c)] = probeCap(corenet.LoopBackendIOURing, c)
 	}

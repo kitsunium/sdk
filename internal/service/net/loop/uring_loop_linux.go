@@ -1301,7 +1301,9 @@ func (ul *uLoop) reapRings() {
 // until an enter posts nothing, reapRounds times at most. A ring still
 // behind then is not judged silent this batch (#1541): its requests may wait
 // in that work. Under 6.13 and later one enter runs only a few dozen of
-// those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds. A ring already
+// those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds, and a round that
+// posts nothing ends them only once the kernel holds no work back, which a
+// ring set up with TASKRUN_FLAG says (caughtUp, #1595). A ring already
 // behind — cut by the budget, not reached, or starved — is left for the next
 // batch, the budget kept (ADR 0206). A ring the budget cuts here is left as
 // reapRings leaves one: counted, the next batch starting there without
@@ -1349,9 +1351,13 @@ func (ul *uLoop) cutBehind(i int) {
 func (rr *uRing) catchUp() (behind, cut bool) {
 	//: an enter, then a reap, until neither brings anything.
 	for range reapRounds {
-		//: the deferred work runs only on this thread's GETEVENTS enter.
+		held := false
+		//: the deferred work runs only on this thread's GETEVENTS enter,
+		//: which leaves IORING_SQ_TASKRUN raised over the works it did not
+		//: run.
 		if rr.u.deferred() {
 			rr.u.flushOverflow()
+			held = rr.u.workHeld()
 		}
 		before := rr.r.st.completions
 		//: cut by the budget: behind, and the next batch does not wait.
@@ -1364,14 +1370,43 @@ func (rr *uRing) catchUp() (behind, cut bool) {
 			//: behind.
 			return true, false
 		}
-		//: nothing came: caught up.
-		if rr.r.st.completions == before {
+		//: nothing came, and the kernel holds no work back: caught up.
+		if caughtUp(rr.r.st.completions != before, rr.u.taskrunFlagged(), held) {
 			//: judged this batch.
 			return len(rr.starved) > 0, false
 		}
 	}
-	//: still coming after the rounds.
+	//: still coming, or still held, after the rounds.
 	return true, false
+}
+
+// caughtUp is one catch-up round's verdict: caught up when the round reaped
+// nothing and, on a ring set up with TASKRUN_FLAG, the enter left no task
+// work held (IORING_SQ_TASKRUN clear). From 6.13 one GETEVENTS enter runs
+// IO_LOCAL_TW_DEFAULT_MAX works whether they post a completion or not — a
+// poll wake-up that falls back to EAGAIN posts none — and leaves the rest in
+// retry_llist, the flag raised (io_run_local_work_continue): a round can reap
+// nothing with a recv still held behind them (#1595). A ring without the
+// flag keeps the reap's word alone; before 6.13 an enter runs every work
+// queued when it started, and the reap's word is exact there.
+func caughtUp(reaped, flagged, held bool) bool {
+	//: something came, or work is held: another round.
+	return !reaped && (!flagged || !held)
+}
+
+// taskrunFlagged reports a ring set up with TASKRUN_FLAG, whose
+// IORING_SQ_TASKRUN workHeld reads.
+func (u *uring) taskrunFlagged() bool {
+	//: as set up.
+	return u.setup&setupTaskrunFlag != 0
+}
+
+// workHeld reports IORING_SQ_TASKRUN: the kernel holds task work for this
+// ring's thread. Read with the atomic load overflowed uses on the same word;
+// only a TASKRUN_FLAG ring raises it.
+func (u *uring) workHeld() bool {
+	//: the flag the kernel raises.
+	return atomic.LoadUint32(u.sqFlags)&sqTaskrun != 0
 }
 
 // submitLate hands the kernel the answers endBatch queued at once, rather

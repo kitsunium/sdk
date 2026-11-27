@@ -94,17 +94,19 @@ jobs:
           # by no leg until one runs a kernel from 6.12 — noble's 6.8 runs
           # its fallback. uring-sock-getsockopt (6.7, #974) by both legs, at
           # 6.8 and above: on or available, the release check deciding.
+          # uring-taskrun-flag (5.19, #1595) by both legs, probed with
+          # uring-defer-taskrun opted into: the drain's catch-up reads it there.
           - leg: host
             kind: host
             requiredBackends: "iouring,epoll"
-            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds,uring-sock-getsockopt"
+            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds,uring-sock-getsockopt,uring-taskrun-flag"
           # Ubuntu noble at its own kernel, 6.8, the one the loop engine's
           # io_uring is sized against (ADR 0186); the image e2e-cross.yml pins,
           # by URL and digest.
           - leg: noble-6.8
             kind: vm
             requiredBackends: "iouring,epoll"
-            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds,uring-sock-getsockopt"
+            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds,uring-sock-getsockopt,uring-taskrun-flag"
             url: https://cloud-images.ubuntu.com/noble/20261017/noble-server-cloudimg-amd64.img
             algo: sha256
             sum: 04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
