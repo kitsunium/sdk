@@ -589,6 +589,26 @@ contending on one accept queue. Zero means one per core; one disables it.
   process, creating nothing. Every refusal prints `draw: skip <reason>`,
   which the parent skips on, then skips the child itself (R6), so a child
   run by hand reports SKIP, not PASS.
+  - *The context must be alive (R8).* "Every spelling the bind reads as port
+    0 is a draw" holds for a live context: under cgo, a blank-led port is
+    looked up through `doBlockingWithCtx`, two selects tossed at random when
+    the context is done, so `drawnPort` could answer with the context's
+    error (no draw) while the bind's own lookup, just after, succeeded and
+    read 0. `listenShard` therefore returns the context's error, as a bind
+    refusal, before it draws or binds
+    (`TestShards_portZeroCancelledContext`). `mustProbe` keeps no such
+    guard: a wrong "no draw" there costs one probe bind and close, and the
+    shard's bind that follows meets the same context.
+  - *The guard's reach (R9).* The child admits a network namespace its own
+    user namespace owns, so a rootless container's namespace, shared with the
+    container's other processes, passes when both variables are set by hand;
+    the sysctl written is that namespace's, never the host's (the host's is
+    owned by the initial user namespace, which `NS_GET_USERNS` refuses).
+  - *A service name costs four lookups (R10).* A port written as a service
+    name is resolved by `mustProbe`, the probe, `portZero` and the bind, not
+    two, all through the same resolver and context. A change of
+    `/etc/services` between two of them could make them differ: root's, outside
+    the threat model.
   - *What it does not close (R1, earlier than #1585).* "A port nobody holds"
     is true at the instant of the draw only. Once `reuseAfterBind` has set
     the option, the group is itself a reuseport holder: another program of
