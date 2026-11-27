@@ -1718,6 +1718,13 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   a memory log, which writes no marker; the marker's write for
   STATE_MACHINE_FAILED and the refusal of the next start are held by
   `TestDataDirLockAndStopMarkers`, on a file log, apart from the install.
+  Before an operator clears that marker, a `DurableStateMachine` must be
+  verified or rebuilt: the next start trusts its `AppliedPosition`, and the
+  machine accepted a state the engine never vouched for. The cause is not
+  kept as a code: an EIO met by the `io.Copy` that follows a nil `Restore`
+  becomes STATE_MACHINE_FAILED, STORAGE_FAILED survives only in the
+  stop's `cause` text, and the marker is permanent, not limited to the
+  start in progress.
 - Keep running, or fall back at a start, after a `Restore` that returned an
   error: the engine cannot tell a machine that read aside and kept its state
   from one that decoded part of the stream into its live state, so it
@@ -1756,13 +1763,18 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `machine/`'s `SQL` restores in one transaction and so loses nothing
   either, yet its refusal stops the node: the engine has no word from a
   machine that its `Restore` is atomic.
-  Before an operator clears that marker, a `DurableStateMachine` must be
-  verified or rebuilt: the next start trusts its `AppliedPosition`, and the
-  machine accepted a state the engine never vouched for. The cause is not
-  kept as a code: an EIO met by the `io.Copy` that follows a nil `Restore`
-  becomes STATE_MACHINE_FAILED, STORAGE_FAILED survives only in the
-  stop's `cause` text, and the marker is permanent, not limited to the
-  start in progress.
+  The only way out of such a stop or start refusal is a restart of the
+  process, on a new machine: the machine whose `Restore` was refused is
+  never handed to another node, since a start that then falls back — the
+  copy rotted between its two reads, no older snapshot, a log from index
+  1 — replays the log over the prefix it holds. Each attempt reads the
+  snapshot twice (the check, then `Restore`), and a refusal that is
+  deterministic fails every start: the supervisor restarts one node at a
+  time, waiting for it to be ready before the next, and gives up past a
+  bound (`lifecycle.Supervisor`'s `GiveUpAfter`, systemd's
+  `StartLimitBurst`); otherwise it loops. An install's refusal stops at
+  most f nodes at once, those outside the commit quorum that need an
+  install, but it eats the margin until they rejoin.
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).
