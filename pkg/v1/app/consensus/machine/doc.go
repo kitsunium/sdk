@@ -11,7 +11,8 @@
 // A batch that cannot complete panics, and the node stops with
 // STATE_MACHINE_FAILED. A snapshot streams from a read-only transaction
 // opened when it is taken; a restore truncates and loads in one transaction
-// with the snapshot's position.
+// with the snapshot's position, and a refused one leaves the database as it
+// was, so the node keeps running (SQL is an AtomicRestorer).
 //
 //	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
 //		Transactor: tm, Dialect: sql.DialectPostgres,

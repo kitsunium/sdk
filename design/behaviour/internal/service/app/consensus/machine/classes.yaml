@@ -109,6 +109,7 @@ files:
       - (*SQL).ApplyBatch
       - (*SQL).AppliedPosition
       - (*SQL).Restore
+      - (*SQL).RestoresAtomically
       - (*SQL).writePosition
       - (*SQL).readPosition
       - clusterOf
@@ -372,6 +373,8 @@ types:
         params: r io.Reader, meta coreconsensus.SnapshotMetaValue
         recv: m *SQL
         results: error
+      - name: RestoresAtomically
+        recv: m *SQL
       - doc: |-
           writePosition updates the one position row inside the transaction ex
           belongs to.
@@ -458,7 +461,8 @@ types:
 vars:
   - doc: |-
       The ports each machine implements: SQL every sibling a durable, batching
-      machine speaks, KV the state machine alone (it is volatile).
+      machine whose restore is one transaction speaks, KV the state machine
+      alone (it is volatile).
     grouped: true
     items:
       - name: _
@@ -466,6 +470,9 @@ vars:
         value: (*SQL)(nil)
       - name: _
         type: coreconsensus.BatchingStateMachine
+        value: (*SQL)(nil)
+      - name: _
+        type: coreconsensus.AtomicRestorer
         value: (*SQL)(nil)
       - name: _
         type: coreconsensus.StateMachine

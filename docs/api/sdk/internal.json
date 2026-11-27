@@ -903,7 +903,7 @@
       "dir": "service/app/consensus/machine",
       "layer": "service",
       "family": "app",
-      "doc": "Package machine holds state machines for the consensus engine (ADR 0152\nD3): the glue every product wrote by hand around a database, and the\nreference key-value machine the linearizability checker models.\n\n[SQL] is a [coreconsensus.DurableStateMachine] and a\n[coreconsensus.BatchingStateMachine] over a [coresql.Transactor]. A\nbatch of committed commands is applied in ONE transaction: the caller's\n[SQLConfig].Apply runs each command on the transaction's executor, and\nthe machine writes the log identity and the position of the last one\ninto its position row in that same transaction before it commits. A\ncrash between the batch and the position, or during the commit, loses\nboth or neither, so the engine resumes after exactly the entries the\ndatabase holds: none applied twice, none skipped. A batch that cannot\ncomplete — the database's failure or Apply's — panics, and the node\nstops with STATE_MACHINE_FAILED: the entries are committed, and the\nrestart applies them again from the position the database kept.\n\nA snapshot is read in a read-only transaction the machine opens on the\napply goroutine (REPEATABLE READ, SERIALIZABLE on SQLite) and holds\nuntil Release, so [SQLConfig].Dump streams the state of the batch last\ncommitted while the next batches commit. A restore runs\n[SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in\none transaction.\n\n\tsm, err := machine.NewSQL(ctx, machine.SQLConfig{\n\t\tTransactor: tm, Dialect: sql.DialectPostgres,\n\t\tApply:    applyCommand, // func(ctx, ex, entry) (result, error)\n\t\tDump:     dumpTables, Truncate: truncateTables, Load: loadTables,\n\t})\n\tnode, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})\n\n[KV] is the reference machine: get, put and compare-and-swap on a\nper-key revision that only grows, so a value written back to an earlier\none never passes a swap the caller read before (D6's ABA defence). Its\ncommands are built with [KVGet], [KVPut] and [KVCompareAndSwap], and\neach answers a [KVResult]. It keeps its state in memory: a volatile\nmachine, rebuilt from the latest snapshot and the log at every start.\n"
+      "doc": "Package machine holds state machines for the consensus engine (ADR 0152\nD3): the glue every product wrote by hand around a database, and the\nreference key-value machine the linearizability checker models.\n\n[SQL] is a [coreconsensus.DurableStateMachine], a\n[coreconsensus.BatchingStateMachine] and a\n[coreconsensus.AtomicRestorer] over a [coresql.Transactor]. A\nbatch of committed commands is applied in ONE transaction: the caller's\n[SQLConfig].Apply runs each command on the transaction's executor, and\nthe machine writes the log identity and the position of the last one\ninto its position row in that same transaction before it commits. A\ncrash between the batch and the position, or during the commit, loses\nboth or neither, so the engine resumes after exactly the entries the\ndatabase holds: none applied twice, none skipped. A batch that cannot\ncomplete — the database's failure or Apply's — panics, and the node\nstops with STATE_MACHINE_FAILED: the entries are committed, and the\nrestart applies them again from the position the database kept.\n\nA snapshot is read in a read-only transaction the machine opens on the\napply goroutine (REPEATABLE READ, SERIALIZABLE on SQLite) and holds\nuntil Release, so [SQLConfig].Dump streams the state of the batch last\ncommitted while the next batches commit. A restore runs\n[SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in\none transaction: a refused one leaves the database as it was, and the\nnode it runs under keeps running on the state it had applied.\n\n\tsm, err := machine.NewSQL(ctx, machine.SQLConfig{\n\t\tTransactor: tm, Dialect: sql.DialectPostgres,\n\t\tApply:    applyCommand, // func(ctx, ex, entry) (result, error)\n\t\tDump:     dumpTables, Truncate: truncateTables, Load: loadTables,\n\t})\n\tnode, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})\n\n[KV] is the reference machine: get, put and compare-and-swap on a\nper-key revision that only grows, so a value written back to an earlier\none never passes a swap the caller read before (D6's ABA defence). Its\ncommands are built with [KVGet], [KVPut] and [KVCompareAndSwap], and\neach answers a [KVResult]. It keeps its state in memory: a volatile\nmachine, rebuilt from the latest snapshot and the log at every start.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/app/consensus/multi",
@@ -2804,6 +2804,31 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.AtomicRestorer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "AtomicRestorer",
+      "spelled": "interface{RestoresAtomically(); StateMachine}",
+      "canonical": "interface{RestoresAtomically(); github.com/kitsunium/sdk/internal/core/app/consensus.StateMachine}",
+      "doc": "AtomicRestorer is the sibling of a state machine whose Restore is\natomic: a Restore that returns an error leaves the state exactly as\nit was before the call, the position a DurableStateMachine's\nAppliedPosition reports included. The engine recognises it by a type\nassertion on the machine. At an install, its refusal does not stop\nthe node and leaves no marker: the install is refused as any failed\none, its copy removed, and the node goes on from the state it had\napplied, through a later offer or the appends of a leader that still\nholds what it lacks. At a start, its refusal falls back to an older\nsnapshot or to a replay of the log, as for a snapshot the engine\nrefused on its checksums. VERSION_UNSUPPORTED still stops the node\nand refuses a start (D18), and a Restore that returned nil on a\nstream whose end the engine then refused still stops it: the machine\naccepted that state. A machine that declares the sibling and breaks\nits contract leaves the node, unseen, on a state no correct node\nholds.\n",
+      "file": "core/app/consensus/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.AtomicRestorer.RestoresAtomically",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "RestoresAtomically",
+      "recv": "AtomicRestorer",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "RestoresAtomically marks the machine as an AtomicRestorer. It does\nnothing, and the engine never calls it.\n",
+      "file": "core/app/consensus/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeerValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -3514,7 +3539,7 @@
       "code": {
         "value": "0.2.57.10"
       },
-      "doc": "CodeStateMachineFailed identifies a node whose Apply panicked or could not\ncomplete — the entry IS committed —, whose Restore returned nil on\na snapshot whose end the engine then refused, or whose Restore\nreturned an error not coded VERSION_UNSUPPORTED. Before an operator\nclears the stop marker this leaves, a DurableStateMachine must be\nverified or rebuilt: the next start trusts its AppliedPosition.\n",
+      "doc": "CodeStateMachineFailed identifies a node whose Apply panicked or could not\ncomplete — the entry IS committed —, whose Restore returned nil on\na snapshot whose end the engine then refused, or whose Restore,\nnot an AtomicRestorer's, returned an error not coded\nVERSION_UNSUPPORTED. Before an operator\nclears the stop marker this leaves, a DurableStateMachine must be\nverified or rebuilt: the next start trusts its AppliedPosition.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -6434,7 +6459,7 @@
       "recv": "StateMachine",
       "spelled": "func(r io.Reader, meta SnapshotMetaValue) error",
       "canonical": "func(r io.Reader, meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
-      "doc": "Restore replaces the state with a snapshot's. It is serialised with\nApply. An error coded VERSION_UNSUPPORTED says the snapshot is of a\nformat this build does not read: the node stops, as for an entry\nkind it does not know, and a restart over that snapshot is refused\n(D18). The engine cannot tell a refusal that left the state as it\nwas from one that wrote part of the stream into it, so it assumes\nthe second: any other error stops the node with\nSTATE_MACHINE_FAILED before it applies another entry or releases a\nBarrier or WaitApplied, and no snapshot is offered again to it. A\nDurableStateMachine may have written that part to its disk, where\nthe next start would resume past its AppliedPosition: its stop\nleaves a marker that refuses the next start until an operator\nclears it. A volatile machine's stop leaves none: its state goes\nwith the process, and a supervisor starts the node again on a new\nmachine. At a start, a Restore that returns an error fails the\nstart with STATE_MACHINE_FAILED, a volatile machine's included,\nrather than falling back to an older snapshot or a replay from the\nfirst entry; a snapshot the engine refuses before Restore, on its\nchecksums, still falls back. A machine that builds the new state\naside and swaps it in only on success is the one that lets an\noperator restart a node with the state it held. A machine reads r to io.EOF: after it\nreturns, the engine reads what it left, and checks the stream's\nsizes and SHA-256 against the metadata. A Restore that returns nil\non a stream whose end is then refused leaves the machine on a\nstate the engine cannot vouch for: the node stops with\nSTATE_MACHINE_FAILED before it applies another entry, and a start\nthat restores that way fails with it.\n",
+      "doc": "Restore replaces the state with a snapshot's. It is serialised with\nApply. An error coded VERSION_UNSUPPORTED says the snapshot is of a\nformat this build does not read: the node stops, as for an entry\nkind it does not know, and a restart over that snapshot is refused\n(D18). Unless the machine is an AtomicRestorer, the engine cannot\ntell a refusal that left the state as it was from one that wrote\npart of the stream into it, so it assumes the second: any other\nerror stops the node with\nSTATE_MACHINE_FAILED before it applies another entry or releases a\nBarrier or WaitApplied, and no snapshot is offered again to it. A\nDurableStateMachine may have written that part to its disk, where\nthe next start would resume past its AppliedPosition: its stop\nleaves a marker that refuses the next start until an operator\nclears it. A volatile machine's stop leaves none: its state goes\nwith the process, and a supervisor starts the node again on a new\nmachine. At a start, a Restore that returns an error fails the\nstart with STATE_MACHINE_FAILED, a volatile machine's included,\nrather than falling back to an older snapshot or a replay from the\nfirst entry; a snapshot the engine refuses before Restore, on its\nchecksums, still falls back. A machine that builds the new state\naside and swaps it in only on success is the one that lets an\noperator restart a node with the state it held; declared an\nAtomicRestorer, its refusal neither stops the node nor fails a\nstart: the install is refused and the node keeps the state it had\napplied, and a start falls back. A machine reads r to io.EOF: after it\nreturns, the engine reads what it left, and checks the stream's\nsizes and SHA-256 against the metadata. A Restore that returns nil\non a stream whose end is then refused leaves the machine on a\nstate the engine cannot vouch for: the node stops with\nSTATE_MACHINE_FAILED before it applies another entry, and a start\nthat restores that way fails with it.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -6464,7 +6489,7 @@
         "reason": "STATE_MACHINE_FAILED",
         "public": "The replicated state machine failed and the node stopped"
       },
-      "doc": "StateMachineFailed stops the node when Apply panics or cannot complete.\nThe entry IS committed: this never means \"not written\". It also stops\nthe node, or fails its start, when Restore returned nil on a snapshot\nwhose end the engine then refused: the machine may hold that state\nwhile the applied position stays below it. Whatever failed the read\nafter that nil, an I/O error included, is this code: the failing\ncause survives only in the stop's text, and the stop marker is\npermanent. It stops a node, or fails its start, whose Restore\nreturned an error not coded VERSION_UNSUPPORTED too: the machine may have written part of the\nsnapshot into its state. A volatile machine's stop on it leaves no\nmarker, its state going with the process. Before an operator clears\nthat marker, a DurableStateMachine must be verified or rebuilt,\nbecause the next start trusts its AppliedPosition.\n",
+      "doc": "StateMachineFailed stops the node when Apply panics or cannot complete.\nThe entry IS committed: this never means \"not written\". It also stops\nthe node, or fails its start, when Restore returned nil on a snapshot\nwhose end the engine then refused: the machine may hold that state\nwhile the applied position stays below it. Whatever failed the read\nafter that nil, an I/O error included, is this code: the failing\ncause survives only in the stop's text, and the stop marker is\npermanent. It stops a node, or fails its start, whose Restore\nreturned an error not coded VERSION_UNSUPPORTED too: the machine may have written part of the\nsnapshot into its state; an AtomicRestorer's refusal is not one. A volatile machine's stop on it leaves no\nmarker, its state going with the process. Before an operator clears\nthat marker, a DurableStateMachine must be verified or rebuilt,\nbecause the next start trusts its AppliedPosition.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -71809,7 +71834,20 @@
       "recv": "SQL",
       "spelled": "func(r io.Reader, meta coreconsensus.SnapshotMetaValue) error",
       "canonical": "func(r io.Reader, meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
-      "doc": "Restore replaces the state with a snapshot's: Truncate, Load and the\nsnapshot's position, in one transaction. A snapshot no SQL machine\nwrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.\n",
+      "doc": "Restore replaces the state with a snapshot's: Truncate, Load and the\nsnapshot's position, in one transaction. A snapshot no SQL machine\nwrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED,\nboth refused before the transaction opens. A refusal leaves the\ndatabase and the position as they were: whatever fails in the\ntransaction rolls it back, and the position the machine reports\nmoves only once it committed.\n",
+      "file": "service/app/consensus/machine/sql.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/machine.(*SQL).RestoresAtomically",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/machine",
+      "name": "RestoresAtomically",
+      "recv": "SQL",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its\nRestore is one transaction, which a failed Transact did not commit,\nso the engine keeps a node running when it refuses. It does nothing.\n",
       "file": "service/app/consensus/machine/sql.go",
       "layer": "service",
       "family": "app"

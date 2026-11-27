@@ -217,7 +217,11 @@ func (m *SQL) AppliedPosition() (coreconsensus.LogIdentityValue, coreconsensus.P
 
 // Restore replaces the state with a snapshot's: Truncate, Load and the
 // snapshot's position, in one transaction. A snapshot no SQL machine
-// wrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.
+// wrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED,
+// both refused before the transaction opens. A refusal leaves the
+// database and the position as they were: whatever fails in the
+// transaction rolls it back, and the position the machine reports
+// moves only once it committed.
 func (m *SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
 	var head [len(sqlSnapshotMagic) + 1]byte
 	if _, err := io.ReadFull(r, head[:]); err != nil {
@@ -246,6 +250,11 @@ func (m *SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
 	m.li, m.pos = meta.Log, meta.Position
 	return nil
 }
+
+// RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its
+// Restore is one transaction, which a failed Transact did not commit,
+// so the engine keeps a node running when it refuses. It does nothing.
+func (m *SQL) RestoresAtomically() {}
 
 // writePosition updates the one position row inside the transaction ex
 // belongs to.

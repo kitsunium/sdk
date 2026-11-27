@@ -2312,6 +2312,7 @@ files:
       - cutRetryMin
       - Latest
       - (*Node).restoreFrom
+      - (*Node).restoresAtomically
       - (*Node).restoreRefused
       - idNamesPosition
       - (*Node).codecOf
@@ -9088,7 +9089,10 @@ types:
           older snapshot is not restored again and stays on the state it accepted.
           A machine whose Restore refused the stream may hold the prefix it decoded
           in place, a volatile one included: the fallback applied over it (#1582),
-          so STATE_MACHINE_FAILED refuses the start too.
+          so STATE_MACHINE_FAILED refuses the start too. An AtomicRestorer's
+          refusal left its state as it was, and returns its own error, which may
+          carry STATE_MACHINE_FAILED, as machine.SQL's does: it falls back, as
+          before #1582, onto a state the older base or the replay continues (#1607).
         name: refusesStart
         params: rerr error
         recv: n *Node
@@ -10516,16 +10520,32 @@ types:
           restoreFrom verifies a snapshot's digest, then restores the state machine
           from it, serialised with Apply. install says the restore is a running
           node's, on the apply goroutine, rather than a start's: a Restore it
-          refuses holds apply until another succeeds (restoreRefused).
+          refuses stops the node there, unless the machine is an AtomicRestorer
+          (restoreRefused).
         name: restoreFrom
         params: m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool
         recv: n *Node
         results: error
       - doc: |-
+          restoresAtomically reports whether the machine declared its Restore
+          atomic: an AtomicRestorer whose Restore returned an error holds the state
+          it held before the call (#1607). It is the engine's one test of the
+          sibling, read by restoreRefused and refusesStart.
+        name: restoresAtomically
+        recv: n *Node
+        results: bool
+      - doc: |-
           restoreRefused is what a Restore that returned err leaves the node. The
           engine cannot tell a machine that read aside and kept its state from one
           that decoded part of the stream into its live state and failed: the
-          machine may hold a prefix of the snapshot no correct node holds (#1582).
+          machine may hold a prefix of the snapshot no correct node holds (#1582),
+          unless it is an AtomicRestorer, whose refusal left its state as it was
+          (#1607). Such a refusal is returned as is, as every refusal was before
+          #1582: an install is refused, restoreItem answers it, restoreFailed
+          removes the copy and raft stays where it was, so the entries handed
+          after the restore continue the state the machine holds; a start falls
+          back to an older snapshot or a replay (refusesStart). Neither stops the
+          node, as a transient failure of a database would for good.
           At an install, on the apply goroutine, the refusal stops the node before
           the restore is answered, so the goroutine takes no item after it and no
           entry is applied, and no Barrier released, over that prefix: stopped from

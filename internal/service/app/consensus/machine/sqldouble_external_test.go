@@ -99,10 +99,14 @@ type memDriver struct{ db *memDB }
 
 func (m memDriver) Open(string) (driver.Conn, error) { return &memConn{db: m.db}, nil }
 
-// memConn is one connection, with the transaction it runs if any.
+// memConn is one connection, with the transaction it runs if any, and
+// whether that transaction is read-only: a snapshot's, whose commit must
+// not write back the copy it read, or it erased every batch committed
+// while it was open.
 type memConn struct {
-	db *memDB
-	tx *dbState
+	db       *memDB
+	tx       *dbState
+	readOnly bool
 }
 
 func (c *memConn) Prepare(string) (driver.Stmt, error) {
@@ -113,20 +117,23 @@ func (c *memConn) Begin() (driver.Tx, error) {
 	return c.BeginTx(context.Background(), driver.TxOptions{})
 }
 
-func (c *memConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+func (c *memConn) BeginTx(_ context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	c.db.mu.Lock()
 	s := c.db.committed.clone()
 	c.db.mu.Unlock()
-	c.tx = &s
+	c.tx, c.readOnly = &s, opts.ReadOnly
 	return memTx{c}, nil
 }
 
 type memTx struct{ c *memConn }
 
 func (t memTx) Commit() error {
-	t.c.db.mu.Lock()
-	t.c.db.committed = *t.c.tx
-	t.c.db.mu.Unlock()
+	//: a read-only transaction has nothing to write back.
+	if !t.c.readOnly {
+		t.c.db.mu.Lock()
+		t.c.db.committed = *t.c.tx
+		t.c.db.mu.Unlock()
+	}
 	t.c.tx = nil
 	return nil
 }

@@ -142,6 +142,7 @@ go_test(
         "applied_alloc_internal_test.go",
         "applied_bench_test.go",
         "appliedwait_internal_test.go",
+        "atomicrestore_internal_test.go",
         "backup_internal_test.go",
         "cancel_internal_test.go",
         "cancelstream_internal_test.go",

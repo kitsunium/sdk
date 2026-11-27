@@ -47,7 +47,7 @@
       "dir": "consensus/machine",
       "layer": "public",
       "family": "app",
-      "doc": "Package machine is the public facade of the consensus domain's state\nmachines (ADR 0152 D3): the durable machine over a database every\nproduct otherwise writes by hand, and the reference key-value machine.\n\n[NewSQL] builds a [SQL] machine over a transactor of package\n[github.com/kitsunium/sdk/pkg/v1/data/sql]. It applies a batch of\ncommitted commands in one transaction and writes the applied log identity\nand position in that same transaction, so a crash between the two loses\nboth or neither and a node configured with DurabilityDurable resumes after\nexactly the entries the database holds: none applied twice, none skipped.\nA batch that cannot complete panics, and the node stops with\nSTATE_MACHINE_FAILED. A snapshot streams from a read-only transaction\nopened when it is taken; a restore truncates and loads in one transaction\nwith the snapshot's position.\n\n\tsm, err := machine.NewSQL(ctx, machine.SQLConfig{\n\t\tTransactor: tm, Dialect: sql.DialectPostgres,\n\t\tApply:    applyCommand, // func(ctx, ex, entry) (result, error)\n\t\tDump:     dumpTables, Truncate: truncateTables, Load: loadTables,\n\t})\n\tnode, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})\n\n[KV] keeps keys in memory, each with a revision that only grows: [KVPut]\nstores a value, [KVGet] reads it through the log, [KVCompareAndSwap]\nstores one only while the revision is the one the caller read, so a value\nwritten back to an earlier one never passes a stale swap. Each command\nanswers a [KVResult] from Propose.\n\n\t_, res, err := node.Propose(ctx, machine.KVCompareAndSwap(\"leader\", []byte(\"fra\"), 0))\n\tif r, ok := res.(machine.KVResult); ok && r.Applied { … } // took the key at revision r.Revision\n"
+      "doc": "Package machine is the public facade of the consensus domain's state\nmachines (ADR 0152 D3): the durable machine over a database every\nproduct otherwise writes by hand, and the reference key-value machine.\n\n[NewSQL] builds a [SQL] machine over a transactor of package\n[github.com/kitsunium/sdk/pkg/v1/data/sql]. It applies a batch of\ncommitted commands in one transaction and writes the applied log identity\nand position in that same transaction, so a crash between the two loses\nboth or neither and a node configured with DurabilityDurable resumes after\nexactly the entries the database holds: none applied twice, none skipped.\nA batch that cannot complete panics, and the node stops with\nSTATE_MACHINE_FAILED. A snapshot streams from a read-only transaction\nopened when it is taken; a restore truncates and loads in one transaction\nwith the snapshot's position, and a refused one leaves the database as it\nwas, so the node keeps running (SQL is an AtomicRestorer).\n\n\tsm, err := machine.NewSQL(ctx, machine.SQLConfig{\n\t\tTransactor: tm, Dialect: sql.DialectPostgres,\n\t\tApply:    applyCommand, // func(ctx, ex, entry) (result, error)\n\t\tDump:     dumpTables, Truncate: truncateTables, Load: loadTables,\n\t})\n\tnode, err := consensus.NewNode(consensus.Config{Machine: sm, Durability: consensus.DurabilityDurable, …})\n\n[KV] keeps keys in memory, each with a revision that only grows: [KVPut]\nstores a value, [KVGet] reads it through the log, [KVCompareAndSwap]\nstores one only while the revision is the one the caller read, so a value\nwritten back to an earlier one never passes a stale swap. Each command\nanswers a [KVResult] from Propose.\n\n\t_, res, err := node.Propose(ctx, machine.KVCompareAndSwap(\"leader\", []byte(\"fra\"), 0))\n\tif r, ok := res.(machine.KVResult); ok && r.Applied { … } // took the key at revision r.Revision\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/app/events",
@@ -934,6 +934,19 @@
       "spelled": "func(dst []byte, t TokenValue) []byte",
       "canonical": "func(dst []byte, t github.com/kitsunium/sdk/pkg/v1/app/consensus.TokenValue) []byte",
       "doc": "AppendToken appends the 41-byte encoding of t.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.AtomicRestorer",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "AtomicRestorer",
+      "spelled": "coreconsensus.AtomicRestorer",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.AtomicRestorer",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/app/consensus.AtomicRestorer",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"

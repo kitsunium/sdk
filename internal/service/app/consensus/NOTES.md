@@ -1754,8 +1754,21 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `r` reached `io.EOF`; on any error it drops the new state and returns,
   the old one untouched. The tests' `kv` and `machine/`'s `KV` read aside.
   `machine/`'s `SQL` restores in one transaction and so loses nothing
-  either, yet its refusal stops the node: the engine has no word from a
-  machine that its `Restore` is atomic.
+  either; it says so as an `AtomicRestorer` (#1607), the sibling whose
+  failed `Restore` left the state, its position included, as it was.
+  `restoresAtomically` (`snapshot.go`) is the engine's one test of it:
+  `restoreRefused` returns such a refusal as is, as every refusal was
+  before #1582 — the install is refused, `restoreItem` lets its hold go,
+  `restoreFailed` removes the copy, raft stays where it was, and the
+  entries handed after the restore continue the state the machine holds;
+  a later offer, or a leader's appends, catch the node up. At a start,
+  `refusesStart` lets it fall back, though `SQL`'s error carries
+  STATE_MACHINE_FAILED. VERSION_UNSUPPORTED and a nil `Restore` whose end
+  is refused still stop it. A machine that declares the sibling and breaks
+  its contract diverges unseen: the engine has nothing to check it with
+  (`TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning`,
+  `TestAnAtomicRestorerRefusedAtStartFallsBack`, `machine/`'s
+  `TestAnSQLFollowerWhoseInstallLoadFailsKeepsRunning`).
   Before an operator clears that marker, a `DurableStateMachine` must be
   verified or rebuilt: the next start trusts its `AppliedPosition`, and the
   machine accepted a state the engine never vouched for. The cause is not

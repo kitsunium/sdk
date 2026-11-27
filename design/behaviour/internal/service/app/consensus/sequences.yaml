@@ -11613,8 +11613,8 @@ sequences:
   - of: (*Node).refusesStart
     steps:
       - return: |-
-          errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) ||
-          		errs.HasCode(rerr, coreconsensus.CodeStateMachineFailed) || n.stopped.Load()
+          errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) || n.stopped.Load() ||
+          		(errs.HasCode(rerr, coreconsensus.CodeStateMachineFailed) && !n.restoresAtomically())
   - of: (*Node).fallbackGap
     steps:
       - opt:
@@ -23484,6 +23484,11 @@ sequences:
       - eval: n.snapState.mu.Unlock()
         to: n.snapState.mu.Unlock
       - return: nil
+  - of: (*Node).restoresAtomically
+    steps:
+      - bind: _, ok
+        eval: n.cfg.Machine.(coreconsensus.AtomicRestorer)
+      - return: ok
   - of: (*Node).restoreRefused
     participants:
       - id: caller
@@ -23508,6 +23513,9 @@ sequences:
                       - eval: n.stop(err, false)
                         to: n.stop
                     when: install
+                - return: err
+            - case: n.restoresAtomically()
+              do:
                 - return: err
             - case: durable
               do:

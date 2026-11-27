@@ -903,10 +903,13 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 // older snapshot is not restored again and stays on the state it accepted.
 // A machine whose Restore refused the stream may hold the prefix it decoded
 // in place, a volatile one included: the fallback applied over it (#1582),
-// so STATE_MACHINE_FAILED refuses the start too.
+// so STATE_MACHINE_FAILED refuses the start too. An AtomicRestorer's
+// refusal left its state as it was, and returns its own error, which may
+// carry STATE_MACHINE_FAILED, as machine.SQL's does: it falls back, as
+// before #1582, onto a state the older base or the replay continues (#1607).
 func (n *Node) refusesStart(rerr error) bool {
-	return errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) ||
-		errs.HasCode(rerr, coreconsensus.CodeStateMachineFailed) || n.stopped.Load()
+	return errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) || n.stopped.Load() ||
+		(errs.HasCode(rerr, coreconsensus.CodeStateMachineFailed) && !n.restoresAtomically())
 }
 
 // fallbackGap is the refusal of a start whose base does not continue the

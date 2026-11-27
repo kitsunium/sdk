@@ -1,0 +1,341 @@
+package machine_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"slices"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svcconsensus "github.com/kitsunium/sdk/internal/service/app/consensus"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/machine"
+)
+
+// errLoadCut is the failure a Load armed to fail returns half way.
+var errLoadCut = errors.New("the database refused the load half way")
+
+// cutLoad arms a configuration's Load to fail, once, after it wrote rows
+// rows of the snapshot: the transaction holds them when it fails.
+type cutLoad struct {
+	armed atomic.Bool
+	rows  int
+	// fired is set once the armed Load failed.
+	fired atomic.Bool
+}
+
+// wrap returns cfg whose Load fails once armed, after c.rows rows.
+func (c *cutLoad) wrap(cfg machine.SQLConfig) machine.SQLConfig {
+	load := cfg.Load
+	cfg.Load = func(ctx context.Context, ex coresql.Executor, r io.Reader) error {
+		//: a Load not armed reads the whole stream.
+		if !c.armed.CompareAndSwap(true, false) {
+			return load(ctx, ex, r)
+		}
+		var head bytes.Buffer
+		// The first rows, a line each, go through the real Load in the
+		// transaction, which then fails.
+		for range c.rows {
+			line, err := readLine(r)
+			//: a stream shorter than the cut is the test's own error.
+			if err != nil {
+				return err
+			}
+			head.Write(line)
+		}
+		//: the rows written before the failure.
+		if err := load(ctx, ex, &head); err != nil {
+			return err
+		}
+		c.fired.Store(true)
+		return errLoadCut
+	}
+	return cfg
+}
+
+// readLine reads one line of r, its newline included, a byte at a time so
+// that nothing past it is consumed.
+func readLine(r io.Reader) ([]byte, error) {
+	var line []byte
+	var b [1]byte
+	//: bytes up to the newline.
+	for {
+		//: a read that ends the stream before the newline.
+		if _, err := io.ReadFull(r, b[:]); err != nil {
+			return nil, err
+		}
+		line = append(line, b[0])
+		//: the end of the line.
+		if b[0] == '\n' {
+			return line, nil
+		}
+	}
+}
+
+// A Restore whose Load fails half way, or whose position write fails,
+// leaves the database and the position it reports as they were: the
+// transaction rolls back, and the position moves only once it committed
+// (#1607). A later restore of the same snapshot succeeds.
+func TestAnSQLRestoreRefusedHalfWayLeavesTheStateAsItWas(t *testing.T) {
+	type tc struct {
+		name string
+		// cut is the rows Load writes before it fails; zero when it does not.
+		cut int
+		// crashPosition fails the position write.
+		crashPosition bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		_, srcTM := newDB(t)
+		from := mustSQL(t, entriesConfig(srcTM))
+		from.ApplyBatch(commands(1, 6), make([]any, 6))
+		snap, err := from.Snapshot()
+		//: the snapshot opens.
+		if err != nil {
+			t.Fatalf("Snapshot() = %v", err)
+		}
+		var body bytes.Buffer
+		_, err = snap.WriteTo(&body)
+		snap.Release()
+		//: the snapshot writes.
+		if err != nil {
+			t.Fatalf("WriteTo() = %v", err)
+		}
+		d, tm := newDB(t)
+		cl := &cutLoad{rows: c.cut}
+		m := mustSQL(t, cl.wrap(entriesConfig(tm)))
+		m.ApplyBatch(commands(1, 2), make([]any, 2))
+		beforeRows := d.rows()
+		beforeLI, beforePos, _ := m.AppliedPosition()
+		meta := coreconsensus.SnapshotMetaValue{
+			Position: coreconsensus.PositionValue{Term: 2, Index: 6},
+			Log:      coreconsensus.LogIdentityValue{Cluster: testCluster, Epoch: 1},
+		}
+		cl.armed.Store(c.cut != 0)
+		//: the position case fails the restore's own position write.
+		if c.crashPosition {
+			d.armCrash(6)
+		}
+		err = m.Restore(bytes.NewReader(body.Bytes()), meta)
+		//: the restore is refused STATE_MACHINE_FAILED.
+		if !errs.HasCode(err, coreconsensus.CodeStateMachineFailed) {
+			t.Fatalf("Restore() = %v, want STATE_MACHINE_FAILED", err)
+		}
+		//: the armed Load wrote its rows before it failed.
+		if c.cut != 0 && !cl.fired.Load() {
+			t.Fatal("setup: the armed Load never failed")
+		}
+		//: the database holds what it held.
+		if got := d.rows(); !slices.Equal(got, beforeRows) {
+			t.Errorf("a refused restore left rows %+v, want %+v", got, beforeRows)
+		}
+		li, pos, _ := m.AppliedPosition()
+		//: the position the machine reports is the one before.
+		if li != beforeLI || pos != beforePos {
+			t.Errorf("a refused restore moved the position to %+v %+v from %+v %+v", li, pos, beforeLI, beforePos)
+		}
+		_, dbPos, _ := mustSQL(t, entriesConfig(transactorOver(t, d))).AppliedPosition()
+		//: the position the database holds is the one before.
+		if dbPos != beforePos {
+			t.Errorf("a refused restore left position %+v in the database, want %+v", dbPos, beforePos)
+		}
+		//: a later restore of the same snapshot succeeds.
+		if err := m.Restore(bytes.NewReader(body.Bytes()), meta); err != nil {
+			t.Fatalf("the restore after a refused one = %v", err)
+		}
+		//: and holds the snapshot's state.
+		if rows := d.rows(); len(rows) != 6 || rows[5].idx != 6 {
+			t.Errorf("the later restore holds %+v, want the snapshot's 6 rows", rows)
+		}
+	}
+	//: each case restores a machine of its own.
+	for _, c := range []tc{
+		{name: "a Load that fails half way", cut: 3},
+		{name: "a position write that fails", crashPosition: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// watchedSQL is an SQL machine that records, around every refused
+// Restore, whether the database and the position it reports moved, and
+// counts the restores that succeeded after one was refused. It embeds the
+// machine, so it is an AtomicRestorer as SQL is.
+type watchedSQL struct {
+	*machine.SQL
+	db *memDB
+	// moved is set when a refused Restore left the state changed.
+	moved *atomic.Bool
+	// refused counts the refused restores, healed those that succeeded
+	// after one.
+	refused, healed *atomic.Int64
+}
+
+// Restore implements StateMachine, judging a refused restore.
+func (w *watchedSQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
+	rows := w.db.rows()
+	li, pos, _ := w.SQL.AppliedPosition()
+	err := w.SQL.Restore(r, meta)
+	//: a successful restore after a refused one is the later offer's.
+	if err == nil {
+		//: one refused before it.
+		if w.refused.Load() > 0 {
+			w.healed.Add(1)
+		}
+		return nil
+	}
+	w.refused.Add(1)
+	li2, pos2, _ := w.SQL.AppliedPosition()
+	//: the state is the one before the call.
+	if !slices.Equal(w.db.rows(), rows) || li2 != li || pos2 != pos {
+		w.moved.Store(true)
+	}
+	return err
+}
+
+// An SQL machine is an AtomicRestorer: a follower whose install's Restore
+// fails half way in Load keeps running, on the state and the position it
+// had applied, with no stop and no marker, and a later offer restores it;
+// it then holds every command once, in log order (#1607). Before, the
+// refusal stopped the node STATE_MACHINE_FAILED with a permanent marker
+// although the transaction had rolled back (#1582).
+func TestAnSQLFollowerWhoseInstallLoadFailsKeepsRunning(t *testing.T) {
+	type tc struct {
+		name string
+		cut  int
+	}
+	runCase := func(t *testing.T, c tc) {
+		dbs := make([]*memDB, 3)
+		//: a database per node.
+		for i := range dbs {
+			dbs[i] = &memDB{}
+		}
+		cut := &cutLoad{rows: c.cut}
+		var moved atomic.Bool
+		var refused, healed atomic.Int64
+		var victim atomic.Int64
+		victim.Store(-1)
+		var mu sync.Mutex
+		cl := newTestClusterEvery(t, svcconsensus.DurabilityDurable, 20, func(i int) coreconsensus.StateMachine {
+			mu.Lock()
+			defer mu.Unlock()
+			cfg := entriesConfig(transactorOver(t, dbs[i]))
+			//: the victim's Load is the one armed.
+			if int64(i) == victim.Load() {
+				cfg = cut.wrap(cfg)
+			}
+			m, err := machine.NewSQL(context.Background(), cfg)
+			//: the machine builds.
+			if err != nil {
+				t.Fatalf("NewSQL() = %v", err)
+			}
+			return &watchedSQL{SQL: m, db: dbs[i], moved: &moved, refused: &refused, healed: &healed}
+		})
+		var want []string
+		write := func(from, to int) uint64 {
+			var last uint64
+			//: one command each.
+			for k := from; k <= to; k++ {
+				data := fmt.Sprintf("w%03d", k)
+				tok, r := cl.propose([]byte(data))
+				//: the machine answers the command.
+				if r != data {
+					t.Fatalf("propose %q answered %v", data, r)
+				}
+				want, last = append(want, data), tok.Index
+			}
+			return last
+		}
+		last := write(1, 30)
+		li, _ := cl.leader()
+		v := (li + 1) % 3
+		cl.waitPosition(v, last)
+		cl.kill(v)
+		victim.Store(int64(v))
+		last = write(31, 200)
+		deadline := time.Now().Add(20 * time.Second)
+		//: every live log starts past what the victim holds: only an install catches it up.
+		for {
+			behind := false
+			//: the live nodes' logs.
+			for i, m := range cl.members {
+				//: the victim's own log does not count.
+				if i == v {
+					continue
+				}
+				//: a log that still reaches the victim's position.
+				if first, _ := m.log.Bounds(); first <= 31 {
+					behind = true
+				}
+			}
+			//: compacted past.
+			if !behind {
+				break
+			}
+			//: not in time.
+			if time.Now().After(deadline) {
+				t.Fatal("setup: the live logs never compacted past the victim")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		cut.armed.Store(true)
+		cl.start(v)
+		deadline = time.Now().Add(20 * time.Second)
+		//: the victim catches up through a later install.
+		for {
+			n, sm := cl.at(v)
+			//: a stop is the defect.
+			if reason, ok := n.StopReason(); ok {
+				t.Fatalf("the follower stopped on a refused atomic restore: %v (refused %d)", reason.Err, refused.Load())
+			}
+			_, pos, _ := sm.(coreconsensus.DurableStateMachine).AppliedPosition()
+			//: caught up.
+			if pos.Index >= last {
+				break
+			}
+			//: not in time.
+			if time.Now().After(deadline) {
+				t.Fatalf("the follower never caught up: position %d against %d, %d refused, %d healed, armed load fired %v",
+					pos.Index, last, refused.Load(), healed.Load(), cut.fired.Load())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		//: the armed Load failed in an install.
+		if !cut.fired.Load() || refused.Load() == 0 {
+			t.Fatalf("setup: no install's restore was refused (fired %v, refused %d)", cut.fired.Load(), refused.Load())
+		}
+		//: the refusal left the database and the position as they were.
+		if moved.Load() {
+			t.Error("a refused restore moved the database or the position")
+		}
+		//: a later offer restored the follower.
+		if healed.Load() == 0 {
+			t.Error("no restore succeeded after the refused one")
+		}
+		rows := dbs[v].rows()
+		//: every command once, in log order.
+		if len(rows) != len(want) {
+			t.Fatalf("the follower holds %d commands, want %d", len(rows), len(want))
+		}
+		//: each row.
+		for k, r := range rows {
+			//: the command of its rank, after the one before it.
+			if r.data != want[k] || (k > 0 && r.idx <= rows[k-1].idx) {
+				t.Fatalf("the follower's row %d is %+v, want %q in log order, once", k, r, want[k])
+			}
+		}
+	}
+	//: each case runs its own cluster.
+	for _, c := range []tc{
+		{name: "a Load that fails half way", cut: 20},
+		{name: "a Load that fails at once"},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}

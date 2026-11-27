@@ -36,7 +36,8 @@ func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error)
 // restoreFrom verifies a snapshot's digest, then restores the state machine
 // from it, serialised with Apply. install says the restore is a running
 // node's, on the apply goroutine, rather than a start's: a Restore it
-// refuses holds apply until another succeeds (restoreRefused).
+// refuses stops the node there, unless the machine is an AtomicRestorer
+// (restoreRefused).
 func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool) error {
 	h, err := n.cfg.Snapshots.Open(m.ID)
 	if err != nil {
@@ -120,10 +121,26 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 	return nil
 }
 
+// restoresAtomically reports whether the machine declared its Restore
+// atomic: an AtomicRestorer whose Restore returned an error holds the state
+// it held before the call (#1607). It is the engine's one test of the
+// sibling, read by restoreRefused and refusesStart.
+func (n *Node) restoresAtomically() bool {
+	_, ok := n.cfg.Machine.(coreconsensus.AtomicRestorer)
+	return ok
+}
+
 // restoreRefused is what a Restore that returned err leaves the node. The
 // engine cannot tell a machine that read aside and kept its state from one
 // that decoded part of the stream into its live state and failed: the
-// machine may hold a prefix of the snapshot no correct node holds (#1582).
+// machine may hold a prefix of the snapshot no correct node holds (#1582),
+// unless it is an AtomicRestorer, whose refusal left its state as it was
+// (#1607). Such a refusal is returned as is, as every refusal was before
+// #1582: an install is refused, restoreItem answers it, restoreFailed
+// removes the copy and raft stays where it was, so the entries handed
+// after the restore continue the state the machine holds; a start falls
+// back to an older snapshot or a replay (refusesStart). Neither stops the
+// node, as a transient failure of a database would for good.
 // At an install, on the apply goroutine, the refusal stops the node before
 // the restore is answered, so the goroutine takes no item after it and no
 // entry is applied, and no Barrier released, over that prefix: stopped from
@@ -150,6 +167,9 @@ func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, ins
 		if install {
 			n.stop(err, false)
 		}
+		return err
+	//: a machine whose Restore is atomic kept its state: refused as before #1582, with no stop.
+	case n.restoresAtomically():
 		return err
 	//: a durable machine may have written the prefix to its disk.
 	case durable:

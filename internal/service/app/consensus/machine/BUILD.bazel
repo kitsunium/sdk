@@ -36,6 +36,7 @@ alias(
 go_test(
     name = "machine_test",
     srcs = [
+        "atomicrestore_external_test.go",
         "cluster_external_test.go",
         "gen_api_test.go",
         "kv_external_test.go",

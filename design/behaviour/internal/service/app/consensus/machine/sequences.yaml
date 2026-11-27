@@ -668,6 +668,7 @@ sequences:
       - set: m.li, m.pos
         value: meta.Log, meta.Position
       - return: nil
+  - of: (*SQL).RestoresAtomically
   - of: (*SQL).writePosition
     participants:
       - id: caller
