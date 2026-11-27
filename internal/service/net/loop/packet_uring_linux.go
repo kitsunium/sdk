@@ -505,8 +505,9 @@ func (lp *packetLane) probeOne(rx, tx int) (cqe, string) {
 
 // waitWindow waits through window with enter, which is one wait bounded by the
 // timespec it is handed, and asks again with what remains of the window when a
-// signal cut it short: EINTR is the thread being interrupted — the runtime's
-// preemption signal is one — not a window that ran out without a completion.
+// signal cut it short: EINTR is the thread being interrupted — by a signal the
+// process receives, SIGCHLD or SIGPROF for instance — not a window that ran out
+// without a completion.
 // It returns the last answer: ETIME or zero once the window ran its course or
 // a completion woke it, EINTR when it was interrupted to its end.
 func waitWindow(window time.Duration, enter func(*kernelTimespec) syscall.Errno) syscall.Errno {

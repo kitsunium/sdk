@@ -462,8 +462,10 @@ func (u *uring) wait(ts *kernelTimespec, want uint32) {
 }
 
 // waitErrno is wait that says how the enter ended: zero when it submitted or
-// woke, ETIME for the tick, EINTR for a signal — the runtime's preemption
-// signal among them — and the kernel's refusal otherwise. A serving loop
+// woke, ETIME for the tick, EINTR for a signal — one the process receives,
+// SIGCHLD or SIGPROF for instance; the runtime does not preempt a goroutine in
+// a system call (runtime/proc.go preemptone, go1.27.4) — and the kernel's
+// refusal otherwise. A serving loop
 // ignores it, since it peeks the CQ whatever happened; the lane's self-test
 // reads it, because an enter a signal cut short has waited for nothing. An
 // enter that submitted SQEs is never answered EINTR: io_uring_enter returns

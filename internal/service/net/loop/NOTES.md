@@ -614,7 +614,7 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   `_refusalNamesTheKernel` holds the field, the reason and the ring closed,
   and `requireLane` fails with every field, the kernel's release and
   `RLIMIT_MEMLOCK` (`laneRefusal`). The self-test's wait is `waitWindow`
-  over `uring.waitErrno`: an `EINTR` — the runtime's preemption signal — asks
+  over `uring.waitErrno`: an `EINTR` — a signal the process receives, `SIGCHLD` or `SIGPROF`, since `preemptone` does not signal a goroutine in a system call (`runtime/proc.go:6926-6928`, go1.27.4) — asks
   again with what is left of the 200 ms, and a window interrupted to its end
   with nothing reaped is refused naming `EINTR`, never as a kernel that
   delivered nothing (#1580); the serving loops keep `uring.wait`, which reaps
