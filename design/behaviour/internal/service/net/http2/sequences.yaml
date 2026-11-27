@@ -5272,7 +5272,7 @@ sequences:
           do:
             - eval: c.goAway()
               to: c.goAway
-          when: io.Pressure(ref)
+          when: io.Pressure(ref) || a.draining.Load()
       - eval: st.pushWrite(ref, off, e)
         to: st.pushWrite
       - return: "n"

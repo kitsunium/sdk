@@ -636,6 +636,55 @@ func TestLoopHTTP2_drain(t *testing.T) {
 	}
 }
 
+// TestLoopHTTP2_drainLatePreface pins #1609 on every backend: a connection
+// open but silent when the drain begins, its preface read once the drain's
+// announcement has walked the lane, still gets GOAWAY(NO_ERROR) before a
+// clean close. The announcement saw it sniffing, not HTTP/2; read later, the
+// preface made it HTTP/2 with nothing in flight, and the drain closed it
+// silent: "read until GOAWAY: EOF".
+func TestLoopHTTP2_drainLatePreface(t *testing.T) {
+	hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
+	runCase := func(t *testing.T, b corenet.LoopBackend) {
+		srv, addr := startLoopServer(t, b, http2.HandleLoop(hello, http1.Parser{}), Plaintext())
+		conn, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { swallowErr(conn.Close()) })
+		if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		c := &rawH2{t: t, conn: conn, br: bufio.NewReaderSize(conn, 1<<16)}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		shut := make(chan error, 1)
+		go func() { shut <- srv.Shutdown(ctx) }()
+		// The announcement runs at once; the drain leaves a silent connection
+		// open for a second (portableQuiet, drainQuiet), so the preface lands
+		// between the two.
+		time.Sleep(100 * time.Millisecond)
+		if _, err := conn.Write([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		c.send(corehttp2.FrameSettings, 0, 0, nil)
+		//: the drain's word, then the clean close.
+		if code := c.untilGoAway(); code != corehttp2.ErrCodeNoError {
+			t.Fatalf("GOAWAY code = %v", code)
+		}
+		//: the clean close: EOF, never a reset.
+		if _, err := c.next(); err != io.EOF {
+			t.Fatalf("after the GOAWAY: %v, want EOF", err)
+		}
+		//: the drain itself.
+		if err := awaitHelper(t, shut, "Shutdown"); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}
+	for _, b := range loopBackends() {
+		t.Run(b.String(), func(t *testing.T) { runCase(t, b) })
+	}
+}
+
 // drainClean reads frames until GOAWAY(NO_ERROR) and stream's body, then EOF,
 // and reports anything else, a reset above all.
 func (c *rawH2) drainClean(stream uint32, want string) error {

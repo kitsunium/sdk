@@ -193,3 +193,86 @@ func TestLoopHandler_aWorkersAnswerInTheDrainingBatchFollowsItsOutput(t *testing
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
+
+// TestLoopHandler_aConnectionKnownAsHTTP2AfterTheAnnouncementGetsItsGoAway
+// pins #1609 on the adapter: the drain's announcement walks the lane's HTTP/2
+// connections once, and a connection whose preface had not been read by then
+// — still sniffing, or not yet open — is not one of them. Read later, its
+// preface made it HTTP/2 with no GOAWAY to come, nothing in flight, and the
+// drain closed it silent: the client saw EOF where #961's fourth criterion
+// promises GOAWAY(NO_ERROR) before a clean close. Its GOAWAY now follows the
+// batch's SETTINGS, any answer the batch gave it, and the batch's end closes it.
+func TestLoopHandler_aConnectionKnownAsHTTP2AfterTheAnnouncementGetsItsGoAway(t *testing.T) {
+	type tc struct {
+		name string
+		// openFirst opens the connection before the announcement; otherwise
+		// it opens after it.
+		openFirst bool
+		// before is what the connection sent before the announcement, the
+		// rest of data coming after it.
+		before int
+		// data is all the connection sends.
+		data []byte
+		// stream is the stream the batch answers, zero for none.
+		stream uint32
+	}
+	preface := h2Request()[:len("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")+corehttp2.FrameHeaderLen]
+	runCase := func(t *testing.T, c tc) {
+		hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
+		a := http2.HandleLoop(hello, http1.Parser{})
+		a.OnStart(1)
+		io := &postIO{batchIO: newBatchIO()}
+		ref := corenet.LoopConnRef{Slot: 1, Gen: 1}
+		//: open, with the part of the data sent before the announcement.
+		if c.openFirst {
+			a.OnOpen(io, ref)
+			//: a preface still arriving: the sniff keeps it in the spill.
+			if c.before > 0 {
+				if n := a.OnData(io, ref, c.data[:c.before]); n != 0 {
+					t.Fatalf("a partial preface: OnData consumed %d, want 0", n)
+				}
+				a.OnBatchEnd(io)
+			}
+		}
+		a.Draining()
+		io.runPosts()
+		//: opened only now, the announcement run already.
+		if !c.openFirst {
+			a.OnOpen(io, ref)
+		}
+		if n := a.OnData(io, ref, c.data); n != len(c.data) {
+			t.Fatalf("OnData consumed %d of %d", n, len(c.data))
+		}
+		a.OnBatchEnd(io)
+		order := frameTypes(io.out[ref])
+		//: RFC 9113 §3.4: the server's SETTINGS opens the connection.
+		if len(order) == 0 || order[0] != corehttp2.FrameSettings {
+			t.Fatalf("the connection's frames %v, want SETTINGS first", order)
+		}
+		//: the drain's word, on a connection it had not seen as HTTP/2.
+		if !hasFrame(io.out[ref], corehttp2.FrameGoAway, 0) {
+			t.Fatalf("the connection's frames %v, want a GOAWAY", order)
+		}
+		//: the stream the batch took is answered, the GOAWAY behind it.
+		if c.stream != 0 {
+			if !hasFrame(io.out[ref], corehttp2.FrameData, c.stream) {
+				t.Fatalf("the connection's frames %v, want the answer on stream %d", order, c.stream)
+			}
+			if slices.Index(order, corehttp2.FrameGoAway) < slices.Index(order, corehttp2.FrameData) {
+				t.Fatalf("the connection's frames %v, want the GOAWAY behind the answer", order)
+			}
+		}
+		//: nothing in flight: the batch's end closed it, after its output.
+		if !io.closed[ref] {
+			t.Fatal("the drained connection, nothing in flight, was left open")
+		}
+	}
+	for _, c := range []tc{
+		{name: "sniffing at the announcement", openFirst: true, data: preface},
+		{name: "preface split across the announcement", openFirst: true, before: 10, data: preface},
+		{name: "opened after the announcement", data: preface},
+		{name: "opened after the announcement with a request", data: h2Request(), stream: 1},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}

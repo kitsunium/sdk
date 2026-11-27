@@ -55,8 +55,12 @@ func (a *LoopHandler) feed(io corenet.LoopIO, ref corenet.LoopConnRef, st *laneS
 	for _, ev := range st.lane.Events() {
 		c.event(ev)
 	}
-	//: the h2 reading of Connection: close: one GOAWAY, the streams finish.
-	if io.Pressure(ref) {
+	//: the h2 reading of Connection: close, or a drain begun: one GOAWAY, the
+	//: streams finish. The drain's announcement walks only the connections
+	//: already HTTP/2; one whose preface is read after it — still sniffing
+	//: then, or not yet open — gets its GOAWAY here, behind the batch's
+	//: SETTINGS and answers, or the drain closed it silent (#1609).
+	if io.Pressure(ref) || a.draining.Load() {
 		c.goAway()
 	}
 	st.pushWrite(ref, off, e)
