@@ -230,6 +230,7 @@ go_test(
         "replacedsilence_internal_test.go",
         "restartcompact_internal_test.go",
         "restoreclose_internal_test.go",
+        "restoresecondread_internal_test.go",
         "retiredoffer_internal_test.go",
         "runtimedir_unix_internal_test.go",
         "savesnapshotstall_internal_test.go",

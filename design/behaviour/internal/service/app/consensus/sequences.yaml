@@ -8856,6 +8856,10 @@ sequences:
               to: n.stop
             - return: err
           when: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
+      - opt:
+          do:
+            - return: err
+          when: n.stopped.Load()
       - bind: noTable
         eval: "false"
       - opt:
@@ -11531,7 +11535,7 @@ sequences:
             - opt:
                 do:
                   - return: coreconsensus.SnapshotMetaValue{}, nil, nil, rerr
-                when: errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported)
+                when: n.refusesStart(rerr)
             - eval: "n.obs.warn(\"consensus: a snapshot was not restored\", lstr(\"id\", m.ID), lstr(\"error\", rerr.Error()))"
               to: n.obs.warn
             - opt:
@@ -11548,6 +11552,9 @@ sequences:
           range: metas
           value: m
       - return: coreconsensus.SnapshotMetaValue{}, nil, newest, nil
+  - of: (*Node).refusesStart
+    steps:
+      - return: errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) || n.stopped.Load()
   - of: (*Node).fallbackGap
     steps:
       - opt:
@@ -14902,6 +14909,8 @@ sequences:
         kind: internal
       - id: n.watchApplied
         kind: internal
+      - id: n.warnResortTransfer
+        kind: internal
       - id: n.handOver
         kind: internal
     steps:
@@ -14923,6 +14932,8 @@ sequences:
         to: n.cutExempt
       - eval: n.watchApplied(applied, st.Commit)
         to: n.watchApplied
+      - eval: n.warnResortTransfer(&st)
+        to: n.warnResortTransfer
       - opt:
           do:
             - set: w.stable, w.applied, w.stableAt, w.appliedAt, w.to
@@ -14947,6 +14958,29 @@ sequences:
           when: (!stuckSync && !stuckApply) || st.Transfer != 0
       - eval: n.handOver(now, new(n.r.Status()), applied, stuckApply)
         to: n.handOver
+  - of: (*Node).warnResortTransfer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).warnResortTransfer
+        kind: self
+      - id: n.obs.warn
+        kind: internal
+      - id: n.warnHandOver
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: st.ForwardResortTransfers == n.watch.resorts
+      - set: n.watch.resorts
+        value: st.ForwardResortTransfers
+      - eval: |-
+          n.obs.warn("consensus: the forward fence took its last resort, handing leadership over",
+          		lattr("to", uint64(st.Transfer)), lattr("term", st.Term))
+        to: n.obs.warn
+      - eval: n.warnHandOver(st.Transfer)
+        to: n.warnHandOver
   - of: (*Node).handOver
     participants:
       - id: caller
@@ -16503,6 +16537,15 @@ sequences:
         to: o.setGauge
       - eval: o.addTo(mForwardForgotten, &o.seenForgotten, int64(st.ForwardForgotten))
         to: o.addTo
+      - bind: transfers
+        eval: int64(st.ForwardResortTransfers)
+      - loop:
+          do:
+            - eval: o.addTo(mForwardResorts, &o.seenResorts[i], total, coreotel.String("action", fwdResortActions[i]))
+              to: o.addTo
+          key: i
+          range: "[2]int64{transfers, int64(st.ForwardLastResorts) - transfers}"
+          value: total
   - of: (*Node).ReadCommitted
     participants:
       - id: caller
@@ -23233,10 +23276,12 @@ sequences:
         kind: internal
       - id: verifySnapshot
         kind: internal
-      - id: newChunkReader
-        kind: internal
       - id: n.cfg.Machine.Restore
         kind: value
+      - id: io
+        kind: stdlib
+      - id: n.stop
+        kind: internal
       - id: raft
         kind: package
       - id: n.snapState.mu.Lock
@@ -23296,16 +23341,31 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - bind: cr
-              eval: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
-              to: newChunkReader
+            - bind: sr
+              eval: "&snapshotReader{cr: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes), meta: m}"
             - opt:
                 do:
                   - return: err
                 init:
                   bind: err
-                  eval: n.cfg.Machine.Restore(cr, m)
+                  eval: n.cfg.Machine.Restore(sr, m)
                   to: n.cfg.Machine.Restore
+                when: err != nil
+            - opt:
+                do:
+                  - bind: serr
+                    eval: |-
+                      origin(coreconsensus.StateMachineFailed,
+                      				errs.String("why", "the machine accepted a snapshot whose end was then refused"),
+                      				errs.String("id", m.ID), errs.String("cause", err.Error()))
+                    to: origin
+                  - eval: n.stop(serr, false)
+                    to: n.stop
+                  - return: serr
+                init:
+                  bind: _, err
+                  eval: io.Copy(io.Discard, sr)
+                  to: io
                 when: err != nil
             - set: n.sessions
               to: raft

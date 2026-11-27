@@ -624,10 +624,17 @@ func Test_handle_StopKillsAGroupThatOutlivesItsLeader(t *testing.T) {
 // #1517: a group whose every member honours SIGTERM is empty once the leader
 // is reaped, so the watch after the reap costs no wait — Stop returns far
 // inside a 30-second grace.
+//
+// The member is a forked subshell blocked on a FIFO (startForkingLeader), not
+// a "sleep 30 &": NetBSD's sh vforks that sleep, and the kernel wakes the
+// vfork parent before the child's execve runs its exec hooks, which up to
+// 10.1 clear every pending signal (PR kern/58091). The marker the shell
+// wrote after the fork could thus precede the SIGTERM's loss, and the sleep
+// lived out the whole grace on one NetBSD run in two (#1590). A subshell
+// never calls execve, so the SIGTERM sent after the marker reaches it.
 func Test_handle_StopReturnsAtOnceOnAGroupThatHonoursSIGTERM(t *testing.T) {
 	t.Parallel()
-	forked := filepath.Join(t.TempDir(), "forked")
-	h := startChildAfter(t, "sleep 30 & : > '"+forked+"'; wait", forked)
+	h := startForkingLeader(t)
 	const grace = 30 * time.Second
 	began := time.Now()
 	if err := h.Stop(t.Context(), grace, coreproc.Signal(syscall.SIGTERM)); err != nil {

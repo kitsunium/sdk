@@ -364,9 +364,36 @@ serial seed loop of `TestBlindSessionRetriesAreAppliedOnce`, now `eachSeed`.
   resort, the run handled least recently of the node holding the most
   marks goes, and that node's new runs wait for the next term; the 65 536
   are runs per lane, about 32 768 restarts when each run forwards on both
-  lanes, and restarts spread over several nodes fence each of them in turn
-  as the most loaded node changes (#1540,
-  `TestTheFenceLastResortFencesOnlyTheCrowdedNode`). Every forward
+  lanes (`TestTheFenceLastResortFencesOnlyTheCrowdedNode`). Under a leader
+  that stays, restarts spread over several nodes fenced each of them in
+  turn as the most loaded node changed (#1540, the review's
+  `TestRv3Leveling`), so a leader whose fence takes its last resort hands
+  its leadership over (`fenceLastResort`, recommended option (a), awaiting
+  the owner's confirmation): `startTransfer`, as `TransferLeadership`, to
+  `resortTarget`, the voter other than itself that holds the commit,
+  answered in this term, last within the minimum election timeout and is
+  not silent, the highest match and then the lowest id; once a term at
+  most (`fwdResortTerm`), never while a transfer runs, and none without
+  such a voter — a leader alone, voters silent in the term, a node that
+  does not lead —, where the fence's last resort stays alone as before.
+  That one stays in every case, the transfer under way included: the
+  safety never rests on the transfer. The next term makes every mark an
+  older term's, and the soft bound takes them back
+  (`TestTheFenceLastResortOpensANewTerm`, red before #1540 with 12
+  forwarders of 12 fenced; `TestTheLastResortTransfersOnceATerm`,
+  `TestTheLastResortLeavesATransferUnderWay`,
+  `TestTheLastResortWithNoVoterToTakeOver`,
+  `TestTheLastResortTimeoutNowIsTakenByAPreviousRelease`). The tests set
+  the bounds low through `Config.fwdRunsSoft` and `fwdRunsHard` (O2), as
+  `fwdCeiling`. `Summary`'s `ForwardLastResorts` counts the last resorts
+  and `ForwardResortTransfers` the transfers they started; the difference,
+  the driver's action `none`, counts a last resort that started no
+  transfer: no eligible voter, a transfer already under way (this one's
+  included), or one that failed this term. The target follows #662's
+  eligibility, not `PreferredLeaders`' order, which the step function does
+  not know: the driver's watch of `PreferredLeaders` may hand the
+  leadership on to a preferred node afterwards, two transfers at most and
+  no storm, since each term starts with no mark of its own. Every forward
   the fence turns away, neither proposed nor answered, is counted by cause
   in `Summary`'s `ForwardDrops` — copy, restarted, evicted —; a forward of
   a term above its receiver's, which no honest member sends, is dropped
@@ -375,7 +402,8 @@ serial seed loop of `TestBlindSessionRetriesAreAppliedOnce`, now `eachSeed`.
   forgotten at the table's bound in `ForwardForgotten` are what the
   driver publishes as
   `consensus_forwards_dropped_total`, `consensus_forward_runs` and
-  `consensus_forward_answers_forgotten_total`
+  `consensus_forward_answers_forgotten_total`, with the last resorts in
+  `consensus_forward_last_resorts_total` by action
   (`TestForwardDropsAreCountedByCause`). Nothing crosses the wire: no
   frame change, no raise, a forwarder of any release fenced the same
   (`TestALateCopyAtALowRateIsAppendedOnce`,

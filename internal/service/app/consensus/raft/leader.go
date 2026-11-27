@@ -1526,7 +1526,9 @@ func (r *Raft) handleForward(m core.MessageValue) {
 			r.fwdForgotten++
 		}
 		r.fwdAnswers.remember(key, a)
-		r.fwdFence.note(&m, maxFwdRuns, maxFwdRunsHard, r.term)
+		if r.fwdFence.note(&m, r.fwdRunsSoft(), r.fwdRunsHard(), r.term) {
+			r.fenceLastResort()
+		}
 	}
 	resp := core.MsgForwardResp
 	if m.Kind == core.MsgForwardAdmin {
@@ -1536,6 +1538,65 @@ func (r *Raft) handleForward(m core.MessageValue) {
 		Kind: resp, To: m.From, Context: m.Context, Term: m.Term,
 		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm, Commit: a.commit,
 	})
+}
+
+// fenceLastResort answers the fence's last resort (#1540): past its hard
+// bound of marks of the current term, the fence forgot the least recent
+// mark of the node holding the most, and that node's new runs wait for the
+// next term. Under a leader that stays, restarts spread over several
+// forwarders fenced each of them in turn, until an election a healthy
+// leader never calls. The leader hands its leadership over instead: the
+// next term makes every mark an older term's, the soft bound takes them
+// back, and no forwarder stays fenced. It does so once a term at most,
+// never while a transfer runs, and only to a voter that holds the commit,
+// was heard within the minimum election timeout and is not silent, the one
+// holding the most of the log, the lowest on a tie (resortTarget); a node
+// that does not lead, or a leader with no such voter, keeps the fence's
+// own last resort alone. That one stays in every case, so the safety never
+// rests on the transfer: a transfer is what TransferLeadership starts, and
+// every release that runs the fence honours its TimeoutNow. Each last
+// resort is counted, and each transfer it started (Summary's
+// ForwardLastResorts and ForwardResortTransfers).
+func (r *Raft) fenceLastResort() {
+	r.fwdResorts++
+	if r.role != core.RoleLeader || r.transferTo != 0 || r.fwdResortTerm == r.term {
+		return
+	}
+	to := r.resortTarget()
+	if to == 0 {
+		return
+	}
+	r.fwdResortTerm = r.term
+	r.fwdResortTransfers++
+	r.startTransfer(to)
+}
+
+// resortTarget is the eligible voter (resortEligible) whose match is
+// highest, the lowest on a tie; 0 when there is none.
+func (r *Raft) resortTarget() core.NodeID {
+	var to core.NodeID
+	var best uint64
+	for _, id := range r.voters() {
+		pr := r.prs[id]
+		if !r.resortEligible(id, pr) {
+			continue
+		}
+		if to == 0 || pr.match > best || (pr.match == best && id < to) {
+			to, best = id, pr.match
+		}
+	}
+	return to
+}
+
+// resortEligible reports whether the voter id, of progress pr, may take
+// this leader's leadership at its last resort: another voter that holds
+// the commit, answered in this term, last within the minimum election
+// timeout, and is not silent, as a preferred leader must (#662).
+func (r *Raft) resortEligible(id core.NodeID, pr *progress) bool {
+	if id == r.id || pr == nil || pr.facts&peerHeard == 0 || pr.facts&peerSilent != 0 {
+		return false
+	}
+	return pr.match >= r.log.committed && r.now.Sub(pr.lastHeard) < r.timing.ElectionTimeoutMin
 }
 
 // countFwdDrop counts the forward m, which the fence turned away, neither
@@ -1567,6 +1628,24 @@ func (r *Raft) forwardWindow() time.Duration {
 		return min(r.cfg.ForwardWindow, maxForwardWindow)
 	}
 	return defaultForwardWindow
+}
+
+// fwdRunsSoft is the marks the fence keeps before it forgets those of an
+// older term: maxFwdRuns, unless the package's own tests set another.
+func (r *Raft) fwdRunsSoft() int {
+	if r.cfg.fwdRunsSoft > 0 {
+		return r.cfg.fwdRunsSoft
+	}
+	return maxFwdRuns
+}
+
+// fwdRunsHard is the marks of the current term the fence keeps before its
+// last resort: maxFwdRunsHard, unless the package's own tests set another.
+func (r *Raft) fwdRunsHard() int {
+	if r.cfg.fwdRunsHard > 0 {
+		return r.cfg.fwdRunsHard
+	}
+	return maxFwdRunsHard
 }
 
 // forwardCeiling is the most answers the table keeps, past which it forgets

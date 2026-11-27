@@ -656,7 +656,13 @@ that needs its group EMPTY once the leader is reaped
 (`Test_handle_signalGroupAllowGone`): a forked `sleep` outlives the kill as
 an orphaned zombie only init reaps, and darwin answers a zombie-only group
 whose leader was collected with `EPERM`, a refusal `Stop` cannot read as gone
-(§Stop);
+(§Stop); and a fixture whose members must honour a signal sent once the
+marker is there forks a subshell, never a program (`startForkingLeader`):
+NetBSD's sh vforks `sleep 30 &`, the kernel wakes the shell before the
+child's exec hooks clear its pending signals (`kern_exec.c`
+`execve_runproc`, kern/58091), so the shell's marker could precede the loss
+and `Test_handle_StopReturnsAtOnceOnAGroupThatHonoursSIGTERM` waited out its
+30 s grace on one NetBSD run in two (#1590);
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
 `Test_applyNice` and `Test_applyPostStart` apply every niceness to a
 disposable child (`niceChild`: a shell blocked on a pipe the test closes, so
@@ -669,6 +675,38 @@ thread) — `RLIMIT_FAILED` from the second run on, on every OS.
 `exec_windows_test.go` covers the Windows backend (skipped where `cmd.exe` is
 not found) and `exec_other_test.go` the `UnsupportedPlatform` stub;
 `exec_windows_internal_test.go` pins the order of a confined spawn (below).
+
+### A drained sink with the wrong bytes on NetBSD (#1501, open)
+
+`Test_stdioState_wait/two_copiers` failed once on the NetBSD 10.1 guest
+(2026-11-15): sink 1 held 65 536 bytes, the payload's length, not its bytes.
+No cause is established, and the issue stays open. What was ruled out:
+
+- **A descriptor closed twice and reused.** Every close in the package is
+  `*os.File.Close` (idempotent, the number kept while a read is in flight) or a
+  raw `syscall.Close` run once on its own error path (`openKnote`'s kqueue, the
+  seal test's `Dup`). On Linux, the package's race suite ran 20 times
+  (`-test.cpu=1,8` included) on a toolchain whose `syscall.Close` reports every
+  `EBADF`, with a probe checking each drained pipe's inode around every read:
+  no `EBADF`, no descriptor that changed file.
+- **NetBSD's direct-write pipes.** `sys/kern/sys_pipe.c` on `netbsd-10`
+  (v1.158) has no `PIPE_DIRECTW` path left: `pipe_write` copies into the
+  kernel buffer with `uiomove`; only the header comment still describes loans.
+- **YMM state lost across a signal** (NetBSD PR kern/60426, golang/go#80285).
+  NetBSD 10.1 restores only the FXSAVE area after a handler, so an AVX copy
+  interrupted by Go's preemption signal loses the upper halves. Fixed in
+  NetBSD HEAD and netbsd-11 (ticket #381), not pulled up to netbsd-10. Go
+  disables AVX on netbsd since 1.27.2 (`internal/cpu/cpu_x86_netbsd.go`, CL
+  813360), so `memmove` (`runtime.memmoveBits`) and `internal/bytealg` use only
+  XMM, which FXSAVE keeps. The run was built with Go 1.27.4, so this cause does
+  not apply, and `GODEBUG=asyncpreemptoff=1` is not set: it would guard
+  against nothing these sources name.
+
+The case now names the cause of its next failure instead: each pipe carries
+its own `taggedPayload` (records of the pipe's letter and the record's offset),
+and each drain reads through a `readLog`. A wrong byte then says which pipe and
+offset it came from, and which read returned it (`Test_readLog`). This adds no
+retry and no tolerance: the case still requires every byte.
 
 ### A Setpgid Windows child gets a console event, not a refusal (#933)
 

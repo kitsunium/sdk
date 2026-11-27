@@ -62,7 +62,10 @@ packages:
       - const:
           - doc: |-
               CodeStateMachineFailed identifies a node whose Apply panicked or could not
-              complete. The entry IS committed.
+              complete — the entry IS committed — or whose Restore returned nil on
+              a snapshot whose end the engine then refused. Before an operator
+              clears the stop marker this leaves, a DurableStateMachine must be
+              verified or rebuilt: the next start trusts its AppliedPosition.
             name: CodeStateMachineFailed
             value: "0x00_02_39_0A"
         type: errs.Code
@@ -724,7 +727,13 @@ packages:
               format this build does not read: the node stops, as for an entry
               kind it does not know, and a restart over that snapshot is refused
               (D18). Any other error refuses that one install, and the leader
-              offers a snapshot again.
+              offers a snapshot again. A machine reads r to io.EOF: after it
+              returns, the engine reads what it left, and checks the stream's
+              sizes and SHA-256 against the metadata. A Restore that returns nil
+              on a stream whose end is then refused leaves the machine on a
+              state the engine cannot vouch for: the node stops with
+              STATE_MACHINE_FAILED before it applies another entry, and a start
+              that restores that way fails with it.
             in:
               - name: r
                 type: io.Reader
@@ -1155,8 +1164,12 @@ packages:
               marks of the current term (runs per lane: about 32 768 restarts when
               each run forwards on both lanes), the least recent mark of the node
               holding the most goes, and that node's new runs wait for the next
-              term; restarts spread over several nodes fence each of them in turn
-              (#1540). No forward is dropped for room. The bound of 2^20 answers,
+              term, which the leader opens by handing its leadership over to a voter
+              that holds the commit and was heard, once a term at most (#1540); a
+              leader alone, with no such voter, or whose transfer failed, leaves
+              them fenced until the next election, restarts spread over several
+              nodes fencing each of them in turn. No forward is dropped for room.
+              The bound of 2^20 answers,
               about 152 MiB and 280 MiB at most under churn, holds per Raft group:
               a multi node with several groups adds them.
               None of them is a refusal, true or false: nothing tells the caller
@@ -1225,7 +1238,15 @@ packages:
           - code: CodeStateMachineFailed
             doc: |-
               StateMachineFailed stops the node when Apply panics or cannot complete.
-              The entry IS committed: this never means "not written".
+              The entry IS committed: this never means "not written". It also stops
+              the node, or fails its start, when Restore returned nil on a snapshot
+              whose end the engine then refused: the machine may hold that state
+              while the applied position stays below it. Whatever failed the read
+              after that nil, an I/O error included, is this code: the failing
+              cause survives only in the stop's text, and the stop marker is
+              permanent. Before an operator clears that marker, a
+              DurableStateMachine must be verified or rebuilt, because the next
+              start trusts its AppliedPosition.
             exit: UNAVAILABLE
             name: StateMachineFailed
             private: "core/app/consensus: Apply panicked or could not complete; the entry is committed and the node stopped applying"
@@ -6166,6 +6187,30 @@ packages:
                 consensus_forward_answers_forgotten_total).
               name: ForwardForgotten
               type: uint64
+            - doc: |-
+                ForwardLastResorts counts, since this node started, the fence's last
+                resorts: a new run past 65 536 marks of the current term made it
+                forget the least recent mark of the node holding the most, whose new
+                runs wait for the next term (#1540,
+                consensus_forward_last_resorts_total). Those that started no
+                transfer — no eligible voter, a transfer already under way, this
+                last resort's own included, or one that failed this term — are
+                ForwardLastResorts less ForwardResortTransfers, action none.
+              name: ForwardLastResorts
+              type: uint64
+            - doc: |-
+                ForwardResortTransfers counts, since this node started, the
+                leadership transfers its last resorts started, once a term at most, to
+                a voter that holds the commit and was heard (#1540,
+                consensus_forward_last_resorts_total{action="transfer"}). Last resorts
+                that climb while it stays at 0 in the term mean no last-resort
+                transfer started, which does not say that no voter could take over:
+                check for a transfer already under way, an operator's included, and
+                for a voter that is up to date and eligible. The forwarders stay
+                fenced until the next election; a transfer of the operator's
+                clears it.
+              name: ForwardResortTransfers
+              type: uint64
       - doc: |-
           ForwardDropsValue counts the forwards a node neither proposed nor
           answered, by cause (#1482).
@@ -6602,8 +6647,13 @@ packages:
       marks of the current term (runs per lane: about 32 768 restarts when
       each run forwards on both lanes), the least recent mark of the node
       holding the most goes, and that node's new runs wait for the next
-      term; restarts spread over several nodes fence each of them in turn
-      (#1540). The bound of 2^20 answers, about 152 MiB and 280 MiB at most
+      term, which the leader opens by handing its leadership over to a
+      voter that holds the commit and was heard, once a term at most
+      (#1540); a leader alone, with no such voter, or whose transfer
+      failed, leaves them fenced until the next election, restarts spread
+      over several nodes fencing each of them in turn, and its last
+      resorts are counted in consensus_forward_last_resorts_total by
+      action. The bound of 2^20 answers, about 152 MiB and 280 MiB at most
       under churn, holds per Raft group: a multi node with several groups
       adds them. None of them is a refusal, true
       or false: the entry may or may not have been appended. Handle it as
@@ -7652,8 +7702,12 @@ packages:
               marks of the current term (runs per lane: about 32 768 restarts when
               each run forwards on both lanes), the least recent mark of the node
               holding the most goes, and that node's new runs wait for the next
-              term; restarts spread over several nodes fence each of them in turn
-              (#1540). No forward is dropped for room. The bound of 2^20 answers,
+              term, which the leader opens by handing its leadership over to a voter
+              that holds the commit and was heard, once a term at most (#1540); a
+              leader alone, with no such voter, or whose transfer failed, leaves
+              them fenced until the next election, restarts spread over several
+              nodes fencing each of them in turn. No forward is dropped for room.
+              The bound of 2^20 answers,
               about 152 MiB and 280 MiB at most under churn, holds per Raft group:
               a multi node with several groups adds them.
               None of them is a refusal, true or false. Once every member runs this

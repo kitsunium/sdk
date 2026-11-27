@@ -3514,7 +3514,7 @@
       "code": {
         "value": "0.2.57.10"
       },
-      "doc": "CodeStateMachineFailed identifies a node whose Apply panicked or could not\ncomplete. The entry IS committed.\n",
+      "doc": "CodeStateMachineFailed identifies a node whose Apply panicked or could not\ncomplete — the entry IS committed — or whose Restore returned nil on\na snapshot whose end the engine then refused. Before an operator\nclears the stop marker this leaves, a DurableStateMachine must be\nverified or rebuilt: the next start trusts its AppliedPosition.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -5558,7 +5558,7 @@
         "reason": "OUTCOME_UNKNOWN",
         "public": "The proposal may or may not have been committed"
       },
-      "doc": "OutcomeUnknown is returned when a proposal was appended, or possibly\ndelivered, and its answer was lost. The entry may still commit: never\nretry a Propose blindly, read the state through Barrier first. A\nProposeSession is retried with the same arguments (ADR 0241). A\nproposal made on a follower, which forwards it to the leader, also\nmeets it when the node the forward went to declines a frame it may\nhave handled already (#1482): a copy that arrives after the forward\nwindow, a forward its connection delivered behind a later one when\nthat connection was replaced, and any forward still sent to a leader\nthat restarted, until the next election. So does a copy of a forward\nwhose answer the leader forgot at its bound of 2^20 answers, the\noldest first, before the window ended, which only a load above 47 662\nforwards a second under the defaults reaches, and, past 65 536\nmarks of the current term (runs per lane: about 32 768 restarts when\neach run forwards on both lanes), the least recent mark of the node\nholding the most goes, and that node's new runs wait for the next\nterm; restarts spread over several nodes fence each of them in turn\n(#1540). No forward is dropped for room. The bound of 2^20 answers,\nabout 152 MiB and 280 MiB at most under churn, holds per Raft group:\na multi node with several groups adds them.\nNone of them is a refusal, true or false: nothing tells the caller\nthat the entry was not appended.\nOnce every member runs this version, a forward is never applied\ntwice.\n",
+      "doc": "OutcomeUnknown is returned when a proposal was appended, or possibly\ndelivered, and its answer was lost. The entry may still commit: never\nretry a Propose blindly, read the state through Barrier first. A\nProposeSession is retried with the same arguments (ADR 0241). A\nproposal made on a follower, which forwards it to the leader, also\nmeets it when the node the forward went to declines a frame it may\nhave handled already (#1482): a copy that arrives after the forward\nwindow, a forward its connection delivered behind a later one when\nthat connection was replaced, and any forward still sent to a leader\nthat restarted, until the next election. So does a copy of a forward\nwhose answer the leader forgot at its bound of 2^20 answers, the\noldest first, before the window ended, which only a load above 47 662\nforwards a second under the defaults reaches, and, past 65 536\nmarks of the current term (runs per lane: about 32 768 restarts when\neach run forwards on both lanes), the least recent mark of the node\nholding the most goes, and that node's new runs wait for the next\nterm, which the leader opens by handing its leadership over to a voter\nthat holds the commit and was heard, once a term at most (#1540); a\nleader alone, with no such voter, or whose transfer failed, leaves\nthem fenced until the next election, restarts spread over several\nnodes fencing each of them in turn. No forward is dropped for room.\nThe bound of 2^20 answers,\nabout 152 MiB and 280 MiB at most under churn, holds per Raft group:\na multi node with several groups adds them.\nNone of them is a refusal, true or false: nothing tells the caller\nthat the entry was not appended.\nOnce every member runs this version, a forward is never applied\ntwice.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -6434,7 +6434,7 @@
       "recv": "StateMachine",
       "spelled": "func(r io.Reader, meta SnapshotMetaValue) error",
       "canonical": "func(r io.Reader, meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
-      "doc": "Restore replaces the state with a snapshot's. It is serialised with\nApply. An error coded VERSION_UNSUPPORTED says the snapshot is of a\nformat this build does not read: the node stops, as for an entry\nkind it does not know, and a restart over that snapshot is refused\n(D18). Any other error refuses that one install, and the leader\noffers a snapshot again.\n",
+      "doc": "Restore replaces the state with a snapshot's. It is serialised with\nApply. An error coded VERSION_UNSUPPORTED says the snapshot is of a\nformat this build does not read: the node stops, as for an entry\nkind it does not know, and a restart over that snapshot is refused\n(D18). Any other error refuses that one install, and the leader\noffers a snapshot again. A machine reads r to io.EOF: after it\nreturns, the engine reads what it left, and checks the stream's\nsizes and SHA-256 against the metadata. A Restore that returns nil\non a stream whose end is then refused leaves the machine on a\nstate the engine cannot vouch for: the node stops with\nSTATE_MACHINE_FAILED before it applies another entry, and a start\nthat restores that way fails with it.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -6464,7 +6464,7 @@
         "reason": "STATE_MACHINE_FAILED",
         "public": "The replicated state machine failed and the node stopped"
       },
-      "doc": "StateMachineFailed stops the node when Apply panics or cannot complete.\nThe entry IS committed: this never means \"not written\".\n",
+      "doc": "StateMachineFailed stops the node when Apply panics or cannot complete.\nThe entry IS committed: this never means \"not written\". It also stops\nthe node, or fails its start, when Restore returned nil on a snapshot\nwhose end the engine then refused: the machine may hold that state\nwhile the applied position stays below it. Whatever failed the read\nafter that nil, an I/O error included, is this code: the failing\ncause survives only in the stop's text, and the stop marker is\npermanent. Before an operator clears that marker, a\nDurableStateMachine must be verified or rebuilt, because the next\nstart trusts its AppliedPosition.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -73534,8 +73534,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "SummaryValue",
-      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time; ForwardDrops ForwardDropsValue; ForwardRuns int; ForwardForgotten uint64}",
-      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time; ForwardDrops github.com/kitsunium/sdk/internal/service/app/consensus/raft.ForwardDropsValue; ForwardRuns int; ForwardForgotten uint64}",
+      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Transfer core.NodeID; HandedBy core.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time; ForwardDrops ForwardDropsValue; ForwardRuns int; ForwardForgotten uint64; ForwardLastResorts uint64; ForwardResortTransfers uint64}",
+      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; PreVotesLost uint64; LeaderLast uint64; Appended time.Time; ForwardDrops github.com/kitsunium/sdk/internal/service/app/consensus/raft.ForwardDropsValue; ForwardRuns int; ForwardForgotten uint64; ForwardLastResorts uint64; ForwardResortTransfers uint64}",
       "fields": [
         {
           "name": "Role",
@@ -73615,6 +73615,16 @@
           "name": "ForwardForgotten",
           "type": "uint64",
           "doc": "ForwardForgotten counts, since this node started, the answers it\nforgot at its bound of 2^20 before their forward window ended, the\noldest first, so that every new forward is handled: a copy of one is\nneither proposed nor answered, counted among ForwardDrops' Copies,\nand its forwarder answers OUTCOME_UNKNOWN (#1482,\nconsensus_forward_answers_forgotten_total).\n"
+        },
+        {
+          "name": "ForwardLastResorts",
+          "type": "uint64",
+          "doc": "ForwardLastResorts counts, since this node started, the fence's last\nresorts: a new run past 65 536 marks of the current term made it\nforget the least recent mark of the node holding the most, whose new\nruns wait for the next term (#1540,\nconsensus_forward_last_resorts_total). Those that started no\ntransfer — no eligible voter, a transfer already under way, this\nlast resort's own included, or one that failed this term — are\nForwardLastResorts less ForwardResortTransfers, action none.\n"
+        },
+        {
+          "name": "ForwardResortTransfers",
+          "type": "uint64",
+          "doc": "ForwardResortTransfers counts, since this node started, the\nleadership transfers its last resorts started, once a term at most, to\na voter that holds the commit and was heard (#1540,\nconsensus_forward_last_resorts_total{action=\"transfer\"}). Last resorts\nthat climb while it stays at 0 in the term mean no last-resort\ntransfer started, which does not say that no voter could take over:\ncheck for a transfer already under way, an operator's included, and\nfor a voter that is up to date and eligible. The forwarders stay\nfenced until the next election; a transfer of the operator's\nclears it.\n"
         }
       ],
       "doc": "SummaryValue is the step function's view without its memberships: every\nfield of a StatusValue but Conf and Committed, which Summary returns\nwithout cloning a configuration (#912).\n",

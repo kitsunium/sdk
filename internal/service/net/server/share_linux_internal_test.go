@@ -52,9 +52,9 @@ func shardPaths() []shardPath {
 }
 
 // holdReusePort binds proto's address 127.0.0.1:0 with SO_REUSEPORT, as
-// another process's shard would, and returns the address; it is closed when
-// the test ends.
-func holdReusePort(t *testing.T, proto string) string {
+// another process's shard would, and returns the address and the socket's
+// inode; it is closed when the test ends.
+func holdReusePort(t *testing.T, proto string) (string, string) {
 	t.Helper()
 	cfg := stdnet.ListenConfig{Control: reusePortControl}
 	if proto == "udp" {
@@ -63,14 +63,14 @@ func holdReusePort(t *testing.T, proto string) string {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { swallowErr(pc.Close()) })
-		return pc.LocalAddr().String()
+		return pc.LocalAddr().String(), socketInode(t, pc)
 	}
 	ln, err := cfg.Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { swallowErr(ln.Close()) })
-	return ln.Addr().String()
+	return ln.Addr().String(), socketInode(t, ln)
 }
 
 // freePort returns a 127.0.0.1 address whose port proto had free a moment ago.
@@ -103,7 +103,7 @@ func freePort(t *testing.T, proto string) string {
 func TestShards_probeRefusesAHeldPort(t *testing.T) {
 	for _, p := range shardPaths() {
 		t.Run(p.name+"/refused", func(t *testing.T) {
-			held := holdReusePort(t, p.proto)
+			held, _ := holdReusePort(t, p.proto)
 			srv := New()
 			t.Cleanup(func() { swallowErr(srv.Close()) })
 			p.declare(srv, held)
@@ -123,7 +123,7 @@ func TestShards_probeRefusesAHeldPort(t *testing.T) {
 			}
 		})
 		t.Run(p.name+"/shared", func(t *testing.T) {
-			held := holdReusePort(t, p.proto)
+			held, holder := holdReusePort(t, p.proto)
 			srv := New()
 			t.Cleanup(func() { swallowErr(srv.Close()) })
 			p.declare(srv, held, ShareAddress())
@@ -134,9 +134,12 @@ func TestShards_probeRefusesAHeldPort(t *testing.T) {
 			if len(st.Listeners) != 1 || !st.Listeners[0].Shared || st.Listeners[0].Shards != p.want {
 				t.Fatalf("Listeners = %+v, want one Shared row of Shards %d", st.Listeners, p.want)
 			}
-			//: the holder's socket and the group's three, this process's on the held address.
-			if n := kernelSocketsOn(t, p.proto, held, p.state); n != p.want+1 {
-				t.Fatalf("the kernel lists %d sockets of this process on %s, want %d", n, held, p.want+1)
+			ours := serverSocketInodes(t, srv)
+			ours[holder] = true
+			//: the holder's socket and the group's three on the held address —
+			//: no other socket of this process that joined the port (#1378).
+			if n := kernelSocketsOn(t, p.proto, held, p.state, ours); n != p.want+1 {
+				t.Fatalf("the kernel lists %d sockets of the holder and the server on %s, want %d", n, held, p.want+1)
 			}
 		})
 	}
@@ -174,8 +177,9 @@ func TestShards_namedPortStillShards(t *testing.T) {
 			if st.Listeners[0].Address != addr {
 				t.Fatalf("bound %s, asked %s", st.Listeners[0].Address, addr)
 			}
-			if n := kernelSocketsOn(t, p.proto, addr, p.state); n != p.want {
-				t.Fatalf("the kernel lists %d sockets of this process on %s, want %d", n, addr, p.want)
+			//: the server's own sockets, on the address it named (#1378).
+			if n := kernelSocketsOn(t, p.proto, addr, p.state, serverSocketInodes(t, srv)); n != p.want {
+				t.Fatalf("the kernel lists %d sockets of the server on %s, want %d", n, addr, p.want)
 			}
 		})
 	}
