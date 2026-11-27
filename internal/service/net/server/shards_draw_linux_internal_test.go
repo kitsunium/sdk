@@ -167,20 +167,27 @@ func TestReuseport_enabledAfterBindAdmitsJoins(t *testing.T) {
 
 // TestShards_portZeroDrawsAPortNobodyHolds is #1585 on the host: a foreign
 // reuseport holder of this process keeps sockets on an eighth of the
-// ephemeral range, and no Shards(4) group asked for 127.0.0.1:0 may be drawn
-// one of their ports. With its first shard drawn with SO_REUSEPORT set, each
-// start lands on a held port — and joins its holder's group — with a
-// probability of about one in eight, so all 96 starts miss with a probability
-// below 3e-6; drawn without the option, never.
+// ephemeral range, and no Shards(4) group asked for port 0 — in any of the
+// spellings Go binds as port 0: "0", "" and "00" — may be drawn one of their
+// ports. With its first shard drawn with SO_REUSEPORT set, each start lands on
+// a held port — and joins its holder's group — with a probability of about
+// one in eight, so all 96 starts miss with a probability below 3e-6; drawn
+// without the option, never.
 func TestShards_portZeroDrawsAPortNobodyHolds(t *testing.T) {
 	type tc struct {
 		name string
+		// addr is the group's address, its port one spelling of port 0.
+		addr string
 		// fraction is the share of the ephemeral range the holder keeps.
 		fraction int
 		// rounds is how many groups are started, one after the other.
 		rounds int
 	}
-	cases := []tc{{name: "an eighth of the range held, 96 starts", fraction: 8, rounds: 96}}
+	cases := []tc{
+		{name: "port 0, an eighth of the range held, 96 starts", addr: "127.0.0.1:0", fraction: 8, rounds: 96},
+		{name: "an empty port, an eighth of the range held, 96 starts", addr: "127.0.0.1:", fraction: 8, rounds: 96},
+		{name: "port 00, an eighth of the range held, 96 starts", addr: "127.0.0.1:00", fraction: 8, rounds: 96},
+	}
 	runCase := func(t *testing.T, c tc) {
 		low, high := localPortRange(t)
 		held := map[int]bool{}
@@ -194,7 +201,7 @@ func TestShards_portZeroDrawsAPortNobodyHolds(t *testing.T) {
 		}
 		joined := 0
 		for i := range c.rounds {
-			srv, addr, err := startDrawGroup(t.Context(), "127.0.0.1:0")
+			srv, addr, err := startDrawGroup(t.Context(), c.addr)
 			if err != nil {
 				t.Fatalf("start %d: %v", i, err)
 			}
@@ -205,9 +212,10 @@ func TestShards_portZeroDrawsAPortNobodyHolds(t *testing.T) {
 				joined++
 			}
 		}
-		t.Logf("%d of %d starts drawn a port among the %d the holder keeps in [%d, %d]", joined, c.rounds, len(held), low, high)
+		t.Logf("%s: %d of %d starts drawn a port among the %d the holder keeps in [%d, %d]", c.addr, joined, c.rounds, len(held), low, high)
+		//: a draw that joined a foreign group.
 		if joined != 0 {
-			t.Fatalf("%d of %d Shards(4) groups asked for port 0 were drawn a port a foreign reuseport socket holds, and joined its group (#1585)", joined, c.rounds)
+			t.Fatalf("%d of %d Shards(4) groups asked for %q were drawn a port a foreign reuseport socket holds, and joined its group (#1585)", joined, c.rounds, c.addr)
 		}
 	}
 	for _, c := range cases {

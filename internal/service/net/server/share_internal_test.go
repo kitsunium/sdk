@@ -70,6 +70,8 @@ func Test_mustProbe(t *testing.T) {
 		{name: "one socket", addr: "127.0.0.1:8080", count: 1},
 		{name: "shared on purpose", addr: "127.0.0.1:8080", count: 4, share: true},
 		{name: "port 0", addr: "[::1]:0", count: 4},
+		{name: "an empty port, Go's port 0", addr: "[::1]:", count: 4},
+		{name: "port 00, Go's port 0", addr: "127.0.0.1:00", count: 4},
 		{name: "no port", addr: "localhost", count: 4},
 	}
 	for _, c := range tests {
@@ -79,6 +81,53 @@ func Test_mustProbe(t *testing.T) {
 				t.Fatalf("mustProbe = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// Test_drawnPort pins the spellings of port 0 (#1585): each port the standard
+// library binds as port 0 is a draw, and nothing else is. Where Go reads the
+// port without a resolver, its own LookupPort is asked too, so the predicate
+// cannot drift from the bind.
+func Test_drawnPort(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		port string
+		want bool
+		// named is a string Go reads as a service name, which LookupPort
+		// would resolve.
+		named bool
+	}
+	tests := []tc{
+		{name: "0", port: "0", want: true},
+		{name: "empty", port: "", want: true},
+		{name: "00", port: "00", want: true},
+		{name: "+0", port: "+0", want: true},
+		{name: "-0", port: "-0", want: true},
+		{name: "a lone sign", port: "+", want: true},
+		{name: "a named port", port: "8080"},
+		{name: "a leading zero", port: "080"},
+		{name: "two signs", port: "+-0", named: true},
+		{name: "a service name", port: "domain", named: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Parallel()
+		//: the predicate's answer.
+		if got := drawnPort(c.port); got != c.want {
+			t.Fatalf("drawnPort(%q) = %v, want %v", c.port, got, c.want)
+		}
+		//: a name is the resolver's, not asked here.
+		if c.named {
+			return
+		}
+		n, err := stdnet.LookupPort("udp", c.port)
+		//: Go's own reading of the port agrees.
+		if (err == nil && n == 0) != c.want {
+			t.Fatalf("LookupPort(%q) = %d, %v; drawnPort says %v", c.port, n, err, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

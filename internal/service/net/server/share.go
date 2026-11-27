@@ -83,8 +83,9 @@ func mustProbe(addr corenet.AddressValue, count int, share bool) bool {
 		return false
 	}
 	_, port, err := stdnet.SplitHostPort(addr.Addr)
-	//: a fresh ephemeral port, or an address the bind will refuse itself.
-	if err != nil || port == "0" {
+	//: a fresh ephemeral port, in any spelling Go binds as port 0
+	//: (drawnPort), or an address the bind will refuse itself.
+	if err != nil || drawnPort(port) {
 		//: no probe.
 		return false
 	}

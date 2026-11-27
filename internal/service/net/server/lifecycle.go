@@ -5,6 +5,7 @@ import (
 	"errors"
 	stdnet "net"
 	"slices"
+	"strings"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -346,7 +347,23 @@ func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec
 func portZero(addr corenet.AddressValue) bool {
 	_, port, err := stdnet.SplitHostPort(addr.Addr)
 	//: port 0, or an address the bind will refuse itself.
-	return err == nil && port == "0"
+	return err == nil && drawnPort(port)
+}
+
+// drawnPort reports whether the standard library binds port as port 0, the
+// kernel's draw (#1585). It reads port as Go's parsePort does (net/port.go,
+// Go 1.27.3) without a resolver: an empty port is 0 (golang.org/issue/13610),
+// one leading sign is read, and the digits that remain are a value; "0",
+// "", "00", "+0", "-0" and a lone sign are all 0. A string with another
+// character is a nonzero number or a service name the bind looks up, a port
+// it names: neither is a draw.
+func drawnPort(port string) bool {
+	//: parsePort's one sign.
+	if port != "" && (port[0] == '+' || port[0] == '-') {
+		port = port[1:]
+	}
+	//: only zeros, or nothing, remain.
+	return strings.Trim(port, "0") == ""
 }
 
 // pinPort returns addr with the port pc bound, so the other shards of an address

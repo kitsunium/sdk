@@ -4310,7 +4310,15 @@ sequences:
       - bind: _, port, err
         eval: stdnet.SplitHostPort(addr.Addr)
         to: stdnet
-      - return: err == nil && port == "0"
+      - return: err == nil && drawnPort(port)
+  - of: drawnPort
+    steps:
+      - opt:
+          do:
+            - set: port
+              value: port[1:]
+          when: port != "" && (port[0] == '+' || port[0] == '-')
+      - return: strings.Trim(port, "0") == ""
   - of: pinPort
     participants:
       - id: caller
@@ -15352,7 +15360,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: err != nil || port == "0"
+          when: err != nil || drawnPort(port)
       - return: "true"
   - of: probeAddress
     participants:

@@ -1350,6 +1350,7 @@ files:
       - (*Server).bindPacketShards
       - listenShard
       - portZero
+      - drawnPort
       - pinPort
       - (*Server).adoptPacketSockets
       - batchDegradation
@@ -2632,6 +2633,17 @@ functions:
   - doc: portZero reports whether addr asks the kernel to draw its port.
     name: portZero
     params: addr corenet.AddressValue
+    results: bool
+  - doc: |-
+      drawnPort reports whether the standard library binds port as port 0, the
+      kernel's draw (#1585). It reads port as Go's parsePort does (net/port.go,
+      Go 1.27.3) without a resolver: an empty port is 0 (golang.org/issue/13610),
+      one leading sign is read, and the digits that remain are a value; "0",
+      "", "00", "+0", "-0" and a lone sign are all 0. A string with another
+      character is a nonzero number or a service name the bind looks up, a port
+      it names: neither is a draw.
+    name: drawnPort
+    params: port string
     results: bool
   - doc: |-
       pinPort returns addr with the port pc bound, so the other shards of an address
