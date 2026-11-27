@@ -15339,11 +15339,26 @@ sequences:
                 do:
                   - continue: true
                 when: "!full || !ok"
-            - eval: n.judgeRateShort(to, pin.rate, float64(max(pin.size-sent, 0))/r, fillSeconds(n.tightFrom()-b, write), r)
+            - eval: n.judgeRateShort(to, pin.rate, float64(max(pin.size-sent, 0))/r, n.pinFill(&pin, b, write), r)
               to: n.judgeRateShort
           key: to
           range: n.sending
           value: pin
+  - of: (*Node).pinFill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).pinFill
+        kind: self
+      - id: fillSeconds
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: pin.lifted
+      - return: fillSeconds(n.tightFrom()-b, write)
+        to: fillSeconds
   - of: (*rateWatch).sample
     participants:
       - id: caller

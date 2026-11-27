@@ -138,8 +138,23 @@ func (n *Node) watchRateShort(now time.Time, etMax time.Duration) {
 		if !full || !ok {
 			continue
 		}
-		n.judgeRateShort(to, pin.rate, float64(max(pin.size-sent, 0))/r, fillSeconds(n.tightFrom()-b, write), r)
+		n.judgeRateShort(to, pin.rate, float64(max(pin.size-sent, 0))/r, n.pinFill(&pin, b, write), r)
 	}
+}
+
+// pinFill is how long, at the write rate, the pin of a stream holds
+// compaction back with the log at b bytes: until the writes bring it to
+// tightFrom (fillSeconds), and 0 once the pin was lifted. A lifted pin holds
+// nothing, for good: the follower needs another snapshot whatever the
+// rates. Read from the rates, every cut compacted at once then, and cuts
+// about one a sample apart read no writes: the flag fell, and rose, counted
+// and logged, at each change of their cadence (D1' of #1486's review).
+func (n *Node) pinFill(pin *sendPin, b int64, write float64) float64 {
+	//: the pin no longer holds compaction back.
+	if pin.lifted {
+		return 0
+	}
+	return fillSeconds(n.tightFrom()-b, write)
 }
 
 // sample adds sent, the stream's progress at now, to its window and returns

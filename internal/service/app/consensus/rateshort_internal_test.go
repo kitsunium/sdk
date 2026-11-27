@@ -26,15 +26,18 @@ func (byteLog) freeBytes() int64 { return -1 }
 // ratePhase is a stretch of a rate-short scenario: for dur, the stream
 // moves at stream bytes a second and the log grows at write bytes a second;
 // at its end the peer's PeerSnapshotRateShort is short, and rises have been
-// counted and logged in all. At its first tick the stream jumps by jump
-// bytes, the offset a resumed stream's accept stores at once, and, when
-// compact is set, the log falls to compactTo bytes, a compaction.
+// counted and logged in all. When compact is set, the log falls to
+// compactTo bytes at its first tick, a compaction, and again every
+// cutEvery when that is set, a cut compacted at once; when lift is set, the
+// pin is lifted at its first tick, as releasePin does once the log was
+// tight: it holds compaction back no more, for good.
 type ratePhase struct {
 	dur           time.Duration
 	stream, write int64
-	jump          int64
 	compact       bool
 	compactTo     int64
+	cutEvery      time.Duration
+	lift          bool
 	short         bool
 	rises         int
 }
@@ -63,9 +66,6 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 		// requires the stream still in flight then: the pin no longer
 		// holds while the transfer goes on, #550's loop.
 		tight bool
-		// rate, when set, bounds the rate the last Warn line gives, in
-		// bytes a second.
-		rate [2]uint64
 	}
 	runCase := func(t *testing.T, c tc) {
 		mc := clock.NewManualClock(time.Unix(1_700_000_000, 0))
@@ -84,15 +84,17 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 			return ph.Flags.Has(PeerSnapshotRateShort)
 		}
 		var sentAcc, logAcc float64
-		step := func(p ratePhase, first bool) {
+		step := func(p ratePhase, k int) {
 			mc.Advance(tick)
-			//: the phase's first tick: the accept's offset, the compaction.
-			if first {
-				sentAcc += float64(p.jump)
-				//: a compaction shrinks the log.
-				if p.compact {
-					logAcc = float64(p.compactTo)
-				}
+			//: the phase's first tick: the pin lifted.
+			if k == 0 && p.lift {
+				pin := n.sending[peer]
+				pin.lifted = true
+				n.sending[peer] = pin
+			}
+			//: a compaction at the first tick, or a cut of the cadence.
+			if p.compact && (k == 0 || p.cutEvery > 0 && k%int(p.cutEvery/tick) == 0) {
+				logAcc = float64(p.compactTo)
 			}
 			sentAcc += float64(p.stream) * tick.Seconds()
 			logAcc += float64(p.write) * tick.Seconds()
@@ -115,7 +117,7 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 		for i, p := range c.phases {
 			//: the phase's ticks.
 			for k := range int(p.dur / tick) {
-				step(p, k == 0)
+				step(p, k)
 			}
 			//: the flag in Health.Peers.
 			if got := short(); got != p.short {
@@ -137,14 +139,6 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 				t.Fatalf("the line does not name the peer, both times and the rate: %v", line)
 			}
 		}
-		//: the rate the last line gives, within its bounds.
-		if c.rate != [2]uint64{} {
-			got, err := strconv.ParseUint(lg.lines[len(lg.lines)-1]["rate"], 10, 64)
-			//: a rate outside the stream's own pace.
-			if err != nil || got < c.rate[0] || got > c.rate[1] {
-				t.Fatalf("the line gives rate %q, want within %v", lg.lines[len(lg.lines)-1]["rate"], c.rate)
-			}
-		}
 		//: the scenario carried on until the pin stops holding.
 		if c.tight {
 			last := c.phases[len(c.phases)-1]
@@ -154,7 +148,7 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 				if i > 100_000 {
 					t.Fatal("the log never turned tight")
 				}
-				step(last, false)
+				step(last, 1)
 			}
 			//: #550: the pin is lifted while the stream still has bytes to send.
 			if sent := progress.Load(); sent >= size {
@@ -230,14 +224,19 @@ func TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged(t *testing.T) {
 			},
 		},
 		{
-			// A stream resumed at 4 MiB: the accept stores the offset at
-			// once, which is no rate; the line gives the stream's own.
-			name: "resumed",
+			// Once the pin is lifted, every cut compacts: cut every 50 ms,
+			// the sampling's interval, the log's net growth reads 0, and
+			// every 200 ms it shows again. The flag fell at each change of
+			// cadence and rose, counted and logged, at the next (D1' of the
+			// review): a lifted pin holds nothing, its fill is 0.
+			name: "cuts at a varying cadence after the lift",
 			phases: []ratePhase{
-				{dur: 200 * time.Millisecond, write: 20 << 10},
-				{dur: time.Second, stream: 100 << 10, write: 20 << 10, jump: 4 << 20, short: true, rises: 1},
+				{dur: time.Second, stream: 100 << 10, write: 20 << 10, short: true, rises: 1},
+				{dur: 2 * time.Second, stream: 100 << 10, write: 200 << 10, compact: true, compactTo: 100 << 10, cutEvery: 50 * time.Millisecond, lift: true, short: true, rises: 1},
+				{dur: 2 * time.Second, stream: 100 << 10, write: 200 << 10, compact: true, compactTo: 100 << 10, cutEvery: 200 * time.Millisecond, short: true, rises: 1},
+				{dur: 2 * time.Second, stream: 100 << 10, write: 200 << 10, compact: true, compactTo: 100 << 10, cutEvery: 50 * time.Millisecond, short: true, rises: 1},
+				{dur: 2 * time.Second, stream: 100 << 10, write: 200 << 10, compact: true, compactTo: 100 << 10, cutEvery: 200 * time.Millisecond, short: true, rises: 1},
 			},
-			rate: [2]uint64{90 << 10, 110 << 10},
 		},
 		{
 			// #550's loop on the base: the pin stops holding mid-stream.

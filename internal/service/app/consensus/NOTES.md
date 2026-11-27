@@ -1624,10 +1624,16 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   of its newest and oldest samples, a compaction during the stream read as
   a window without writes, and the flag fell for a window, then rose and was
   counted and logged again, once per compaction (D1 of #1486's review). A
-  stream's window starts at its first sample past 0, the accept, which
-  stores a resumed stream's offset at once: a window spanning the offer's
-  wait read a fraction of R, and one spanning the offset a rate the stream
-  never had. The samples are stamped with the wall clock's Unix
+  stream's window starts at its first sample past 0: its first read for a
+  new stream, the accept for a resumed one, which stores the offset at
+  once. A window spanning the offer's wait read a fraction of R and raised
+  the flag for a stream fast enough. A lifted pin's fill is 0 (`pinFill`):
+  it holds nothing, the loss is certain, and the flag stays up to the
+  stream's end. Read from the rates, every cut compacting at once then,
+  cuts about one a sample apart read no writes, and the flag fell and rose,
+  counted again, at each change of their cadence (D1' of the review). A
+  stream that waits for a slot (`MaxSnapshotStreams`) is never judged
+  while it waits, though the log fills: there is no R without bytes. The samples are stamped with the wall clock's Unix
   nanoseconds, as a pin's `moved` and `since`: a clock stepped back
   freezes a window, one stepped forward dilutes it, for one window. It raises `PeerSnapshotRateShort` once
   (`EncodedSize` less the bytes sent) over R exceeds (`tightFrom` less the

@@ -2048,6 +2048,7 @@ files:
       - (*rateWindow).rate
       - (*Node).tightFrom
       - (*Node).watchRateShort
+      - (*Node).pinFill
       - (*rateWatch).sample
       - fillSeconds
       - (*Node).judgeRateShort
@@ -10016,6 +10017,18 @@ types:
         name: watchRateShort
         params: now time.Time, etMax time.Duration
         recv: n *Node
+      - doc: |-
+          pinFill is how long, at the write rate, the pin of a stream holds
+          compaction back with the log at b bytes: until the writes bring it to
+          tightFrom (fillSeconds), and 0 once the pin was lifted. A lifted pin holds
+          nothing, for good: the follower needs another snapshot whatever the
+          rates. Read from the rates, every cut compacted at once then, and cuts
+          about one a sample apart read no writes: the flag fell, and rose, counted
+          and logged, at each change of their cadence (D1' of #1486's review).
+        name: pinFill
+        params: pin *sendPin, b int64, write float64
+        recv: n *Node
+        results: float64
       - doc: |-
           judgeRateShort raises or lowers PeerSnapshotRateShort for the stream to
           peer to, whose transfer would end in eta seconds at rate bytes a second
