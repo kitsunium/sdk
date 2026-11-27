@@ -128,10 +128,7 @@ type Node struct {
 	// hold: raft is built on the snapshot before the first publish.
 	pubHolds int
 	pubHold  uint64
-	// unvouched holds apply after an install's Restore refused its stream
-	// (#1582).
-	unvouched unvouchedApply
-	waiters   map[uint64]*proposal
+	waiters  map[uint64]*proposal
 	// appliedQ holds the Barrier and WaitApplied callers parked on an
 	// index not yet applied, lowest first: an applied entry releases only
 	// those it reaches, O(1) when none is due (#1109). nil until the first
@@ -339,20 +336,6 @@ type applyResult struct {
 	index uint64
 	term  uint64
 	val   any
-}
-
-// unvouchedApply is the hold an install's refused Restore puts on apply:
-// the machine may hold a prefix it wrote in place, so no entry is applied
-// onto it and no Barrier or WaitApplied caller is released over it until a
-// Restore succeeds (#1582).
-type unvouchedApply struct {
-	// on is set by the refusal and cleared by a Restore that succeeds, on
-	// the apply goroutine, under am.
-	on bool
-	// items are the apply items taken while on, in their order, run once
-	// a Restore succeeded. Raft hands no more than MaxApplyLagBytes of
-	// payload meanwhile. The apply goroutine's alone.
-	items []applyItem
 }
 
 // appliedWaiter is one caller parked until index is applied: ch, one slot,
@@ -897,7 +880,7 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 		if rerr == nil {
 			return m, failed, newest, nil
 		}
-		//: a format this build does not read, or a machine a restore left unvouched for, refuses the start.
+		//: a format this build does not read, or a machine that refused its restore, refuses the start.
 		if n.refusesStart(rerr) {
 			return coreconsensus.SnapshotMetaValue{}, nil, nil, rerr
 		}
@@ -2586,15 +2569,30 @@ func (n *Node) completeWrite(rd *raft.ReadyValue) bool {
 // stop records why the node stopped itself, writes its marker, and stops
 // every goroutine without a final sync.
 func (n *Node) stop(err error, storage bool) {
+	n.stopAs(err, storage, true)
+}
+
+// stopUnmarked stops the node as stop does, but writes no stop marker: the
+// cause is held in memory only, a volatile machine's refused restore
+// (#1582), which a restart on a fresh machine does not meet again, and the
+// start refuses on its own when it does.
+func (n *Node) stopUnmarked(err error) {
+	n.stopAs(err, false, false)
+}
+
+// stopAs is stop, with mark saying whether the stop markers are written.
+func (n *Node) stopAs(err error, storage, mark bool) {
 	n.stopMu.Lock()
 	if n.stopReason != nil {
 		n.stopMu.Unlock()
 		return
 	}
 	reason := &coreconsensus.StopReasonValue{Err: err}
-	if m, ok := n.cfg.Log.(interface {
+	m, ok := n.cfg.Log.(interface {
 		markStopEach(code errs.Code, detail string) (dirErr, runErr error)
-	}); ok {
+	})
+	//: a marked stop on a log that keeps markers writes them.
+	if ok && mark {
 		code, _ := errs.CodeOf(err)
 		dirErr, runErr := m.markStopEach(code, err.Error())
 		if dirErr != nil && (runErr != nil || code != coreconsensus.CodeStorageFailed) && storage {

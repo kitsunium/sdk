@@ -160,20 +160,16 @@ func (n *Node) applyItems(items []applyItem) bool {
 	return true
 }
 
-// applyItem runs one item taken from the apply queue. A machine a refused
-// restore left on a prefix takes nothing but a restore: no entry is applied
-// over it, and no cut or save captures it; the other items wait, in order,
-// for a restore that succeeds, which runs them (#1582). It returns false
-// when the apply goroutine must end.
+// applyItem runs one item taken from the apply queue. It returns false
+// when the apply goroutine must end: a restore whose Restore the machine
+// refused stopped the node before it was answered, so no item taken after
+// it runs over the prefix the machine may hold (#1582).
 func (n *Node) applyItem(it *applyItem) bool {
 	switch {
-	//: a restore runs whatever the machine holds, and one that ended a hold runs what it kept.
+	//: a restore, which a refusal of the machine ends the goroutine on.
 	case it.restore != nil:
 		n.restoreItem(it.restore)
-		return n.unvouched.on || n.applyHeldItems()
-	//: an unvouched machine keeps the item for after the next restore.
-	case n.unvouched.on:
-		n.unvouched.items = append(n.unvouched.items, *it)
+		return !n.stopped.Load()
 	//: an operator's save.
 	case it.save != nil:
 		n.save(it.save)
@@ -188,15 +184,6 @@ func (n *Node) applyItem(it *applyItem) bool {
 		return n.applyHanded(it)
 	}
 	return true
-}
-
-// applyHeldItems runs the items a refused restore held back, once a
-// restore succeeded: the entries it covers are skipped, the others applied
-// over its state. It returns false when the apply goroutine must end.
-func (n *Node) applyHeldItems() bool {
-	held := n.unvouched.items
-	n.unvouched.items = nil
-	return n.applyItems(held)
 }
 
 // applyHanded applies what raft handed in one item, entries in memory or a
@@ -476,8 +463,7 @@ func (n *Node) keptResult(index uint64) (applyResult, bool) {
 // no other: a caller is woken once, when its wait is over, never to check
 // again (#1109). The caller holds am.
 func (n *Node) releaseApplied() {
-	//: no caller is released over a machine a refused restore left unvouched (#1582).
-	if n.appliedQ == nil || n.unvouched.on {
+	if n.appliedQ == nil {
 		return
 	}
 	for {
@@ -499,8 +485,7 @@ func (n *Node) releaseApplied() {
 // takes its waiter out of the queue (#1109).
 func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
 	n.am.Lock()
-	//: an applied index returns at once, unless a refused restore left the machine unvouched.
-	if n.applied >= index && !n.unvouched.on {
+	if n.applied >= index {
 		n.am.Unlock()
 		return true
 	}
@@ -519,7 +504,7 @@ func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
 	n.am.Lock()
 	defer n.am.Unlock()
 	n.appliedQ.Remove(h)
-	return n.applied >= index && !n.unvouched.on
+	return n.applied >= index
 }
 
 // unsupportedKind stops a node that meets an entry kind it does not know

@@ -156,6 +156,8 @@ sequences:
         kind: self
       - id: n.restoreItem
         kind: internal
+      - id: n.stopped.Load
+        kind: value
       - id: n.save
         kind: internal
       - id: n.forceCut
@@ -171,11 +173,8 @@ sequences:
               do:
                 - eval: n.restoreItem(it.restore)
                   to: n.restoreItem
-                - return: n.unvouched.on || n.applyHeldItems()
-            - case: n.unvouched.on
-              do:
-                - set: n.unvouched.items
-                  value: append(n.unvouched.items, *it)
+                - return: "!n.stopped.Load()"
+                  to: n.stopped.Load
             - case: it.save != nil
               do:
                 - eval: n.save(it.save)
@@ -193,21 +192,6 @@ sequences:
                 - return: n.applyHanded(it)
                   to: n.applyHanded
       - return: "true"
-  - of: (*Node).applyHeldItems
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Node).applyHeldItems
-        kind: self
-      - id: n.applyItems
-        kind: internal
-    steps:
-      - bind: held
-        eval: n.unvouched.items
-      - set: n.unvouched.items
-        value: nil
-      - return: n.applyItems(held)
-        to: n.applyItems
   - of: (*Node).applyHanded
     participants:
       - id: caller
@@ -710,7 +694,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: n.appliedQ == nil || n.unvouched.on
+          when: n.appliedQ == nil
       - loop:
           do:
             - bind: w, _, ok
@@ -754,7 +738,7 @@ sequences:
             - eval: n.am.Unlock()
               to: n.am.Unlock
             - return: "true"
-          when: n.applied >= index && !n.unvouched.on
+          when: n.applied >= index
       - opt:
           do:
             - set: n.appliedQ
@@ -779,7 +763,7 @@ sequences:
           mutex: n.am
       - eval: n.appliedQ.Remove(h)
         to: n.appliedQ.Remove
-      - return: n.applied >= index && !n.unvouched.on
+      - return: n.applied >= index
   - of: unsupportedKind
     participants:
       - id: caller
@@ -14178,6 +14162,28 @@ sequences:
         kind: actor
       - id: (*Node).stop
         kind: self
+      - id: n.stopAs
+        kind: internal
+    steps:
+      - eval: n.stopAs(err, storage, true)
+        to: n.stopAs
+  - of: (*Node).stopUnmarked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).stopUnmarked
+        kind: self
+      - id: n.stopAs
+        kind: internal
+    steps:
+      - eval: n.stopAs(err, false, false)
+        to: n.stopAs
+  - of: (*Node).stopAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).stopAs
+        kind: self
       - id: n.stopMu.Lock
         kind: value
       - id: n.stopMu.Unlock
@@ -14211,6 +14217,11 @@ sequences:
           when: n.stopReason != nil
       - bind: reason
         eval: "&coreconsensus.StopReasonValue{Err: err}"
+      - bind: m, ok
+        eval: |-
+          n.cfg.Log.(interface {
+          		markStopEach(code errs.Code, detail string) (dirErr, runErr error)
+          	})
       - opt:
           do:
             - bind: code, _
@@ -14234,13 +14245,7 @@ sequences:
                 when: dirErr != nil && (runErr != nil || code != coreconsensus.CodeStorageFailed) && storage
             - eval: n.reportUnwrittenMarkers(dirErr, runErr)
               to: n.reportUnwrittenMarkers
-          init:
-            bind: m, ok
-            eval: |-
-              n.cfg.Log.(interface {
-              		markStopEach(code errs.Code, detail string) (dirErr, runErr error)
-              	})
-          when: ok
+          when: ok && mark
       - set: n.stopReason
         value: reason
       - eval: n.stopMu.Unlock()
@@ -23465,8 +23470,6 @@ sequences:
               to: n.am.Lock
             - set: n.applied, n.appliedTerm
               value: m.Position.Index, m.Position.Term
-            - set: n.unvouched.on
-              value: "false"
             - eval: n.answerCovered(m.Position.Index)
               to: n.answerCovered
             - eval: n.releaseApplied()
@@ -23487,66 +23490,48 @@ sequences:
         kind: actor
       - id: (*Node).restoreRefused
         kind: self
-      - id: n.holdApply
+      - id: n.stop
         kind: internal
       - id: origin
         kind: internal
-      - id: n.stop
+      - id: n.stopUnmarked
         kind: internal
     steps:
+      - bind: _, durable
+        eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
+      - switch:
+          cases:
+            - case: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
+              do:
+                - opt:
+                    do:
+                      - eval: n.stop(err, false)
+                        to: n.stop
+                    when: install
+                - return: err
+            - case: durable
+              do:
+                - bind: serr
+                  eval: |-
+                    origin(coreconsensus.StateMachineFailed,
+                    			errs.String("why", "a durable machine refused a restore it may have written"),
+                    			errs.String("id", m.ID), errs.String("cause", err.Error()))
+                  to: origin
+                - eval: n.stop(serr, false)
+                  to: n.stop
+                - return: serr
+      - bind: serr
+        eval: |-
+          origin(coreconsensus.StateMachineFailed,
+          		errs.String("why", "a volatile machine refused a restore it may have written"),
+          		errs.String("id", m.ID), errs.String("cause", err.Error()))
+        to: origin
       - opt:
           do:
-            - eval: n.holdApply(install)
-              to: n.holdApply
-            - return: err
-          when: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
-      - opt:
-          do:
-            - bind: serr
-              eval: |-
-                origin(coreconsensus.StateMachineFailed,
-                			errs.String("why", "a durable machine refused a restore it may have written"),
-                			errs.String("id", m.ID), errs.String("cause", err.Error()))
-              to: origin
-            - eval: n.stop(serr, false)
-              to: n.stop
-            - return: serr
-          init:
-            bind: _, durable
-            eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
-          when: durable
-      - opt:
-          do:
-            - return: |-
-                origin(coreconsensus.StateMachineFailed,
-                			errs.String("why", "a volatile machine refused a restore it may have written at a start"),
-                			errs.String("id", m.ID), errs.String("cause", err.Error()))
-              to: origin
-          when: "!install"
-      - eval: n.holdApply(install)
-        to: n.holdApply
-      - return: err
-  - of: (*Node).holdApply
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Node).holdApply
-        kind: self
-      - id: n.am.Lock
-        kind: value
-      - id: n.am.Unlock
-        kind: value
-    steps:
-      - opt:
-          do:
-            - return: ""
-          when: "!install"
-      - eval: n.am.Lock()
-        to: n.am.Lock
-      - set: n.unvouched.on
-        value: "true"
-      - eval: n.am.Unlock()
-        to: n.am.Unlock
+            - eval: n.stopUnmarked(serr)
+              to: n.stopUnmarked
+          when: install
+      - return: serr
   - of: idNamesPosition
     participants:
       - id: caller

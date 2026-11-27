@@ -230,7 +230,8 @@ func holdOnlyTheLeadersNewest(t *testing.T, l, f *testNode) string {
 // its copy first, and a replacement that then failed — a cut transfer, a
 // Restore refused — left it no snapshot. At its next start its log began
 // past a compaction with nothing naming the members: it admitted nobody and
-// was isolated for good (#526).
+// was isolated for good (#526). A refused Restore now stops the node
+// (#1582): its copy stays for the next start, which the cause gone feeds.
 func TestANodeWithNoTableKeepsItsMembersThroughAFailedReplacement(t *testing.T) {
 	c, refuse, refused := refusingCluster(t, errors.New("this build does not read that state"))
 	l := c.settledLeader(5 * time.Second)
@@ -255,11 +256,17 @@ func TestANodeWithNoTableKeepsItsMembersThroughAFailedReplacement(t *testing.T) 
 	// answered with a request for a snapshot.
 	proposeOnLeader(t, c, "nudge=1")
 	deadline := time.Now().Add(10 * time.Second)
-	for refused.Load() < 2 {
+	//: until a replacement's refused Restore stops the node.
+	for refused.Load() < 1 || !f.node.stopped.Load() {
+		//: not in time.
 		if time.Now().After(deadline) {
-			t.Fatalf("no replacement reached Restore twice (refused %d)", refused.Load())
+			t.Fatalf("no replacement's refused Restore stopped the node (refused %d)", refused.Load())
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	//: the refusal stops the node STATE_MACHINE_FAILED.
+	if reason, _ := f.node.StopReason(); !errs.HasCode(reason.Err, coreconsensus.CodeStateMachineFailed) {
+		t.Errorf("a refused Restore stopped the node with %v, want STATE_MACHINE_FAILED", reason.Err)
 	}
 	c.net.Isolate(f.id, true)
 	c.kill(f)

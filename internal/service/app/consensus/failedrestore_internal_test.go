@@ -36,6 +36,10 @@ type partialRestore struct {
 	// and onPrefix counts the entries applied over it.
 	prefix   atomic.Bool
 	onPrefix atomic.Int64
+	// refused is set as the failing restore returns, and afterRefusal
+	// counts every Apply made once it is.
+	refused      atomic.Bool
+	afterRefusal atomic.Int64
 	// refusal, when set, is the error the failing restore returns in place
 	// of SNAPSHOT_CORRUPT.
 	refusal error
@@ -46,6 +50,10 @@ func (p *partialRestore) Apply(e coreconsensus.EntryValue) any {
 	//: an entry applied while the kv holds a failed restore's prefix.
 	if p.prefix.Load() {
 		p.onPrefix.Add(1)
+	}
+	//: an entry applied once a restore was refused.
+	if p.refused.Load() {
+		p.afterRefusal.Add(1)
 	}
 	return p.kv.Apply(e)
 }
@@ -91,6 +99,7 @@ func (p *partialRestore) Restore(r io.Reader, meta coreconsensus.SnapshotMetaVal
 			{Kind: coreconsensus.EntryCommand, Position: coreconsensus.PositionValue{Index: meta.Position.Index - 1, Term: meta.Position.Term}, Data: []byte("onprefix=2")},
 		}})
 	}
+	p.refused.Store(true)
 	close(p.failed)
 	//: a refusal the case names is returned as is.
 	if p.refusal != nil {
@@ -165,36 +174,55 @@ func sameState(a, b *kv) bool {
 	return maps.Equal(am, b.m)
 }
 
+// markedLog is a memory log that counts the stop markers a stop writes.
+type markedLog struct {
+	*MemoryLog
+	marks atomic.Int64
+}
+
+// markStopEach counts a stop marker, as a file log writes one.
+func (l *markedLog) markStopEach(errs.Code, string) (dirErr, runErr error) {
+	l.marks.Add(1)
+	return nil, nil
+}
+
 // A Restore that fails after it wrote part of its stream in place leaves
 // the machine on a prefix no correct node holds. The entries (A, match]
 // handed after the restore were applied over it, and a durable machine
 // recorded their positions with that state, which a restart resumed after
-// (#1582). The node now applies nothing once an install's Restore refused
-// its stream, until a Restore succeeds: the leader offers a snapshot again,
-// its restore replaces the state, and the entries it covers are skipped. A
-// DurableStateMachine may have written its disk, so its refusal stops the
-// node STATE_MACHINE_FAILED. A machine that reads aside ends the same way
-// as before: on the leader's state.
-func TestAFailedRestoreAppliesNothingUntilARestoreSucceeds(t *testing.T) {
+// (#1582). The engine cannot tell such a machine from one that read aside,
+// so every refusal of an install's Restore now stops the node, on the apply
+// goroutine, before the restore is answered: no entry is applied after it.
+// A volatile machine stops STATE_MACHINE_FAILED with no marker, and a node
+// started again on a fresh machine ends on the leader's state; a
+// DurableStateMachine stops STATE_MACHINE_FAILED, and VERSION_UNSUPPORTED
+// stops on its own code, both with their marker.
+func TestARefusedRestoreStopsTheNodeBeforeAnyApply(t *testing.T) {
 	type tc struct {
 		name    string
 		inPlace bool
 		durable bool
-		// version has the machine refuse VERSION_UNSUPPORTED, on which the
-		// node stops as before.
+		// version has the machine refuse VERSION_UNSUPPORTED.
 		version bool
+		// code is the stop's code, marked whether it leaves a marker.
+		code   errs.Code
+		marked bool
 	}
 	runCase := func(t *testing.T, tcase tc) {
 		var lagID atomic.Uint64
 		var armed atomic.Bool
 		var node atomic.Pointer[Node]
 		var machine atomic.Pointer[partialRestore]
+		var marks atomic.Pointer[markedLog]
 		c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 5, 8, 2}, every: 20, size: 3}
 		c.configure = func(tn *testNode, cfg *Config) {
 			//: only the lagging node runs the failing machine.
 			if uint64(tn.id) != lagID.Load() {
 				return
 			}
+			ml := &markedLog{MemoryLog: tn.log}
+			marks.Store(ml)
+			cfg.Log = ml
 			p := &partialRestore{kv: tn.sm, inPlace: tcase.inPlace, armed: &armed, node: &node, failed: make(chan struct{})}
 			//: the version case's machine refuses a format it does not read.
 			if tcase.version {
@@ -242,53 +270,56 @@ func TestAFailedRestoreAppliesNothingUntilARestoreSucceeds(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatal("setup: the lagging node never failed an install's restore")
 		}
-		deadline := time.Now().Add(15 * time.Second)
-		//: the node stops, or ends on the leader's state.
-		for {
-			//: a stopped node is judged below.
-			if lag.node.stopped.Load() {
-				break
-			}
-			//: caught up on the leader's state.
-			if lag.node.Status().Applied >= tok.Index && sameState(lag.sm, l.sm) {
-				break
-			}
-			//: neither in time.
+		deadline := time.Now().Add(10 * time.Second)
+		//: the refusal stops the node.
+		for !lag.node.stopped.Load() {
+			//: not in time.
 			if time.Now().After(deadline) {
-				t.Fatalf("the lagging node neither stopped nor caught up: Applied %d against %d, %d keys against the leader's %d",
+				t.Fatalf("a refused restore did not stop the node: Applied %d, %d entries applied after the refusal",
+					lag.node.Status().Applied, p.afterRefusal.Load())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		reason, _ := lag.node.StopReason()
+		//: the stop's code is the case's.
+		if !errs.HasCode(reason.Err, tcase.code) {
+			t.Errorf("a refused restore stopped the node with %v, want code %v", reason.Err, tcase.code)
+		}
+		//: no entry is applied once the restore was refused.
+		if k := p.afterRefusal.Load(); k != 0 {
+			t.Errorf("%d entries were applied after a refused restore, %d over the prefix it wrote", k, p.onPrefix.Load())
+		}
+		//: a durable machine's stop, and a version's, leave their marker; a volatile machine's none.
+		if got := marks.Load().marks.Load() != 0; got != tcase.marked {
+			t.Errorf("the stop wrote %d markers, want marked %v", marks.Load().marks.Load(), tcase.marked)
+		}
+		//: the durable and version cases end on the stop.
+		if tcase.durable || tcase.version {
+			return
+		}
+		// Started again on a fresh machine, as a supervisor does: the
+		// install is offered again and its restore succeeds.
+		armed.Store(false)
+		c.kill(lag)
+		lagID.Store(0)
+		c.start(lag)
+		deadline = time.Now().Add(15 * time.Second)
+		//: the restarted node ends on the leader's state.
+		for lag.node.Status().Applied < tok.Index || !sameState(lag.sm, l.sm) {
+			//: not in time.
+			if time.Now().After(deadline) {
+				t.Fatalf("the restarted node did not catch up: Applied %d against %d, %d keys against the leader's %d",
 					lag.node.Status().Applied, tok.Index, machineKeys(lag), machineKeys(l))
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
-		reason, stopped := lag.node.StopReason()
-		//: a durable machine that refused a restore stops the node.
-		if tcase.durable && (!stopped || !errs.HasCode(reason.Err, coreconsensus.CodeStateMachineFailed)) {
-			t.Errorf("a DurableStateMachine refused a restore it may have written, and the node goes on (stopped %v, %v): Applied %d, %d entries applied over the prefix",
-				stopped, reason.Err, lag.node.Status().Applied, p.onPrefix.Load())
-		}
-		//: a machine that refused VERSION_UNSUPPORTED stops the node on it, as before.
-		if tcase.version && (!stopped || !errs.HasCode(reason.Err, coreconsensus.CodeVersionUnsupported)) {
-			t.Errorf("a machine refused VERSION_UNSUPPORTED, and the node goes on (stopped %v, %v)", stopped, reason.Err)
-		}
-		//: a volatile machine is never stopped by any other refused restore.
-		if !tcase.durable && !tcase.version && stopped {
-			t.Errorf("a refused restore stopped the node: %v", reason.Err)
-		}
-		//: no entry is applied over the prefix a failed restore wrote.
-		if k := p.onPrefix.Load(); k != 0 {
-			t.Errorf("%d entries were applied over the prefix a failed restore wrote in place", k)
-		}
-		//: a volatile node that goes on ends on the leader's state.
-		if !tcase.durable && !tcase.version && !sameState(lag.sm, l.sm) {
-			t.Errorf("the lagging node holds %d keys, the leader %d", machineKeys(lag), machineKeys(l))
-		}
 	}
 	//: each case runs its own cluster.
 	for _, tcase := range []tc{
-		{name: "a restore that wrote a prefix in place applies nothing over it", inPlace: true},
-		{name: "a restore that read aside ends on the leader's state"},
-		{name: "a durable restore that wrote a prefix stops the node", inPlace: true, durable: true},
-		{name: "a restore that wrote a prefix then refused its version applies nothing over it", inPlace: true, version: true},
+		{name: "a restore that wrote a prefix in place stops the node unmarked", inPlace: true, code: coreconsensus.CodeStateMachineFailed},
+		{name: "a restore that read aside stops the node unmarked", code: coreconsensus.CodeStateMachineFailed},
+		{name: "a durable restore that wrote a prefix stops the node marked", inPlace: true, durable: true, code: coreconsensus.CodeStateMachineFailed, marked: true},
+		{name: "a restore that refused its version stops the node on it, marked", inPlace: true, version: true, code: coreconsensus.CodeVersionUnsupported, marked: true},
 	} {
 		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })
 	}

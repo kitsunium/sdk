@@ -1272,7 +1272,6 @@ files:
       - (*Node).restoreItem
       - (*Node).applyItems
       - (*Node).applyItem
-      - (*Node).applyHeldItems
       - (*Node).applyHanded
       - (*Node).applyRead
       - (*Node).readBack
@@ -1812,7 +1811,6 @@ files:
       - fwdSpan
       - snapState
       - applyResult
-      - unvouchedApply
       - appliedWaiter
       - proposal
       - (*proposal).isSession
@@ -1932,6 +1930,8 @@ files:
       - (*Node).syncFor
       - (*Node).completeWrite
       - (*Node).stop
+      - (*Node).stopUnmarked
+      - (*Node).stopAs
       - (*Node).reportUnwrittenMarkers
       - (*Node).StopReason
       - (*Node).failAllOnStop
@@ -2313,7 +2313,6 @@ files:
       - Latest
       - (*Node).restoreFrom
       - (*Node).restoreRefused
-      - (*Node).holdApply
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
@@ -8208,11 +8207,6 @@ types:
         type: int
       - name: pubHold
         type: uint64
-      - doc: |-
-          unvouched holds apply after an install's Restore refused its stream
-          (#1582).
-        name: unvouched
-        type: unvouchedApply
       - name: waiters
         type: map[uint64]*proposal
       - doc: |-
@@ -8462,20 +8456,12 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
-          applyItem runs one item taken from the apply queue. A machine a refused
-          restore left on a prefix takes nothing but a restore: no entry is applied
-          over it, and no cut or save captures it; the other items wait, in order,
-          for a restore that succeeds, which runs them (#1582). It returns false
-          when the apply goroutine must end.
+          applyItem runs one item taken from the apply queue. It returns false
+          when the apply goroutine must end: a restore whose Restore the machine
+          refused stopped the node before it was answered, so no item taken after
+          it runs over the prefix the machine may hold (#1582).
         name: applyItem
         params: it *applyItem
-        recv: n *Node
-        results: bool
-      - doc: |-
-          applyHeldItems runs the items a refused restore held back, once a
-          restore succeeded: the entries it covers are skipped, the others applied
-          over its state. It returns false when the apply goroutine must end.
-        name: applyHeldItems
         recv: n *Node
         results: bool
       - doc: |-
@@ -9722,6 +9708,18 @@ types:
         params: err error, storage bool
         recv: n *Node
       - doc: |-
+          stopUnmarked stops the node as stop does, but writes no stop marker: the
+          cause is held in memory only, a volatile machine's refused restore
+          (#1582), which a restart on a fresh machine does not meet again, and the
+          start refuses on its own when it does.
+        name: stopUnmarked
+        params: err error
+        recv: n *Node
+      - doc: stopAs is stop, with mark saying whether the stop markers are written.
+        name: stopAs
+        params: err error, storage, mark bool
+        recv: n *Node
+      - doc: |-
           reportUnwrittenMarkers logs each place a stop marker could not be written.
           R9-05 accepts a stop that left one marker of the two; the line says which
           one is missing, so an operator knows what protects the next start.
@@ -10528,35 +10526,27 @@ types:
           engine cannot tell a machine that read aside and kept its state from one
           that decoded part of the stream into its live state and failed: the
           machine may hold a prefix of the snapshot no correct node holds (#1582).
-          VERSION_UNSUPPORTED is returned as is: the install, or the start, stops
-          on it (D18). The install's stop runs on its own goroutine, after the apply
-          goroutine went on, so the refusal holds apply first, as any other: the
-          entries handed after the restore were applied over the prefix, and a
-          Barrier released over it, until that stop ran. A DurableStateMachine may have written that prefix to its
-          disk, where a restart resumes past its AppliedPosition: the node stops
-          STATE_MACHINE_FAILED, as when a nil Restore's end is refused, and a
-          start fails with it. A volatile machine's refusal, at an install, holds
-          apply until a Restore succeeds: the entries handed after it wait, and the
-          next offer's restore replaces the state they would have been applied
-          over. A volatile machine's refusal at a start fails the start
-          STATE_MACHINE_FAILED: an older snapshot or a replay from index 1 was
-          applied over the prefix it may hold. No marker is written, since the
-          machine's state is the process's: a start with a machine of its own
+          At an install, on the apply goroutine, the refusal stops the node before
+          the restore is answered, so the goroutine takes no item after it and no
+          entry is applied, and no Barrier released, over that prefix: stopped from
+          the install goroutine once answered, the entries handed after the restore
+          were applied meanwhile. VERSION_UNSUPPORTED stops it on that code, its
+          marker as before (D18). A DurableStateMachine may have written the
+          prefix to its disk, where a restart resumes past its AppliedPosition: it
+          stops STATE_MACHINE_FAILED with its marker, at an install as at a start.
+          A volatile machine's refusal stops an install STATE_MACHINE_FAILED with
+          no marker, and fails a start STATE_MACHINE_FAILED with no fallback to an
+          older snapshot or a replay from index 1, which applied the log over the
+          prefix. Its state is the process's: a start with a machine of its own
           restores again, and one handed the same machine is refused again while
-          its Restore refuses. A snapshot the engine refuses before Restore, on
-          its checksums, touched no machine and is not judged here.
+          its Restore refuses; a marker would only keep down a node a supervisor
+          restarts on a fresh machine. A snapshot the engine refuses before
+          Restore, on its metadata or checksums, touched no machine and is not
+          judged here.
         name: restoreRefused
         params: m *coreconsensus.SnapshotMetaValue, err error, install bool
         recv: n *Node
         results: error
-      - doc: |-
-          holdApply holds apply after an install's refused Restore, until a Restore
-          succeeds, on the apply goroutine and before the restore is answered: no
-          item taken after it runs over the prefix the machine may hold (#1582). A
-          start's refusal holds nothing: no item is taken before it ends.
-        name: holdApply
-        params: install bool
-        recv: n *Node
       - doc: |-
           codecOf is the codec a snapshot of metadata m is decoded with, refused
           VERSION_UNSUPPORTED for a metadata version or a codec this build does
@@ -11063,25 +11053,6 @@ types:
         type: any
     kind: struct
     name: applyResult
-  - doc: |-
-      unvouchedApply is the hold an install's refused Restore puts on apply:
-      the machine may hold a prefix it wrote in place, so no entry is applied
-      onto it and no Barrier or WaitApplied caller is released over it until a
-      Restore succeeds (#1582).
-    fields:
-      - doc: |-
-          on is set by the refusal and cleared by a Restore that succeeds, on
-          the apply goroutine, under am.
-        name: "on"
-        type: bool
-      - doc: |-
-          items are the apply items taken while on, in their order, run once
-          a Restore succeeded. Raft hands no more than MaxApplyLagBytes of
-          payload meanwhile. The apply goroutine's alone.
-        name: items
-        type: "[]applyItem"
-    kind: struct
-    name: unvouchedApply
   - doc: |-
       appliedWaiter is one caller parked until index is applied: ch, one slot,
       receives its release.

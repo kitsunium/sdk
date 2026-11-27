@@ -110,9 +110,6 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 		n.snapState.mu.Unlock()
 		n.am.Lock()
 		n.applied, n.appliedTerm = m.Position.Index, m.Position.Term
-		// The machine holds the snapshot's whole state again: what a
-		// refused restore held back is released over it (#1582).
-		n.unvouched.on = false
 		n.answerCovered(m.Position.Index)
 		n.releaseApplied()
 		n.am.Unlock()
@@ -127,59 +124,49 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 // engine cannot tell a machine that read aside and kept its state from one
 // that decoded part of the stream into its live state and failed: the
 // machine may hold a prefix of the snapshot no correct node holds (#1582).
-// VERSION_UNSUPPORTED is returned as is: the install, or the start, stops
-// on it (D18). The install's stop runs on its own goroutine, after the apply
-// goroutine went on, so the refusal holds apply first, as any other: the
-// entries handed after the restore were applied over the prefix, and a
-// Barrier released over it, until that stop ran. A DurableStateMachine may have written that prefix to its
-// disk, where a restart resumes past its AppliedPosition: the node stops
-// STATE_MACHINE_FAILED, as when a nil Restore's end is refused, and a
-// start fails with it. A volatile machine's refusal, at an install, holds
-// apply until a Restore succeeds: the entries handed after it wait, and the
-// next offer's restore replaces the state they would have been applied
-// over. A volatile machine's refusal at a start fails the start
-// STATE_MACHINE_FAILED: an older snapshot or a replay from index 1 was
-// applied over the prefix it may hold. No marker is written, since the
-// machine's state is the process's: a start with a machine of its own
+// At an install, on the apply goroutine, the refusal stops the node before
+// the restore is answered, so the goroutine takes no item after it and no
+// entry is applied, and no Barrier released, over that prefix: stopped from
+// the install goroutine once answered, the entries handed after the restore
+// were applied meanwhile. VERSION_UNSUPPORTED stops it on that code, its
+// marker as before (D18). A DurableStateMachine may have written the
+// prefix to its disk, where a restart resumes past its AppliedPosition: it
+// stops STATE_MACHINE_FAILED with its marker, at an install as at a start.
+// A volatile machine's refusal stops an install STATE_MACHINE_FAILED with
+// no marker, and fails a start STATE_MACHINE_FAILED with no fallback to an
+// older snapshot or a replay from index 1, which applied the log over the
+// prefix. Its state is the process's: a start with a machine of its own
 // restores again, and one handed the same machine is refused again while
-// its Restore refuses. A snapshot the engine refuses before Restore, on
-// its checksums, touched no machine and is not judged here.
+// its Restore refuses; a marker would only keep down a node a supervisor
+// restarts on a fresh machine. A snapshot the engine refuses before
+// Restore, on its metadata or checksums, touched no machine and is not
+// judged here.
 func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool) error {
-	//: a format this build does not read is stopped on by the caller, nothing applied before.
-	if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
-		n.holdApply(install)
+	_, durable := n.cfg.Machine.(coreconsensus.DurableStateMachine)
+	switch {
+	//: a format this build does not read: the start returns it, an install stops on it here.
+	case errs.HasCode(err, coreconsensus.CodeVersionUnsupported):
+		//: only an install has items after it.
+		if install {
+			n.stop(err, false)
+		}
 		return err
-	}
 	//: a durable machine may have written the prefix to its disk.
-	if _, durable := n.cfg.Machine.(coreconsensus.DurableStateMachine); durable {
+	case durable:
 		serr := origin(coreconsensus.StateMachineFailed,
 			errs.String("why", "a durable machine refused a restore it may have written"),
 			errs.String("id", m.ID), errs.String("cause", err.Error()))
 		n.stop(serr, false)
 		return serr
 	}
-	//: a start's refusal fails the start, with no marker for a state the process takes with it.
-	if !install {
-		return origin(coreconsensus.StateMachineFailed,
-			errs.String("why", "a volatile machine refused a restore it may have written at a start"),
-			errs.String("id", m.ID), errs.String("cause", err.Error()))
+	serr := origin(coreconsensus.StateMachineFailed,
+		errs.String("why", "a volatile machine refused a restore it may have written"),
+		errs.String("id", m.ID), errs.String("cause", err.Error()))
+	//: an install stops, with no marker for a state the process takes with it.
+	if install {
+		n.stopUnmarked(serr)
 	}
-	n.holdApply(install)
-	return err
-}
-
-// holdApply holds apply after an install's refused Restore, until a Restore
-// succeeds, on the apply goroutine and before the restore is answered: no
-// item taken after it runs over the prefix the machine may hold (#1582). A
-// start's refusal holds nothing: no item is taken before it ends.
-func (n *Node) holdApply(install bool) {
-	//: only an install's refusal has items after it.
-	if !install {
-		return
-	}
-	n.am.Lock()
-	n.unvouched.on = true
-	n.am.Unlock()
+	return serr
 }
 
 // idNamesPosition reports whether a snapshot id of the form a cut writes,
