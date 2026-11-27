@@ -36,6 +36,9 @@ type partialRestore struct {
 	// and onPrefix counts the entries applied over it.
 	prefix   atomic.Bool
 	onPrefix atomic.Int64
+	// refusal, when set, is the error the failing restore returns in place
+	// of SNAPSHOT_CORRUPT.
+	refusal error
 }
 
 // Apply implements StateMachine, counting an entry applied over a prefix.
@@ -89,6 +92,10 @@ func (p *partialRestore) Restore(r io.Reader, meta coreconsensus.SnapshotMetaVal
 		}})
 	}
 	close(p.failed)
+	//: a refusal the case names is returned as is.
+	if p.refusal != nil {
+		return p.refusal
+	}
 	return origin(coreconsensus.SnapshotCorrupt, errs.String("why", "the test's machine failed half way"))
 }
 
@@ -173,6 +180,9 @@ func TestAFailedRestoreAppliesNothingUntilARestoreSucceeds(t *testing.T) {
 		name    string
 		inPlace bool
 		durable bool
+		// version has the machine refuse VERSION_UNSUPPORTED, on which the
+		// node stops as before.
+		version bool
 	}
 	runCase := func(t *testing.T, tcase tc) {
 		var lagID atomic.Uint64
@@ -186,6 +196,10 @@ func TestAFailedRestoreAppliesNothingUntilARestoreSucceeds(t *testing.T) {
 				return
 			}
 			p := &partialRestore{kv: tn.sm, inPlace: tcase.inPlace, armed: &armed, node: &node, failed: make(chan struct{})}
+			//: the version case's machine refuses a format it does not read.
+			if tcase.version {
+				p.refusal = origin(coreconsensus.VersionUnsupported, errs.String("why", "the test's machine met a record it does not read"))
+			}
 			machine.Store(p)
 			cfg.Machine = p
 			//: the durable case's machine says where it stands.
@@ -252,16 +266,20 @@ func TestAFailedRestoreAppliesNothingUntilARestoreSucceeds(t *testing.T) {
 			t.Errorf("a DurableStateMachine refused a restore it may have written, and the node goes on (stopped %v, %v): Applied %d, %d entries applied over the prefix",
 				stopped, reason.Err, lag.node.Status().Applied, p.onPrefix.Load())
 		}
-		//: a volatile machine is never stopped by a refused restore.
-		if !tcase.durable && stopped {
+		//: a machine that refused VERSION_UNSUPPORTED stops the node on it, as before.
+		if tcase.version && (!stopped || !errs.HasCode(reason.Err, coreconsensus.CodeVersionUnsupported)) {
+			t.Errorf("a machine refused VERSION_UNSUPPORTED, and the node goes on (stopped %v, %v)", stopped, reason.Err)
+		}
+		//: a volatile machine is never stopped by any other refused restore.
+		if !tcase.durable && !tcase.version && stopped {
 			t.Errorf("a refused restore stopped the node: %v", reason.Err)
 		}
 		//: no entry is applied over the prefix a failed restore wrote.
 		if k := p.onPrefix.Load(); k != 0 {
 			t.Errorf("%d entries were applied over the prefix a failed restore wrote in place", k)
 		}
-		//: a volatile node ends on the leader's state.
-		if !tcase.durable && !sameState(lag.sm, l.sm) {
+		//: a volatile node that goes on ends on the leader's state.
+		if !tcase.durable && !tcase.version && !sameState(lag.sm, l.sm) {
 			t.Errorf("the lagging node holds %d keys, the leader %d", machineKeys(lag), machineKeys(l))
 		}
 	}
@@ -270,6 +288,7 @@ func TestAFailedRestoreAppliesNothingUntilARestoreSucceeds(t *testing.T) {
 		{name: "a restore that wrote a prefix in place applies nothing over it", inPlace: true},
 		{name: "a restore that read aside ends on the leader's state"},
 		{name: "a durable restore that wrote a prefix stops the node", inPlace: true, durable: true},
+		{name: "a restore that wrote a prefix then refused its version applies nothing over it", inPlace: true, version: true},
 	} {
 		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })
 	}

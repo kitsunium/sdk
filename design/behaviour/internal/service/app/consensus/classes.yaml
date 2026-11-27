@@ -2313,6 +2313,7 @@ files:
       - Latest
       - (*Node).restoreFrom
       - (*Node).restoreRefused
+      - (*Node).holdApply
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
@@ -10525,7 +10526,10 @@ types:
           that decoded part of the stream into its live state and failed: the
           machine may hold a prefix of the snapshot no correct node holds (#1582).
           VERSION_UNSUPPORTED is returned as is: the install, or the start, stops
-          on it (D18). A DurableStateMachine may have written that prefix to its
+          on it (D18). The install's stop runs on its own goroutine, after the apply
+          goroutine went on, so the refusal holds apply first, as any other: the
+          entries handed after the restore were applied over the prefix, and a
+          Barrier released over it, until that stop ran. A DurableStateMachine may have written that prefix to its
           disk, where a restart resumes past its AppliedPosition: the node stops
           STATE_MACHINE_FAILED, as when a nil Restore's end is refused, and a
           start fails with it. A volatile machine's refusal, at an install, holds
@@ -10536,6 +10540,14 @@ types:
         params: m *coreconsensus.SnapshotMetaValue, err error, install bool
         recv: n *Node
         results: error
+      - doc: |-
+          holdApply holds apply after an install's refused Restore, until a Restore
+          succeeds, on the apply goroutine and before the restore is answered: no
+          item taken after it runs over the prefix the machine may hold (#1582). A
+          start's refusal holds nothing: no item is taken before it ends.
+        name: holdApply
+        params: install bool
+        recv: n *Node
       - doc: |-
           codecOf is the codec a snapshot of metadata m is decoded with, refused
           VERSION_UNSUPPORTED for a metadata version or a codec this build does

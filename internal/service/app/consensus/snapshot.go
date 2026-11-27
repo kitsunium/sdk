@@ -128,7 +128,10 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 // that decoded part of the stream into its live state and failed: the
 // machine may hold a prefix of the snapshot no correct node holds (#1582).
 // VERSION_UNSUPPORTED is returned as is: the install, or the start, stops
-// on it (D18). A DurableStateMachine may have written that prefix to its
+// on it (D18). The install's stop runs on its own goroutine, after the apply
+// goroutine went on, so the refusal holds apply first, as any other: the
+// entries handed after the restore were applied over the prefix, and a
+// Barrier released over it, until that stop ran. A DurableStateMachine may have written that prefix to its
 // disk, where a restart resumes past its AppliedPosition: the node stops
 // STATE_MACHINE_FAILED, as when a nil Restore's end is refused, and a
 // start fails with it. A volatile machine's refusal, at an install, holds
@@ -136,8 +139,9 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 // next offer's restore replaces the state they would have been applied
 // over. A start's refusal falls back as before.
 func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool) error {
-	//: a format this build does not read is stopped on by the caller.
+	//: a format this build does not read is stopped on by the caller, nothing applied before.
 	if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
+		n.holdApply(install)
 		return err
 	}
 	//: a durable machine may have written the prefix to its disk.
@@ -148,13 +152,22 @@ func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, ins
 		n.stop(serr, false)
 		return serr
 	}
-	//: an install's refusal holds apply until a restore succeeds.
-	if install {
-		n.am.Lock()
-		n.unvouched.on = true
-		n.am.Unlock()
-	}
+	n.holdApply(install)
 	return err
+}
+
+// holdApply holds apply after an install's refused Restore, until a Restore
+// succeeds, on the apply goroutine and before the restore is answered: no
+// item taken after it runs over the prefix the machine may hold (#1582). A
+// start's refusal holds nothing: no item is taken before it ends.
+func (n *Node) holdApply(install bool) {
+	//: only an install's refusal has items after it.
+	if !install {
+		return
+	}
+	n.am.Lock()
+	n.unvouched.on = true
+	n.am.Unlock()
 }
 
 // idNamesPosition reports whether a snapshot id of the form a cut writes,

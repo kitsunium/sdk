@@ -23485,17 +23485,17 @@ sequences:
         kind: actor
       - id: (*Node).restoreRefused
         kind: self
+      - id: n.holdApply
+        kind: internal
       - id: origin
         kind: internal
       - id: n.stop
         kind: internal
-      - id: n.am.Lock
-        kind: value
-      - id: n.am.Unlock
-        kind: value
     steps:
       - opt:
           do:
+            - eval: n.holdApply(install)
+              to: n.holdApply
             - return: err
           when: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
       - opt:
@@ -23513,16 +23513,30 @@ sequences:
             bind: _, durable
             eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
           when: durable
+      - eval: n.holdApply(install)
+        to: n.holdApply
+      - return: err
+  - of: (*Node).holdApply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).holdApply
+        kind: self
+      - id: n.am.Lock
+        kind: value
+      - id: n.am.Unlock
+        kind: value
+    steps:
       - opt:
           do:
-            - eval: n.am.Lock()
-              to: n.am.Lock
-            - set: n.unvouched.on
-              value: "true"
-            - eval: n.am.Unlock()
-              to: n.am.Unlock
-          when: install
-      - return: err
+            - return: ""
+          when: "!install"
+      - eval: n.am.Lock()
+        to: n.am.Lock
+      - set: n.unvouched.on
+        value: "true"
+      - eval: n.am.Unlock()
+        to: n.am.Unlock
   - of: idNamesPosition
     participants:
       - id: caller
