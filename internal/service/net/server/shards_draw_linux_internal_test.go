@@ -38,6 +38,12 @@ const (
 	drawNetnsEnv = "NET_SERVER_TEST_DRAW_NETNS"
 	// netnsPath is the calling thread's network namespace.
 	netnsPath = "/proc/thread-self/ns/net"
+	// usernsPath is the calling thread's user namespace.
+	usernsPath = "/proc/thread-self/ns/user"
+	// nsGetUserns is NS_GET_USERNS, _IO(0xb7, 0x1) (include/uapi/linux/nsfs.h):
+	// on a namespace's descriptor, a descriptor of the user namespace that owns
+	// it, EPERM when that owner is outside the caller's user namespace.
+	nsGetUserns = 0xb701
 	// initialUIDMap is the initial user namespace's uid_map, the full
 	// identity: a child that reads it is on the host.
 	initialUIDMap = "0 0 4294967295"
@@ -58,7 +64,8 @@ var drawRanges = map[string]string{
 	"2": fmt.Sprintf("%d %d", drawPort, drawPort+1),
 }
 
-// netnsID is a network namespace's identity, its nsfs device and inode.
+// netnsID is a namespace's identity, its nsfs device and inode: a network
+// namespace's, or a user namespace's.
 type netnsID struct{ dev, ino uint64 }
 
 // String writes the identity as drawNetnsEnv carries it.
@@ -79,9 +86,47 @@ func parseNetnsID(raw string) (netnsID, bool) {
 // threadNetns stats the calling thread's network namespace; the caller holds
 // its OS thread so the answer is the namespace its next calls run in.
 func threadNetns() (netnsID, error) {
-	var st syscall.Stat_t
 	//: the thread's own namespace, not the leader's.
-	if err := syscall.Stat(netnsPath, &st); err != nil {
+	return statNamespace(netnsPath)
+}
+
+// threadUserns stats the calling thread's user namespace.
+func threadUserns() (netnsID, error) {
+	//: the thread's own, the one its writes are judged in.
+	return statNamespace(usernsPath)
+}
+
+// statNamespace stats the namespace path names, following the magic link to
+// its nsfs inode.
+func statNamespace(path string) (netnsID, error) {
+	var st syscall.Stat_t
+	//: the namespace, read.
+	if err := syscall.Stat(path, &st); err != nil {
+		return netnsID{}, err
+	}
+	return netnsID{dev: uint64(st.Dev), ino: st.Ino}, nil
+}
+
+// threadNetnsOwner returns the user namespace that owns the calling thread's
+// network namespace (NS_GET_USERNS): the child's own when both were created
+// together by CLONE_NEWUSER|CLONE_NEWNET, the initial one for the host's —
+// which a child in a user namespace of its own cannot name: EPERM.
+func threadNetnsOwner() (netnsID, error) {
+	f, err := os.Open(netnsPath)
+	//: the thread's network namespace, opened.
+	if err != nil {
+		return netnsID{}, err
+	}
+	defer func() { _ = f.Close() }()
+	owner, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), nsGetUserns, 0)
+	//: an owner outside this user namespace, or no such ioctl.
+	if errno != 0 {
+		return netnsID{}, errno
+	}
+	defer func() { _ = syscall.Close(int(owner)) }()
+	var st syscall.Stat_t
+	//: the owner's identity.
+	if err := syscall.Fstat(int(owner), &st); err != nil {
 		return netnsID{}, err
 	}
 	return netnsID{dev: uint64(st.Dev), ino: st.Ino}, nil
@@ -101,12 +146,22 @@ type drawGuard struct {
 	// uidMap is /proc/self/uid_map, and uidMapErr the failure of its read.
 	uidMap    string
 	uidMapErr error
+	// owner is the user namespace that owns own (NS_GET_USERNS), and
+	// ownerErr the failure of that read; userns is the child's own user
+	// namespace, and usernsErr the failure of its read.
+	owner     netnsID
+	ownerErr  error
+	userns    netnsID
+	usernsErr error
 }
 
 // drawChildDecision decides whether a draw child may write its namespace's
 // range: it returns the range to write, or the reason it refuses. It refuses
 // an unknown case, a parent namespace missing or unreadable, its own namespace
-// unread or the parent's, and the initial user namespace.
+// unread or the parent's, the initial user namespace, and a network namespace
+// its own user namespace does not own — the host's, seen from a user
+// namespace that maps 0 to 0 without being the identity, with a parent named
+// by hand (R5 of #1585's review).
 func drawChildDecision(g drawGuard) (spec, refusal string) {
 	spec, known := drawRanges[g.index]
 	//: only a case the constants build.
@@ -135,6 +190,20 @@ func drawChildDecision(g drawGuard) (spec, refusal string) {
 	if strings.Join(strings.Fields(g.uidMap), " ") == initialUIDMap {
 		return "", "in the initial user namespace"
 	}
+	//: the owner of its network namespace, named — EPERM for an owner
+	//: outside its user namespace.
+	if g.ownerErr != nil {
+		return "", fmt.Sprintf("network namespace's owner: %v", g.ownerErr)
+	}
+	//: its own user namespace, read.
+	if g.usernsErr != nil {
+		return "", fmt.Sprintf("own user namespace: %v", g.usernsErr)
+	}
+	//: a network namespace created with its user namespace, as the parent's
+	//: clone creates it.
+	if g.owner != g.userns {
+		return "", "network namespace " + g.own.String() + " owned by user namespace " + g.owner.String() + ", not its own " + g.userns.String()
+	}
 	return spec, ""
 }
 
@@ -153,7 +222,8 @@ func Test_drawChildDecision(t *testing.T) {
 	parent := netnsID{dev: 4, ino: 4026531840}
 	own := netnsID{dev: 4, ino: 4026532999}
 	const childMap = "         0       1000          1\n"
-	admitted := drawGuard{index: "1", parent: parent.String(), own: own, uidMap: childMap}
+	userns := netnsID{dev: 4, ino: 4026533000}
+	admitted := drawGuard{index: "1", parent: parent.String(), own: own, uidMap: childMap, owner: userns, userns: userns}
 	with := func(edit func(*drawGuard)) drawGuard {
 		g := admitted
 		edit(&g)
@@ -171,6 +241,13 @@ func Test_drawChildDecision(t *testing.T) {
 		{name: "the parent's namespace", g: with(func(g *drawGuard) { g.own = parent }), refusal: "in the parent's network namespace"},
 		{name: "uid_map unread", g: with(func(g *drawGuard) { g.uidMapErr = syscall.EACCES }), refusal: "uid_map"},
 		{name: "the initial user namespace", g: with(func(g *drawGuard) { g.uidMap = "         0          0 4294967295\n" }), refusal: "initial user namespace"},
+		{name: "the host's network namespace under unshare -U -r", g: with(func(g *drawGuard) {
+			g.uidMap, g.owner, g.ownerErr = "         0          0          1\n", netnsID{}, syscall.EPERM
+		}), refusal: "network namespace's owner"},
+		{name: "a network namespace another user namespace owns", g: with(func(g *drawGuard) {
+			g.owner = netnsID{dev: 4, ino: 4026531837}
+		}), refusal: "not its own"},
+		{name: "its own user namespace unread", g: with(func(g *drawGuard) { g.usernsErr = syscall.ENOENT }), refusal: "own user namespace"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Parallel()
@@ -186,6 +263,48 @@ func Test_drawChildDecision(t *testing.T) {
 		//: a refusal writes nothing, and says why.
 		if spec != "" || !strings.Contains(refusal, c.refusal) {
 			t.Fatalf("decision = %q, %q; want no range and a refusal naming %q", spec, refusal, c.refusal)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// Test_namespaceReaders pins the guard's readers on this process, reading
+// only — no namespace is created, nothing is written: each names an nsfs inode
+// on the device of this thread's network namespace, and the owner's read is
+// NS_GET_USERNS — EPERM where this process's user namespace does not reach the
+// owner, never ENOTTY, which a wrong request number would give.
+func Test_namespaceReaders(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		read func() (netnsID, error)
+		// mayRefuse is a read EPERM may answer.
+		mayRefuse bool
+	}
+	tests := []tc{
+		{name: "the network namespace", read: threadNetns},
+		{name: "the user namespace", read: threadUserns},
+		{name: "the network namespace's owner", read: threadNetnsOwner, mayRefuse: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Parallel()
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		netns, nerr := threadNetns()
+		//: no /proc namespaces to read here.
+		if nerr != nil {
+			t.Skipf("%s: %v", netnsPath, nerr)
+		}
+		id, err := c.read()
+		//: an owner outside this user namespace, refused as the kernel says.
+		if c.mayRefuse && errors.Is(err, syscall.EPERM) {
+			t.Skipf("%s: %v", c.name, err)
+		}
+		//: an nsfs inode, on the namespaces' device.
+		if err != nil || id.dev != netns.dev || id.ino == 0 {
+			t.Fatalf("%s = %v, %v; want an inode on device %d", c.name, id, err, netns.dev)
 		}
 	}
 	for _, c := range tests {
@@ -461,9 +580,10 @@ func TestShards_portZeroNarrowRange(t *testing.T) {
 // 0.0.0.0:0 and prints its verdict. It skips unless started as that child,
 // and writes nothing — printing "draw: skip <reason>" — unless
 // drawChildDecision admits it: a known case, and a network namespace and a
-// user namespace that are not the parent's or the host's. The thread that
-// reads its namespace is the one that opens and writes the sysctl, held until
-// the test ends.
+// user namespace that are not the parent's or the host's, the first owned by
+// the second. A refusal is a skip, the line printed first for the parent. The
+// thread that reads its namespace is the one that opens and writes the sysctl,
+// held until the test ends.
 func TestShards_portZeroNarrowRangeChild(t *testing.T) {
 	index := os.Getenv(drawChildEnv)
 	//: run by the parent alone.
@@ -477,21 +597,25 @@ func TestShards_portZeroNarrowRangeChild(t *testing.T) {
 	runtime.LockOSThread()
 	own, ownErr := threadNetns()
 	uidMap, uidMapErr := os.ReadFile("/proc/self/uid_map")
+	owner, ownerErr := threadNetnsOwner()
+	userns, usernsErr := threadUserns()
 	spec, refusal := drawChildDecision(drawGuard{
 		index: index, parent: os.Getenv(drawNetnsEnv),
 		own: own, ownErr: ownErr,
 		uidMap: string(uidMap), uidMapErr: uidMapErr,
+		owner: owner, ownerErr: ownerErr,
+		userns: userns, usernsErr: usernsErr,
 	})
 	//: not a namespace of its own, or not a case of the constants: no write.
 	if refusal != "" {
 		fmt.Printf("draw: skip %s\n", refusal)
-		return
+		t.Skip(refusal)
 	}
 	//: the namespace's own sysctl, refused where the user namespace is
 	//: stripped of its capabilities.
 	if err := os.WriteFile("/proc/sys/net/ipv4/ip_local_port_range", []byte(spec), 0o644); err != nil {
 		fmt.Printf("draw: skip ip_local_port_range: %v\n", err)
-		return
+		t.Skipf("ip_local_port_range: %v", err)
 	}
 	held, err := foreignSocket(t.Context(), "0.0.0.0:"+strconv.Itoa(drawPort))
 	if err != nil {
