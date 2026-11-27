@@ -468,14 +468,9 @@ func TestARestoreWhoseSecondReadIsCutIsRefused(t *testing.T) {
 			if !tcase.cut {
 				t.Errorf("the restore of %s read it whole, yet it was refused (machine error %v): %s removed, Applied %d", id, got.err, gone, st.Applied)
 			}
-			//: a machine that accepted the stream cannot be refused and kept running.
+			//: a cut second read stops the node, its machine refused or not: none is removed and kept running.
 			if stops {
-				t.Errorf("the machine accepted %s (error %v, %d keys against %d before), its end was refused, yet the node kept running: %s removed, Applied %d against the snapshot's %d",
-					id, got.err, got.after, got.before, gone, st.Applied, index)
-			}
-			//: the refusal is the snapshot's own fault, the machine kept its state, and applied did not move.
-			if tcase.cut && !stops && (!errs.HasCode(got.err, coreconsensus.CodeSnapshotCorrupt) || got.after != got.before || gone != id || st.Applied >= index) {
-				t.Errorf("the second read of %s was cut by a chunk: the machine read %v (want SNAPSHOT_CORRUPT) and holds %d keys against %d before, %s removed with Applied %d against the snapshot's %d",
+				t.Errorf("the second read of %s was cut (machine error %v, %d keys against %d before), yet the node kept running: %s removed, Applied %d against the snapshot's %d",
 					id, got.err, got.after, got.before, gone, st.Applied, index)
 			}
 		//: the install reached installed, raft moved.
@@ -501,8 +496,13 @@ func TestARestoreWhoseSecondReadIsCutIsRefused(t *testing.T) {
 			}
 			//: the stop says the machine is not vouched for, applied did not move, and the copy stays for the next start.
 			if stops && (!errs.HasCode(reason.Err, coreconsensus.CodeStateMachineFailed) || (got.err != nil) != refuses || index == 0 || st.Applied >= index) {
-				t.Errorf("the machine accepted %s, whose end was refused: the node stopped with %v (want STATE_MACHINE_FAILED), the machine read %v, the copy is at %d, Applied %d",
-					id, reason.Err, got.err, index, st.Applied)
+				t.Errorf("the second read of %s was cut: the node stopped with %v (want STATE_MACHINE_FAILED), the machine read %v (refused %v), the copy is at %d, Applied %d",
+					id, reason.Err, got.err, refuses, index, st.Applied)
+			}
+			//: a machine that read the cut itself was handed SNAPSHOT_CORRUPT, and kept its state.
+			if refuses && (!errs.HasCode(got.err, coreconsensus.CodeSnapshotCorrupt) || got.after != got.before) {
+				t.Errorf("the second read of %s was cut by a chunk: the machine read %v (want SNAPSHOT_CORRUPT) and holds %d keys against %d before",
+					id, got.err, got.after, got.before)
 			}
 		//: the install ended no way.
 		case <-time.After(10 * time.Second):
