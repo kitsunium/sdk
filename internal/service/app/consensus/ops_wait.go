@@ -16,8 +16,9 @@ import (
 // committed before the call (D9).
 // Reads queued in one turn share one round.
 // A node that knows no leader of a stable term, or whose leader changes
-// while the read waits, refuses it with NOT_LEADER: nothing was read, and
-// the call may be retried, for instance after the next leader change.
+// before the read is confirmed, refuses it with NOT_LEADER: nothing was
+// read, and the call may be retried, for instance after the next leader
+// change.
 func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	if n.stopped.Load() {
 		return coreconsensus.TokenValue{}, n.stoppedErr()

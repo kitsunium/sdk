@@ -29,7 +29,7 @@ A command without a natural key — an event appended, a counter moved — is re
 
 Barrier returns once the local state machine reflects every write committed before the call: ReadIndex by default, confirmed by a heartbeat round started after the read arrived. ReadLease is opt-in and sound only under the four conditions of D9; a leader paused after its lease check serves a stale read, which ReadIndex never does.
 
-A node that knows no leader of a stable term, or whose leader changes while the read waits, refuses the read with NOT\_LEADER: nothing was read, and Barrier may be retried, for instance after the next leader change.
+A node that knows no leader of a stable term, or whose leader changes before the read is confirmed, refuses the read with NOT\_LEADER: nothing was read, and Barrier may be retried, for instance after the next leader change.
 
 ### Backup
 
@@ -3391,7 +3391,7 @@ AppendBackup writes to w the committed entries after since, the point a previous
 func (*Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error)
 ```
 
-Barrier returns once the local state machine reflects every write committed before the call (D9). Reads queued in one turn share one round. A node that knows no leader of a stable term, or whose leader changes while the read waits, refuses it with NOT\_LEADER: nothing was read, and the call may be retried, for instance after the next leader change.
+Barrier returns once the local state machine reflects every write committed before the call (D9). Reads queued in one turn share one round. A node that knows no leader of a stable term, or whose leader changes before the read is confirmed, refuses it with NOT\_LEADER: nothing was read, and the call may be retried, for instance after the next leader change.
 
 <a name="Node.ClearNoSpace"></a>
 ### func \(Node\) [ClearNoSpace](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -3984,8 +3984,9 @@ type Replicated interface {
 	// committed before the call, with the token of the applied index.
 	// Reads queued in one turn share one round.
 	// A node that knows no leader of a stable term, or whose leader changes
-	// while the read waits, refuses it with NOT_LEADER: nothing was read, and
-	// the call may be retried, for instance after the next leader change.
+	// before the read is confirmed, refuses it with NOT_LEADER: nothing was
+	// read, and the call may be retried, for instance after the next leader
+	// change.
 	Barrier(ctx context.Context) (TokenValue, error)
 	// Propose replicates data and returns, once the entry is applied
 	// locally, its lineage-scoped token and the value Apply returned.
@@ -4015,7 +4016,7 @@ type Replicated interface {
 func (Replicated) Barrier(ctx context.Context) (TokenValue, error)
 ```
 
-Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index. Reads queued in one turn share one round. A node that knows no leader of a stable term, or whose leader changes while the read waits, refuses it with NOT\_LEADER: nothing was read, and the call may be retried, for instance after the next leader change.
+Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index. Reads queued in one turn share one round. A node that knows no leader of a stable term, or whose leader changes before the read is confirmed, refuses it with NOT\_LEADER: nothing was read, and the call may be retried, for instance after the next leader change.
 
 <a name="Replicated.Propose"></a>
 ### func \(Replicated\) [Propose](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
