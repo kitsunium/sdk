@@ -15,6 +15,8 @@ import (
 // Barrier returns once the local state machine reflects every write
 // committed before the call (D9).
 // Reads queued in one turn share one round.
+// A Barrier may be refused with NOT_LEADER: nothing was read, and the call is
+// safe to retry.
 func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	if n.stopped.Load() {
 		return coreconsensus.TokenValue{}, n.stoppedErr()

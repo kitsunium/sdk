@@ -71,6 +71,9 @@
 // under the four conditions of D9; a leader paused after its lease check
 // serves a stale read, which ReadIndex never does.
 //
+// A Barrier may be refused with NOT_LEADER: nothing was read, and the call is
+// safe to retry.
+//
 // # Backup
 //
 // A backup is three calls. Node.ExportBackup writes a full file: the

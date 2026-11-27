@@ -29,6 +29,8 @@ A command without a natural key — an event appended, a counter moved — is re
 
 Barrier returns once the local state machine reflects every write committed before the call: ReadIndex by default, confirmed by a heartbeat round started after the read arrived. ReadLease is opt-in and sound only under the four conditions of D9; a leader paused after its lease check serves a stale read, which ReadIndex never does.
 
+A Barrier may be refused with NOT\_LEADER: nothing was read, and the call is safe to retry.
+
 ### Backup
 
 A backup is three calls. Node.ExportBackup writes a full file: the snapshot SaveSnapshot cuts, then the committed entries after it up to the commit at the call, then a trailer naming the point it ends at. Node.AppendBackup writes, from that point, only the entries committed since, and returns the next point; keep the last point beside the files. VerifyBackup checks the files offline (every record's sum, the snapshot's SHA-256, the chain from its ChainTip), and RestoreBackup restores the export and its tails, in order, through ImportObserved on every node of the new cluster, refusing a tail that does not continue the chain before anything is written.
@@ -3398,7 +3400,7 @@ AppendBackup writes to w the committed entries after since, the point a previous
 func (*Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error)
 ```
 
-Barrier returns once the local state machine reflects every write committed before the call (D9). Reads queued in one turn share one round.
+Barrier returns once the local state machine reflects every write committed before the call (D9). Reads queued in one turn share one round. A Barrier may be refused with NOT\_LEADER: nothing was read, and the call is safe to retry.
 
 <a name="Node.ClearNoSpace"></a>
 ### func \(Node\) [ClearNoSpace](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -3990,6 +3992,8 @@ type Replicated interface {
 	// Barrier returns once the local state machine reflects every write
 	// committed before the call, with the token of the applied index.
 	// Reads queued in one turn share one round.
+	// A Barrier may be refused with NOT_LEADER: nothing was read, and the call is
+	// safe to retry.
 	Barrier(ctx context.Context) (TokenValue, error)
 	// Propose replicates data and returns, once the entry is applied
 	// locally, its lineage-scoped token and the value Apply returned.
@@ -4019,7 +4023,7 @@ type Replicated interface {
 func (Replicated) Barrier(ctx context.Context) (TokenValue, error)
 ```
 
-Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index. Reads queued in one turn share one round.
+Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index. Reads queued in one turn share one round. A Barrier may be refused with NOT\_LEADER: nothing was read, and the call is safe to retry.
 
 <a name="Replicated.Propose"></a>
 ### func \(Replicated\) [Propose](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)

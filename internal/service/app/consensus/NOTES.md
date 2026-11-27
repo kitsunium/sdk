@@ -325,6 +325,9 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `applyCompactRecord` or `applyTruncate` stop inlining: `kit gen` holds
   the inline set of the base and refuses a generation that loses one, so
   their bodies call one helper of the index each.
+  Until #1616 is settled, `(*Node).refusesStart` no longer inlines since
+  #1582: a branch cut before #1582 regenerates with
+  `kit gen -base origin/main`, or `-base MERGE_HEAD` during a merge.
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.
@@ -2053,6 +2056,15 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `TestATurnThatChangesNothingPublishesWithoutAllocating`,
   `TestAFrameWithoutEntriesIsEncodedInOneAllocation`; `BENCH.md`'s `TURN`
   rows).
+- Promise more of a `Barrier`'s refusal than "may be NOT_LEADER, nothing
+  read, safe to retry": the cases are the code's and move with it. Today a
+  queued read is handled at the loop's next turn (`ops_wait.go:32`,
+  `node.go:1412-1418`); it then goes to the leader the node knows, or is
+  refused NOT_LEADER when none of a stable term is known
+  (`raft/leader.go:1741-1756`); once registered, a leader change before
+  the confirmation refuses it (`node.go:1938-1941`, `node.go:2022-2025`);
+  once confirmed it waits for the application, which a leader change no
+  longer refuses (`apply.go:475-497`).
 - Hand the loop a `Barrier` through `exec`, or handle the Ready per read:
   each closure ran in its own turn and flushed its read alone, so N
   concurrent reads cost N heartbeat broadcasts (#1108). `Barrier` queues

@@ -5704,7 +5704,7 @@
       "recv": "Replicated",
       "spelled": "func(ctx context.Context) (TokenValue, error)",
       "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, error)",
-      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call, with the token of the applied index.\nReads queued in one turn share one round.\n",
+      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call, with the token of the applied index.\nReads queued in one turn share one round.\nA Barrier may be refused with NOT_LEADER: nothing was read, and the call is\nsafe to retry.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -70143,7 +70143,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context) (coreconsensus.TokenValue, error)",
       "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, error)",
-      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call (D9).\nReads queued in one turn share one round.\n",
+      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call (D9).\nReads queued in one turn share one round.\nA Barrier may be refused with NOT_LEADER: nothing was read, and the call is\nsafe to retry.\n",
       "file": "service/app/consensus/ops_wait.go",
       "layer": "service",
       "family": "app"
@@ -72955,7 +72955,7 @@
       "recv": "Raft",
       "spelled": "func(now time.Time, ctx uint64, noLease bool)",
       "canonical": "func(now time.Time, ctx uint64, noLease bool)",
-      "doc": "ReadIndex asks for a linearizable read point under ctx. noLease forces a\nconfirmation round.\n",
+      "doc": "ReadIndex asks for a linearizable read point under ctx. noLease forces a\nconfirmation round.\nA read may be refused with NOT_LEADER: nothing was read, and it may be\nasked again.\n",
       "file": "service/app/consensus/raft/leader.go",
       "layer": "service",
       "family": "app"

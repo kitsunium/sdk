@@ -624,6 +624,8 @@ packages:
               Barrier returns once the local state machine reflects every write
               committed before the call, with the token of the applied index.
               Reads queued in one turn share one round.
+              A Barrier may be refused with NOT_LEADER: nothing was read, and the call is
+              safe to retry.
             in:
               - name: ctx
                 type: context.Context
@@ -3911,6 +3913,8 @@ packages:
               Barrier returns once the local state machine reflects every write
               committed before the call (D9).
               Reads queued in one turn share one round.
+              A Barrier may be refused with NOT_LEADER: nothing was read, and the call is
+              safe to retry.
             in:
               - name: ctx
                 type: context.Context
@@ -5782,6 +5786,8 @@ packages:
           - doc: |-
               ReadIndex asks for a linearizable read point under ctx. noLease forces a
               confirmation round.
+              A read may be refused with NOT_LEADER: nothing was read, and it may be
+              asked again.
             in:
               - name: now
                 type: time.Time
@@ -6730,6 +6736,9 @@ packages:
       round started after the read arrived. ReadLease is opt-in and sound only
       under the four conditions of D9; a leader paused after its lease check
       serves a stale read, which ReadIndex never does.
+
+      A Barrier may be refused with NOT_LEADER: nothing was read, and the call is
+      safe to retry.
 
       # Backup
 
