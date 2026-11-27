@@ -1303,7 +1303,9 @@ func (ul *uLoop) reapRings() {
 // in that work. Under 6.13 and later one enter runs only a few dozen of
 // those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds. A ring already
 // behind — cut by the budget, not reached, or starved — is left for the next
-// batch, the budget kept (ADR 0206).
+// batch, the budget kept (ADR 0206). A ring the budget cuts here is left as
+// reapRings leaves one: counted, the next batch starting there without
+// waiting (cutAt), and the rings after it not caught up.
 func (ul *uLoop) catchUp() {
 	//: serving: no silence is judged.
 	if !ul.lp.draining {
@@ -1311,18 +1313,40 @@ func (ul *uLoop) catchUp() {
 		return
 	}
 	//: every ring the batch reaped whole.
-	for _, rr := range ul.rings {
+	for i, rr := range ul.rings {
 		//: behind already: judged at a later batch.
 		if rr.r.behind() {
 			continue
 		}
-		rr.r.setBehind(rr.catchUp())
+		behind, cut := rr.catchUp()
+		rr.r.setBehind(behind)
+		//: the budget ran out with completions left: the rest next batch.
+		if cut {
+			ul.cutBehind(i)
+			return
+		}
+	}
+}
+
+// cutBehind records the budget's cut of ring i in catchUp as reapRings records
+// its own: the ring counted, the next batch starting at the batch's first cut
+// without waiting, and every ring after i, which catchUp no longer reaches,
+// behind.
+func (ul *uLoop) cutBehind(i int) {
+	ul.rings[i].r.st.cut++
+	//: reapRings cut none: this one is where the next batch starts.
+	if ul.cutAt == 0 {
+		ul.cutAt = i + 1
+	}
+	//: not caught up this batch.
+	for _, rr := range ul.rings[i+1:] {
+		rr.r.setBehind(true)
 	}
 }
 
 // catchUp is uLoop.catchUp on one ring, and reports whether it is still
-// behind.
-func (rr *uRing) catchUp() bool {
+// behind, and whether the budget cut its reap with completions left.
+func (rr *uRing) catchUp() (behind, cut bool) {
 	//: an enter, then a reap, until neither brings anything.
 	for range reapRounds {
 		//: the deferred work runs only on this thread's GETEVENTS enter.
@@ -1330,19 +1354,24 @@ func (rr *uRing) catchUp() bool {
 			rr.u.flushOverflow()
 		}
 		before := rr.r.st.completions
-		//: cut by the budget, or the kernel held completions back.
-		if rr.reapAll() || rr.u.overflowed() {
+		//: cut by the budget: behind, and the next batch does not wait.
+		if rr.reapAll() {
+			//: cut.
+			return true, true
+		}
+		//: the kernel held completions back.
+		if rr.u.overflowed() {
 			//: behind.
-			return true
+			return true, false
 		}
 		//: nothing came: caught up.
 		if rr.r.st.completions == before {
 			//: judged this batch.
-			return len(rr.starved) > 0
+			return len(rr.starved) > 0, false
 		}
 	}
 	//: still coming after the rounds.
-	return true
+	return true, false
 }
 
 // submitLate hands the kernel the answers endBatch queued at once, rather

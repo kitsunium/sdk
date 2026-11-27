@@ -2301,6 +2301,7 @@ files:
       - (*uLoop).await
       - (*uLoop).reapRings
       - (*uLoop).catchUp
+      - (*uLoop).cutBehind
       - (*uRing).catchUp
       - (*uLoop).submitLate
       - (*uLoop).live
@@ -6457,10 +6458,10 @@ types:
         recv: rr *uRing
       - doc: |-
           catchUp is uLoop.catchUp on one ring, and reports whether it is still
-          behind.
+          behind, and whether the budget cut its reap with completions left.
         name: catchUp
         recv: rr *uRing
-        results: bool
+        results: behind, cut bool
       - doc: |-
           reapAll reaps the ring's CQ until it is empty, a batch at a time, and
           flushes an overflow the kernel held back. Under a batch budget it reaps
@@ -7438,8 +7439,18 @@ types:
           in that work. Under 6.13 and later one enter runs only a few dozen of
           those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds. A ring already
           behind — cut by the budget, not reached, or starved — is left for the next
-          batch, the budget kept (ADR 0206).
+          batch, the budget kept (ADR 0206). A ring the budget cuts here is left as
+          reapRings leaves one: counted, the next batch starting there without
+          waiting (cutAt), and the rings after it not caught up.
         name: catchUp
+        recv: ul *uLoop
+      - doc: |-
+          cutBehind records the budget's cut of ring i in catchUp as reapRings records
+          its own: the ring counted, the next batch starting at the batch's first cut
+          without waiting, and every ring after i, which catchUp no longer reaches,
+          behind.
+        name: cutBehind
+        params: i int
         recv: ul *uLoop
       - doc: |-
           submitLate hands the kernel the answers endBatch queued at once, rather

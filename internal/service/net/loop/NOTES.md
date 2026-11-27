@@ -125,7 +125,11 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   GETEVENTS so the kernel runs the work a recv armed before its data left —
   a wait that finds the CQ not empty does not enter —, until an enter posts
   nothing, `reapRounds` times at most, else the ring stays behind
-  (`TestConformance_drainRunsDeferredWork`). The drain's look (`settleDrain`, then
+  (`TestConformance_drainRunsDeferredWork`). A `catchUp` the batch budget
+  cuts leaves its ring as `reapRings`' cut does: counted, `cutAt` set so the
+  next batch reaps it without waiting, the rings after it behind — else a
+  cut secondary waited on an empty primary for its tick
+  (`TestURingCatchUp_cutLeavesTheRingNext`, ADR 0206). The drain's look (`settleDrain`, then
   `closeSettled`) runs once `OnBatchEnd` has returned, before `endBatch`
   flushes: an answer written at `OnBatchEnd` is queued before the close is
   marked, and a closing slot finishes only once its output left (#1385).

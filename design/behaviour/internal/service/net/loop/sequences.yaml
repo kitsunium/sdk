@@ -9471,7 +9471,11 @@ sequences:
         kind: actor
       - id: (*uLoop).catchUp
         kind: self
+      - id: rr.catchUp
+        kind: internal
       - id: rr.r.setBehind
+        kind: internal
+      - id: ul.cutBehind
         kind: internal
     steps:
       - opt:
@@ -9484,10 +9488,42 @@ sequences:
                 do:
                   - continue: true
                 when: rr.r.behind()
-            - eval: rr.r.setBehind(rr.catchUp())
+            - bind: behind, cut
+              eval: rr.catchUp()
+              to: rr.catchUp
+            - eval: rr.r.setBehind(behind)
+              to: rr.r.setBehind
+            - opt:
+                do:
+                  - eval: ul.cutBehind(i)
+                    to: ul.cutBehind
+                  - return: ""
+                when: cut
+          key: i
+          range: ul.rings
+          value: rr
+  - of: (*uLoop).cutBehind
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).cutBehind
+        kind: self
+      - id: rr.r.setBehind
+        kind: internal
+    steps:
+      - op: ++
+        set: ul.rings[i].r.st.cut
+      - opt:
+          do:
+            - set: ul.cutAt
+              value: i + 1
+          when: ul.cutAt == 0
+      - loop:
+          do:
+            - eval: rr.r.setBehind(true)
               to: rr.r.setBehind
           key: _
-          range: ul.rings
+          range: ul.rings[i+1:]
           value: rr
   - of: (*uRing).catchUp
     participants:
@@ -9509,14 +9545,18 @@ sequences:
               eval: rr.r.st.completions
             - opt:
                 do:
-                  - return: "true"
-                when: rr.reapAll() || rr.u.overflowed()
+                  - return: true, true
+                when: rr.reapAll()
             - opt:
                 do:
-                  - return: len(rr.starved) > 0
+                  - return: true, false
+                when: rr.u.overflowed()
+            - opt:
+                do:
+                  - return: len(rr.starved) > 0, false
                 when: rr.r.st.completions == before
           range: reapRounds
-      - return: "true"
+      - return: true, false
   - of: (*uLoop).submitLate
     participants:
       - id: caller
