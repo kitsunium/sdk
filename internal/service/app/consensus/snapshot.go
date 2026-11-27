@@ -137,7 +137,13 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 // start fails with it. A volatile machine's refusal, at an install, holds
 // apply until a Restore succeeds: the entries handed after it wait, and the
 // next offer's restore replaces the state they would have been applied
-// over. A start's refusal falls back as before.
+// over. A volatile machine's refusal at a start fails the start
+// STATE_MACHINE_FAILED: an older snapshot or a replay from index 1 was
+// applied over the prefix it may hold. No marker is written, since the
+// machine's state is the process's: a start with a machine of its own
+// restores again, and one handed the same machine is refused again while
+// its Restore refuses. A snapshot the engine refuses before Restore, on
+// its checksums, touched no machine and is not judged here.
 func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool) error {
 	//: a format this build does not read is stopped on by the caller, nothing applied before.
 	if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
@@ -151,6 +157,12 @@ func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, ins
 			errs.String("id", m.ID), errs.String("cause", err.Error()))
 		n.stop(serr, false)
 		return serr
+	}
+	//: a start's refusal fails the start, with no marker for a state the process takes with it.
+	if !install {
+		return origin(coreconsensus.StateMachineFailed,
+			errs.String("why", "a volatile machine refused a restore it may have written at a start"),
+			errs.String("id", m.ID), errs.String("cause", err.Error()))
 	}
 	n.holdApply(install)
 	return err

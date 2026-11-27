@@ -11628,7 +11628,9 @@ sequences:
       - return: coreconsensus.SnapshotMetaValue{}, nil, newest, nil
   - of: (*Node).refusesStart
     steps:
-      - return: errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) || n.stopped.Load()
+      - return: |-
+          errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) ||
+          		errs.HasCode(rerr, coreconsensus.CodeStateMachineFailed) || n.stopped.Load()
   - of: (*Node).fallbackGap
     steps:
       - opt:
@@ -23513,6 +23515,14 @@ sequences:
             bind: _, durable
             eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
           when: durable
+      - opt:
+          do:
+            - return: |-
+                origin(coreconsensus.StateMachineFailed,
+                			errs.String("why", "a volatile machine refused a restore it may have written at a start"),
+                			errs.String("id", m.ID), errs.String("cause", err.Error()))
+              to: origin
+          when: "!install"
       - eval: n.holdApply(install)
         to: n.holdApply
       - return: err

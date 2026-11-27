@@ -375,3 +375,96 @@ func TestADurableRestoreRefusedAtStartStopsTheNode(t *testing.T) {
 		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })
 	}
 }
+
+// A volatile machine whose Restore is refused at a start may hold the
+// prefix it decoded in place: falling back to an older snapshot it skipped
+// or to a replay from index 1 applied the log over that prefix (#1582).
+// The start now fails STATE_MACHINE_FAILED, with no marker: the state is
+// the process's, so a start with a machine of its own restores again. A
+// snapshot the engine refuses before Restore, on its checksums, touched no
+// machine and still falls back.
+func TestAVolatileRestoreRefusedAtStartRefusesTheStart(t *testing.T) {
+	type tc struct {
+		name string
+		// corrupt flips a byte of the published snapshot, which the engine
+		// refuses before Restore.
+		corrupt bool
+	}
+	runCase := func(t *testing.T, tcase tc) {
+		b := newDurableBench(t, coreconsensus.ClusterID{9, 5, 8, 3})
+		var tok coreconsensus.TokenValue
+		//: enough entries for a snapshot of some size.
+		for i := range 30 {
+			tok = propose(t, b.leader().node, fmt.Sprintf("k%d=v%d", i, i))
+		}
+		l := b.leader()
+		var f *durableNode
+		//: the follower is the node whose start is judged.
+		for _, x := range b.nodes {
+			//: any node but the leader.
+			if x != l {
+				f = x
+				break
+			}
+		}
+		b.waitMachine(f, tok.Index)
+		b.save(f)
+		b.crash(f)
+		//: the corrupt case's snapshot fails its checksums before Restore.
+		if tcase.corrupt && corruptPublishedSnapshots(t, f.dir) == 0 {
+			t.Fatal("setup: no published snapshot to corrupt")
+		}
+		var armed atomic.Bool
+		armed.Store(true)
+		p := &partialRestore{kv: newKV(), inPlace: true, armed: &armed, node: new(atomic.Pointer[Node]), failed: make(chan struct{})}
+		start := func(m coreconsensus.StateMachine) error {
+			f.dd = b.openDD(f.dir)
+			cfg := b.conf(f)
+			cfg.Machine, cfg.Durability, cfg.Log, cfg.Snapshots = m, DurabilityVolatile, f.dd.Log(), f.dd.Snapshots()
+			n, err := NewNode(cfg)
+			//: a started node is closed with its directory.
+			if err == nil {
+				abandon(n.HardClose())
+			}
+			abandon(NewMemoryTransport(b.net, f.id).Close())
+			abandon(f.dd.Close())
+			return err
+		}
+		err := start(p)
+		//: a snapshot the engine refused falls back, and the machine's Restore never failed.
+		if tcase.corrupt {
+			select {
+			//: the failing restore ran.
+			case <-p.failed:
+				t.Errorf("the machine was asked to restore a snapshot that failed its checksums")
+			//: it did not.
+			default:
+			}
+			//: the fallback starts.
+			if err != nil {
+				t.Errorf("a start whose snapshot failed its checksums did not fall back: %v %v", err, errs.FieldsOf(err))
+			}
+			return
+		}
+		//: a refused restore fails the start STATE_MACHINE_FAILED, applying nothing over the prefix.
+		if !errs.HasCode(err, coreconsensus.CodeStateMachineFailed) {
+			t.Fatalf("a volatile machine refused its restore at a start, which returned %v (want STATE_MACHINE_FAILED); %d entries applied over the prefix",
+				err, p.onPrefix.Load())
+		}
+		//: nothing applied over the prefix.
+		if k := p.onPrefix.Load(); k != 0 {
+			t.Errorf("%d entries were applied over the prefix a refused start restore wrote", k)
+		}
+		//: no marker: a start with a machine of its own restores again.
+		if err := start(newKV()); err != nil {
+			t.Errorf("a start with a fresh volatile machine after a refused restore failed: %v", err)
+		}
+	}
+	//: each case runs its own bench.
+	for _, tcase := range []tc{
+		{name: "a restore the machine refused fails the start and leaves no marker"},
+		{name: "a snapshot the engine refused before Restore still falls back", corrupt: true},
+	} {
+		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })
+	}
+}

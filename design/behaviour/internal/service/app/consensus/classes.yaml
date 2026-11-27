@@ -9100,6 +9100,9 @@ types:
           stopped the node, its machine having accepted a stream whose end was then
           refused. Falling back from the second, a durable machine already past the
           older snapshot is not restored again and stays on the state it accepted.
+          A machine whose Restore refused the stream may hold the prefix it decoded
+          in place, a volatile one included: the fallback applied over it (#1582),
+          so STATE_MACHINE_FAILED refuses the start too.
         name: refusesStart
         params: rerr error
         recv: n *Node
@@ -10535,7 +10538,13 @@ types:
           start fails with it. A volatile machine's refusal, at an install, holds
           apply until a Restore succeeds: the entries handed after it wait, and the
           next offer's restore replaces the state they would have been applied
-          over. A start's refusal falls back as before.
+          over. A volatile machine's refusal at a start fails the start
+          STATE_MACHINE_FAILED: an older snapshot or a replay from index 1 was
+          applied over the prefix it may hold. No marker is written, since the
+          machine's state is the process's: a start with a machine of its own
+          restores again, and one handed the same machine is refused again while
+          its Restore refuses. A snapshot the engine refuses before Restore, on
+          its checksums, touched no machine and is not judged here.
         name: restoreRefused
         params: m *coreconsensus.SnapshotMetaValue, err error, install bool
         recv: n *Node

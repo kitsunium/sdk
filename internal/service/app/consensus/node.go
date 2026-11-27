@@ -918,8 +918,12 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 // stopped the node, its machine having accepted a stream whose end was then
 // refused. Falling back from the second, a durable machine already past the
 // older snapshot is not restored again and stays on the state it accepted.
+// A machine whose Restore refused the stream may hold the prefix it decoded
+// in place, a volatile one included: the fallback applied over it (#1582),
+// so STATE_MACHINE_FAILED refuses the start too.
 func (n *Node) refusesStart(rerr error) bool {
-	return errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) || n.stopped.Load()
+	return errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) ||
+		errs.HasCode(rerr, coreconsensus.CodeStateMachineFailed) || n.stopped.Load()
 }
 
 // fallbackGap is the refusal of a start whose base does not continue the
