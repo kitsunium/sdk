@@ -219,6 +219,29 @@ jobs:
             echo "skipped by scope: no Bazel target differs from the base"
           fi
 
+      # The net suites open hundreds of thousands of loopback connections and
+      # flows, four test actions side by side. Past the runner's
+      # nf_conntrack_max (262 144) conntrack cannot insert an entry: it drops
+      # the packet in LOCAL_OUT, a datagram's sendmsg returns EPERM and a SYN
+      # goes unanswered (#1377; the net kernel gate's host lane logged
+      # "nf_conntrack: table full, dropping packet"). Nothing this job runs
+      # needs loopback tracked, so the raw table exempts it before any test.
+      # A runner that refuses the rule warns: the tests still run, as before.
+      - name: loopback untracked by conntrack (#1377)
+        run: |
+          set -uo pipefail
+          for t in iptables ip6tables; do
+            for rule in "OUTPUT -o lo" "PREROUTING -i lo"; do
+              # shellcheck disable=SC2086 # rule is a chain and its match.
+              sudo "$t" -w -t raw -I $rule -j CT --notrack ||
+                echo "::warning::$t -t raw -I $rule -j CT --notrack refused: loopback stays tracked (#1377)"
+            done
+          done
+          sudo iptables -w -t raw -S || true
+          for f in nf_conntrack_count nf_conntrack_max; do
+            echo "$f: $(cat "/proc/sys/net/netfilter/$f" 2>/dev/null || echo absent)"
+          done
+
       - name: test
         env:
           MODE: ${{ steps.bscope.outputs.mode }}
@@ -274,6 +297,16 @@ jobs:
           else
             echo "skipped by scope: no allocation gate differs from the base"
           fi
+
+      # What a refused loopback send leaves only in the kernel: the table's
+      # fill and its "table full" lines (#1377), read when a step failed.
+      - name: the host's connection tracking, when a step failed
+        if: failure()
+        run: |
+          for f in nf_conntrack_count nf_conntrack_max; do
+            echo "$f: $(cat "/proc/sys/net/netfilter/$f" 2>/dev/null || echo absent)"
+          done
+          sudo dmesg 2>/dev/null | grep -i conntrack | tail -20 || true
 
       # Guards the invariant the step above depends on: no //go:build !race
       # test may exist outside the alloc lane's target list.
