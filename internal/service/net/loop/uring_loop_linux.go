@@ -1810,7 +1810,7 @@ func (rr *uRing) takeBuf(c *cqe) {
 // cancelled and ended.
 func (rr *uRing) recvCancelled(slot int32, more bool) {
 	//: still reading, and the recv ended: armed again.
-	if !more && reads(&rr.r.conns[slot]) {
+	if !more && rr.r.reads(&rr.r.conns[slot]) {
 		rr.armRecv(slot)
 	}
 }
@@ -1829,7 +1829,7 @@ func (rr *uRing) recvBytes(slot int32, more bool) {
 	}
 	//: re-armed unless the connection is going: a drain's close reads on,
 	//: to linger (ring.lingers).
-	if !more && reads(&rr.r.conns[slot]) {
+	if !more && rr.r.reads(&rr.r.conns[slot]) {
 		rr.armRecv(slot)
 	}
 }
@@ -1843,7 +1843,7 @@ func (rr *uRing) recvStarved(slot int32) {
 	switch {
 	//: queued, to be re-armed: an open connection, or a drain's close that
 	//: reads on to linger.
-	case reads(c) && len(rr.starved) < starvedCap:
+	case rr.r.reads(c) && len(rr.starved) < starvedCap:
 		rr.starved = append(rr.starved, starvedRecv{slot: slot, gen: c.gen})
 	//: an open one past the bound fails.
 	case c.state == stOpen:
@@ -1852,13 +1852,13 @@ func (rr *uRing) recvStarved(slot int32) {
 	//: a lingering one past the bound reads no more: drainLinger ends it.
 }
 
-// reads reports whether c's recv stays armed: an open connection, or one the
-// drain closes, which reads on to linger (ring.lingers) — on every path that
-// re-arms a recv, so a linger never stops reading on an ENOBUFS or a cancel
-// and closes with input unread.
-func reads(c *connCtl) bool {
-	//: open, or the drain's closing.
-	return c.state == stOpen || (c.state == stClosing && c.reason == rDrain)
+// reads reports whether c's recv stays armed: an open connection, or one a
+// drain closes (ring.drainClose), which reads on to linger (ring.lingers) —
+// on every path that re-arms a recv, so a linger never stops reading on an
+// ENOBUFS or a cancel and closes with input unread.
+func (r *ring) reads(c *connCtl) bool {
+	//: open, or a drain's closing.
+	return c.state == stOpen || r.drainClose(c)
 }
 
 // recvEOF marks an open connection's peer done: it settles at the end of the
@@ -2225,7 +2225,7 @@ func (rr *uRing) rearmStarved() {
 		//: re-armed only if the connection that starved still holds its
 		//: slot, and still reads: one that finished left its entry behind,
 		//: and the slot's next connection has its own recv.
-		if c := &rr.r.conns[e.slot]; c.gen == e.gen && reads(c) {
+		if c := &rr.r.conns[e.slot]; c.gen == e.gen && rr.r.reads(c) {
 			rr.armRecvOn(e.slot, g)
 			left[g]--
 			room--

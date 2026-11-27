@@ -685,6 +685,81 @@ func TestLoopHTTP2_drainLatePreface(t *testing.T) {
 	}
 }
 
+// TestLoopHTTP2_drainLateReader pins #1609's close on every backend: a
+// client that reads late — a small receive buffer, nothing read while a
+// large answer and the drain's GOAWAY wait on the server's side — and that
+// sends a frame meanwhile, still reads the whole answer, the GOAWAY, then a
+// clean end. A connection closed with that frame unread answers with a
+// reset, and the reset discards what the server's kernel still held of its
+// output: the answer's tail and the GOAWAY. The drain's close shuts the
+// writing side first and reads on (lingers), so nothing is unread at the
+// close.
+func TestLoopHTTP2_drainLateReader(t *testing.T) {
+	const size = 256 << 10
+	big := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+		res.Body = bytes.Repeat([]byte("b"), size)
+	})
+	runCase := func(t *testing.T, b corenet.LoopBackend) {
+		srv, addr := startLoopServer(t, b, http2.HandleLoop(big, http1.Parser{}), Plaintext(), Loop(corenet.LoopValue{Backend: b, OutputCap: 2 * size}))
+		conn, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { swallowErr(conn.Close()) })
+		//: a small receive buffer: what the client has not read waits on the
+		//: server's side.
+		if tc, ok := conn.(*stdnet.TCPConn); ok {
+			swallowErr(tc.SetReadBuffer(16 << 10))
+		}
+		if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		c := &rawH2{t: t, conn: conn, br: bufio.NewReaderSize(conn, 1<<16)}
+		if _, err := conn.Write([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		//: windows wide enough for the whole answer at once: the stream ends
+		//: on the server's side, nothing in flight but bytes.
+		c.send(corehttp2.FrameSettings, 0, 0, []byte{0, 4, 0x7f, 0xff, 0xff, 0xff})
+		c.send(corehttp2.FrameWindowUpdate, 0, 0, binary.BigEndian.AppendUint32(nil, 1<<30))
+		c.get(1, "/big")
+		time.Sleep(200 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		shut := make(chan error, 1)
+		go func() { shut <- srv.Shutdown(ctx) }()
+		//: the GOAWAY queued behind the answer and the close decided, the
+		//: client sends one more frame, then reads.
+		time.Sleep(200 * time.Millisecond)
+		c.write(frameBytes(corehttp2.FramePing, 0, 0, []byte("latelate")))
+		got, sawGoAway := 0, false
+		for {
+			ev, err := c.next()
+			//: the end: clean, and after the whole answer and the GOAWAY.
+			if err != nil {
+				if err != io.EOF || got != size || !sawGoAway {
+					t.Fatalf("after %d of %d bytes, GOAWAY read %v: %v, want EOF after both", got, size, sawGoAway, err)
+				}
+				break
+			}
+			//: the answer's bytes, and the drain's word.
+			switch ev.h.Type {
+			case corehttp2.FrameData:
+				got += len(ev.payload)
+			case corehttp2.FrameGoAway:
+				sawGoAway = true
+			}
+		}
+		//: the drain itself.
+		if err := awaitHelper(t, shut, "Shutdown"); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}
+	for _, b := range loopBackends() {
+		t.Run(b.String(), func(t *testing.T) { runCase(t, b) })
+	}
+}
+
 // drainClean reads frames until GOAWAY(NO_ERROR) and stream's body, then EOF,
 // and reports anything else, a reset above all.
 func (c *rawH2) drainClean(stream uint32, want string) error {

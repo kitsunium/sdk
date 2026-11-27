@@ -1065,6 +1065,9 @@ sequences:
             - eval: r.markDirty(slot)
               to: r.markDirty
           when: (c.state == stClosing || c.flags&fPeerDone != 0) && !c.sending()
+  - of: (*ring).drainClose
+    steps:
+      - return: c.state == stClosing && (c.reason == rDrain || (c.reason == rNone && r.draining))
   - of: (*ring).lingers
     participants:
       - id: caller
@@ -1079,7 +1082,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: c.state != stClosing || c.reason != rDrain || c.flags&fPeerDone != 0
+          when: "!r.drainClose(c) || c.flags&fPeerDone != 0"
       - opt:
           do:
             - set: c.linger
@@ -10233,7 +10236,7 @@ sequences:
           do:
             - eval: rr.armRecv(slot)
               to: rr.armRecv
-          when: "!more && reads(&rr.r.conns[slot])"
+          when: "!more && rr.r.reads(&rr.r.conns[slot])"
   - of: (*uRing).recvBytes
     participants:
       - id: caller
@@ -10261,7 +10264,7 @@ sequences:
           do:
             - eval: rr.armRecv(slot)
               to: rr.armRecv
-          when: "!more && reads(&rr.r.conns[slot])"
+          when: "!more && rr.r.reads(&rr.r.conns[slot])"
   - of: (*uRing).recvStarved
     participants:
       - id: caller
@@ -10277,7 +10280,7 @@ sequences:
         eval: "&rr.r.conns[slot]"
       - switch:
           cases:
-            - case: reads(c) && len(rr.starved) < starvedCap
+            - case: rr.r.reads(c) && len(rr.starved) < starvedCap
               do:
                 - set: rr.starved
                   value: "append(rr.starved, starvedRecv{slot: slot, gen: c.gen})"
@@ -10285,9 +10288,9 @@ sequences:
               do:
                 - eval: rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
                   to: rr.r.fail
-  - of: reads
+  - of: (*ring).reads
     steps:
-      - return: c.state == stOpen || (c.state == stClosing && c.reason == rDrain)
+      - return: c.state == stOpen || r.drainClose(c)
   - of: (*uRing).recvEOF
     participants:
       - id: caller
@@ -10843,7 +10846,7 @@ sequences:
                 init:
                   bind: c
                   eval: "&rr.r.conns[e.slot]"
-                when: c.gen == e.gen && reads(c)
+                when: c.gen == e.gen && rr.r.reads(c)
       - set: rr.starved
         value: rr.starved[:copy(rr.starved, rr.starved[k:])]
   - of: (*uRing).flush

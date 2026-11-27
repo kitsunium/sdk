@@ -1834,6 +1834,7 @@ files:
       - (*ring).flushDirty
       - (*ring).settle
       - (*ring).settleAfterWrite
+      - (*ring).drainClose
       - (*ring).lingers
       - (*ring).sent
       - (*ring).fail
@@ -2332,7 +2333,7 @@ files:
       - (*uRing).recvCancelled
       - (*uRing).recvBytes
       - (*uRing).recvStarved
-      - reads
+      - (*ring).reads
       - (*uRing).recvEOF
       - (*uRing).failLive
       - (*uRing).onSend
@@ -3271,14 +3272,6 @@ functions:
     params: res int32, live int64
     results: bool
   - doc: |-
-      reads reports whether c's recv stays armed: an open connection, or one the
-      drain closes, which reads on to linger (ring.lingers) — on every path that
-      re-arms a recv, so a linger never stops reading on an ENOBUFS or a cancel
-      and closes with input unread.
-    name: reads
-    params: c *connCtl
-    results: bool
-  - doc: |-
       bufBudgetFor is the bytes of provided buffers one loop of sz may hand its
       rings: loopBufBudget, or less under MaxConns — a buffer for each of the
       loop's share of the connections, and the first ones every ring starts
@@ -3959,13 +3952,24 @@ types:
         params: slot int32
         recv: r *ring
       - doc: |-
+          drainClose reports whether c is a close of r's drain: the drain's own, or
+          the handler's clean close while r drains — an HTTP/2 adapter's after the
+          drain's GOAWAY (#1609), an HTTP/1.1 answer's Connection: close —, whose
+          output the peer has yet to read just the same.
+        name: drainClose
+        params: c *connCtl
+        recv: r *ring
+        results: bool
+      - doc: |-
           lingers reports whether slot, its output gone, still lingers before its
           close. A close the drain decided on a connection whose peer still sends
           would, with that input unread, send a reset, and the reset discards what
           the kernel holds of the output not yet delivered: the answers the drain
-          waited for (#1385). So the drain shuts the writing side first — the peer
-          reads every answer, then the end — and the slot keeps reading, and
-          dropping, until the peer ends or drainLinger passed (closeSettled looks).
+          waited for (#1385), or the GOAWAY a handler wrote before its close while
+          the ring drains (#1609). So such a close shuts the writing side first —
+          the peer reads every answer, then the end — and the slot keeps reading,
+          and dropping, until the peer ends or drainLinger passed (closeSettled
+          looks).
         name: lingers
         params: slot int32
         recv: r *ring
@@ -4119,6 +4123,15 @@ types:
       - doc: publish copies the ring's counters to its atomics, those that moved.
         name: publish
         recv: r *ring
+      - doc: |-
+          reads reports whether c's recv stays armed: an open connection, or one a
+          drain closes (ring.drainClose), which reads on to linger (ring.lingers) —
+          on every path that re-arms a recv, so a linger never stops reading on an
+          ENOBUFS or a cancel and closes with input unread.
+        name: reads
+        params: c *connCtl
+        recv: r *ring
+        results: bool
     name: ring
   - doc: |-
       seen is what a ring last published. A counter is stored to its atomic only

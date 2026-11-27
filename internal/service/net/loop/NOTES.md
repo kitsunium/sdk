@@ -163,13 +163,18 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   `closeSettled` settles it and the descriptor closes — on io_uring the recv
   still armed cancelled by user data. A close with input unread resets, and
   the reset discards the output the kernel has not delivered yet (#1385,
-  ADR 0196 amended 2026-11-14). A closing slot whose output left through
+  ADR 0196 amended 2026-11-14). A handler's clean close while the ring
+  drains lingers the same (`ring.drainClose`): the HTTP/2 adapter writes the
+  drain's GOAWAY and closes, and closed at once, a client frame still to come
+  or unread reset the connection and took the GOAWAY with it, the answer's
+  tail first on a slow reader (#1609, `TestLoopHTTP2_drainLateReader`). A
+  closing slot whose output left through
   the writable path — a write refused for room, resumed on the event — is
   settled at the batch's end (`settleAfterWrite`, epoll and kqueue; io_uring's
   send completion already marks it dirty): left alone, its close never
   began and the drain waited for its deadline (FreeBSD, NetBSD). On io_uring
   every path that re-arms a recv — bytes, buffers starved then back, a
-  cancel — re-arms a lingering slot's too (`reads`,
+  cancel — re-arms a lingering slot's too (`ring.reads`,
   `TestURing_lingerReadsOnAfterStarveOrCancel`). The window between a taker's last empty read
   and its close is the kernel's: the server's grace empties the queue first,
   and a partial drain in an `SO_REUSEPORT` group is `tcp_migrate_req=1`'s.
