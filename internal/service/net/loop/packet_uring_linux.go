@@ -134,8 +134,10 @@ type packetLane struct {
 	gsoSends atomic.Uint64
 	cfg      PacketConfig
 	// failStage fails the probe at the named stage: the suite's injection,
-	// empty in service.
+	// empty in service. failErrno is the kernel's answer the stage then
+	// reports, zero for none: a refusal the suite cannot have the kernel give.
 	failStage string
+	failErrno syscall.Errno
 	u         *uring
 	// efd is the lane's wake eventfd, -1 once closed; wakeMu orders a wake
 	// against its close.
@@ -196,19 +198,20 @@ type packetLane struct {
 // its life cycle and nothing else.
 func StartPacket(cfg *PacketConfig) (PacketLane, error) {
 	//: no injected failure in service.
-	return startPacket(cfg, "")
+	return startPacket(cfg, "", 0)
 }
 
 // startPacket is StartPacket with the suite's injection: failStage names the
-// probe stage that fails, empty for none.
+// probe stage that fails, empty for none, and failErrno the kernel's answer it
+// reports there, zero for none.
 //
 // Goroutine lifecycle: StartPacket's — one per lane, locked to its OS thread,
 // started here; it returns once Stop is asked or a handover drained the
 // socket, and closes Done last.
 //
 // IFACE-OPAQUE: StartPacket's lane, the same value.
-func startPacket(cfg *PacketConfig, failStage string) (PacketLane, error) {
-	lp := &packetLane{cfg: *cfg, failStage: failStage, efd: -1, done: make(chan struct{})}
+func startPacket(cfg *PacketConfig, failStage string, failErrno syscall.Errno) (PacketLane, error) {
+	lp := &packetLane{cfg: *cfg, failStage: failStage, failErrno: failErrno, efd: -1, done: make(chan struct{})}
 	ready := make(chan error, 1)
 	go lp.run(ready)
 	//: the probe's verdict, from the lane's own thread.
@@ -270,9 +273,8 @@ func (lp *packetLane) run(ready chan<- error) {
 	defer lp.doneOnce.Do(func() { close(lp.done) })
 	defer lp.release()
 	//: refused at a stage: the caller serves the socket elsewhere.
-	if stage, why := lp.setup(); stage != "" {
-		ready <- errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{},
-			errs.String("group", lp.cfg.Group), errs.String("stage", stage), errs.String("reason", why))
+	if stage, why, errno := lp.setup(); stage != "" {
+		ready <- refusal(lp.cfg.Group, stage, why, errno)
 		//: refused.
 		return
 	}
@@ -280,83 +282,123 @@ func (lp *packetLane) run(ready chan<- error) {
 	lp.serve()
 }
 
+// refusal is the lane's LoopBackendUnavailable at stage, with why and, when
+// the kernel answered one, its errno: ENOMEM or EAGAIN is the kernel short of
+// a resource — from 6.14 the ring's pages are charged to RLIMIT_MEMLOCK,
+// summed over every process of the user — and not a kernel without the lane,
+// so the refusal says which it was rather than leave it to be guessed (#1580).
+func refusal(group, stage, why string, errno syscall.Errno) error {
+	fields := []errs.FieldValue{errs.String("group", group), errs.String("stage", stage), errs.String("reason", why)}
+	//: the kernel's answer, when there was one.
+	if errno != 0 {
+		fields = append(fields, errs.Int("errno", int(errno)))
+	}
+	//: named.
+	return errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{}, fields...)
+}
+
 // setup opens the ring, probes it and self-tests it, then arms the socket's
-// receive and the wake poll; it returns the failed stage and why.
-func (lp *packetLane) setup() (stage, why string) {
+// receive and the wake poll; it returns the failed stage, why, and the
+// kernel's errno when it answered one.
+func (lp *packetLane) setup() (stage, why string, errno syscall.Errno) {
 	lp.onCQE = lp.complete
 	lp.tick = kernelTimespec{nsec: packetTick}
 	//: the ring, its ops and its buffers.
-	if stage, why := lp.openRing(); stage != "" {
+	if stage, why, errno := lp.openRing(); stage != "" {
 		//: refused.
-		return stage, why
+		return stage, why, errno
 	}
 	lp.hdr.Namelen = uint32(packetNameRoom)
 	lp.hdr.Controllen = uint64(packetCtrlRoom)
 	//: the self-test.
 	if why := lp.selfTest(); why != "" || lp.failStage == "recvmsg" {
 		//: refused.
-		return "recvmsg", why + lp.failStage
+		return "recvmsg", why + lp.failStage, 0
 	}
 	//: the memory the replies and the handover use.
-	if why := lp.mapArenas(); why != "" {
+	if why, errno := lp.mapArenas(); why != "" {
 		//: refused.
-		return "arena", why
+		return "arena", why, errno
 	}
 	//: the socket and the wake.
-	if stage, why := lp.armSocket(); stage != "" {
+	if stage, why, errno := lp.armSocket(); stage != "" {
 		//: refused.
-		return stage, why
+		return stage, why, errno
 	}
 	//: serving.
-	return "", ""
+	return "", "", 0
 }
 
 // openRing opens the lane's ring — COOP_TASKRUN and SINGLE_ISSUER where the
 // kernel takes them —, asks REGISTER_PROBE for the lane's ops and registers
-// the provided buffers; it returns the failed stage and why.
-func (lp *packetLane) openRing() (stage, why string) {
+// the provided buffers; it returns the failed stage, why and the kernel's
+// errno, zero when the refusal is not one.
+func (lp *packetLane) openRing() (stage, why string, errno syscall.Errno) {
 	ring, step, errno := openURing(packetEntries, setupCoopTaskrun|setupSingleIssuer)
 	//: an older kernel refuses the flags: the plain ring.
 	if errno == syscall.EINVAL {
 		ring, step, errno = openURing(packetEntries, 0)
 	}
+	//: a ring the suite refuses is the lane's to close, as every other stage's.
+	if ring != nil {
+		lp.u = ring
+	}
+	errno = lp.answer("setup", errno)
 	//: no ring.
 	if errno != 0 || lp.failStage == "setup" {
 		//: the step and the kernel's answer.
-		return "setup", step + ": " + errno.Error()
+		return "setup", step + ": " + errno.Error(), errno
 	}
-	lp.u = ring
 	ok, perr := ring.supports(opRecvmsg, opSendmsg, opAsyncCancel, opPollAdd)
-	//: an op missing.
-	if perr != 0 || !ok || lp.failStage == "probe" {
+	perr = lp.answer("probe", perr)
+	//: the probe itself refused: the kernel's answer, never read as an op missing.
+	if perr != 0 {
 		//: named.
-		return "probe", "REGISTER_PROBE: RECVMSG, SENDMSG, ASYNC_CANCEL or POLL_ADD unsupported"
+		return "probe", "REGISTER_PROBE: " + perr.Error(), perr
+	}
+	//: an op missing.
+	if !ok || lp.failStage == "probe" {
+		//: named.
+		return "probe", "REGISTER_PROBE: RECVMSG, SENDMSG, ASYNC_CANCEL or POLL_ADD unsupported", 0
 	}
 	size := uint32(recvmsgOutBytes + packetNameRoom + packetCtrlRoom + max(packetPayloadRoom, lp.cfg.Ceiling+1))
 	//: the buffer ring.
-	if errno := ring.setupBuffers(packetBufs, size, packetBufs, false); errno != 0 || lp.failStage == "buf_ring" {
+	if errno := lp.answer("buf_ring", ring.setupBuffers(packetBufs, size, packetBufs, false)); errno != 0 || lp.failStage == "buf_ring" {
 		//: refused.
-		return "buf_ring", "IORING_REGISTER_PBUF_RING: " + errno.Error()
+		return "buf_ring", "IORING_REGISTER_PBUF_RING: " + errno.Error(), errno
 	}
 	//: opened.
-	return "", ""
+	return "", "", 0
+}
+
+// answer is the kernel's answer errno at stage, or the suite's injected one
+// when the stage is the one it fails with an errno.
+func (lp *packetLane) answer(stage string, errno syscall.Errno) syscall.Errno {
+	//: the suite's refusal stands in for the kernel's.
+	if lp.failErrno != 0 && lp.failStage == stage {
+		//: injected.
+		return lp.failErrno
+	}
+	//: the kernel's.
+	return errno
 }
 
 // armSocket reads the socket's family, opens the wake eventfd, asks for UDP
-// GRO and arms the receive and the wake; it returns the failed stage and why.
-func (lp *packetLane) armSocket() (stage, why string) {
+// GRO and arms the receive and the wake; it returns the failed stage, why and
+// the kernel's errno when it answered one.
+func (lp *packetLane) armSocket() (stage, why string, errno syscall.Errno) {
 	family, ferr := socketFamily(lp.cfg.FD)
 	//: not a datagram socket the lane serves.
 	if ferr != "" {
 		//: refused.
-		return "socket", ferr
+		return "socket", ferr, 0
 	}
 	lp.family = family
 	efd, _, e := syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
 	//: no wake.
 	if e != 0 {
 		//: refused.
-		return "eventfd", e.Error()
+		return "eventfd", e.Error(), e
 	}
 	lp.efd = int(efd)
 	//: GRO on: a refusal leaves one datagram a message, which the lane reads as well.
@@ -365,18 +407,19 @@ func (lp *packetLane) armSocket() (stage, why string) {
 	lp.armWake()
 	lp.u.submit()
 	//: armed.
-	return "", ""
+	return "", "", 0
 }
 
 // mapArenas maps the reply arena, its records and the handover's buffer,
-// outside the Go heap: the kernel reads them after Reply returned.
-func (lp *packetLane) mapArenas() string {
+// outside the Go heap: the kernel reads them after Reply returned. It returns
+// why it failed and the kernel's errno.
+func (lp *packetLane) mapArenas() (string, syscall.Errno) {
 	out, err := syscall.Mmap(-1, 0, packetOutBytes+packetReplies*packetRecordBytes+recvmsgOutBytes+packetNameRoom+packetCtrlRoom+packetPayloadRoom,
 		syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	//: no memory.
 	if err != nil {
 		//: named.
-		return "mmap: " + err.Error()
+		return "mmap: " + err.Error(), errnoOfErr(err)
 	}
 	lp.arena = out
 	lp.out = out[:packetOutBytes:packetOutBytes]
@@ -388,7 +431,7 @@ func (lp *packetLane) mapArenas() string {
 	lp.pend = make([]pendingReply, 0, packetReplies)
 	lp.recycle = make([]uint16, 0, packetBufs)
 	//: mapped.
-	return ""
+	return "", 0
 }
 
 // selfTest arms a multishot RECVMSG on a loopback socket of its own, sends

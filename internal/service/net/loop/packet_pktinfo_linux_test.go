@@ -235,8 +235,8 @@ func TestPacketLane_allocsPinned(t *testing.T) {
 	}
 	defer lp.release()
 	//: no lane here.
-	if stage, why := lp.setup(); stage != "" {
-		requireLane(t, errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{}, errs.String("stage", stage), errs.String("reason", why)))
+	if stage, why, errno := lp.setup(); stage != "" {
+		requireLane(t, refusal("", stage, why, errno))
 	}
 	name := make([]byte, packetNameRoom)
 	binary.LittleEndian.PutUint16(name, afInet)

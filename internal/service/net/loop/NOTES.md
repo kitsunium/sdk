@@ -599,7 +599,20 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   `_ceiling`, `_failStage` (each stage, the descriptor closed), `_handover`
   (every datagram once, the lane's then the successor's, GRO off) and `_allocs`
   (a datagram handed on, answered and sent: 0 allocations); they fail, not
-  skip, where `requiredBackends` names `iouring`.
+  skip, where `requiredBackends` names `iouring`. A refusal the kernel answered
+  carries its `errno` beside `stage` and `reason` (`refusal`), and a
+  REGISTER_PROBE that fails names its errno instead of an op missing: from
+  6.14 the SQ/CQ rings, the SQEs and every provided-buffer ring are charged to
+  `RLIMIT_MEMLOCK` of an unprivileged process's user, summed over all its
+  processes, so a host running suites side by side can see `ENOMEM` at
+  `setup` or `buf_ring` — a kernel short of locked memory, not one without the
+  lane (#1580). It is named, not retried: ADR 0189 §D3 retries only `EINVAL`'s
+  descent. `startPacket`'s `failErrno` plays the kernel's answer at a stage;
+  `_refusalNamesTheKernel` holds the field, the reason and the ring closed,
+  and `requireLane` fails with every field, the kernel's release and
+  `RLIMIT_MEMLOCK` (`laneRefusal`). The self-test's one wait still reads an
+  interrupted wait (`EINTR`) as its 200 ms passed: `uring.wait` keeps its
+  errno.
 - **A handler queues what `Write` refuses.** A line the handler stopped at
   stays in the spill and comes back only with the next bytes. A handler that
   answers a pipelined request behind a refused write must therefore queue it
