@@ -115,6 +115,7 @@ func socketInode(t *testing.T, sock any) string {
 		t.Fatalf("%T offers no descriptor", sock)
 	}
 	rc, err := sc.SyscallConn()
+	//: the descriptor is read through the connection's raw handle, which a closed socket refuses.
 	if err != nil {
 		t.Fatalf("%T: %v", sock, err)
 	}
@@ -137,9 +138,11 @@ func serverSocketInodes(t *testing.T, srv *Server) map[string]bool {
 	srv.mu.RLock()
 	defer srv.mu.RUnlock()
 	inodes := make(map[string]bool, len(srv.listeners)+len(srv.packetConns))
+	//: every stream listener's socket belongs to the server.
 	for _, b := range srv.listeners {
 		inodes[socketInode(t, b.ln)] = true
 	}
+	//: every datagram socket's too, one per shard.
 	for _, b := range srv.packetConns {
 		inodes[socketInode(t, b.pc)] = true
 	}
@@ -171,8 +174,10 @@ const tableReads = 50
 func kernelSocketsOn(t *testing.T, proto, addr, state string, held map[string]bool) int {
 	t.Helper()
 	want := procHexAddrPort(t, addr)
+	//: a read of the table can tear, so it is repeated a bounded number of times.
 	for range tableReads {
 		listed, on := make(map[string]bool, len(held)), make(map[string]bool, len(held))
+		//: every row of the table is judged, so one that is not the server's is skipped.
 		for _, s := range procSockets(t, proto) {
 			//: a row of another socket's.
 			if !held[s.inode] {
@@ -435,6 +440,7 @@ func TestKernelSocketsOn_readsATornTableOnce(t *testing.T) {
 		srv := New()
 		srv.PacketGroup("p", Listen("udp4", "127.0.0.1:0"), Shards(c.shards)).
 			HandleFunc(func(context.Context, corenet.Packet) error { return nil })
+		//: a server that does not start leaves nothing to count.
 		if err := srv.Start(t.Context()); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
@@ -446,9 +452,11 @@ func TestKernelSocketsOn_readsATornTableOnce(t *testing.T) {
 		churned := make(chan struct{})
 		go func() {
 			defer close(churned)
+			//: the churn runs until the test ends.
 			for {
-				//: the test is over.
+				//: the loop polls for the stop signal without blocking.
 				select {
+				//: the test is over, so the churn stops.
 				case <-stop:
 					return
 				//: a socket hashed then unhashed ahead of the shards' rows.
@@ -461,6 +469,7 @@ func TestKernelSocketsOn_readsATornTableOnce(t *testing.T) {
 			}
 		}()
 		defer func() { close(stop); <-churned }()
+		//: each holder joins the bucket ahead of the shards, one more per pass.
 		for i := range c.holders {
 			holder, err := stdnet.ListenPacket("udp4", stdnet.JoinHostPort("127.0.0."+strconv.Itoa(3+i), port))
 			//: an address the host does not route to the loopback.
@@ -468,6 +477,7 @@ func TestKernelSocketsOn_readsATornTableOnce(t *testing.T) {
 				t.Skipf("no holder beside the server: %v", err)
 			}
 			defer func() { _ = holder.Close() }()
+			//: each pass reads the table again under the churn.
 			for range c.reads {
 				//: every read counts the shards once each, whatever the churn.
 				if n := kernelSocketsOn(t, "udp", reported, "07", ours); n != c.shards {
@@ -476,6 +486,7 @@ func TestKernelSocketsOn_readsATornTableOnce(t *testing.T) {
 			}
 		}
 	}
+	//: each case runs as its own subtest.
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
