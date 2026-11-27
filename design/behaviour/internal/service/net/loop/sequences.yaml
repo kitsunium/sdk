@@ -5250,9 +5250,20 @@ sequences:
     steps:
       - opt:
           do:
-            - return: "\"multishot RECVMSG: the wait was interrupted (\" + werr.Error() + \") for the whole 200 ms\", werr"
-          when: got.userData != pudProbe && werr == syscall.EINTR
-      - return: "\"\", 0"
+            - return: "\"\", 0"
+          when: got.userData == pudProbe
+      - switch:
+          cases:
+            - case: 0, errnoETIME
+              do:
+                - return: "\"\", 0"
+            - case: syscall.EINTR
+              do:
+                - return: "\"multishot RECVMSG: the wait was interrupted (\" + werr.Error() + \") for the whole 200 ms\", werr"
+            - default: true
+              do:
+                - return: "\"multishot RECVMSG: the wait was refused (\" + werr.Error() + \")\", werr"
+          "on": werr
   - of: waitWindow
     participants:
       - id: caller

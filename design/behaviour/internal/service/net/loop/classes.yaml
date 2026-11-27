@@ -2919,9 +2919,11 @@ functions:
     results: error
   - doc: |-
       probeVerdict is what the self-test's wait decides: a reason and the errno
-      behind it when nothing came and the wait never ran its course, which is not a
+      behind it when nothing came and the wait never ran its course — interrupted to
+      its end (EINTR) or refused by the kernel (EBUSY for instance) — which is not a
       kernel without the lane; empty otherwise, a completion reaped despite a last
-      EINTR and an ETIME with nothing alike, the caller judging what was reaped.
+      errno and an ETIME or a wake with nothing alike, the caller judging what was
+      reaped.
     name: probeVerdict
     params: got cqe, werr syscall.Errno
     results: string, syscall.Errno

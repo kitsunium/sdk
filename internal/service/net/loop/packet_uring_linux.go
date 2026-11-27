@@ -522,9 +522,11 @@ func probeVerdict(got cqe, werr syscall.Errno) (string, syscall.Errno) {
 	case syscall.EINTR:
 		//: named, with its errno.
 		return "multishot RECVMSG: the wait was interrupted (" + werr.Error() + ") for the whole 200 ms", werr
-	}
 	//: the kernel refused the wait, so the window never ran.
-	return "multishot RECVMSG: the wait was refused (" + werr.Error() + ")", werr
+	default:
+		//: named, with its errno.
+		return "multishot RECVMSG: the wait was refused (" + werr.Error() + ")", werr
+	}
 }
 
 // waitWindow waits through window with enter, which is one wait bounded by the
