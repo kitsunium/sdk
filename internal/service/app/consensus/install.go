@@ -340,7 +340,9 @@ func (n *Node) dropOtherSpools(id string) {
 // install receives the stream of an accepted offer into its spool, commits
 // it, and has the apply goroutine restore from it before raft adopts it. A
 // short stream keeps the spool for the next offer to resume; a snapshot
-// that does not restore is removed, so a restart does not load it. The
+// the engine refused before Restore is removed, so a restart does not load
+// it, and one whose Restore the machine refused stopped the node and stays
+// for the next start (restoreFailed). The
 // test-only crash hook launches HardClose on its own goroutine, which ends
 // when HardClose returns, because install itself runs under the transport.
 func (n *Node) install(req coreconsensus.InstallParams) error {
@@ -422,10 +424,12 @@ func (n *Node) restoreFailed(snapID string, err error) error {
 		n.stop(err, false)
 		return err
 	}
-	// A restore that stopped the node, its machine having accepted a
-	// stream whose end was then refused, keeps its copy for the next
-	// start, which the stop's marker holds. Left to the exec below, the
-	// copy stayed or went depending on whether the loop had ended yet.
+	// A restore that stopped the node — its machine refused the stream, or
+	// accepted one whose end was then refused — keeps its copy for the next
+	// start: held by the stop's marker for a durable machine and for an
+	// accepted stream, restored again by a volatile machine's restart, whose
+	// stop leaves none (#1582). Left to the exec below, the copy stayed or
+	// went depending on whether the loop had ended yet.
 	//: a node the restore stopped touches nothing on its way out.
 	if n.stopped.Load() {
 		return err

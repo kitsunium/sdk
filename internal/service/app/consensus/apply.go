@@ -130,7 +130,7 @@ func (n *Node) restoreItem(r *restoreReq) {
 		n.holdPublishedLocked(applied)
 	}
 	n.am.Unlock()
-	err := n.restoreFrom(r.meta, applied)
+	err := n.restoreFrom(r.meta, applied, true)
 	//: a failed restore moved nothing raft would take: its hold goes with it.
 	if err != nil && r.hold {
 		n.releasePublished()
@@ -152,25 +152,36 @@ func (n *Node) applyItems(items []applyItem) bool {
 		// released them, and raft handed more meanwhile (#664).
 		it := items[k]
 		items[k] = applyItem{}
-		if it.restore != nil {
-			n.restoreItem(it.restore)
-			continue
-		}
-		if it.save != nil {
-			n.save(it.save)
-			continue
-		}
-		if it.cut {
-			n.forceCut()
-			continue
-		}
-		if it.compact {
-			n.afterCut()
-			continue
-		}
-		if !n.applyHanded(&it) {
+		//: an item that ended the goroutine ends the batch.
+		if !n.applyItem(&it) {
 			return false
 		}
+	}
+	return true
+}
+
+// applyItem runs one item taken from the apply queue. It returns false
+// when the apply goroutine must end: a restore whose Restore the machine
+// refused stopped the node before it was answered, so no item taken after
+// it runs over the prefix the machine may hold (#1582).
+func (n *Node) applyItem(it *applyItem) bool {
+	switch {
+	//: a restore, which a refusal of the machine ends the goroutine on.
+	case it.restore != nil:
+		n.restoreItem(it.restore)
+		return !n.stopped.Load()
+	//: an operator's save.
+	case it.save != nil:
+		n.save(it.save)
+	//: a cut a peer or a trigger asked for.
+	case it.cut:
+		n.forceCut()
+	//: a compaction a pin's end allowed.
+	case it.compact:
+		n.afterCut()
+	//: entries raft handed, in memory or to read back.
+	default:
+		return n.applyHanded(it)
 	}
 	return true
 }

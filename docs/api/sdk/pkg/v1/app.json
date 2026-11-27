@@ -2931,6 +2931,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PeerSnapshotRateShort",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "PeerSnapshotRateShort",
+      "spelled": "svcconsensus.PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "128",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshotRateShort",
+      "doc": "PeerSnapshotRateShort is set while the snapshot stream to the peer looks\ntoo slow to end before the writes lift its pin, after which the peer\nneeds another snapshot: it rises once the estimated transfer time\nexceeds the log's fill time, falls once the transfer would end within\nthree quarters of it, and stays up to the stream's last byte once the\npin was lifted (#1486).\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.PeerStranded",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",

@@ -1001,6 +1001,12 @@ constants:
       - name: setupCoopTaskrun
         type: uint32
         value: 1 << 8
+      - doc: |-
+          setupTaskrunFlag is IORING_SETUP_TASKRUN_FLAG (5.19): the kernel raises
+          sqTaskrun while task work waits for the ring's thread (#1595).
+        name: setupTaskrunFlag
+        type: uint32
+        value: 1 << 9
       - name: setupSingleIssuer
         type: uint32
         value: 1 << 12
@@ -1055,6 +1061,13 @@ constants:
         name: sqCQOverflow
         type: uint32
         value: 1 << 1
+      - doc: |-
+          sqTaskrun is IORING_SQ_TASKRUN, raised under setupTaskrunFlag while
+          task work waits for an enter: from 6.13 also the works one GETEVENTS
+          enter left in retry_llist past IO_LOCAL_TW_DEFAULT_MAX.
+        name: sqTaskrun
+        type: uint32
+        value: 1 << 2
       - doc: mmap offsets.
         name: offSQRing
         type: uintptr
@@ -1411,6 +1424,27 @@ constants:
         name: reapRounds
         type: int
         value: "4"
+      - doc: |-
+          heldBatches bounds the batches running in which IORING_SQ_TASKRUN alone
+          keeps a ring behind while its catch-up reaps nothing. The flag is
+          exact one way only: clear, the kernel holds no task work; raised, it
+          may hold none, the kernel clearing it only on entering
+          __io_run_local_work, so a work queued and run in the same pass — a
+          linked SQE's next, on 6.8 any enter, from 6.12 one short of
+          min_events, as the grouped wait asks — leaves it raised over an
+          empty list until the next work comes (#1595). Work truly held in
+          retry_llist is not what the bound lets through: the drain's plain wait,
+          the wait of each batch that waits (a batch that does not wait reaps, which
+          starts the count again), runs the local work until one completion
+          posts (io_cqring_wait_schedule answers 1 while any is pending), so a
+          recv held behind works that post nothing is run by the next batch's
+          wait at the latest, and its completion starts the count again. Each
+          GETEVENTS enter besides runs at least IO_LOCAL_TW_DEFAULT_MAX (20)
+          works. A stale flag costs a quiet ring heldBatches ticks, far under
+          drainQuiet.
+        name: heldBatches
+        type: int
+        value: reapRounds
       - doc: |-
           staleFill is the byte a provided buffer is overwritten with under the
           fill hook: a stale byte read back shows as it.
@@ -2223,6 +2257,7 @@ files:
       - (*uLoop).probeRingFDs
       - (*uLoop).rewindSelfTest
       - (*uLoop).settle
+      - (*uLoop).settleTaskrunFlag
       - layoutFlags
       - (*uLoop).reportMinTimeout
       - (*uLoop).reportSelfTest
@@ -2309,6 +2344,11 @@ files:
       - (*uLoop).catchUp
       - (*uLoop).cutBehind
       - (*uRing).catchUp
+      - (*uRing).readHeld
+      - (*uRing).countHeld
+      - caughtUp
+      - (*uring).taskrunFlagged
+      - (*uring).workHeld
       - (*uLoop).submitLate
       - (*uLoop).live
       - (*uRing).reapAll
@@ -3254,6 +3294,21 @@ functions:
     name: fillMargin
     params: table int
     results: int
+  - doc: |-
+      caughtUp is one catch-up round's verdict: caught up when the round reaped
+      nothing and, on a ring set up with TASKRUN_FLAG, the enter left no task
+      work held (IORING_SQ_TASKRUN clear), or the flag already kept the ring
+      behind idle — heldBatches batches running that reaped nothing —: the flag
+      may stay raised over no work, so it vetoes a bounded number of batches. From 6.13 one GETEVENTS enter runs
+      IO_LOCAL_TW_DEFAULT_MAX works whether they post a completion or not — a
+      poll wake-up that falls back to EAGAIN posts none — and leaves the rest in
+      retry_llist, the flag raised (io_run_local_work_continue): a round can reap
+      nothing with a recv still held behind them (#1595). A ring without the
+      flag keeps the reap's word alone; before 6.13 an enter runs every work
+      queued when it started, and the reap's word is exact there.
+    name: caughtUp
+    params: reaped, flagged, held bool, idle int
+    results: bool
   - doc: |-
       reapShape is how many completions one reap takes and how many reaps a
       ring gets a batch: CQBatch, reapRounds times; under a budget the same
@@ -6298,6 +6353,16 @@ types:
         name: starvedSeen
         type: uint64
       - doc: |-
+          heldIdle is how many batches running the catch-up reaped nothing and
+          ended behind on IORING_SQ_TASKRUN alone (heldBatches); heldMark the
+          ring's completions when it last counted, so a reap that brought
+          anything since, or a round that reads the flag clear (readHeld), starts
+          the count again.
+        name: heldIdle
+        type: int
+      - name: heldMark
+        type: uint64
+      - doc: |-
           promise is rearmStarved's scratch: each group's buffers not yet
           promised to a re-armed recv.
         name: promise
@@ -6515,6 +6580,24 @@ types:
         name: catchUp
         recv: rr *uRing
         results: behind, cut bool
+      - doc: |-
+          readHeld flushes the overflow and reports IORING_SQ_TASKRUN. A flagged ring
+          reading it clear ends the episode the count belongs to: clear, the flag is
+          exact, and the count does not carry a raised flag from one episode to the
+          next.
+        name: readHeld
+        recv: rr *uRing
+        results: bool
+      - doc: |-
+          countHeld counts a catch-up that ended behind: one batch more held on
+          IORING_SQ_TASKRUN alone when its rounds reaped nothing since start, the
+          count started again when they reaped anything — also when a round reads the
+          flag clear (readHeld). The count is what the drain's wait leaves to guard
+          against, not the protection itself: that wait runs the local work until a
+          completion posts.
+        name: countHeld
+        params: start uint64
+        recv: rr *uRing
       - doc: |-
           reapAll reaps the ring's CQ until it is empty, a batch at a time, and
           flushes an overflow the kernel held back. Under a batch budget it reaps
@@ -7249,8 +7332,9 @@ types:
         results: "*uring, uint32, error"
       - doc: |-
           probeFlags is the first setup the probe tries: every class A-code flag the
-          operator left on, SQ_REWIND only with NO_SQARRAY, which it requires, and
-          DEFER_TASKRUN in place of COOP_TASKRUN.
+          operator left on, SQ_REWIND only with NO_SQARRAY, which it requires,
+          DEFER_TASKRUN in place of COOP_TASKRUN, and TASKRUN_FLAG unless the
+          operator switched it off.
         name: probeFlags
         recv: ul *uLoop
         results: uint32
@@ -7283,6 +7367,14 @@ types:
           SQ_REWIND passed its self-test, features the kernel's.
         name: settle
         params: found uint32, rewind bool, features uint32
+        recv: ul *uLoop
+      - doc: |-
+          settleTaskrunFlag puts TASKRUN_FLAG on a DEFER_TASKRUN primary, the one
+          ring whose IORING_SQ_TASKRUN the drain's catch-up reads (#1595), and
+          reports its row: on there, available on a loop without DEFER_TASKRUN. A
+          flag the setup gave up keeps giveUp's row, one switched off its own.
+        name: settleTaskrunFlag
+        params: found uint32
         recv: ul *uLoop
       - doc: |-
           reportMinTimeout is class B's MIN_TIMEOUT row: what the features say,
@@ -7490,7 +7582,9 @@ types:
           until an enter posts nothing, reapRounds times at most. A ring still
           behind then is not judged silent this batch (#1541): its requests may wait
           in that work. Under 6.13 and later one enter runs only a few dozen of
-          those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds. A ring already
+          those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds, and a round that
+          posts nothing ends them only once the kernel holds no work back, which a
+          ring set up with TASKRUN_FLAG says (caughtUp, #1595). A ring already
           behind — cut by the budget, not reached, or starved — is left for the next
           batch, the budget kept (ADR 0206). A ring the budget cuts here is left as
           reapRings leaves one: counted, the next batch starting there without
@@ -7976,6 +8070,19 @@ types:
         params: usecs uint32, prefer bool
         recv: u *uring
         results: uringNAPI, syscall.Errno
+      - doc: |-
+          taskrunFlagged reports a ring set up with TASKRUN_FLAG, whose
+          IORING_SQ_TASKRUN workHeld reads.
+        name: taskrunFlagged
+        recv: u *uring
+        results: bool
+      - doc: |-
+          workHeld reports IORING_SQ_TASKRUN: the kernel holds task work for this
+          ring's thread. Read with the atomic load overflowed uses on the same word;
+          only a TASKRUN_FLAG ring raises it.
+        name: workHeld
+        recv: u *uring
+        results: bool
       - doc: |-
           mapRings maps the SQ and CQ rings, one mapping under FEAT_SINGLE_MMAP, and
           the SQEs. It returns the step that failed and the kernel's errno.
@@ -8474,6 +8581,7 @@ vars:
           		{corenet.CapabilityTCPKeepAlive, classKernel},
           		{corenet.CapabilityTCPUserTimeout, classKernel},
           		{corenet.CapabilityURingSockGetsockopt, classKernel},
+          		{corenet.CapabilityURingTaskrunFlag, classKernel},
           		{corenet.CapabilityURingDeferTaskrun, classCode},
           		{corenet.CapabilityURingNoSQArray, classCode},
           		{corenet.CapabilityURingRingFDs, classCode},
@@ -8535,7 +8643,8 @@ vars:
       setupDrops is the order in which the probe gives up setup flags on EINVAL,
       the newest first, so a flag is never dropped before one that requires it:
       SQ_REWIND before NO_SQARRAY (REWIND⇒NO_SQARRAY), DEFER_TASKRUN before
-      SINGLE_ISSUER (DEFER⇒SINGLE).
+      SINGLE_ISSUER (DEFER⇒SINGLE). TASKRUN_FLAG (5.19), the oldest, goes last:
+      it needs COOP_TASKRUN or DEFER_TASKRUN, one of which every try carries.
     items:
       - name: setupDrops
         value: |-
@@ -8547,6 +8656,7 @@ vars:
           	{setupNoSQArray, corenet.CapabilityURingNoSQArray},
           	{setupDeferTaskrun, corenet.CapabilityURingDeferTaskrun},
           	{setupSingleIssuer, ""},
+          	{setupTaskrunFlag, corenet.CapabilityURingTaskrunFlag},
           }
     name: setupDrops
   - grouped: true

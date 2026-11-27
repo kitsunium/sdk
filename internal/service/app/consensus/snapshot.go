@@ -34,8 +34,11 @@ func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error)
 }
 
 // restoreFrom verifies a snapshot's digest, then restores the state machine
-// from it, serialised with Apply.
-func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) error {
+// from it, serialised with Apply. install says the restore is a running
+// node's, on the apply goroutine, rather than a start's: a Restore it
+// refuses stops the node there, before it takes another item, where a
+// start's refusal fails the start (restoreRefused).
+func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool) error {
 	h, err := n.cfg.Snapshots.Open(m.ID)
 	if err != nil {
 		return err
@@ -72,9 +75,9 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) err
 		// snapshot's index (#1562). The chunk reader hashes what it decodes
 		// either way: the comparison is the only cost.
 		sr := &snapshotReader{cr: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes), meta: m}
-		//: a refused restore moves nothing, applied included.
+		//: a refused restore moves nothing, applied included, and may leave a prefix the machine wrote.
 		if err := n.cfg.Machine.Restore(sr, m); err != nil {
-			return err
+			return n.restoreRefused(&m, err, install)
 		}
 		// A machine may stop reading before the end: the rest is read, so
 		// the end is checked whatever the machine read, before applied
@@ -116,6 +119,56 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) err
 	n.snapState.last = max(n.snapState.last, m.Position.Index)
 	n.snapState.mu.Unlock()
 	return nil
+}
+
+// restoreRefused is what a Restore that returned err leaves the node. The
+// engine cannot tell a machine that read aside and kept its state from one
+// that decoded part of the stream into its live state and failed: the
+// machine may hold a prefix of the snapshot no correct node holds (#1582).
+// At an install, on the apply goroutine, the refusal stops the node before
+// the restore is answered, so the goroutine takes no item after it and no
+// entry is applied, and no Barrier released, over that prefix: stopped from
+// the install goroutine once answered, the entries handed after the restore
+// were applied meanwhile. VERSION_UNSUPPORTED stops it on that code, its
+// marker as before (D18). A DurableStateMachine may have written the
+// prefix to its disk, where a restart resumes past its AppliedPosition: it
+// stops STATE_MACHINE_FAILED with its marker, at an install as at a start.
+// A volatile machine's refusal stops an install STATE_MACHINE_FAILED with
+// no marker, and fails a start STATE_MACHINE_FAILED with no fallback to an
+// older snapshot or a replay from index 1, which applied the log over the
+// prefix. Its state is the process's: a start with a machine of its own
+// restores again; a marker would only keep down a node a supervisor
+// restarts on a fresh machine. The refused machine is never handed to
+// another node: one whose snapshot then fails its checksums falls back,
+// and a replay from index 1 would run over the prefix it holds. A snapshot the engine refuses before
+// Restore, on its metadata or checksums, touched no machine and is not
+// judged here.
+func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool) error {
+	_, durable := n.cfg.Machine.(coreconsensus.DurableStateMachine)
+	switch {
+	//: a format this build does not read: the start returns it, an install stops on it here.
+	case errs.HasCode(err, coreconsensus.CodeVersionUnsupported):
+		//: only an install has items after it.
+		if install {
+			n.stop(err, false)
+		}
+		return err
+	//: a durable machine may have written the prefix to its disk.
+	case durable:
+		serr := origin(coreconsensus.StateMachineFailed,
+			errs.String("why", "a durable machine refused a restore it may have written"),
+			errs.String("id", m.ID), errs.String("cause", err.Error()))
+		n.stop(serr, false)
+		return serr
+	}
+	serr := origin(coreconsensus.StateMachineFailed,
+		errs.String("why", "a volatile machine refused a restore it may have written"),
+		errs.String("id", m.ID), errs.String("cause", err.Error()))
+	//: an install stops, with no marker for a state the process takes with it.
+	if install {
+		n.stopUnmarked(serr)
+	}
+	return serr
 }
 
 // idNamesPosition reports whether a snapshot id of the form a cut writes,

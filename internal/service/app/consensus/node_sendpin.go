@@ -59,6 +59,9 @@ type sendPin struct {
 	// snapshot's EncodedSize (#920).
 	progress *atomic.Int64
 	size     int64
+	// rate is, while it streams, the stream's pace against the log's fill,
+	// from the stream's first tick (watchRateShort, #1486).
+	rate *rateWatch
 }
 
 // pinFollow follows the catch-up of a streamed snapshot's peer: at is where
@@ -227,6 +230,7 @@ func (n *Node) watchPins(now time.Time) {
 			ended = true
 		}
 	}
+	n.watchRateShort(now, n.r.Summary().Timing.ElectionTimeoutMax)
 	n.prunePinScale()
 	if ended {
 		n.aq.push(applyItem{compact: true})

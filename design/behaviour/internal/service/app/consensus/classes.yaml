@@ -397,6 +397,23 @@ constants:
           leadership moves to a member it does not know, nothing answers it. The
           changes that rely on it were admitted (#765).
         name: PeerLeaderUnconfirmed
+      - doc: |-
+          PeerSnapshotRateShort is set while the snapshot stream to the peer looks
+          too slow to end before the writes bring the log to the band where its pin
+          stops holding compaction back, after which the peer needs another
+          snapshot, the loop of #550. It rises once the transfer's estimated time,
+          at the stream's rate over the last four maximum election timeouts,
+          exceeds the time the writes take to fill the log to that band, at their
+          rate over the same window; it falls once the transfer would end within
+          three quarters of that time. Once the pin was lifted it holds nothing,
+          and the flag stays up to the stream's last byte. A raised flag thus does
+          not always mean that the transfer outlasts the fill at this instant. A
+          stream that did not move over the window is left to its pin bound. Each
+          rise adds one to consensus_snapshot_rate_short_total by peer and logs a
+          Warn line naming the peer, both times and the rate; the package guide
+          says what to do: raise SnapshotStreamBytesPerSecond, raise MaxLogBytes,
+          or lower the write load (#1486).
+        name: PeerSnapshotRateShort
     name: PeerVoter
   - doc: The answers a HealthValue carries.
     grouped: true
@@ -607,6 +624,36 @@ constants:
         value: "30"
     name: cutAllowance
   - doc: |-
+      rateWindowTimeouts is the span of the sliding windows a stream's rate and
+      the log's write rate are measured over, in maximum election timeouts: 8 s
+      at the default 2 s. Long enough that a paced stream's reads, a tenth of a
+      second apart, and a burst of writes average out; short enough that a rate
+      raised, or writes that stopped, show within it (#1486).
+    items:
+      - name: rateWindowTimeouts
+        type: int64
+        value: "4"
+    name: rateWindowTimeouts
+  - doc: |-
+      rateSamples is how many samples a rateWindow keeps, one per eighth of its
+      span at most: its memory is bounded whatever the tick, and the rate reads
+      over the last seven eighths of the span at least.
+    items:
+      - name: rateSamples
+        value: "8"
+    name: rateSamples
+  - doc: |-
+      rateShortClear is the hysteresis of PeerSnapshotRateShort: raised once the
+      transfer would end after the log's fill, it falls only once the transfer
+      would end within this fraction of the fill, so an estimate that hovers
+      around the fill time does not raise it, and count it, at every sample
+      (#1486).
+    items:
+      - name: rateShortClear
+        type: float64
+        value: "0.75"
+    name: rateShortClear
+  - doc: |-
       pinAfterStream bounds the pin of a streamed snapshot, in maximum
       election timeouts: a peer that stopped after its install no longer holds
       the log back once it passes. It bounds a stream that stopped moving as
@@ -754,6 +801,12 @@ constants:
           in bytes a second (#920).
         name: mSnapshotStreamRate
         value: "\"consensus_snapshot_stream_bytes_per_second\""
+      - doc: |-
+          mSnapshotRateShort counts, by peer, the rises of
+          PeerSnapshotRateShort: a stream that would end after the writes lift
+          its pin (#1486).
+        name: mSnapshotRateShort
+        value: "\"consensus_snapshot_rate_short_total\""
     name: mRole
   - doc: |-
       departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads
@@ -1271,6 +1324,7 @@ files:
       - (*Node).applyLoop
       - (*Node).restoreItem
       - (*Node).applyItems
+      - (*Node).applyItem
       - (*Node).applyHanded
       - (*Node).applyRead
       - (*Node).readBack
@@ -1654,6 +1708,7 @@ files:
       - onThisLeader
       - (*Node).warnHandOver
       - (*Node).peerHealth
+      - streamHealth
       - peerRoleFlags
       - (*Node).peerUnreachable
     name: health.go
@@ -1929,6 +1984,8 @@ files:
       - (*Node).syncFor
       - (*Node).completeWrite
       - (*Node).stop
+      - (*Node).stopUnmarked
+      - (*Node).stopAs
       - (*Node).reportUnwrittenMarkers
       - (*Node).StopReason
       - (*Node).failAllOnStop
@@ -1986,6 +2043,22 @@ files:
       - (*Node).voterMatch
       - (*Node).cutExempt
     name: node_progresswatch.go
+  - decls:
+      - rateWindowTimeouts
+      - rateSamples
+      - rateShortClear
+      - rateWindow
+      - rateWatch
+      - (*rateWindow).add
+      - (*rateWindow).rate
+      - (*Node).tightFrom
+      - (*Node).watchRateShort
+      - (*Node).pinFill
+      - (*rateWatch).sample
+      - fillSeconds
+      - (*Node).judgeRateShort
+      - secondsText
+    name: node_rateshort.go
   - decls:
       - pinAfterStream
       - pinScaleMax
@@ -2309,6 +2382,7 @@ files:
       - cutRetryMin
       - Latest
       - (*Node).restoreFrom
+      - (*Node).restoreRefused
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
@@ -3352,6 +3426,13 @@ functions:
     params: vs []raft.IsolationValue
     results: bool
   - doc: |-
+      streamHealth fills, for pin's stream in flight, how far the transport
+      has read it (#920) and whether it is too slow to end before the log
+      lifts its pin (#1486). A streamed pin, or one whose stream has not
+      opened, adds nothing.
+    name: streamHealth
+    params: ph *PeerHealthValue, pin *sendPin
+  - doc: |-
       peerRoleFlags carries the facts of the leader's view a verdict repeats
       as they are: whether the peer votes and whether a snapshot is under way
       to it.
@@ -3652,6 +3733,19 @@ functions:
     name: keepWaiting
     params: w []queuedStream, role func(coreconsensus.NodeID) waiterRole
     results: kept []queuedStream, voter, learner int
+  - doc: |-
+      fillSeconds is how long writes at rate bytes a second take to add left
+      bytes to the log: 0 once there is none left, the log already tight, and
+      +Inf with no writes.
+    name: fillSeconds
+    params: left int64, rate float64
+    results: float64
+  - doc: |-
+      secondsText renders s seconds as a duration, to the millisecond, "never"
+      past what a Duration holds.
+    name: secondsText
+    params: s float64
+    results: string
   - doc: |-
       maxPacedStreams is the most snapshot streams a pacer can share without
       one's moved mark outliving its pin bound. Each of N streams waits for N
@@ -7446,7 +7540,7 @@ types:
       - doc: |-
           Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
           PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
-          PeerLeaderUnconfirmed.
+          PeerLeaderUnconfirmed, PeerSnapshotRateShort.
         name: Flags
         type: PeerFlags
       - doc: Match is the highest index the peer holds durably, as acknowledged.
@@ -8307,6 +8401,11 @@ types:
         name: pinScale
         type: map[coreconsensus.NodeID]uint8
       - doc: |-
+          logRate is the window over the log's bytes the writes' rate is read
+          from, sampled at each tick (watchRateShort, #1486).
+        name: logRate
+        type: rateWindow
+      - doc: |-
           tooLarge is, per learner, the newest snapshot it was found too small
           to install, so that it is said once per snapshot (#591).
         name: tooLarge
@@ -8449,6 +8548,15 @@ types:
           entry stopped it.
         name: applyItems
         params: items []applyItem
+        recv: n *Node
+        results: bool
+      - doc: |-
+          applyItem runs one item taken from the apply queue. It returns false
+          when the apply goroutine must end: a restore whose Restore the machine
+          refused stopped the node before it was answered, so no item taken after
+          it runs over the prefix the machine may hold (#1582).
+        name: applyItem
+        params: it *applyItem
         recv: n *Node
         results: bool
       - doc: |-
@@ -8791,7 +8899,9 @@ types:
           install receives the stream of an accepted offer into its spool, commits
           it, and has the apply goroutine restore from it before raft adopts it. A
           short stream keeps the spool for the next offer to resume; a snapshot
-          that does not restore is removed, so a restart does not load it. The
+          the engine refused before Restore is removed, so a restart does not load
+          it, and one whose Restore the machine refused stopped the node and stays
+          for the next start (restoreFailed). The
           test-only crash hook launches HardClose on its own goroutine, which ends
           when HardClose returns, because install itself runs under the transport.
         name: install
@@ -9073,6 +9183,9 @@ types:
           stopped the node, its machine having accepted a stream whose end was then
           refused. Falling back from the second, a durable machine already past the
           older snapshot is not restored again and stays on the state it accepted.
+          A machine whose Restore refused the stream may hold the prefix it decoded
+          in place, a volatile one included: the fallback applied over it (#1582),
+          so STATE_MACHINE_FAILED refuses the start too.
         name: refusesStart
         params: rerr error
         recv: n *Node
@@ -9692,6 +9805,18 @@ types:
         params: err error, storage bool
         recv: n *Node
       - doc: |-
+          stopUnmarked stops the node as stop does, but writes no stop marker: the
+          cause is held in memory only, a volatile machine's refused restore
+          (#1582), which a restart on a fresh machine does not meet again, and the
+          start refuses on its own when it does.
+        name: stopUnmarked
+        params: err error
+        recv: n *Node
+      - doc: stopAs is stop, with mark saying whether the stop markers are written.
+        name: stopAs
+        params: err error, storage, mark bool
+        recv: n *Node
+      - doc: |-
           reportUnwrittenMarkers logs each place a stop marker could not be written.
           R9-05 accepts a stop that left one marker of the two; the line says which
           one is missing, so an operator knows what protects the next start.
@@ -9899,6 +10024,52 @@ types:
         params: now time.Time, etMax time.Duration
         recv: n *Node
         results: bool
+      - doc: |-
+          tightFrom is the fewest bytes at which the log is tight (logTight): past
+          both MaxLogBytes less twice LogReserveBytes and half of MaxLogBytes less
+          LogReserveBytes. Every pin stops holding compaction back there.
+        name: tightFrom
+        recv: n *Node
+        results: int64
+      - doc: |-
+          watchRateShort judges, at a tick, whether each snapshot stream in flight
+          would end before the writes bring the log to tightFrom, where its pin
+          stops holding compaction back (#1486). The stream's rate R is its bytes
+          sent over the sliding window from its accept, the writes' rate the log's
+          growth over the same window, compactions left out (rateWindow), both
+          rateWindowTimeouts of etMax: it raises
+          PeerSnapshotRateShort for the stream once (EncodedSize less the bytes
+          sent) over R exceeds (tightFrom less the log's bytes) over the write rate,
+          adds one to consensus_snapshot_rate_short_total and logs it at Warn; it
+          lowers it once the transfer would end within rateShortClear of the fill.
+          A stream that did not move over the window is left as it stands: its pin
+          bound judges it (streamDue). Nothing else changes: the pin, the
+          compaction and the pacing are left as they are. It runs on the loop,
+          which holds n.sending and the windows: no lock.
+        name: watchRateShort
+        params: now time.Time, etMax time.Duration
+        recv: n *Node
+      - doc: |-
+          pinFill is how long, at the write rate, the pin of a stream holds
+          compaction back with the log at b bytes: until the writes bring it to
+          tightFrom (fillSeconds), and 0 once the pin was lifted. A lifted pin holds
+          nothing, for good: the follower needs another snapshot whatever the
+          rates. Read from the rates, every cut compacted at once then, and cuts
+          about one a sample apart read no writes: the flag fell, and rose, counted
+          and logged, at each change of their cadence (D1' of #1486's review).
+        name: pinFill
+        params: pin *sendPin, b int64, write float64
+        recv: n *Node
+        results: float64
+      - doc: |-
+          judgeRateShort raises or lowers PeerSnapshotRateShort for the stream to
+          peer to, whose transfer would end in eta seconds at rate bytes a second
+          and whose pin stops holding in fill seconds: raised when eta exceeds
+          fill, counted and logged once per rise; lowered once eta is within
+          rateShortClear of fill.
+        name: judgeRateShort
+        params: to coreconsensus.NodeID, s *rateWatch, eta, fill, rate float64
+        recv: n *Node
       - doc: |-
           streamedPin is the pin of the snapshot at index once its stream to peer
           to ended at now, the leader's log then at last: it holds a pinBound,
@@ -10486,9 +10657,39 @@ types:
         results: "*raft.SessionTable"
       - doc: |-
           restoreFrom verifies a snapshot's digest, then restores the state machine
-          from it, serialised with Apply.
+          from it, serialised with Apply. install says the restore is a running
+          node's, on the apply goroutine, rather than a start's: a Restore it
+          refuses stops the node there, before it takes another item, where a
+          start's refusal fails the start (restoreRefused).
         name: restoreFrom
-        params: m coreconsensus.SnapshotMetaValue, durIdx uint64
+        params: m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool
+        recv: n *Node
+        results: error
+      - doc: |-
+          restoreRefused is what a Restore that returned err leaves the node. The
+          engine cannot tell a machine that read aside and kept its state from one
+          that decoded part of the stream into its live state and failed: the
+          machine may hold a prefix of the snapshot no correct node holds (#1582).
+          At an install, on the apply goroutine, the refusal stops the node before
+          the restore is answered, so the goroutine takes no item after it and no
+          entry is applied, and no Barrier released, over that prefix: stopped from
+          the install goroutine once answered, the entries handed after the restore
+          were applied meanwhile. VERSION_UNSUPPORTED stops it on that code, its
+          marker as before (D18). A DurableStateMachine may have written the
+          prefix to its disk, where a restart resumes past its AppliedPosition: it
+          stops STATE_MACHINE_FAILED with its marker, at an install as at a start.
+          A volatile machine's refusal stops an install STATE_MACHINE_FAILED with
+          no marker, and fails a start STATE_MACHINE_FAILED with no fallback to an
+          older snapshot or a replay from index 1, which applied the log over the
+          prefix. Its state is the process's: a start with a machine of its own
+          restores again; a marker would only keep down a node a supervisor
+          restarts on a fresh machine. The refused machine is never handed to
+          another node: one whose snapshot then fails its checksums falls back,
+          and a replay from index 1 would run over the prefix it holds. A snapshot the engine refuses before
+          Restore, on its metadata or checksums, touched no machine and is not
+          judged here.
+        name: restoreRefused
+        params: m *coreconsensus.SnapshotMetaValue, err error, install bool
         recv: n *Node
         results: error
       - doc: |-
@@ -11359,6 +11560,68 @@ types:
     kind: struct
     name: progressWatch
   - doc: |-
+      rateWindow is a sliding window over a count that may also fall — the
+      bytes a stream sent, the bytes the log holds, which a compaction shrinks —
+      sampled on the loop: the samples at, in Unix nanoseconds (the wall
+      clock's, as a pin's moved and since), and acc, the growth the count
+      gained from one sample to the next summed since the window's first, a
+      ring of rateSamples whose next slot is head, n of them taken; last is the
+      count at the newest sample. Only growth is summed: a compaction costs the
+      write rate the writes of the one interval it falls in, and never reads as
+      a window without writes, which lowered PeerSnapshotRateShort for a window
+      after each compaction of a stream it held for, then raised and counted it
+      again (D1 of #1486's review).
+    fields:
+      - name: at
+        type: "[rateSamples]int64"
+      - name: acc
+        type: "[rateSamples]int64"
+      - name: last
+        type: int64
+      - name: head
+        type: int
+      - name: "n"
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          add samples v at now, once an eighth of span has passed since the newest
+          sample: a tick faster than that adds nothing.
+        name: add
+        params: now time.Time, v int64, span time.Duration
+        recv: w *rateWindow
+      - doc: |-
+          rate is the count's growth a second from the oldest sample to the newest,
+          its falls left out, and false until the ring is full.
+        name: rate
+        recv: w *rateWindow
+        results: float64, bool
+    name: rateWindow
+  - doc: |-
+      rateWatch is what a stream's pin measures of its pace: the window over
+      the bytes sent, and whether PeerSnapshotRateShort is raised for it. It
+      holds on the pin's side by pointer, as pinFollow, so the pin still passes
+      by value.
+    fields:
+      - name: sent
+        type: rateWindow
+      - name: short
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          sample adds sent, the stream's progress at now, to its window and returns
+          the stream's rate, false until the window is full or while the stream
+          did not move over it. The window starts again at the first sample past
+          0, the accept, which stores a resumed stream's offset at once: that jump
+          is no rate, and a window spanning the offer's wait would read a fraction
+          of the stream's.
+        name: sample
+        params: now time.Time, sent int64, span time.Duration
+        recv: s *rateWatch
+        results: float64, bool
+    name: rateWatch
+  - doc: |-
       sendPin is a snapshot that pins compaction for a peer. While it streams,
       until is zero; moved is when the stream last moved, in Unix nanoseconds
       of n.clk: its offer, then the accept, which opens the snapshot, then each
@@ -11396,6 +11659,11 @@ types:
         type: "*atomic.Int64"
       - name: size
         type: int64
+      - doc: |-
+          rate is, while it streams, the stream's pace against the log's fill,
+          from the stream's first tick (watchRateShort, #1486).
+        name: rate
+        type: "*rateWatch"
     kind: struct
     name: sendPin
   - doc: |-
