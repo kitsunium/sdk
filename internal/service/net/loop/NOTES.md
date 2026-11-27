@@ -193,7 +193,7 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   ring) and 110 ms (two) without, while the readers read it 35 to 107 ms
   after, which failed 3 runs in 5. The loop still lets them run (sysmon
   preempts it: 20 to 30 ms gaps between its batch ends, as long without a
-  budget); a remote client sees the kernel's instant. The benchmark keeps the
+  budget); the stamp leaves out the local readers' scheduling delay alone, and a remote client's own reading adds the network and its host on top. The benchmark keeps the
   reader's clock.
 - `WriteFile` (#982, `corenet.LoopFileWriter`): head then n bytes of a file, the
   descriptor duplicated (the engine's copy, so an SQE can name it until the file
