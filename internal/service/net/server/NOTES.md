@@ -564,10 +564,37 @@ contending on one accept queue. Zero means one per core; one disables it.
   draw never shares a port with a bound socket (`inet_csk_find_open_port`
   asks `inet_csk_bind_conflict` with `reuseport_ok` false), so `bindShards`
   and `bindLoopAddress` keep theirs. `shards_draw_linux_internal_test.go`:
-  the kernel's contract (`TestReuseport_enabledAfterBindAdmitsJoins`), 96
-  starts beside a holder of an eighth of the range, and a child in a user and
-  network namespace of its own whose range is one or two ports, skipped where
-  the host refuses one.
+  the kernel's contract (`TestReuseport_enabledAfterBindAdmitsJoins`), 128
+  starts beside a holder of an eighth of the range for each of the
+  spellings `"0"`, `""` and `"00"` — `drawnPort` reads a port as Go's
+  `parsePort` does, so every spelling Go binds as port 0 is a draw
+  (`Test_drawnPort`) —, and a child in a user and network namespace of its
+  own whose range is one or two ports, skipped where the host refuses one.
+  The child writes the sysctl only when `drawChildDecision` admits it: a
+  case index the constants build, never a range from the environment; the
+  parent's network namespace (`dev:ino` of `/proc/thread-self/ns/net`)
+  named and different from its own, read on the locked thread that then
+  writes; and a `uid_map` that is not the initial namespace's identity.
+  Every refusal prints `draw: skip <reason>`, which the parent skips on.
+  - *What it does not close (R1, earlier than #1585).* "A port nobody holds"
+    is true at the instant of the draw only. Once `reuseAfterBind` has set
+    the option, the group is itself a reuseport holder: another program of
+    the same user that draws port 0 with SO_REUSEPORT set on the same
+    address may be given the group's port by the same rule
+    (`udp_lib_lport_inuse`) and join its group, reading part of its
+    datagrams while State shows nothing — as it may for a group on a named
+    port after #1330's probe. It cannot be closed without giving up
+    SO_REUSEPORT; `Steer(SteerCPU)` limits it, since its `cpu % n` program
+    never picks the index of a socket that joined after it.
+  - *The BSDs are not measured (R4).* `reuseport_bsd.go` keeps the option
+    before bind on darwin, freebsd, netbsd, openbsd and dragonfly, on a
+    reading of the kernels' source and no run: FreeBSD's draw,
+    `in_pcb_lport_dest`, counts a port as taken whenever
+    `in_pcblookup_local` finds a pcb on it, whatever its reuse options, so a
+    draw would not join a holder. No test measures it on a BSD kernel;
+    running `TestShards_portZeroDrawsAPortNobodyHolds` under
+    `unix && !solaris && !illumos` would, since the CI's `bsd` lanes run
+    every package's test binary.
 - **An address another process holds is refused, not shared** (#1330, ADR
   0029 amended 2026-11-12). SO_REUSEPORT on every shard used to let a second
   copy of a program start on the address a first one served and take half its

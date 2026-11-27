@@ -315,9 +315,9 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 // SO_REUSEPORT set may be given a port a reuseport socket of the same user
 // holds, and join its group (udp_reuseport_add_sock) — another program's
 // socket would then read part of the group's datagrams. Drawn without the
-// option, the port is one nobody holds; set afterwards, the option admits
-// the shards that follow, the group created when the second joins
-// (reuseport_add_sock, net/core/sock_reuseport.c).
+// option, the port is one nobody holds at the instant of the draw; set
+// afterwards, the option admits the shards that follow, the group created
+// when the second joins (reuseport_add_sock, net/core/sock_reuseport.c).
 func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec, first bool) (stdnet.PacketConn, bindReport, error) {
 	//: a shard joining a port, a named port, or one socket alone: as asked.
 	if !first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(addr) {

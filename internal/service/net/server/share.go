@@ -70,11 +70,11 @@ func shareRefusalFor(group *StreamGroup, familyRefusal *errs.Error, reusePort bo
 // without the group asking to share it with others, and only when it names a
 // port. An address asked as port 0 has its first shard draw the port without
 // SO_REUSEPORT (listenShard, #1585), which the kernel gives a port nobody
-// holds: a draw with SO_REUSEPORT set may, on Linux, be given a port a
-// reuseport socket of the same user holds (udp_lib_lport_inuse,
-// net/ipv4/udp.c). A stream's draw never shares a port with a bound socket
-// (inet_csk_find_open_port, net/ipv4/inet_connection_sock.c), so nothing is
-// probed there either.
+// holds at the instant of the draw: a draw with SO_REUSEPORT set may, on
+// Linux, be given a port a reuseport socket of the same user holds
+// (udp_lib_lport_inuse, net/ipv4/udp.c). A stream's draw never shares a port
+// with a bound socket (inet_csk_find_open_port,
+// net/ipv4/inet_connection_sock.c), so nothing is probed there either.
 func mustProbe(addr corenet.AddressValue, count int, share bool) bool {
 	//: one socket binds without SO_REUSEPORT and is refused by the kernel
 	//: itself; a shared address is not probed on purpose.

@@ -2624,9 +2624,9 @@ functions:
       SO_REUSEPORT set may be given a port a reuseport socket of the same user
       holds, and join its group (udp_reuseport_add_sock) — another program's
       socket would then read part of the group's datagrams. Drawn without the
-      option, the port is one nobody holds; set afterwards, the option admits
-      the shards that follow, the group created when the second joins
-      (reuseport_add_sock, net/core/sock_reuseport.c).
+      option, the port is one nobody holds at the instant of the draw; set
+      afterwards, the option admits the shards that follow, the group created
+      when the second joins (reuseport_add_sock, net/core/sock_reuseport.c).
     name: listenShard
     params: ctx context.Context, addr corenet.AddressValue, spec socketSpec, first bool
     results: stdnet.PacketConn, bindReport, error
@@ -3601,11 +3601,11 @@ functions:
       without the group asking to share it with others, and only when it names a
       port. An address asked as port 0 has its first shard draw the port without
       SO_REUSEPORT (listenShard, #1585), which the kernel gives a port nobody
-      holds: a draw with SO_REUSEPORT set may, on Linux, be given a port a
-      reuseport socket of the same user holds (udp_lib_lport_inuse,
-      net/ipv4/udp.c). A stream's draw never shares a port with a bound socket
-      (inet_csk_find_open_port, net/ipv4/inet_connection_sock.c), so nothing is
-      probed there either.
+      holds at the instant of the draw: a draw with SO_REUSEPORT set may, on
+      Linux, be given a port a reuseport socket of the same user holds
+      (udp_lib_lport_inuse, net/ipv4/udp.c). A stream's draw never shares a port
+      with a bound socket (inet_csk_find_open_port,
+      net/ipv4/inet_connection_sock.c), so nothing is probed there either.
     name: mustProbe
     params: addr corenet.AddressValue, count int, share bool
     results: bool
