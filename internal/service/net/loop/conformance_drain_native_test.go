@@ -331,6 +331,153 @@ func TestConformance_drainTakesWhatTheQueueHolds(t *testing.T) {
 	eachBackend(t, runCase)
 }
 
+// What TestConformance_drainReadsBeforeItJudgesSilence queues: drainUnreaped
+// connections, each with its line, that one take accepts — fewer than
+// queueTakeBatch and than the BSDs' listen backlog —, on a loop that reaps
+// drainReap events a batch, so most of them wait batches for their read;
+// drainTakeLimit bounds the batches the take may need, io_uring's reaping
+// drainReap accepts and receives a batch.
+const (
+	drainUnreaped  int = min(24, drainQueueCap/2)
+	drainReap      int = 4
+	drainTakeLimit int = 4 * drainUnreaped
+)
+
+// TestConformance_drainReadsBeforeItJudgesSilence pins that the drain never
+// takes for silent a connection whose request waits unread in its socket
+// (#1541): one loop of one ring reaping drainReap events a batch, held at
+// every batch end once the drain is asked for; drainUnreaped connections
+// complete their handshake into the queue, each with its line; one batch
+// takes them all, then the loop stays held past drainQuiet, as a loaded
+// runner holds it between two batches, then goes on. Every one must read its
+// echo, then the end.
+//
+// The drain judged a connection by the ticks since it last moved, and one
+// taken at a batch's end had not been read yet: its readiness waited behind
+// the events that batch could not reap (cqBatch), so the next batch begun a
+// second later found it silent and closed it half-way — a FIN, the request
+// unread, the peer reading EOF where its echo should be (the noble-6.8 lane:
+// 91 of 1 200, the last of one loop's take past the 512 its next batch
+// reaped).
+func TestConformance_drainReadsBeforeItJudgesSilence(t *testing.T) {
+	runCase := func(t *testing.T, b backendCase) {
+		var gating atomic.Bool
+		step := make(chan struct{})
+		held := make(chan struct{}, 1)
+		h := &lineH{}
+		h.batchEnd = func(corenet.LoopIO) {
+			//: once gated, the loop holds at every batch end until stepped.
+			if gating.Load() {
+				held <- struct{}{}
+				<-step
+			}
+		}
+		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings, c.Value.CQBatch = 1, 1, drainReap })
+		release := func() {
+			//: let a loop held at its batch end go, and every batch after.
+			if gating.Swap(false) {
+				close(step)
+			}
+		}
+		t.Cleanup(release)
+		c0 := dial(t, addr)
+		echo(t, c0, "warm\n")
+		park := func() bool {
+			//: held at a batch end, or never.
+			select {
+			case <-held:
+				return true
+			case <-time.After(5 * time.Second):
+				return false
+			}
+		}
+		gating.Store(true)
+		//: a posted no-op wakes the loop to its batch end.
+		if err := g.loops[0].Post(func(corenet.LoopIO, uintptr) {}, 0); err != nil {
+			t.Fatalf("Post: %v", err)
+		}
+		//: parked before the drain.
+		if !park() {
+			t.Fatal("the loop never reached its batch end")
+		}
+		g.ctl.drain()
+		conns := make([]stdnet.Conn, 0, drainUnreaped)
+		//: every connection queued, its line sent, before the take.
+		for range drainUnreaped {
+			c := dial(t, addr)
+			_, _ = c.Write([]byte("q\n"))
+			conns = append(conns, c)
+		}
+		// The loop runs a batch at a time until the take holds every one:
+		// epoll and kqueue take them in one, io_uring as its reaps allow.
+		opened := 0
+		//: drainTakeLimit batches at most.
+		for range drainTakeLimit {
+			step <- struct{}{}
+			//: the batch ended.
+			if !park() {
+				t.Fatal("the loop never ended a batch of the take")
+			}
+			opened, _ = h.counts()
+			//: the whole queue taken.
+			if opened == 1+drainUnreaped {
+				break
+			}
+		}
+		//: the take left part of the queue.
+		if want := 1 + drainUnreaped; opened != want {
+			t.Fatalf("%d of %d connections open after %d batches of the take", opened, want, drainTakeLimit)
+		}
+		// The next batch begins past drainQuiet, as on a loaded runner.
+		time.Sleep(drainQuiet + 250*time.Millisecond)
+		release()
+
+		done := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			done <- g.Shutdown(ctx)
+		}()
+		var wg sync.WaitGroup
+		failures := make(chan string, len(conns)+1)
+		//: each client reads its echo, then the end.
+		for i, c := range conns {
+			wg.Go(func() {
+				msg := echoThenEnd(c, "q\n")
+				resetClose([]stdnet.Conn{c})
+				//: cut short.
+				if msg != "" {
+					failures <- msg + " (queued #" + strconv.Itoa(i) + ")"
+				}
+			})
+		}
+		wg.Go(func() {
+			msg := echoThenEnd(c0, "")
+			resetClose([]stdnet.Conn{c0})
+			//: cut short.
+			if msg != "" {
+				failures <- msg + " (the warm one)"
+			}
+		})
+		wg.Wait()
+		close(failures)
+		var all []string
+		//: every failure, in arrival order.
+		for f := range failures {
+			all = append(all, f)
+		}
+		//: one unread request closed as silence is the defect.
+		if len(all) > 0 {
+			t.Fatalf("%d of %d connections cut short: %v", len(all), len(conns)+1, all[:min(len(all), 8)])
+		}
+		//: the drain ended within its budget.
+		if err := <-done; err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}
+	eachBackend(t, runCase)
+}
+
 // What TestConformance_drainClosesOnItsLastRead dials: drainBurst connections
 // between two batches of the drain — on Linux more than io_uring keeps
 // accepts in flight (acceptDepth, 32), so its take arms a round of its own,
@@ -502,4 +649,46 @@ func serveOn(t *testing.T, b backendCase, h corenet.LoopHandler, network string,
 	}
 	t.Cleanup(func() { _ = g.Close() })
 	return g, path
+}
+
+// TestConformance_drainClosesTheSilentUnderPosts pins that a drain closes a
+// connection that stays silent even when every batch reaps as many events as
+// its array holds (#1541 review): one loop reaping one event a batch, a Post
+// at every batch end, so each wait reports the wake alone. The silent
+// connection must read its end once drainQuiet passed, and Shutdown must
+// return, not wait its context out (DrainTimeout).
+func TestConformance_drainClosesTheSilentUnderPosts(t *testing.T) {
+	runCase := func(t *testing.T, b backendCase) {
+		var posting atomic.Bool
+		posting.Store(true)
+		h := &lineH{}
+		h.batchEnd = func(lio corenet.LoopIO) {
+			lp, ok := lio.(*loop)
+			//: a wake for the next batch, while the test wants one.
+			if ok && posting.Load() {
+				_ = lp.Post(func(corenet.LoopIO, uintptr) {}, 0)
+			}
+		}
+		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings, c.Value.CQBatch = 1, 1, 1 })
+		t.Cleanup(func() { posting.Store(false) })
+		c0 := dial(t, addr)
+		echo(t, c0, "warm\n")
+		silent := dial(t, addr)
+		ctx, cancel := context.WithTimeout(context.Background(), 4*drainQuiet)
+		defer cancel()
+		start := time.Now()
+		err := g.Shutdown(ctx)
+		posting.Store(false)
+		//: the drain ended by itself, the silent one closed.
+		if err != nil {
+			t.Fatalf("Shutdown after %v: %v", time.Since(start), err)
+		}
+		_ = silent.SetReadDeadline(time.Now().Add(time.Second))
+		//: the silent connection read its end.
+		if _, err := silent.Read(make([]byte, 1)); !errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET) {
+			t.Fatalf("the silent connection after the drain: %v", err)
+		}
+		resetClose([]stdnet.Conn{c0, silent})
+	}
+	eachBackend(t, runCase)
 }

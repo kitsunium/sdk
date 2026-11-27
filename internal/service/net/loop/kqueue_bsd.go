@@ -384,6 +384,7 @@ func (kl *kqueueLoop) setup() error {
 	lp := kl.lp
 	lp.post = newPostQueue(kl.wake)
 	kl.r = newRing(lp, 0, kl)
+	kl.r.silence = silenceAsk
 	lp.rings = []*ring{kl.r}
 	kl.armListeners()
 	//: ready to serve.

@@ -1218,6 +1218,7 @@ func (ul *uLoop) batch(ts *kernelTimespec, want uint32, tick *kernelTimespec) {
 		rr.sweep()
 		rr.closeBackstop()
 	}
+	ul.catchUp()
 	lp.h.OnBatchEnd(lp)
 	lp.settleDrain()
 	lp.endBatch()
@@ -1265,12 +1266,19 @@ func (ul *uLoop) reapRings() {
 	ul.reaped, ul.arrived, ul.fanReaped = 0, 0, 0
 	n, start := len(ul.rings), max(ul.cutAt-1, 0)
 	ul.cutAt = 0
+	//: a ring this batch does not reach is behind on its completions.
+	for _, rr := range ul.rings {
+		rr.r.setBehind(true)
+	}
 	//: each ring once, in turn.
 	for k := range n {
 		i := (start + k) % n
 		rr := ul.rings[i]
 		before := rr.r.st.completions
 		cut := rr.reapAll()
+		// Completions left in the CQ or held back by the kernel, and recvs
+		// starved of a provided buffer, wait for a later batch.
+		rr.r.setBehind(cut || rr.u.ready() > 0 || rr.u.overflowed() || len(rr.starved) > 0)
 		ul.reaped += rr.r.st.completions - before
 		//: a secondary's, for watchFan.
 		if i > 0 {
@@ -1284,6 +1292,86 @@ func (ul *uLoop) reapRings() {
 			return
 		}
 	}
+}
+
+// catchUp, while the loop drains, reaps what the batch's own submits posted
+// after reapRings and, on a DEFER_TASKRUN ring, the work the kernel holds for
+// this thread — a recv armed before its data came posts its completion only
+// on an enter with GETEVENTS, which a wait finding the CQ not empty skips —,
+// until an enter posts nothing, reapRounds times at most. A ring still
+// behind then is not judged silent this batch (#1541): its requests may wait
+// in that work. Under 6.13 and later one enter runs only a few dozen of
+// those works (IO_LOCAL_TW_DEFAULT_MAX), hence the rounds. A ring already
+// behind — cut by the budget, not reached, or starved — is left for the next
+// batch, the budget kept (ADR 0206). A ring the budget cuts here is left as
+// reapRings leaves one: counted, the next batch starting there without
+// waiting (cutAt), and the rings after it not caught up.
+func (ul *uLoop) catchUp() {
+	//: serving: no silence is judged.
+	if !ul.lp.draining {
+		//: nothing.
+		return
+	}
+	//: every ring the batch reaped whole.
+	for i, rr := range ul.rings {
+		//: behind already: judged at a later batch.
+		if rr.r.behind() {
+			continue
+		}
+		behind, cut := rr.catchUp()
+		rr.r.setBehind(behind)
+		//: the budget ran out with completions left: the rest next batch.
+		if cut {
+			ul.cutBehind(i)
+			return
+		}
+	}
+}
+
+// cutBehind records the budget's cut of ring i in catchUp as reapRings records
+// its own: the ring counted, the next batch starting at the batch's first cut
+// without waiting, and every ring after i, which catchUp no longer reaches,
+// behind.
+func (ul *uLoop) cutBehind(i int) {
+	ul.rings[i].r.st.cut++
+	//: reapRings cut none: this one is where the next batch starts.
+	if ul.cutAt == 0 {
+		ul.cutAt = i + 1
+	}
+	//: not caught up this batch.
+	for _, rr := range ul.rings[i+1:] {
+		rr.r.setBehind(true)
+	}
+}
+
+// catchUp is uLoop.catchUp on one ring, and reports whether it is still
+// behind, and whether the budget cut its reap with completions left.
+func (rr *uRing) catchUp() (behind, cut bool) {
+	//: an enter, then a reap, until neither brings anything.
+	for range reapRounds {
+		//: the deferred work runs only on this thread's GETEVENTS enter.
+		if rr.u.deferred() {
+			rr.u.flushOverflow()
+		}
+		before := rr.r.st.completions
+		//: cut by the budget: behind, and the next batch does not wait.
+		if rr.reapAll() {
+			//: cut.
+			return true, true
+		}
+		//: the kernel held completions back.
+		if rr.u.overflowed() {
+			//: behind.
+			return true, false
+		}
+		//: nothing came: caught up.
+		if rr.r.st.completions == before {
+			//: judged this batch.
+			return len(rr.starved) > 0, false
+		}
+	}
+	//: still coming after the rounds.
+	return true, false
 }
 
 // submitLate hands the kernel the answers endBatch queued at once, rather

@@ -109,6 +109,7 @@ go_test(
         "bundle_uring_linux_test.go",
         "busypoll_linux_test.go",
         "busypoll_uring_linux_test.go",
+        "catchup_uring_linux_test.go",
         "conformance_bsd_test.go",
         "conformance_caps_linux_test.go",
         "conformance_caps_uring_linux_test.go",

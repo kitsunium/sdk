@@ -26,6 +26,15 @@ const (
 	slotStep int = 2048
 )
 
+// The bits of ring.silence.
+const (
+	// silenceAsk asks the socket whether a silent-looking connection holds
+	// unread input.
+	silenceAsk uint8 = 1 << iota
+	// silenceBehind marks a batch that may have left a request unseen.
+	silenceBehind
+)
+
 // driver is what a backend does for the core: send a connection's output and
 // release its descriptor. The core owns every other decision.
 type driver interface {
@@ -97,6 +106,15 @@ type ring struct {
 	seen seen
 	// draining is a ring that accepts nothing more.
 	draining bool
+	// silence is how the drain believes a connection silent on this ring
+	// (#1541): silenceAsk, set by epoll and kqueue, whose connections are
+	// process descriptors the kernel reads input into, has the drain ask the
+	// socket (driver.unread) whether a silent-looking connection holds unread
+	// input — a readiness the batch did not reap, a read put off for want of
+	// arena —; silenceBehind, set by io_uring for the batch when it left
+	// completions unreaped or work the kernel holds for the thread, has it
+	// judge no silence this batch.
+	silence uint8
 }
 
 // seen is what a ring last published. A counter is stored to its atomic only

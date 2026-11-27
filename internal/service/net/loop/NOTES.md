@@ -23,7 +23,7 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
 | `kqueue_bsd.go` | the kqueue backend (ADR 0222): epoll's shape on the shared core — one locked thread, one kqueue, one ring a loop, a 2 MiB mmap'd arena —, level-triggered filters (`EV_CLEAR` would need a read to `EAGAIN`), `EVFILT_READ` and a disabled `EVFILT_WRITE` registered at accept so every change is an enable or a disable, `fdSlot` mapping a descriptor to its slot (kqueue names no slot), a batch's connection events served before its listeners' accepts so no event names a connection accepted in it, `EV_EOF` failing a connection that no longer reads only with the socket error in `fflags`, a non-blocking pipe as the wake on every BSD, `unread` a one-byte `MSG_PEEK`; `probeKqueue`'s stages `kqueue`, `kqueue-wake`, `kqueue-socket` (a socket pair, not a loopback accept: a jail may have no loopback), the conformance hook `failStage` honoured. No `fileSender`, no `peerer`: `LoopFileWriter` refuses, `Peer` answers false |
 | `group_bsd.go`, `accept_darwin.go`, `accept_bsd4.go`, `keepalive_*.go`, `listener_bsd.go`, `affinity_bsd.go`, `debug_bsd.go`, `drain_take_bsd.go` | kqueue's platform half: `startNative` (auto and kqueue probed then started, io_uring and epoll `UnsupportedPlatform`), `RLIMIT_NOFILE` signed or not, `MAP_ANON`, `pipeCloexec` (no `pipe2` on darwin: close-on-exec under the fork lock); accept with `accept4`, or under the fork lock on darwin, with `SO_NOSIGPIPE`; the rows: `tcp-nodelay` and `tcp-keepalive` on the listener (the keepalive's parameters where the platform names them, OpenBSD none), `tcp-user-timeout`, `tcp-defer-accept`, `so-incoming-cpu` Linux's and `tcp-notsent-lowat` not built, each absent or missing when opted into; `loop-affinity` missing when `Affinity` names a CPU; `loopdebug` compiled out (no thread identifier in package `syscall`, OpenBSD's pinned system calls refuse a raw one); `takeAfter` without `ENONET` |
 | `listener_native.go` | what the listener options share on Linux and the BSDs: `listenerRow`, `tcpListener`, `shardRow` (`SO_REUSEPORT` read back, the per-platform value), `capReport.apply`, `refuseSeqpacket` |
-| `drain_native.go` (`drain_take_linux.go`) | the drain's shared parts (ADR 0196 §D3): `listenerSet` (each taker — a loop on epoll, a ring on io_uring — hands each listener back once it took its queue; the last closes it, `closeRest` the others once every loop returned; it also counts each listener's accepts, every ring together, for the watchdog — ADR 0200 §D1), `drainable` (no partial input, and heard, or silent for `drainQuiet`; a slot heard in the batch waits for the next — #1385), `queueTakeMax` |
+| `drain_native.go` (`drain_take_linux.go`) | the drain's shared parts (ADR 0196 §D3): `listenerSet` (each taker — a loop on epoll, a ring on io_uring — hands each listener back once it took its queue; the last closes it, `closeRest` the others once every loop returned; it also counts each listener's accepts, every ring together, for the watchdog — ADR 0200 §D1), `drainable` (no partial input, and heard, or silent for `drainQuiet` with nothing waiting unread (`silent`: the socket asked on epoll and kqueue, the ring not `behind` on io_uring) — #1541; a slot heard in the batch waits for the next — #1385), `queueTakeMax` |
 | `*_bench_test.go` | every Benchmark of the package, by file name for `check-bench-md.sh` (#981): `loop_bench_test.go` (`Post`, `Wheel`, `Slab`, `Write`; `post_wake_linux_test.go` adds the eventfd wake), `batch_cost_bench_test.go`, `uring_cost_bench_test.go`, `bundle_/budget_/fill_/pbufinc_uring_bench_test.go`; their numbers are `BENCH.md` |
 | `postq.go` | the `Post` queue: preallocated, mutex, `pending` CAS false→true wakes once per drain |
 | `stats.go` | the per-ring counters (plain on the loop, atomic for `State`, published at the end of each batch) and the batch-duration histogram behind `BatchP99`. #975 adds `BytesIn` (`deliver`, `deliverSpill`), `BytesOut` (`wrote`: epoll's write, io_uring's `sendProgress`, a short send counted as it left), `OutputRefused` (`refuseOutput`, Write's three refusals), `SpillClosed` and `IdleClosed` (`countClose`), `Timeouts` (`expire`) and the gauge `PendingOutput` (Write adds, `wrote` subtracts, `finish` subtracts the unsent `out`, `release` the unsent `flight`: a closed connection owes nobody), and per loop `SlabInUse`/`SlabMapped` published at `endBatch`, summed with `SlabBudget` in `Group.State`; plain fields on the loop's thread, the atomics stored at a batch's end and only when the counter moved (`storeU`, `storeI`, against `ring.seen`): an atomic store is a full barrier, and storing the new counters as the old ones were cost a batch +22 % (`BenchmarkCore_batch`, benchstat, n=10), where storing what moved costs it 30 % less than the base. The portable backend fills the same fields from its lanes (server's) |
@@ -110,7 +110,46 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   connections drain; a loop stops once its connections are gone and its
   listeners handed back. A connection that has sent nothing (`fHeard` unset)
   closes only once heard or after `drainQuiet` (1 s): the take's connections
-  have their request on the way. The drain's look (`settleDrain`, then
+  have their request on the way. A silence is believed only when nothing
+  says the request waits unread (`ring.silent`), or the close would read it
+  away unanswered behind a FIN — a take of more than `CQBatch` on one loop,
+  its next batch a second late on a loaded runner (#1541,
+  `TestConformance_drainReadsBeforeItJudgesSilence`). epoll and kqueue ask
+  the socket (`silenceAsk`, `driver.unread`: SIOCINQ, a peek), exactly, so a
+  reap that only filled its array never holds a silent one open
+  (`TestConformance_drainClosesTheSilentUnderPosts`, `CQBatch` 1 and a Post
+  a batch); io_uring judges the ring (`silenceBehind`: completions left,
+  overflowed, a starved recv, a ring not reached). On io_uring, while it
+  drains, `catchUp` runs before `OnBatchEnd`: it reaps what the batch's own
+  submits posted after `reapRings` and, on a DEFER_TASKRUN ring, enters with
+  GETEVENTS so the kernel runs the work a recv armed before its data left —
+  a wait that finds the CQ not empty does not enter —, until an enter posts
+  nothing, `reapRounds` times at most, else the ring stays behind
+  (`TestConformance_drainRunsDeferredWork`). A `catchUp` the batch budget
+  cuts leaves its ring as `reapRings`' cut does: counted, `cutAt` set so the
+  next batch reaps it without waiting, the rings after it behind — else a
+  cut secondary waited on an empty primary for its tick
+  (`TestURingCatchUp_cutLeavesTheRingNext`, ADR 0206). On 6.13 and later the
+  catch-up's "caught up" is an approximation (#1541 safety review, R1): one
+  GETEVENTS enter runs at most `IO_LOCAL_TW_DEFAULT_MAX` (20) task works,
+  the rest kept in `retry_llist`, and the bound counts works, not
+  completions; twenty in a row that post nothing (a poll wake-up back to
+  EAGAIN: an accept another ring won, a wake-up with no data) make a round
+  that reaps nothing while a recv still waits behind them, and a connection
+  at its `drainQuiet` mark would be judged silent. The exact criterion is
+  `IORING_SETUP_TASKRUN_FLAG`, `IORING_SQ_TASKRUN` read after the enter:
+  since 6.13 `io_run_local_work_continue` sets it again while work remains.
+  It is not taken here: a new setup flag goes through ADR 0189's probe
+  descent and its registry, and the case needs both such a burst and a
+  connection at the 1 s mark, the `Shutdown` context still the bound. The
+  CI legs that run this package on such kernels — `fedora-kernel` (6.14)
+  and the runner's own (7.0) — are where its test would run; a 6.12 host
+  has no `retry_llist`. Under epoll, `driver.unread` (SIOCINQ, `tcp_inq`)
+  undercounts when TCP urgent data not inline has its mark at the head
+  (`urg_seq == copied_seq`): the bytes behind the mark are not counted, and
+  the connection reads as silent (#1541 safety review, R3). It is the
+  base's behaviour, narrowed to a client that sends `MSG_OOB` during a
+  drain. The drain's look (`settleDrain`, then
   `closeSettled`) runs once `OnBatchEnd` has returned, before `endBatch`
   flushes: an answer written at `OnBatchEnd` is queued before the close is
   marked, and a closing slot finishes only once its output left (#1385).
