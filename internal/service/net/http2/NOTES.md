@@ -18,7 +18,7 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
 | `loop_serve.go` | `Feed` and the stream events: decode, map, serve, answer, buffer or stream the body, `Abort`/`ResetStream`, `OnBatchEnd` |
 | `loop_request.go` | RFC 9113 §8.3.1's mapping onto `HTTP1RequestValue`, a split Cookie joined, the §8.2.2 fields malformed, the canonical target from `http1.Canonical` (#962) |
 | `loop_batch_external_test.go` | one `EndBatch` for a batch serving both versions on a lane, none for an empty one |
-| `loop_drain_external_test.go` | the drain's GOAWAY run in the batch that fed a request leaves the connection to `OnBatchEnd`, which writes the answer, then closes it; an idle one closes at once; the frames' order, SETTINGS first and the GOAWAY behind the answer; a worker's answer returned in a batch that fed its connection joins the batch's output, SETTINGS first, whether the drain runs or not (#1385); a connection still sniffing at the announcement, its preface split across it, or opened after it, gets its GOAWAY behind SETTINGS and any answer, then closes (#1609) |
+| `loop_drain_external_test.go` | the drain's GOAWAY run in the batch that fed a request leaves the connection to `OnBatchEnd`, which writes the answer, then closes it; an idle one closes at once; the frames' order, SETTINGS first and the GOAWAY behind the answer; a worker's answer returned in a batch that fed its connection joins the batch's output, SETTINGS first, whether the drain runs or not (#1385); a connection still sniffing at the announcement, its preface split across it, or opened after it, gets its GOAWAY behind SETTINGS and any answer, then closes (#1609); one GOAWAY a connection through the drain, a connection error's alone when it met one |
 | `loop_pending.go` | the worker path (`Worker`, `OnDone`, a slot per Pending stream, an RST_STREAM cancelling), the drain's GOAWAY (`Draining`, `InFlight`), `Pending` |
 | `frame.go` | `ParseFrameHeader`, `AppendFrameHeader`, `AppendSettings`, `AppendSettingsAck`, `AppendWindowUpdate`, `AppendRSTStream`, `AppendGoAway`, `AppendPing` |
 | `hpack_table.go` | `Decoder` and the dynamic table: a byte ring of entries and a ring of offsets, in memory the caller hands to `Decode` (`TableMem`) |
@@ -76,7 +76,10 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   sniffing then, or opened since — gets its GOAWAY from `feed`, which writes
   one on every connection it feeds once `draining` is set, behind the batch's
   SETTINGS and answers; read after the walk, it had none, nothing in flight,
-  and the drain closed it silent (#1609).
+  and the drain closed it silent (#1609). A connection a connection error
+  ended (`connError`, `Abort`: `Closing`) has written its GOAWAY with the
+  error's code; neither `goAway` nor `announceConn` adds a GOAWAY(NO_ERROR)
+  behind it, which a client could read as the final cause.
 - **`Honours` Protocols; `SetHTTP` carries it, and the `http2-loop` switch**,
   before `OnStart` — and `CheckSpill` refuses a group whose spill cannot hold
   one frame or field block.

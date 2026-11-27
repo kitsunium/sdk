@@ -309,8 +309,9 @@ func (st *laneState) announceDrain(io corenet.LoopIO) {
 // open with the server's SETTINGS, which RFC 9113 §3.4 makes the
 // connection's first frame, and written at once the GOAWAY came first.
 func (st *laneState) announceConn(io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry) {
-	//: one GOAWAY a connection, whoever asked first.
-	if e.flags&entryGoAway == 0 {
+	//: one GOAWAY a connection, whoever asked first; one a connection error
+	//: ended wrote its own (goAway).
+	if e.flags&entryGoAway == 0 && !st.lane.Closing(&e.conn) {
 		e.flags |= entryGoAway
 		st.writeGoAway(io, ref, e)
 	}

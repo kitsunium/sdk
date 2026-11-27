@@ -4730,7 +4730,7 @@ sequences:
               value: entryGoAway
             - eval: st.writeGoAway(io, ref, e)
               to: st.writeGoAway
-          when: e.flags&entryGoAway == 0
+          when: e.flags&entryGoAway == 0 && !st.lane.Closing(&e.conn)
       - opt:
           do:
             - eval: swallowErr(io.Close(ref))
@@ -5865,7 +5865,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: c.e.flags&entryGoAway != 0
+          when: c.e.flags&entryGoAway != 0 || c.st.lane.Closing(&c.e.conn)
       - op: "|="
         set: c.e.flags
         value: entryGoAway

@@ -1,6 +1,7 @@
 package http2_test
 
 import (
+	"encoding/binary"
 	"slices"
 	"testing"
 
@@ -272,6 +273,122 @@ func TestLoopHandler_aConnectionKnownAsHTTP2AfterTheAnnouncementGetsItsGoAway(t 
 		{name: "preface split across the announcement", openFirst: true, before: 10, data: preface},
 		{name: "opened after the announcement", data: preface},
 		{name: "opened after the announcement with a request", data: h2Request(), stream: 1},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// goAwayCodes is the code of each GOAWAY of out, a run of whole frames, in
+// order.
+func goAwayCodes(out []byte) []corehttp2.ErrCode {
+	var codes []corehttp2.ErrCode
+	for len(out) >= corehttp2.FrameHeaderLen {
+		n := int(out[0])<<16 | int(out[1])<<8 | int(out[2])
+		if len(out) < corehttp2.FrameHeaderLen+n {
+			break
+		}
+		if corehttp2.FrameType(out[3]) == corehttp2.FrameGoAway && n >= 8 {
+			codes = append(codes, corehttp2.ErrCode(binary.BigEndian.Uint32(out[corehttp2.FrameHeaderLen+4:])))
+		}
+		out = out[corehttp2.FrameHeaderLen+n:]
+	}
+	return codes
+}
+
+// TestLoopHandler_oneGoAwayAConnectionThroughTheDrain pins the GOAWAY the
+// drain writes to one a connection (#1609), and a connection error's to the
+// only one: an error a feed meets while the drain runs writes its GOAWAY,
+// and neither the feed's drain GOAWAY nor the announcement adds a
+// GOAWAY(NO_ERROR) after it, which a client could take for the final cause.
+// Two feeds of one connection, or a feed after the announcement covered it,
+// write one GOAWAY(NO_ERROR) between them.
+func TestLoopHandler_oneGoAwayAConnectionThroughTheDrain(t *testing.T) {
+	type tc struct {
+		name string
+		// run drives the adapter through the case and returns the connection's
+		// output.
+		run  func(t *testing.T) []byte
+		want []corehttp2.ErrCode
+	}
+	preface := h2Request()[:len("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")+corehttp2.FrameHeaderLen]
+	// badData is DATA on stream 0, a connection error (RFC 9113 §6.1).
+	badData := http2.AppendFrameHeader(nil, corehttp2.FrameValue{Type: corehttp2.FrameData, StreamID: 0, Length: 1})
+	badData = append(badData, 'x')
+	ping := http2.AppendFrameHeader(nil, corehttp2.FrameValue{Type: corehttp2.FramePing, Length: 8})
+	ping = append(ping, "pingping"...)
+	ref := corenet.LoopConnRef{Slot: 1, Gen: 1}
+	hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
+	feed := func(t *testing.T, a *http2.LoopHandler, io corenet.LoopIO, b []byte) {
+		t.Helper()
+		if n := a.OnData(io, ref, b); n != len(b) {
+			t.Fatalf("OnData consumed %d of %d", n, len(b))
+		}
+	}
+	runCase := func(t *testing.T, c tc) {
+		out := c.run(t)
+		if got := goAwayCodes(out); !slices.Equal(got, c.want) {
+			t.Fatalf("GOAWAY codes %v, want %v; frames %v", got, c.want, frameTypes(out))
+		}
+	}
+	for _, c := range []tc{
+		{name: "a connection error in the feed that knows it HTTP/2", want: []corehttp2.ErrCode{corehttp2.ErrCodeProtocol}, run: func(t *testing.T) []byte {
+			a := http2.HandleLoop(hello, http1.Parser{})
+			a.OnStart(1)
+			io := &postIO{batchIO: newBatchIO()}
+			a.OnOpen(io, ref)
+			a.Draining()
+			io.runPosts()
+			feed(t, a, io, append(append([]byte(nil), preface...), badData...))
+			a.OnBatchEnd(io)
+			return io.out[ref]
+		}},
+		{name: "a connection error in the announcing batch", want: []corehttp2.ErrCode{corehttp2.ErrCodeProtocol}, run: func(t *testing.T) []byte {
+			a := http2.HandleLoop(hello, http1.Parser{})
+			a.OnStart(1)
+			io := &postIO{batchIO: newBatchIO()}
+			a.OnOpen(io, ref)
+			a.Draining()
+			feed(t, a, io, append(append([]byte(nil), preface...), badData...))
+			io.runPosts()
+			a.OnBatchEnd(io)
+			return io.out[ref]
+		}},
+		{name: "two feeds during the drain", want: []corehttp2.ErrCode{corehttp2.ErrCodeNoError}, run: func(t *testing.T) []byte {
+			a := http2.HandleLoop(hello, http1.Parser{})
+			a.OnStart(1)
+			io := &postIO{batchIO: newBatchIO()}
+			a.OnOpen(io, ref)
+			a.Draining()
+			io.runPosts()
+			feed(t, a, io, preface)
+			feed(t, a, io, ping)
+			a.OnBatchEnd(io)
+			return io.out[ref]
+		}},
+		{name: "a feed after the announcement covered it", want: []corehttp2.ErrCode{corehttp2.ErrCodeNoError}, run: func(t *testing.T) []byte {
+			a := http2.HandleLoop(workerH{}, http1.Parser{})
+			a.OnStart(1)
+			jobs := &sentJobs{}
+			a.OnOutbound(corenet.LoopOutboundValue{Lanes: []corenet.LoopOutbound{jobs}, OutputCap: 1 << 20})
+			io := &postIO{batchIO: newBatchIO()}
+			a.OnOpen(io, ref)
+			feed(t, a, io, h2Request())
+			a.OnBatchEnd(io)
+			a.Draining()
+			io.runPosts()
+			if io.closed[ref] {
+				t.Fatal("the announcement closed a connection with a stream in flight")
+			}
+			feed(t, a, io, ping)
+			a.OnBatchEnd(io)
+			if len(jobs.jobs) != 1 {
+				t.Fatalf("%d jobs sent to the worker, want 1", len(jobs.jobs))
+			}
+			a.Worker().Work(0, jobs.jobs[0])
+			a.OnDone(io, jobs.jobs[0])
+			a.OnBatchEnd(io)
+			return io.out[ref]
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}

@@ -399,10 +399,12 @@ func (c *h2Call) answerStatus(stream uint32, status int) {
 }
 
 // goAway writes GOAWAY(NO_ERROR) once: the connection serves its streams and
-// closes when they end.
+// closes when they end. A connection a connection error ended has written
+// its GOAWAY already, with the error's code: a GOAWAY(NO_ERROR) behind it, the
+// drain's or Connection: close's, could be read as the final cause.
 func (c *h2Call) goAway() {
-	//: one GOAWAY a connection, whoever asked.
-	if c.e.flags&entryGoAway != 0 {
+	//: one GOAWAY a connection, whoever asked, the error's first.
+	if c.e.flags&entryGoAway != 0 || c.st.lane.Closing(&c.e.conn) {
 		//: already written.
 		return
 	}
