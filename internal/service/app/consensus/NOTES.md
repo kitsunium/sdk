@@ -1698,8 +1698,8 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   256 MiB, and the comparison is lost in the noise (311 ms against 316 ms
   for 256 MiB of random data, 1.56 s against 1.54 s for text). A machine
   that consumed the cut stream before it failed holds what it read: as for
-  any failed `Restore`, the copy is removed, nothing moves, and the next
-  restore replaces the state.
+  any failed `Restore`, the node stops STATE_MACHINE_FAILED (see the next
+  bullet but one).
 - Refuse, and keep running, a restore whose `Restore` returned nil before
   its end was refused: the machine accepted the stream and may hold the
   snapshot's state N while `applied` stays at A. A machine that stops at the
@@ -1725,6 +1725,56 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   becomes STATE_MACHINE_FAILED, STORAGE_FAILED survives only in the
   stop's `cause` text, and the marker is permanent, not limited to the
   start in progress.
+- Keep running, or fall back at a start, after a `Restore` that returned an
+  error: the engine cannot tell a machine that read aside and kept its state
+  from one that decoded part of the stream into its live state, so it
+  assumes the second. The entries (A, match] handed after the restore item
+  were applied over that prefix, a state no correct node holds, a durable
+  machine recorded their positions with it, which a restart resumed after,
+  and a start's fallback to an older snapshot or a replay from index 1
+  applied the log over it (#1582). `restoreRefused` stops the node on the
+  apply goroutine, before the restore is answered (`restoreItem`'s
+  `r.done`): `applyItems` reads `stopped` before every item, so none taken
+  after the restore runs, no `Barrier` or `WaitApplied` is released, and
+  `restoreFailed` (`install.go`), which stopped the node from the install
+  goroutine once answered, finds it stopped and keeps the copy.
+  VERSION_UNSUPPORTED stops on its own code with its marker (D18); a
+  `DurableStateMachine`'s refusal stops STATE_MACHINE_FAILED through
+  `n.stop`, with its marker, the prefix may be on its disk; a volatile
+  machine's through `n.stopUnmarked`, with none: its state goes with the
+  process, a supervisor starts it again on a new machine, which restores
+  the kept copy, and a refusal that repeats then fails that start. At a
+  start, a refusal fails the start STATE_MACHINE_FAILED for any machine,
+  with no fallback (`refusesStart`); a snapshot the engine refuses before
+  `Restore`, on its metadata or checksums, touched no machine and still
+  falls back. No snapshot is offered again to the stopped node. The owner
+  chose the stop (#1582): holding apply until a later `Restore` succeeded
+  relied on that offer, which a new leader whose log covers the node's
+  tail never makes, and putting raft back into NoTable at run time would
+  accept offers below what the node applied
+  (`TestARefusedRestoreStopsTheNodeBeforeAnyApply`,
+  `TestAVolatileRestoreRefusedAtStartRefusesTheStart`,
+  `TestADurableRestoreRefusedAtStartStopsTheNode`). A machine is written so
+  that a failed `Restore` loses nothing: it decodes the stream into a new
+  state of its own — a map, a temporary file or table — and swaps it in, a
+  pointer under its lock or a rename, only once the whole stream decoded and
+  `r` reached `io.EOF`; on any error it drops the new state and returns,
+  the old one untouched. The tests' `kv` and `machine/`'s `KV` read aside.
+  `machine/`'s `SQL` restores in one transaction and so loses nothing
+  either, yet its refusal stops the node: the engine has no word from a
+  machine that its `Restore` is atomic.
+  The only way out of such a stop or start refusal is a restart of the
+  process, on a new machine: the machine whose `Restore` was refused is
+  never handed to another node, since a start that then falls back — the
+  copy rotted between its two reads, no older snapshot, a log from index
+  1 — replays the log over the prefix it holds. Each attempt reads the
+  snapshot twice (the check, then `Restore`), and a refusal that is
+  deterministic fails every start: the supervisor restarts one node at a
+  time, waiting for it to be ready before the next, and gives up past a
+  bound (`lifecycle.Supervisor`'s `GiveUpAfter`, systemd's
+  `StartLimitBurst`); otherwise it loops. An install's refusal stops at
+  most f nodes at once, those outside the commit quorum that need an
+  install, but it eats the margin until they rejoin.
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).

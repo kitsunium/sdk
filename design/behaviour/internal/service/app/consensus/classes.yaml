@@ -1271,6 +1271,7 @@ files:
       - (*Node).applyLoop
       - (*Node).restoreItem
       - (*Node).applyItems
+      - (*Node).applyItem
       - (*Node).applyHanded
       - (*Node).applyRead
       - (*Node).readBack
@@ -1929,6 +1930,8 @@ files:
       - (*Node).syncFor
       - (*Node).completeWrite
       - (*Node).stop
+      - (*Node).stopUnmarked
+      - (*Node).stopAs
       - (*Node).reportUnwrittenMarkers
       - (*Node).StopReason
       - (*Node).failAllOnStop
@@ -2309,6 +2312,7 @@ files:
       - cutRetryMin
       - Latest
       - (*Node).restoreFrom
+      - (*Node).restoreRefused
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
@@ -8452,6 +8456,15 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
+          applyItem runs one item taken from the apply queue. It returns false
+          when the apply goroutine must end: a restore whose Restore the machine
+          refused stopped the node before it was answered, so no item taken after
+          it runs over the prefix the machine may hold (#1582).
+        name: applyItem
+        params: it *applyItem
+        recv: n *Node
+        results: bool
+      - doc: |-
           applyHanded applies what raft handed in one item, entries in memory or a
           read of the log, then wakes the loop when apply has room again. It
           returns false when the apply goroutine must end.
@@ -8791,7 +8804,9 @@ types:
           install receives the stream of an accepted offer into its spool, commits
           it, and has the apply goroutine restore from it before raft adopts it. A
           short stream keeps the spool for the next offer to resume; a snapshot
-          that does not restore is removed, so a restart does not load it. The
+          the engine refused before Restore is removed, so a restart does not load
+          it, and one whose Restore the machine refused stopped the node and stays
+          for the next start (restoreFailed). The
           test-only crash hook launches HardClose on its own goroutine, which ends
           when HardClose returns, because install itself runs under the transport.
         name: install
@@ -9073,6 +9088,9 @@ types:
           stopped the node, its machine having accepted a stream whose end was then
           refused. Falling back from the second, a durable machine already past the
           older snapshot is not restored again and stays on the state it accepted.
+          A machine whose Restore refused the stream may hold the prefix it decoded
+          in place, a volatile one included: the fallback applied over it (#1582),
+          so STATE_MACHINE_FAILED refuses the start too.
         name: refusesStart
         params: rerr error
         recv: n *Node
@@ -9690,6 +9708,18 @@ types:
           every goroutine without a final sync.
         name: stop
         params: err error, storage bool
+        recv: n *Node
+      - doc: |-
+          stopUnmarked stops the node as stop does, but writes no stop marker: the
+          cause is held in memory only, a volatile machine's refused restore
+          (#1582), which a restart on a fresh machine does not meet again, and the
+          start refuses on its own when it does.
+        name: stopUnmarked
+        params: err error
+        recv: n *Node
+      - doc: stopAs is stop, with mark saying whether the stop markers are written.
+        name: stopAs
+        params: err error, storage, mark bool
         recv: n *Node
       - doc: |-
           reportUnwrittenMarkers logs each place a stop marker could not be written.
@@ -10486,9 +10516,39 @@ types:
         results: "*raft.SessionTable"
       - doc: |-
           restoreFrom verifies a snapshot's digest, then restores the state machine
-          from it, serialised with Apply.
+          from it, serialised with Apply. install says the restore is a running
+          node's, on the apply goroutine, rather than a start's: a Restore it
+          refuses stops the node there, before it takes another item, where a
+          start's refusal fails the start (restoreRefused).
         name: restoreFrom
-        params: m coreconsensus.SnapshotMetaValue, durIdx uint64
+        params: m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool
+        recv: n *Node
+        results: error
+      - doc: |-
+          restoreRefused is what a Restore that returned err leaves the node. The
+          engine cannot tell a machine that read aside and kept its state from one
+          that decoded part of the stream into its live state and failed: the
+          machine may hold a prefix of the snapshot no correct node holds (#1582).
+          At an install, on the apply goroutine, the refusal stops the node before
+          the restore is answered, so the goroutine takes no item after it and no
+          entry is applied, and no Barrier released, over that prefix: stopped from
+          the install goroutine once answered, the entries handed after the restore
+          were applied meanwhile. VERSION_UNSUPPORTED stops it on that code, its
+          marker as before (D18). A DurableStateMachine may have written the
+          prefix to its disk, where a restart resumes past its AppliedPosition: it
+          stops STATE_MACHINE_FAILED with its marker, at an install as at a start.
+          A volatile machine's refusal stops an install STATE_MACHINE_FAILED with
+          no marker, and fails a start STATE_MACHINE_FAILED with no fallback to an
+          older snapshot or a replay from index 1, which applied the log over the
+          prefix. Its state is the process's: a start with a machine of its own
+          restores again; a marker would only keep down a node a supervisor
+          restarts on a fresh machine. The refused machine is never handed to
+          another node: one whose snapshot then fails its checksums falls back,
+          and a replay from index 1 would run over the prefix it holds. A snapshot the engine refuses before
+          Restore, on its metadata or checksums, touched no machine and is not
+          judged here.
+        name: restoreRefused
+        params: m *coreconsensus.SnapshotMetaValue, err error, install bool
         recv: n *Node
         results: error
       - doc: |-

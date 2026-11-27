@@ -347,9 +347,10 @@ func snapshotIndex(t *testing.T, s coreconsensus.SnapshotStore, id string) uint6
 // SHA-256 its first read verified. It was checked per chunk only: a .snap
 // cut on a chunk boundary between the two reads ended cleanly, the machine
 // was restored from that prefix, and applied moved to the snapshot's index
-// (#1562). A machine that reads the cut is refused SNAPSHOT_CORRUPT: it
-// keeps its state, the copy is removed, nothing moves, and the next install
-// restores the whole state. A machine that returned nil before the cut end,
+// (#1562). A machine that reads the cut is refused SNAPSHOT_CORRUPT, and
+// its refusal stops the node STATE_MACHINE_FAILED (#1582): the engine
+// cannot tell whether it kept its state; the copy stays, applied does not
+// move, and the next start restores the whole state. A machine that returned nil before the cut end,
 // the rest read after it, accepted a stream the engine then refuses: it may
 // hold the snapshot's state while applied stays below it, and the entries
 // handed after the restore were applied over that state a second time. The
@@ -368,7 +369,9 @@ func TestARestoreWhoseSecondReadIsCutIsRefused(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tcase tc) {
 		var lagID atomic.Uint64
-		stops := tcase.cut && (tcase.skim || tcase.framed)
+		stops := tcase.cut
+		// refuses: the machine itself reads the cut and refuses the stream.
+		refuses := tcase.cut && !tcase.skim && !tcase.framed
 		store := &secondReadCut{
 			cut:      tcase.cut,
 			opened:   make(chan string, 1),
@@ -465,14 +468,9 @@ func TestARestoreWhoseSecondReadIsCutIsRefused(t *testing.T) {
 			if !tcase.cut {
 				t.Errorf("the restore of %s read it whole, yet it was refused (machine error %v): %s removed, Applied %d", id, got.err, gone, st.Applied)
 			}
-			//: a machine that accepted the stream cannot be refused and kept running.
+			//: a cut second read stops the node, its machine refused or not: none is removed and kept running.
 			if stops {
-				t.Errorf("the machine accepted %s (error %v, %d keys against %d before), its end was refused, yet the node kept running: %s removed, Applied %d against the snapshot's %d",
-					id, got.err, got.after, got.before, gone, st.Applied, index)
-			}
-			//: the refusal is the snapshot's own fault, the machine kept its state, and applied did not move.
-			if tcase.cut && !stops && (!errs.HasCode(got.err, coreconsensus.CodeSnapshotCorrupt) || got.after != got.before || gone != id || st.Applied >= index) {
-				t.Errorf("the second read of %s was cut by a chunk: the machine read %v (want SNAPSHOT_CORRUPT) and holds %d keys against %d before, %s removed with Applied %d against the snapshot's %d",
+				t.Errorf("the second read of %s was cut (machine error %v, %d keys against %d before), yet the node kept running: %s removed, Applied %d against the snapshot's %d",
 					id, got.err, got.after, got.before, gone, st.Applied, index)
 			}
 		//: the install reached installed, raft moved.
@@ -497,9 +495,14 @@ func TestARestoreWhoseSecondReadIsCutIsRefused(t *testing.T) {
 				t.Errorf("the restore of %s stopped the node: %v", id, reason.Err)
 			}
 			//: the stop says the machine is not vouched for, applied did not move, and the copy stays for the next start.
-			if stops && (!errs.HasCode(reason.Err, coreconsensus.CodeStateMachineFailed) || got.err != nil || index == 0 || st.Applied >= index) {
-				t.Errorf("the machine accepted %s, whose end was refused: the node stopped with %v (want STATE_MACHINE_FAILED), the machine read %v, the copy is at %d, Applied %d",
-					id, reason.Err, got.err, index, st.Applied)
+			if stops && (!errs.HasCode(reason.Err, coreconsensus.CodeStateMachineFailed) || (got.err != nil) != refuses || index == 0 || st.Applied >= index) {
+				t.Errorf("the second read of %s was cut: the node stopped with %v (want STATE_MACHINE_FAILED), the machine read %v (refused %v), the copy is at %d, Applied %d",
+					id, reason.Err, got.err, refuses, index, st.Applied)
+			}
+			//: a machine that read the cut itself was handed SNAPSHOT_CORRUPT, and kept its state.
+			if refuses && (!errs.HasCode(got.err, coreconsensus.CodeSnapshotCorrupt) || got.after != got.before) {
+				t.Errorf("the second read of %s was cut by a chunk: the machine read %v (want SNAPSHOT_CORRUPT) and holds %d keys against %d before",
+					id, got.err, got.after, got.before)
 			}
 		//: the install ended no way.
 		case <-time.After(10 * time.Second):
@@ -537,7 +540,7 @@ func TestARestoreWhoseSecondReadIsCutIsRefused(t *testing.T) {
 	}
 	//: each case runs its own cluster.
 	for _, tcase := range []tc{
-		{name: "a second read cut by a chunk is refused", cut: true},
+		{name: "a second read cut by a chunk is refused and stops the node", cut: true},
 		{name: "a cut stream a machine stopped reading stops the node", cut: true, skim: true},
 		{name: "a cut end past what a machine decodes stops the node", cut: true, framed: true},
 		{name: "an intact second read installs"},

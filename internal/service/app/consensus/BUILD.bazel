@@ -164,6 +164,7 @@ go_test(
         "entriesown_internal_test.go",
         "failclosed_internal_test.go",
         "failclosed_unix_internal_test.go",
+        "failedrestore_internal_test.go",
         "faultfs_internal_test.go",
         "faultpoints_internal_test.go",
         "fetchframe_internal_test.go",
