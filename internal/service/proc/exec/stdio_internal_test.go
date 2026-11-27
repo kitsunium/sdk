@@ -798,14 +798,14 @@ func Test_stdioState_afterStart(t *testing.T) {
 func Test_stdioState_wait(t *testing.T) {
 	t.Parallel()
 	type tc struct {
-		name    string
-		drains  int
-		payload string
+		name   string
+		drains int
+		size   int
 	}
 	tests := []tc{
 		{name: "no copiers at all"},
-		{name: "one copier", drains: 1, payload: "hello"},
-		{name: "two copiers", drains: 2, payload: strings.Repeat("z", 64*1024)},
+		{name: "one copier", drains: 1, size: 5},
+		{name: "two copiers", drains: 2, size: 64 * 1024},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -817,6 +817,11 @@ func Test_stdioState_wait(t *testing.T) {
 		//: each writer reports on its own buffered channel, read after the
 		//: join: a failed write is named next to the sink it starved (#1501).
 		wrote := make([]chan error, c.drains)
+		//: every drain reads through a log of its reads, and every pipe
+		//: carries its own tagged payload, so a wrong byte names its pipe,
+		//: its offset and the read that returned it (#1501).
+		logs := make([]*readLog, c.drains)
+		payloads := make([]string, c.drains)
 		for i := range c.drains {
 			pr, pw, err := os.Pipe()
 			if err != nil {
@@ -824,22 +829,26 @@ func Test_stdioState_wait(t *testing.T) {
 			}
 			sinks[i] = &bytes.Buffer{}
 			wrote[i] = make(chan error, 1)
+			logs[i] = &readLog{src: pr}
+			payloads[i] = taggedPayload(i, c.size)
 			s.wg.Add(1)
-			go s.drainOutput(pr, sinks[i])
-			go func(w *os.File, done chan<- error) {
-				werr := writeAll(w, c.payload)
+			go s.drainOutput(logs[i], sinks[i])
+			go func(w *os.File, payload string, done chan<- error) {
+				werr := writeAll(w, payload)
 				done <- errors.Join(werr, w.Close())
-			}(pw, wrote[i])
+			}(pw, payloads[i], wrote[i])
 		}
 
 		s.wg.Wait()
 
-		//: after the join every byte is in the caller's buffer, with no
-		//: further synchronisation needed.
+		//: after the join every byte is in the caller's buffer, and every
+		//: read is in its log, with no further synchronisation needed.
 		for i, sink := range sinks {
 			werr := <-wrote[i]
-			if got := sink.String(); got != c.payload {
-				t.Errorf("sink %d (writer error %v): %s", i, werr, describeMismatch(got, c.payload))
+			//: a sink that is not its pipe's payload, byte for byte, fails.
+			if got := sink.String(); got != payloads[i] {
+				t.Errorf("sink %d (writer error %v): %s; %s", i, werr,
+					describeMismatch(got, payloads[i]), logs[i].around(got, payloads[i]))
 			}
 		}
 	}
@@ -940,6 +949,145 @@ func mismatchAt(s string, first int) string {
 		return ""
 	}
 	return s[first:end]
+}
+
+// recordSize is the length of one record of taggedPayload: a letter naming
+// the pipe, then the record's offset in seven hexadecimal digits.
+const recordSize int = 8
+
+// taggedPayload is size bytes of 8-byte records, each the letter 'A'+pipe and
+// its own offset in hexadecimal ("A0000000A0000008…"), cut at size. A byte
+// that is not its pipe's then says where it came from: another pipe of the
+// case (its letter), an earlier or later part of the same stream (its offset),
+// another test's pipe (that test's bytes), or lost memory (zeros) (#1501).
+func taggedPayload(pipe, size int) string {
+	var b strings.Builder
+	b.Grow(size + recordSize)
+	//: one record per recordSize bytes, the last one cut at size.
+	for off := 0; off < size; off += recordSize {
+		fmt.Fprintf(&b, "%c%07x", 'A'+pipe, off)
+	}
+	return b.String()[:size]
+}
+
+// readSpan is one Read the drain made: where it starts in the stream and how
+// many bytes it returned.
+type readSpan struct {
+	off, n int
+}
+
+// readLog is a pipe's read end that records every Read. Only the drain reads
+// it, and the test reads the log after the drain's join.
+type readLog struct {
+	src   *os.File
+	next  int
+	reads []readSpan
+}
+
+// Read reads from the pipe and records the span it returned.
+func (r *readLog) Read(p []byte) (int, error) {
+	n, err := r.src.Read(p)
+	//: an empty read moves nothing.
+	if n > 0 {
+		r.reads = append(r.reads, readSpan{off: r.next, n: n})
+		r.next += n
+	}
+	return n, err
+}
+
+// Close closes the pipe's read end.
+func (r *readLog) Close() error {
+	return r.src.Close()
+}
+
+// around names the reads that returned the first and the last byte where got
+// differs from want, and how many reads there were: a difference inside one
+// read's bounds, or covering whole reads, points at what the kernel returned;
+// one that crosses reads at 16- or 32-byte lanes points at a copy in this
+// process (#1501).
+func (r *readLog) around(got, want string) string {
+	n := min(len(got), len(want))
+	first, last := -1, -1
+	for i := range n {
+		//: equal bytes say nothing.
+		if got[i] == want[i] {
+			continue
+		}
+		//: the first difference is kept.
+		if first < 0 {
+			first = i
+		}
+		last = i
+	}
+	//: no common byte differs: the sink is short or long, not wrong.
+	if first < 0 {
+		return fmt.Sprintf("%d reads, %d bytes", len(r.reads), r.next)
+	}
+	return fmt.Sprintf("%d reads, %d bytes; byte %d came from read %s, byte %d from read %s",
+		len(r.reads), r.next, first, r.spanOf(first), last, r.spanOf(last))
+}
+
+// spanOf names the read that returned the stream's byte at off.
+func (r *readLog) spanOf(off int) string {
+	//: the reads are in stream order, without gaps.
+	for i, s := range r.reads {
+		//: off lies within this read.
+		if off >= s.off && off < s.off+s.n {
+			return fmt.Sprintf("#%d [%d, %d)", i, s.off, s.off+s.n)
+		}
+	}
+	return "none"
+}
+
+// Test_readLog pins what Test_stdioState_wait reports beside the mismatch: a
+// tagged payload's records, and the reads that returned the first and the
+// last wrong byte (#1501).
+func Test_readLog(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		reads     []readSpan
+		got, want string
+		message   string
+	}
+	want := taggedPayload(1, 20)
+	tests := []tc{
+		{
+			name: "the tagged records", reads: []readSpan{{0, 20}}, got: want, want: want,
+			message: "B0000000B0000008B000|1 reads, 20 bytes",
+		},
+		{
+			name:  "another pipe's record in the second read",
+			reads: []readSpan{{0, 8}, {8, 12}},
+			got:   want[:8] + "A0000008" + want[16:], want: want,
+			message: "B0000000B0000008B000|2 reads, 20 bytes; " +
+				"byte 8 came from read #1 [8, 20), byte 8 from read #1 [8, 20)",
+		},
+		{
+			name:  "the damage crosses two reads",
+			reads: []readSpan{{0, 10}, {10, 10}},
+			got:   want[:6] + "\x00\x00\x00\x00\x00\x00" + want[12:], want: want,
+			message: "B0000000B0000008B000|2 reads, 20 bytes; " +
+				"byte 6 came from read #0 [0, 10), byte 11 from read #1 [10, 20)",
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		r := &readLog{reads: c.reads}
+		//: the log's total is the sum of its reads.
+		for _, s := range c.reads {
+			r.next += s.n
+		}
+		if got := want + "|" + r.around(c.got, c.want); got != c.message {
+			t.Errorf("payload|around =\n%s\nwant\n%s", got, c.message)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
 }
 
 // writeAll writes the whole string to f.

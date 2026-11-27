@@ -137,6 +137,11 @@ one blocked inside the caller's reader ends only at that reader's next return.
 first, negative grace) and that no goroutine outlives `Wait`;
 `TestWindowsDrainGraceBoundsWait` runs `cmd /c start /b` on Windows.
 
+`Test_stdioState_wait` keeps its tagged payloads and its `readLog`: #1501, a
+wrong byte on NetBSD 10.1 with no cause found, stays open until its next
+failure names the cause. Never a retry or a tolerance there, and no
+`asyncpreemptoff` without a source that names it (NOTES.md §Tests).
+
 ## Exit status ownership (ADR 0093)
 
 Two things in the SDK call `wait4` on this package's children: the handle's own
