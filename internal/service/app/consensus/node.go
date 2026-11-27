@@ -120,7 +120,15 @@ type Node struct {
 	am          sync.Mutex
 	applied     uint64
 	appliedTerm uint64
-	waiters     map[uint64]*proposal
+	// pubHolds counts the installs between their restore, which moves
+	// applied, and installed's move of raft onto their configuration;
+	// while it is not zero, publish reports pubHold, the applied position
+	// before the first of them, so Status().Applied never runs ahead of
+	// the Membership published with it (#1584). A start restores with no
+	// hold: raft is built on the snapshot before the first publish.
+	pubHolds int
+	pubHold  uint64
+	waiters  map[uint64]*proposal
 	// appliedQ holds the Barrier and WaitApplied callers parked on an
 	// index not yet applied, lowest first: an applied entry releases only
 	// those it reaches, O(1) when none is due (#1109). nil until the first
@@ -2184,6 +2192,10 @@ func (n *Node) publish() {
 	st := n.r.Summary()
 	n.am.Lock()
 	applied := n.applied
+	//: an install restored and raft not yet on its configuration: the position from before it.
+	if n.pubHolds > 0 {
+		applied = min(applied, n.pubHold)
+	}
 	n.am.Unlock()
 	cur := coreconsensus.StatusValue{
 		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,

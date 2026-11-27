@@ -109,16 +109,53 @@ sequences:
                   - return: ""
                 when: "!n.applyItems(items)"
           forever: true
+  - of: (*Node).restoreItem
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).restoreItem
+        kind: self
+      - id: n.am.Lock
+        kind: value
+      - id: n.holdPublishedLocked
+        kind: internal
+      - id: n.am.Unlock
+        kind: value
+      - id: n.restoreFrom
+        kind: internal
+      - id: n.releasePublished
+        kind: internal
+    steps:
+      - eval: n.am.Lock()
+        to: n.am.Lock
+      - bind: applied
+        eval: n.applied
+      - opt:
+          do:
+            - eval: n.holdPublishedLocked(applied)
+              to: n.holdPublishedLocked
+          when: r.hold
+      - eval: n.am.Unlock()
+        to: n.am.Unlock
+      - bind: err
+        eval: n.restoreFrom(r.meta, applied)
+        to: n.restoreFrom
+      - opt:
+          do:
+            - eval: n.releasePublished()
+              to: n.releasePublished
+          when: err != nil && r.hold
+      - send:
+          chan: r.done
+          value: err
   - of: (*Node).applyItems
     participants:
       - id: caller
         kind: actor
       - id: (*Node).applyItems
         kind: self
-      - id: n.am.Lock
-        kind: value
-      - id: n.am.Unlock
-        kind: value
+      - id: n.restoreItem
+        kind: internal
       - id: n.save
         kind: internal
       - id: n.forceCut
@@ -138,15 +175,8 @@ sequences:
               value: applyItem{}
             - opt:
                 do:
-                  - eval: n.am.Lock()
-                    to: n.am.Lock
-                  - bind: applied
-                    eval: n.applied
-                  - eval: n.am.Unlock()
-                    to: n.am.Unlock
-                  - send:
-                      chan: it.restore.done
-                      value: n.restoreFrom(it.restore.meta, applied)
+                  - eval: n.restoreItem(it.restore)
+                    to: n.restoreItem
                   - continue: true
                 when: it.restore != nil
             - opt:
@@ -8820,7 +8850,7 @@ sequences:
           when: n.crashAfterPublish.Load()
       - bind: done
         eval: make(chan error, 1)
-      - eval: "n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})"
+      - eval: "n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done, hold: true}})"
         to: n.aq.push
       - select:
           cases:
@@ -8921,6 +8951,35 @@ sequences:
               to: origin
           when: code != 0
       - return: nil
+  - of: (*Node).holdPublishedLocked
+    steps:
+      - opt:
+          do:
+            - set: n.pubHold
+              value: applied
+          when: n.pubHolds == 0
+      - op: ++
+        set: n.pubHolds
+  - of: (*Node).releasePublished
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).releasePublished
+        kind: self
+      - id: n.am.Lock
+        kind: value
+      - id: n.am.Unlock
+        kind: value
+    steps:
+      - eval: n.am.Lock()
+        to: n.am.Lock
+      - opt:
+          do:
+            - op: "--"
+              set: n.pubHolds
+          when: n.pubHolds > 0
+      - eval: n.am.Unlock()
+        to: n.am.Unlock
   - of: (*Node).installed
     participants:
       - id: caller
@@ -8929,6 +8988,8 @@ sequences:
         kind: self
       - id: n.exec
         kind: internal
+      - id: n.releasePublished
+        kind: internal
       - id: n.retain
         kind: internal
       - id: n.obs.inc
@@ -8936,12 +8997,21 @@ sequences:
       - id: n.obs.info
         kind: internal
     steps:
+      - bind: released
+        eval: "false"
       - eval: |-
           n.exec(func() {
           		n.r.InstallSnapshot(meta)
+          		n.releasePublished()
+          		released = true
           		n.handleReady()
           	})
         to: n.exec
+      - opt:
+          do:
+            - eval: n.releasePublished()
+              to: n.releasePublished
+          when: "!released"
       - eval: n.retain()
         to: n.retain
       - eval: n.obs.inc(mSnapshotInstalls)
@@ -13590,6 +13660,11 @@ sequences:
         to: n.am.Lock
       - bind: applied
         eval: n.applied
+      - opt:
+          do:
+            - set: applied
+              value: min(applied, n.pubHold)
+          when: n.pubHolds > 0
       - eval: n.am.Unlock()
         to: n.am.Unlock
       - bind: cur

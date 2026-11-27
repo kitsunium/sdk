@@ -1269,6 +1269,7 @@ files:
       - closeSaved
       - (*Node).token
       - (*Node).applyLoop
+      - (*Node).restoreItem
       - (*Node).applyItems
       - (*Node).applyHanded
       - (*Node).applyRead
@@ -1684,6 +1685,8 @@ files:
       - (*Node).install
       - (*Node).restoreFailed
       - (*Node).stillFresh
+      - (*Node).holdPublishedLocked
+      - (*Node).releasePublished
       - (*Node).installed
     name: install.go
   - decls:
@@ -4879,6 +4882,12 @@ types:
         type: coreconsensus.SnapshotMetaValue
       - name: done
         type: chan error
+      - doc: |-
+          hold keeps the published applied position where it was until the
+          caller moves raft onto the snapshot and lets it go (installed): an
+          install's restore. It is let go here when the restore fails (#1584).
+        name: hold
+        type: bool
     kind: struct
     name: restoreReq
   - fields:
@@ -8183,6 +8192,17 @@ types:
         type: uint64
       - name: appliedTerm
         type: uint64
+      - doc: |-
+          pubHolds counts the installs between their restore, which moves
+          applied, and installed's move of raft onto their configuration;
+          while it is not zero, publish reports pubHold, the applied position
+          before the first of them, so Status().Applied never runs ahead of
+          the Membership published with it (#1584). A start restores with no
+          hold: raft is built on the snapshot before the first publish.
+        name: pubHolds
+        type: int
+      - name: pubHold
+        type: uint64
       - name: waiters
         type: map[uint64]*proposal
       - doc: |-
@@ -8412,6 +8432,16 @@ types:
           applyLoop is the apply goroutine: every committed command in log order,
           on one goroutine (D3).
         name: applyLoop
+        recv: n *Node
+      - doc: |-
+          restoreItem restores the snapshot r names on the apply goroutine and
+          answers r. A machine already past the snapshot is never rolled back: the
+          entries it applied after the snapshot are committed and would not be
+          applied again (review H3). An install's restore holds the published
+          applied position before applied moves, and a failed one lets it go
+          (#1584).
+        name: restoreItem
+        params: r *restoreReq
         recv: n *Node
       - doc: |-
           applyItems runs one batch taken from the apply queue in order. It returns
@@ -8792,9 +8822,24 @@ types:
         recv: n *Node
         results: error
       - doc: |-
+          holdPublishedLocked holds the applied position publish reports at
+          applied, the one before an install's restore moves it, until the matching
+          releasePublished. Overlapping holds keep the first position: the one
+          every configuration raft holds covers. The caller holds am.
+        name: holdPublishedLocked
+        params: applied uint64
+        recv: n *Node
+      - doc: |-
+          releasePublished lets go of one hold holdPublishedLocked took: the next
+          publish reports the applied position again once none is left.
+        name: releasePublished
+        recv: n *Node
+      - doc: |-
           installed moves raft onto a restored install and keeps the two newest
           snapshots: the installed one is the newest, and the oldest of the ones
-          this node held goes, as after a cut.
+          this node held goes, as after a cut. The restore's hold on the published
+          applied position goes in the same turn as raft's move, before that turn
+          publishes, or after it when the loop ended first.
         name: installed
         params: meta coreconsensus.SnapshotMetaValue, from coreconsensus.NodeID
         recv: n *Node

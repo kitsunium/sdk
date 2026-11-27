@@ -183,6 +183,7 @@ go_test(
         "inspectinstall_internal_test.go",
         "inspectterm_internal_test.go",
         "install_internal_test.go",
+        "installconf_internal_test.go",
         "installnewest_internal_test.go",
         "joinelsewhere_internal_test.go",
         "joinerunion_internal_test.go",
