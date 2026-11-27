@@ -15,10 +15,11 @@ import (
 // Barrier returns once the local state machine reflects every write
 // committed before the call (D9).
 // Reads queued in one turn share one round.
-// A node that knows no leader of a stable term, or whose leader changes
-// before the read is confirmed, refuses it with NOT_LEADER: nothing was
-// read, and the call may be retried, for instance after the next leader
-// change.
+// A Barrier may be refused with NOT_LEADER when the node knows no
+// leader of a stable term, or when the leader changes while its
+// read awaits confirmation: nothing was read, and the call may be
+// retried, for instance after the next leader change. A read still
+// queued when the leader changes is sent to the new leader.
 func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	if n.stopped.Load() {
 		return coreconsensus.TokenValue{}, n.stoppedErr()
