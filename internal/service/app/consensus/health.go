@@ -49,6 +49,20 @@ const (
 	// leadership moves to a member it does not know, nothing answers it. The
 	// changes that rely on it were admitted (#765).
 	PeerLeaderUnconfirmed
+	// PeerSnapshotRateShort is set while the snapshot stream to the peer, at
+	// the rate it moved over the last four maximum election timeouts, would
+	// end after the writes, at their rate over the same window, bring the log
+	// to the band where no pin holds compaction back: the pin is lifted
+	// before the install ends, compaction passes the snapshot and the peer
+	// needs another, the loop of #550 under a steady write rate. A stream
+	// that did not move over the window is left to its pin bound. It falls
+	// once the transfer would end within three quarters of that time, or once
+	// the stream ends. Each rise adds one to
+	// consensus_snapshot_rate_short_total by peer and logs a Warn line naming
+	// the peer, both times and the rate; the package guide says what to do:
+	// raise SnapshotStreamBytesPerSecond, raise MaxLogBytes, or lower the
+	// write load (#1486).
+	PeerSnapshotRateShort
 )
 
 // The answers a HealthValue carries.
@@ -85,7 +99,7 @@ type PeerHealthValue struct {
 	ID coreconsensus.NodeID
 	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
 	// PeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,
-	// PeerLeaderUnconfirmed.
+	// PeerLeaderUnconfirmed, PeerSnapshotRateShort.
 	Flags PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match uint64
@@ -402,11 +416,26 @@ func (n *Node) peerHealth(p *raft.PeerStatValue, now time.Time, last uint64, win
 	if n.peerUnreachable(p, heard, ph.LastContact, window) {
 		ph.Flags |= PeerUnreachable
 	}
-	if pin, ok := n.sending[p.ID]; ok && pin.until.IsZero() && pin.progress != nil {
-		// A stream in flight: how far the transport has read it (#920).
-		ph.SnapshotSent, ph.SnapshotSize = pin.progress.Load(), pin.size
+	if pin, ok := n.sending[p.ID]; ok {
+		streamHealth(&ph, &pin)
 	}
 	return ph
+}
+
+// streamHealth fills, for pin's stream in flight, how far the transport
+// has read it (#920) and whether it is too slow to end before the log
+// lifts its pin (#1486). A streamed pin, or one whose stream has not
+// opened, adds nothing.
+func streamHealth(ph *PeerHealthValue, pin *sendPin) {
+	//: no stream in flight.
+	if !pin.until.IsZero() || pin.progress == nil {
+		return
+	}
+	ph.SnapshotSent, ph.SnapshotSize = pin.progress.Load(), pin.size
+	//: a stream too slow to end before the log lifts its pin.
+	if pin.rate != nil && pin.rate.short {
+		ph.Flags |= PeerSnapshotRateShort
+	}
 }
 
 // peerRoleFlags carries the facts of the leader's view a verdict repeats

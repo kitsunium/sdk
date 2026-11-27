@@ -1610,6 +1610,31 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   data lane is `BENCH.md`'s `TCP/<device>/paced+stream` rows and the A/B
   lane's `cstream` (#1365): measure it against a cluster that keeps no state
   in its heap, or it measures that heap's collections instead.
+- Say when a snapshot stream is too slow to end before the writes lift its
+  pin (#1486, O4 of #920's safety review). A stream lasts `EncodedSize`
+  over its rate R; when the writes bring the log to the tight band first
+  (`logTight`, from `tightFrom` bytes), the pin stops holding, compaction
+  passes the snapshot, and the follower needs another: #550's loop, which
+  pacing makes reachable by configuration. `watchRateShort`
+  (`node_rateshort.go`), on the loop's tick from `watchPins`, measures R as
+  the stream's `progress` and the write rate as the log's `logBytes` over
+  one sliding window of `rateWindowTimeouts` (4) maximum election timeouts,
+  `rateSamples` (8) samples at most; it raises `PeerSnapshotRateShort` once
+  (`EncodedSize` less the bytes sent) over R exceeds (`tightFrom` less the
+  log's bytes) over the write rate, adds one to
+  `consensus_snapshot_rate_short_total` by peer and logs the peer, both
+  times and R at Warn; it lowers the flag once the transfer would end
+  within `rateShortClear` (three quarters) of the fill, or when the stream
+  ends. A stream that did not move over the window is left to `streamDue`.
+  It changes nothing: the pin, the compaction and the pacing are as before.
+  What an operator does with it: raise `SnapshotStreamBytesPerSecond`
+  until the transfer fits (R at least `EncodedSize` over the fill time the
+  line gives, with the other streams' share of the pacer), raise
+  `MaxLogBytes` so the band is further away, or lower the write load while
+  the follower installs. Left alone, the follower installs snapshot after
+  snapshot and never catches up while the writes last
+  (`TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged`,
+  `TestTightFromIsWhereTheLogTurnsTight`).
 - Serve the snapshot streams' queue first asked first served, voters and
   learners alike: under the default `MaxSnapshotStreams` of 1, a voter back
   after a compaction waited behind a replacement learner's 50 GiB at
