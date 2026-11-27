@@ -556,6 +556,61 @@ func TestShards_portZeroCancelledContext(t *testing.T) {
 	}
 }
 
+// TestShards_portZeroFailedLookup pins the draw's other guard (#1585): a port
+// lookup that fails while the context is alive, as one does when the context
+// ends between portZero's lookup and the bind's, binds no first shard and
+// returns the lookup's error. Bound as the spec says, the draw would carry
+// SO_REUSEPORT. The lookup is made to fail through the lookupPort seam, the
+// only change to production, so the case is deterministic where the real one
+// is the toss of two selects. The test sets a package variable, so it and its
+// cases do not run in parallel.
+func TestShards_portZeroFailedLookup(t *testing.T) {
+	type tc struct {
+		name string
+		// addr is the address, its port one spelling of port 0.
+		addr string
+		// reuse is the first shard's mode.
+		reuse reuseMode
+		// fail is the error the lookup answers.
+		fail error
+	}
+	cases := []tc{
+		{name: "canceled, the group's shards", addr: "127.0.0.1:0", reuse: reuseShards, fail: context.Canceled},
+		{name: "canceled, shared", addr: "127.0.0.1:0", reuse: reuseShared, fail: context.Canceled},
+		{name: "deadline exceeded", addr: "127.0.0.1: 0", reuse: reuseShards, fail: context.DeadlineExceeded},
+	}
+	runCase := func(t *testing.T, c tc) {
+		prev := lookupPort
+		t.Cleanup(func() { lookupPort = prev })
+		lookupPort = func(context.Context, string, string) (int, error) { return 0, c.fail }
+		pc, _, err := listenShard(t.Context(), corenet.AddressValue{Network: "udp4", Addr: c.addr}, socketSpec{reuse: c.reuse}, true)
+		//: a socket bound although the lookup failed.
+		if pc != nil {
+			swallowErr(pc.Close())
+			t.Fatalf("listenShard(%q) bound %s after a failed lookup", c.addr, pc.LocalAddr())
+		}
+		var e *errs.Error
+		cause := ""
+		//: the refusal's cause field, where bindRefusal keeps the lookup's error.
+		if errors.As(err, &e) {
+			//: each field of the refusal.
+			for _, f := range e.Fields() {
+				//: the cause.
+				if f.Key() == "cause" {
+					cause = f.StringValue()
+				}
+			}
+		}
+		//: the refusal is the lookup's.
+		if cause != c.fail.Error() {
+			t.Fatalf("listenShard(%q) = %v (cause %q), want a refusal caused by %q", c.addr, err, cause, c.fail)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
 // TestShards_portZeroNarrowRange is #1585 made certain: in a network namespace
 // of its own, whose ephemeral range is narrowed to one or two ports, a foreign
 // reuseport socket holds the first; a Shards(4) group asked for 0.0.0.0:0 is

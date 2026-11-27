@@ -85,7 +85,14 @@ func mustProbe(ctx context.Context, addr corenet.AddressValue, count int, share 
 	_, port, err := stdnet.SplitHostPort(addr.Addr)
 	//: a fresh ephemeral port, in any spelling Go binds as port 0
 	//: (drawnPort), or an address the bind will refuse itself.
-	if err != nil || drawnPort(ctx, addr.Network, port) {
+	if err != nil {
+		//: no probe.
+		return false
+	}
+	drawn, lerr := drawnPort(ctx, addr.Network, port)
+	//: a draw, as the bind reads it; a lookup that failed is no draw here, and
+	//: costs one probe at worst, never a socket.
+	if lerr == nil && drawn {
 		//: no probe.
 		return false
 	}

@@ -1350,6 +1350,7 @@ files:
       - (*Server).bindPacketShards
       - listenShard
       - portZero
+      - lookupPort
       - drawnPort
       - pinPort
       - (*Server).adoptPacketSockets
@@ -2630,10 +2631,13 @@ functions:
     name: listenShard
     params: ctx context.Context, addr corenet.AddressValue, spec socketSpec, first bool
     results: stdnet.PacketConn, bindReport, error
-  - doc: portZero reports whether addr asks the kernel to draw its port.
+  - doc: |-
+      portZero reports whether addr asks the kernel to draw its port, and the
+      error of the port's lookup when it failed: the answer is then unknown. An
+      address SplitHostPort refuses is no draw and no error, the bind refuses it.
     name: portZero
     params: ctx context.Context, addr corenet.AddressValue
-    results: bool
+    results: bool, error
   - doc: |-
       drawnPort reports whether the bind reads port as port 0, the kernel's draw
       (#1585). It asks the resolver the bind asks, the standard library's
@@ -2644,10 +2648,12 @@ functions:
       up: the Go resolver reads it as a service name, cgo's getaddrinfo with
       glibc's strtoul, which skips leading blanks and is cut to 16 bits (" 0",
       "\t00" and " 65536" draw there) — a lookup the bind would make itself. A
-      port the lookup refuses is no draw: the bind refuses it too.
+      port the lookup refuses is no draw, and its error is returned: a caller that
+      binds must not bind on a lookup that failed, since the bind's own lookup may
+      still succeed (a context ending between the two) and read port 0.
     name: drawnPort
     params: ctx context.Context, network, port string
-    results: bool
+    results: bool, error
   - doc: |-
       pinPort returns addr with the port pc bound, so the other shards of an address
       asked as ":0" join it instead of drawing their own.
@@ -9316,6 +9322,13 @@ vars:
           	"frame_settings_window_size_too_big": corehttp2.ErrorTypeFlowControl,
           }
     name: netHTTPFrameErrors
+  - doc: |-
+      lookupPort is the resolver call drawnPort and the bind share, a variable so
+      a test can make the lookup fail while the context is alive.
+    items:
+      - name: lookupPort
+        value: stdnet.DefaultResolver.LookupPort
+    name: lookupPort
   - grouped: true
     items:
       - doc: |-

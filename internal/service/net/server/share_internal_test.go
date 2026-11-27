@@ -156,7 +156,7 @@ func Test_drawnPort(t *testing.T) {
 			want = loopbackDraws(c.port)
 		}
 		//: the predicate's answer.
-		if got := drawnPort(t.Context(), "udp", c.port); got != want {
+		if got, _ := drawnPort(t.Context(), "udp", c.port); got != want {
 			t.Fatalf("drawnPort(%q) = %v, want %v", c.port, got, want)
 		}
 		//: a name is the resolver's, not asked here.

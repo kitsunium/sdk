@@ -332,8 +332,16 @@ func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec
 		//: the context's error, naming the address.
 		return nil, bindReport{}, bindRefusal(addr, cerr)
 	}
+	zero, zerr := portZero(ctx, addr)
+	//: the lookup failed, so whether this is a draw is unknown: the context
+	//: ended between this lookup and the bind's, which may still read port 0.
+	//: Bound as the spec says, the draw would carry SO_REUSEPORT (#1585).
+	if zerr != nil {
+		//: the lookup's error, naming the address; nothing bound.
+		return nil, bindReport{}, bindRefusal(addr, zerr)
+	}
 	//: a named port, or an address the bind refuses itself.
-	if !portZero(ctx, addr) {
+	if !zero {
 		//: the bind as the spec says.
 		return listenPacket(ctx, addr, spec)
 	}
@@ -356,12 +364,23 @@ func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec
 	return pc, rep, nil
 }
 
-// portZero reports whether addr asks the kernel to draw its port.
-func portZero(ctx context.Context, addr corenet.AddressValue) bool {
+// portZero reports whether addr asks the kernel to draw its port, and the
+// error of the port's lookup when it failed: the answer is then unknown. An
+// address SplitHostPort refuses is no draw and no error, the bind refuses it.
+func portZero(ctx context.Context, addr corenet.AddressValue) (bool, error) {
 	_, port, err := stdnet.SplitHostPort(addr.Addr)
-	//: port 0, or an address the bind will refuse itself.
-	return err == nil && drawnPort(ctx, addr.Network, port)
+	//: an address the bind will refuse itself.
+	if err != nil {
+		//: not a draw, not a failed lookup.
+		return false, nil
+	}
+	//: port 0, a named port, or the lookup's failure.
+	return drawnPort(ctx, addr.Network, port)
 }
+
+// lookupPort is the resolver call drawnPort and the bind share, a variable so
+// a test can make the lookup fail while the context is alive.
+var lookupPort = stdnet.DefaultResolver.LookupPort
 
 // drawnPort reports whether the bind reads port as port 0, the kernel's draw
 // (#1585). It asks the resolver the bind asks, the standard library's
@@ -372,11 +391,18 @@ func portZero(ctx context.Context, addr corenet.AddressValue) bool {
 // up: the Go resolver reads it as a service name, cgo's getaddrinfo with
 // glibc's strtoul, which skips leading blanks and is cut to 16 bits (" 0",
 // "\t00" and " 65536" draw there) — a lookup the bind would make itself. A
-// port the lookup refuses is no draw: the bind refuses it too.
-func drawnPort(ctx context.Context, network, port string) bool {
-	n, err := stdnet.DefaultResolver.LookupPort(ctx, network, port)
+// port the lookup refuses is no draw, and its error is returned: a caller that
+// binds must not bind on a lookup that failed, since the bind's own lookup may
+// still succeed (a context ending between the two) and read port 0.
+func drawnPort(ctx context.Context, network, port string) (bool, error) {
+	n, err := lookupPort(ctx, network, port)
+	//: the lookup failed: the answer is unknown.
+	if err != nil {
+		//: not a draw, and why.
+		return false, err
+	}
 	//: the bind's port 0, nothing else.
-	return err == nil && n == 0
+	return n == 0, nil
 }
 
 // pinPort returns addr with the port pc bound, so the other shards of an address

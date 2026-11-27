@@ -4262,6 +4262,8 @@ sequences:
         kind: internal
       - id: ctx.Err
         kind: value
+      - id: portZero
+        kind: internal
       - id: reuseAfterBind
         kind: internal
       - id: swallowErr
@@ -4282,11 +4284,18 @@ sequences:
             eval: ctx.Err()
             to: ctx.Err
           when: cerr != nil
+      - bind: zero, zerr
+        eval: portZero(ctx, addr)
+        to: portZero
+      - opt:
+          do:
+            - return: nil, bindReport{}, bindRefusal(addr, zerr)
+          when: zerr != nil
       - opt:
           do:
             - return: listenPacket(ctx, addr, spec)
               to: listenPacket
-          when: "!portZero(ctx, addr)"
+          when: "!zero"
       - bind: alone
         eval: spec
       - set: alone.reuse
@@ -4321,24 +4330,27 @@ sequences:
         kind: self
       - id: stdnet
         kind: stdlib
+      - id: drawnPort
+        kind: internal
     steps:
       - bind: _, port, err
         eval: stdnet.SplitHostPort(addr.Addr)
         to: stdnet
-      - return: err == nil && drawnPort(ctx, addr.Network, port)
+      - opt:
+          do:
+            - return: false, nil
+          when: err != nil
+      - return: drawnPort(ctx, addr.Network, port)
+        to: drawnPort
   - of: drawnPort
-    participants:
-      - id: caller
-        kind: actor
-      - id: drawnPort
-        kind: self
-      - id: stdnet.DefaultResolver.LookupPort
-        kind: value
     steps:
       - bind: n, err
-        eval: stdnet.DefaultResolver.LookupPort(ctx, network, port)
-        to: stdnet.DefaultResolver.LookupPort
-      - return: err == nil && n == 0
+        eval: lookupPort(ctx, network, port)
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - return: n == 0, nil
   - of: pinPort
     participants:
       - id: caller
@@ -15369,6 +15381,8 @@ sequences:
         kind: self
       - id: stdnet
         kind: stdlib
+      - id: drawnPort
+        kind: internal
     steps:
       - opt:
           do:
@@ -15380,7 +15394,14 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: err != nil || drawnPort(ctx, addr.Network, port)
+          when: err != nil
+      - bind: drawn, lerr
+        eval: drawnPort(ctx, addr.Network, port)
+        to: drawnPort
+      - opt:
+          do:
+            - return: "false"
+          when: lerr == nil && drawn
       - return: "true"
   - of: probeAddress
     participants:
