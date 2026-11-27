@@ -2939,7 +2939,7 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "128",
       "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshotRateShort",
-      "doc": "PeerSnapshotRateShort is set while the snapshot stream to the peer,\nat its current rate, would end after the writes, at theirs, bring\nthe log to the band where its pin no longer holds compaction back:\nthe peer would need another snapshot (#1486).\n",
+      "doc": "PeerSnapshotRateShort is set while the snapshot stream to the peer looks\ntoo slow to end before the writes lift its pin, after which the peer\nneeds another snapshot: it rises once the estimated transfer time\nexceeds the log's fill time, falls once the transfer would end within\nthree quarters of it, and stays up to the stream's last byte once the\npin was lifted (#1486).\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"

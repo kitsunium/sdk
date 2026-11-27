@@ -697,7 +697,7 @@ Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerSn
 const PeerSnapshotRateShort svcconsensus.PeerFlags = 128
 ```
 
-PeerSnapshotRateShort is set while the snapshot stream to the peer, at its current rate, would end after the writes, at theirs, bring the log to the band where its pin no longer holds compaction back: the peer would need another snapshot (#1486).
+PeerSnapshotRateShort is set while the snapshot stream to the peer looks too slow to end before the writes lift its pin, after which the peer needs another snapshot: it rises once the estimated transfer time exceeds the log's fill time, falls once the transfer would end within three quarters of it, and stays up to the stream's last byte once the pin was lifted (#1486).
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshotRateShort`.
 

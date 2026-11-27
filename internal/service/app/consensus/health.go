@@ -49,19 +49,21 @@ const (
 	// leadership moves to a member it does not know, nothing answers it. The
 	// changes that rely on it were admitted (#765).
 	PeerLeaderUnconfirmed
-	// PeerSnapshotRateShort is set while the snapshot stream to the peer, at
-	// the rate it moved over the last four maximum election timeouts, would
-	// end after the writes, at their rate over the same window, bring the log
-	// to the band where no pin holds compaction back: the pin is lifted
-	// before the install ends, compaction passes the snapshot and the peer
-	// needs another, the loop of #550 under a steady write rate. A stream
-	// that did not move over the window is left to its pin bound. It falls
-	// once the transfer would end within three quarters of that time, or once
-	// the stream ends. Each rise adds one to
-	// consensus_snapshot_rate_short_total by peer and logs a Warn line naming
-	// the peer, both times and the rate; the package guide says what to do:
-	// raise SnapshotStreamBytesPerSecond, raise MaxLogBytes, or lower the
-	// write load (#1486).
+	// PeerSnapshotRateShort is set while the snapshot stream to the peer looks
+	// too slow to end before the writes bring the log to the band where its pin
+	// stops holding compaction back, after which the peer needs another
+	// snapshot, the loop of #550. It rises once the transfer's estimated time,
+	// at the stream's rate over the last four maximum election timeouts,
+	// exceeds the time the writes take to fill the log to that band, at their
+	// rate over the same window; it falls once the transfer would end within
+	// three quarters of that time. Once the pin was lifted it holds nothing,
+	// and the flag stays up to the stream's last byte. A raised flag thus does
+	// not always mean that the transfer outlasts the fill at this instant. A
+	// stream that did not move over the window is left to its pin bound. Each
+	// rise adds one to consensus_snapshot_rate_short_total by peer and logs a
+	// Warn line naming the peer, both times and the rate; the package guide
+	// says what to do: raise SnapshotStreamBytesPerSecond, raise MaxLogBytes,
+	// or lower the write load (#1486).
 	PeerSnapshotRateShort
 )
 
