@@ -325,6 +325,9 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `applyCompactRecord` or `applyTruncate` stop inlining: `kit gen` holds
   the inline set of the base and refuses a generation that loses one, so
   their bodies call one helper of the index each.
+  Until #1616 is settled, `(*Node).refusesStart` no longer inlines since
+  #1582: a branch cut before #1582 regenerates with
+  `kit gen -base origin/main`, or `-base MERGE_HEAD` during a merge.
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.
