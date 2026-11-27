@@ -28,8 +28,10 @@ constants:
           handled least recently of the node that holds the most goes, and
           that node's new runs wait for the next term. The marks are per lane,
           about 32 768 restarts when each run forwards on both lanes; restarts
-          spread over several nodes fence each of them in turn, the most loaded
-          node changing as the counts level out (#1540).
+          spread over several nodes fenced each of them in turn under a leader
+          that stays, the most loaded node changing as the counts level out,
+          so a leader that reaches it hands its leadership over to open that
+          term (Raft.fenceLastResort, #1540).
         name: maxFwdRunsHard
         type: int
         value: 1 << 16
@@ -801,9 +803,14 @@ files:
       - (*Raft).activeMajority
       - (*Raft).activeMajorityWithout
       - (*Raft).handleForward
+      - (*Raft).fenceLastResort
+      - (*Raft).resortTarget
+      - (*Raft).resortEligible
       - (*Raft).countFwdDrop
       - (*Raft).fwdAdmits
       - (*Raft).forwardWindow
+      - (*Raft).fwdRunsSoft
+      - (*Raft).fwdRunsHard
       - (*Raft).forwardCeiling
       - (*Raft).answerForward
       - (*Raft).answerSessionForward
@@ -1404,10 +1411,12 @@ types:
         results: fwdVerdict
       - doc: |-
           note records that the forward m was handled. A run new to the fence
-          first makes room past soft marks: evict, at the term current.
+          first makes room past soft marks: evict, at the term current. It reports
+          whether the room was made by the last resort.
         name: note
         params: m *core.MessageValue, soft, hard int, current uint64
         recv: f *fwdFence
+        results: bool
       - doc: |-
           evict brings the marks under soft, forgetting those of a term below
           current, the oldest term first and, within a term, the one handled least
@@ -1417,10 +1426,11 @@ types:
           most goes, the lowest node on a tie. Each mark forgotten raises its
           node's fence to the mark's term, so that run's copies stay refused. The
           choices are the same whatever the map's order: no two marks share a
-          count of use.
+          count of use. It reports whether it took the last resort.
         name: evict
         params: soft, hard int, current uint64
         recv: f *fwdFence
+        results: bool
       - doc: |-
           crowded is the mark handled least recently of the node that holds the
           most marks, the lowest node on a tie.
@@ -2030,6 +2040,20 @@ types:
         name: fwdCeiling
         type: int
       - doc: |-
+          fwdRunsSoft and fwdRunsHard, set by the package's own tests alone,
+          are the fence's bounds on its marks in place of maxFwdRuns and
+          maxFwdRunsHard, so that its last resort is reached with a few
+          hundred runs (#1540, O2).
+        name: fwdRunsSoft
+        type: int
+      - doc: |-
+          fwdRunsSoft and fwdRunsHard, set by the package's own tests alone,
+          are the fence's bounds on its marks in place of maxFwdRuns and
+          maxFwdRunsHard, so that its last resort is reached with a few
+          hundred runs (#1540, O2).
+        name: fwdRunsHard
+        type: int
+      - doc: |-
           fwdUnfenced, set by the package's own tests alone, switches the
           forward fence off (fwdFence): the node handles a forward whose answer
           it forgot as the release before #1482's did, so the fence is shown to
@@ -2375,6 +2399,20 @@ types:
         name: fwdDrops
         type: ForwardDropsValue
       - name: fwdForgotten
+        type: uint64
+      - doc: |-
+          fwdResorts counts the fence's last resorts, fwdResortTransfers the
+          leadership transfers they started, and fwdResortTerm is the term of
+          the last one started, so that a term starts one at most (#1540).
+        name: fwdResorts
+        type: uint64
+      - doc: |-
+          fwdResorts counts the fence's last resorts, fwdResortTransfers the
+          leadership transfers they started, and fwdResortTerm is the term of
+          the last one started, so that a term starts one at most (#1540).
+        name: fwdResortTransfers
+        type: uint64
+      - name: fwdResortTerm
         type: uint64
       - name: id
         type: core.NodeID
@@ -3307,6 +3345,41 @@ types:
         params: m core.MessageValue
         recv: r *Raft
       - doc: |-
+          fenceLastResort answers the fence's last resort (#1540): past its hard
+          bound of marks of the current term, the fence forgot the least recent
+          mark of the node holding the most, and that node's new runs wait for the
+          next term. Under a leader that stays, restarts spread over several
+          forwarders fenced each of them in turn, until an election a healthy
+          leader never calls. The leader hands its leadership over instead: the
+          next term makes every mark an older term's, the soft bound takes them
+          back, and no forwarder stays fenced. It does so once a term at most,
+          never while a transfer runs, and only to a voter that holds the commit,
+          was heard within the minimum election timeout and is not silent, the one
+          holding the most of the log, the lowest on a tie (resortTarget); a node
+          that does not lead, or a leader with no such voter, keeps the fence's
+          own last resort alone. That one stays in every case, so the safety never
+          rests on the transfer: a transfer is what TransferLeadership starts, and
+          every release that runs the fence honours its TimeoutNow. Each last
+          resort is counted, and each transfer it started (Summary's
+          ForwardLastResorts and ForwardResortTransfers).
+        name: fenceLastResort
+        recv: r *Raft
+      - doc: |-
+          resortTarget is the eligible voter (resortEligible) whose match is
+          highest, the lowest on a tie; 0 when there is none.
+        name: resortTarget
+        recv: r *Raft
+        results: core.NodeID
+      - doc: |-
+          resortEligible reports whether the voter id, of progress pr, may take
+          this leader's leadership at its last resort: another voter that holds
+          the commit, answered in this term, last within the minimum election
+          timeout, and is not silent, as a preferred leader must (#662).
+        name: resortEligible
+        params: id core.NodeID, pr *progress
+        recv: r *Raft
+        results: bool
+      - doc: |-
           countFwdDrop counts the forward m, which the fence turned away, neither
           proposed nor answered, under its cause (Summary's ForwardDrops).
         name: countFwdDrop
@@ -3326,6 +3399,18 @@ types:
         name: forwardWindow
         recv: r *Raft
         results: time.Duration
+      - doc: |-
+          fwdRunsSoft is the marks the fence keeps before it forgets those of an
+          older term: maxFwdRuns, unless the package's own tests set another.
+        name: fwdRunsSoft
+        recv: r *Raft
+        results: int
+      - doc: |-
+          fwdRunsHard is the marks of the current term the fence keeps before its
+          last resort: maxFwdRunsHard, unless the package's own tests set another.
+        name: fwdRunsHard
+        recv: r *Raft
+        results: int
       - doc: |-
           forwardCeiling is the most answers the table keeps, past which it forgets
           the oldest: maxFwdAnswers, unless the package's own tests set another.
@@ -4940,6 +5025,30 @@ types:
           and its forwarder answers OUTCOME_UNKNOWN (#1482,
           consensus_forward_answers_forgotten_total).
         name: ForwardForgotten
+        type: uint64
+      - doc: |-
+          ForwardLastResorts counts, since this node started, the fence's last
+          resorts: a new run past 65 536 marks of the current term made it
+          forget the least recent mark of the node holding the most, whose new
+          runs wait for the next term (#1540,
+          consensus_forward_last_resorts_total). Those that started no
+          transfer — no eligible voter, a transfer already under way, this
+          last resort's own included, or one that failed this term — are
+          ForwardLastResorts less ForwardResortTransfers, action none.
+        name: ForwardLastResorts
+        type: uint64
+      - doc: |-
+          ForwardResortTransfers counts, since this node started, the
+          leadership transfers its last resorts started, once a term at most, to
+          a voter that holds the commit and was heard (#1540,
+          consensus_forward_last_resorts_total{action="transfer"}). Last resorts
+          that climb while it stays at 0 in the term mean no last-resort
+          transfer started, which does not say that no voter could take over:
+          check for a transfer already under way, an operator's included, and
+          for a voter that is up to date and eligible. The forwarders stay
+          fenced until the next election; a transfer of the operator's
+          clears it.
+        name: ForwardResortTransfers
         type: uint64
     kind: struct
     name: SummaryValue

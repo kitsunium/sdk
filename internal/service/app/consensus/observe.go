@@ -60,6 +60,7 @@ const (
 	mForwardsDropped  = "consensus_forwards_dropped_total"
 	mForwardRuns      = "consensus_forward_runs"
 	mForwardForgotten = "consensus_forward_answers_forgotten_total"
+	mForwardResorts   = "consensus_forward_last_resorts_total"
 	mLogBytes         = "consensus_log_bytes"
 	mLogQuota         = "consensus_log_quota_bytes"
 	mFsFree           = "consensus_fs_free_bytes"
@@ -91,6 +92,11 @@ var (
 	// fwdDropReasons are consensus_forwards_dropped_total's reasons, in the
 	// order of raft.ForwardDropsValue's fields (#1482).
 	fwdDropReasons = [3]string{"copy", "restarted", "evicted"}
+	// fwdResortActions are consensus_forward_last_resorts_total's actions:
+	// a last resort that started a leadership transfer, and one that started
+	// none — no eligible voter, a transfer already under way (the last
+	// resort's own included), or one that failed this term (#1540).
+	fwdResortActions = [2]string{"transfer", "none"}
 )
 
 // obs holds a node's instruments. Every method is safe on a nil Meter,
@@ -125,9 +131,12 @@ type obs struct {
 	seenTimedOut, seenSilenced                       int64
 	// seenDrops are consensus_forwards_dropped_total's by reason, in the
 	// order of fwdDropReasons; seenForgotten is
-	// consensus_forward_answers_forgotten_total's.
+	// consensus_forward_answers_forgotten_total's, and seenResorts
+	// consensus_forward_last_resorts_total's by action, in the order of
+	// fwdResortActions.
 	seenDrops     [3]int64
 	seenForgotten int64
+	seenResorts   [2]int64
 }
 
 // newObs binds a node's instruments to its configured Meter, Tracer and
@@ -523,10 +532,13 @@ func (n *Node) observeLinkAborts(o *obs) {
 
 // observeForwards publishes the forwards this node neither proposed nor
 // answered, by reason, the forwarder runs its fence keeps a mark of (raft's
-// fwdFence, #1482) and the answers its table forgot at its bound before
-// their window ended: a run of drops of reason evicted names the fence's
-// last resort, a node with more than 65 536 runs in one term, and a copy of
-// an answer forgotten is a drop of reason copy.
+// fwdFence, #1482), the answers its table forgot at its bound before
+// their window ended, and the fence's last resorts, past 65 536 runs in one
+// term, by whether they started a leadership transfer (#1540): a run of
+// drops of reason evicted follows a last resort, last resorts of action
+// none climbing while transfer stays at 0 in the term name a leader whose
+// forwarders stay fenced until the next election, and a copy of an answer
+// forgotten is a drop of reason copy.
 func (n *Node) observeForwards(st *raft.SummaryValue) {
 	o := n.obs
 	d := st.ForwardDrops
@@ -535,4 +547,8 @@ func (n *Node) observeForwards(st *raft.SummaryValue) {
 	}
 	o.setGauge(mForwardRuns, float64(st.ForwardRuns))
 	o.addTo(mForwardForgotten, &o.seenForgotten, int64(st.ForwardForgotten))
+	transfers := int64(st.ForwardResortTransfers)
+	for i, total := range [2]int64{transfers, int64(st.ForwardLastResorts) - transfers} {
+		o.addTo(mForwardResorts, &o.seenResorts[i], total, coreotel.String("action", fwdResortActions[i]))
+	}
 }

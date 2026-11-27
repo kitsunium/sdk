@@ -14902,6 +14902,8 @@ sequences:
         kind: internal
       - id: n.watchApplied
         kind: internal
+      - id: n.warnResortTransfer
+        kind: internal
       - id: n.handOver
         kind: internal
     steps:
@@ -14923,6 +14925,8 @@ sequences:
         to: n.cutExempt
       - eval: n.watchApplied(applied, st.Commit)
         to: n.watchApplied
+      - eval: n.warnResortTransfer(&st)
+        to: n.warnResortTransfer
       - opt:
           do:
             - set: w.stable, w.applied, w.stableAt, w.appliedAt, w.to
@@ -14947,6 +14951,29 @@ sequences:
           when: (!stuckSync && !stuckApply) || st.Transfer != 0
       - eval: n.handOver(now, new(n.r.Status()), applied, stuckApply)
         to: n.handOver
+  - of: (*Node).warnResortTransfer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).warnResortTransfer
+        kind: self
+      - id: n.obs.warn
+        kind: internal
+      - id: n.warnHandOver
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: st.ForwardResortTransfers == n.watch.resorts
+      - set: n.watch.resorts
+        value: st.ForwardResortTransfers
+      - eval: |-
+          n.obs.warn("consensus: the forward fence took its last resort, handing leadership over",
+          		lattr("to", uint64(st.Transfer)), lattr("term", st.Term))
+        to: n.obs.warn
+      - eval: n.warnHandOver(st.Transfer)
+        to: n.warnHandOver
   - of: (*Node).handOver
     participants:
       - id: caller
@@ -16503,6 +16530,15 @@ sequences:
         to: o.setGauge
       - eval: o.addTo(mForwardForgotten, &o.seenForgotten, int64(st.ForwardForgotten))
         to: o.addTo
+      - bind: transfers
+        eval: int64(st.ForwardResortTransfers)
+      - loop:
+          do:
+            - eval: o.addTo(mForwardResorts, &o.seenResorts[i], total, coreotel.String("action", fwdResortActions[i]))
+              to: o.addTo
+          key: i
+          range: "[2]int64{transfers, int64(st.ForwardLastResorts) - transfers}"
+          value: total
   - of: (*Node).ReadCommitted
     participants:
       - id: caller

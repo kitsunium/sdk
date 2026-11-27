@@ -26,8 +26,10 @@ const (
 	// handled least recently of the node that holds the most goes, and
 	// that node's new runs wait for the next term. The marks are per lane,
 	// about 32 768 restarts when each run forwards on both lanes; restarts
-	// spread over several nodes fence each of them in turn, the most loaded
-	// node changing as the counts level out (#1540).
+	// spread over several nodes fenced each of them in turn under a leader
+	// that stays, the most loaded node changing as the counts level out,
+	// so a leader that reaches it hands its leadership over to open that
+	// term (Raft.fenceLastResort, #1540).
 	maxFwdRunsHard int = 1 << 16
 )
 
@@ -115,20 +117,23 @@ func (f *fwdFence) unmarked(m *core.MessageValue) fwdVerdict {
 }
 
 // note records that the forward m was handled. A run new to the fence
-// first makes room past soft marks: evict, at the term current.
-func (f *fwdFence) note(m *core.MessageValue, soft, hard int, current uint64) {
+// first makes room past soft marks: evict, at the term current. It reports
+// whether the room was made by the last resort.
+func (f *fwdFence) note(m *core.MessageValue, soft, hard int, current uint64) bool {
 	run, n := runOf(m)
 	k, ok := f.marks[run]
+	resort := false
 	if !ok {
 		if f.marks == nil {
 			f.marks = map[fwdRun]fwdMark{}
 		}
 		if len(f.marks) >= soft {
-			f.evict(soft, hard, current)
+			resort = f.evict(soft, hard, current)
 		}
 	}
 	f.used++
 	f.marks[run] = fwdMark{high: max(k.high, n), term: max(k.term, m.Term), used: f.used}
+	return resort
 }
 
 // evict brings the marks under soft, forgetting those of a term below
@@ -139,8 +144,8 @@ func (f *fwdFence) note(m *core.MessageValue, soft, hard int, current uint64) {
 // most goes, the lowest node on a tie. Each mark forgotten raises its
 // node's fence to the mark's term, so that run's copies stay refused. The
 // choices are the same whatever the map's order: no two marks share a
-// count of use.
-func (f *fwdFence) evict(soft, hard int, current uint64) {
+// count of use. It reports whether it took the last resort.
+func (f *fwdFence) evict(soft, hard int, current uint64) bool {
 	var old []fwdRun
 	for run, k := range f.marks {
 		if k.term < current {
@@ -157,9 +162,11 @@ func (f *fwdFence) evict(soft, hard int, current uint64) {
 	for _, run := range old[:min(len(old), len(f.marks)-soft+1)] {
 		f.forget(run)
 	}
-	if len(f.marks) >= hard {
-		f.forget(f.crowded())
+	if len(f.marks) < hard {
+		return false
 	}
+	f.forget(f.crowded())
+	return true
 }
 
 // crowded is the mark handled least recently of the node that holds the

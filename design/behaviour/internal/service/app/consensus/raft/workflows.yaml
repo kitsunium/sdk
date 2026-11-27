@@ -230,6 +230,31 @@ workflows:
           range: next.Members
           value: m
       - return: "false"
+  - of: (*Raft).resortTarget
+    steps:
+      - var:
+          name: to
+          type: core.NodeID
+      - var:
+          name: best
+          type: uint64
+      - loop:
+          do:
+            - bind: pr
+              eval: r.prs[id]
+            - opt:
+                do:
+                  - continue: true
+                when: "!r.resortEligible(id, pr)"
+            - opt:
+                do:
+                  - set: to, best
+                    value: id, pr.match
+                when: to == 0 || pr.match > best || (pr.match == best && id < to)
+          key: _
+          range: r.voters()
+          value: id
+      - return: to
   - of: (*Raft).EngineAt
     steps:
       - bind: v
