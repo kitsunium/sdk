@@ -71,11 +71,8 @@
 // under the four conditions of D9; a leader paused after its lease check
 // serves a stale read, which ReadIndex never does.
 //
-// A Barrier may be refused with NOT_LEADER when the node knows no leader
-// of a stable term, or when the leader changes while its read awaits
-// confirmation: nothing was read, and the call may be retried, for
-// instance after the next leader change. A read still queued when the
-// leader changes is sent to the new leader.
+// A Barrier may be refused with NOT_LEADER: nothing was read, and the call is
+// safe to retry.
 //
 // # Backup
 //
