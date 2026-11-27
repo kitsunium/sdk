@@ -592,13 +592,14 @@ func (r *ring) settleAfterWrite(slot int32) {
 }
 
 // drainClose reports whether c is a close of r's drain: the drain's own, or
-// the handler's clean close while the loop drains — an HTTP/2 adapter's after
-// the drain's GOAWAY (#1609), an HTTP/1.1 answer's Connection: close —, whose
-// output the peer has yet to read just the same. The loop's drain, not the
+// the handler's clean close while the loop drains — above all an HTTP/1.1
+// answer's Connection: close; the HTTP/2 adapter leaves a drained
+// connection's close to the drain itself since #1609 and closes only on a
+// connection error —, whose output the peer has yet to read just the same. The loop's drain, not the
 // ring's: io_uring's accept watchdog stops a ring accepting (ring.draining)
 // with no drain begun, and only a drain's closeSettled ends a linger.
 func (r *ring) drainClose(c *connCtl) bool {
-	//: closing, by the drain or by its handler while the ring drains.
+	//: closing, by the drain or by its handler while the loop drains.
 	return c.state == stClosing && (c.reason == rDrain || (c.reason == rNone && r.lp.draining))
 }
 
@@ -606,11 +607,11 @@ func (r *ring) drainClose(c *connCtl) bool {
 // close. A close the drain decided on a connection whose peer still sends
 // would, with that input unread, send a reset, and the reset discards what
 // the kernel holds of the output not yet delivered: the answers the drain
-// waited for (#1385), or the GOAWAY a handler wrote before its close while
-// the ring drains (#1609). So such a close shuts the writing side first —
-// the peer reads every answer, then the end — and the slot keeps reading,
-// and dropping, until the peer ends or drainLinger passed (closeSettled
-// looks).
+// waited for (#1385), or the answer a handler wrote before its clean close
+// while the loop drains — an HTTP/1.1 Connection: close (#1609). So such a
+// close shuts the writing side first — the peer reads every answer, then
+// the end — and the slot keeps reading, and dropping, until the peer ends or
+// drainLinger passed (closeSettled looks).
 func (r *ring) lingers(slot int32) bool {
 	c := &r.conns[slot]
 	//: not a drain's close, or a peer that already ended: no reset to fear.

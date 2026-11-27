@@ -58,8 +58,8 @@ func TestLoopHandler_drainAnnouncedMidBatchKeepsTheBatchsAnswers(t *testing.T) {
 	type tc struct {
 		name string
 		// fedThisBatch feeds the request in the announcing batch; otherwise
-		// the request is answered a batch before, and the announcement closes
-		// an idle connection at once.
+		// the request is answered a batch before, and the announcement finds
+		// an idle connection, which it leaves to the engine's drain as well.
 		fedThisBatch bool
 	}
 	runCase := func(t *testing.T, c tc) {
