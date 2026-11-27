@@ -390,7 +390,11 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		return n.stoppedErr()
 	}
 	done := make(chan error, 1)
-	n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
+	// Held from the restore to installed: the applied position the restore
+	// gives is published in the turn raft takes the snapshot's
+	// configuration, never one turn before it (#1584). A stop meanwhile
+	// leaves the hold, which no turn publishes past any more.
+	n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done, hold: true}})
 	select {
 	case err = <-done:
 	case <-n.stopc:
@@ -468,14 +472,48 @@ func (n *Node) stillFresh(req *coreconsensus.InstallParams, sink coreconsensus.S
 	return nil
 }
 
+// holdPublishedLocked holds the applied position publish reports at
+// applied, the one before an install's restore moves it, until the matching
+// releasePublished. Overlapping holds keep the first position: the one
+// every configuration raft holds covers. The caller holds am.
+func (n *Node) holdPublishedLocked(applied uint64) {
+	//: the first hold records the position; the others count.
+	if n.pubHolds == 0 {
+		n.pubHold = applied
+	}
+	n.pubHolds++
+}
+
+// releasePublished lets go of one hold holdPublishedLocked took: the next
+// publish reports the applied position again once none is left.
+func (n *Node) releasePublished() {
+	n.am.Lock()
+	//: a release with no hold left changes nothing.
+	if n.pubHolds > 0 {
+		n.pubHolds--
+	}
+	n.am.Unlock()
+}
+
 // installed moves raft onto a restored install and keeps the two newest
 // snapshots: the installed one is the newest, and the oldest of the ones
-// this node held goes, as after a cut.
+// this node held goes, as after a cut. The restore's hold on the published
+// applied position goes in the same turn as raft's move, before that turn
+// publishes, or after it when the loop ended first.
 func (n *Node) installed(meta coreconsensus.SnapshotMetaValue, from coreconsensus.NodeID) {
+	// released is written on the loop, which ends after the func returned:
+	// read once exec returned, it says whether the turn ran.
+	released := false
 	n.exec(func() {
 		n.r.InstallSnapshot(meta)
+		n.releasePublished()
+		released = true
 		n.handleReady()
 	})
+	//: a loop that ended before the move still lets the hold go, once.
+	if !released {
+		n.releasePublished()
+	}
 	n.retain()
 	n.obs.inc(mSnapshotInstalls)
 	n.obs.info("consensus: snapshot installed", lattr("index", meta.Position.Index), lattr("from", uint64(from)))

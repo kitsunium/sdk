@@ -1660,6 +1660,24 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   nothing and records no newest snapshot size; it only raises
   `snapState.last` to the snapshot's index: the appends published `applied`, not the install,
   and the install's `retain` records the newest snapshot after (#1554).
+- Publish an install's applied position before raft holds its
+  configuration: `restoreFrom` moves `applied` on the applier and
+  `installed` moves raft one exec later, so a turn between the two
+  published `Status().Applied` past a removal the snapshot covers with the
+  `Membership()` from before it (#1584). An install's restore item carries
+  `hold`: the applier records the published position before `applied`
+  moves (`pubHolds`, `pubHold`), `publish` reports it while a hold is left,
+  and `installed` lets it go in the exec that calls `InstallSnapshot`,
+  before that turn publishes (after it, when the loop ended first); a
+  failed restore lets it go on the applier. A start restores with no hold:
+  `newRaft` builds raft on the snapshot before its first publish.
+  `WaitApplied` and `Barrier` read `applied`, never the published value, and
+  are not delayed (`TestAnInstallPublishesItsAppliedPositionWithItsConfiguration`,
+  `TestAStartOnASnapshotPublishesItsAppliedPositionWithItsConfiguration`,
+  `TestARefusedRestoreDoesNotHoldThePublishedAppliedPosition`). Until then
+  `TestANodeThatInstallsASnapshotRefusesItsRetiredKeys`, which waits for
+  `Applied` and then reads `Membership()`, failed about once in 3,000 runs
+  under `GOMAXPROCS=1`, when the scheduler ran that turn.
 - Fail a restore on its read handle's Close alone: the snapshot was read in
   full and verified, so the Close says nothing of the state restored, and
   the pin goes either way. Returned, it made the install remove the copy

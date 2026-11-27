@@ -26,6 +26,10 @@ type applyItem struct {
 type restoreReq struct {
 	meta coreconsensus.SnapshotMetaValue
 	done chan error
+	// hold keeps the published applied position where it was until the
+	// caller moves raft onto the snapshot and lets it go (installed): an
+	// install's restore. It is let go here when the restore fails (#1584).
+	hold bool
 }
 
 type saveReq struct {
@@ -112,6 +116,28 @@ func (n *Node) applyLoop() {
 	}
 }
 
+// restoreItem restores the snapshot r names on the apply goroutine and
+// answers r. A machine already past the snapshot is never rolled back: the
+// entries it applied after the snapshot are committed and would not be
+// applied again (review H3). An install's restore holds the published
+// applied position before applied moves, and a failed one lets it go
+// (#1584).
+func (n *Node) restoreItem(r *restoreReq) {
+	n.am.Lock()
+	applied := n.applied
+	//: an install's restore holds the published position before applied moves.
+	if r.hold {
+		n.holdPublishedLocked(applied)
+	}
+	n.am.Unlock()
+	err := n.restoreFrom(r.meta, applied)
+	//: a failed restore moved nothing raft would take: its hold goes with it.
+	if err != nil && r.hold {
+		n.releasePublished()
+	}
+	r.done <- err
+}
+
 // applyItems runs one batch taken from the apply queue in order. It returns
 // false when the apply goroutine must end: the node stopped, or applying an
 // entry stopped it.
@@ -127,13 +153,7 @@ func (n *Node) applyItems(items []applyItem) bool {
 		it := items[k]
 		items[k] = applyItem{}
 		if it.restore != nil {
-			// A machine already past the snapshot is never rolled back:
-			// the entries it applied after the snapshot are committed
-			// and would not be applied again (review H3).
-			n.am.Lock()
-			applied := n.applied
-			n.am.Unlock()
-			it.restore.done <- n.restoreFrom(it.restore.meta, applied)
+			n.restoreItem(it.restore)
 			continue
 		}
 		if it.save != nil {
