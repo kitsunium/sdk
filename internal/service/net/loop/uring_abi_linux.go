@@ -135,7 +135,8 @@ const (
 	ringFDAlloc uint32 = 0xFFFFFFFF
 	// pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
 	// buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
-	// so no user page is pinned against RLIMIT_MEMLOCK.
+	// so no user page of the process is pinned; from 6.14 the kernel's pages
+	// are still charged to RLIMIT_MEMLOCK (mapBufRing).
 	pbufRingMmap uint16 = 1
 	// pbufRingInc is IOU_PBUF_RING_INC (6.12): a buffer is consumed as far
 	// as each completion took, and serves the next from where it stopped.

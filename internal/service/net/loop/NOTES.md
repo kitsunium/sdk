@@ -443,7 +443,10 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   kernel charges each ring's SQ and CQ to `RLIMIT_MEMLOCK` (8 MiB by
   default). A serving ring asks for 1024 SQEs and a 4096-entry CQ, the
   probe's rings for 16. The buffer ring is the kernel's
-  (`IOU_PBUF_RING_MMAP`, 6.4), user pages before that. With 4096 SQEs and
+  (`IOU_PBUF_RING_MMAP`, 6.4), user pages before that; from 6.14 the
+  kernel's ring is charged to the same limit (`io_create_region`, see
+  `mapBufRing`), so the MMAP flag spares the process its pinned pages and not
+  its limit. With 4096 SQEs and
   16384 CQEs, CI's non-root lane ran out after a few groups (`ENOMEM` at setup).
 - **Ubuntu 6.8.0-147 refuses every well-formed buffer ring.** Its
   `io_register_pbuf_ring` inverts the reserved-field check (`if
@@ -661,9 +664,17 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   descent. `startPacket`'s `failErrno` plays the kernel's answer at a stage;
   `_refusalNamesTheKernel` holds the field, the reason and the ring closed,
   and `requireLane` fails with every field, the kernel's release and
-  `RLIMIT_MEMLOCK` (`laneRefusal`). The self-test's one wait still reads an
-  interrupted wait (`EINTR`) as its 200 ms passed: `uring.wait` keeps its
-  errno.
+  `RLIMIT_MEMLOCK` (`laneRefusal`). The self-test's wait is `waitWindow`
+  over `uring.waitErrno`: an `EINTR` — a signal the process receives, `SIGCHLD` or `SIGPROF`, since `preemptone` does not signal a goroutine in a system call (`runtime/proc.go:6926-6928`, go1.27.4) — asks
+  again with what is left of the 200 ms, and a window interrupted to its end
+  with nothing reaped is refused naming `EINTR`, in the text and in the `errno` field (`probeVerdict` decides, `TestProbeVerdict` holds it), never as a kernel that
+  delivered nothing (#1580); the serving loops keep `uring.wait`, which reaps
+  the CQ whatever the enter answered. `TestWaitWindow_interrupted` drives it
+  with an enter the test cuts, the kernel offering no way to land a signal
+  there. The 6.14 accounting is `io_create_region`'s `__io_account_mem`
+  (`io_uring/memmap.c:213-215`, `rsrc.c:35-52`, `kbuf.c:662`, v6.14), on
+  `ctx->user`, set without `CAP_IPC_LOCK` (`io_uring.c:3655-3656`); v6.13's
+  `io_alloc_pbuf_ring` mapped the same pages uncharged.
 - **A handler queues what `Write` refuses.** A line the handler stopped at
   stays in the spill and comes back only with the next bytes. A handler that
   answers a pipelined request behind a refused write must therefore queue it

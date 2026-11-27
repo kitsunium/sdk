@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -311,9 +312,9 @@ func (lp *packetLane) setup() (stage, why string, errno syscall.Errno) {
 	lp.hdr.Namelen = uint32(packetNameRoom)
 	lp.hdr.Controllen = uint64(packetCtrlRoom)
 	//: the self-test.
-	if why := lp.selfTest(); why != "" || lp.failStage == "recvmsg" {
-		//: refused.
-		return "recvmsg", why + lp.failStage, 0
+	if why, werr := lp.selfTest(); why != "" || lp.failStage == "recvmsg" {
+		//: refused, with the errno of an interrupted wait when that was the cause.
+		return "recvmsg", why + lp.failStage, werr
 	}
 	//: the memory the replies and the handover use.
 	if why, errno := lp.mapArenas(); why != "" {
@@ -437,24 +438,24 @@ func (lp *packetLane) mapArenas() (string, syscall.Errno) {
 // selfTest arms a multishot RECVMSG on a loopback socket of its own, sends
 // it one datagram and reads it back from a provided buffer: the header, the
 // sender's family and the payload. It returns why it failed.
-func (lp *packetLane) selfTest() string {
+func (lp *packetLane) selfTest() (string, syscall.Errno) {
 	rx, tx, why := loopbackPair()
 	//: no sockets.
 	if why != "" {
 		//: named.
-		return why
+		return why, 0
 	}
 	defer closePair(rx, tx)
-	got, why := lp.probeOne(rx, tx)
+	got, why, werr := lp.probeOne(rx, tx)
 	//: nothing came back.
 	if why != "" {
-		//: named.
-		return why
+		//: named, with the errno the wait ended on, if it is the reason.
+		return why, werr
 	}
 	//: the datagram, its buffer and the promise of more.
 	if got.userData != pudProbe || got.res <= 0 || got.flags&cqeFBuffer == 0 || got.flags&cqeFMore == 0 {
 		//: named.
-		return "multishot RECVMSG: no datagram with a buffer and F_MORE within 200 ms"
+		return "multishot RECVMSG: no datagram with a buffer and F_MORE within 200 ms", 0
 	}
 	bid := uint16(got.flags >> cqeBufferShift)
 	name, _, payload, _ := splitRecvmsgOut(lp.u.buf(bid)[:got.res])
@@ -464,15 +465,16 @@ func (lp *packetLane) selfTest() string {
 	//: the header as laid out.
 	if string(payload) != "kit" || !from.IsValid() || !from.Addr().Is4() {
 		//: named.
-		return "multishot RECVMSG: the buffer's header, address or payload did not read back"
+		return "multishot RECVMSG: the buffer's header, address or payload did not read back", 0
 	}
 	//: passed.
-	return ""
+	return "", 0
 }
 
 // probeOne arms the self-test's receive on rx, sends it three bytes from tx,
-// takes the first completion, then cancels the receive and reaps its end.
-func (lp *packetLane) probeOne(rx, tx int) (cqe, string) {
+// takes the first completion, then cancels the receive and reaps its end. It
+// returns the errno the wait ended on when that is the refusal's reason.
+func (lp *packetLane) probeOne(rx, tx int) (cqe, string, syscall.Errno) {
 	ring := lp.u
 	prepRecvmsg(ring.get(), rx, &lp.hdr, pudProbe)
 	ring.submit()
@@ -480,22 +482,74 @@ func (lp *packetLane) probeOne(rx, tx int) (cqe, string) {
 	//: the receiver's address.
 	if err != nil {
 		//: named.
-		return cqe{}, "getsockname: " + err.Error()
+		return cqe{}, "getsockname: " + err.Error(), 0
 	}
 	//: one datagram of three bytes.
 	if err := syscall.Sendto(tx, []byte("kit"), 0, addr); err != nil {
 		//: named.
-		return cqe{}, "sendto: " + err.Error()
+		return cqe{}, "sendto: " + err.Error(), 0
 	}
-	ts := kernelTimespec{nsec: packetProbeWait}
-	ring.wait(&ts, 1)
+	werr := waitWindow(time.Duration(packetProbeWait), func(ts *kernelTimespec) syscall.Errno { return ring.waitErrno(ts, 1) })
 	var got cqe
 	ring.reap(1, func(c *cqe) { got = *c })
 	prepCancelUserData(ring.get(), pudProbe, pudCancel)
 	ring.submit()
-	lp.awaitFinals(&ts)
-	//: the first completion.
-	return got, ""
+	lp.awaitFinals(new(kernelTimespec{nsec: packetProbeWait}))
+	why, errno := probeVerdict(got, werr)
+	//: the first completion, or the interruption that kept it from coming.
+	return got, why, errno
+}
+
+// probeVerdict is what the self-test's wait decides: a reason and the errno
+// behind it when nothing came and the wait never ran its course — interrupted to
+// its end (EINTR) or refused by the kernel (EBUSY for instance) — which is not a
+// kernel without the lane; empty otherwise, a completion reaped despite a last
+// errno and an ETIME or a wake with nothing alike, the caller judging what was
+// reaped.
+func probeVerdict(got cqe, werr syscall.Errno) (string, syscall.Errno) {
+	//: a completion was reaped, whatever the wait ended on.
+	if got.userData == pudProbe {
+		//: no verdict of its own.
+		return "", 0
+	}
+	//: what the wait ended on with nothing reaped.
+	switch werr {
+	//: the window ran out or a wake found nothing: the caller's own refusal.
+	case 0, errnoETIME:
+		//: no verdict of its own.
+		return "", 0
+	//: interrupted to its end.
+	case syscall.EINTR:
+		//: named, with its errno.
+		return "multishot RECVMSG: the wait was interrupted (" + werr.Error() + ") for the whole 200 ms", werr
+	//: the kernel refused the wait, so the window never ran.
+	default:
+		//: named, with its errno.
+		return "multishot RECVMSG: the wait was refused (" + werr.Error() + ")", werr
+	}
+}
+
+// waitWindow waits through window with enter, which is one wait bounded by the
+// timespec it is handed, and asks again with what remains of the window when a
+// signal cut it short: EINTR is the thread being interrupted — by a signal the
+// process receives, SIGCHLD or SIGPROF for instance — not a window that ran out
+// without a completion.
+// It returns the last answer: ETIME or zero once the window ran its course or
+// a completion woke it, EINTR when it was interrupted to its end.
+func waitWindow(window time.Duration, enter func(*kernelTimespec) syscall.Errno) syscall.Errno {
+	deadline := time.Now().Add(window)
+	errno := syscall.Errno(0)
+	//: until the window's end.
+	for left := window; left > 0; left = time.Until(deadline) {
+		errno = enter(&kernelTimespec{nsec: int64(left)})
+		//: an answer other than an interruption is the wait's.
+		if errno != syscall.EINTR {
+			//: as answered.
+			return errno
+		}
+	}
+	//: interrupted to the end.
+	return errno
 }
 
 // awaitFinals reaps the self-test's cancel and its receive's last
