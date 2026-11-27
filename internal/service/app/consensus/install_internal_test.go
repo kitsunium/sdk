@@ -230,7 +230,8 @@ func holdOnlyTheLeadersNewest(t *testing.T, l, f *testNode) string {
 // its copy first, and a replacement that then failed — a cut transfer, a
 // Restore refused — left it no snapshot. At its next start its log began
 // past a compaction with nothing naming the members: it admitted nobody and
-// was isolated for good (#526).
+// was isolated for good (#526). A refused Restore now stops the node
+// (#1582): its copy stays for the next start, which the cause gone feeds.
 func TestANodeWithNoTableKeepsItsMembersThroughAFailedReplacement(t *testing.T) {
 	c, refuse, refused := refusingCluster(t, errors.New("this build does not read that state"))
 	l := c.settledLeader(5 * time.Second)
@@ -255,11 +256,17 @@ func TestANodeWithNoTableKeepsItsMembersThroughAFailedReplacement(t *testing.T) 
 	// answered with a request for a snapshot.
 	proposeOnLeader(t, c, "nudge=1")
 	deadline := time.Now().Add(10 * time.Second)
-	for refused.Load() < 2 {
+	//: until a replacement's refused Restore stops the node.
+	for refused.Load() < 1 || !f.node.stopped.Load() {
+		//: not in time.
 		if time.Now().After(deadline) {
-			t.Fatalf("no replacement reached Restore twice (refused %d)", refused.Load())
+			t.Fatalf("no replacement's refused Restore stopped the node (refused %d)", refused.Load())
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	//: the refusal stops the node STATE_MACHINE_FAILED.
+	if reason, _ := f.node.StopReason(); !errs.HasCode(reason.Err, coreconsensus.CodeStateMachineFailed) {
+		t.Errorf("a refused Restore stopped the node with %v, want STATE_MACHINE_FAILED", reason.Err)
 	}
 	c.net.Isolate(f.id, true)
 	c.kill(f)
@@ -561,5 +568,97 @@ func TestANodeWithNothingNamingItsMembersIsRefused(t *testing.T) {
 			_ = n.HardClose()
 		}
 		t.Fatalf("a node with nothing naming its members started: %v", err)
+	}
+}
+
+// openRefused is a snapshot store whose Open, from an install's restore
+// once armed, is refused: the engine refuses the snapshot before any
+// Restore, and the machine is never handed it.
+type openRefused struct {
+	coreconsensus.SnapshotStore
+	armed   atomic.Bool
+	refused atomic.Int64
+}
+
+// Open implements SnapshotStore, refusing a restore's open once armed.
+func (s *openRefused) Open(id string) (coreconsensus.SnapshotHandle, error) {
+	//: only a restore's open, once armed, is refused.
+	if s.armed.Load() && calledFrom(".(*Node).restoreFrom") {
+		s.refused.Add(1)
+		return nil, origin(coreconsensus.SnapshotCorrupt, errs.String("why", "the test refuses the restore's open"))
+	}
+	return s.SnapshotStore.Open(id)
+}
+
+// A node with no table whose install the engine refuses before Restore —
+// the snapshot unreadable, no machine touched — keeps running and keeps the
+// copy its members are read from (#526): only a Restore the machine refused
+// stops the node (#1582). Once the cause is gone, the next offer installs.
+func TestANodeWithNoTableKeepsItsCopyThroughAnEngineRefusal(t *testing.T) {
+	type tc struct{ name string }
+	runCase := func(t *testing.T, _ tc) {
+		var fID atomic.Uint64
+		var store atomic.Pointer[openRefused]
+		c := newClusterWith(t, &cluster{
+			t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 7}, every: 20,
+			configure: func(tn *testNode, cfg *Config) {
+				//: only the node with no table opens through the double.
+				if uint64(tn.id) != fID.Load() {
+					return
+				}
+				s := &openRefused{SnapshotStore: tn.snaps}
+				store.Store(s)
+				cfg.Snapshots = s
+			},
+		})
+		l := c.settledLeader(5 * time.Second)
+		f := c.otherThan(l)
+		tok := lagBehindAnInstall(t, c, f, 120)
+		c.start(f)
+		c.net.Isolate(f.id, false)
+		c.waitApplied(tok.Index, 10*time.Second)
+		// The installed copy rots; the node restarts with no table.
+		c.net.Isolate(f.id, true)
+		c.kill(f)
+		held := holdOnlyTheLeadersNewest(t, l, f)
+		fID.Store(uint64(f.id))
+		c.start(f)
+		//: the setup starts the node with no table.
+		if !holdsNoTable(t, f) {
+			t.Fatal("setup: the node started with a table")
+		}
+		s := store.Load()
+		s.armed.Store(true)
+		c.net.Isolate(f.id, false)
+		proposeOnLeader(t, c, "nudge=1")
+		deadline := time.Now().Add(10 * time.Second)
+		//: until two installs were refused before Restore.
+		for s.refused.Load() < 2 {
+			//: not in time.
+			if time.Now().After(deadline) {
+				t.Fatalf("no install reached the restore's open twice (refused %d)", s.refused.Load())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		//: an engine refusal never stops the node.
+		if reason, stopped := f.node.StopReason(); stopped {
+			t.Fatalf("an install the engine refused before Restore stopped the node: %v", reason.Err)
+		}
+		//: the node with no table keeps a copy to read its members from.
+		if metas := must(f.snaps.List())(t); len(metas) == 0 {
+			t.Errorf("the node with no table was left no snapshot (it held %s)", held)
+		}
+		// The cause is gone: the next offer installs.
+		s.armed.Store(false)
+		tok = proposeOnLeader(t, c, "after=1")
+		c.waitApplied(tok.Index, 10*time.Second)
+		//: the node is fed the whole state.
+		if v, _ := f.sm.get("k5"); v != "5" {
+			t.Fatalf("the node was never installed: k5=%q", v)
+		}
+	}
+	//: one case, its own cluster.
+	for _, tt := range []tc{{name: "an open refused at the restore keeps the copy and the node"}} {
+		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }

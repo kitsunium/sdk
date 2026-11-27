@@ -75,6 +75,8 @@ func TestURingABI(t *testing.T) {
 		got, want uint64
 	}{
 		{"IORING_SETUP_DEFER_TASKRUN", uint64(setupDeferTaskrun), 1 << 13},
+		{"IORING_SETUP_TASKRUN_FLAG", uint64(setupTaskrunFlag), 1 << 9},
+		{"IORING_SQ_TASKRUN", uint64(sqTaskrun), 1 << 2},
 		{"IORING_SETUP_NO_SQARRAY", uint64(setupNoSQArray), 1 << 16},
 		{"IORING_SETUP_SQ_REWIND", uint64(setupSQRewind), 1 << 20},
 		{"IORING_ENTER_REGISTERED_RING", uint64(enterRegisteredRing), 1 << 4},

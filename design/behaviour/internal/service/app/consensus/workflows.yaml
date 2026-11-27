@@ -1,6 +1,25 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: (*Node).applyItems
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: n.stopped.Load()
+            - bind: it
+              eval: items[k]
+            - set: items[k]
+              value: applyItem{}
+            - opt:
+                do:
+                  - return: "false"
+                when: "!n.applyItem(&it)"
+          key: k
+          range: items
+      - return: "true"
   - of: countVoters
     steps:
       - bind: voters

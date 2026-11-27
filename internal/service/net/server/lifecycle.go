@@ -255,7 +255,7 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 	spec := socketSpec{reuse: reuseOf(count, share), receiveBuffer: group.limits.ReceiveBuffer, sendBuffer: group.limits.SendBuffer}
 	//: an address another process holds is refused before the shards could
 	//: join it (#1330).
-	if mustProbe(addr, count, share) {
+	if mustProbe(ctx, addr, count, share) {
 		//: AddressInUse, naming it.
 		if err := probeAddress(ctx, addr, false); err != nil {
 			//: Start unwinds whatever is already bound.
@@ -269,7 +269,7 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 	sockets := make([]stdnet.PacketConn, 0, count)
 	//: the shards, the first naming the port the others join.
 	for i := range count {
-		pc, rep, err := listenPacket(ctx, bindAddr, spec)
+		pc, rep, err := listenShard(ctx, bindAddr, spec, i == 0)
 		//: a shard that will not bind aborts startup rather than serving a
 		//: quietly smaller set than the operator asked for.
 		if err != nil {
@@ -304,6 +304,112 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 	s.probeSteer(group.steer, sockets)
 	//: every shard of this address is reading.
 	return nil
+}
+
+// listenShard binds one shard of a datagram address. The first shard of an
+// address asked as port 0 asks the kernel for its port without SO_REUSEPORT
+// and is given the option once bound (#1585): Linux's draw, udp_lib_get_port,
+// skips only the ports whose holders the new socket cannot share
+// (udp_lib_lport_inuse, net/ipv4/udp.c), so a socket drawing with
+// SO_REUSEPORT set may be given a port a reuseport socket of the same user
+// holds, and join its group (udp_reuseport_add_sock) — another program's
+// socket would then read part of the group's datagrams. Drawn without the
+// option, the port is one nobody holds at the instant of the draw; set
+// afterwards, the option admits the shards that follow, the group created
+// when the second joins (reuseport_add_sock, net/core/sock_reuseport.c).
+func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec, first bool) (stdnet.PacketConn, bindReport, error) {
+	//: a shard joining a port, a named port, or one socket alone: as asked.
+	if !first || spec.reuse == reuseNone || !reuseportDrawJoins {
+		//: the bind as the spec says.
+		return listenPacket(ctx, addr, spec)
+	}
+	//: a network the engine does not serve: listenPacket refuses it by name,
+	//: UnsupportedNetwork as before the draw's guards, where portZero's lookup
+	//: would fail on it and be refused as a failed bind.
+	if _, served := packetNetworks[addr.Network]; !served {
+		//: the one refusal an unserved family has always had.
+		return listenPacket(ctx, addr, spec)
+	}
+	//: a context already done: portZero's lookup may answer with the context's
+	//: error while the bind's own lookup, a few instructions later, still
+	//: succeeds and reads the port as 0 (two selects tossed at random,
+	//: doBlockingWithCtx under cgo); the draw would then be made with
+	//: SO_REUSEPORT set (#1585). Refused here, nothing drawn, nothing bound.
+	if cerr := ctx.Err(); cerr != nil {
+		//: the context's error, naming the address.
+		return nil, bindReport{}, bindRefusal(addr, cerr)
+	}
+	zero, zerr := portZero(ctx, addr)
+	//: the lookup failed, so whether this is a draw is unknown: the context
+	//: ended between this lookup and the bind's, which may still read port 0.
+	//: Bound as the spec says, the draw would carry SO_REUSEPORT (#1585).
+	if zerr != nil {
+		//: the lookup's error, naming the address; nothing bound.
+		return nil, bindReport{}, bindRefusal(addr, zerr)
+	}
+	//: a named port, or an address the bind refuses itself.
+	if !zero {
+		//: the bind as the spec says.
+		return listenPacket(ctx, addr, spec)
+	}
+	alone := spec
+	alone.reuse = reuseNone
+	pc, rep, err := listenPacket(ctx, addr, alone)
+	//: the draw itself was refused.
+	if err != nil {
+		//: already naming the address.
+		return nil, rep, err
+	}
+	//: the option the other shards join through, on the drawn port.
+	if err := reuseAfterBind(pc); err != nil {
+		swallowErr(pc.Close())
+		//: the shards could not join it.
+		return nil, rep, bindRefusal(addr, err)
+	}
+	rep.traits |= traitIf(spec.reuse == reuseShared, traitShared)
+	//: bound alone on a fresh port, open to the shards.
+	return pc, rep, nil
+}
+
+// portZero reports whether addr asks the kernel to draw its port, and the
+// error of the port's lookup when it failed: the answer is then unknown. An
+// address SplitHostPort refuses is no draw and no error, the bind refuses it.
+func portZero(ctx context.Context, addr corenet.AddressValue) (bool, error) {
+	_, port, err := stdnet.SplitHostPort(addr.Addr)
+	//: an address the bind will refuse itself.
+	if err != nil {
+		//: not a draw, not a failed lookup.
+		return false, nil
+	}
+	//: port 0, a named port, or the lookup's failure.
+	return drawnPort(ctx, addr.Network, port)
+}
+
+// lookupPort is the resolver call drawnPort and the bind share, a variable so
+// a test can make the lookup fail while the context is alive.
+var lookupPort = stdnet.DefaultResolver.LookupPort
+
+// drawnPort reports whether the bind reads port as port 0, the kernel's draw
+// (#1585). It asks the resolver the bind asks, the standard library's
+// DefaultResolver.LookupPort (internetAddrList, net/ipsock.go), so the answer
+// is the bind's by construction. A port of digits after at most one sign is
+// read by parsePort (net/port.go) with no resolver, no file and no network:
+// "0", "", "00", "+0", "-0" and a lone sign are 0. Any other string is looked
+// up: the Go resolver reads it as a service name, cgo's getaddrinfo with
+// glibc's strtoul, which skips leading blanks and is cut to 16 bits (" 0",
+// "\t00" and " 65536" draw there) — a lookup the bind would make itself. A
+// port the lookup refuses is no draw, and its error is returned: a caller that
+// binds must not bind on a lookup that failed, since the bind's own lookup may
+// still succeed (a context ending between the two) and read port 0.
+func drawnPort(ctx context.Context, network, port string) (bool, error) {
+	n, err := lookupPort(ctx, network, port)
+	//: the lookup failed: the answer is unknown.
+	if err != nil {
+		//: not a draw, and why.
+		return false, err
+	}
+	//: the bind's port 0, nothing else.
+	return n == 0, nil
 }
 
 // pinPort returns addr with the port pc bound, so the other shards of an address
@@ -498,7 +604,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 	share := group.kinds.has(corenet.OptionShareAddress)
 	//: an address another process holds is refused before the shards could
 	//: join it (#1330).
-	if mustProbe(addr, count, share) {
+	if mustProbe(ctx, addr, count, share) {
 		//: AddressInUse, naming it.
 		if err := probeAddress(ctx, addr, true); err != nil {
 			//: Start unwinds whatever is already bound.

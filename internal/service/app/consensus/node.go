@@ -879,11 +879,11 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 			}
 			continue
 		}
-		rerr := n.restoreFrom(m, durIdx)
+		rerr := n.restoreFrom(m, durIdx, false)
 		if rerr == nil {
 			return m, failed, newest, nil
 		}
-		//: a format this build does not read, or a machine a restore left unvouched for, refuses the start.
+		//: a format this build does not read, or a machine that refused its restore, refuses the start.
 		if n.refusesStart(rerr) {
 			return coreconsensus.SnapshotMetaValue{}, nil, nil, rerr
 		}
@@ -904,8 +904,12 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 // stopped the node, its machine having accepted a stream whose end was then
 // refused. Falling back from the second, a durable machine already past the
 // older snapshot is not restored again and stays on the state it accepted.
+// A machine whose Restore refused the stream may hold the prefix it decoded
+// in place, a volatile one included: the fallback applied over it (#1582),
+// so STATE_MACHINE_FAILED refuses the start too.
 func (n *Node) refusesStart(rerr error) bool {
-	return errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) || n.stopped.Load()
+	return errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) ||
+		errs.HasCode(rerr, coreconsensus.CodeStateMachineFailed) || n.stopped.Load()
 }
 
 // fallbackGap is the refusal of a start whose base does not continue the
@@ -2568,15 +2572,30 @@ func (n *Node) completeWrite(rd *raft.ReadyValue) bool {
 // stop records why the node stopped itself, writes its marker, and stops
 // every goroutine without a final sync.
 func (n *Node) stop(err error, storage bool) {
+	n.stopAs(err, storage, true)
+}
+
+// stopUnmarked stops the node as stop does, but writes no stop marker: the
+// cause is held in memory only, a volatile machine's refused restore
+// (#1582), which a restart on a fresh machine does not meet again, and the
+// start refuses on its own when it does.
+func (n *Node) stopUnmarked(err error) {
+	n.stopAs(err, false, false)
+}
+
+// stopAs is stop, with mark saying whether the stop markers are written.
+func (n *Node) stopAs(err error, storage, mark bool) {
 	n.stopMu.Lock()
 	if n.stopReason != nil {
 		n.stopMu.Unlock()
 		return
 	}
 	reason := &coreconsensus.StopReasonValue{Err: err}
-	if m, ok := n.cfg.Log.(interface {
+	m, ok := n.cfg.Log.(interface {
 		markStopEach(code errs.Code, detail string) (dirErr, runErr error)
-	}); ok {
+	})
+	//: a marked stop on a log that keeps markers writes them.
+	if ok && mark {
 		code, _ := errs.CodeOf(err)
 		dirErr, runErr := m.markStopEach(code, err.Error())
 		if dirErr != nil && (runErr != nil || code != coreconsensus.CodeStorageFailed) && storage {

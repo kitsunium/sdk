@@ -221,6 +221,8 @@ func (r refusedOnce) Restore(rd io.Reader, meta coreconsensus.SnapshotMetaValue)
 // published applied position: left, the hold of the next install, which
 // restores, is let go by its installed, and the first one kept
 // Status().Applied below every entry applied after, for good (#1584).
+// The refusal now stops the node (#1582): the hold is let go all the same,
+// and the node started again is installed.
 func TestARefusedRestoreDoesNotHoldThePublishedAppliedPosition(t *testing.T) {
 	type tc struct{ name string }
 	runCase := func(t *testing.T, _ tc) {
@@ -252,19 +254,31 @@ func TestARefusedRestoreDoesNotHoldThePublishedAppliedPosition(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("the node stopped behind index %d never restored a snapshot", end)
 		}
-		//: the next offer installs, and the published position follows it with no hold left.
+		// The refusal stops the node (#1582): the hold goes with the
+		// restore, and the published position is the applied one.
+		for deadline := time.Now().Add(10 * time.Second); !n.stopped.Load(); time.Sleep(time.Millisecond) {
+			//: not in time.
+			if time.Now().After(deadline) {
+				t.Fatal("a refused restore did not stop the node")
+			}
+		}
+		// The restore answers after the stop: its hold is let go once it is.
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
 			pub := n.Status().Applied
 			at, holds := appliedAndHolds(n)
-			//: caught up, and published as applied.
-			if holds == 0 && pub >= tok.Index {
-				return
+			//: no hold left, published as applied.
+			if holds == 0 && pub == at {
+				break
 			}
 			//: a hold left behind keeps the published position below the applied one.
 			if time.Now().After(deadline) {
 				t.Fatalf("Status().Applied is %d, applied %d, %d hold(s) left, after a refused restore", pub, at, holds)
 			}
 		}
+		// Started again, as a supervisor does, the node is installed.
+		c.kill(lag)
+		c.start(lag)
+		c.waitApplied(tok.Index, 10*time.Second)
 	}
 	for _, tt := range []tc{{name: "a restore the machine refuses"}} {
 		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })

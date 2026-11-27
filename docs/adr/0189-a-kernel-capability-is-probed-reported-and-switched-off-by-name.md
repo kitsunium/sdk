@@ -608,3 +608,34 @@ option. `TestConformance_notsentLowat` holds it, the report read through
 `atWritableEdge`, a hook the `loopdebug` build tag compiles in and nothing
 calls without it; the approaches tried and their measures are in
 `internal/service/net/loop/BENCH.md`.
+
+## Amendment 2026-11-27 (#1595): uring-taskrun-flag
+
+`uring-taskrun-flag` joins class A-kernel: `IORING_SETUP_TASKRUN_FLAG` (1 << 9,
+Linux 5.19), which has the kernel raise `IORING_SQ_TASKRUN` (1 << 2) in the SQ
+flags while task work waits for the ring's thread. From 6.13 one GETEVENTS
+enter runs at most `IO_LOCAL_TW_DEFAULT_MAX` (20) works and keeps the rest in
+`retry_llist`, and a work counts whether it posts a completion or not, so the
+drain's catch-up (#1541) could take a round that reaped nothing for "caught
+up" with a recv still held; `io_run_local_work_continue` raises the flag again
+while work remains (`io_uring/io_uring.c`, v6.13:1264, v6.15:1256,
+v6.18:1359). The probe tries the flag unless switched off and gives it up
+last in §D3's descent (the oldest, needing COOP_TASKRUN or DEFER_TASKRUN, one
+of which every try carries). It is set on the DEFER_TASKRUN primary only, the
+one ring the catch-up enters, so no default changes: the row reads `on` there,
+`available` without `uring-defer-taskrun`, and a ring without the flag keeps
+the catch-up's former rule. The flag is exact one way only: clear, no task
+work is held; raised, none may be. The kernel clears it only on entering
+`__io_run_local_work`, so a work queued and run in the same pass (`goto
+again`: on 6.8 on any enter, from 6.12 when `events < min_events`, which the
+loop's grouped wait asks) leaves it raised over an empty list. A raised flag
+therefore keeps a ring behind for `heldBatches` (4, `reapRounds`)
+consecutive batches that reap nothing on it, then the ring is caught up; any
+reap that brings something, and any round that reads the flag clear, starts the
+count again. What keeps a held recv from crossing the bound is not the count
+but the drain's plain wait of each batch that waits (a batch that does not wait reaps, which starts the count again): it runs the local work until
+one completion posts (`io_cqring_wait_schedule` answers 1 while any is
+pending), so a recv held behind works that post nothing runs by the next
+batch's wait at the latest; each GETEVENTS enter besides runs at least 20. `KITSUNIUM_NET_DISABLE=uring-taskrun-flag` reads
+disabled and the probe never tries it. The kernel gate's legs both require it,
+probed with `uring-defer-taskrun` opted into.

@@ -129,22 +129,55 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   cuts leaves its ring as `reapRings`' cut does: counted, `cutAt` set so the
   next batch reaps it without waiting, the rings after it behind — else a
   cut secondary waited on an empty primary for its tick
-  (`TestURingCatchUp_cutLeavesTheRingNext`, ADR 0206). On 6.13 and later the
-  catch-up's "caught up" is an approximation (#1541 safety review, R1): one
-  GETEVENTS enter runs at most `IO_LOCAL_TW_DEFAULT_MAX` (20) task works,
-  the rest kept in `retry_llist`, and the bound counts works, not
-  completions; twenty in a row that post nothing (a poll wake-up back to
-  EAGAIN: an accept another ring won, a wake-up with no data) make a round
-  that reaps nothing while a recv still waits behind them, and a connection
-  at its `drainQuiet` mark would be judged silent. The exact criterion is
-  `IORING_SETUP_TASKRUN_FLAG`, `IORING_SQ_TASKRUN` read after the enter:
-  since 6.13 `io_run_local_work_continue` sets it again while work remains.
-  It is not taken here: a new setup flag goes through ADR 0189's probe
-  descent and its registry, and the case needs both such a burst and a
-  connection at the 1 s mark, the `Shutdown` context still the bound. The
-  CI legs that run this package on such kernels — `fedora-kernel` (6.14)
-  and the runner's own (7.0) — are where its test would run; a 6.12 host
-  has no `retry_llist`. Under epoll, `driver.unread` (SIOCINQ, `tcp_inq`)
+  (`TestURingCatchUp_cutLeavesTheRingNext`, ADR 0206). On 6.13 and later one
+  GETEVENTS enter runs at most `IO_LOCAL_TW_DEFAULT_MAX` (20) task works, the
+  rest kept in `retry_llist`, and the bound counts works, not completions:
+  twenty in a row that post nothing (a poll wake-up back to EAGAIN: an accept
+  another ring won, a wake-up with no data) made a round that reaped nothing
+  while a recv still waited behind them, and a connection at its
+  `drainQuiet` mark was judged silent (#1541 safety review, R1; #1595). The
+  probe now sets `IORING_SETUP_TASKRUN_FLAG` (`uring-taskrun-flag`, class
+  A-kernel, last of the setup descent) on the DEFER_TASKRUN primary, and a
+  round ends the catch-up only once it reaped nothing and `IORING_SQ_TASKRUN`
+  reads clear after its enter (`caughtUp`, an atomic load of the SQ flags):
+  `io_run_local_work_continue` raises it while work remains, 6.13 to 7.0.
+  The flag is exact one way only: clear, the kernel holds no task work;
+  raised, it may hold none. The kernel clears it only on entering
+  `__io_run_local_work`, and a work queued after that and run by the same
+  pass's `goto again` leaves it raised over an empty list until the next
+  work comes: on 6.8 on any enter, from 6.12 when `events < min_events`,
+  which the grouped wait asks (`want = BatchWaitMin`) — a recv linked to a
+  NOP, its byte written, one enter for two completions, leaves it so on a
+  6.12 host (`TestURingTaskrunFlag_raisedOverNoWork`). A raised flag
+  therefore vetoes `heldBatches` (`reapRounds`, 4) batches running that
+  reap nothing on the ring, then the ring is caught up whatever it reads
+  (`uRing.heldIdle`, started again by any reap that brings something, and by
+  a round that reads the flag clear): what keeps a held recv from crossing
+  that bound is the drain's plain wait of each batch that waits (a batch that does not wait reaps, which starts the count again), which runs
+  the local work until one completion posts (`io_cqring_wait_schedule`
+  answers 1 while any is pending, v6.13:2487), so a recv held behind works
+  that post nothing runs by the next batch's wait at the latest and its
+  completion starts the count again; every GETEVENTS enter besides runs at
+  least 20 works. A stale flag costs a quiet ring 4 ticks, far under
+  `drainQuiet` (`TestURingCatchUp_staleFlagQuietRing`,
+  `TestURingCatchUp_heldCountRestarts`, `TestURingCatchUp_flagClearRestartsCount`).
+  Before 6.13 an enter runs every work queued when it started and the flag
+  only adds a round when work came meanwhile. A ring without the flag — a
+  secondary, a loop without `uring-defer-taskrun`, the row switched off by
+  `KITSUNIUM_NET_DISABLE`, which the probe then never tries — keeps the
+  reap's word (`TestCatchUpVerdict`, `TestCaps_taskrunFlag`).
+  `TestURingCatchUp_heldWorkAheadOfARecv` queues 24 recv wake-ups whose byte
+  it reads away ahead of one recv: with the flag the recv is reaped within
+  the catch-up on every kernel; its control without the flag, judged caught
+  up with the recv held, runs from 6.13 only — `fedora-kernel` (6.14) and
+  the runner's own (7.0, net-kernel-gate's `host`) — and skips on a 6.12
+  host, which has no `retry_llist`. The probe gives the flag up last of the
+  setup descent (ADR 0189 §D3, the oldest flag): a kernel or sandbox that
+  refused it alone would first lose SQ_REWIND, NO_SQARRAY, DEFER_TASKRUN and
+  SINGLE_ISSUER, reported absent though the kernel has them (#1595 safety
+  review, R1). No mainline kernel does: the flag came with COOP_TASKRUN in
+  5.19, which `setupBase` carries, and every try carries COOP_TASKRUN or
+  DEFER_TASKRUN, which it needs; no other flag needs it, so the order stays. Under epoll, `driver.unread` (SIOCINQ, `tcp_inq`)
   undercounts when TCP urgent data not inline has its mark at the head
   (`urg_seq == copied_seq`): the bytes behind the mark are not counted, and
   the connection reads as silent (#1541 safety review, R3). It is the

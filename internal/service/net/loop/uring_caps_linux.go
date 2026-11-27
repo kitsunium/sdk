@@ -24,7 +24,8 @@ const (
 // setupDrops is the order in which the probe gives up setup flags on EINVAL,
 // the newest first, so a flag is never dropped before one that requires it:
 // SQ_REWIND before NO_SQARRAY (REWIND⇒NO_SQARRAY), DEFER_TASKRUN before
-// SINGLE_ISSUER (DEFER⇒SINGLE).
+// SINGLE_ISSUER (DEFER⇒SINGLE). TASKRUN_FLAG (5.19), the oldest, goes last:
+// it needs COOP_TASKRUN or DEFER_TASKRUN, one of which every try carries.
 var setupDrops = [...]struct {
 	flag uint32
 	name corenet.Capability
@@ -33,6 +34,7 @@ var setupDrops = [...]struct {
 	{setupNoSQArray, corenet.CapabilityURingNoSQArray},
 	{setupDeferTaskrun, corenet.CapabilityURingDeferTaskrun},
 	{setupSingleIssuer, ""},
+	{setupTaskrunFlag, corenet.CapabilityURingTaskrunFlag},
 }
 
 // probe runs stages 1 to 3 on throwaway rings, on this locked thread from
@@ -106,8 +108,9 @@ func (ul *uLoop) openDescending() (*uring, uint32, error) {
 }
 
 // probeFlags is the first setup the probe tries: every class A-code flag the
-// operator left on, SQ_REWIND only with NO_SQARRAY, which it requires, and
-// DEFER_TASKRUN in place of COOP_TASKRUN.
+// operator left on, SQ_REWIND only with NO_SQARRAY, which it requires,
+// DEFER_TASKRUN in place of COOP_TASKRUN, and TASKRUN_FLAG unless the
+// operator switched it off.
 func (ul *uLoop) probeFlags() uint32 {
 	flags := setupSingleIssuer | setupSubmitAll | setupCoopTaskrun
 	//: each class A-code flag, unless the operator switched it off.
@@ -116,6 +119,10 @@ func (ul *uLoop) probeFlags() uint32 {
 		if !ul.sw.disabled(d.name) {
 			flags |= d.flag
 		}
+	}
+	//: TASKRUN_FLAG, class A-kernel: the operator's switch, never probed.
+	if !ul.sw.disabled(corenet.CapabilityURingTaskrunFlag) {
+		flags |= setupTaskrunFlag
 	}
 	//: REWIND⇒NO_SQARRAY: without the second the first is not tried.
 	if flags&setupNoSQArray == 0 && flags&setupSQRewind != 0 {
@@ -232,8 +239,29 @@ func (ul *uLoop) settle(found uint32, rewind bool, features uint32) {
 	if found&setupDeferTaskrun != 0 && sw.wants(corenet.CapabilityURingDeferTaskrun) {
 		ul.primary = base&^setupCoopTaskrun | setupDeferTaskrun
 	}
+	ul.settleTaskrunFlag(found)
 	ul.uses.multishot = sw.wants(corenet.CapabilityURingMultishotRecv)
 	ul.reportMinTimeout(features)
+}
+
+// settleTaskrunFlag puts TASKRUN_FLAG on a DEFER_TASKRUN primary, the one
+// ring whose IORING_SQ_TASKRUN the drain's catch-up reads (#1595), and
+// reports its row: on there, available on a loop without DEFER_TASKRUN. A
+// flag the setup gave up keeps giveUp's row, one switched off its own.
+func (ul *uLoop) settleTaskrunFlag(found uint32) {
+	//: refused at setup, or never tried.
+	if found&setupTaskrunFlag == 0 || !ul.sw.wants(corenet.CapabilityURingTaskrunFlag) {
+		//: the row already says why.
+		return
+	}
+	//: only a DEFER_TASKRUN ring holds work for its thread's enter.
+	if ul.primary&setupDeferTaskrun == 0 {
+		ul.rep.set(corenet.CapabilityURingTaskrunFlag, statusAvailable, "read on a DEFER_TASKRUN ring only: uring-defer-taskrun not in use")
+		//: no ring carries it.
+		return
+	}
+	ul.primary |= setupTaskrunFlag
+	ul.rep.set(corenet.CapabilityURingTaskrunFlag, statusOn, "")
 }
 
 // layoutFlags is the SQ layout every ring takes: NO_SQARRAY as asked, or
