@@ -577,8 +577,18 @@ contending on one accept queue. Zero means one per core; one disables it.
   case index the constants build, never a range from the environment; the
   parent's network namespace (`dev:ino` of `/proc/thread-self/ns/net`)
   named and different from its own, read on the locked thread that then
-  writes; and a `uid_map` that is not the initial namespace's identity.
-  Every refusal prints `draw: skip <reason>`, which the parent skips on.
+  writes; a `uid_map` that is not the initial namespace's identity; and a
+  network namespace its own user namespace owns — `NS_GET_USERNS` on
+  `/proc/thread-self/ns/net` names the same inode as
+  `/proc/thread-self/ns/user` (R5 of the review: root under `unshare -U -r`,
+  whose `uid_map` is `0 0 1`, left in the host's network namespace with both
+  variables set by hand and a made-up `dev:ino`, passed the two checks
+  before; the host's namespace is owned by the initial user namespace, which
+  the ioctl refuses as EPERM from below it). `Test_drawChildDecision` pins
+  each refusal on values, `Test_namespaceReaders` the three reads on this
+  process, creating nothing. Every refusal prints `draw: skip <reason>`,
+  which the parent skips on, then skips the child itself (R6), so a child
+  run by hand reports SKIP, not PASS.
   - *What it does not close (R1, earlier than #1585).* "A port nobody holds"
     is true at the instant of the draw only. Once `reuseAfterBind` has set
     the option, the group is itself a reuseport holder: another program of
@@ -589,6 +599,15 @@ contending on one accept queue. Zero means one per core; one disables it.
     port after #1330's probe. It cannot be closed without giving up
     SO_REUSEPORT; `Steer(SteerCPU)` limits it, since its `cpu % n` program
     never picks the index of a socket that joined after it.
+  - *`holdsPort` keeps its own reading of a port (R7, earlier than #1585).*
+    `holdsPort` (`exclusive.go`) treats only `"0"` and `""` as the kernel's
+    choice and compares ports as strings, not through `drawnPort`. Port 0 is
+    unaffected — `"00"` or `" 0"` match no held listener's port, so the
+    answer, false, is right —, but a fixed port spelled `"08080"` is not seen
+    as the `"8080"` a listener holds, and keeps `rebindAttempts`' platform
+    bound instead of one attempt: on Windows a conflict with the server
+    itself is waited out, up to `BindWait`, before the same refusal. Left as
+    it is: it delays an error, never admits a bind.
   - *The BSDs are not measured (R4).* `reuseport_bsd.go` keeps the option
     before bind on darwin, freebsd, netbsd, openbsd and dragonfly, on a
     reading of the kernels' source and no run: FreeBSD's draw,
