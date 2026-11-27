@@ -102,6 +102,13 @@ const (
 	// still answers. Switched off, or absent, a group with a Unix listener runs on
 	// process descriptors, where LoopPeer asks the socket.
 	CapabilityURingSockGetsockopt Capability = "uring-sock-getsockopt"
+	// CapabilityURingTaskrunFlag is IORING_SETUP_TASKRUN_FLAG (Linux 5.19) on the
+	// DEFER_TASKRUN ring a loop's thread waits on: the kernel raises IORING_SQ_TASKRUN
+	// while task work waits for that thread, so a draining loop judges the ring caught
+	// up only once an enter posted nothing and left no work held (#1595). On only with
+	// uring-defer-taskrun, available otherwise. Switched off, or absent, the drain ends
+	// its rounds on the first enter that posts nothing.
+	CapabilityURingTaskrunFlag Capability = "uring-taskrun-flag"
 )
 
 // The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
