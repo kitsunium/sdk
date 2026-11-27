@@ -234,15 +234,15 @@ func frameBytes(typ corehttp2.FrameType, flags corehttp2.FrameFlags, stream uint
 	return append(buf, payload...)
 }
 
-// write sends bytes already framed.
+// write sends bytes already framed, and reports nothing: a flood the server
+// cut short is the point, its answer is what is read; and next calls it off
+// the test's goroutine (readGoAway, drainClean), where a t.Logf made after the
+// test ended panics the binary (#1609).
 func (c *rawH2) write(b []byte) {
-	c.t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	//: a flood the server cut short is the point: its answer is what is read.
-	if _, err := c.conn.Write(b); err != nil {
-		c.t.Logf("write: %v", err)
-	}
+	_, err := c.conn.Write(b)
+	swallowErr(err)
 }
 
 // literalField is an HPACK literal without indexing, both strings plain.
