@@ -663,3 +663,52 @@ func echoThenEnd(c stdnet.Conn, want string) string {
 	}
 	return ""
 }
+
+// shutdownServes shuts g down and requires every one of conns to read its
+// echo of "q\n", c0 the end alone, each then ended cleanly, and Shutdown to
+// return within its budget.
+func shutdownServes(t *testing.T, g *Group, conns []stdnet.Conn, c0 stdnet.Conn) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		done <- g.Shutdown(ctx)
+	}()
+	var wg sync.WaitGroup
+	failures := make(chan string, len(conns)+1)
+	//: each client reads its echo, then the end.
+	for i, c := range conns {
+		wg.Go(func() {
+			msg := echoThenEnd(c, "q\n")
+			resetClose([]stdnet.Conn{c})
+			//: cut short.
+			if msg != "" {
+				failures <- msg + " (#" + strconv.Itoa(i) + ")"
+			}
+		})
+	}
+	wg.Go(func() {
+		msg := echoThenEnd(c0, "")
+		resetClose([]stdnet.Conn{c0})
+		//: cut short.
+		if msg != "" {
+			failures <- msg + " (the warm one)"
+		}
+	})
+	wg.Wait()
+	close(failures)
+	var all []string
+	//: every failure, in arrival order.
+	for f := range failures {
+		all = append(all, f)
+	}
+	//: an unread request closed as silence.
+	if len(all) > 0 {
+		t.Fatalf("%d of %d connections cut short: %v", len(all), len(conns)+1, all[:min(len(all), 8)])
+	}
+	//: the drain ended within its budget.
+	if err := <-done; err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+}
