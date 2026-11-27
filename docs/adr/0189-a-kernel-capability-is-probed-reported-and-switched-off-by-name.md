@@ -624,6 +624,13 @@ last in §D3's descent (the oldest, needing COOP_TASKRUN or DEFER_TASKRUN, one
 of which every try carries). It is set on the DEFER_TASKRUN primary only, the
 one ring the catch-up enters, so no default changes: the row reads `on` there,
 `available` without `uring-defer-taskrun`, and a ring without the flag keeps
-the catch-up's former rule. `KITSUNIUM_NET_DISABLE=uring-taskrun-flag` reads
+the catch-up's former rule. The flag is exact one way only: clear, no task
+work is held; raised, none may be. The kernel clears it only on entering
+`__io_run_local_work`, so a work queued and run in the same pass (`goto
+again`: on 6.8 on any enter, from 6.12 when `events < min_events`, which the
+loop's grouped wait asks) leaves it raised over an empty list. A raised flag
+therefore keeps a ring behind for `heldBatches` (4, `reapRounds`)
+consecutive batches that reap nothing on it, then the ring is caught up; any
+reap that brings something starts the count again. `KITSUNIUM_NET_DISABLE=uring-taskrun-flag` reads
 disabled and the probe never tries it. The kernel gate's legs both require it,
 probed with `uring-defer-taskrun` opted into.

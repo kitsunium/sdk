@@ -141,6 +141,20 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   round ends the catch-up only once it reaped nothing and `IORING_SQ_TASKRUN`
   reads clear after its enter (`caughtUp`, an atomic load of the SQ flags):
   `io_run_local_work_continue` raises it while work remains, 6.13 to 7.0.
+  The flag is exact one way only: clear, the kernel holds no task work;
+  raised, it may hold none. The kernel clears it only on entering
+  `__io_run_local_work`, and a work queued after that and run by the same
+  pass's `goto again` leaves it raised over an empty list until the next
+  work comes: on 6.8 on any enter, from 6.12 when `events < min_events`,
+  which the grouped wait asks (`want = BatchWaitMin`) — a recv linked to a
+  NOP, its byte written, one enter for two completions, leaves it so on a
+  6.12 host (`TestURingTaskrunFlag_raisedOverNoWork`). A raised flag
+  therefore vetoes `heldBatches` (`reapRounds`, 4) batches running that
+  reap nothing on the ring, then the ring is caught up whatever it reads
+  (`uRing.heldIdle`, started again by any reap that brings something): work
+  truly held in `retry_llist` runs 20 at a time on every GETEVENTS enter,
+  some 400 works in those batches, while a stale flag costs a quiet ring 4
+  ticks, far under `drainQuiet` (`TestURingCatchUp_staleFlagQuietRing`).
   Before 6.13 an enter runs every work queued when it started and the flag
   only adds a round when work came meanwhile. A ring without the flag — a
   secondary, a loop without `uring-defer-taskrun`, the row switched off by
@@ -151,7 +165,13 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   the catch-up on every kernel; its control without the flag, judged caught
   up with the recv held, runs from 6.13 only — `fedora-kernel` (6.14) and
   the runner's own (7.0, net-kernel-gate's `host`) — and skips on a 6.12
-  host, which has no `retry_llist`. Under epoll, `driver.unread` (SIOCINQ, `tcp_inq`)
+  host, which has no `retry_llist`. The probe gives the flag up last of the
+  setup descent (ADR 0189 §D3, the oldest flag): a kernel or sandbox that
+  refused it alone would first lose SQ_REWIND, NO_SQARRAY, DEFER_TASKRUN and
+  SINGLE_ISSUER, reported absent though the kernel has them (#1595 safety
+  review, R1). No mainline kernel does: the flag came with COOP_TASKRUN in
+  5.19, which `setupBase` carries, and every try carries COOP_TASKRUN or
+  DEFER_TASKRUN, which it needs; no other flag needs it, so the order stays. Under epoll, `driver.unread` (SIOCINQ, `tcp_inq`)
   undercounts when TCP urgent data not inline has its mark at the head
   (`urg_seq == copied_seq`): the bytes behind the mark are not counted, and
   the connection reads as silent (#1541 safety review, R3). It is the
