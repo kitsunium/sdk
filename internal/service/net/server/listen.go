@@ -115,8 +115,10 @@ func shardsFor(requested int, network string, reusePort bool) (count int, degrad
 
 // reusePortControl enables SO_REUSEPORT before the socket is bound.
 //
-// The option MUST be set before bind, which is precisely what net.ListenConfig's
-// Control hook exists for; setting it afterwards has no effect.
+// The option is set before bind, which is precisely what net.ListenConfig's
+// Control hook exists for: a socket joining a port must carry it when it
+// binds. Set afterwards, it only admits the sockets that bind after it
+// (reuseAfterBind, #1585).
 // The network and address parameters are part of net.ListenConfig.Control's
 // signature. They are read only to keep the intent explicit: the option applies
 // identically whatever address is about to be bound, so neither is consulted.

@@ -1738,6 +1738,8 @@ func (r *Raft) admitForward(size int) errs.Code {
 
 // ReadIndex asks for a linearizable read point under ctx. noLease forces a
 // confirmation round.
+// A read may be refused with NOT_LEADER: nothing was read, and it may be
+// asked again.
 func (r *Raft) ReadIndex(now time.Time, ctx uint64, noLease bool) {
 	r.now = now
 	switch {

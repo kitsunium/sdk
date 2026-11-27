@@ -4976,9 +4976,9 @@ sequences:
         value: uint64(packetCtrlRoom)
       - opt:
           do:
-            - return: "\"recvmsg\", why + lp.failStage, 0"
+            - return: "\"recvmsg\", why + lp.failStage, werr"
           init:
-            bind: why
+            bind: why, werr
             eval: lp.selfTest()
             to: lp.selfTest
           when: why != "" || lp.failStage == "recvmsg"
@@ -5174,20 +5174,20 @@ sequences:
         to: loopbackPair
       - opt:
           do:
-            - return: why
+            - return: why, 0
           when: why != ""
       - defer: closePair(rx, tx)
         to: closePair
-      - bind: got, why
+      - bind: got, why, werr
         eval: lp.probeOne(rx, tx)
         to: lp.probeOne
       - opt:
           do:
-            - return: why
+            - return: why, werr
           when: why != ""
       - opt:
           do:
-            - return: "\"multishot RECVMSG: no datagram with a buffer and F_MORE within 200 ms\""
+            - return: "\"multishot RECVMSG: no datagram with a buffer and F_MORE within 200 ms\", 0"
           when: got.userData != pudProbe || got.res <= 0 || got.flags&cqeFBuffer == 0 || got.flags&cqeFMore == 0
       - bind: bid
         eval: uint16(got.flags >> cqeBufferShift)
@@ -5203,9 +5203,9 @@ sequences:
         to: sockaddrPort
       - opt:
           do:
-            - return: "\"multishot RECVMSG: the buffer's header, address or payload did not read back\""
+            - return: "\"multishot RECVMSG: the buffer's header, address or payload did not read back\", 0"
           when: string(payload) != "kit" || !from.IsValid() || !from.Addr().Is4()
-      - return: "\"\""
+      - return: "\"\", 0"
   - of: (*packetLane).probeOne
     participants:
       - id: caller
@@ -5218,13 +5218,15 @@ sequences:
         kind: internal
       - id: syscall
         kind: stdlib
-      - id: ring.wait
+      - id: waitWindow
         kind: internal
       - id: ring.reap
         kind: internal
       - id: prepCancelUserData
         kind: internal
       - id: lp.awaitFinals
+        kind: internal
+      - id: probeVerdict
         kind: internal
     steps:
       - bind: ring
@@ -5238,20 +5240,19 @@ sequences:
         to: syscall
       - opt:
           do:
-            - return: "cqe{}, \"getsockname: \" + err.Error()"
+            - return: "cqe{}, \"getsockname: \" + err.Error(), 0"
           when: err != nil
       - opt:
           do:
-            - return: "cqe{}, \"sendto: \" + err.Error()"
+            - return: "cqe{}, \"sendto: \" + err.Error(), 0"
           init:
             bind: err
             eval: syscall.Sendto(tx, []byte("kit"), 0, addr)
             to: syscall
           when: err != nil
-      - bind: ts
-        eval: "kernelTimespec{nsec: packetProbeWait}"
-      - eval: ring.wait(&ts, 1)
-        to: ring.wait
+      - bind: werr
+        eval: waitWindow(time.Duration(packetProbeWait), func(ts *kernelTimespec) syscall.Errno { return ring.waitErrno(ts, 1) })
+        to: waitWindow
       - var:
           name: got
           type: cqe
@@ -5261,9 +5262,59 @@ sequences:
         to: prepCancelUserData
       - eval: ring.submit()
         to: ring.submit
-      - eval: lp.awaitFinals(&ts)
+      - eval: "lp.awaitFinals(new(kernelTimespec{nsec: packetProbeWait}))"
         to: lp.awaitFinals
-      - return: got, ""
+      - bind: why, errno
+        eval: probeVerdict(got, werr)
+        to: probeVerdict
+      - return: got, why, errno
+  - of: probeVerdict
+    steps:
+      - opt:
+          do:
+            - return: "\"\", 0"
+          when: got.userData == pudProbe
+      - switch:
+          cases:
+            - case: 0, errnoETIME
+              do:
+                - return: "\"\", 0"
+            - case: syscall.EINTR
+              do:
+                - return: "\"multishot RECVMSG: the wait was interrupted (\" + werr.Error() + \") for the whole 200 ms\", werr"
+            - default: true
+              do:
+                - return: "\"multishot RECVMSG: the wait was refused (\" + werr.Error() + \")\", werr"
+          "on": werr
+  - of: waitWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: waitWindow
+        kind: self
+      - id: time.Now().Add
+        kind: value
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: deadline
+        eval: time.Now().Add(window)
+        to: time.Now().Add
+      - bind: errno
+        eval: syscall.Errno(0)
+        to: syscall
+      - loop:
+          cond: left > 0
+          do:
+            - set: errno
+              value: "enter(&kernelTimespec{nsec: int64(left)})"
+            - opt:
+                do:
+                  - return: errno
+                when: errno != syscall.EINTR
+          init: left := window
+          post: left = time.Until(deadline)
+      - return: errno
   - of: (*packetLane).awaitFinals
     participants:
       - id: caller
@@ -7654,6 +7705,12 @@ sequences:
           value: d
       - opt:
           do:
+            - op: "|="
+              set: flags
+              value: setupTaskrunFlag
+          when: "!ul.sw.disabled(corenet.CapabilityURingTaskrunFlag)"
+      - opt:
+          do:
             - op: "&^="
               set: flags
               value: setupSQRewind
@@ -7817,6 +7874,8 @@ sequences:
         kind: internal
       - id: layoutFlags
         kind: internal
+      - id: ul.settleTaskrunFlag
+        kind: internal
       - id: sw.wants
         kind: internal
       - id: ul.reportMinTimeout
@@ -7852,11 +7911,37 @@ sequences:
             - set: ul.primary
               value: base&^setupCoopTaskrun | setupDeferTaskrun
           when: found&setupDeferTaskrun != 0 && sw.wants(corenet.CapabilityURingDeferTaskrun)
+      - eval: ul.settleTaskrunFlag(found)
+        to: ul.settleTaskrunFlag
       - set: ul.uses.multishot
         to: sw.wants
         value: sw.wants(corenet.CapabilityURingMultishotRecv)
       - eval: ul.reportMinTimeout(features)
         to: ul.reportMinTimeout
+  - of: (*uLoop).settleTaskrunFlag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).settleTaskrunFlag
+        kind: self
+      - id: ul.rep.set
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: found&setupTaskrunFlag == 0 || !ul.sw.wants(corenet.CapabilityURingTaskrunFlag)
+      - opt:
+          do:
+            - eval: "ul.rep.set(corenet.CapabilityURingTaskrunFlag, statusAvailable, \"read on a DEFER_TASKRUN ring only: uring-defer-taskrun not in use\")"
+              to: ul.rep.set
+            - return: ""
+          when: ul.primary&setupDeferTaskrun == 0
+      - op: "|="
+        set: ul.primary
+        value: setupTaskrunFlag
+      - eval: ul.rep.set(corenet.CapabilityURingTaskrunFlag, statusOn, "")
+        to: ul.rep.set
   - of: layoutFlags
     steps:
       - var:
@@ -9567,15 +9652,27 @@ sequences:
         kind: actor
       - id: (*uRing).catchUp
         kind: self
-      - id: rr.u.flushOverflow
+      - id: rr.readHeld
+        kind: internal
+      - id: rr.countHeld
         kind: internal
     steps:
+      - bind: start
+        eval: rr.r.st.completions
+      - opt:
+          do:
+            - set: rr.heldIdle
+              value: "0"
+          when: start != rr.heldMark
       - loop:
           do:
+            - bind: held
+              eval: "false"
             - opt:
                 do:
-                  - eval: rr.u.flushOverflow()
-                    to: rr.u.flushOverflow
+                  - set: held
+                    to: rr.readHeld
+                    value: rr.readHeld()
                 when: rr.u.deferred()
             - bind: before
               eval: rr.r.st.completions
@@ -9590,9 +9687,55 @@ sequences:
             - opt:
                 do:
                   - return: len(rr.starved) > 0, false
-                when: rr.r.st.completions == before
+                when: caughtUp(rr.r.st.completions != before, rr.u.taskrunFlagged(), held, rr.heldIdle)
           range: reapRounds
+      - eval: rr.countHeld(start)
+        to: rr.countHeld
       - return: true, false
+  - of: (*uRing).readHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).readHeld
+        kind: self
+      - id: rr.u.flushOverflow
+        kind: internal
+      - id: rr.u.workHeld
+        kind: internal
+    steps:
+      - eval: rr.u.flushOverflow()
+        to: rr.u.flushOverflow
+      - bind: held
+        eval: rr.u.workHeld()
+        to: rr.u.workHeld
+      - opt:
+          do:
+            - set: rr.heldIdle
+              value: "0"
+          when: "!held && rr.u.taskrunFlagged()"
+      - return: held
+  - of: (*uRing).countHeld
+    steps:
+      - alt:
+          - do:
+              - op: ++
+                set: rr.heldIdle
+            when: rr.r.st.completions == start
+          - do:
+              - set: rr.heldIdle
+                value: "0"
+            else: true
+      - set: rr.heldMark
+        value: rr.r.st.completions
+  - of: caughtUp
+    steps:
+      - return: "!reaped && (!flagged || !held || idle >= heldBatches)"
+  - of: (*uring).taskrunFlagged
+    steps:
+      - return: u.setup&setupTaskrunFlag != 0
+  - of: (*uring).workHeld
+    steps:
+      - return: atomic.LoadUint32(u.sqFlags)&sqTaskrun != 0
   - of: (*uLoop).submitLate
     participants:
       - id: caller
@@ -13256,6 +13399,17 @@ sequences:
         kind: actor
       - id: (*uring).wait
         kind: self
+      - id: u.waitErrno
+        kind: internal
+    steps:
+      - eval: u.waitErrno(ts, want)
+        to: u.waitErrno
+  - of: (*uring).waitErrno
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).waitErrno
+        kind: self
       - id: u.submit
         kind: internal
       - id: u.publish
@@ -13271,7 +13425,7 @@ sequences:
           do:
             - eval: u.submit()
               to: u.submit
-            - return: ""
+            - return: "0"
           when: u.ready() > 0
       - eval: u.publish()
         to: u.publish
@@ -13295,6 +13449,7 @@ sequences:
                 - op: ++
                   set: u.retries
           "on": errno
+      - return: errno
   - of: (*uring).ready
     steps:
       - return: atomic.LoadUint32(u.cqTail) - *u.cqHead

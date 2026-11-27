@@ -12,6 +12,11 @@ import "syscall"
 // because golang.org/x/sys is banned SDK-wide.
 const soReusePort int = 0x200
 
+// reuseportDrawJoins is whether a port-0 draw with SO_REUSEPORT set may join
+// another socket's port; the rule listenShard answers is Linux's (#1585), and
+// these kernels keep the draw with the option set before bind.
+const reuseportDrawJoins = false
+
 // reusePortSupported reports whether this platform can bind several listeners
 // to one address.
 func reusePortSupported() bool {

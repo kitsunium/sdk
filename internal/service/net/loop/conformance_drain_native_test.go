@@ -478,6 +478,115 @@ func TestConformance_drainReadsBeforeItJudgesSilence(t *testing.T) {
 	eachBackend(t, runCase)
 }
 
+// TestConformance_drainReadsOneLoopsWholeTake pins, at the default sizes and
+// on a shared listener, that the drain never takes for silent a connection
+// its loop took but has not read yet (#1541, #1602): drainLoops loops of one
+// ring share one TCP listener, each held at every batch end once the drain is
+// asked for; drainArrivals connections complete their handshake into the
+// queue, each with its line; loop 0 alone runs one batch, so its take holds
+// more of the queue than its next batch reads (CQBatch, 512, on epoll and
+// kqueue); then every loop stays held past drainQuiet, as a slow guest holds
+// them between two batches, and goes on. Every one must read its echo, then
+// the end.
+//
+// This is the shape the ubuntu-kernel lane ran into on a branch cut before
+// the fix of #1541: one loop's take of 1 024, the next batch begun more than
+// drainQuiet later, and the connections past what that batch read closed
+// with their request unread, from #1024 on. On that code it fails here on
+// every run, on any machine; TestConformance_drainTakesWhatTheQueueHolds
+// meets it only when the runner is slow enough.
+func TestConformance_drainReadsOneLoopsWholeTake(t *testing.T) {
+	runCase := func(t *testing.T, b backendCase) {
+		var gating atomic.Bool
+		steps := make([]chan struct{}, drainLoops)
+		//: one step channel per loop.
+		for i := range steps {
+			steps[i] = make(chan struct{}, 1)
+		}
+		held := make(chan int, drainLoops)
+		h := &lineH{}
+		h.batchEnd = func(lio corenet.LoopIO) {
+			lp, ok := lio.(*loop)
+			//: once gated, each loop holds at every batch end until stepped.
+			if ok && gating.Load() {
+				held <- lp.index
+				<-steps[lp.index]
+			}
+		}
+		g, addr := serveOn(t, b, h, "tcp", drainLoops, 1)
+		release := func() {
+			gating.Store(false)
+			//: every loop held, or about to be, goes.
+			for _, s := range steps {
+				select {
+				//: stepped.
+				case s <- struct{}{}:
+				//: a step already waits for it.
+				default:
+				}
+			}
+		}
+		t.Cleanup(release)
+		c0 := dial(t, addr)
+		echo(t, c0, "warm\n")
+		// hold waits until loop want holds at a batch end; any other loop that
+		// reaches one first is counted held too.
+		parked := map[int]bool{}
+		hold := func(want int) bool {
+			deadline := time.After(5 * time.Second)
+			//: until want is held.
+			for !parked[want] {
+				select {
+				//: a loop at its batch end.
+				case i := <-held:
+					parked[i] = true
+				//: never.
+				case <-deadline:
+					return false
+				}
+			}
+			return true
+		}
+		gating.Store(true)
+		//: a posted no-op wakes each loop to its batch end.
+		for _, lp := range g.loops {
+			//: posted.
+			if err := lp.Post(func(corenet.LoopIO, uintptr) {}, 0); err != nil {
+				t.Fatalf("Post: %v", err)
+			}
+		}
+		//: every loop parked before the drain.
+		for i := range drainLoops {
+			//: held.
+			if !hold(i) {
+				t.Fatalf("loop %d never reached its batch end", i)
+			}
+		}
+		g.ctl.drain()
+		conns := make([]stdnet.Conn, 0, drainArrivals)
+		//: every connection queued, its line sent, before the take.
+		for range drainArrivals {
+			c := dial(t, addr)
+			_, _ = c.Write([]byte("q\n"))
+			conns = append(conns, c)
+		}
+		// Loop 0 alone runs one batch: its take, the others held.
+		delete(parked, 0)
+		steps[0] <- struct{}{}
+		//: its batch ended.
+		if !hold(0) {
+			t.Fatal("loop 0 never ended the batch of its take")
+		}
+		opened, _ := h.counts()
+		t.Logf("loop 0 took %d of %d queued connections in one batch", opened-1, len(conns))
+		// The next batch begins past drainQuiet, as on a slow guest.
+		time.Sleep(drainQuiet + 250*time.Millisecond)
+		release()
+		shutdownServes(t, g, conns, c0)
+	}
+	eachBackend(t, runCase)
+}
+
 // What TestConformance_drainClosesOnItsLastRead dials: drainBurst connections
 // between two batches of the drain — on Linux more than io_uring keeps
 // accepts in flight (acceptDepth, 32), so its take arms a round of its own,

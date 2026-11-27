@@ -325,6 +325,9 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `applyCompactRecord` or `applyTruncate` stop inlining: `kit gen` holds
   the inline set of the base and refuses a generation that loses one, so
   their bodies call one helper of the index each.
+  Until #1616 is settled, `(*Node).refusesStart` no longer inlines since
+  #1582: a branch cut before #1582 regenerates with
+  `kit gen -base origin/main`, or `-base MERGE_HEAD` during a merge.
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.
@@ -1610,6 +1613,55 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   data lane is `BENCH.md`'s `TCP/<device>/paced+stream` rows and the A/B
   lane's `cstream` (#1365): measure it against a cluster that keeps no state
   in its heap, or it measures that heap's collections instead.
+- Say when a snapshot stream is too slow to end before the writes lift its
+  pin (#1486, O4 of #920's safety review). A stream lasts `EncodedSize`
+  over its rate R; when the writes bring the log to the tight band first
+  (`logTight`, from `tightFrom` bytes), the pin stops holding, compaction
+  passes the snapshot, and the follower needs another: #550's loop, which
+  pacing makes reachable by configuration. `watchRateShort`
+  (`node_rateshort.go`), on the loop's tick from `watchPins`, measures R as
+  the stream's `progress` and the write rate as the log's `logBytes` over
+  one sliding window of `rateWindowTimeouts` (4) maximum election timeouts,
+  `rateSamples` (8) samples at most. Each `rateWindow` sums the growth from
+  one sample to the next and leaves the falls out: read as the difference
+  of its newest and oldest samples, a compaction during the stream read as
+  a window without writes, and the flag fell for a window, then rose and was
+  counted and logged again, once per compaction (D1 of #1486's review). A
+  stream's window starts at its first sample past 0: its first read for a
+  new stream, the accept for a resumed one, which stores the offset at
+  once. A window spanning the offer's wait read a fraction of R and raised
+  the flag for a stream fast enough. A lifted pin's fill is 0 (`pinFill`):
+  it holds nothing, the loss is certain, and the flag stays up to the
+  stream's end. Read from the rates, every cut compacting at once then,
+  cuts about one a sample apart read no writes, and the flag fell and rose,
+  counted again, at each change of their cadence (D1' of the review). A
+  stream that waits for a slot (`MaxSnapshotStreams`) is never judged
+  while it waits, though the log fills: there is no R without bytes. The samples are stamped with the wall clock's Unix
+  nanoseconds, as a pin's `moved` and `since`: a clock stepped back
+  freezes a window, one stepped forward dilutes it, for one window. It raises `PeerSnapshotRateShort` once
+  (`EncodedSize` less the bytes sent) over R exceeds (`tightFrom` less the
+  log's bytes) over the write rate, adds one to
+  `consensus_snapshot_rate_short_total` by peer and logs the peer, both
+  times and R at Warn; it lowers the flag once the transfer would end
+  within `rateShortClear` (three quarters) of the fill, or when the stream
+  ends. A stream that did not move over the window is left to `streamDue`.
+  It changes nothing: the pin, the compaction and the pacing are as before.
+  What an operator does with it: raise `SnapshotStreamBytesPerSecond`
+  until the transfer fits (R at least `EncodedSize` over the fill time the
+  line gives, with the other streams' share of the pacer), raise
+  `MaxLogBytes` so the band is further away, or lower the write load while
+  the follower installs. Left alone, the follower installs snapshot after
+  snapshot and never catches up while the writes last. The signal is
+  sufficient for #550's loop, not necessary: it counts the transfer alone,
+  and the receiver's Restore and its catch-up by appends follow it, while a
+  log turning tight then lifts the pin as well (`pinAt`). A stream that ends
+  just within the fill raises nothing and may still loop: leave a margin
+  for the install and the catch-up. `PeerSnapshotRateShort` takes the last
+  of `PeerFlags`' eight bits: the next fact of a peer widens the type to a
+  `uint16`, a change of the public API that v0 admits (ADR 0040)
+  (`TestAStreamTooSlowForTheLogBudgetIsFlaggedCountedAndLogged`,
+  `TestOnlyTheStreamTooSlowIsFlagged`,
+  `TestTightFromIsWhereTheLogTurnsTight`).
 - Serve the snapshot streams' queue first asked first served, voters and
   learners alike: under the default `MaxSnapshotStreams` of 1, a voter back
   after a compaction waited behind a replacement learner's 50 GiB at
@@ -1718,6 +1770,13 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   a memory log, which writes no marker; the marker's write for
   STATE_MACHINE_FAILED and the refusal of the next start are held by
   `TestDataDirLockAndStopMarkers`, on a file log, apart from the install.
+  Before an operator clears that marker, a `DurableStateMachine` must be
+  verified or rebuilt: the next start trusts its `AppliedPosition`, and the
+  machine accepted a state the engine never vouched for. The cause is not
+  kept as a code: an EIO met by the `io.Copy` that follows a nil `Restore`
+  becomes STATE_MACHINE_FAILED, STORAGE_FAILED survives only in the
+  stop's `cause` text, and the marker is permanent, not limited to the
+  start in progress.
 - Keep running, or fall back at a start, after a `Restore` that returned an
   error: the engine cannot tell a machine that read aside and kept its state
   from one that decoded part of the stream into its live state, so it
@@ -1759,7 +1818,8 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `restoresAtomically` (`snapshot.go`) is the engine's one test of it:
   `restoreRefused` returns such a refusal as is, as every refusal was
   before #1582 — the install is refused, `restoreItem` lets its hold go,
-  `restoreFailed` removes the copy, raft stays where it was, and the
+  `restoreFailed` removes the copy (or keeps it on a node with no
+  table), raft stays where it was, and the
   entries handed after the restore continue the state the machine holds;
   a later offer, or a leader's appends, catch the node up. At a start,
   `refusesStart` lets it fall back, though `SQL`'s error carries
@@ -1775,13 +1835,18 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   (`TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning`,
   `TestAnAtomicRestorerRefusedAtStartFallsBack`, `machine/`'s
   `TestAnSQLFollowerWhoseInstallLoadFailsKeepsRunning`).
-  Before an operator clears that marker, a `DurableStateMachine` must be
-  verified or rebuilt: the next start trusts its `AppliedPosition`, and the
-  machine accepted a state the engine never vouched for. The cause is not
-  kept as a code: an EIO met by the `io.Copy` that follows a nil `Restore`
-  becomes STATE_MACHINE_FAILED, STORAGE_FAILED survives only in the
-  stop's `cause` text, and the marker is permanent, not limited to the
-  start in progress.
+  For a machine that does not declare it, the only way out of such a stop
+  or start refusal is a restart of the process, on a new machine: the machine whose `Restore` was refused is
+  never handed to another node, since a start that then falls back — the
+  copy rotted between its two reads, no older snapshot, a log from index
+  1 — replays the log over the prefix it holds. Each attempt reads the
+  snapshot twice (the check, then `Restore`), and a refusal that is
+  deterministic fails every start: the supervisor restarts one node at a
+  time, waiting for it to be ready before the next, and gives up past a
+  bound (`lifecycle.Supervisor`'s `GiveUpAfter`, systemd's
+  `StartLimitBurst`); otherwise it loops. An install's refusal stops at
+  most f nodes at once, those outside the commit quorum that need an
+  install, but it eats the margin until they rejoin.
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).
@@ -2011,6 +2076,15 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `TestATurnThatChangesNothingPublishesWithoutAllocating`,
   `TestAFrameWithoutEntriesIsEncodedInOneAllocation`; `BENCH.md`'s `TURN`
   rows).
+- Promise more of a `Barrier`'s refusal than "may be NOT_LEADER, nothing
+  read, safe to retry": the cases are the code's and move with it. Today a
+  queued read is handled at the loop's next turn (`ops_wait.go:32`,
+  `node.go:1412-1418`); it then goes to the leader the node knows, or is
+  refused NOT_LEADER when none of a stable term is known
+  (`raft/leader.go:1741-1756`); once registered, a leader change before
+  the confirmation refuses it (`node.go:1938-1941`, `node.go:2022-2025`);
+  once confirmed it waits for the application, which a leader change no
+  longer refuses (`apply.go:475-497`).
 - Hand the loop a `Barrier` through `exec`, or handle the Ready per read:
   each closure ran in its own turn and flushed its read alone, so N
   concurrent reads cost N heartbeat broadcasts (#1108). `Barrier` queues

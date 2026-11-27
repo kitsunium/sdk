@@ -154,6 +154,7 @@ go_test(
         "starve_uring_linux_test.go",
         "starvegen_uring_linux_test.go",
         "steering_linux_test.go",
+        "taskrun_uring_linux_test.go",
         "unix_linux_test.go",
         "uring_abi_linux_internal_test.go",
         "uring_cost_bench_test.go",

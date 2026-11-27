@@ -3539,7 +3539,7 @@
       "code": {
         "value": "0.2.57.10"
       },
-      "doc": "CodeStateMachineFailed identifies a node whose Apply panicked or could not\ncomplete — the entry IS committed —, whose Restore returned nil on\na snapshot whose end the engine then refused, or whose Restore,\nnot an AtomicRestorer's, returned an error not coded\nVERSION_UNSUPPORTED. Before an operator\nclears the stop marker this leaves, a DurableStateMachine must be\nverified or rebuilt: the next start trusts its AppliedPosition.\n",
+      "doc": "CodeStateMachineFailed identifies a node whose Apply panicked or could not\ncomplete — the entry IS committed —, whose Restore returned nil on\na snapshot whose end the engine then refused, or whose Restore,\nnot an AtomicRestorer's, returned an error not coded\nVERSION_UNSUPPORTED. A volatile machine's refused Restore stops the\nnode with no marker. Before an operator clears the stop marker the\nothers leave, a DurableStateMachine must be verified or rebuilt: the\nnext start trusts its AppliedPosition.\n",
       "file": "core/app/consensus/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -5729,7 +5729,7 @@
       "recv": "Replicated",
       "spelled": "func(ctx context.Context) (TokenValue, error)",
       "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, error)",
-      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call, with the token of the applied index.\nReads queued in one turn share one round.\n",
+      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call, with the token of the applied index.\nReads queued in one turn share one round.\nA Barrier may be refused with NOT_LEADER: nothing was read, and the call is\nsafe to retry.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -6459,7 +6459,7 @@
       "recv": "StateMachine",
       "spelled": "func(r io.Reader, meta SnapshotMetaValue) error",
       "canonical": "func(r io.Reader, meta github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
-      "doc": "Restore replaces the state with a snapshot's. It is serialised with\nApply. An error coded VERSION_UNSUPPORTED says the snapshot is of a\nformat this build does not read: the node stops, as for an entry\nkind it does not know, and a restart over that snapshot is refused\n(D18). Unless the machine is an AtomicRestorer, the engine cannot\ntell a refusal that left the state as it was from one that wrote\npart of the stream into it, so it assumes the second: any other\nerror stops the node with\nSTATE_MACHINE_FAILED before it applies another entry or releases a\nBarrier or WaitApplied, and no snapshot is offered again to it. A\nDurableStateMachine may have written that part to its disk, where\nthe next start would resume past its AppliedPosition: its stop\nleaves a marker that refuses the next start until an operator\nclears it. A volatile machine's stop leaves none: its state goes\nwith the process, and a supervisor starts the node again on a new\nmachine. At a start, a Restore that returns an error fails the\nstart with STATE_MACHINE_FAILED, a volatile machine's included,\nrather than falling back to an older snapshot or a replay from the\nfirst entry; a snapshot the engine refuses before Restore, on its\nchecksums, still falls back. A machine that builds the new state\naside and swaps it in only on success is the one that lets an\noperator restart a node with the state it held; declared an\nAtomicRestorer, its refusal neither stops the node nor fails a\nstart: the install is refused and the node keeps the state it had\napplied, and a start falls back. A machine reads r to io.EOF: after it\nreturns, the engine reads what it left, and checks the stream's\nsizes and SHA-256 against the metadata. A Restore that returns nil\non a stream whose end is then refused leaves the machine on a\nstate the engine cannot vouch for: the node stops with\nSTATE_MACHINE_FAILED before it applies another entry, and a start\nthat restores that way fails with it.\n",
+      "doc": "Restore replaces the state with a snapshot's. It is serialised with\nApply. An error coded VERSION_UNSUPPORTED says the snapshot is of a\nformat this build does not read: the node stops, as for an entry\nkind it does not know, and a restart over that snapshot is refused\n(D18). Unless the machine is an AtomicRestorer, the engine cannot\ntell a refusal that left the state as it was from one that wrote\npart of the stream into it, so it assumes the second: any other\nerror stops the node with\nSTATE_MACHINE_FAILED before it applies another entry or releases a\nBarrier or WaitApplied, and no snapshot is offered again to it. A\nDurableStateMachine may have written that part to its disk, where\nthe next start would resume past its AppliedPosition: its stop\nleaves a marker that refuses the next start until an operator\nclears it. A volatile machine's stop leaves none: its state goes\nwith the process, and a supervisor starts the node again on a new\nmachine. At a start, a Restore that returns any other error fails\nthe start with STATE_MACHINE_FAILED, a volatile machine's included,\nrather than falling back to an older snapshot or a replay from the\nfirst entry; a snapshot the engine refuses before Restore, on its\nchecksums, still falls back. The only way out is a restart of the\nprocess on a new machine: the machine whose Restore was refused is\nnever handed to another node, whose start could fall back over the\npart it holds. A machine that builds the new state\naside and swaps it in only on success keeps its state through a\nrefusal, but the engine cannot tell, and stops all the same, unless\nthe machine declares it as an AtomicRestorer: then its refusal\nneither stops the node nor fails a start, the install is refused\nand the node keeps the state it had applied, and a start falls\nback. A machine reads r to io.EOF: after it\nreturns, the engine reads what it left, and checks the stream's\nsizes and SHA-256 against the metadata. A Restore that returns nil\non a stream whose end is then refused leaves the machine on a\nstate the engine cannot vouch for: the node stops with\nSTATE_MACHINE_FAILED before it applies another entry, and a start\nthat restores that way fails with it.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -30771,6 +30771,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
       "value": "\"uring-sock-getsockopt\"",
       "doc": "CapabilityURingSockGetsockopt is io_uring's socket getsockopt command\n(IORING_OP_URING_CMD with SOCKET_URING_OP_GETSOCKOPT, Linux 6.7), with which\nthe loop reads a Unix connection's SO_PEERCRED on its direct descriptor at\naccept, so a group with a Unix listener keeps direct descriptors and LoopPeer\nstill answers. Switched off, or absent, a group with a Unix listener runs on\nprocess descriptors, where LoopPeer asks the socket.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingTaskrunFlag",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingTaskrunFlag",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-taskrun-flag\"",
+      "doc": "CapabilityURingTaskrunFlag is IORING_SETUP_TASKRUN_FLAG (Linux 5.19) on the\nDEFER_TASKRUN ring a loop's thread waits on: the kernel raises IORING_SQ_TASKRUN\nwhile task work waits for that thread, so a draining loop judges the ring caught\nup only once an enter posted nothing and left no work held (#1595). On only with\nuring-defer-taskrun, available otherwise. Switched off, or absent, the drain ends\nits rounds on the first enter that posts nothing.\n",
       "file": "core/net/capability.go",
       "layer": "core",
       "family": "net"
@@ -70155,7 +70168,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context) (coreconsensus.TokenValue, error)",
       "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue, error)",
-      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call (D9).\nReads queued in one turn share one round.\n",
+      "doc": "Barrier returns once the local state machine reflects every write\ncommitted before the call (D9).\nReads queued in one turn share one round.\nA Barrier may be refused with NOT_LEADER: nothing was read, and the call is\nsafe to retry.\n",
       "file": "service/app/consensus/ops_wait.go",
       "layer": "service",
       "family": "app"
@@ -70577,7 +70590,7 @@
         {
           "name": "Flags",
           "type": "PeerFlags",
-          "doc": "Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,\nPeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,\nPeerLeaderUnconfirmed.\n"
+          "doc": "Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,\nPeerSnapshot, PeerStranded, PeerPinDenied, PeerLeaderMoved,\nPeerLeaderUnconfirmed, PeerSnapshotRateShort.\n"
         },
         {
           "name": "Match",
@@ -70663,6 +70676,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
       "value": "4",
       "doc": "PeerSnapshot is set while a snapshot is being sent to the peer.\n",
+      "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshotRateShort",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "PeerSnapshotRateShort",
+      "spelled": "PeerFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags",
+      "value": "128",
+      "doc": "PeerSnapshotRateShort is set while the snapshot stream to the peer looks\ntoo slow to end before the writes bring the log to the band where its pin\nstops holding compaction back, after which the peer needs another\nsnapshot, the loop of #550. It rises once the transfer's estimated time,\nat the stream's rate over the last four maximum election timeouts,\nexceeds the time the writes take to fill the log to that band, at their\nrate over the same window; it falls once the transfer would end within\nthree quarters of that time. Once the pin was lifted it holds nothing,\nand the flag stays up to the stream's last byte. A raised flag thus does\nnot always mean that the transfer outlasts the fill at this instant. A\nstream that did not move over the window is left to its pin bound. Each\nrise adds one to consensus_snapshot_rate_short_total by peer and logs a\nWarn line naming the peer, both times and the rate; the package guide\nsays what to do: raise SnapshotStreamBytesPerSecond, raise MaxLogBytes,\nor lower the write load (#1486).\n",
       "file": "service/app/consensus/health.go",
       "layer": "service",
       "family": "app"
@@ -72967,7 +72993,7 @@
       "recv": "Raft",
       "spelled": "func(now time.Time, ctx uint64, noLease bool)",
       "canonical": "func(now time.Time, ctx uint64, noLease bool)",
-      "doc": "ReadIndex asks for a linearizable read point under ctx. noLease forces a\nconfirmation round.\n",
+      "doc": "ReadIndex asks for a linearizable read point under ctx. noLease forces a\nconfirmation round.\nA read may be refused with NOT_LEADER: nothing was read, and it may be\nasked again.\n",
       "file": "service/app/consensus/raft/leader.go",
       "layer": "service",
       "family": "app"

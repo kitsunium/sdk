@@ -60,7 +60,7 @@ func (s *Server) bindLoopAddress(ctx context.Context, group *StreamGroup, addr c
 	share := group.kinds.has(corenet.OptionShareAddress)
 	//: an address another process holds is refused before the loops' shards
 	//: could join it (#1330).
-	if mustProbe(addr, count, share) {
+	if mustProbe(ctx, addr, count, share) {
 		//: AddressInUse, naming it.
 		if err := probeAddress(ctx, addr, true); err != nil {
 			//: Start unwinds what is bound.

@@ -36,8 +36,9 @@ func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error)
 // restoreFrom verifies a snapshot's digest, then restores the state machine
 // from it, serialised with Apply. install says the restore is a running
 // node's, on the apply goroutine, rather than a start's: a Restore it
-// refuses stops the node there, unless the machine is an AtomicRestorer
-// (restoreRefused).
+// refuses stops the node there, before it takes another item, where a
+// start's refusal fails the start, unless the machine is an AtomicRestorer
+// that kept its position (restoreRefused).
 func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool) error {
 	h, err := n.cfg.Snapshots.Open(m.ID)
 	if err != nil {
@@ -196,9 +197,10 @@ func (n *Node) keptPosition(pre *machinePosition) bool {
 // no marker, and fails a start STATE_MACHINE_FAILED with no fallback to an
 // older snapshot or a replay from index 1, which applied the log over the
 // prefix. Its state is the process's: a start with a machine of its own
-// restores again, and one handed the same machine is refused again while
-// its Restore refuses; a marker would only keep down a node a supervisor
-// restarts on a fresh machine. A snapshot the engine refuses before
+// restores again; a marker would only keep down a node a supervisor
+// restarts on a fresh machine. The refused machine is never handed to
+// another node: one whose snapshot then fails its checksums falls back,
+// and a replay from index 1 would run over the prefix it holds. A snapshot the engine refuses before
 // Restore, on its metadata or checksums, touched no machine and is not
 // judged here.
 func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool, pre *machinePosition) error {

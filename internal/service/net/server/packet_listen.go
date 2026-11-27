@@ -69,6 +69,34 @@ func listenPacket(ctx context.Context, addr corenet.AddressValue, spec socketSpe
 	return bound, rep, nil
 }
 
+// reuseAfterBind sets SO_REUSEPORT on a bound datagram socket, so the shards
+// that follow can join its port (#1585): Linux reads the option of a bound
+// socket when another binds beside it, and creates the reuseport group then
+// (reuseport_add_sock, net/core/sock_reuseport.c).
+func reuseAfterBind(pc stdnet.PacketConn) error {
+	sc := packetSocket(pc)
+	//: a socket with no descriptor cannot be shared.
+	if sc == nil {
+		//: refused by name.
+		return errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+			errs.String("address", pc.LocalAddr().String()), errs.String("cause", "no descriptor"))
+	}
+	raw, err := sc.SyscallConn()
+	//: the descriptor cannot be reached.
+	if err != nil {
+		//: the standard library's reason.
+		return err
+	}
+	var setErr error
+	//: the descriptor, already bound.
+	if err := raw.Control(func(fd uintptr) { setErr = setReusePort(fd) }); err != nil {
+		//: the descriptor was closed meanwhile.
+		return err
+	}
+	//: the setsockopt outcome.
+	return setErr
+}
+
 // boundPacketConn pairs a live datagram socket with the group that owns it.
 type boundPacketConn struct {
 	// group is the owning group's name.

@@ -12,7 +12,8 @@ const (
 	// uringEntries is a serving ring's SQ size; CLAMP lets the kernel lower
 	// it, and the size it grants is read back from the params. A ring's SQ and
 	// CQ are charged to RLIMIT_MEMLOCK for a process without CAP_IPC_LOCK
-	// (an 8 MiB default on most distributions), so they are sized to keep a
+	// (an 8 MiB default on most distributions), and so is each provided-buffer
+	// ring from 6.14 (mapBufRing), so they are sized to keep a
 	// few rings within it rather than to the largest burst: a full SQ submits
 	// inline, a full CQ overflows into the kernel's list (NODROP).
 	uringEntries uint32 = 1024
@@ -457,11 +458,26 @@ func (u *uring) submit() {
 // the CQ makes it a submit, with no scheduler round trip, and no system call
 // at all when nothing is pending (ADR 0202).
 func (u *uring) wait(ts *kernelTimespec, want uint32) {
+	u.waitErrno(ts, want)
+}
+
+// waitErrno is wait that says how the enter ended: zero when it submitted or
+// woke, ETIME for the tick, EINTR for a signal — one the process receives,
+// SIGCHLD or SIGPROF for instance; the runtime does not preempt a goroutine in
+// a system call (runtime/proc.go preemptone, go1.27.4) — and the kernel's
+// refusal otherwise. A serving loop
+// ignores it, since it peeks the CQ whatever happened; the lane's self-test
+// reads it, because an enter a signal cut short has waited for nothing. An
+// enter that submitted SQEs is never answered EINTR: io_uring_enter returns
+// the count it submitted and drops the wait's error (io_uring/io_uring.c:
+// 3372-3375 and 3421-3422, v6.14), so only an enter with nothing pending can
+// be cut, and asking again repeats nothing.
+func (u *uring) waitErrno(ts *kernelTimespec, want uint32) syscall.Errno {
 	//: a completion already there: the caller reaps it now.
 	if u.ready() > 0 {
 		u.submit()
 		//: submitted, or nothing to.
-		return
+		return 0
 	}
 	u.publish()
 	arg := getEventsArg{ts: uint64(uintptr(unsafe.Pointer(ts)))}
@@ -477,6 +493,8 @@ func (u *uring) wait(ts *kernelTimespec, want uint32) {
 	default:
 		u.retries++
 	}
+	//: as the kernel answered.
+	return errno
 }
 
 // ready is how many completions wait in the CQ.
@@ -640,12 +658,19 @@ func (u *uring) addGroup() syscall.Errno {
 }
 
 // mapBufRing registers group bgid's ring of count entries, with flags, and
-// maps it. It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a
-// ring in user pages is pinned and charged to RLIMIT_MEMLOCK, which an
-// unprivileged process runs out of after a few rings (CI's non-root lane
-// did). A kernel that does not know the flag (EINVAL) gets the ring in user
-// pages; with flags, an EINVAL is returned instead, since the kernel may
-// refuse those as well (a kernel with IOU_PBUF_RING_INC has MMAP).
+// maps it. It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): the
+// ring is then no user page the process pins and no mapping it must keep
+// within a limit of its own. Before 6.14 the kernel's pages were charged to
+// nothing; from 6.14 io_create_region accounts them to the user's
+// RLIMIT_MEMLOCK as it does a ring in user pages, for a process without
+// CAP_IPC_LOCK (io_uring/memmap.c:213-215 calls __io_account_mem, which
+// refuses past the limit with ENOMEM, io_uring/rsrc.c:35-52; the MMAP path of
+// io_register_pbuf_ring reaches it, io_uring/kbuf.c:662, v6.14), so the
+// refusal there is ENOMEM at buf_ring, which the caller names. Either way an
+// unprivileged process runs out after a few rings (CI's non-root lane did). A
+// kernel that does not know the flag (EINVAL) gets the ring in user pages;
+// with flags, an EINVAL is returned instead, since the kernel may refuse
+// those as well (a kernel with IOU_PBUF_RING_INC has MMAP).
 func (u *uring) mapBufRing(bgid uint16, count uint32, flags uint16) ([]byte, syscall.Errno) {
 	ringBytes := max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
 	errno := registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bgid, flags: pbufRingMmap | flags})

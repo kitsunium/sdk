@@ -8109,6 +8109,8 @@ sequences:
         kind: value
       - id: now.Sub
         kind: value
+      - id: streamHealth
+        kind: internal
     steps:
       - bind: ph
         eval: "PeerHealthValue{ID: p.ID, Match: p.Match, Inflight: p.Inflight, LastContact: -1, Flags: peerRoleFlags(p.Flags)}"
@@ -8134,13 +8136,27 @@ sequences:
           when: n.peerUnreachable(p, heard, ph.LastContact, window)
       - opt:
           do:
-            - set: ph.SnapshotSent, ph.SnapshotSize
-              value: pin.progress.Load(), pin.size
+            - eval: streamHealth(&ph, &pin)
+              to: streamHealth
           init:
             bind: pin, ok
             eval: n.sending[p.ID]
-          when: ok && pin.until.IsZero() && pin.progress != nil
+          when: ok
       - return: ph
+  - of: streamHealth
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!pin.until.IsZero() || pin.progress == nil"
+      - set: ph.SnapshotSent, ph.SnapshotSize
+        value: pin.progress.Load(), pin.size
+      - opt:
+          do:
+            - op: "|="
+              set: ph.Flags
+              value: PeerSnapshotRateShort
+          when: pin.rate != nil && pin.rate.short
   - of: peerRoleFlags
     steps:
       - var:
@@ -15226,6 +15242,218 @@ sequences:
         eval: n.cuttingSince.Load()
         to: n.cuttingSince.Load
       - return: since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
+  - of: (*rateWindow).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rateWindow).add
+        kind: self
+      - id: now.UnixNano
+        kind: value
+    steps:
+      - bind: t
+        eval: now.UnixNano()
+        to: now.UnixNano
+      - opt:
+          do:
+            - return: ""
+          when: w.n > 0 && t-w.at[(w.head+rateSamples-1)%rateSamples] < int64(span)/rateSamples
+      - var:
+          name: acc
+          type: int64
+      - opt:
+          do:
+            - set: acc
+              value: w.acc[(w.head+rateSamples-1)%rateSamples] + max(v-w.last, 0)
+          when: w.n > 0
+      - set: w.at[w.head], w.acc[w.head], w.last
+        value: t, acc, v
+      - set: w.head
+        value: (w.head + 1) % rateSamples
+      - set: w.n
+        value: min(w.n+1, rateSamples)
+  - of: (*rateWindow).rate
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: w.n < rateSamples
+      - bind: oldest, newest
+        eval: w.head, (w.head+rateSamples-1)%rateSamples
+      - bind: dt
+        eval: w.at[newest] - w.at[oldest]
+      - opt:
+          do:
+            - return: 0, false
+          when: dt <= 0
+      - return: float64(w.acc[newest]-w.acc[oldest]) / time.Duration(dt).Seconds(), true
+  - of: (*Node).tightFrom
+    steps:
+      - bind: m, r
+        eval: n.cfg.MaxLogBytes, n.cfg.LogReserveBytes
+      - return: max(m-2*r, (m-r+1)/2)
+  - of: (*Node).watchRateShort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).watchRateShort
+        kind: self
+      - id: sr.logBytes
+        kind: internal
+      - id: n.logRate.add
+        kind: internal
+      - id: n.logRate.rate
+        kind: internal
+      - id: pin.progress.Load
+        kind: value
+      - id: pin.rate.sample
+        kind: internal
+      - id: n.judgeRateShort
+        kind: internal
+    steps:
+      - bind: sr, ok
+        eval: n.cfg.Log.(spaceReporter)
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - bind: span
+        eval: time.Duration(rateWindowTimeouts) * etMax
+      - bind: b
+        eval: sr.logBytes()
+        to: sr.logBytes
+      - eval: n.logRate.add(now, b, span)
+        to: n.logRate.add
+      - bind: write, full
+        eval: n.logRate.rate()
+        to: n.logRate.rate
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!pin.until.IsZero() || pin.progress == nil"
+            - opt:
+                do:
+                  - set: pin.rate
+                    value: new(rateWatch)
+                  - set: n.sending[to]
+                    value: pin
+                when: pin.rate == nil
+            - bind: sent
+              eval: pin.progress.Load()
+              to: pin.progress.Load
+            - bind: r, ok
+              eval: pin.rate.sample(now, sent, span)
+              to: pin.rate.sample
+            - opt:
+                do:
+                  - continue: true
+                when: "!full || !ok"
+            - eval: n.judgeRateShort(to, pin.rate, float64(max(pin.size-sent, 0))/r, n.pinFill(&pin, b, write), r)
+              to: n.judgeRateShort
+          key: to
+          range: n.sending
+          value: pin
+  - of: (*Node).pinFill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).pinFill
+        kind: self
+      - id: fillSeconds
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: pin.lifted
+      - return: fillSeconds(n.tightFrom()-b, write)
+        to: fillSeconds
+  - of: (*rateWatch).sample
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*rateWatch).sample
+        kind: self
+      - id: s.sent.add
+        kind: internal
+      - id: s.sent.rate
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: s.sent
+              value: rateWindow{}
+          when: s.sent.n > 0 && s.sent.last == 0 && sent > 0
+      - eval: s.sent.add(now, sent, span)
+        to: s.sent.add
+      - bind: r, ok
+        eval: s.sent.rate()
+        to: s.sent.rate
+      - return: r, ok && r > 0
+  - of: fillSeconds
+    participants:
+      - id: caller
+        kind: actor
+      - id: fillSeconds
+        kind: self
+      - id: math
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: left <= 0
+      - opt:
+          do:
+            - return: math.Inf(1)
+              to: math
+          when: rate <= 0
+      - return: float64(left) / rate
+  - of: (*Node).judgeRateShort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).judgeRateShort
+        kind: self
+      - id: n.obs.inc
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "!s.short && eta > fill"
+              do:
+                - set: s.short
+                  value: "true"
+                - eval: n.obs.inc(mSnapshotRateShort, coreotel.String("peer", to.String()))
+                  to: n.obs.inc
+                - eval: |-
+                    n.obs.warn("consensus: a snapshot stream cannot end before the writes fill the log budget and lift its pin; raise SnapshotStreamBytesPerSecond, raise MaxLogBytes or lower the write load",
+                    			lattr("peer", uint64(to)), lstr("transfer", secondsText(eta)), lstr("fill", secondsText(fill)),
+                    			lattr("rate", uint64(rate)))
+                  to: n.obs.warn
+            - case: s.short && eta <= fill*rateShortClear
+              do:
+                - set: s.short
+                  value: "false"
+  - of: secondsText
+    participants:
+      - id: caller
+        kind: actor
+      - id: secondsText
+        kind: self
+      - id: time.Duration(s * float64(time.Second)).Round(time.Millisecond).String
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "\"never\""
+          when: s >= math.MaxInt64/float64(time.Second)
+      - return: time.Duration(s * float64(time.Second)).Round(time.Millisecond).String()
+        to: time.Duration(s * float64(time.Second)).Round(time.Millisecond).String
   - of: maxPacedStreams
     steps:
       - return: int64(etMax / (time.Second / time.Duration(pinAfterStream*paceSlices)))
@@ -15367,6 +15595,8 @@ sequences:
         kind: internal
       - id: n.r.Progress
         kind: value
+      - id: n.watchRateShort
+        kind: internal
       - id: n.prunePinScale
         kind: internal
       - id: n.aq.push
@@ -15406,6 +15636,8 @@ sequences:
           key: to
           range: n.sending
           value: pin
+      - eval: n.watchRateShort(now, n.r.Summary().Timing.ElectionTimeoutMax)
+        to: n.watchRateShort
       - eval: n.prunePinScale()
         to: n.prunePinScale
       - opt:

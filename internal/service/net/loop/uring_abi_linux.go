@@ -19,10 +19,13 @@ const (
 	sysIOURingRegister uintptr = 427
 
 	// io_uring_setup flags.
-	setupCQSize       uint32 = 1 << 3
-	setupClamp        uint32 = 1 << 4
-	setupSubmitAll    uint32 = 1 << 7
-	setupCoopTaskrun  uint32 = 1 << 8
+	setupCQSize      uint32 = 1 << 3
+	setupClamp       uint32 = 1 << 4
+	setupSubmitAll   uint32 = 1 << 7
+	setupCoopTaskrun uint32 = 1 << 8
+	// setupTaskrunFlag is IORING_SETUP_TASKRUN_FLAG (5.19): the kernel raises
+	// sqTaskrun while task work waits for the ring's thread (#1595).
+	setupTaskrunFlag  uint32 = 1 << 9
 	setupSingleIssuer uint32 = 1 << 12
 	setupDeferTaskrun uint32 = 1 << 13
 	// setupNoSQArray is IORING_SETUP_NO_SQARRAY (6.6): the SQ tail indexes
@@ -51,6 +54,10 @@ const (
 
 	// SQ ring flags.
 	sqCQOverflow uint32 = 1 << 1
+	// sqTaskrun is IORING_SQ_TASKRUN, raised under setupTaskrunFlag while
+	// task work waits for an enter: from 6.13 also the works one GETEVENTS
+	// enter left in retry_llist past IO_LOCAL_TW_DEFAULT_MAX.
+	sqTaskrun uint32 = 1 << 2
 
 	// mmap offsets.
 	offSQRing uintptr = 0
@@ -135,7 +142,8 @@ const (
 	ringFDAlloc uint32 = 0xFFFFFFFF
 	// pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
 	// buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
-	// so no user page is pinned against RLIMIT_MEMLOCK.
+	// so no user page of the process is pinned; from 6.14 the kernel's pages
+	// are still charged to RLIMIT_MEMLOCK (mapBufRing).
 	pbufRingMmap uint16 = 1
 	// pbufRingInc is IOU_PBUF_RING_INC (6.12): a buffer is consumed as far
 	// as each completion took, and serves the next from where it stopped.
