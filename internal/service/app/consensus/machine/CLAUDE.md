@@ -48,7 +48,8 @@ never `service/app/consensus`, so the engine's own tests may use it.
   way, or whose position write fails, leaves the rows and the position as
   they were; a follower whose install's `Load` fails keeps running and a
   later offer restores it; a lost COMMIT acknowledgement (`lostAck`) is
-  read back (#1607).
+  read back, a retried read back keeps no earlier answer, and one past
+  its bound (`SetReadBackTimeout`, `export_test.go`) is unknown (#1607).
 
 ## Do NOT
 

@@ -351,6 +351,9 @@ type lostAck struct {
 	coresql.Transactor
 	armed atomic.Bool
 	blind atomic.Bool
+	// twice runs the read-write fn of every Transact after the loss twice,
+	// the second time on a cancelled context: a transactor that retries.
+	twice atomic.Bool
 	// lost is set once a commit's acknowledgement was lost.
 	lost atomic.Bool
 }
@@ -361,6 +364,15 @@ func (l *lostAck) Transact(ctx context.Context, opts coresql.TxOptionsValue, fn 
 	//: a blind transactor reaches nothing once the acknowledgement was lost.
 	if l.blind.Load() && l.lost.Load() {
 		return errors.New("the database cannot be reached")
+	}
+	//: a retrying transactor whose second pass fails.
+	if l.twice.Load() && l.lost.Load() && !opts.ReadOnly {
+		return l.Transactor.Transact(ctx, opts, func(ctx context.Context, ex coresql.Executor) error {
+			_ = fn(ctx, ex)
+			cctx, cancel := context.WithCancel(ctx)
+			cancel()
+			return fn(cctx, ex)
+		})
 	}
 	err := l.Transactor.Transact(ctx, opts, fn)
 	//: the armed read-write transaction committed, and its answer is lost.
@@ -381,8 +393,9 @@ func (l *lostAck) Transact(ctx context.Context, opts coresql.TxOptionsValue, fn 
 func TestAnSQLRestoreWhoseCommitAcknowledgementIsLostIsJudgedOnTheDatabase(t *testing.T) {
 	type tc struct {
 		name string
-		// blind fails the read back.
-		blind bool
+		// blind fails the read back; twice runs it twice, the second pass
+		// failing, which must not keep the first's answer.
+		blind, twice bool
 	}
 	runCase := func(t *testing.T, c tc) {
 		_, srcTM := newDB(t)
@@ -403,6 +416,7 @@ func TestAnSQLRestoreWhoseCommitAcknowledgementIsLostIsJudgedOnTheDatabase(t *te
 		d, tm := newDB(t)
 		la := &lostAck{Transactor: tm}
 		la.blind.Store(c.blind)
+		la.twice.Store(c.twice)
 		m := mustSQL(t, entriesConfig(la))
 		m.ApplyBatch(commands(1, 2), make([]any, 2))
 		meta := coreconsensus.SnapshotMetaValue{
@@ -416,7 +430,7 @@ func TestAnSQLRestoreWhoseCommitAcknowledgementIsLostIsJudgedOnTheDatabase(t *te
 			t.Fatal("setup: no acknowledgement was lost")
 		}
 		//: a read back that cannot reach the database leaves the outcome unknown.
-		if c.blind {
+		if c.blind || c.twice {
 			//: a refusal.
 			if err == nil {
 				t.Fatal("a restore whose outcome is unknown returned nil")
@@ -456,6 +470,7 @@ func TestAnSQLRestoreWhoseCommitAcknowledgementIsLostIsJudgedOnTheDatabase(t *te
 	for _, c := range []tc{
 		{name: "the commit held, read back"},
 		{name: "the read back fails too", blind: true},
+		{name: "the read back's last pass fails", twice: true},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
@@ -477,6 +492,9 @@ func TestAnSQLRestoreIsReadBackOnThePrimaryUnderTheRowLock(t *testing.T) {
 		// inflight has the restore's COMMIT answer an error, then commit
 		// on the server after the delay.
 		inflight time.Duration
+		// bound replaces the read back's bound; a COMMIT in flight past
+		// it leaves the outcome unknown.
+		bound time.Duration
 	}
 	runCase := func(t *testing.T, c tc) {
 		_, srcTM := newDB(t)
@@ -512,6 +530,10 @@ func TestAnSQLRestoreIsReadBackOnThePrimaryUnderTheRowLock(t *testing.T) {
 			tm = la
 		}
 		m := mustSQL(t, entriesConfig(tm))
+		//: the bounded case waits less than the COMMIT takes.
+		if c.bound > 0 {
+			machine.SetReadBackTimeout(m, c.bound)
+		}
 		m.ApplyBatch(commands(1, 2), make([]any, 2))
 		//: the replica holds what the primary held before the restore.
 		if replica != nil {
@@ -533,6 +555,15 @@ func TestAnSQLRestoreIsReadBackOnThePrimaryUnderTheRowLock(t *testing.T) {
 		if la != nil && !la.lost.Load() {
 			t.Fatal("setup: no acknowledgement was lost")
 		}
+		//: a read back that met its bound names no outcome, and no position.
+		if c.bound > 0 {
+			<-primary.committedLate
+			//: refused, with no position the engine could take for one kept.
+			if _, _, perr := m.AppliedPosition(); err == nil || perr == nil {
+				t.Errorf("a read back past its bound gave %v, AppliedPosition error %v; want both errors", err, perr)
+			}
+			return
+		}
 		//: the restore took effect on the primary, and says so.
 		if err != nil {
 			t.Fatalf("a restore the primary committed returned %v", err)
@@ -553,6 +584,7 @@ func TestAnSQLRestoreIsReadBackOnThePrimaryUnderTheRowLock(t *testing.T) {
 	for _, c := range []tc{
 		{name: "a replica behind the primary", replica: true},
 		{name: "a COMMIT still in flight", inflight: 50 * time.Millisecond},
+		{name: "a COMMIT in flight past the bound", inflight: 300 * time.Millisecond, bound: 30 * time.Millisecond},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}

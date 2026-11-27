@@ -429,7 +429,7 @@ sequences:
             to: cfg.validate
           when: err != nil
       - bind: m
-        eval: "&SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead, lockIso: stdsql.LevelReadCommitted}"
+        eval: "&SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead, lockIso: stdsql.LevelReadCommitted, readBackWait: readBackTimeout}"
       - opt:
           do:
             - set: m.snapIso, m.lockIso
@@ -734,7 +734,7 @@ sequences:
           name: pos
           type: coreconsensus.PositionValue
       - bind: ctx, cancel
-        eval: context.WithTimeout(context.Background(), readBackTimeout)
+        eval: context.WithTimeout(context.Background(), m.readBackWait)
         to: context
       - defer: cancel()
       - bind: read
@@ -742,13 +742,13 @@ sequences:
       - bind: err
         eval: |-
           m.cfg.Transactor.Transact(ctx, coresql.TxOptionsValue{Isolation: m.lockIso}, func(ctx context.Context, ex coresql.Executor) error {
+          		// A transactor that runs fn again keeps no answer of an earlier pass.
+          		read = false
           		//: the row's lock, waited for behind a COMMIT in flight.
           		if _, err := ex.ExecContext(ctx, m.lockRow); err != nil {
           			return err
           		}
-          		var found bool
-          		var err error
-          		li, pos, found, err = m.readPosition(ctx, ex)
+          		l, p, found, err := m.readPosition(ctx, ex)
           		//: a position row that is not there names no outcome.
           		if err == nil && !found {
           			return origin(coreconsensus.StateMachineFailed, errs.String("why", "the position row is not there"))
@@ -757,7 +757,7 @@ sequences:
           		if err != nil {
           			return err
           		}
-          		read = true
+          		li, pos, read = l, p, true
           		// The read is all this transaction is for: an error rolls it back.
           		return origin(coreconsensus.StateMachineFailed, errs.String("why", "a read back rolls back"))
           	})

@@ -38,14 +38,15 @@ go_test(
     srcs = [
         "atomicrestore_external_test.go",
         "cluster_external_test.go",
+        "export_test.go",
         "gen_api_test.go",
         "kv_external_test.go",
         "lincheck_external_test.go",
         "sql_external_test.go",
         "sqldouble_external_test.go",
     ],
+    embed = [":machine"],
     deps = [
-        ":machine",
         "//internal/core/app/consensus",
         "//internal/core/data/sql",
         "//internal/kernel/errs",

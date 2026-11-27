@@ -45,6 +45,15 @@ const positionColumns = "cluster, epoch, predecessor, predecessor_epoch, kept_in
 
 // SQLConfig builds an SQL machine. Every field but Table is required: the
 // machine runs the caller's statements and owns the position table alone.
+// The machine assumes a durable COMMIT (PostgreSQL's synchronous_commit
+// on, MySQL's innodb_flush_log_at_trx_commit=1 and sync_binlog=1,
+// SQLite without synchronous=OFF) and a failover to a synchronous copy
+// only: otherwise a committed batch or restore can be lost, and neither
+// DurabilityDurable nor the AtomicRestorer promise holds. Under MySQL
+// the read back of a failed restore runs at READ COMMITTED, which
+// MySQL admits only with binlog_format=ROW: under another format every
+// failed restore ends in an unknown outcome, and the node stops with
+// its marker.
 type SQLConfig struct {
 	// Transactor runs the machine's transactions.
 	Transactor coresql.Transactor
@@ -80,6 +89,8 @@ type SQL struct {
 	// lockIso is the isolation its read back runs at (readBack).
 	lockRow string
 	lockIso stdsql.IsolationLevel
+	// readBackWait bounds readBack: readBackTimeout, which a test lowers.
+	readBackWait time.Duration
 
 	mu  sync.Mutex
 	li  coreconsensus.LogIdentityValue
@@ -99,7 +110,7 @@ func NewSQL(ctx context.Context, cfg SQLConfig) (*SQL, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	m := &SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead, lockIso: stdsql.LevelReadCommitted}
+	m := &SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead, lockIso: stdsql.LevelReadCommitted, readBackWait: readBackTimeout}
 	if cfg.Dialect == coresql.DialectSQLite {
 		//: SQLite isolates a transaction serialisably and knows no other level.
 		m.snapIso, m.lockIso = stdsql.LevelSerializable, stdsql.LevelDefault
@@ -339,17 +350,17 @@ func (m *SQL) restoreOutcome(meta *coreconsensus.SnapshotMetaValue, cause error)
 func (m *SQL) readBack() (coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error) {
 	var li coreconsensus.LogIdentityValue
 	var pos coreconsensus.PositionValue
-	ctx, cancel := context.WithTimeout(context.Background(), readBackTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), m.readBackWait)
 	defer cancel()
 	read := false
 	err := m.cfg.Transactor.Transact(ctx, coresql.TxOptionsValue{Isolation: m.lockIso}, func(ctx context.Context, ex coresql.Executor) error {
+		// A transactor that runs fn again keeps no answer of an earlier pass.
+		read = false
 		//: the row's lock, waited for behind a COMMIT in flight.
 		if _, err := ex.ExecContext(ctx, m.lockRow); err != nil {
 			return err
 		}
-		var found bool
-		var err error
-		li, pos, found, err = m.readPosition(ctx, ex)
+		l, p, found, err := m.readPosition(ctx, ex)
 		//: a position row that is not there names no outcome.
 		if err == nil && !found {
 			return origin(coreconsensus.StateMachineFailed, errs.String("why", "the position row is not there"))
@@ -358,7 +369,7 @@ func (m *SQL) readBack() (coreconsensus.LogIdentityValue, coreconsensus.Position
 		if err != nil {
 			return err
 		}
-		read = true
+		li, pos, read = l, p, true
 		// The read is all this transaction is for: an error rolls it back.
 		return origin(coreconsensus.StateMachineFailed, errs.String("why", "a read back rolls back"))
 	})

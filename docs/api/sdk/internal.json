@@ -71909,7 +71909,7 @@
           "doc": "Load writes on ex the state Dump wrote into r.\n"
         }
       ],
-      "doc": "SQLConfig builds an SQL machine. Every field but Table is required: the\nmachine runs the caller's statements and owns the position table alone.\n",
+      "doc": "SQLConfig builds an SQL machine. Every field but Table is required: the\nmachine runs the caller's statements and owns the position table alone.\nThe machine assumes a durable COMMIT (PostgreSQL's synchronous_commit\non, MySQL's innodb_flush_log_at_trx_commit=1 and sync_binlog=1,\nSQLite without synchronous=OFF) and a failover to a synchronous copy\nonly: otherwise a committed batch or restore can be lost, and neither\nDurabilityDurable nor the AtomicRestorer promise holds. Under MySQL\nthe read back of a failed restore runs at READ COMMITTED, which\nMySQL admits only with binlog_format=ROW: under another format every\nfailed restore ends in an unknown outcome, and the node stops with\nits marker.\n",
       "file": "service/app/consensus/machine/sql.go",
       "layer": "service",
       "family": "app"

@@ -376,6 +376,9 @@ types:
         type: string
       - name: lockIso
         type: stdsql.IsolationLevel
+      - doc: "readBackWait bounds readBack: readBackTimeout, which a test lowers."
+        name: readBackWait
+        type: time.Duration
       - name: mu
         type: sync.Mutex
       - name: li
