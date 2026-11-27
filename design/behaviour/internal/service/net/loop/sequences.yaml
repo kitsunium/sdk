@@ -4954,9 +4954,9 @@ sequences:
         value: uint64(packetCtrlRoom)
       - opt:
           do:
-            - return: "\"recvmsg\", why + lp.failStage, 0"
+            - return: "\"recvmsg\", why + lp.failStage, werr"
           init:
-            bind: why
+            bind: why, werr
             eval: lp.selfTest()
             to: lp.selfTest
           when: why != "" || lp.failStage == "recvmsg"
@@ -5152,20 +5152,20 @@ sequences:
         to: loopbackPair
       - opt:
           do:
-            - return: why
+            - return: why, 0
           when: why != ""
       - defer: closePair(rx, tx)
         to: closePair
-      - bind: got, why
+      - bind: got, why, werr
         eval: lp.probeOne(rx, tx)
         to: lp.probeOne
       - opt:
           do:
-            - return: why
+            - return: why, werr
           when: why != ""
       - opt:
           do:
-            - return: "\"multishot RECVMSG: no datagram with a buffer and F_MORE within 200 ms\""
+            - return: "\"multishot RECVMSG: no datagram with a buffer and F_MORE within 200 ms\", 0"
           when: got.userData != pudProbe || got.res <= 0 || got.flags&cqeFBuffer == 0 || got.flags&cqeFMore == 0
       - bind: bid
         eval: uint16(got.flags >> cqeBufferShift)
@@ -5181,9 +5181,9 @@ sequences:
         to: sockaddrPort
       - opt:
           do:
-            - return: "\"multishot RECVMSG: the buffer's header, address or payload did not read back\""
+            - return: "\"multishot RECVMSG: the buffer's header, address or payload did not read back\", 0"
           when: string(payload) != "kit" || !from.IsValid() || !from.Addr().Is4()
-      - return: "\"\""
+      - return: "\"\", 0"
   - of: (*packetLane).probeOne
     participants:
       - id: caller
@@ -5204,6 +5204,8 @@ sequences:
         kind: internal
       - id: lp.awaitFinals
         kind: internal
+      - id: probeVerdict
+        kind: internal
     steps:
       - bind: ring
         eval: lp.u
@@ -5216,11 +5218,11 @@ sequences:
         to: syscall
       - opt:
           do:
-            - return: "cqe{}, \"getsockname: \" + err.Error()"
+            - return: "cqe{}, \"getsockname: \" + err.Error(), 0"
           when: err != nil
       - opt:
           do:
-            - return: "cqe{}, \"sendto: \" + err.Error()"
+            - return: "cqe{}, \"sendto: \" + err.Error(), 0"
           init:
             bind: err
             eval: syscall.Sendto(tx, []byte("kit"), 0, addr)
@@ -5240,11 +5242,17 @@ sequences:
         to: ring.submit
       - eval: "lp.awaitFinals(new(kernelTimespec{nsec: packetProbeWait}))"
         to: lp.awaitFinals
+      - bind: why, errno
+        eval: probeVerdict(got, werr)
+        to: probeVerdict
+      - return: got, why, errno
+  - of: probeVerdict
+    steps:
       - opt:
           do:
-            - return: "cqe{}, \"multishot RECVMSG: the wait was interrupted (\" + werr.Error() + \") for the whole 200 ms\""
+            - return: "\"multishot RECVMSG: the wait was interrupted (\" + werr.Error() + \") for the whole 200 ms\", werr"
           when: got.userData != pudProbe && werr == syscall.EINTR
-      - return: got, ""
+      - return: "\"\", 0"
   - of: waitWindow
     participants:
       - id: caller

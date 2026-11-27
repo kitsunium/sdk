@@ -312,9 +312,9 @@ func (lp *packetLane) setup() (stage, why string, errno syscall.Errno) {
 	lp.hdr.Namelen = uint32(packetNameRoom)
 	lp.hdr.Controllen = uint64(packetCtrlRoom)
 	//: the self-test.
-	if why := lp.selfTest(); why != "" || lp.failStage == "recvmsg" {
-		//: refused.
-		return "recvmsg", why + lp.failStage, 0
+	if why, werr := lp.selfTest(); why != "" || lp.failStage == "recvmsg" {
+		//: refused, with the errno of an interrupted wait when that was the cause.
+		return "recvmsg", why + lp.failStage, werr
 	}
 	//: the memory the replies and the handover use.
 	if why, errno := lp.mapArenas(); why != "" {
@@ -438,24 +438,24 @@ func (lp *packetLane) mapArenas() (string, syscall.Errno) {
 // selfTest arms a multishot RECVMSG on a loopback socket of its own, sends
 // it one datagram and reads it back from a provided buffer: the header, the
 // sender's family and the payload. It returns why it failed.
-func (lp *packetLane) selfTest() string {
+func (lp *packetLane) selfTest() (string, syscall.Errno) {
 	rx, tx, why := loopbackPair()
 	//: no sockets.
 	if why != "" {
 		//: named.
-		return why
+		return why, 0
 	}
 	defer closePair(rx, tx)
-	got, why := lp.probeOne(rx, tx)
+	got, why, werr := lp.probeOne(rx, tx)
 	//: nothing came back.
 	if why != "" {
-		//: named.
-		return why
+		//: named, with the errno the wait ended on, if it is the reason.
+		return why, werr
 	}
 	//: the datagram, its buffer and the promise of more.
 	if got.userData != pudProbe || got.res <= 0 || got.flags&cqeFBuffer == 0 || got.flags&cqeFMore == 0 {
 		//: named.
-		return "multishot RECVMSG: no datagram with a buffer and F_MORE within 200 ms"
+		return "multishot RECVMSG: no datagram with a buffer and F_MORE within 200 ms", 0
 	}
 	bid := uint16(got.flags >> cqeBufferShift)
 	name, _, payload, _ := splitRecvmsgOut(lp.u.buf(bid)[:got.res])
@@ -465,15 +465,16 @@ func (lp *packetLane) selfTest() string {
 	//: the header as laid out.
 	if string(payload) != "kit" || !from.IsValid() || !from.Addr().Is4() {
 		//: named.
-		return "multishot RECVMSG: the buffer's header, address or payload did not read back"
+		return "multishot RECVMSG: the buffer's header, address or payload did not read back", 0
 	}
 	//: passed.
-	return ""
+	return "", 0
 }
 
 // probeOne arms the self-test's receive on rx, sends it three bytes from tx,
-// takes the first completion, then cancels the receive and reaps its end.
-func (lp *packetLane) probeOne(rx, tx int) (cqe, string) {
+// takes the first completion, then cancels the receive and reaps its end. It
+// returns the errno the wait ended on when that is the refusal's reason.
+func (lp *packetLane) probeOne(rx, tx int) (cqe, string, syscall.Errno) {
 	ring := lp.u
 	prepRecvmsg(ring.get(), rx, &lp.hdr, pudProbe)
 	ring.submit()
@@ -481,12 +482,12 @@ func (lp *packetLane) probeOne(rx, tx int) (cqe, string) {
 	//: the receiver's address.
 	if err != nil {
 		//: named.
-		return cqe{}, "getsockname: " + err.Error()
+		return cqe{}, "getsockname: " + err.Error(), 0
 	}
 	//: one datagram of three bytes.
 	if err := syscall.Sendto(tx, []byte("kit"), 0, addr); err != nil {
 		//: named.
-		return cqe{}, "sendto: " + err.Error()
+		return cqe{}, "sendto: " + err.Error(), 0
 	}
 	werr := waitWindow(time.Duration(packetProbeWait), func(ts *kernelTimespec) syscall.Errno { return ring.waitErrno(ts, 1) })
 	var got cqe
@@ -494,13 +495,23 @@ func (lp *packetLane) probeOne(rx, tx int) (cqe, string) {
 	prepCancelUserData(ring.get(), pudProbe, pudCancel)
 	ring.submit()
 	lp.awaitFinals(new(kernelTimespec{nsec: packetProbeWait}))
-	//: nothing came and the wait never ran its course: not a kernel without the lane.
+	why, errno := probeVerdict(got, werr)
+	//: the first completion, or the interruption that kept it from coming.
+	return got, why, errno
+}
+
+// probeVerdict is what the self-test's wait decides: a reason and the errno
+// behind it when nothing came and the wait never ran its course, which is not a
+// kernel without the lane; empty otherwise, a completion reaped despite a last
+// EINTR and an ETIME with nothing alike, the caller judging what was reaped.
+func probeVerdict(got cqe, werr syscall.Errno) (string, syscall.Errno) {
+	//: nothing came and the wait was interrupted to its end.
 	if got.userData != pudProbe && werr == syscall.EINTR {
 		//: named, with its errno.
-		return cqe{}, "multishot RECVMSG: the wait was interrupted (" + werr.Error() + ") for the whole 200 ms"
+		return "multishot RECVMSG: the wait was interrupted (" + werr.Error() + ") for the whole 200 ms", werr
 	}
-	//: the first completion.
-	return got, ""
+	//: no verdict of its own.
+	return "", 0
 }
 
 // waitWindow waits through window with enter, which is one wait bounded by the

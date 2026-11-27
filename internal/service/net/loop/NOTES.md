@@ -616,7 +616,7 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   `RLIMIT_MEMLOCK` (`laneRefusal`). The self-test's wait is `waitWindow`
   over `uring.waitErrno`: an `EINTR` — a signal the process receives, `SIGCHLD` or `SIGPROF`, since `preemptone` does not signal a goroutine in a system call (`runtime/proc.go:6926-6928`, go1.27.4) — asks
   again with what is left of the 200 ms, and a window interrupted to its end
-  with nothing reaped is refused naming `EINTR`, never as a kernel that
+  with nothing reaped is refused naming `EINTR`, in the text and in the `errno` field (`probeVerdict` decides, `TestProbeVerdict` holds it), never as a kernel that
   delivered nothing (#1580); the serving loops keep `uring.wait`, which reaps
   the CQ whatever the enter answered. `TestWaitWindow_interrupted` drives it
   with an enter the test cuts, the kernel offering no way to land a signal

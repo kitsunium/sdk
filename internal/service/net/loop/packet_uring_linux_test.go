@@ -372,6 +372,8 @@ func TestWaitWindow_interrupted(t *testing.T) {
 		start := time.Now()
 		got := waitWindow(window, func(ts *kernelTimespec) syscall.Errno {
 			asked = append(asked, ts.nsec)
+			//: a real short wait, as an enter cut by a signal has spent some time: no spinning.
+			time.Sleep(time.Millisecond)
 			//: one answer a call; the last stands for every later one.
 			return c.answers[min(len(asked), len(c.answers))-1]
 		})
@@ -403,6 +405,43 @@ func TestWaitWindow_interrupted(t *testing.T) {
 		{name: "interrupted to the end", answers: []syscall.Errno{syscall.EINTR}, want: syscall.EINTR, spent: true},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestProbeVerdict holds the decision of the self-test's wait: an interruption
+// to the end with nothing reaped is refused naming EINTR, in the text and in the
+// errno; a completion reaped despite a last EINTR is not refused, and an ETIME
+// with nothing is left to the caller's own refusal (#1580).
+func TestProbeVerdict(t *testing.T) {
+	type tc struct {
+		name      string
+		got       cqe
+		werr      syscall.Errno
+		wantWhy   bool
+		wantErrno syscall.Errno
+	}
+	runCase := func(t *testing.T, c tc) {
+		why, errno := probeVerdict(c.got, c.werr)
+		//: whether a refusal was named.
+		if (why != "") != c.wantWhy {
+			t.Fatalf("probeVerdict(%+v, %v) reason = %q, want a reason: %v", c.got, c.werr, why, c.wantWhy)
+		}
+		//: the errno carried.
+		if errno != c.wantErrno {
+			t.Fatalf("probeVerdict(%+v, %v) errno = %v, want %v", c.got, c.werr, errno, c.wantErrno)
+		}
+		//: the reason names the errno it carries.
+		if c.wantWhy && !strings.Contains(why, c.wantErrno.Error()) {
+			t.Fatalf("reason %q does not name %v", why, c.wantErrno)
+		}
+	}
+	for _, c := range []tc{
+		{name: "interrupted to the end, nothing reaped", werr: syscall.EINTR, wantWhy: true, wantErrno: syscall.EINTR},
+		{name: "a completion reaped despite a last EINTR", got: cqe{userData: pudProbe, res: 3}, werr: syscall.EINTR},
+		{name: "ETIME, nothing reaped", werr: errnoETIME},
+		{name: "woken, nothing reaped", werr: 0},
+	} {
+		t.Run(c.name, func(t *testing.T) { t.Parallel(); runCase(t, c) })
 	}
 }
 

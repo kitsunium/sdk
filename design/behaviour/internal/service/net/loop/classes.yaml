@@ -2059,6 +2059,7 @@ files:
       - (*packetLane).mapArenas
       - (*packetLane).selfTest
       - (*packetLane).probeOne
+      - probeVerdict
       - waitWindow
       - (*packetLane).awaitFinals
       - loopbackPair
@@ -2917,10 +2918,19 @@ functions:
     params: group, stage, why string, errno syscall.Errno
     results: error
   - doc: |-
+      probeVerdict is what the self-test's wait decides: a reason and the errno
+      behind it when nothing came and the wait never ran its course, which is not a
+      kernel without the lane; empty otherwise, a completion reaped despite a last
+      EINTR and an ETIME with nothing alike, the caller judging what was reaped.
+    name: probeVerdict
+    params: got cqe, werr syscall.Errno
+    results: string, syscall.Errno
+  - doc: |-
       waitWindow waits through window with enter, which is one wait bounded by the
       timespec it is handed, and asks again with what remains of the window when a
-      signal cut it short: EINTR is the thread being interrupted — the runtime's
-      preemption signal is one — not a window that ran out without a completion.
+      signal cut it short: EINTR is the thread being interrupted — by a signal the
+      process receives, SIGCHLD or SIGPROF for instance — not a window that ran out
+      without a completion.
       It returns the last answer: ETIME or zero once the window ran its course or
       a completion woke it, EINTR when it was interrupted to its end.
     name: waitWindow
@@ -5454,14 +5464,15 @@ types:
           sender's family and the payload. It returns why it failed.
         name: selfTest
         recv: lp *packetLane
-        results: string
+        results: string, syscall.Errno
       - doc: |-
           probeOne arms the self-test's receive on rx, sends it three bytes from tx,
-          takes the first completion, then cancels the receive and reaps its end.
+          takes the first completion, then cancels the receive and reaps its end. It
+          returns the errno the wait ended on when that is the refusal's reason.
         name: probeOne
         params: rx, tx int
         recv: lp *packetLane
-        results: cqe, string
+        results: cqe, string, syscall.Errno
       - doc: |-
           awaitFinals reaps the self-test's cancel and its receive's last
           completion, within probeFinalTries waits.
@@ -8002,8 +8013,10 @@ types:
         recv: u *uring
       - doc: |-
           waitErrno is wait that says how the enter ended: zero when it submitted or
-          woke, ETIME for the tick, EINTR for a signal — the runtime's preemption
-          signal among them — and the kernel's refusal otherwise. A serving loop
+          woke, ETIME for the tick, EINTR for a signal — one the process receives,
+          SIGCHLD or SIGPROF for instance; the runtime does not preempt a goroutine in
+          a system call (runtime/proc.go preemptone, go1.27.4) — and the kernel's
+          refusal otherwise. A serving loop
           ignores it, since it peeks the CQ whatever happened; the lane's self-test
           reads it, because an enter a signal cut short has waited for nothing. An
           enter that submitted SQEs is never answered EINTR: io_uring_enter returns
