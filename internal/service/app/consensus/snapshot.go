@@ -34,8 +34,10 @@ func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error)
 }
 
 // restoreFrom verifies a snapshot's digest, then restores the state machine
-// from it, serialised with Apply.
-func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) error {
+// from it, serialised with Apply. install says the restore is a running
+// node's, on the apply goroutine, rather than a start's: a Restore it
+// refuses holds apply until another succeeds (restoreRefused).
+func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool) error {
 	h, err := n.cfg.Snapshots.Open(m.ID)
 	if err != nil {
 		return err
@@ -72,9 +74,9 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) err
 		// snapshot's index (#1562). The chunk reader hashes what it decodes
 		// either way: the comparison is the only cost.
 		sr := &snapshotReader{cr: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes), meta: m}
-		//: a refused restore moves nothing, applied included.
+		//: a refused restore moves nothing, applied included, and may leave a prefix the machine wrote.
 		if err := n.cfg.Machine.Restore(sr, m); err != nil {
-			return err
+			return n.restoreRefused(&m, err, install)
 		}
 		// A machine may stop reading before the end: the rest is read, so
 		// the end is checked whatever the machine read, before applied
@@ -108,6 +110,9 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) err
 		n.snapState.mu.Unlock()
 		n.am.Lock()
 		n.applied, n.appliedTerm = m.Position.Index, m.Position.Term
+		// The machine holds the snapshot's whole state again: what a
+		// refused restore held back is released over it (#1582).
+		n.unvouched.on = false
 		n.answerCovered(m.Position.Index)
 		n.releaseApplied()
 		n.am.Unlock()
@@ -116,6 +121,40 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) err
 	n.snapState.last = max(n.snapState.last, m.Position.Index)
 	n.snapState.mu.Unlock()
 	return nil
+}
+
+// restoreRefused is what a Restore that returned err leaves the node. The
+// engine cannot tell a machine that read aside and kept its state from one
+// that decoded part of the stream into its live state and failed: the
+// machine may hold a prefix of the snapshot no correct node holds (#1582).
+// VERSION_UNSUPPORTED is returned as is: the install, or the start, stops
+// on it (D18). A DurableStateMachine may have written that prefix to its
+// disk, where a restart resumes past its AppliedPosition: the node stops
+// STATE_MACHINE_FAILED, as when a nil Restore's end is refused, and a
+// start fails with it. A volatile machine's refusal, at an install, holds
+// apply until a Restore succeeds: the entries handed after it wait, and the
+// next offer's restore replaces the state they would have been applied
+// over. A start's refusal falls back as before.
+func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool) error {
+	//: a format this build does not read is stopped on by the caller.
+	if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
+		return err
+	}
+	//: a durable machine may have written the prefix to its disk.
+	if _, durable := n.cfg.Machine.(coreconsensus.DurableStateMachine); durable {
+		serr := origin(coreconsensus.StateMachineFailed,
+			errs.String("why", "a durable machine refused a restore it may have written"),
+			errs.String("id", m.ID), errs.String("cause", err.Error()))
+		n.stop(serr, false)
+		return serr
+	}
+	//: an install's refusal holds apply until a restore succeeds.
+	if install {
+		n.am.Lock()
+		n.unvouched.on = true
+		n.am.Unlock()
+	}
+	return err
 }
 
 // idNamesPosition reports whether a snapshot id of the form a cut writes,

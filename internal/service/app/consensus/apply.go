@@ -130,7 +130,7 @@ func (n *Node) restoreItem(r *restoreReq) {
 		n.holdPublishedLocked(applied)
 	}
 	n.am.Unlock()
-	err := n.restoreFrom(r.meta, applied)
+	err := n.restoreFrom(r.meta, applied, true)
 	//: a failed restore moved nothing raft would take: its hold goes with it.
 	if err != nil && r.hold {
 		n.releasePublished()
@@ -152,27 +152,51 @@ func (n *Node) applyItems(items []applyItem) bool {
 		// released them, and raft handed more meanwhile (#664).
 		it := items[k]
 		items[k] = applyItem{}
-		if it.restore != nil {
-			n.restoreItem(it.restore)
-			continue
-		}
-		if it.save != nil {
-			n.save(it.save)
-			continue
-		}
-		if it.cut {
-			n.forceCut()
-			continue
-		}
-		if it.compact {
-			n.afterCut()
-			continue
-		}
-		if !n.applyHanded(&it) {
+		//: an item that ended the goroutine ends the batch.
+		if !n.applyItem(&it) {
 			return false
 		}
 	}
 	return true
+}
+
+// applyItem runs one item taken from the apply queue. A machine a refused
+// restore left on a prefix takes nothing but a restore: no entry is applied
+// over it, and no cut or save captures it; the other items wait, in order,
+// for a restore that succeeds, which runs them (#1582). It returns false
+// when the apply goroutine must end.
+func (n *Node) applyItem(it *applyItem) bool {
+	switch {
+	//: a restore runs whatever the machine holds, and one that ended a hold runs what it kept.
+	case it.restore != nil:
+		n.restoreItem(it.restore)
+		return n.unvouched.on || n.applyHeldItems()
+	//: an unvouched machine keeps the item for after the next restore.
+	case n.unvouched.on:
+		n.unvouched.items = append(n.unvouched.items, *it)
+	//: an operator's save.
+	case it.save != nil:
+		n.save(it.save)
+	//: a cut a peer or a trigger asked for.
+	case it.cut:
+		n.forceCut()
+	//: a compaction a pin's end allowed.
+	case it.compact:
+		n.afterCut()
+	//: entries raft handed, in memory or to read back.
+	default:
+		return n.applyHanded(it)
+	}
+	return true
+}
+
+// applyHeldItems runs the items a refused restore held back, once a
+// restore succeeded: the entries it covers are skipped, the others applied
+// over its state. It returns false when the apply goroutine must end.
+func (n *Node) applyHeldItems() bool {
+	held := n.unvouched.items
+	n.unvouched.items = nil
+	return n.applyItems(held)
 }
 
 // applyHanded applies what raft handed in one item, entries in memory or a
@@ -452,7 +476,8 @@ func (n *Node) keptResult(index uint64) (applyResult, bool) {
 // no other: a caller is woken once, when its wait is over, never to check
 // again (#1109). The caller holds am.
 func (n *Node) releaseApplied() {
-	if n.appliedQ == nil {
+	//: no caller is released over a machine a refused restore left unvouched (#1582).
+	if n.appliedQ == nil || n.unvouched.on {
 		return
 	}
 	for {
@@ -474,7 +499,8 @@ func (n *Node) releaseApplied() {
 // takes its waiter out of the queue (#1109).
 func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
 	n.am.Lock()
-	if n.applied >= index {
+	//: an applied index returns at once, unless a refused restore left the machine unvouched.
+	if n.applied >= index && !n.unvouched.on {
 		n.am.Unlock()
 		return true
 	}
@@ -493,7 +519,7 @@ func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
 	n.am.Lock()
 	defer n.am.Unlock()
 	n.appliedQ.Remove(h)
-	return n.applied >= index
+	return n.applied >= index && !n.unvouched.on
 }
 
 // unsupportedKind stops a node that meets an entry kind it does not know

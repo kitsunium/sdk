@@ -1271,6 +1271,8 @@ files:
       - (*Node).applyLoop
       - (*Node).restoreItem
       - (*Node).applyItems
+      - (*Node).applyItem
+      - (*Node).applyHeldItems
       - (*Node).applyHanded
       - (*Node).applyRead
       - (*Node).readBack
@@ -1810,6 +1812,7 @@ files:
       - fwdSpan
       - snapState
       - applyResult
+      - unvouchedApply
       - appliedWaiter
       - proposal
       - (*proposal).isSession
@@ -2309,6 +2312,7 @@ files:
       - cutRetryMin
       - Latest
       - (*Node).restoreFrom
+      - (*Node).restoreRefused
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
@@ -8203,6 +8207,11 @@ types:
         type: int
       - name: pubHold
         type: uint64
+      - doc: |-
+          unvouched holds apply after an install's Restore refused its stream
+          (#1582).
+        name: unvouched
+        type: unvouchedApply
       - name: waiters
         type: map[uint64]*proposal
       - doc: |-
@@ -8449,6 +8458,23 @@ types:
           entry stopped it.
         name: applyItems
         params: items []applyItem
+        recv: n *Node
+        results: bool
+      - doc: |-
+          applyItem runs one item taken from the apply queue. A machine a refused
+          restore left on a prefix takes nothing but a restore: no entry is applied
+          over it, and no cut or save captures it; the other items wait, in order,
+          for a restore that succeeds, which runs them (#1582). It returns false
+          when the apply goroutine must end.
+        name: applyItem
+        params: it *applyItem
+        recv: n *Node
+        results: bool
+      - doc: |-
+          applyHeldItems runs the items a refused restore held back, once a
+          restore succeeded: the entries it covers are skipped, the others applied
+          over its state. It returns false when the apply goroutine must end.
+        name: applyHeldItems
         recv: n *Node
         results: bool
       - doc: |-
@@ -10486,9 +10512,28 @@ types:
         results: "*raft.SessionTable"
       - doc: |-
           restoreFrom verifies a snapshot's digest, then restores the state machine
-          from it, serialised with Apply.
+          from it, serialised with Apply. install says the restore is a running
+          node's, on the apply goroutine, rather than a start's: a Restore it
+          refuses holds apply until another succeeds (restoreRefused).
         name: restoreFrom
-        params: m coreconsensus.SnapshotMetaValue, durIdx uint64
+        params: m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool
+        recv: n *Node
+        results: error
+      - doc: |-
+          restoreRefused is what a Restore that returned err leaves the node. The
+          engine cannot tell a machine that read aside and kept its state from one
+          that decoded part of the stream into its live state and failed: the
+          machine may hold a prefix of the snapshot no correct node holds (#1582).
+          VERSION_UNSUPPORTED is returned as is: the install, or the start, stops
+          on it (D18). A DurableStateMachine may have written that prefix to its
+          disk, where a restart resumes past its AppliedPosition: the node stops
+          STATE_MACHINE_FAILED, as when a nil Restore's end is refused, and a
+          start fails with it. A volatile machine's refusal, at an install, holds
+          apply until a Restore succeeds: the entries handed after it wait, and the
+          next offer's restore replaces the state they would have been applied
+          over. A start's refusal falls back as before.
+        name: restoreRefused
+        params: m *coreconsensus.SnapshotMetaValue, err error, install bool
         recv: n *Node
         results: error
       - doc: |-
@@ -10997,6 +11042,25 @@ types:
         type: any
     kind: struct
     name: applyResult
+  - doc: |-
+      unvouchedApply is the hold an install's refused Restore puts on apply:
+      the machine may hold a prefix it wrote in place, so no entry is applied
+      onto it and no Barrier or WaitApplied caller is released over it until a
+      Restore succeeds (#1582).
+    fields:
+      - doc: |-
+          on is set by the refusal and cleared by a Restore that succeeds, on
+          the apply goroutine, under am.
+        name: "on"
+        type: bool
+      - doc: |-
+          items are the apply items taken while on, in their order, run once
+          a Restore succeeded. Raft hands no more than MaxApplyLagBytes of
+          payload meanwhile. The apply goroutine's alone.
+        name: items
+        type: "[]applyItem"
+    kind: struct
+    name: unvouchedApply
   - doc: |-
       appliedWaiter is one caller parked until index is applied: ch, one slot,
       receives its release.

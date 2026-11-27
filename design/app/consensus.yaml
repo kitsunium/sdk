@@ -62,8 +62,9 @@ packages:
       - const:
           - doc: |-
               CodeStateMachineFailed identifies a node whose Apply panicked or could not
-              complete — the entry IS committed — or whose Restore returned nil on
-              a snapshot whose end the engine then refused. Before an operator
+              complete — the entry IS committed —, whose Restore returned nil on
+              a snapshot whose end the engine then refused, or whose
+              DurableStateMachine refused a Restore. Before an operator
               clears the stop marker this leaves, a DurableStateMachine must be
               verified or rebuilt: the next start trusts its AppliedPosition.
             name: CodeStateMachineFailed
@@ -727,7 +728,16 @@ packages:
               format this build does not read: the node stops, as for an entry
               kind it does not know, and a restart over that snapshot is refused
               (D18). Any other error refuses that one install, and the leader
-              offers a snapshot again. A machine reads r to io.EOF: after it
+              offers a snapshot again. The engine cannot tell a refusal that left
+              the state as it was from one that wrote part of the stream into it,
+              so it assumes the second: the node applies no entry, and releases
+              no Barrier or WaitApplied, until a later Restore succeeds and
+              replaces the whole state. A machine that builds the new state aside
+              and swaps it in only on success loses nothing by it. A
+              DurableStateMachine may have written that part to its disk, where
+              the next start would resume past its AppliedPosition: its refusal
+              stops the node with STATE_MACHINE_FAILED, and a start whose Restore
+              it refuses fails with it. A machine reads r to io.EOF: after it
               returns, the engine reads what it left, and checks the stream's
               sizes and SHA-256 against the metadata. A Restore that returns nil
               on a stream whose end is then refused leaves the machine on a
@@ -1244,9 +1254,11 @@ packages:
               while the applied position stays below it. Whatever failed the read
               after that nil, an I/O error included, is this code: the failing
               cause survives only in the stop's text, and the stop marker is
-              permanent. Before an operator clears that marker, a
-              DurableStateMachine must be verified or rebuilt, because the next
-              start trusts its AppliedPosition.
+              permanent. It stops a node, or fails its start, whose
+              DurableStateMachine refused a Restore too: the machine may have
+              written part of the snapshot to its disk. Before an operator clears
+              that marker, a DurableStateMachine must be verified or rebuilt,
+              because the next start trusts its AppliedPosition.
             exit: UNAVAILABLE
             name: StateMachineFailed
             private: "core/app/consensus: Apply panicked or could not complete; the entry is committed and the node stopped applying"

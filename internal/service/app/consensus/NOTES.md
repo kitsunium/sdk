@@ -1672,7 +1672,7 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   failed restore lets it go on the applier. A start restores with no hold:
   `newRaft` builds raft on the snapshot before its first publish.
   `WaitApplied` and `Barrier` read `applied`, never the published value, and
-  are not delayed (`TestAnInstallPublishesItsAppliedPositionWithItsConfiguration`,
+  are not delayed but by a refused restore (#1582) (`TestAnInstallPublishesItsAppliedPositionWithItsConfiguration`,
   `TestAStartOnASnapshotPublishesItsAppliedPositionWithItsConfiguration`,
   `TestARefusedRestoreDoesNotHoldThePublishedAppliedPosition`). Until then
   `TestANodeThatInstallsASnapshotRefusesItsRetiredKeys`, which waits for
@@ -1698,8 +1698,8 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   256 MiB, and the comparison is lost in the noise (311 ms against 316 ms
   for 256 MiB of random data, 1.56 s against 1.54 s for text). A machine
   that consumed the cut stream before it failed holds what it read: as for
-  any failed `Restore`, the copy is removed, nothing moves, and the next
-  restore replaces the state.
+  any failed `Restore`, the copy is removed, nothing moves, apply waits, and
+  the next restore replaces the state (see the next bullet but one).
 - Refuse, and keep running, a restore whose `Restore` returned nil before
   its end was refused: the machine accepted the stream and may hold the
   snapshot's state N while `applied` stays at A. A machine that stops at the
@@ -1718,6 +1718,35 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   a memory log, which writes no marker; the marker's write for
   STATE_MACHINE_FAILED and the refusal of the next start are held by
   `TestDataDirLockAndStopMarkers`, on a file log, apart from the install.
+- Apply an entry, cut, save or release a `Barrier` or `WaitApplied` over a
+  machine whose `Restore` refused an install's stream: the engine cannot
+  tell a machine that read aside and kept its state from one that decoded
+  part of the stream into its live state, so it assumes the second. The
+  entries (A, match] handed after the restore item were applied over that
+  prefix, a state no correct node holds, and a durable machine recorded
+  their positions with it, which a restart resumed after (#1582).
+  `restoreRefused` sets `unvouched.on`: `applyItem` keeps every item but a
+  restore in `unvouched.items`, in order, `releaseApplied` releases no caller and
+  `waitApplied` answers no index, until a restore succeeds and clears it;
+  the held items then run, those the snapshot covers skipped. The leader
+  offers a snapshot again, as for any refused restore, and raft hands no
+  more than `MaxApplyLagBytes` meanwhile; `Status().Applied` stays at A, the
+  position the published hold of #1584 gives back, and a stop meanwhile
+  answers the parked callers NODE_STOPPED. A `DurableStateMachine`'s refusal
+  stops the node STATE_MACHINE_FAILED instead, at an install or a start,
+  through `n.stop` as above: the prefix may be on its disk. A start's
+  volatile refusal still falls back to an older snapshot, or to a replay
+  from index 1, onto whatever the machine holds: a machine that writes in
+  place is not safe there (`TestAFailedRestoreAppliesNothingUntilARestoreSucceeds`,
+  `TestADurableRestoreRefusedAtStartStopsTheNode`). A machine is written so
+  that a failed `Restore` loses nothing: it decodes the stream into a new
+  state of its own — a map, a temporary file or table — and swaps it in, a
+  pointer under its lock or a rename, only once the whole stream decoded and
+  `r` reached `io.EOF`; on any error it drops the new state and returns,
+  the old one untouched. The tests' `kv` and `machine/`'s `KV` read aside.
+  `machine/`'s `SQL` restores in one transaction and so loses nothing
+  either, yet, a `DurableStateMachine`, its refusal stops the node: the
+  engine has no word from a machine that its `Restore` is atomic.
   Before an operator clears that marker, a `DurableStateMachine` must be
   verified or rebuilt: the next start trusts its `AppliedPosition`, and the
   machine accepted a state the engine never vouched for. The cause is not

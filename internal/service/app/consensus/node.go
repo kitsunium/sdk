@@ -128,7 +128,10 @@ type Node struct {
 	// hold: raft is built on the snapshot before the first publish.
 	pubHolds int
 	pubHold  uint64
-	waiters  map[uint64]*proposal
+	// unvouched holds apply after an install's Restore refused its stream
+	// (#1582).
+	unvouched unvouchedApply
+	waiters   map[uint64]*proposal
 	// appliedQ holds the Barrier and WaitApplied callers parked on an
 	// index not yet applied, lowest first: an applied entry releases only
 	// those it reaches, O(1) when none is due (#1109). nil until the first
@@ -336,6 +339,20 @@ type applyResult struct {
 	index uint64
 	term  uint64
 	val   any
+}
+
+// unvouchedApply is the hold an install's refused Restore puts on apply:
+// the machine may hold a prefix it wrote in place, so no entry is applied
+// onto it and no Barrier or WaitApplied caller is released over it until a
+// Restore succeeds (#1582).
+type unvouchedApply struct {
+	// on is set by the refusal and cleared by a Restore that succeeds, on
+	// the apply goroutine, under am.
+	on bool
+	// items are the apply items taken while on, in their order, run once
+	// a Restore succeeded. Raft hands no more than MaxApplyLagBytes of
+	// payload meanwhile. The apply goroutine's alone.
+	items []applyItem
 }
 
 // appliedWaiter is one caller parked until index is applied: ch, one slot,
@@ -876,7 +893,7 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 			}
 			continue
 		}
-		rerr := n.restoreFrom(m, durIdx)
+		rerr := n.restoreFrom(m, durIdx, false)
 		if rerr == nil {
 			return m, failed, newest, nil
 		}

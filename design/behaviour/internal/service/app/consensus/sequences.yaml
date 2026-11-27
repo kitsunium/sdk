@@ -138,7 +138,7 @@ sequences:
       - eval: n.am.Unlock()
         to: n.am.Unlock
       - bind: err
-        eval: n.restoreFrom(r.meta, applied)
+        eval: n.restoreFrom(r.meta, applied, true)
         to: n.restoreFrom
       - opt:
           do:
@@ -148,11 +148,11 @@ sequences:
       - send:
           chan: r.done
           value: err
-  - of: (*Node).applyItems
+  - of: (*Node).applyItem
     participants:
       - id: caller
         kind: actor
-      - id: (*Node).applyItems
+      - id: (*Node).applyItem
         kind: self
       - id: n.restoreItem
         kind: internal
@@ -162,48 +162,52 @@ sequences:
         kind: internal
       - id: n.afterCut
         kind: internal
+      - id: n.applyHanded
+        kind: internal
     steps:
-      - loop:
-          do:
-            - opt:
-                do:
-                  - return: "false"
-                when: n.stopped.Load()
-            - bind: it
-              eval: items[k]
-            - set: items[k]
-              value: applyItem{}
-            - opt:
-                do:
-                  - eval: n.restoreItem(it.restore)
-                    to: n.restoreItem
-                  - continue: true
-                when: it.restore != nil
-            - opt:
-                do:
-                  - eval: n.save(it.save)
-                    to: n.save
-                  - continue: true
-                when: it.save != nil
-            - opt:
-                do:
-                  - eval: n.forceCut()
-                    to: n.forceCut
-                  - continue: true
-                when: it.cut
-            - opt:
-                do:
-                  - eval: n.afterCut()
-                    to: n.afterCut
-                  - continue: true
-                when: it.compact
-            - opt:
-                do:
-                  - return: "false"
-                when: "!n.applyHanded(&it)"
-          key: k
-          range: items
+      - switch:
+          cases:
+            - case: it.restore != nil
+              do:
+                - eval: n.restoreItem(it.restore)
+                  to: n.restoreItem
+                - return: n.unvouched.on || n.applyHeldItems()
+            - case: n.unvouched.on
+              do:
+                - set: n.unvouched.items
+                  value: append(n.unvouched.items, *it)
+            - case: it.save != nil
+              do:
+                - eval: n.save(it.save)
+                  to: n.save
+            - case: it.cut
+              do:
+                - eval: n.forceCut()
+                  to: n.forceCut
+            - case: it.compact
+              do:
+                - eval: n.afterCut()
+                  to: n.afterCut
+            - default: true
+              do:
+                - return: n.applyHanded(it)
+                  to: n.applyHanded
       - return: "true"
+  - of: (*Node).applyHeldItems
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).applyHeldItems
+        kind: self
+      - id: n.applyItems
+        kind: internal
+    steps:
+      - bind: held
+        eval: n.unvouched.items
+      - set: n.unvouched.items
+        value: nil
+      - return: n.applyItems(held)
+        to: n.applyItems
   - of: (*Node).applyHanded
     participants:
       - id: caller
@@ -706,7 +710,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: n.appliedQ == nil
+          when: n.appliedQ == nil || n.unvouched.on
       - loop:
           do:
             - bind: w, _, ok
@@ -750,7 +754,7 @@ sequences:
             - eval: n.am.Unlock()
               to: n.am.Unlock
             - return: "true"
-          when: n.applied >= index
+          when: n.applied >= index && !n.unvouched.on
       - opt:
           do:
             - set: n.appliedQ
@@ -775,7 +779,7 @@ sequences:
           mutex: n.am
       - eval: n.appliedQ.Remove(h)
         to: n.appliedQ.Remove
-      - return: n.applied >= index
+      - return: n.applied >= index && !n.unvouched.on
   - of: unsupportedKind
     participants:
       - id: caller
@@ -11596,7 +11600,7 @@ sequences:
                   - continue: true
                 when: termless(&m)
             - bind: rerr
-              eval: n.restoreFrom(m, durIdx)
+              eval: n.restoreFrom(m, durIdx, false)
               to: n.restoreFrom
             - opt:
                 do:
@@ -23353,6 +23357,8 @@ sequences:
         kind: internal
       - id: n.cfg.Machine.Restore
         kind: value
+      - id: n.restoreRefused
+        kind: internal
       - id: io
         kind: stdlib
       - id: n.stop
@@ -23420,7 +23426,8 @@ sequences:
               eval: "&snapshotReader{cr: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes), meta: m}"
             - opt:
                 do:
-                  - return: err
+                  - return: n.restoreRefused(&m, err, install)
+                    to: n.restoreRefused
                 init:
                   bind: err
                   eval: n.cfg.Machine.Restore(sr, m)
@@ -23456,6 +23463,8 @@ sequences:
               to: n.am.Lock
             - set: n.applied, n.appliedTerm
               value: m.Position.Index, m.Position.Term
+            - set: n.unvouched.on
+              value: "false"
             - eval: n.answerCovered(m.Position.Index)
               to: n.answerCovered
             - eval: n.releaseApplied()
@@ -23470,6 +23479,50 @@ sequences:
       - eval: n.snapState.mu.Unlock()
         to: n.snapState.mu.Unlock
       - return: nil
+  - of: (*Node).restoreRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).restoreRefused
+        kind: self
+      - id: origin
+        kind: internal
+      - id: n.stop
+        kind: internal
+      - id: n.am.Lock
+        kind: value
+      - id: n.am.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: err
+          when: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
+      - opt:
+          do:
+            - bind: serr
+              eval: |-
+                origin(coreconsensus.StateMachineFailed,
+                			errs.String("why", "a durable machine refused a restore it may have written"),
+                			errs.String("id", m.ID), errs.String("cause", err.Error()))
+              to: origin
+            - eval: n.stop(serr, false)
+              to: n.stop
+            - return: serr
+          init:
+            bind: _, durable
+            eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
+          when: durable
+      - opt:
+          do:
+            - eval: n.am.Lock()
+              to: n.am.Lock
+            - set: n.unvouched.on
+              value: "true"
+            - eval: n.am.Unlock()
+              to: n.am.Unlock
+          when: install
+      - return: err
   - of: idNamesPosition
     participants:
       - id: caller
