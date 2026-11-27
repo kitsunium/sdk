@@ -410,7 +410,7 @@ func TestWaitWindow_interrupted(t *testing.T) {
 
 // TestProbeVerdict holds the decision of the self-test's wait: an interruption
 // to the end with nothing reaped is refused naming EINTR, in the text and in the
-// errno; a completion reaped despite a last EINTR is not refused, and an ETIME
+// errno, and so is any other refusal of the wait (EBUSY); a completion reaped despite a last EINTR is not refused, and an ETIME
 // with nothing is left to the caller's own refusal (#1580).
 func TestProbeVerdict(t *testing.T) {
 	type tc struct {
@@ -438,6 +438,8 @@ func TestProbeVerdict(t *testing.T) {
 	for _, c := range []tc{
 		{name: "interrupted to the end, nothing reaped", werr: syscall.EINTR, wantWhy: true, wantErrno: syscall.EINTR},
 		{name: "a completion reaped despite a last EINTR", got: cqe{userData: pudProbe, res: 3}, werr: syscall.EINTR},
+		{name: "refused wait, nothing reaped", werr: syscall.EBUSY, wantWhy: true, wantErrno: syscall.EBUSY},
+		{name: "refused wait, a completion reaped", got: cqe{userData: pudProbe, res: 3}, werr: syscall.EBUSY},
 		{name: "ETIME, nothing reaped", werr: errnoETIME},
 		{name: "woken, nothing reaped", werr: 0},
 	} {

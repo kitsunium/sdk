@@ -501,17 +501,30 @@ func (lp *packetLane) probeOne(rx, tx int) (cqe, string, syscall.Errno) {
 }
 
 // probeVerdict is what the self-test's wait decides: a reason and the errno
-// behind it when nothing came and the wait never ran its course, which is not a
+// behind it when nothing came and the wait never ran its course — interrupted to
+// its end (EINTR) or refused by the kernel (EBUSY for instance) — which is not a
 // kernel without the lane; empty otherwise, a completion reaped despite a last
-// EINTR and an ETIME with nothing alike, the caller judging what was reaped.
+// errno and an ETIME or a wake with nothing alike, the caller judging what was
+// reaped.
 func probeVerdict(got cqe, werr syscall.Errno) (string, syscall.Errno) {
-	//: nothing came and the wait was interrupted to its end.
-	if got.userData != pudProbe && werr == syscall.EINTR {
+	//: a completion was reaped, whatever the wait ended on.
+	if got.userData == pudProbe {
+		//: no verdict of its own.
+		return "", 0
+	}
+	//: what the wait ended on with nothing reaped.
+	switch werr {
+	//: the window ran out or a wake found nothing: the caller's own refusal.
+	case 0, errnoETIME:
+		//: no verdict of its own.
+		return "", 0
+	//: interrupted to its end.
+	case syscall.EINTR:
 		//: named, with its errno.
 		return "multishot RECVMSG: the wait was interrupted (" + werr.Error() + ") for the whole 200 ms", werr
 	}
-	//: no verdict of its own.
-	return "", 0
+	//: the kernel refused the wait, so the window never ran.
+	return "multishot RECVMSG: the wait was refused (" + werr.Error() + ")", werr
 }
 
 // waitWindow waits through window with enter, which is one wait bounded by the
