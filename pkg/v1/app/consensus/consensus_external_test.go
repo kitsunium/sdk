@@ -2,6 +2,7 @@ package consensus_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -64,85 +65,147 @@ func closeAtCleanup(t *testing.T, n closer) {
 }
 
 // TestFacadeThreeNodesInMemory runs three nodes through the facade alone.
+// A Barrier on node 0 follows a write the cluster committed: node 0 may not
+// know the leader yet, the write needing only the two others, and its read
+// is then NOT_LEADER, which NotLeader documents as safe to retry. The second
+// case holds node 0 out of the election until the write commits, the order a
+// loaded runner produced (a Barrier asked before any frame of the leader
+// reached it), so the retry is exercised on every run.
 func TestFacadeThreeNodesInMemory(t *testing.T) {
-	net := consensus.NewMemoryNetwork()
-	cluster := consensus.ClusterID{9}
-	type nodeParts struct {
-		log   *consensus.MemoryLog
-		snaps *consensus.MemorySnapshots
-		id    consensus.NodeID
+	type tc struct {
+		name string
+		// isolated keeps node 0 cut from the others until the write commits.
+		isolated bool
 	}
-	var parts []nodeParts
-	var members []consensus.MemberValue
-	for i := range 3 {
-		p := nodeParts{log: consensus.NewMemoryLog(), snaps: consensus.NewMemorySnapshots()}
-		slot := fmt.Sprintf("s%d", i)
-		id, inc, err := consensus.InitLog(p.log, cluster, slot)
-		if err != nil {
-			t.Fatal(err)
-		}
-		p.id = id
-		parts = append(parts, p)
-		members = append(members, consensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: consensus.MemorySPKI(id), Voter: true})
+	cases := []tc{
+		{name: "every node takes part in the election"},
+		{name: "the barrier node hears no leader before the write commits", isolated: true},
 	}
-	timing := consensus.TimingContractSpec{
-		HeartbeatInterval:  10 * time.Millisecond,
-		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond,
+	runCase := func(t *testing.T, c tc) {
+		net := consensus.NewMemoryNetwork()
+		cluster := consensus.ClusterID{9}
+		type nodeParts struct {
+			log   *consensus.MemoryLog
+			snaps *consensus.MemorySnapshots
+			tr    *consensus.MemoryTransport
+			id    consensus.NodeID
+		}
+		var parts []nodeParts
+		var members []consensus.MemberValue
+		for i := range 3 {
+			p := nodeParts{log: consensus.NewMemoryLog(), snaps: consensus.NewMemorySnapshots()}
+			slot := fmt.Sprintf("s%d", i)
+			id, inc, err := consensus.InitLog(p.log, cluster, slot)
+			//: a log that cannot be initialised builds no cluster.
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.id = id
+			p.tr = consensus.NewMemoryTransport(net, id)
+			parts = append(parts, p)
+			members = append(members, consensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: consensus.MemorySPKI(id), Voter: true})
+		}
+		//: node 0 is cut before any node runs, so it hears no frame of the election.
+		if c.isolated {
+			net.Isolate(parts[0].id, true)
+		}
+		timing := consensus.TimingContractSpec{
+			HeartbeatInterval:  10 * time.Millisecond,
+			ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond,
+		}
+		var nodes []*consensus.Node
+		for _, p := range parts {
+			cfg := consensus.Config{
+				Cluster: cluster, Machine: &counter{}, Durability: consensus.DurabilityVolatile,
+				Log: p.log, Snapshots: p.snaps, Transport: p.tr, InitialTiming: timing,
+				MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30, MinVoters: 3,
+			}
+			//: a node that cannot be bootstrapped builds no cluster.
+			if err := consensus.Bootstrap(context.Background(), &cfg, members); err != nil {
+				t.Fatal(err)
+			}
+			n, err := consensus.NewNode(cfg)
+			//: a node that cannot be built builds no cluster.
+			if err != nil {
+				t.Fatal(err)
+			}
+			closeAtCleanup(t, n)
+			nodes = append(nodes, n)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		// The proposers are the nodes that can reach a majority: all three,
+		// or the two others while node 0 is cut.
+		proposers := nodes
+		//: node 0 alone proposes nothing while it is cut.
+		if c.isolated {
+			proposers = nodes[1:]
+		}
+		var sum int
+		var err error
+		//: a proposal is retried until a leader is elected and takes it.
+		for i := 0; ; i++ {
+			_, sum, err = consensus.ProposeAs[int](ctx, proposers[i%len(proposers)], []byte("abc"))
+			//: the write committed.
+			if err == nil {
+				break
+			}
+			//: no leader took it within the test's bound.
+			if ctx.Err() != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		//: the counter applied the one write.
+		if sum != 3 {
+			t.Fatalf("sum %d", sum)
+		}
+		//: node 0 joins the cluster again once the write is committed.
+		if c.isolated {
+			net.Isolate(parts[0].id, false)
+		}
+		// Barrier is the contract: its token is the applied index once it
+		// returns. A node that does not know the leader yet refuses the read
+		// with NOT_LEADER, safe to retry, as the proposals above are retried;
+		// any other refusal fails the test. Status is the node's view after
+		// its LAST TURN, published by the loop while entries are applied on
+		// another goroutine, so it may trail the Barrier by one turn and is
+		// polled rather than read once.
+		var tok consensus.TokenValue
+		//: a read is retried while node 0 does not know the leader.
+		for {
+			tok, err = nodes[0].Barrier(ctx)
+			//: the read point is confirmed and applied.
+			if err == nil {
+				break
+			}
+			//: a refusal other than NOT_LEADER, or one past the bound, fails.
+			if !errors.Is(err, consensus.NotLeader) || ctx.Err() != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		//: the token covers the write committed before the Barrier.
+		if tok.Index < 3 {
+			t.Fatalf("barrier token %+v", tok)
+		}
+		//: Status is polled until it shows the leader and the write applied.
+		for {
+			st := nodes[0].Status()
+			//: node 0's published view caught up with its Barrier.
+			if st.Leader != 0 && st.Applied >= 3 {
+				break
+			}
+			//: the view never caught up within the test's bound.
+			if ctx.Err() != nil {
+				t.Fatalf("status %+v", st)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
-	var nodes []*consensus.Node
-	for _, p := range parts {
-		cfg := consensus.Config{
-			Cluster: cluster, Machine: &counter{}, Durability: consensus.DurabilityVolatile,
-			Log: p.log, Snapshots: p.snaps, Transport: consensus.NewMemoryTransport(net, p.id), InitialTiming: timing,
-			MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30, MinVoters: 3,
-		}
-		if err := consensus.Bootstrap(context.Background(), &cfg, members); err != nil {
-			t.Fatal(err)
-		}
-		n, err := consensus.NewNode(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		closeAtCleanup(t, n)
-		nodes = append(nodes, n)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var sum int
-	var err error
-	for i := 0; ; i++ {
-		_, sum, err = consensus.ProposeAs[int](ctx, nodes[i%3], []byte("abc"))
-		if err == nil {
-			break
-		}
-		if ctx.Err() != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if sum != 3 {
-		t.Fatalf("sum %d", sum)
-	}
-	// Barrier is the contract: its token is the applied index once it
-	// returns. Status is the node's view after its LAST TURN, published by
-	// the loop while entries are applied on another goroutine, so it may
-	// trail the Barrier by one turn and is polled rather than read once.
-	tok, err := nodes[0].Barrier(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tok.Index < 3 {
-		t.Fatalf("barrier token %+v", tok)
-	}
-	for {
-		st := nodes[0].Status()
-		if st.Leader != 0 && st.Applied >= 3 {
-			break
-		}
-		if ctx.Err() != nil {
-			t.Fatalf("status %+v", st)
-		}
-		time.Sleep(5 * time.Millisecond)
+	//: every case runs as its own subtest.
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
