@@ -352,6 +352,60 @@ func TestPacketLane_refusalNamesTheKernel(t *testing.T) {
 	}
 }
 
+// TestWaitWindow_interrupted drives the self-test's wait with an enter a signal
+// cuts short: it asks again with what is left of the window, never reads an
+// interruption as a window that passed with nothing, and says EINTR when the
+// whole window was interrupted (#1580). The kernel cannot be made to deliver the
+// signal at that instant, so the enter is the test's.
+func TestWaitWindow_interrupted(t *testing.T) {
+	const window = 50 * time.Millisecond
+	type tc struct {
+		name    string
+		answers []syscall.Errno
+		want    syscall.Errno
+		calls   int
+		// spent is whether the window must have run out.
+		spent bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		var asked []int64
+		start := time.Now()
+		got := waitWindow(window, func(ts *kernelTimespec) syscall.Errno {
+			asked = append(asked, ts.nsec)
+			//: one answer a call; the last stands for every later one.
+			return c.answers[min(len(asked), len(c.answers))-1]
+		})
+		//: the answer.
+		if got != c.want {
+			t.Fatalf("waitWindow = %v, want %v", got, c.want)
+		}
+		//: how many times it asked, when that is fixed.
+		if c.calls > 0 && len(asked) != c.calls {
+			t.Fatalf("asked %d times, want %d", len(asked), c.calls)
+		}
+		//: each ask is bounded by what the window had left, and positive.
+		for i, ns := range asked {
+			//: never past the window, never nothing.
+			if ns <= 0 || ns > int64(window) || (i > 0 && ns > asked[i-1]) {
+				t.Fatalf("ask %d waited %d ns of a %d ns window after %v", i, ns, int64(window), asked[:i])
+			}
+		}
+		//: an interrupted window ends with its time.
+		if elapsed := time.Since(start); c.spent && elapsed < window {
+			t.Fatalf("returned after %v of a %v window", elapsed, window)
+		}
+	}
+	for _, c := range []tc{
+		{name: "interrupted twice then woken", answers: []syscall.Errno{syscall.EINTR, syscall.EINTR, 0}, want: 0, calls: 3},
+		{name: "interrupted then the tick", answers: []syscall.Errno{syscall.EINTR, errnoETIME}, want: errnoETIME, calls: 2},
+		{name: "the tick", answers: []syscall.Errno{errnoETIME}, want: errnoETIME, calls: 1},
+		{name: "a refusal", answers: []syscall.Errno{syscall.EBUSY}, want: syscall.EBUSY, calls: 1},
+		{name: "interrupted to the end", answers: []syscall.Errno{syscall.EINTR}, want: syscall.EINTR, spent: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
 // openFDs is how many descriptors the process holds.
 func openFDs(t *testing.T) int {
 	t.Helper()

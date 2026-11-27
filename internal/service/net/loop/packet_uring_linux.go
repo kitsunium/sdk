@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -487,15 +488,41 @@ func (lp *packetLane) probeOne(rx, tx int) (cqe, string) {
 		//: named.
 		return cqe{}, "sendto: " + err.Error()
 	}
-	ts := kernelTimespec{nsec: packetProbeWait}
-	ring.wait(&ts, 1)
+	werr := waitWindow(time.Duration(packetProbeWait), func(ts *kernelTimespec) syscall.Errno { return ring.waitErrno(ts, 1) })
 	var got cqe
 	ring.reap(1, func(c *cqe) { got = *c })
 	prepCancelUserData(ring.get(), pudProbe, pudCancel)
 	ring.submit()
-	lp.awaitFinals(&ts)
+	lp.awaitFinals(new(kernelTimespec{nsec: packetProbeWait}))
+	//: nothing came and the wait never ran its course: not a kernel without the lane.
+	if got.userData != pudProbe && werr == syscall.EINTR {
+		//: named, with its errno.
+		return cqe{}, "multishot RECVMSG: the wait was interrupted (" + werr.Error() + ") for the whole 200 ms"
+	}
 	//: the first completion.
 	return got, ""
+}
+
+// waitWindow waits through window with enter, which is one wait bounded by the
+// timespec it is handed, and asks again with what remains of the window when a
+// signal cut it short: EINTR is the thread being interrupted — the runtime's
+// preemption signal is one — not a window that ran out without a completion.
+// It returns the last answer: ETIME or zero once the window ran its course or
+// a completion woke it, EINTR when it was interrupted to its end.
+func waitWindow(window time.Duration, enter func(*kernelTimespec) syscall.Errno) syscall.Errno {
+	deadline := time.Now().Add(window)
+	errno := syscall.Errno(0)
+	//: until the window's end.
+	for left := window; left > 0; left = time.Until(deadline) {
+		errno = enter(&kernelTimespec{nsec: int64(left)})
+		//: an answer other than an interruption is the wait's.
+		if errno != syscall.EINTR {
+			//: as answered.
+			return errno
+		}
+	}
+	//: interrupted to the end.
+	return errno
 }
 
 // awaitFinals reaps the self-test's cancel and its receive's last

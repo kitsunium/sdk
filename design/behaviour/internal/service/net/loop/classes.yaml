@@ -1213,7 +1213,8 @@ constants:
       - doc: |-
           pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
           buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
-          so no user page is pinned against RLIMIT_MEMLOCK.
+          so no user page of the process is pinned; from 6.14 the kernel's pages
+          are still charged to RLIMIT_MEMLOCK (mapBufRing).
         name: pbufRingMmap
         type: uint16
         value: "1"
@@ -1556,7 +1557,8 @@ constants:
           uringEntries is a serving ring's SQ size; CLAMP lets the kernel lower
           it, and the size it grants is read back from the params. A ring's SQ and
           CQ are charged to RLIMIT_MEMLOCK for a process without CAP_IPC_LOCK
-          (an 8 MiB default on most distributions), so they are sized to keep a
+          (an 8 MiB default on most distributions), and so is each provided-buffer
+          ring from 6.14 (mapBufRing), so they are sized to keep a
           few rings within it rather than to the largest burst: a full SQ submits
           inline, a full CQ overflows into the kernel's list (NODROP).
         name: uringEntries
@@ -2057,6 +2059,7 @@ files:
       - (*packetLane).mapArenas
       - (*packetLane).selfTest
       - (*packetLane).probeOne
+      - waitWindow
       - (*packetLane).awaitFinals
       - loopbackPair
       - closePair
@@ -2429,6 +2432,7 @@ files:
       - (*uring).pending
       - (*uring).submit
       - (*uring).wait
+      - (*uring).waitErrno
       - (*uring).ready
       - (*uring).reap
       - (*uring).completed
@@ -2912,6 +2916,16 @@ functions:
     name: refusal
     params: group, stage, why string, errno syscall.Errno
     results: error
+  - doc: |-
+      waitWindow waits through window with enter, which is one wait bounded by the
+      timespec it is handed, and asks again with what remains of the window when a
+      signal cut it short: EINTR is the thread being interrupted — the runtime's
+      preemption signal is one — not a window that ran out without a completion.
+      It returns the last answer: ETIME or zero once the window ran its course or
+      a completion woke it, EINTR when it was interrupted to its end.
+    name: waitWindow
+    params: window time.Duration, enter func(*kernelTimespec) syscall.Errno
+    results: syscall.Errno
   - doc: loopbackPair opens two UDP sockets on 127.0.0.1, the first bound.
     name: loopbackPair
     results: rx, tx int, why string
@@ -7986,6 +8000,20 @@ types:
         name: wait
         params: ts *kernelTimespec, want uint32
         recv: u *uring
+      - doc: |-
+          waitErrno is wait that says how the enter ended: zero when it submitted or
+          woke, ETIME for the tick, EINTR for a signal — the runtime's preemption
+          signal among them — and the kernel's refusal otherwise. A serving loop
+          ignores it, since it peeks the CQ whatever happened; the lane's self-test
+          reads it, because an enter a signal cut short has waited for nothing. An
+          enter that submitted SQEs is never answered EINTR: io_uring_enter returns
+          the count it submitted and drops the wait's error (io_uring/io_uring.c:
+          3372-3375 and 3421-3422, v6.14), so only an enter with nothing pending can
+          be cut, and asking again repeats nothing.
+        name: waitErrno
+        params: ts *kernelTimespec, want uint32
+        recv: u *uring
+        results: syscall.Errno
       - doc: ready is how many completions wait in the CQ.
         name: ready
         recv: u *uring
@@ -8046,12 +8074,19 @@ types:
         results: syscall.Errno
       - doc: |-
           mapBufRing registers group bgid's ring of count entries, with flags, and
-          maps it. It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a
-          ring in user pages is pinned and charged to RLIMIT_MEMLOCK, which an
-          unprivileged process runs out of after a few rings (CI's non-root lane
-          did). A kernel that does not know the flag (EINVAL) gets the ring in user
-          pages; with flags, an EINVAL is returned instead, since the kernel may
-          refuse those as well (a kernel with IOU_PBUF_RING_INC has MMAP).
+          maps it. It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): the
+          ring is then no user page the process pins and no mapping it must keep
+          within a limit of its own. Before 6.14 the kernel's pages were charged to
+          nothing; from 6.14 io_create_region accounts them to the user's
+          RLIMIT_MEMLOCK as it does a ring in user pages, for a process without
+          CAP_IPC_LOCK (io_uring/memmap.c:213-215 calls __io_account_mem, which
+          refuses past the limit with ENOMEM, io_uring/rsrc.c:35-52; the MMAP path of
+          io_register_pbuf_ring reaches it, io_uring/kbuf.c:662, v6.14), so the
+          refusal there is ENOMEM at buf_ring, which the caller names. Either way an
+          unprivileged process runs out after a few rings (CI's non-root lane did). A
+          kernel that does not know the flag (EINVAL) gets the ring in user pages;
+          with flags, an EINVAL is returned instead, since the kernel may refuse
+          those as well (a kernel with IOU_PBUF_RING_INC has MMAP).
         name: mapBufRing
         params: bgid uint16, count uint32, flags uint16
         recv: u *uring
