@@ -68,7 +68,8 @@ const (
 	// min_events, as the grouped wait asks — leaves it raised over an
 	// empty list until the next work comes (#1595). Work truly held in
 	// retry_llist is not what the bound lets through: the drain's plain wait,
-	// each batch's first step, runs the local work until one completion
+	// the wait of each batch that waits (a batch that does not wait reaps, which
+	// starts the count again), runs the local work until one completion
 	// posts (io_cqring_wait_schedule answers 1 while any is pending), so a
 	// recv held behind works that post nothing is run by the next batch's
 	// wait at the latest, and its completion starts the count again. Each
@@ -227,7 +228,8 @@ type uRing struct {
 	// heldIdle is how many batches running the catch-up reaped nothing and
 	// ended behind on IORING_SQ_TASKRUN alone (heldBatches); heldMark the
 	// ring's completions when it last counted, so a reap that brought
-	// anything since starts the count again.
+	// anything since, or a round that reads the flag clear (readHeld), starts
+	// the count again.
 	heldIdle int
 	heldMark uint64
 	// promise is rearmStarved's scratch: each group's buffers not yet

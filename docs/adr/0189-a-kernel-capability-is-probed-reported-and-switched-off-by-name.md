@@ -633,7 +633,7 @@ therefore keeps a ring behind for `heldBatches` (4, `reapRounds`)
 consecutive batches that reap nothing on it, then the ring is caught up; any
 reap that brings something, and any round that reads the flag clear, starts the
 count again. What keeps a held recv from crossing the bound is not the count
-but the drain's plain wait, a batch's first step: it runs the local work until
+but the drain's plain wait of each batch that waits (a batch that does not wait reaps, which starts the count again): it runs the local work until
 one completion posts (`io_cqring_wait_schedule` answers 1 while any is
 pending), so a recv held behind works that post nothing runs by the next
 batch's wait at the latest; each GETEVENTS enter besides runs at least 20. `KITSUNIUM_NET_DISABLE=uring-taskrun-flag` reads

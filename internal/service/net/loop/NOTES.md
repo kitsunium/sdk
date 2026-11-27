@@ -153,7 +153,7 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   reap nothing on the ring, then the ring is caught up whatever it reads
   (`uRing.heldIdle`, started again by any reap that brings something, and by
   a round that reads the flag clear): what keeps a held recv from crossing
-  that bound is the drain's plain wait, each batch's first step, which runs
+  that bound is the drain's plain wait of each batch that waits (a batch that does not wait reaps, which starts the count again), which runs
   the local work until one completion posts (`io_cqring_wait_schedule`
   answers 1 while any is pending, v6.13:2487), so a recv held behind works
   that post nothing runs by the next batch's wait at the latest and its
