@@ -129,7 +129,27 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
   cuts leaves its ring as `reapRings`' cut does: counted, `cutAt` set so the
   next batch reaps it without waiting, the rings after it behind — else a
   cut secondary waited on an empty primary for its tick
-  (`TestURingCatchUp_cutLeavesTheRingNext`, ADR 0206). The drain's look (`settleDrain`, then
+  (`TestURingCatchUp_cutLeavesTheRingNext`, ADR 0206). On 6.13 and later the
+  catch-up's "caught up" is an approximation (#1541 safety review, R1): one
+  GETEVENTS enter runs at most `IO_LOCAL_TW_DEFAULT_MAX` (20) task works,
+  the rest kept in `retry_llist`, and the bound counts works, not
+  completions; twenty in a row that post nothing (a poll wake-up back to
+  EAGAIN: an accept another ring won, a wake-up with no data) make a round
+  that reaps nothing while a recv still waits behind them, and a connection
+  at its `drainQuiet` mark would be judged silent. The exact criterion is
+  `IORING_SETUP_TASKRUN_FLAG`, `IORING_SQ_TASKRUN` read after the enter:
+  since 6.13 `io_run_local_work_continue` sets it again while work remains.
+  It is not taken here: a new setup flag goes through ADR 0189's probe
+  descent and its registry, and the case needs both such a burst and a
+  connection at the 1 s mark, the `Shutdown` context still the bound. The
+  CI legs that run this package on such kernels — `fedora-kernel` (6.14)
+  and the runner's own (7.0) — are where its test would run; a 6.12 host
+  has no `retry_llist`. Under epoll, `driver.unread` (SIOCINQ, `tcp_inq`)
+  undercounts when TCP urgent data not inline has its mark at the head
+  (`urg_seq == copied_seq`): the bytes behind the mark are not counted, and
+  the connection reads as silent (#1541 safety review, R3). It is the
+  base's behaviour, narrowed to a client that sends `MSG_OOB` during a
+  drain. The drain's look (`settleDrain`, then
   `closeSettled`) runs once `OnBatchEnd` has returned, before `endBatch`
   flushes: an answer written at `OnBatchEnd` is queued before the close is
   marked, and a closing slot finishes only once its output left (#1385).
