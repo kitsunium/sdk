@@ -33,6 +33,9 @@ type progressWatch struct {
 	// leads: that hand-off did not complete, and the next one goes to
 	// another voter when there is one (#674).
 	to coreconsensus.NodeID
+	// resorts is the count of raft's last-resort transfers last seen
+	// (Summary's ForwardResortTransfers, #1540).
+	resorts uint64
 }
 
 // watchProgress hands the leadership to the most up-to-date voter once
@@ -52,6 +55,7 @@ func (n *Node) watchProgress(now time.Time) {
 	limit := st.Timing.ElectionTimeoutMax
 	cutting := n.cutExempt(now, limit)
 	n.watchApplied(applied, st.Commit)
+	n.warnResortTransfer(&st)
 	if st.Role != coreconsensus.RoleLeader {
 		w.stable, w.applied, w.stableAt, w.appliedAt, w.to = st.Stable, applied, now, now, 0
 		return
@@ -74,6 +78,18 @@ func (n *Node) watchProgress(now time.Time) {
 	}
 	// The memberships are read, and cloned, only for a hand-over (#912).
 	n.handOver(now, new(n.r.Status()), applied, stuckApply)
+}
+
+// warnResortTransfer logs, once each, a transfer raft started at the
+// forward fence's last resort (#1540), as handOver logs its own.
+func (n *Node) warnResortTransfer(st *raft.SummaryValue) {
+	if st.ForwardResortTransfers == n.watch.resorts {
+		return
+	}
+	n.watch.resorts = st.ForwardResortTransfers
+	n.obs.warn("consensus: the forward fence took its last resort, handing leadership over",
+		lattr("to", uint64(st.Transfer)), lattr("term", st.Term))
+	n.warnHandOver(st.Transfer)
 }
 
 // handOver starts the transfer of a leader that makes no progress to the

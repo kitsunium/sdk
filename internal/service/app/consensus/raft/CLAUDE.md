@@ -26,6 +26,7 @@ write leave in `Ready.AfterSync`.
 - Drop a new forward at the forward answers' table's bound, or handle one there without the fence's mark: the bound forgets the oldest answer, and the mark, set for every forward handled, a refusal included, is what fences its copy
 - Rest the deduplication of forwards on that table's memory, or on any time: the fence (`fwdFence`) refuses every copy by the order of the submission ids
 - Forget a mark of the current term below `maxFwdRunsHard`, or choose the mark to forget by its node
+- Rest the fence's safety on the last resort's transfer, or start that transfer twice in a term, while a transfer runs, or to a voter that does not hold the commit or was not heard: the fence's own last resort stays in every case (`fenceLastResort`, #1540)
 - Let a silent node campaign, on its election timer or a TimeoutNow: its candidacy is a vote for itself, and the silence grants none
 - Campaign on a TimeoutNow while the driver holds its apply stalled (`SetApplyStalled`): a leader whose apply is stuck hands over (#554) and still acknowledges, and the transfer back to it made it lead almost all the time
 - Clear a campaign's transfer issuer when it wins: `Status.HandedBy` names it while the term lasts, and the driver's watch of `PreferredLeaders` pauses after a transfer on it (#676, `TestTheStatusNamesTheLeaderThatHandedTheTermOver`)
