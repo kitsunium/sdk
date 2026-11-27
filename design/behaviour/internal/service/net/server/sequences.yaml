@@ -4153,7 +4153,7 @@ sequences:
         kind: internal
       - id: joinReason
         kind: internal
-      - id: listenPacket
+      - id: listenShard
         kind: internal
       - id: s.newBoundPacket
         kind: internal
@@ -4207,8 +4207,8 @@ sequences:
       - loop:
           do:
             - bind: pc, rep, err
-              eval: listenPacket(ctx, bindAddr, spec)
-              to: listenPacket
+              eval: listenShard(ctx, bindAddr, spec, i == 0)
+              to: listenShard
             - opt:
                 do:
                   - return: err
@@ -4252,6 +4252,65 @@ sequences:
       - eval: s.probeSteer(group.steer, sockets)
         to: s.probeSteer
       - return: nil
+  - of: listenShard
+    participants:
+      - id: caller
+        kind: actor
+      - id: listenShard
+        kind: self
+      - id: listenPacket
+        kind: internal
+      - id: reuseAfterBind
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: traitIf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: listenPacket(ctx, addr, spec)
+              to: listenPacket
+          when: "!first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(addr)"
+      - bind: alone
+        eval: spec
+      - set: alone.reuse
+        value: reuseNone
+      - bind: pc, rep, err
+        eval: listenPacket(ctx, addr, alone)
+        to: listenPacket
+      - opt:
+          do:
+            - return: nil, rep, err
+          when: err != nil
+      - opt:
+          do:
+            - eval: swallowErr(pc.Close())
+              to: swallowErr
+            - return: nil, rep, bindRefusal(addr, err)
+          init:
+            bind: err
+            eval: reuseAfterBind(pc)
+            to: reuseAfterBind
+          when: err != nil
+      - op: "|="
+        set: rep.traits
+        to: traitIf
+        value: traitIf(spec.reuse == reuseShared, traitShared)
+      - return: pc, rep, nil
+  - of: portZero
+    participants:
+      - id: caller
+        kind: actor
+      - id: portZero
+        kind: self
+      - id: stdnet
+        kind: stdlib
+    steps:
+      - bind: _, port, err
+        eval: stdnet.SplitHostPort(addr.Addr)
+        to: stdnet
+      - return: err == nil && port == "0"
   - of: pinPort
     participants:
       - id: caller
@@ -12848,6 +12907,50 @@ sequences:
         to: socketBuffers
         value: socketBuffers(packetSocket(bound))
       - return: bound, rep, nil
+  - of: reuseAfterBind
+    participants:
+      - id: caller
+        kind: actor
+      - id: reuseAfterBind
+        kind: self
+      - id: packetSocket
+        kind: internal
+      - id: errs
+        kind: package
+      - id: sc.SyscallConn
+        kind: value
+      - id: raw.Control
+        kind: value
+    steps:
+      - bind: sc
+        eval: packetSocket(pc)
+        to: packetSocket
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+                			errs.String("address", pc.LocalAddr().String()), errs.String("cause", "no descriptor"))
+              to: errs
+          when: sc == nil
+      - bind: raw, err
+        eval: sc.SyscallConn()
+        to: sc.SyscallConn
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - var:
+          name: setErr
+          type: error
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: raw.Control(func(fd uintptr) { setErr = setReusePort(fd) })
+            to: raw.Control
+          when: err != nil
+      - return: setErr
   - of: (*boundPacketConn).finish
     participants:
       - id: caller

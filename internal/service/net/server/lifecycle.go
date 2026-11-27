@@ -269,7 +269,7 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 	sockets := make([]stdnet.PacketConn, 0, count)
 	//: the shards, the first naming the port the others join.
 	for i := range count {
-		pc, rep, err := listenPacket(ctx, bindAddr, spec)
+		pc, rep, err := listenShard(ctx, bindAddr, spec, i == 0)
 		//: a shard that will not bind aborts startup rather than serving a
 		//: quietly smaller set than the operator asked for.
 		if err != nil {
@@ -304,6 +304,49 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 	s.probeSteer(group.steer, sockets)
 	//: every shard of this address is reading.
 	return nil
+}
+
+// listenShard binds one shard of a datagram address. The first shard of an
+// address asked as port 0 asks the kernel for its port without SO_REUSEPORT
+// and is given the option once bound (#1585): Linux's draw, udp_lib_get_port,
+// skips only the ports whose holders the new socket cannot share
+// (udp_lib_lport_inuse, net/ipv4/udp.c), so a socket drawing with
+// SO_REUSEPORT set may be given a port a reuseport socket of the same user
+// holds, and join its group (udp_reuseport_add_sock) — another program's
+// socket would then read part of the group's datagrams. Drawn without the
+// option, the port is one nobody holds; set afterwards, the option admits
+// the shards that follow, the group created when the second joins
+// (reuseport_add_sock, net/core/sock_reuseport.c).
+func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec, first bool) (stdnet.PacketConn, bindReport, error) {
+	//: a shard joining a port, a named port, or one socket alone: as asked.
+	if !first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(addr) {
+		//: the bind as the spec says.
+		return listenPacket(ctx, addr, spec)
+	}
+	alone := spec
+	alone.reuse = reuseNone
+	pc, rep, err := listenPacket(ctx, addr, alone)
+	//: the draw itself was refused.
+	if err != nil {
+		//: already naming the address.
+		return nil, rep, err
+	}
+	//: the option the other shards join through, on the drawn port.
+	if err := reuseAfterBind(pc); err != nil {
+		swallowErr(pc.Close())
+		//: the shards could not join it.
+		return nil, rep, bindRefusal(addr, err)
+	}
+	rep.traits |= traitIf(spec.reuse == reuseShared, traitShared)
+	//: bound alone on a fresh port, open to the shards.
+	return pc, rep, nil
+}
+
+// portZero reports whether addr asks the kernel to draw its port.
+func portZero(addr corenet.AddressValue) bool {
+	_, port, err := stdnet.SplitHostPort(addr.Addr)
+	//: port 0, or an address the bind will refuse itself.
+	return err == nil && port == "0"
 }
 
 // pinPort returns addr with the port pc bound, so the other shards of an address

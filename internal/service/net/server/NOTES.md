@@ -549,6 +549,25 @@ contending on one accept queue. Zero means one per core; one disables it.
   and a suite go test runs beside this one listened on 127.0.0.1 at the port
   number of the server's [::1] shards (#1378,
   `TestKernelSocketsOn_countsThisServersOnly`).
+- **A datagram group's port 0 is drawn without SO_REUSEPORT** (#1585). Linux's
+  UDP draw skips only the ports whose holders the new socket cannot share
+  (`udp_lib_lport_inuse`, net/ipv4/udp.c, v6.12): a first shard drawing with
+  SO_REUSEPORT set could be given a port a reuseport socket of the same user
+  holds, and join its group (`udp_reuseport_add_sock`) — that socket then read
+  part of the group's datagrams while State showed a healthy group.
+  `listenShard` (`lifecycle.go`) binds the first shard of a `:0` address with
+  `reuseNone`, then `reuseAfterBind` (`packet_listen.go`) sets the option on
+  the bound socket; the kernel reads it when the second shard binds and
+  creates the group then (`reuseport_add_sock`, net/core/sock_reuseport.c), so
+  #1331's one port and `Steer(SteerCPU)`'s program, attached once all are
+  bound, are unchanged. `reuseportDrawJoins` keeps it Linux's; a stream's
+  draw never shares a port with a bound socket (`inet_csk_find_open_port`
+  asks `inet_csk_bind_conflict` with `reuseport_ok` false), so `bindShards`
+  and `bindLoopAddress` keep theirs. `shards_draw_linux_internal_test.go`:
+  the kernel's contract (`TestReuseport_enabledAfterBindAdmitsJoins`), 96
+  starts beside a holder of an eighth of the range, and a child in a user and
+  network namespace of its own whose range is one or two ports, skipped where
+  the host refuses one.
 - **An address another process holds is refused, not shared** (#1330, ADR
   0029 amended 2026-11-12). SO_REUSEPORT on every shard used to let a second
   copy of a program start on the address a first one served and take half its

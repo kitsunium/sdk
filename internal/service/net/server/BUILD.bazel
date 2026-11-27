@@ -320,6 +320,7 @@ go_test(
         "server_bench_test.go",
         "server_external_test.go",
         "server_internal_test.go",
+        "shards_draw_linux_internal_test.go",
         "shards_l3_linux_internal_test.go",
         "shards_linux_internal_test.go",
         "shards_port_linux_internal_test.go",
