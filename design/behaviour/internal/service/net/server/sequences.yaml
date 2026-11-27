@@ -4278,6 +4278,14 @@ sequences:
           when: "!first || spec.reuse == reuseNone || !reuseportDrawJoins"
       - opt:
           do:
+            - return: listenPacket(ctx, addr, spec)
+              to: listenPacket
+          init:
+            bind: _, served
+            eval: packetNetworks[addr.Network]
+          when: "!served"
+      - opt:
+          do:
             - return: nil, bindReport{}, bindRefusal(addr, cerr)
           init:
             bind: cerr

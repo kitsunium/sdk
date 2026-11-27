@@ -323,6 +323,13 @@ func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec
 		//: the bind as the spec says.
 		return listenPacket(ctx, addr, spec)
 	}
+	//: a network the engine does not serve: listenPacket refuses it by name,
+	//: UnsupportedNetwork as before the draw's guards, where portZero's lookup
+	//: would fail on it and be refused as a failed bind.
+	if _, served := packetNetworks[addr.Network]; !served {
+		//: the one refusal an unserved family has always had.
+		return listenPacket(ctx, addr, spec)
+	}
 	//: a context already done: portZero's lookup may answer with the context's
 	//: error while the bind's own lookup, a few instructions later, still
 	//: succeeds and reads the port as 0 (two selects tossed at random,

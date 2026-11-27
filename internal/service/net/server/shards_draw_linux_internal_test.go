@@ -573,8 +573,13 @@ func TestShards_portZeroFailedLookup(t *testing.T) {
 		reuse reuseMode
 		// fail is the error the lookup answers.
 		fail error
+		// network overrides udp4 when set.
+		network string
+		// unsupported says the refusal is UnsupportedNetwork, not the lookup's.
+		unsupported bool
 	}
 	cases := []tc{
+		{name: "an unserved network keeps its refusal", addr: "127.0.0.1:0", reuse: reuseShards, fail: errors.New("unknown network ip4"), network: "ip4", unsupported: true},
 		{name: "canceled, the group's shards", addr: "127.0.0.1:0", reuse: reuseShards, fail: context.Canceled},
 		{name: "canceled, shared", addr: "127.0.0.1:0", reuse: reuseShared, fail: context.Canceled},
 		{name: "deadline exceeded", addr: "127.0.0.1: 0", reuse: reuseShards, fail: context.DeadlineExceeded},
@@ -583,11 +588,24 @@ func TestShards_portZeroFailedLookup(t *testing.T) {
 		prev := lookupPort
 		t.Cleanup(func() { lookupPort = prev })
 		lookupPort = func(context.Context, string, string) (int, error) { return 0, c.fail }
-		pc, _, err := listenShard(t.Context(), corenet.AddressValue{Network: "udp4", Addr: c.addr}, socketSpec{reuse: c.reuse}, true)
+		network := "udp4"
+		//: a case naming its own network.
+		if c.network != "" {
+			network = c.network
+		}
+		pc, _, err := listenShard(t.Context(), corenet.AddressValue{Network: network, Addr: c.addr}, socketSpec{reuse: c.reuse}, true)
 		//: a socket bound although the lookup failed.
 		if pc != nil {
 			swallowErr(pc.Close())
 			t.Fatalf("listenShard(%q) bound %s after a failed lookup", c.addr, pc.LocalAddr())
+		}
+		//: a network the engine does not serve: refused by name, not as a failed lookup.
+		if c.unsupported {
+			//: the public code an unserved family has always had.
+			if !errs.HasCode(err, corenet.CodeUnsupportedNetwork) {
+				t.Fatalf("listenShard(%q on %q) = %v, want UnsupportedNetwork", c.addr, network, err)
+			}
+			return
 		}
 		var e *errs.Error
 		cause := ""
