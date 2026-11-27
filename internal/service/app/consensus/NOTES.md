@@ -1668,6 +1668,45 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `consensus: snapshot handle close failed`, as `sendSnapshot` does, and
   the install carries on to `installed`
   (`TestARestoreWhoseHandleFailsToCloseStillInstalls`).
+- Hand the machine a restore's second read checked per chunk only: a `.snap`
+  cut from outside on a chunk boundary after `verifySnapshot` ended cleanly,
+  the machine was restored from that prefix and `applied` moved to the
+  snapshot's index (#1562). `restoreFrom` reads it through `snapshotReader`
+  (SNAPSHOT_CORRUPT instead of `io.EOF` when the sizes or the SHA-256 differ
+  from the metadata) and reads the rest to the end after a `Restore` that
+  stopped short, before `applied` moves
+  (`TestARestoreWhoseSecondReadIsCutIsRefused`). The SHA-256 costs nothing
+  more: the chunk reader already hashed the second read, about 190 ms per
+  256 MiB, and the comparison is lost in the noise (311 ms against 316 ms
+  for 256 MiB of random data, 1.56 s against 1.54 s for text). A machine
+  that consumed the cut stream before it failed holds what it read: as for
+  any failed `Restore`, the copy is removed, nothing moves, and the next
+  restore replaces the state.
+- Refuse, and keep running, a restore whose `Restore` returned nil before
+  its end was refused: the machine accepted the stream and may hold the
+  snapshot's state N while `applied` stays at A. A machine that stops at the
+  end of its value, as a `json.Decoder` leaving the final newline unread,
+  then had the entries (A, match] handed after the restore applied over N
+  a second time, and a durable one recorded a position below N with that
+  state. Without the digest it just refused, the engine cannot tell a whole
+  state from a prefix, so `restoreFrom` stops the node STATE_MACHINE_FAILED
+  on the apply goroutine, before it takes another item; `restoreFailed`
+  keeps the copy, and `restoreLatest` fails the start instead of falling
+  back to an older snapshot, which a durable machine already past it would
+  skip while keeping the state it accepted. On a file log the stop writes
+  `STOP-STATE_MACHINE_FAILED`, and every later start is refused
+  STOP_MARKER_PRESENT until an operator clears it. The stop itself is held by
+  `TestARestoreWhoseSecondReadIsCutIsRefused` (its skim and framed cases), on
+  a memory log, which writes no marker; the marker's write for
+  STATE_MACHINE_FAILED and the refusal of the next start are held by
+  `TestDataDirLockAndStopMarkers`, on a file log, apart from the install.
+  Before an operator clears that marker, a `DurableStateMachine` must be
+  verified or rebuilt: the next start trusts its `AppliedPosition`, and the
+  machine accepted a state the engine never vouched for. The cause is not
+  kept as a code: an EIO met by the `io.Copy` that follows a nil `Restore`
+  becomes STATE_MACHINE_FAILED, STORAGE_FAILED survives only in the
+  stop's `cause` text, and the marker is permanent, not limited to the
+  start in progress.
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).

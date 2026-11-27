@@ -1830,6 +1830,7 @@ files:
       - termless
       - (*Node).durablePosition
       - (*Node).restoreLatest
+      - (*Node).refusesStart
       - (*Node).fallbackGap
       - ownFailure
       - (*Node).unpublishNewer
@@ -9012,6 +9013,17 @@ types:
         params: metas []coreconsensus.SnapshotMetaValue, durIdx uint64
         recv: n *Node
         results: base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, newest, err error
+      - doc: |-
+          refusesStart reports whether a snapshot that did not restore, with rerr,
+          refuses the start instead of letting it fall back to an older one: a
+          version or format this build does not know (D18, #513), or a restore that
+          stopped the node, its machine having accepted a stream whose end was then
+          refused. Falling back from the second, a durable machine already past the
+          older snapshot is not restored again and stays on the state it accepted.
+        name: refusesStart
+        params: rerr error
+        recv: n *Node
+        results: bool
       - doc: |-
           fallbackGap is the refusal of a start whose base does not continue the
           log. When that base is an older snapshot restored because the newest did

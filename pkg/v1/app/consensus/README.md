@@ -4516,7 +4516,13 @@ type StateMachine interface {
 	// format this build does not read: the node stops, as for an entry
 	// kind it does not know, and a restart over that snapshot is refused
 	// (D18). Any other error refuses that one install, and the leader
-	// offers a snapshot again.
+	// offers a snapshot again. A machine reads r to io.EOF: after it
+	// returns, the engine reads what it left, and checks the stream's
+	// sizes and SHA-256 against the metadata. A Restore that returns nil
+	// on a stream whose end is then refused leaves the machine on a
+	// state the engine cannot vouch for: the node stops with
+	// STATE_MACHINE_FAILED before it applies another entry, and a start
+	// that restores that way fails with it.
 	Restore(r io.Reader, meta SnapshotMetaValue) error
 	// Snapshot captures a point-in-time view of the state, cheaply: it is
 	// called on the apply goroutine.
@@ -4540,7 +4546,7 @@ Apply applies one committed command and returns its result, delivered to the Pro
 func (StateMachine) Restore(r io.Reader, meta SnapshotMetaValue) error
 ```
 
-Restore replaces the state with a snapshot's. It is serialised with Apply. An error coded VERSION\_UNSUPPORTED says the snapshot is of a format this build does not read: the node stops, as for an entry kind it does not know, and a restart over that snapshot is refused (D18). Any other error refuses that one install, and the leader offers a snapshot again.
+Restore replaces the state with a snapshot's. It is serialised with Apply. An error coded VERSION\_UNSUPPORTED says the snapshot is of a format this build does not read: the node stops, as for an entry kind it does not know, and a restart over that snapshot is refused (D18). Any other error refuses that one install, and the leader offers a snapshot again. A machine reads r to io.EOF: after it returns, the engine reads what it left, and checks the stream's sizes and SHA-256 against the metadata. A Restore that returns nil on a stream whose end is then refused leaves the machine on a state the engine cannot vouch for: the node stops with STATE\_MACHINE\_FAILED before it applies another entry, and a start that restores that way fails with it.
 
 <a name="StateMachine.Snapshot"></a>
 ### func \(StateMachine\) [Snapshot](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)

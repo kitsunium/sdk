@@ -872,7 +872,8 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 		if rerr == nil {
 			return m, failed, newest, nil
 		}
-		if errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) {
+		//: a format this build does not read, or a machine a restore left unvouched for, refuses the start.
+		if n.refusesStart(rerr) {
 			return coreconsensus.SnapshotMetaValue{}, nil, nil, rerr
 		}
 		n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", rerr.Error()))
@@ -884,6 +885,16 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 		}
 	}
 	return coreconsensus.SnapshotMetaValue{}, nil, newest, nil
+}
+
+// refusesStart reports whether a snapshot that did not restore, with rerr,
+// refuses the start instead of letting it fall back to an older one: a
+// version or format this build does not know (D18, #513), or a restore that
+// stopped the node, its machine having accepted a stream whose end was then
+// refused. Falling back from the second, a durable machine already past the
+// older snapshot is not restored again and stays on the state it accepted.
+func (n *Node) refusesStart(rerr error) bool {
+	return errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) || n.stopped.Load()
 }
 
 // fallbackGap is the refusal of a start whose base does not continue the

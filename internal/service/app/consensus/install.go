@@ -418,6 +418,14 @@ func (n *Node) restoreFailed(snapID string, err error) error {
 		n.stop(err, false)
 		return err
 	}
+	// A restore that stopped the node, its machine having accepted a
+	// stream whose end was then refused, keeps its copy for the next
+	// start, which the stop's marker holds. Left to the exec below, the
+	// copy stayed or went depending on whether the loop had ended yet.
+	//: a node the restore stopped touches nothing on its way out.
+	if n.stopped.Load() {
+		return err
+	}
 	noTable := false
 	if !n.exec(func() { noTable = n.r.NoTable() }) {
 		return err
