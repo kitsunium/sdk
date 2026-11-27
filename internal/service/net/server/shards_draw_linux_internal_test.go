@@ -503,6 +503,59 @@ func TestShards_portZeroDrawsAPortNobodyHolds(t *testing.T) {
 	}
 }
 
+// TestShards_portZeroCancelledContext pins the draw's last guard (#1585, R8 of
+// the review): a context already done binds no first shard, whatever the
+// spelling of port 0, and the refusal names the context's error. Without the
+// guard, "0" and "" are bound (their lookup never reads the context), and a
+// blank-led port under cgo is bound or refused by the toss of two selects, so
+// the draw could be made with SO_REUSEPORT set. The plain spellings make the
+// case deterministic; the blank-led one is the same guard, random without it.
+func TestShards_portZeroCancelledContext(t *testing.T) {
+	type tc struct {
+		name string
+		// addr is the address, its port one spelling of port 0.
+		addr string
+		// reuse is the first shard's mode.
+		reuse reuseMode
+	}
+	cases := []tc{
+		{name: "port 0, the group's shards", addr: "127.0.0.1:0", reuse: reuseShards},
+		{name: "port 0, shared", addr: "127.0.0.1:0", reuse: reuseShared},
+		{name: "an empty port", addr: "127.0.0.1:", reuse: reuseShards},
+		{name: "a blank-led port", addr: "127.0.0.1: 0", reuse: reuseShards},
+	}
+	runCase := func(t *testing.T, c tc) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		pc, _, err := listenShard(ctx, corenet.AddressValue{Network: "udp4", Addr: c.addr}, socketSpec{reuse: c.reuse}, true)
+		//: a socket bound under a context that is done.
+		if pc != nil {
+			swallowErr(pc.Close())
+			t.Fatalf("listenShard(%q) bound %s under a cancelled context", c.addr, pc.LocalAddr())
+		}
+		var e *errs.Error
+		cause := ""
+		//: the refusal's cause field, where bindRefusal keeps what the OS or
+		//: the lookup said.
+		if errors.As(err, &e) {
+			//: each field of the refusal.
+			for _, f := range e.Fields() {
+				//: the cause.
+				if f.Key() == "cause" {
+					cause = f.StringValue()
+				}
+			}
+		}
+		//: the refusal is the context's, whatever the lookup answered.
+		if cause != context.Canceled.Error() {
+			t.Fatalf("listenShard(%q) = %v (cause %q), want a refusal caused by %q", c.addr, err, cause, context.Canceled)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
 // TestShards_portZeroNarrowRange is #1585 made certain: in a network namespace
 // of its own, whose ephemeral range is narrowed to one or two ports, a foreign
 // reuseport socket holds the first; a Shards(4) group asked for 0.0.0.0:0 is

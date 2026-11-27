@@ -4260,6 +4260,8 @@ sequences:
         kind: self
       - id: listenPacket
         kind: internal
+      - id: ctx.Err
+        kind: value
       - id: reuseAfterBind
         kind: internal
       - id: swallowErr
@@ -4271,7 +4273,20 @@ sequences:
           do:
             - return: listenPacket(ctx, addr, spec)
               to: listenPacket
-          when: "!first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(ctx, addr)"
+          when: "!first || spec.reuse == reuseNone || !reuseportDrawJoins"
+      - opt:
+          do:
+            - return: nil, bindReport{}, bindRefusal(addr, cerr)
+          init:
+            bind: cerr
+            eval: ctx.Err()
+            to: ctx.Err
+          when: cerr != nil
+      - opt:
+          do:
+            - return: listenPacket(ctx, addr, spec)
+              to: listenPacket
+          when: "!portZero(ctx, addr)"
       - bind: alone
         eval: spec
       - set: alone.reuse

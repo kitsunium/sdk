@@ -319,7 +319,21 @@ func (s *Server) bindPacketShards(ctx context.Context, group *PacketGroup, addr 
 // when the second joins (reuseport_add_sock, net/core/sock_reuseport.c).
 func listenShard(ctx context.Context, addr corenet.AddressValue, spec socketSpec, first bool) (stdnet.PacketConn, bindReport, error) {
 	//: a shard joining a port, a named port, or one socket alone: as asked.
-	if !first || spec.reuse == reuseNone || !reuseportDrawJoins || !portZero(ctx, addr) {
+	if !first || spec.reuse == reuseNone || !reuseportDrawJoins {
+		//: the bind as the spec says.
+		return listenPacket(ctx, addr, spec)
+	}
+	//: a context already done: portZero's lookup may answer with the context's
+	//: error while the bind's own lookup, a few instructions later, still
+	//: succeeds and reads the port as 0 (two selects tossed at random,
+	//: doBlockingWithCtx under cgo); the draw would then be made with
+	//: SO_REUSEPORT set (#1585). Refused here, nothing drawn, nothing bound.
+	if cerr := ctx.Err(); cerr != nil {
+		//: the context's error, naming the address.
+		return nil, bindReport{}, bindRefusal(addr, cerr)
+	}
+	//: a named port, or an address the bind refuses itself.
+	if !portZero(ctx, addr) {
 		//: the bind as the spec says.
 		return listenPacket(ctx, addr, spec)
 	}
