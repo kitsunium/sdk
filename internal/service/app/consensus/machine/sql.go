@@ -296,13 +296,27 @@ func (m *SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// done is set once the transaction's function ran to its end, in any
-	// pass a retrying transactor made: only then can a COMMIT have been
-	// sent, whose outcome the database holds. It is never reset, so a pass
-	// that committed and lost its answer is still read back after a later
-	// pass failed.
-	done := false
-	err := m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{}, func(ctx context.Context, ex coresql.Executor) error {
+	done, err := m.restoreTx(r, &meta)
+	switch {
+	//: a function that failed never committed: a refusal, even where the row names the snapshot's position.
+	case err != nil && !done:
+		return failed("restore", err)
+	//: a failure after the function's end is judged on what the database holds.
+	case err != nil:
+		return m.restoreOutcome(&meta, err)
+	}
+	m.li, m.pos, m.unknown = meta.Log, meta.Position, nil
+	return nil
+}
+
+// restoreTx runs Restore's transaction: Truncate, Load and the snapshot's
+// position. done is set once its function ran to its end, in any pass a
+// retrying transactor made: only then can a COMMIT have been sent, whose
+// outcome the database holds. It is never reset, so a pass that committed
+// and lost its answer is still read back after a later pass failed. The
+// caller holds mu.
+func (m *SQL) restoreTx(r io.Reader, meta *coreconsensus.SnapshotMetaValue) (done bool, err error) {
+	err = m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{}, func(ctx context.Context, ex coresql.Executor) error {
 		if err := m.cfg.Truncate(ctx, ex); err != nil {
 			return err
 		}
@@ -316,16 +330,7 @@ func (m *SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
 		done = true
 		return nil
 	})
-	switch {
-	//: a function that failed never committed: a refusal, even where the row names the snapshot's position.
-	case err != nil && !done:
-		return failed("restore", err)
-	//: a failure after the function's end is judged on what the database holds.
-	case err != nil:
-		return m.restoreOutcome(&meta, err)
-	}
-	m.li, m.pos, m.unknown = meta.Log, meta.Position, nil
-	return nil
+	return done, err
 }
 
 // restoreOutcome judges a Restore whose transaction returned cause on the
