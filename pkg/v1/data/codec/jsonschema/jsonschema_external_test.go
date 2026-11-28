@@ -26,3 +26,13 @@ func TestFacade(t *testing.T) {
 		t.Fatalf("a refused keyword: %v", err)
 	}
 }
+
+// TestNewValidatorRejectsInvalidType pins the public error for an invalid nested type.
+func TestNewValidatorRejectsInvalidType(t *testing.T) {
+	t.Parallel()
+	const schema = `{"properties":{"name":{"type":"thing"}}}`
+	v, err := jsonschema.NewValidator([]byte(schema), jsonschema.Config{})
+	if v != nil || !errs.HasCode(err, jsonschema.CodeSchemaInvalid) {
+		t.Fatalf("NewValidator: %v, %v, want nil validator and SchemaInvalid", v, err)
+	}
+}

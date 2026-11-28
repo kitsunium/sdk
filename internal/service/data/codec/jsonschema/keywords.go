@@ -20,6 +20,8 @@ const (
 	violationCode errs.Code = corejsonschema.CodeJSONSchemaViolation
 	// maxBoundDecimals caps the decimals a bound prints with.
 	maxBoundDecimals int = 6
+	// integerType occupies the low bit; the remaining bits correspond to JSON kinds.
+	integerType typeSet = 1
 )
 
 // keyword is one keyword being compiled: the compiler, the schema object
@@ -38,6 +40,9 @@ type keyword struct {
 // builder compiles one keyword into a check — or nil for a keyword that
 // asserts nothing on its own.
 type builder func(k keyword) (check, error)
+
+// typeSet holds the compiled alternatives of a "type" keyword.
+type typeSet uint8
 
 // builderFor returns the builder of a keyword, or false for an annotation or
 // an unknown keyword, which assert nothing.
@@ -132,41 +137,62 @@ func keywordInvalid(kw string) error {
 	return errs.Wrap(corejsonschema.SchemaInvalid, errs.WrapParams{}, errs.String("keyword", kw))
 }
 
-// typeMatches reports whether v is of the JSON Schema type name.
-func typeMatches(v *value, name string) bool {
-	//: by name; "integer" is a number with no fractional part.
+// schemaType maps each allowed name to its own bit, or zero for an unknown name.
+func schemaType(name string) typeSet {
+	//: look up the draft 2020-12 type name.
 	switch name {
+	//: null.
 	case "null":
-		return v.kind == kindNull
+		return 2 << kindNull
+	//: a boolean.
 	case "boolean":
-		return v.kind == kindBool
+		return 2 << kindBool
+	//: an object.
 	case "object":
-		return v.kind == kindObject
+		return 2 << kindObject
+	//: an array.
 	case "array":
-		return v.kind == kindArray
+		return 2 << kindArray
+	//: any number.
 	case "number":
-		return v.kind == kindNumber
+		return 2 << kindNumber
+	//: only numbers with no fractional part.
 	case "integer":
-		return v.isInteger()
+		return integerType
+	//: a string.
 	case "string":
-		return v.kind == kindString
+		return 2 << kindString
+	//: any other name is invalid.
 	default:
-		return false
+		return 0
 	}
 }
 
-// buildType compiles "type": a name or an array of names.
+// buildType compiles "type": a name or a nonempty array of unique names.
 func buildType(k keyword) (check, error) {
-	//: one name, or several.
+	//: read one name or an array of names.
 	names, err := stringList(k.kw, "type")
 	if err != nil {
 		return nil, err
 	}
+	//: the meta-schema requires at least one alternative.
+	if len(names) == 0 {
+		return nil, keywordInvalid("type")
+	}
+	var allowed typeSet
+	//: each name has one bit, so overlap detects a duplicate.
+	for _, name := range names {
+		typ := schemaType(name)
+		//: an unknown or repeated name makes the schema invalid.
+		if typ == 0 || allowed&typ != 0 {
+			return nil, keywordInvalid("type")
+		}
+		allowed |= typ
+	}
 	return func(e *eval, v *value, path string) bool {
-		for _, name := range names {
-			if typeMatches(v, name) {
-				return true
-			}
+		//: match a JSON kind directly, or test integrality if requested.
+		if allowed&(2<<v.kind) != 0 || allowed&integerType != 0 && v.isInteger() {
+			return true
 		}
 		return e.fail(path, "type", "must be of the type the schema names", violationCode)
 	}, nil

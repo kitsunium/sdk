@@ -1654,42 +1654,34 @@ sequences:
     steps:
       - return: errs.Wrap(corejsonschema.SchemaInvalid, errs.WrapParams{}, errs.String("keyword", kw))
         to: errs
-  - of: typeMatches
-    participants:
-      - id: caller
-        kind: actor
-      - id: typeMatches
-        kind: self
-      - id: v.isInteger
-        kind: internal
+  - of: schemaType
     steps:
       - switch:
           cases:
             - case: "\"null\""
               do:
-                - return: v.kind == kindNull
+                - return: 2 << kindNull
             - case: "\"boolean\""
               do:
-                - return: v.kind == kindBool
+                - return: 2 << kindBool
             - case: "\"object\""
               do:
-                - return: v.kind == kindObject
+                - return: 2 << kindObject
             - case: "\"array\""
               do:
-                - return: v.kind == kindArray
+                - return: 2 << kindArray
             - case: "\"number\""
               do:
-                - return: v.kind == kindNumber
+                - return: 2 << kindNumber
             - case: "\"integer\""
               do:
-                - return: v.isInteger()
-                  to: v.isInteger
+                - return: integerType
             - case: "\"string\""
               do:
-                - return: v.kind == kindString
+                - return: 2 << kindString
             - default: true
               do:
-                - return: "false"
+                - return: "0"
           "on": name
   - of: buildType
     participants:
@@ -1699,6 +1691,8 @@ sequences:
         kind: self
       - id: stringList
         kind: internal
+      - id: schemaType
+        kind: internal
     steps:
       - bind: names, err
         eval: stringList(k.kw, "type")
@@ -1707,12 +1701,33 @@ sequences:
           do:
             - return: nil, err
           when: err != nil
+      - opt:
+          do:
+            - return: nil, keywordInvalid("type")
+          when: len(names) == 0
+      - var:
+          name: allowed
+          type: typeSet
+      - loop:
+          do:
+            - bind: typ
+              eval: schemaType(name)
+              to: schemaType
+            - opt:
+                do:
+                  - return: nil, keywordInvalid("type")
+                when: typ == 0 || allowed&typ != 0
+            - op: "|="
+              set: allowed
+              value: typ
+          key: _
+          range: names
+          value: name
       - return: |-
           func(e *eval, v *value, path string) bool {
-          		for _, name := range names {
-          			if typeMatches(v, name) {
-          				return true
-          			}
+          		//: match a JSON kind directly, or test integrality if requested.
+          		if allowed&(2<<v.kind) != 0 || allowed&integerType != 0 && v.isInteger() {
+          			return true
           		}
           		return e.fail(path, "type", "must be of the type the schema names", violationCode)
           	}, nil
