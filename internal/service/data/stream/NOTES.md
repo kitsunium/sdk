@@ -45,7 +45,8 @@ Reference moved out of `CLAUDE.md` (ADR 0253), unchanged and under the same sect
 | `compact_external_test.go` | the compaction cases every engine runs: a key's last compactable record and every young one kept at their offsets, `Bounds` unmoved, a read inside a hole; a tombstone kept one window then gone with its key, `OFFSET_TRIMMED` only below the first offset; a young record untouched; a zero `CompactAfter` |
 | `memory_external_test.go` | what only the memory engine has: its construction |
 | `sqlfake_external_test.go`, `sql_export_test.go` | the fake SQL engine — a `database/sql` driver keeping the three tables in maps, the queue's fake for these tables — and the rendered statements it recognises |
-| `sql_external_test.go` | what only the SQL engine has: an Append that exists if and only if its transaction commits, a failed one leaving the caller's transaction usable with the driver's words withheld, offsets committed in order under concurrent appenders some of which roll back, the statements per call (`Append` = 3 + one per chunk of 199, `Read` = 1, `Commit` = 2), a Commit in the handler's transaction, Trim and the age sweep deleting rows, the refusals, the statement texts pinned |
+| `sqllocks_external_test.go` | the fake's concurrent mode: transactions side by side over the committed tables plus their own writes, the head's row locks, and on MySQL InnoDB's locks on a missing key (§The head on MySQL); with `rowLocks` false, the negative control |
+| `sql_external_test.go` | what only the SQL engine has: an Append that exists if and only if its transaction commits, a failed one leaving the caller's transaction usable with the driver's words withheld, offsets committed in order under concurrent appenders some of which roll back — on the serialising and the concurrent fake, with the control that the race fails on one without locks —, a fresh partition outliving its first appender's rollback, the MySQL head created on a second connection, the statements per call (`Append` = 3 + one per chunk of 199, 2 + chunks on MySQL once the head is known, `Read` = 1, `Commit` = 2), a Commit in the handler's transaction, Trim and the age sweep deleting rows, the refusals, the statement texts pinned |
 | `file_external_test.go` | what only the file engine has: its refusals, the lock, a reopen keeping records, trim, cursors and the byte bound, a segment past `RetainFor` unlinked |
 | `death_external_test.go` | the SIGKILL test: a child appending numbered batches is killed, and every batch its `Append` acknowledged is read back whole, none in part (the queue's victim pattern, `KTNS_VICTIM_STREAM_DIR`, dropped from the inherited environment before the child's is set; a victim spawns none, and stops by itself after 20 000 batches or two minutes when its parent is gone) |
 | `subscribe_external_test.go` | the subscriber over `everyStream`: two groups each receiving every record once, per-key order over four partitions and a failing partition blocking only itself, a crash before the commit redelivering, a record parked as JSON, the fence keeping one reader per partition, the refusals |
@@ -81,3 +82,47 @@ retained by the node's compaction (no `Trimmer`, `Seeker`, `Compactor` or
 offset and retention cases cannot hold for it, and `data` must not import
 `app`; its contract cases run in that package on the memory cluster of three
 nodes (`stream_internal_test.go`).
+
+## The head on MySQL (#822)
+
+The audit of lot L1 (#1361) ran `e2e/integration/sql`'s
+`TestConcurrentAppendersCommitInOrderOnEveryEngine` on MySQL: sixteen
+appenders of a partition never written failed `STREAM_BACKEND_FAILED`, then
+`SAVEPOINT_FAILED` (error 1305). The head's upsert, `INSERT … ON DUPLICATE
+KEY UPDATE`, sent by several transactions on a missing key, does this under
+InnoDB (MySQL 8.0 manual, 17.7.3 "Locks Set by Different SQL Statements",
+17.7.1 "InnoDB Locking", 17.7.2.1, 17.7.5.2, 17.21.5, 15.3.4):
+
+- the first inserts the row and holds its exclusive record lock; the others
+  hit the duplicate and queue for a lock on that record;
+- the first rolls back: the row is gone, and the waiters' locks stay on the
+  gap where it was — gap locks coexist, are "purely inhibitive", and READ
+  COMMITTED keeps them for duplicate-key checking;
+- each waiter now inserts the key, and its insert intention waits for the
+  gap the others hold: a cycle, and InnoDB rolls "the entire transaction"
+  of one back; the transactor's `ROLLBACK TO SAVEPOINT` then answers 1305,
+  the savepoint gone with it.
+
+So on MySQL the head is created by `INSERT IGNORE`, autocommit on the pool,
+which never rolls back, and every Append locks the committed row by the
+head's read `FOR UPDATE`. Inside a caller's transaction the creation comes
+after an unlocked read found no row — a locking read of a missing row would
+take a gap lock under REPEATABLE READ that the creation, on another
+connection, would wait on — and takes a second connection of the pool once
+per partition: a pool whose every connection such transactions hold waits
+for one until the context ends (`TestSQLAMySQLHeadIsCreatedOnASecondConnection`).
+`heads` remembers, per partition, that the row exists, and a failed head read
+forgets it.
+
+The serialising fake could not fail the ordering test. The concurrent fake
+models the list above for MySQL — `release` copies a rolled-back fresh
+row's waiters into its gaps, `acquire` kills the transaction whose insert
+closes the cycle, `errDeadlock` and the savepoints gone — and nothing more:
+PostgreSQL's waiter inserts the key once the first rolls back, and an
+autocommit statement holds its lock alone. On main before the fix,
+`TestSQLAFreshPartitionOutlivesItsFirstAppenderRollingBack/mysql` failed
+30 of 30 (STREAM_BACKEND_FAILED with SAVEPOINT_FAILED in its chain, one
+transaction rolled back on the head), and the ordering race on it 8 of 30 —
+only when its first appender is one of the two that roll back their first
+transaction. The real engine stays the proof: no CI job runs
+`e2e/integration/sql` on MySQL yet (#822's option (a)).

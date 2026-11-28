@@ -92,6 +92,7 @@ go_test(
         "sql_export_test.go",
         "sql_external_test.go",
         "sqlfake_external_test.go",
+        "sqllocks_external_test.go",
         "stream_bench_test.go",
         "subscribe_bench_test.go",
         "subscribe_external_test.go",

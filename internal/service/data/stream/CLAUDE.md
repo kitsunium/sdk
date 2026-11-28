@@ -90,14 +90,31 @@ it asserts that `NewFile` refuses the same way, then skips with the reason
   read returned.
 
 - **The SQL engine serialises the appenders of a partition on its head
-  row.** An Append's first statement is an upsert that creates the head row
-  or writes it back unchanged — the row lock on PostgreSQL and MySQL, the
-  write that takes SQLite's lock first (ADR 0140) — held until the
-  transaction ends, so offsets are assigned in commit order and a reader
-  following a partition never passes a record that commits later. Then the
-  head is read (`FOR UPDATE`), the records inserted 199 per statement, the
-  head advanced: 3 + chunks statements. A rolled-back Append takes its
-  offsets back with it.
+  row.** On PostgreSQL and SQLite an Append's first statement is an upsert
+  that creates the head row or writes it back unchanged — the row lock on
+  PostgreSQL, the write that takes SQLite's lock first (ADR 0140) — held
+  until the transaction ends, so offsets are assigned in commit order and a
+  reader following a partition never passes a record that commits later.
+  Then the head is read (`FOR UPDATE`), the records inserted 199 per
+  statement, the head advanced: 3 + chunks statements. A rolled-back Append
+  takes its offsets back with it.
+- **On MySQL the head is created apart, then locked by reading it — never
+  by the upsert** (#822). Sixteen transactions upserting a missing head
+  deadlocked once the one that inserted it rolled back, and InnoDB rolled a
+  caller's transaction back whole. The row is created by `INSERT IGNORE`,
+  alone and committed on the pool — before the engine's own transaction
+  outside a caller's, after an unlocked read found none inside one (a second
+  connection, once per partition) —, then locked by the head's read
+  `FOR UPDATE`; once known it is locked at once: 2 + chunks statements.
+  Never send the upsert on MySQL. Why, and the fake that proves it:
+  `NOTES.md` §The head on MySQL.
+- **The ordering test must be able to fail.** The serialising fake cannot
+  tell whether the head is locked: a change to the head's statements is
+  judged by `TestSQLOffsetsCommitInOrderUnderConcurrentAppenders` and
+  `TestSQLAFreshPartitionOutlivesItsFirstAppenderRollingBack` on the
+  concurrent fake (`sqllocks_external_test.go`), and the negative control
+  `TestSQLTheOrderingTestFailsOnAnEngineWithoutRowLocks` must keep failing
+  the race on a fake that locks nothing.
 - **The SQL engine's Read is one unlocked statement**: the head row LEFT
   JOINed with the readable records, and the head's floor beside the highest
   stored offset past the age bound: the first readable offset is the floor
