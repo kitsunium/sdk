@@ -19,7 +19,8 @@ State machines for the consensus engine (ADR 0152 D3, #916), published by
   it opens and `m.pos` moved once it committed, so a refusal leaves the
   state as it was and the node keeps running (#1607), except on
   VERSION_UNSUPPORTED, which stops it (D18), and on an outcome the read
-  back cannot name, which stops it with its marker. A failure of the
+  back cannot name or a position the engine cannot read again after the
+  refusal (`keptPosition`), which stop it with its marker. A failure of the
   transaction's function is a refusal at once; only one after its end is
   read back. Snapshot format: `KSQL`,
   version 1, then what `Dump` wrote.
