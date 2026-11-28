@@ -64,6 +64,10 @@ const (
 	// groupLoopback is the loopback address the groups of the rest of the
 	// package bind.
 	groupLoopback = "127.0.0.1"
+	// enableLoopback is the loopback address TestReuseport_enabledAfterBindAdmitsJoins
+	// binds: no holder of TestShards_portZeroDrawsAPortNobodyHolds binds it, so a
+	// holder that draws the same port cannot join the group under test (#1627).
+	enableLoopback = "127.0.0.3"
 )
 
 // drawRanges are the narrowed ranges a child writes, by case: one port, held,
@@ -422,9 +426,9 @@ func TestReuseport_enabledAfterBindAdmitsJoins(t *testing.T) {
 		{name: "never enabled", enable: false},
 	}
 	runCase := func(t *testing.T, c tc) {
-		requireLoopback(t, drawLoopback)
+		requireLoopback(t, enableLoopback)
 		var lc stdnet.ListenConfig
-		first, err := lc.ListenPacket(t.Context(), "udp4", drawLoopback+":0")
+		first, err := lc.ListenPacket(t.Context(), "udp4", enableLoopback+":0")
 		if err != nil {
 			t.Fatalf("first bind: %v", err)
 		}
@@ -504,7 +508,7 @@ func TestReuseport_loopbackSeparatesGroups(t *testing.T) {
 		t.Logf("%s: the group kept %d, the foreign socket on %s:%d read %d of %d", c.name, kept, c.host, port, got, spreadSenders)
 		//: the socket joined: it read some, the group lost them.
 		if c.joins {
-			if got == 0 || kept+got != spreadSenders {
+			if got == 0 || kept == 0 || kept+got != spreadSenders {
 				t.Fatalf("the group kept %d and the socket read %d of %d, want both nonzero: the socket joined the group", kept, got, spreadSenders)
 			}
 			return
