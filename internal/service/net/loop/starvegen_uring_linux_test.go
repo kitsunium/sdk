@@ -71,9 +71,13 @@ func TestURing_starvedRearmsOnlyItsConnection(t *testing.T) {
 			if err := first.Close(); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, "the first connection's slot released", func() bool {
+			// The slot reads stFree from the moment its close is submitted,
+			// but joins the free list only at the close's completion: a
+			// connection accepted in between takes another slot. Wait for
+			// the release itself.
+			waitFor(t, "the first connection's slot back on the free list", func() bool {
 				var free bool
-				onLoop(t, g, func() { free = rr.r.conns[slot].state == stFree })
+				onLoop(t, g, func() { free = slices.Contains(rr.r.free, slot) })
 				return free
 			})
 			second := dial(t, addr)
