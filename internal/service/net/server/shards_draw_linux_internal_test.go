@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -55,6 +56,14 @@ const (
 	// kernel's hash of the four-tuple sends all of them to one socket with a
 	// probability of 2^-(spreadSenders-1).
 	spreadSenders = 64
+	// drawLoopback is the loopback address the tests that hold thousands of
+	// reuseport sockets bind: a reuseport group belongs to one (address, port)
+	// pair (udp_lib_lport_inuse compares the addresses), so a socket here never
+	// joins a group another process of the run keeps on 127.0.0.1 (#1627).
+	drawLoopback = "127.0.0.2"
+	// groupLoopback is the loopback address the groups of the rest of the
+	// package bind.
+	groupLoopback = "127.0.0.1"
 )
 
 // drawRanges are the narrowed ranges a child writes, by case: one port, held,
@@ -321,6 +330,19 @@ func foreignSocket(ctx context.Context, addr string) (stdnet.PacketConn, error) 
 	return lc.ListenPacket(ctx, "udp4", addr)
 }
 
+// requireLoopback skips the test when host does not bind on this machine: the
+// whole 127/8 block is the host's loopback on Linux, but a container or a
+// hardened network namespace may configure 127.0.0.1 alone.
+func requireLoopback(t *testing.T, host string) {
+	t.Helper()
+	pc, err := stdnet.ListenPacket("udp4", host+":0")
+	//: a loopback address this machine does not bind: nothing to judge here.
+	if err != nil {
+		t.Skipf("%s does not bind on this machine: %v", host, err)
+	}
+	_ = pc.Close()
+}
+
 // localPortRange is the host's ip_local_port_range, the ports a draw picks
 // among.
 func localPortRange(t *testing.T) (low, high int) {
@@ -400,8 +422,9 @@ func TestReuseport_enabledAfterBindAdmitsJoins(t *testing.T) {
 		{name: "never enabled", enable: false},
 	}
 	runCase := func(t *testing.T, c tc) {
+		requireLoopback(t, drawLoopback)
 		var lc stdnet.ListenConfig
-		first, err := lc.ListenPacket(t.Context(), "udp4", "127.0.0.1:0")
+		first, err := lc.ListenPacket(t.Context(), "udp4", drawLoopback+":0")
 		if err != nil {
 			t.Fatalf("first bind: %v", err)
 		}
@@ -436,7 +459,68 @@ func TestReuseport_enabledAfterBindAdmitsJoins(t *testing.T) {
 	}
 }
 
-// TestShards_portZeroDrawsAPortNobodyHolds is #1585 on the host: a foreign
+// TestReuseport_loopbackSeparatesGroups is #1627's proof, in one process: a
+// reuseport socket bound on the port of a live Shards(4) group on 127.0.0.1
+// joins the group and takes its share of the datagrams, while the same socket
+// on drawLoopback does not, and the group keeps every datagram. This is why the
+// holders of TestShards_portZeroDrawsAPortNobodyHolds bind drawLoopback.
+func TestReuseport_loopbackSeparatesGroups(t *testing.T) {
+	type tc struct {
+		name string
+		// host is the address the foreign socket binds, on the group's port.
+		host string
+		// joins is whether the foreign socket enters the group's reuseport group.
+		joins bool
+	}
+	cases := []tc{
+		{name: "same address, the socket joins the group", host: groupLoopback, joins: true},
+		{name: "another loopback address, the group is left whole", host: drawLoopback, joins: false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		requireLoopback(t, c.host)
+		var seen atomic.Int64
+		srv := New()
+		srv.PacketGroup("p", Listen("udp4", groupLoopback+":0"), Shards(4)).
+			HandleFunc(func(context.Context, corenet.Packet) error { seen.Add(1); return nil })
+		if err := srv.Start(t.Context()); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		defer func() { swallowErr(srv.Close()) }()
+		groupAddr := srv.State().Listeners[0].Address
+		port := portOf(t, groupAddr)
+		foreign, err := foreignSocket(t.Context(), stdnet.JoinHostPort(c.host, strconv.Itoa(port)))
+		//: the kernel refused the bind: the socket neither joined nor stayed apart.
+		if err != nil {
+			t.Fatalf("a reuseport bind on %s:%d: %v", c.host, port, err)
+		}
+		defer func() { _ = foreign.Close() }()
+		got := receivedBy(t, groupAddr, foreign)[0]
+		//: the group's handlers run asynchronously: wait for the datagrams it
+		//: still owes.
+		for deadline := time.Now().Add(5 * time.Second); int(seen.Load())+got < spreadSenders && time.Now().Before(deadline); {
+			time.Sleep(10 * time.Millisecond)
+		}
+		kept := int(seen.Load())
+		t.Logf("%s: the group kept %d, the foreign socket on %s:%d read %d of %d", c.name, kept, c.host, port, got, spreadSenders)
+		//: the socket joined: it read some, the group lost them.
+		if c.joins {
+			if got == 0 || kept+got != spreadSenders {
+				t.Fatalf("the group kept %d and the socket read %d of %d, want both nonzero: the socket joined the group", kept, got, spreadSenders)
+			}
+			return
+		}
+		//: the socket stayed apart: it read none, the group kept all.
+		if got != 0 || kept != spreadSenders {
+			t.Fatalf("the group kept %d and the socket on %s read %d of %d, want %d and 0: another address must not join the group (#1627)", kept, c.host, got, spreadSenders, spreadSenders)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestShards_portZeroDrawsAPortNobodyHolds is #1585 on the host, on 127.0.0.2:
+// a foreign
 // reuseport holder of this process keeps sockets on an eighth of the
 // ephemeral range, and no Shards(4) group asked for port 0 — in any of the
 // spellings Go binds as port 0: "0", "" and "00" — may be drawn one of their
@@ -448,6 +532,13 @@ func TestReuseport_enabledAfterBindAdmitsJoins(t *testing.T) {
 // M ports, 11.75% for N = M/8; a start misses them with a probability of
 // about e^(-1/8), and 128 starts with e^(-16) ≈ 1.1e-7. A host whose
 // descriptor limit cannot hold the holders skips.
+//
+// The holders and the groups bind drawLoopback, not 127.0.0.1 (#1627): a
+// reuseport group belongs to one (address, port) pair, so none of the thousands
+// of holders, which never read, can land on the port of a live Shards(4) group
+// another test process keeps on 127.0.0.1 — under Bazel the package's other
+// tests run beside this one — and join it, stealing about a fifth of its
+// datagrams. TestReuseport_loopbackSeparatesGroups pins that separation.
 func TestShards_portZeroDrawsAPortNobodyHolds(t *testing.T) {
 	type tc struct {
 		name string
@@ -459,15 +550,16 @@ func TestShards_portZeroDrawsAPortNobodyHolds(t *testing.T) {
 		rounds int
 	}
 	cases := []tc{
-		{name: "port 0, an eighth of the range held, 128 starts", addr: "127.0.0.1:0", fraction: 8, rounds: 128},
-		{name: "an empty port, an eighth of the range held, 128 starts", addr: "127.0.0.1:", fraction: 8, rounds: 128},
-		{name: "port 00, an eighth of the range held, 128 starts", addr: "127.0.0.1:00", fraction: 8, rounds: 128},
+		{name: "port 0, an eighth of the range held, 128 starts", addr: drawLoopback + ":0", fraction: 8, rounds: 128},
+		{name: "an empty port, an eighth of the range held, 128 starts", addr: drawLoopback + ":", fraction: 8, rounds: 128},
+		{name: "port 00, an eighth of the range held, 128 starts", addr: drawLoopback + ":00", fraction: 8, rounds: 128},
 	}
 	runCase := func(t *testing.T, c tc) {
+		requireLoopback(t, drawLoopback)
 		low, high := localPortRange(t)
 		held := map[int]bool{}
 		for i := range (high - low + 1) / c.fraction {
-			pc, err := foreignSocket(t.Context(), "127.0.0.1:0")
+			pc, err := foreignSocket(t.Context(), drawLoopback+":0")
 			//: the descriptor limit, not the draw: nothing to judge.
 			if errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE) {
 				t.Skipf("holder socket %d of %d: %v: the descriptor limit cannot hold the holders", i, (high-low+1)/c.fraction, err)
