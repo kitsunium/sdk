@@ -2387,6 +2387,7 @@ files:
       - (*Node).atomicPosition
       - (*Node).keptPosition
       - (*Node).restoreRefused
+      - (*Node).refusedDurable
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
@@ -10736,6 +10737,14 @@ types:
           judged here.
         name: restoreRefused
         params: m *coreconsensus.SnapshotMetaValue, err error, install bool, pre *machinePosition
+        recv: n *Node
+        results: error
+      - doc: |-
+          refusedDurable stops the node STATE_MACHINE_FAILED, with its marker, on
+          a refused Restore that may have moved a durable machine's state, and
+          returns the stop's error: at an install as at a start.
+        name: refusedDurable
+        params: m *coreconsensus.SnapshotMetaValue, err error, why string
         recv: n *Node
         results: error
       - doc: |-

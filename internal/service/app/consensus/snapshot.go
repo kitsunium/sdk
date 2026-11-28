@@ -204,12 +204,15 @@ func (n *Node) keptPosition(pre *machinePosition) bool {
 // Restore, on its metadata or checksums, touched no machine and is not
 // judged here.
 func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool, pre *machinePosition) error {
-	_, durable := n.cfg.Machine.(coreconsensus.DurableStateMachine)
-	why := "a durable machine refused a restore it may have written"
-	//: an AtomicRestorer stopped here broke its contract, or no longer knows its state.
-	if n.restoresAtomically() {
-		why = "an AtomicRestorer refused a restore and moved its position, or named none"
+	// An AtomicRestorer whose position moved broke its contract whatever
+	// its code: returned VERSION_UNSUPPORTED, a start failed with no
+	// marker, and the next one took the moved position for the snapshot's
+	// and skipped its restore, on the state the machine refused (#1607).
+	//: a durable AtomicRestorer that moved its position, or names none, stops as a durable machine.
+	if n.restoresAtomically() && !n.keptPosition(pre) {
+		return n.refusedDurable(m, err, "an AtomicRestorer refused a restore and moved its position, or named none")
 	}
+	_, durable := n.cfg.Machine.(coreconsensus.DurableStateMachine)
 	switch {
 	//: a format this build does not read: the start returns it, an install stops on it here.
 	case errs.HasCode(err, coreconsensus.CodeVersionUnsupported):
@@ -219,15 +222,11 @@ func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, ins
 		}
 		return err
 	//: a machine whose Restore is atomic kept its state: refused as before #1582, with no stop.
-	case n.restoresAtomically() && n.keptPosition(pre):
+	case n.restoresAtomically():
 		return err
 	//: a durable machine may have written the prefix to its disk.
 	case durable:
-		serr := origin(coreconsensus.StateMachineFailed,
-			errs.String("why", why),
-			errs.String("id", m.ID), errs.String("cause", err.Error()))
-		n.stop(serr, false)
-		return serr
+		return n.refusedDurable(m, err, "a durable machine refused a restore it may have written")
 	}
 	serr := origin(coreconsensus.StateMachineFailed,
 		errs.String("why", "a volatile machine refused a restore it may have written"),
@@ -236,6 +235,17 @@ func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, ins
 	if install {
 		n.stopUnmarked(serr)
 	}
+	return serr
+}
+
+// refusedDurable stops the node STATE_MACHINE_FAILED, with its marker, on
+// a refused Restore that may have moved a durable machine's state, and
+// returns the stop's error: at an install as at a start.
+func (n *Node) refusedDurable(m *coreconsensus.SnapshotMetaValue, err error, why string) error {
+	serr := origin(coreconsensus.StateMachineFailed,
+		errs.String("why", why),
+		errs.String("id", m.ID), errs.String("cause", err.Error()))
+	n.stop(serr, false)
 	return serr
 }
 

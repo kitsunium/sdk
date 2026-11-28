@@ -47,13 +47,18 @@ const positionColumns = "cluster, epoch, predecessor, predecessor_epoch, kept_in
 // machine runs the caller's statements and owns the position table alone.
 // The machine assumes a durable COMMIT (PostgreSQL's synchronous_commit
 // on, MySQL's innodb_flush_log_at_trx_commit=1 and sync_binlog=1,
-// SQLite without synchronous=OFF) and a failover to a synchronous copy
-// only: otherwise a committed batch or restore can be lost, and neither
-// DurabilityDurable nor the AtomicRestorer promise holds. Under MySQL
-// the read back of a failed restore runs at READ COMMITTED, which
-// MySQL admits only with binlog_format=ROW: under another format every
-// failed restore ends in an unknown outcome, and the node stops with
-// its marker.
+// SQLite's synchronous=FULL or EXTRA, since a COMMIT in WAL mode under
+// NORMAL may roll back after a power loss) and a failover to a
+// synchronous copy only: otherwise a committed batch or restore can be
+// lost, and neither DurabilityDurable nor the AtomicRestorer promise
+// holds. Truncate and Load run only statements the transaction rolls
+// back: a statement that commits implicitly (MySQL's TRUNCATE TABLE or
+// any DDL) leaves a failed restore's tables changed under the old
+// position, a state the read back takes for a refusal. Under MySQL the
+// read back of a failed restore runs at READ COMMITTED, which MySQL
+// logs only row-based: binlog_format=ROW or MIXED, which switches to
+// row-based logging there; under STATEMENT every failed restore ends
+// in an unknown outcome, and the node stops with its marker.
 type SQLConfig struct {
 	// Transactor runs the machine's transactions.
 	Transactor coresql.Transactor
@@ -69,9 +74,12 @@ type SQLConfig struct {
 	// Dump writes the machine's state, read on ex, the snapshot's read-only
 	// transaction.
 	Dump func(ctx context.Context, ex coresql.Executor, w io.Writer) error
-	// Truncate removes the machine's state on ex, before a Load.
+	// Truncate removes the machine's state on ex, before a Load, with
+	// statements the transaction rolls back: never one that commits
+	// implicitly, such as MySQL's TRUNCATE TABLE (use DELETE).
 	Truncate func(ctx context.Context, ex coresql.Executor) error
-	// Load writes on ex the state Dump wrote into r.
+	// Load writes on ex the state Dump wrote into r, with statements
+	// the transaction rolls back, as Truncate.
 	Load func(ctx context.Context, ex coresql.Executor, r io.Reader) error
 }
 
@@ -288,6 +296,12 @@ func (m *SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// done is set once the transaction's function ran to its end, in any
+	// pass a retrying transactor made: only then can a COMMIT have been
+	// sent, whose outcome the database holds. It is never reset, so a pass
+	// that committed and lost its answer is still read back after a later
+	// pass failed.
+	done := false
 	err := m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{}, func(ctx context.Context, ex coresql.Executor) error {
 		if err := m.cfg.Truncate(ctx, ex); err != nil {
 			return err
@@ -295,10 +309,19 @@ func (m *SQL) Restore(r io.Reader, meta coreconsensus.SnapshotMetaValue) error {
 		if err := m.cfg.Load(ctx, ex, r); err != nil {
 			return err
 		}
-		return m.writePosition(ctx, ex, meta.Log, meta.Position)
+		//: a position written is the function's end.
+		if err := m.writePosition(ctx, ex, meta.Log, meta.Position); err != nil {
+			return err
+		}
+		done = true
+		return nil
 	})
-	//: a failed transaction is judged on what the database holds.
-	if err != nil {
+	switch {
+	//: a function that failed never committed: a refusal, even where the row names the snapshot's position.
+	case err != nil && !done:
+		return failed("restore", err)
+	//: a failure after the function's end is judged on what the database holds.
+	case err != nil:
 		return m.restoreOutcome(&meta, err)
 	}
 	m.li, m.pos, m.unknown = meta.Log, meta.Position, nil

@@ -12,7 +12,9 @@
 // STATE_MACHINE_FAILED. A snapshot streams from a read-only transaction
 // opened when it is taken; a restore truncates and loads in one transaction
 // with the snapshot's position, and a refused one leaves the database as it
-// was, so the node keeps running (SQL is an AtomicRestorer).
+// was, so the node keeps running (SQL is an AtomicRestorer), except on
+// VERSION_UNSUPPORTED and on an outcome it could not read back, which stop
+// it.
 //
 //	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
 //		Transactor: tm, Dialect: sql.DialectPostgres,

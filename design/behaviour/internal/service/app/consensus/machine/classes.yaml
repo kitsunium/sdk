@@ -331,10 +331,15 @@ types:
           transaction.
         name: Dump
         type: func(ctx context.Context, ex coresql.Executor, w io.Writer) error
-      - doc: Truncate removes the machine's state on ex, before a Load.
+      - doc: |-
+          Truncate removes the machine's state on ex, before a Load, with
+          statements the transaction rolls back: never one that commits
+          implicitly, such as MySQL's TRUNCATE TABLE (use DELETE).
         name: Truncate
         type: func(ctx context.Context, ex coresql.Executor) error
-      - doc: Load writes on ex the state Dump wrote into r.
+      - doc: |-
+          Load writes on ex the state Dump wrote into r, with statements
+          the transaction rolls back, as Truncate.
         name: Load
         type: func(ctx context.Context, ex coresql.Executor, r io.Reader) error
     kind: struct

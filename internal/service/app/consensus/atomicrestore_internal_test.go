@@ -1,8 +1,10 @@
 package consensus
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,21 +13,60 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// applyOrder records the index of every entry a machine applies, and
-// counts each one that does not follow the index before it: an entry
-// applied over a state it does not continue.
+// applyOrder records the rank of every test command a machine applies,
+// "k<rank>=…", and counts each one that does not follow the rank the
+// machine's state ends on: a command applied over a state it does not
+// continue. Ranks, not log indexes, are compared, so the entries the
+// engine applies without the machine (a leader's no-op, a membership
+// change) open no false gap, and a missing command still shows.
 type applyOrder struct {
-	last     atomic.Uint64
+	// last is the rank the state ends on, valid once known is set.
+	last     atomic.Int64
+	known    atomic.Bool
 	disorder atomic.Int64
 }
 
-// applied records an Apply at index i.
-func (o *applyOrder) applied(i uint64) {
-	//: an entry past the first must follow the one before it.
-	if last := o.last.Load(); last != 0 && i != last+1 {
+// rank returns the rank of the test command data, false for any other.
+func rank(data []byte) (int64, bool) {
+	k, _, ok := bytes.Cut(data, []byte("="))
+	//: a test command is "k<rank>=…".
+	if !ok || len(k) < 2 || k[0] != 'k' {
+		return 0, false
+	}
+	r, err := strconv.ParseInt(string(k[1:]), 10, 64)
+	return r, err == nil
+}
+
+// applied records the Apply of e.
+func (o *applyOrder) applied(e coreconsensus.EntryValue) {
+	r, ok := rank(e.Data)
+	//: only the test's commands have a rank.
+	if !ok {
+		return
+	}
+	//: a command past a known state must follow it.
+	if o.known.Load() && r != o.last.Load()+1 {
 		o.disorder.Add(1)
 	}
-	o.last.Store(i)
+	o.last.Store(r)
+	o.known.Store(true)
+}
+
+// restored records the state a whole restore left in s: the next command
+// follows the highest rank it holds.
+func (o *applyOrder) restored(s *kv) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	top := int64(-1)
+	//: the highest rank of the state.
+	for k := range s.m {
+		//: a key of the test's commands.
+		if r, ok := rank([]byte(k + "=")); ok && r > top {
+			top = r
+		}
+	}
+	o.last.Store(top)
+	o.known.Store(true)
 }
 
 // orderedRestore is a partialRestore whose applies are checked in order
@@ -38,7 +79,7 @@ type orderedRestore struct {
 
 // Apply implements StateMachine, checking the entry's order.
 func (o *orderedRestore) Apply(e coreconsensus.EntryValue) any {
-	o.ord.applied(e.Position.Index)
+	o.ord.applied(e)
 	return o.partialRestore.Apply(e)
 }
 
@@ -47,7 +88,7 @@ func (o *orderedRestore) Restore(r io.Reader, meta coreconsensus.SnapshotMetaVal
 	err := o.partialRestore.Restore(r, meta)
 	//: a whole restore is where the next entry follows.
 	if err == nil {
-		o.ord.last.Store(meta.Position.Index)
+		o.ord.restored(o.kv)
 	}
 	return err
 }
@@ -69,7 +110,7 @@ type orderedDurable struct {
 
 // Apply implements StateMachine, checking the entry's order.
 func (o *orderedDurable) Apply(e coreconsensus.EntryValue) any {
-	o.ord.applied(e.Position.Index)
+	o.ord.applied(e)
 	return o.partialDurable.Apply(e)
 }
 
@@ -78,7 +119,7 @@ func (o *orderedDurable) Restore(r io.Reader, meta coreconsensus.SnapshotMetaVal
 	err := o.partialDurable.Restore(r, meta)
 	//: a whole restore is where the next entry follows.
 	if err == nil {
-		o.ord.last.Store(meta.Position.Index)
+		o.ord.restored(o.kv)
 	}
 	//: a machine that breaks its contract moves its position on a refusal.
 	if err != nil && o.breaks {
@@ -281,8 +322,11 @@ func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 		name   string
 		atomic bool
 		// smf has the machine refuse STATE_MACHINE_FAILED, as machine.SQL
-		// does, rather than SNAPSHOT_CORRUPT.
-		smf bool
+		// does, rather than SNAPSHOT_CORRUPT; version VERSION_UNSUPPORTED.
+		smf, version bool
+		// breaks has the machine move its position on the refusal: the
+		// start must stop it with its marker, whatever the code.
+		breaks bool
 	}
 	runCase := func(t *testing.T, tcase tc) {
 		b := newDurableBench(t, coreconsensus.ClusterID{9, 6, 0, 7})
@@ -313,7 +357,11 @@ func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 		if tcase.smf {
 			p.refusal = origin(coreconsensus.StateMachineFailed, errs.String("why", "the test's database refused the restore"))
 		}
-		o := &orderedDurable{partialDurable: &partialDurable{partialRestore: p}}
+		//: the version case refuses a format it does not read.
+		if tcase.version {
+			p.refusal = origin(coreconsensus.VersionUnsupported, errs.String("why", "the test's machine met a record it does not read"))
+		}
+		o := &orderedDurable{partialDurable: &partialDurable{partialRestore: p}, breaks: tcase.breaks}
 		var m coreconsensus.StateMachine = o
 		//: the declared case's machine says its restore is atomic.
 		if tcase.atomic {
@@ -337,6 +385,11 @@ func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 			abandon(f.dd.Close())
 		}
 		n, err := start()
+		//: a node that started is closed with the test, whatever follows.
+		if err == nil {
+			first := n
+			t.Cleanup(func() { stopNode(first) })
+		}
 		select {
 		//: the failing restore ran.
 		case <-p.failed:
@@ -344,16 +397,16 @@ func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 		default:
 			t.Fatal("setup: the start never asked the machine to restore")
 		}
-		//: the undeclared machine fails the start, and its marker refuses the next.
-		if !tcase.atomic {
+		//: the undeclared machine, and a declared one that moved its position, fail the start, and the marker refuses the next.
+		if !tcase.atomic || tcase.breaks {
 			//: the stop #1582 decided.
 			if !errs.HasCode(err, coreconsensus.CodeStateMachineFailed) {
-				t.Fatalf("an undeclared durable machine refused its restore at a start, which returned %v (want STATE_MACHINE_FAILED)", err)
+				t.Fatalf("a durable machine undeclared, or declared and moving its position, refused its restore at a start, which returned %v (want STATE_MACHINE_FAILED)", err)
 			}
-			n, err = start()
+			second, err := start()
 			//: a node that started anyway is closed.
 			if err == nil {
-				stopNode(n)
+				stopNode(second)
 			}
 			//: the marker refuses the next start.
 			if !errs.HasCode(err, coreconsensus.CodeStopMarkerPresent) {
@@ -365,7 +418,6 @@ func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 		if err != nil {
 			t.Fatalf("an AtomicRestorer refused its restore at a start, which returned %v %v (want a fallback)", err, errs.FieldsOf(err))
 		}
-		defer stopNode(n)
 		deadline := time.Now().Add(10 * time.Second)
 		//: the node ends on the cluster's state.
 		for {
@@ -394,6 +446,7 @@ func TestAnAtomicRestorerRefusedAtStartFallsBack(t *testing.T) {
 	for _, tcase := range []tc{
 		{name: "a durable AtomicRestorer refused at a start falls back and runs", atomic: true},
 		{name: "a durable AtomicRestorer refused STATE_MACHINE_FAILED at a start falls back and runs", atomic: true, smf: true},
+		{name: "a durable AtomicRestorer that moved its position and refused its version stops marked", atomic: true, version: true, breaks: true},
 		{name: "the same machine undeclared fails the start and leaves its marker"},
 	} {
 		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })

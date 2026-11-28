@@ -23768,6 +23768,8 @@ sequences:
         kind: actor
       - id: (*Node).restoreRefused
         kind: self
+      - id: n.refusedDurable
+        kind: internal
       - id: n.stop
         kind: internal
       - id: origin
@@ -23775,15 +23777,13 @@ sequences:
       - id: n.stopUnmarked
         kind: internal
     steps:
-      - bind: _, durable
-        eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
-      - bind: why
-        eval: "\"a durable machine refused a restore it may have written\""
       - opt:
           do:
-            - set: why
-              value: "\"an AtomicRestorer refused a restore and moved its position, or named none\""
-          when: n.restoresAtomically()
+            - return: n.refusedDurable(m, err, "an AtomicRestorer refused a restore and moved its position, or named none")
+              to: n.refusedDurable
+          when: n.restoresAtomically() && !n.keptPosition(pre)
+      - bind: _, durable
+        eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
       - switch:
           cases:
             - case: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
@@ -23794,20 +23794,13 @@ sequences:
                         to: n.stop
                     when: install
                 - return: err
-            - case: n.restoresAtomically() && n.keptPosition(pre)
+            - case: n.restoresAtomically()
               do:
                 - return: err
             - case: durable
               do:
-                - bind: serr
-                  eval: |-
-                    origin(coreconsensus.StateMachineFailed,
-                    			errs.String("why", why),
-                    			errs.String("id", m.ID), errs.String("cause", err.Error()))
-                  to: origin
-                - eval: n.stop(serr, false)
-                  to: n.stop
-                - return: serr
+                - return: n.refusedDurable(m, err, "a durable machine refused a restore it may have written")
+                  to: n.refusedDurable
       - bind: serr
         eval: |-
           origin(coreconsensus.StateMachineFailed,
@@ -23819,6 +23812,26 @@ sequences:
             - eval: n.stopUnmarked(serr)
               to: n.stopUnmarked
           when: install
+      - return: serr
+  - of: (*Node).refusedDurable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).refusedDurable
+        kind: self
+      - id: origin
+        kind: internal
+      - id: n.stop
+        kind: internal
+    steps:
+      - bind: serr
+        eval: |-
+          origin(coreconsensus.StateMachineFailed,
+          		errs.String("why", why),
+          		errs.String("id", m.ID), errs.String("cause", err.Error()))
+        to: origin
+      - eval: n.stop(serr, false)
+        to: n.stop
       - return: serr
   - of: idNamesPosition
     participants:

@@ -69,6 +69,10 @@ type memDB struct {
 	// is closed once it committed.
 	inflight      time.Duration
 	committedLate chan struct{}
+	// release, when set, holds that commit until it is closed, in place of
+	// the delay: no wall clock decides which of the read back and the
+	// commit comes first.
+	release chan struct{}
 }
 
 // rowLock returns the position row's lock.
@@ -81,17 +85,27 @@ func (d *memDB) rowLock() chan struct{} {
 // delay after it answered an error.
 func (d *memDB) armInflight(delay time.Duration) {
 	d.fmu.Lock()
-	d.inflight, d.committedLate = delay, make(chan struct{})
+	d.inflight, d.committedLate, d.release = delay, make(chan struct{}), nil
 	d.fmu.Unlock()
 }
 
+// armInflightHeld has the next read-write commit holding the row lock
+// commit once the channel it returns is closed.
+func (d *memDB) armInflightHeld() chan struct{} {
+	rel := make(chan struct{})
+	d.fmu.Lock()
+	d.inflight, d.committedLate, d.release = time.Nanosecond, make(chan struct{}), rel
+	d.fmu.Unlock()
+	return rel
+}
+
 // takeInflight disarms and returns the delay armed, zero when none.
-func (d *memDB) takeInflight() (time.Duration, chan struct{}) {
+func (d *memDB) takeInflight() (time.Duration, chan struct{}, chan struct{}) {
 	d.fmu.Lock()
 	defer d.fmu.Unlock()
-	delay, done := d.inflight, d.committedLate
+	delay, done, rel := d.inflight, d.committedLate, d.release
 	d.inflight = 0
-	return delay, done
+	return delay, done, rel
 }
 
 // crashNow reports whether a position write at idx fails, and disarms it.
@@ -199,11 +213,16 @@ func (t memTx) Commit() error {
 	//: an armed commit of a row-lock holder answers before it commits.
 	if !t.c.readOnly && t.c.locked {
 		//: armed.
-		if delay, done := t.c.db.takeInflight(); delay > 0 {
+		if delay, done, rel := t.c.db.takeInflight(); delay > 0 {
 			s, d := *t.c.tx, t.c.db
 			t.c.tx, t.c.locked = nil, false
 			go func() {
-				time.Sleep(delay)
+				//: a held commit waits for the test, the others for the delay.
+				if rel != nil {
+					<-rel
+				} else {
+					time.Sleep(delay)
+				}
 				d.mu.Lock()
 				d.committed = s
 				d.mu.Unlock()

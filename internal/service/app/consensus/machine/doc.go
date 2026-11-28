@@ -22,7 +22,9 @@
 // committed while the next batches commit. A restore runs
 // [SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in
 // one transaction: a refused one leaves the database as it was, and the
-// node it runs under keeps running on the state it had applied.
+// node it runs under keeps running on the state it had applied, except
+// on VERSION_UNSUPPORTED, which stops it (D18), and when the outcome of
+// the transaction could not be read back, which stops it with its marker.
 //
 //	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
 //		Transactor: tm, Dialect: sql.DialectPostgres,

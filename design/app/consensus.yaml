@@ -755,7 +755,8 @@ packages:
               the machine declares it as an AtomicRestorer: then its refusal
               neither stops the node nor fails a start, the install is refused
               and the node keeps the state it had applied, and a start falls
-              back. A machine reads r to io.EOF: after it
+              back, unless the machine is durable and its AppliedPosition moved
+              across the refusal or failed, which stops it with its marker. A machine reads r to io.EOF: after it
               returns, the engine reads what it left, and checks the stream's
               sizes and SHA-256 against the metadata. A Restore that returns nil
               on a stream whose end is then refused leaves the machine on a
@@ -4732,7 +4733,9 @@ packages:
       committed while the next batches commit. A restore runs
       [SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in
       one transaction: a refused one leaves the database as it was, and the
-      node it runs under keeps running on the state it had applied.
+      node it runs under keeps running on the state it had applied, except
+      on VERSION_UNSUPPORTED, which stops it (D18), and when the outcome of
+      the transaction could not be read back, which stops it with its marker.
 
       	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
       		Transactor: tm, Dialect: sql.DialectPostgres,
@@ -4808,13 +4811,18 @@ packages:
           machine runs the caller's statements and owns the position table alone.
           The machine assumes a durable COMMIT (PostgreSQL's synchronous_commit
           on, MySQL's innodb_flush_log_at_trx_commit=1 and sync_binlog=1,
-          SQLite without synchronous=OFF) and a failover to a synchronous copy
-          only: otherwise a committed batch or restore can be lost, and neither
-          DurabilityDurable nor the AtomicRestorer promise holds. Under MySQL
-          the read back of a failed restore runs at READ COMMITTED, which
-          MySQL admits only with binlog_format=ROW: under another format every
-          failed restore ends in an unknown outcome, and the node stops with
-          its marker.
+          SQLite's synchronous=FULL or EXTRA, since a COMMIT in WAL mode under
+          NORMAL may roll back after a power loss) and a failover to a
+          synchronous copy only: otherwise a committed batch or restore can be
+          lost, and neither DurabilityDurable nor the AtomicRestorer promise
+          holds. Truncate and Load run only statements the transaction rolls
+          back: a statement that commits implicitly (MySQL's TRUNCATE TABLE or
+          any DDL) leaves a failed restore's tables changed under the old
+          position, a state the read back takes for a refusal. Under MySQL the
+          read back of a failed restore runs at READ COMMITTED, which MySQL
+          logs only row-based: binlog_format=ROW or MIXED, which switches to
+          row-based logging there; under STATEMENT every failed restore ends
+          in an unknown outcome, and the node stops with its marker.
         name: SQLConfig
         struct:
           fields:
@@ -4840,10 +4848,15 @@ packages:
                 transaction.
               name: Dump
               type: func(ctx context.Context, ex coresql.Executor, w io.Writer) error
-            - doc: Truncate removes the machine's state on ex, before a Load.
+            - doc: |-
+                Truncate removes the machine's state on ex, before a Load, with
+                statements the transaction rolls back: never one that commits
+                implicitly, such as MySQL's TRUNCATE TABLE (use DELETE).
               name: Truncate
               type: func(ctx context.Context, ex coresql.Executor) error
-            - doc: Load writes on ex the state Dump wrote into r.
+            - doc: |-
+                Load writes on ex the state Dump wrote into r, with statements
+                the transaction rolls back, as Truncate.
               name: Load
               type: func(ctx context.Context, ex coresql.Executor, r io.Reader) error
       - doc: |-
@@ -6932,8 +6945,6 @@ packages:
             target: coreconsensus.DurableStateMachine
           - name: BatchingStateMachine
             target: coreconsensus.BatchingStateMachine
-          - name: AtomicRestorer
-            target: coreconsensus.AtomicRestorer
           - name: Snapshot
             target: coreconsensus.Snapshot
           - name: LogReader
@@ -7015,6 +7026,17 @@ packages:
           - name: PEMIdentity
             target: svcconsensus.PEMIdentity
         doc: Every type needed to implement a published port is aliased here (R2-32).
+      - alias:
+          - doc: |-
+              AtomicRestorer is the sibling of a StateMachine whose failed Restore
+              leaves its state as it was, the position a DurableStateMachine
+              reports included: its refusal neither stops the node nor fails a
+              start, except on VERSION_UNSUPPORTED (D18) and for a durable one
+              whose AppliedPosition moved across the refusal or failed, which is
+              stopped with its marker. A type that embeds one inherits the marker,
+              and must keep its own Restore atomic.
+            name: AtomicRestorer
+            target: coreconsensus.AtomicRestorer
       - const:
           - name: WipeAndRejoin
             reexport: svcconsensus.WipeAndRejoin
@@ -8012,7 +8034,9 @@ packages:
       STATE_MACHINE_FAILED. A snapshot streams from a read-only transaction
       opened when it is taken; a restore truncates and loads in one transaction
       with the snapshot's position, and a refused one leaves the database as it
-      was, so the node keeps running (SQL is an AtomicRestorer).
+      was, so the node keeps running (SQL is an AtomicRestorer), except on
+      VERSION_UNSUPPORTED and on an outcome it could not read back, which stop
+      it.
 
       	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
       		Transactor: tm, Dialect: sql.DialectPostgres,

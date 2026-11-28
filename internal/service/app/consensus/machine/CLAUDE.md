@@ -17,7 +17,11 @@ State machines for the consensus engine (ADR 0152 D3, #916), published by
   `WriteTo` served in it (`sqlsnap.go`); a restore is `Truncate`, `Load`
   and the snapshot's position in one transaction, the header checked before
   it opens and `m.pos` moved once it committed, so a refusal leaves the
-  state as it was and the node keeps running (#1607). Snapshot format: `KSQL`,
+  state as it was and the node keeps running (#1607), except on
+  VERSION_UNSUPPORTED, which stops it (D18), and on an outcome the read
+  back cannot name, which stops it with its marker. A failure of the
+  transaction's function is a refusal at once; only one after its end is
+  read back. Snapshot format: `KSQL`,
   version 1, then what `Dump` wrote.
 - `KV` (`NewKV`, `KVGet`, `KVPut`, `KVCompareAndSwap`, `KVResult`) — the
   reference volatile machine: a per-key revision that only grows (D6's ABA

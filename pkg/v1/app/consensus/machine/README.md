@@ -8,7 +8,7 @@ import "github.com/kitsunium/sdk/pkg/v1/app/consensus/machine"
 
 Package machine is the public facade of the consensus domain's state machines (ADR 0152 D3): the durable machine over a database every product otherwise writes by hand, and the reference key-value machine.
 
-[NewSQL](#NewSQL) builds a [SQL](#SQL) machine over a transactor of package [github.com/kitsunium/sdk/pkg/v1/data/sql](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/data/sql). It applies a batch of committed commands in one transaction and writes the applied log identity and position in that same transaction, so a crash between the two loses both or neither and a node configured with DurabilityDurable resumes after exactly the entries the database holds: none applied twice, none skipped. A batch that cannot complete panics, and the node stops with STATE\_MACHINE\_FAILED. A snapshot streams from a read-only transaction opened when it is taken; a restore truncates and loads in one transaction with the snapshot's position, and a refused one leaves the database as it was, so the node keeps running (SQL is an AtomicRestorer).
+[NewSQL](#NewSQL) builds a [SQL](#SQL) machine over a transactor of package [github.com/kitsunium/sdk/pkg/v1/data/sql](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/data/sql). It applies a batch of committed commands in one transaction and writes the applied log identity and position in that same transaction, so a crash between the two loses both or neither and a node configured with DurabilityDurable resumes after exactly the entries the database holds: none applied twice, none skipped. A batch that cannot complete panics, and the node stops with STATE\_MACHINE\_FAILED. A snapshot streams from a read-only transaction opened when it is taken; a restore truncates and loads in one transaction with the snapshot's position, and a refused one leaves the database as it was, so the node keeps running (SQL is an AtomicRestorer), except on VERSION\_UNSUPPORTED and on an outcome it could not read back, which stop it.
 
 ```
 sm, err := machine.NewSQL(ctx, machine.SQLConfig{
@@ -293,9 +293,12 @@ type SQLConfig struct {
 	// Dump writes the machine's state, read on ex, the snapshot's read-only
 	// transaction.
 	Dump       func(ctx context.Context, ex coresql.Executor, w io.Writer) error
-	// Truncate removes the machine's state on ex, before a Load.
+	// Truncate removes the machine's state on ex, before a Load, with
+	// statements the transaction rolls back: never one that commits
+	// implicitly, such as MySQL's TRUNCATE TABLE (use DELETE).
 	Truncate   func(ctx context.Context, ex coresql.Executor) error
-	// Load writes on ex the state Dump wrote into r.
+	// Load writes on ex the state Dump wrote into r, with statements
+	// the transaction rolls back, as Truncate.
 	Load       func(ctx context.Context, ex coresql.Executor, r io.Reader) error
 }
 ```

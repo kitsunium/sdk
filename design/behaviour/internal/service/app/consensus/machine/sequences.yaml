@@ -628,6 +628,8 @@ sequences:
         kind: internal
       - id: m.cfg.Transactor.Transact
         kind: value
+      - id: failed
+        kind: internal
       - id: m.restoreOutcome
         kind: internal
     steps:
@@ -658,6 +660,8 @@ sequences:
           when: v != sqlSnapshotVersion
       - lock:
           mutex: m.mu
+      - bind: done
+        eval: "false"
       - bind: err
         eval: |-
           m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{}, func(ctx context.Context, ex coresql.Executor) error {
@@ -667,14 +671,24 @@ sequences:
           		if err := m.cfg.Load(ctx, ex, r); err != nil {
           			return err
           		}
-          		return m.writePosition(ctx, ex, meta.Log, meta.Position)
+          		//: a position written is the function's end.
+          		if err := m.writePosition(ctx, ex, meta.Log, meta.Position); err != nil {
+          			return err
+          		}
+          		done = true
+          		return nil
           	})
         to: m.cfg.Transactor.Transact
-      - opt:
-          do:
-            - return: m.restoreOutcome(&meta, err)
-              to: m.restoreOutcome
-          when: err != nil
+      - switch:
+          cases:
+            - case: err != nil && !done
+              do:
+                - return: failed("restore", err)
+                  to: failed
+            - case: err != nil
+              do:
+                - return: m.restoreOutcome(&meta, err)
+                  to: m.restoreOutcome
       - set: m.li, m.pos, m.unknown
         value: meta.Log, meta.Position, nil
       - return: nil

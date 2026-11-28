@@ -142,10 +142,10 @@ func TestAnSQLRestoreRefusedHalfWayLeavesTheStateAsItWas(t *testing.T) {
 		if li != beforeLI || pos != beforePos {
 			t.Errorf("a refused restore moved the position to %+v %+v from %+v %+v", li, pos, beforeLI, beforePos)
 		}
-		_, dbPos, _ := mustSQL(t, entriesConfig(transactorOver(t, d))).AppliedPosition()
-		//: the position the database holds is the one before.
-		if dbPos != beforePos {
-			t.Errorf("a refused restore left position %+v in the database, want %+v", dbPos, beforePos)
+		dbLI, dbPos, dbErr := mustSQL(t, entriesConfig(transactorOver(t, d))).AppliedPosition()
+		//: the identity and the position the database holds are the ones before.
+		if dbErr != nil || dbLI != beforeLI || dbPos != beforePos {
+			t.Errorf("a refused restore left %+v %+v (%v) in the database, want %+v %+v", dbLI, dbPos, dbErr, beforeLI, beforePos)
 		}
 		//: a later restore of the same snapshot succeeds.
 		if err := m.Restore(bytes.NewReader(body.Bytes()), meta); err != nil {
@@ -259,6 +259,10 @@ func TestAnSQLFollowerWhoseInstallLoadFailsKeepsRunning(t *testing.T) {
 		v := (li + 1) % 3
 		cl.waitPosition(v, last)
 		cl.kill(v)
+		// The victim's log ends at held: a live log based at held or below
+		// still feeds it by appends, so only one that starts past held+1
+		// leaves an install as its way back.
+		_, held := cl.members[v].log.Bounds()
 		victim.Store(int64(v))
 		last = write(31, 200)
 		deadline := time.Now().Add(20 * time.Second)
@@ -272,7 +276,7 @@ func TestAnSQLFollowerWhoseInstallLoadFailsKeepsRunning(t *testing.T) {
 					continue
 				}
 				//: a log that still reaches the victim's position.
-				if first, _ := m.log.Bounds(); first <= 31 {
+				if first, _ := m.log.Bounds(); first <= held+1 {
 					behind = true
 				}
 			}
@@ -351,6 +355,8 @@ type lostAck struct {
 	coresql.Transactor
 	armed atomic.Bool
 	blind atomic.Bool
+	// calls counts the Transact calls.
+	calls atomic.Int64
 	// twice runs the read-write fn of every Transact after the loss twice,
 	// the second time on a cancelled context: a transactor that retries.
 	twice atomic.Bool
@@ -361,6 +367,7 @@ type lostAck struct {
 // Transact runs fn through the inner transactor, then loses its answer
 // once armed.
 func (l *lostAck) Transact(ctx context.Context, opts coresql.TxOptionsValue, fn coresql.TxFunc) error {
+	l.calls.Add(1)
 	//: a blind transactor reaches nothing once the acknowledgement was lost.
 	if l.blind.Load() && l.lost.Load() {
 		return errors.New("the database cannot be reached")
@@ -435,15 +442,18 @@ func TestAnSQLRestoreWhoseCommitAcknowledgementIsLostIsJudgedOnTheDatabase(t *te
 			if err == nil {
 				t.Fatal("a restore whose outcome is unknown returned nil")
 			}
+			_, pos, perr := m.AppliedPosition()
 			//: and no position: the engine cannot take it for one kept.
-			if _, pos, perr := m.AppliedPosition(); perr == nil {
+			if perr == nil {
 				t.Errorf("a restore whose outcome is unknown left AppliedPosition %+v, nil", pos)
 			}
+			calls := la.calls.Load()
 			func() {
 				defer func() {
-					//: an apply over an unknown state panics.
-					if r := recover(); r == nil {
-						t.Error("a batch was applied over a state whose restore is unknown")
+					r := recover()
+					//: an apply over an unknown state panics with that state's error, before any transaction.
+					if r != error(perr) || la.calls.Load() != calls {
+						t.Errorf("ApplyBatch over an unknown state panicked with %v after %d transactions, want %v before any", r, la.calls.Load()-calls, perr)
 					}
 				}()
 				m.ApplyBatch(commands(7, 7), make([]any, 1))
@@ -542,8 +552,14 @@ func TestAnSQLRestoreIsReadBackOnThePrimaryUnderTheRowLock(t *testing.T) {
 			primary.mu.Unlock()
 			la.armed.Store(true)
 		}
-		//: the in-flight case's COMMIT lands after its answer.
-		if c.inflight > 0 {
+		var rel chan struct{}
+		//: the in-flight case's COMMIT lands after its answer, the bounded one's only once the read back gave up.
+		switch {
+		//: held until the read back gave up.
+		case c.bound > 0:
+			rel = primary.armInflightHeld()
+		//: committed after a delay.
+		case c.inflight > 0:
 			primary.armInflight(c.inflight)
 		}
 		meta := coreconsensus.SnapshotMetaValue{
@@ -557,6 +573,7 @@ func TestAnSQLRestoreIsReadBackOnThePrimaryUnderTheRowLock(t *testing.T) {
 		}
 		//: a read back that met its bound names no outcome, and no position.
 		if c.bound > 0 {
+			close(rel)
 			<-primary.committedLate
 			//: refused, with no position the engine could take for one kept.
 			if _, _, perr := m.AppliedPosition(); err == nil || perr == nil {
@@ -584,8 +601,52 @@ func TestAnSQLRestoreIsReadBackOnThePrimaryUnderTheRowLock(t *testing.T) {
 	for _, c := range []tc{
 		{name: "a replica behind the primary", replica: true},
 		{name: "a COMMIT still in flight", inflight: 50 * time.Millisecond},
-		{name: "a COMMIT in flight past the bound", inflight: 300 * time.Millisecond, bound: 30 * time.Millisecond},
+		{name: "a COMMIT in flight past the bound", bound: 30 * time.Millisecond},
 	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// A Restore whose Load fails is a refusal even when the snapshot names the
+// position the machine already holds: the transaction never reached its
+// COMMIT, so the position row read back, the same either way, says nothing
+// of it. Judged on that row alone, the refusal was returned as a restore
+// that took effect, its Load not run to the end (#1607).
+func TestAnSQLRestoreOfTheHeldPositionWhoseLoadFailsIsRefused(t *testing.T) {
+	type tc struct {
+		name string
+		cut  int
+	}
+	runCase := func(t *testing.T, c tc) {
+		_, srcTM := newDB(t)
+		from := mustSQL(t, entriesConfig(srcTM))
+		from.ApplyBatch(commands(1, 2), make([]any, 2))
+		snap, err := from.Snapshot()
+		//: the snapshot opens.
+		if err != nil {
+			t.Fatalf("Snapshot() = %v", err)
+		}
+		var body bytes.Buffer
+		_, err = snap.WriteTo(&body)
+		snap.Release()
+		//: the snapshot writes.
+		if err != nil {
+			t.Fatalf("WriteTo() = %v", err)
+		}
+		_, tm := newDB(t)
+		cl := &cutLoad{rows: c.cut}
+		m := mustSQL(t, cl.wrap(entriesConfig(tm)))
+		m.ApplyBatch(commands(1, 2), make([]any, 2))
+		li, pos, _ := m.AppliedPosition()
+		cl.armed.Store(true)
+		err = m.Restore(bytes.NewReader(body.Bytes()), coreconsensus.SnapshotMetaValue{Position: pos, Log: li})
+		//: the Load failed: a refusal, whatever the row says.
+		if !cl.fired.Load() || !errs.HasCode(err, coreconsensus.CodeStateMachineFailed) {
+			t.Fatalf("a restore of the held position whose Load failed (fired %v) returned %v, want STATE_MACHINE_FAILED", cl.fired.Load(), err)
+		}
+	}
+	//: one case: a Load cut after one row.
+	for _, c := range []tc{{name: "a Load that fails after one row", cut: 1}} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
