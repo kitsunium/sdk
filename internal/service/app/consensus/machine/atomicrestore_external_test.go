@@ -258,11 +258,15 @@ func TestAnSQLFollowerWhoseInstallLoadFailsKeepsRunning(t *testing.T) {
 		li, _ := cl.leader()
 		v := (li + 1) % 3
 		cl.waitPosition(v, last)
+		_, vsm := cl.at(v)
+		_, vpos, _ := vsm.(coreconsensus.DurableStateMachine).AppliedPosition()
 		cl.kill(v)
-		// The victim's log ends at held: a live log based at held or below
-		// still feeds it by appends, so only one that starts past held+1
-		// leaves an install as its way back.
+		// The victim resumes past the higher of its log's end and its
+		// database's position: a live log based at that point or below
+		// still feeds it by appends, so only one that starts past it plus
+		// one leaves an install as its way back.
 		_, held := cl.members[v].log.Bounds()
+		held = max(held, vpos.Index)
 		victim.Store(int64(v))
 		last = write(31, 200)
 		deadline := time.Now().Add(20 * time.Second)
