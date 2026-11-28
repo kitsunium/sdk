@@ -440,6 +440,9 @@ files:
       - (*sqlStream).Partitions
       - (*sqlStream).Append
       - (*sqlStream).write
+      - (*sqlStream).lockHead
+      - (*sqlStream).prepareHead
+      - (*sqlStream).createHead
       - nullable
       - (*sqlStream).run
       - (*sqlStream).announce
@@ -485,6 +488,7 @@ files:
       - sqlStatements
       - renderSQLStatements
       - lockHeadStatement
+      - createHeadStatement
       - commitStatement
       - (*sqlStatements).insertRows
       - (*sqlStatements).compactDelete
@@ -917,6 +921,18 @@ functions:
       PostgreSQL wants the existing row's column qualified by its table, SQLite
       names it bare, MySQL has no ON CONFLICT.
     name: lockHeadStatement
+    params: dialect coresql.Dialect, h string
+    results: string
+  - doc: |-
+      createHeadStatement renders the creation of a missing head row that
+      leaves an existing one as it is: INSERT IGNORE on MySQL, ON CONFLICT DO
+      NOTHING elsewhere. Only MySQL sends it (headApart), an autocommit
+      statement of its own, so the row is committed before any appender's
+      transaction locks it: the upsert lockHead sends elsewhere, run by sixteen
+      MySQL transactions on a partition never written, deadlocked them on the
+      new key once the one that inserted it rolled back, and the server rolled a
+      caller's transaction back whole (#822).
+    name: createHeadStatement
     params: dialect coresql.Dialect, h string
     results: string
   - doc: |-
@@ -1833,7 +1849,8 @@ types:
 
       # Why offsets commit in order
 
-      The head row of a partition is locked by the Append's first statement and
+      The head row of a partition is locked by the Append's first statement —
+      on MySQL by the head's read, after the row was created apart (#822) — and
       held until its transaction ends, so a second appender of that partition
       waits for the first to commit or roll back and then reads the next offset
       the first left. Offsets are therefore assigned in commit order, and a
@@ -1869,6 +1886,17 @@ types:
       - doc: turn counts the unkeyed batches, which go to the partitions in turn.
         name: turn
         type: atomic.Uint64
+      - doc: |-
+          pool runs, outside every transaction, the one statement that must
+          commit on its own: a MySQL head's creation.
+        name: pool
+        type: coresql.Executor
+      - doc: |-
+          heads are, per partition, whether this engine knows its MySQL head
+          row exists: a head is never deleted while its table stands, so once
+          known the Append locks it at once, with no read before.
+        name: heads
+        type: "[]atomic.Bool"
     kind: struct
     methods:
       - doc: Partitions returns how many partitions the stream has.
@@ -1895,6 +1923,44 @@ types:
           	ctx context.Context, ex coresql.Executor, partition int, records []corestream.RecordValue, now int64,
         recv: s *sqlStream
         results: corestream.AppendValue, error
+      - doc: |-
+          lockHead makes sure partition's head row exists and, but on MySQL, locks
+          it until ex's transaction ends; on MySQL the head read that follows locks
+          it, FOR UPDATE.
+
+          PostgreSQL and SQLite send the upsert, which creates and locks the row in
+          one statement. On MySQL that upsert, sent by many transactions on a
+          partition never written, deadlocked them on the new key once the one that
+          inserted it rolled back, and the server rolled a caller's transaction back
+          whole (#822): there the row is created by a statement of its own,
+          committed at once on the pool, before any transaction locks it. A head
+          this engine knows exists is locked at once; otherwise lockHead reads it
+          unlocked first — a locking read of a missing row would take a gap lock its
+          creation, on another connection, would then wait on.
+        name: lockHead
+        params: ctx context.Context, ex coresql.Executor, partition int
+        recv: s *sqlStream
+        results: error
+      - doc: |-
+          prepareHead creates partition's MySQL head on the pool before an Append
+          or a Trim opens a transaction of its own, so the creation never waits for
+          a connection while that transaction holds one. Inside a caller's
+          transaction there is none to wait for before: lockHead creates it there,
+          on a second connection of the pool, the first time the partition is
+          written — a pool whose every connection such transactions hold waits for
+          one until ctx ends. Nothing on PostgreSQL and SQLite.
+        name: prepareHead
+        params: ctx context.Context, partition int
+        recv: s *sqlStream
+        results: error
+      - doc: |-
+          createHead creates partition's MySQL head on the pool, committed at once
+          whatever the transaction that asked becomes, and leaves an existing one
+          as it is.
+        name: createHead
+        params: ctx context.Context, partition int
+        recv: s *sqlStream
+        results: error
       - doc: |-
           run runs a call's statements where they belong, as the queue's SQL broker
           does (ADR 0151): inside the caller's transaction every call is a savepoint
@@ -2198,6 +2264,18 @@ types:
           before anything is read (ADR 0140).
         name: lockHead
         type: string
+      - doc: |-
+          createHead creates a partition's missing head row and does nothing to
+          an existing one, sent alone on the pool, outside every transaction,
+          where headApart says so (#822).
+        name: createHead
+        type: string
+      - doc: |-
+          headApart is whether the head row is created apart and locked by its
+          read: MySQL's, where creating it inside the appenders' transactions
+          deadlocked them (#822).
+        name: headApart
+        type: bool
       - doc: "head reads the locked head row: next offset, floor, last instant."
         name: head
         type: string

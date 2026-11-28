@@ -30,6 +30,7 @@ func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
 			s.lockHead: "lockHead", s.head: "head", s.advance: "advance", s.floor: "floor", s.read: "read",
 			s.bounds: "bounds", s.offsetAt: "offsetAt", s.lowest: "lowest", s.release: "release",
 			s.headNext: "headNext", s.commit: "commit", s.committed: "committed", s.compactScan: "compactScan",
+			s.createHead: "createHead",
 		},
 		InsertRows:    s.insertRows,
 		CompactDelete: s.compactDelete,

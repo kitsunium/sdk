@@ -52,6 +52,14 @@ type sqlStatements struct {
 	// SQLite it is also the write that takes the database's write lock
 	// before anything is read (ADR 0140).
 	lockHead string
+	// createHead creates a partition's missing head row and does nothing to
+	// an existing one, sent alone on the pool, outside every transaction,
+	// where headApart says so (#822).
+	createHead string
+	// headApart is whether the head row is created apart and locked by its
+	// read: MySQL's, where creating it inside the appenders' transactions
+	// deadlocked them (#822).
+	headApart bool
 	// head reads the locked head row: next offset, floor, last instant.
 	head string
 	// insertFull inserts a full chunk of sqlRowsPerStatement records.
@@ -110,10 +118,12 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 			" AND x.appended_at <= " + p(n) + ")"
 	}
 	s := sqlStatements{
-		lockHead: lockHeadStatement(dialect, h),
-		head:     "SELECT next_offset, first_offset, last_at FROM " + h + " WHERE part = " + p(1) + dialect.ForUpdate(),
-		advance:  "UPDATE " + h + " SET next_offset = " + p(1) + ", last_at = " + p(2) + " WHERE part = " + p(3),
-		floor:    "UPDATE " + h + " SET first_offset = " + p(1) + " WHERE part = " + p(2),
+		lockHead:   lockHeadStatement(dialect, h),
+		createHead: createHeadStatement(dialect, h),
+		headApart:  dialect == coresql.DialectMySQL,
+		head:       "SELECT next_offset, first_offset, last_at FROM " + h + " WHERE part = " + p(1) + dialect.ForUpdate(),
+		advance:    "UPDATE " + h + " SET next_offset = " + p(1) + ", last_at = " + p(2) + " WHERE part = " + p(3),
+		floor:      "UPDATE " + h + " SET first_offset = " + p(1) + " WHERE part = " + p(2),
 		read: "SELECT h.next_offset, h.first_offset, " + expired(1) + ", r.record_offset, r.appended_at, r.record_key, r.payload FROM " +
 			h + " h LEFT JOIN " + t + " r ON " + readable + p(2) + " AND r.record_offset >= " + p(3) + " WHERE h.part = " + p(4) +
 			" ORDER BY r.record_offset LIMIT " + p(5),
@@ -159,6 +169,24 @@ func lockHeadStatement(dialect coresql.Dialect, h string) string {
 		//: SQLite: a bare column is the existing row's.
 		return insert + " ON CONFLICT (part) DO UPDATE SET next_offset = next_offset"
 	}
+}
+
+// createHeadStatement renders the creation of a missing head row that
+// leaves an existing one as it is: INSERT IGNORE on MySQL, ON CONFLICT DO
+// NOTHING elsewhere. Only MySQL sends it (headApart), an autocommit
+// statement of its own, so the row is committed before any appender's
+// transaction locks it: the upsert lockHead sends elsewhere, run by sixteen
+// MySQL transactions on a partition never written, deadlocked them on the
+// new key once the one that inserted it rolled back, and the server rolled a
+// caller's transaction back whole (#822).
+func createHeadStatement(dialect coresql.Dialect, h string) string {
+	values := " (part, next_offset, first_offset, last_at) VALUES (" + dialect.Placeholder(1) + ", 0, 0, 0)"
+	//: MySQL and MariaDB: no ON CONFLICT.
+	if dialect == coresql.DialectMySQL {
+		return "INSERT IGNORE INTO " + h + values
+	}
+	//: PostgreSQL and SQLite.
+	return "INSERT INTO " + h + values + " ON CONFLICT (part) DO NOTHING"
 }
 
 // commitStatement renders the upsert of a group's cursor: the digest of the

@@ -839,8 +839,13 @@ packages:
           commits, and the stream's Waker fires only after the commit. The head row
           of the partition is locked for the rest of that transaction, so the
           appenders of one partition are serialised and its offsets commit in
-          order, with no gap a reader could skip. A Commit made on a handler's own
-          transaction commits the group's offset with the handler's effect.
+          order, with no gap a reader could skip. On MySQL the head row of a
+          partition never written is created first, by a statement of its own
+          committed at once on the pool: inside a caller's transaction that takes
+          a second connection of the pool, once per partition, so a pool whose
+          every connection such transactions hold waits for one until the
+          context ends. A Commit made on a handler's own transaction commits the
+          group's offset with the handler's effect.
 
           It refuses a policy it cannot honour with the core's Validate, as every
           engine does, and a RetainBytes or MaxBytes, which it does not keep, with

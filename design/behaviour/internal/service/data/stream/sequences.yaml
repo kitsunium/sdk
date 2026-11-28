@@ -3458,6 +3458,8 @@ sequences:
         kind: internal
       - id: cfg.Policy.Normalized
         kind: value
+      - id: parts.join.Join
+        kind: value
     steps:
       - bind: parts, invalid
         eval: cfg.validate()
@@ -3469,12 +3471,17 @@ sequences:
       - bind: policy
         eval: cfg.Policy.Normalized()
         to: cfg.Policy.Normalized
+      - bind: pool, _
+        eval: parts.join.Join(context.Background())
+        to: parts.join.Join
       - return: |-
           &sqlStream{
-          		tm: cfg.Transactor, clk: sqlClockOrSystem(cfg.Clock), tx: parts,
+          		pool: pool,
+          		tm:   cfg.Transactor, clk: sqlClockOrSystem(cfg.Clock), tx: parts,
           		wake: sqlWakeFor(parts.join, cfg.Table), table: cfg.Table,
-          		swept: make([]atomic.Int64, policy.Partitions), stmts: renderSQLStatements(cfg.Dialect, cfg.Table),
-          		own: sqlOwnTxOptions(cfg.Dialect), policy: policy,
+          		swept: make([]atomic.Int64, policy.Partitions), heads: make([]atomic.Bool, policy.Partitions),
+          		stmts: renderSQLStatements(cfg.Dialect, cfg.Table),
+          		own:   sqlOwnTxOptions(cfg.Dialect), policy: policy,
           	}, nil
   - of: sqlWakeFor
     participants:
@@ -3532,6 +3539,8 @@ sequences:
         kind: internal
       - id: s.clk.Now
         kind: value
+      - id: s.prepareHead
+        kind: internal
       - id: s.run
         kind: internal
       - id: s.announce
@@ -3570,6 +3579,14 @@ sequences:
           do:
             - return: corestream.AppendValue{}, misconfigured("Clock")
           when: "!sqlNameable(now)"
+      - opt:
+          do:
+            - return: corestream.AppendValue{}, err
+          init:
+            bind: err
+            eval: s.prepareHead(ctx, partition)
+            to: s.prepareHead
+          when: err != nil
       - var:
           name: appended
           type: corestream.AppendValue
@@ -3597,23 +3614,29 @@ sequences:
         kind: actor
       - id: (*sqlStream).write
         kind: self
-      - id: ex.ExecContext
-        kind: value
+      - id: s.lockHead
+        kind: internal
       - id: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+        kind: value
+      - id: s.heads[partition].Store
+        kind: value
+      - id: ex.ExecContext
         kind: value
     steps:
       - opt:
           do:
-            - return: corestream.AppendValue{}, s.failed("lock the head", err)
+            - return: corestream.AppendValue{}, err
           init:
-            bind: _, err
-            eval: ex.ExecContext(ctx, s.stmts.lockHead, int64(partition))
-            to: ex.ExecContext
+            bind: err
+            eval: s.lockHead(ctx, ex, partition)
+            to: s.lockHead
           when: err != nil
       - leaf: a var of several names, or of no type
         stmt: var next, first, last int64
       - opt:
           do:
+            - eval: s.heads[partition].Store(false)
+              to: s.heads[partition].Store
             - return: corestream.AppendValue{}, s.failed("read the head", err)
           init:
             bind: err
@@ -3662,6 +3685,109 @@ sequences:
           corestream.AppendValue{
           		Partition: partition, First: corestream.Offset(next), Last: corestream.Offset(end - 1),
           	}, nil
+  - of: (*sqlStream).lockHead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).lockHead
+        kind: self
+      - id: ex.ExecContext
+        kind: value
+      - id: s.failed
+        kind: internal
+      - id: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan
+        kind: value
+      - id: s.heads[partition].Store
+        kind: value
+      - id: s.createHead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: s.failed("lock the head", err)
+                    to: s.failed
+                init:
+                  bind: _, err
+                  eval: ex.ExecContext(ctx, s.stmts.lockHead, int64(partition))
+                  to: ex.ExecContext
+                when: err != nil
+            - return: nil
+          when: "!s.stmts.headApart"
+      - opt:
+          do:
+            - return: nil
+          when: s.heads[partition].Load()
+      - var:
+          name: next
+          type: int64
+      - bind: err
+        eval: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan(&next)
+        to: ex.QueryRowContext(ctx, s.stmts.headNext, int64(partition)).Scan
+      - opt:
+          do:
+            - eval: s.heads[partition].Store(true)
+              to: s.heads[partition].Store
+            - return: nil
+          when: err == nil
+      - opt:
+          do:
+            - return: s.failed("read the head", err)
+              to: s.failed
+          when: "!errors.Is(err, stdsql.ErrNoRows)"
+      - return: s.createHead(ctx, partition)
+        to: s.createHead
+  - of: (*sqlStream).prepareHead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).prepareHead
+        kind: self
+      - id: s.tx.join.Join
+        kind: value
+      - id: s.createHead
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!s.stmts.headApart || s.heads[partition].Load()"
+      - opt:
+          do:
+            - return: nil
+          init:
+            bind: _, inTx
+            eval: s.tx.join.Join(ctx)
+            to: s.tx.join.Join
+          when: inTx
+      - return: s.createHead(ctx, partition)
+        to: s.createHead
+  - of: (*sqlStream).createHead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlStream).createHead
+        kind: self
+      - id: s.pool.ExecContext
+        kind: value
+      - id: s.failed
+        kind: internal
+      - id: s.heads[partition].Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: s.failed("create the head", err)
+              to: s.failed
+          init:
+            bind: _, err
+            eval: s.pool.ExecContext(ctx, s.stmts.createHead, int64(partition))
+            to: s.pool.ExecContext
+          when: err != nil
+      - eval: s.heads[partition].Store(true)
+        to: s.heads[partition].Store
+      - return: nil
   - of: nullable
     steps:
       - opt:
@@ -4247,10 +4373,12 @@ sequences:
       - bind: s
         eval: |-
           sqlStatements{
-          		lockHead: lockHeadStatement(dialect, h),
-          		head:     "SELECT next_offset, first_offset, last_at FROM " + h + " WHERE part = " + p(1) + dialect.ForUpdate(),
-          		advance:  "UPDATE " + h + " SET next_offset = " + p(1) + ", last_at = " + p(2) + " WHERE part = " + p(3),
-          		floor:    "UPDATE " + h + " SET first_offset = " + p(1) + " WHERE part = " + p(2),
+          		lockHead:   lockHeadStatement(dialect, h),
+          		createHead: createHeadStatement(dialect, h),
+          		headApart:  dialect == coresql.DialectMySQL,
+          		head:       "SELECT next_offset, first_offset, last_at FROM " + h + " WHERE part = " + p(1) + dialect.ForUpdate(),
+          		advance:    "UPDATE " + h + " SET next_offset = " + p(1) + ", last_at = " + p(2) + " WHERE part = " + p(3),
+          		floor:      "UPDATE " + h + " SET first_offset = " + p(1) + " WHERE part = " + p(2),
           		read: "SELECT h.next_offset, h.first_offset, " + expired(1) + ", r.record_offset, r.appended_at, r.record_key, r.payload FROM " +
           			h + " h LEFT JOIN " + t + " r ON " + readable + p(2) + " AND r.record_offset >= " + p(3) + " WHERE h.part = " + p(4) +
           			" ORDER BY r.record_offset LIMIT " + p(5),
@@ -4291,6 +4419,15 @@ sequences:
               do:
                 - return: insert + " ON CONFLICT (part) DO UPDATE SET next_offset = next_offset"
           "on": dialect
+  - of: createHeadStatement
+    steps:
+      - bind: values
+        eval: "\" (part, next_offset, first_offset, last_at) VALUES (\" + dialect.Placeholder(1) + \", 0, 0, 0)\""
+      - opt:
+          do:
+            - return: "\"INSERT IGNORE INTO \" + h + values"
+          when: dialect == coresql.DialectMySQL
+      - return: "\"INSERT INTO \" + h + values + \" ON CONFLICT (part) DO NOTHING\""
   - of: commitStatement
     steps:
       - bind: p
@@ -4805,6 +4942,8 @@ sequences:
         kind: self
       - id: s.checkPartition
         kind: internal
+      - id: s.prepareHead
+        kind: internal
       - id: s.run
         kind: internal
       - id: s.release
@@ -4818,6 +4957,14 @@ sequences:
             eval: s.checkPartition(partition)
             to: s.checkPartition
           when: refused != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.prepareHead(ctx, partition)
+            to: s.prepareHead
+          when: err != nil
       - bind: raised
         eval: "false"
       - bind: floorErr
@@ -4845,23 +4992,29 @@ sequences:
         kind: actor
       - id: (*sqlStream).raiseFloor
         kind: self
-      - id: ex.ExecContext
-        kind: value
+      - id: s.lockHead
+        kind: internal
       - id: ex.QueryRowContext(ctx, s.stmts.head, int64(partition)).Scan
+        kind: value
+      - id: s.heads[partition].Store
+        kind: value
+      - id: ex.ExecContext
         kind: value
     steps:
       - opt:
           do:
-            - return: false, s.failed("lock the head", err)
+            - return: false, err
           init:
-            bind: _, err
-            eval: ex.ExecContext(ctx, s.stmts.lockHead, int64(partition))
-            to: ex.ExecContext
+            bind: err
+            eval: s.lockHead(ctx, ex, partition)
+            to: s.lockHead
           when: err != nil
       - leaf: a var of several names, or of no type
         stmt: var next, first, last int64
       - opt:
           do:
+            - eval: s.heads[partition].Store(false)
+              to: s.heads[partition].Store
             - return: false, s.failed("read the head", err)
           init:
             bind: err
