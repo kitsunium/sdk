@@ -136,6 +136,20 @@ type atomicDurable struct{ *orderedDurable }
 // RestoresAtomically implements AtomicRestorer.
 func (atomicDurable) RestoresAtomically() {}
 
+// refusedCopyStays is a snapshot store whose Remove of an install's copy
+// that did not restore fails as a failed unlink or directory sync does;
+// every other Remove goes through.
+type refusedCopyStays struct{ *MemorySnapshots }
+
+// Remove implements SnapshotStore, failing the removal restoreFailed makes.
+func (s refusedCopyStays) Remove(id string) error {
+	//: only the removal of a copy that did not restore fails.
+	if calledFrom(".(*Node).restoreFailed") {
+		return storageFailed("remove", errImpossible)
+	}
+	return s.MemorySnapshots.Remove(id)
+}
+
 // A machine that declares its Restore atomic, an AtomicRestorer, leaves
 // its state as it was when its Restore fails: the engine refuses the
 // install as before #1582 and the node keeps running, with no marker, every
@@ -143,7 +157,10 @@ func (atomicDurable) RestoresAtomically() {}
 // restores it (#1607). The same machine without the declaration stops as
 // #1582 decided, an AtomicRestorer that refuses its version still stops on
 // it (D18), and a durable one whose position moved across its refusal is
-// stopped with its marker: the paths are apart.
+// stopped with its marker: the paths are apart. A refusal that keeps the
+// node running still removes its copy, and a removal that fails there is
+// this node's disk failing: it stops the node STORAGE_FAILED, with its
+// marker (D4).
 func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 	type tc struct {
 		name    string
@@ -153,6 +170,9 @@ func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 		breaks bool
 		// version has the machine refuse VERSION_UNSUPPORTED.
 		version bool
+		// removeFails has the removal of the refused copy fail
+		// STORAGE_FAILED.
+		removeFails bool
 		// code is the stop's code when the node must stop, 0 when it must
 		// keep running; marked whether that stop leaves a marker.
 		code   errs.Code
@@ -173,6 +193,10 @@ func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 			ml := &markedLog{MemoryLog: tn.log}
 			marks.Store(ml)
 			cfg.Log = ml
+			//: the removal case's store fails the removal of the refused copy.
+			if tcase.removeFails {
+				cfg.Snapshots = refusedCopyStays{tn.snaps}
+			}
 			// No entry is handed past the refusal by the test: the order the
 			// engine applies in is the one judged.
 			p := &partialRestore{kv: tn.sm, armed: &armed, node: new(atomic.Pointer[Node]), failed: make(chan struct{})}
@@ -253,9 +277,13 @@ func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 			if !errs.HasCode(reason.Err, tcase.code) {
 				t.Errorf("a refused restore stopped the node with %v, want code %v", reason.Err, tcase.code)
 			}
-			//: no entry is applied once the restore was refused.
-			if k := p.afterRefusal.Load(); k != 0 {
+			//: a refusal that stops the node applies no entry after it; an atomic one kept a state its entries continue.
+			if k := p.afterRefusal.Load(); k != 0 && !tcase.removeFails {
 				t.Errorf("%d entries were applied after a refused restore", k)
+			}
+			//: every entry continued the state before it.
+			if k := order.Load().disorder.Load(); k != 0 {
+				t.Errorf("%d entries were applied over a state they do not continue", k)
 			}
 			//: the marker is the case's.
 			if got := marks.Load().marks.Load() != 0; got != tcase.marked {
@@ -307,6 +335,8 @@ func TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning(t *testing.T) {
 		{name: "the same durable machine undeclared stops marked", durable: true, code: coreconsensus.CodeStateMachineFailed, marked: true},
 		{name: "an AtomicRestorer that refuses its version stops on it, marked", atomic: true, version: true, code: coreconsensus.CodeVersionUnsupported, marked: true},
 		{name: "a durable AtomicRestorer whose refusal moved its position stops marked", atomic: true, durable: true, breaks: true, code: coreconsensus.CodeStateMachineFailed, marked: true},
+		{name: "a volatile AtomicRestorer whose refused copy cannot be removed stops on its disk", atomic: true, removeFails: true, code: coreconsensus.CodeStorageFailed, marked: true},
+		{name: "a durable AtomicRestorer whose refused copy cannot be removed stops on its disk", atomic: true, durable: true, removeFails: true, code: coreconsensus.CodeStorageFailed, marked: true},
 	} {
 		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })
 	}

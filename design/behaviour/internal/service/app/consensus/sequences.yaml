@@ -8881,6 +8881,8 @@ sequences:
         kind: internal
       - id: n.obs.warn
         kind: internal
+      - id: n.cfg.Snapshots.Remove
+        kind: value
       - id: alsoFailed
         kind: internal
     steps:
@@ -8906,7 +8908,15 @@ sequences:
               to: n.obs.warn
             - return: err
           when: noTable
-      - return: alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
+      - bind: rerr
+        eval: n.cfg.Snapshots.Remove(snapID)
+        to: n.cfg.Snapshots.Remove
+      - opt:
+          do:
+            - eval: n.stop(rerr, true)
+              to: n.stop
+          when: errs.HasCode(rerr, coreconsensus.CodeStorageFailed)
+      - return: alsoFailed(err, "remove", rerr)
         to: alsoFailed
   - of: (*Node).stillFresh
     participants:

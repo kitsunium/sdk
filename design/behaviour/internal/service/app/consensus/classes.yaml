@@ -8919,7 +8919,9 @@ types:
           failure to do so travels with it — unless the node has no table: its
           configuration is read from its snapshots' metadata, and a node left none
           starts with no member to admit (#526). The copy stays until another is
-          published over it, and a restart falls back to no table again.
+          published over it, and a restart falls back to no table again. A removal
+          that fails STORAGE_FAILED stops the node, its marker written, and the
+          refusal is returned with its own code.
         name: restoreFailed
         params: snapID string, err error
         recv: n *Node

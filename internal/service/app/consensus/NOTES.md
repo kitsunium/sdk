@@ -1819,7 +1819,8 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `restoreRefused` returns such a refusal as is, as every refusal was
   before #1582 — the install is refused, `restoreItem` lets its hold go,
   `restoreFailed` removes the copy (or keeps it on a node with no
-  table), raft stays where it was, and the
+  table; a removal that fails STORAGE_FAILED stops the node, marked, D4),
+  raft stays where it was, and the
   entries handed after the restore continue the state the machine holds;
   a later offer, or a leader's appends, catch the node up. At a start,
   `refusesStart` lets it fall back, though `SQL`'s error carries

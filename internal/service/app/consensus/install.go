@@ -414,7 +414,9 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 // failure to do so travels with it — unless the node has no table: its
 // configuration is read from its snapshots' metadata, and a node left none
 // starts with no member to admit (#526). The copy stays until another is
-// published over it, and a restart falls back to no table again.
+// published over it, and a restart falls back to no table again. A removal
+// that fails STORAGE_FAILED stops the node, its marker written, and the
+// refusal is returned with its own code.
 func (n *Node) restoreFailed(snapID string, err error) error {
 	if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
 		// A state this build cannot read: unknown means stop, never skip
@@ -442,7 +444,15 @@ func (n *Node) restoreFailed(snapID string, err error) error {
 		n.obs.warn("consensus: an installed snapshot did not restore", lstr("id", snapID), lstr("error", err.Error()))
 		return err
 	}
-	return alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
+	rerr := n.cfg.Snapshots.Remove(snapID)
+	//: a removal this node's disk failed stops the node (D4), as the copy's Commit does.
+	if errs.HasCode(rerr, coreconsensus.CodeStorageFailed) {
+		// A refusal that keeps the node running, an AtomicRestorer's or the
+		// engine's before Restore, reaches this removal: left a field of the
+		// refusal, the node voted and applied on a disk that had failed.
+		n.stop(rerr, true)
+	}
+	return alsoFailed(err, "remove", rerr)
 }
 
 // stillFresh judges the offer again, on the event loop, right before the
