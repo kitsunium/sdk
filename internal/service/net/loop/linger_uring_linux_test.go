@@ -31,6 +31,8 @@ func TestURing_lingerReadsOnAfterStarveOrCancel(t *testing.T) {
 	}
 	cases := []tc{
 		{name: "starved, then re-armed", end: func(rr *uRing, slot int32) {
+			// The multishot's last completion, as onRecv records it.
+			rr.setRecvOn(slot, false)
 			rr.recvStarved(slot)
 			rr.rearmStarved()
 		}},

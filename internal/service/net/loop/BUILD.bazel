@@ -134,6 +134,7 @@ go_test(
         "fill_uring_bench_test.go",
         "fill_uring_linux_test.go",
         "gen_api_test.go",
+        "linger_recv_uring_linux_test.go",
         "linger_uring_linux_test.go",
         "listener_rows_linux_test.go",
         "loop_bench_test.go",

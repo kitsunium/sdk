@@ -49,7 +49,9 @@ type driver interface {
 	// eviction never closes a connection mid-request.
 	unread(r *ring, slot int32) bool
 	// halfClose shuts slot's writing side once its output left, and keeps
-	// it reading: the drain's lingering close (#1385).
+	// it reading: the drain's lingering close (#1385). The slot may have
+	// stopped reading before — a handler's close made outside the drain —,
+	// so the backend reads again here whatever it did since (#1609 review).
 	halfClose(r *ring, slot int32)
 }
 

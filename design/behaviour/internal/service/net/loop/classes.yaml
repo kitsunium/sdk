@@ -2327,6 +2327,9 @@ files:
       - (*uRing).armRecv
       - (*uRing).roomiest
       - (*uRing).armRecvOn
+      - (*uRing).prepRecvOn
+      - (*uRing).setRecvOn
+      - (*uRing).hasRecv
       - (*uRing).setEpoch
       - (*uRing).owns
       - (*uRing).onRecv
@@ -3739,7 +3742,9 @@ types:
       	// eviction never closes a connection mid-request.
       	unread(r *ring, slot int32) bool
       	// halfClose shuts slot's writing side once its output left, and keeps
-      	// it reading: the drain's lingering close (#1385).
+      	// it reading: the drain's lingering close (#1385). The slot may have
+      	// stopped reading before — a handler's close made outside the drain —,
+      	// so the backend reads again here whatever it did since (#1609 review).
       	halfClose(r *ring, slot int32)
       }
   - doc: |-
@@ -6300,13 +6305,18 @@ types:
       - doc: |-
           given is, per group, the buffers handed to the kernel so far;
           armedOn the recvs armed on it; recvGroup, per slot, the group its
-          recv was last armed on.
+          recv was last armed on; recvOn, per slot, whether a recv is armed —
+          set when one is, cleared when its last completion comes, so a
+          lingering slot is given one when it has none (halfClose), never a
+          second.
         name: given
         type: "[]int"
       - name: armedOn
         type: "[]int"
       - name: recvGroup
         type: "[]uint8"
+      - name: recvOn
+        type: "[]bool"
       - doc: |-
           held counts the returns giveBack put off because an entry still named
           a buffer the kernel held (uring.entryFree).
@@ -6621,6 +6631,19 @@ types:
         name: armRecvOn
         params: slot int32, g int
         recv: rr *uRing
+      - doc: prepRecvOn fills s as slot's multishot recv on buffer group g, counted.
+        name: prepRecvOn
+        params: s *sqe, slot int32, g int
+        recv: rr *uRing
+      - doc: setRecvOn records whether slot has a recv armed.
+        name: setRecvOn
+        params: slot int32, on bool
+        recv: rr *uRing
+      - doc: hasRecv reports whether slot has a recv armed.
+        name: hasRecv
+        params: slot int32
+        recv: rr *uRing
+        results: bool
       - doc: setEpoch records the closes count slot's recv was armed at, or noEpoch.
         name: setEpoch
         params: slot int32, epoch uint64
@@ -6794,9 +6817,14 @@ types:
         recv: rr *uRing
       - doc: |-
           halfClose implements driver: IORING_OP_SHUTDOWN of the writing side, the
-          FIN after the output; the recv stays armed, so the lingering slot reads to
-          its peer's end (ring.lingers). With no room in the SQ the slot lingers
-          without it, to drainLinger.
+          FIN after the output, and a recv for the lingering slot, so it reads to its
+          peer's end (ring.lingers). A handler's close made before the loop's drain
+          may have none: a recv that ended then was not re-armed (ring.reads) —
+          every completion in single-shot mode, an ENOBUFS, a multishot the kernel
+          ended —, and the linger, reading nothing, closed at its bound with the
+          peer's input unread, a reset that discarded the answer the kernel still
+          held (#1609 review). With no room in the SQ the slot lingers without
+          either, to drainLinger.
         name: halfClose
         params: r *ring, slot int32
         recv: rr *uRing

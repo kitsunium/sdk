@@ -58,6 +58,8 @@ func TestURing_starvedRearmsOnlyItsConnection(t *testing.T) {
 			if slot < 0 {
 				return
 			}
+			// The multishot's last completion, as onRecv records it.
+			rr.setRecvOn(slot, false)
 			rr.recvStarved(slot)
 			queued = len(rr.starved)
 			held := slices.Clone(rr.starved)
