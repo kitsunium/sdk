@@ -49,7 +49,9 @@ type driver interface {
 	// eviction never closes a connection mid-request.
 	unread(r *ring, slot int32) bool
 	// halfClose shuts slot's writing side once its output left, and keeps
-	// it reading: the drain's lingering close (#1385).
+	// it reading: the drain's lingering close (#1385). The slot may have
+	// stopped reading before — a handler's close made outside the drain —,
+	// so the backend reads again here whatever it did since (#1609 review).
 	halfClose(r *ring, slot int32)
 }
 
@@ -454,6 +456,12 @@ func (r *ring) spillRoom(slot int32, want int) []byte {
 // the handler with the rest of the spill.
 func (r *ring) deliverSpill(slot int32, n int) {
 	c := &r.conns[slot]
+	//: a closing or dead connection reads nothing more, as deliver: the bytes
+	//: read past the spill's length are dropped, the bound of a linger kept.
+	if c.state != stOpen {
+		//: dropped.
+		return
+	}
 	c.spill.len += int32(n)
 	c.lastIO = r.lp.tick
 	c.flags |= fHeard
@@ -585,17 +593,31 @@ func (r *ring) settleAfterWrite(slot int32) {
 	}
 }
 
+// drainClose reports whether c is a close of r's drain: the drain's own, or
+// the handler's clean close while the loop drains — above all an HTTP/1.1
+// answer's Connection: close; the HTTP/2 adapter leaves a drained
+// connection's close to the drain itself since #1609 and closes only on a
+// connection error —, whose output the peer has yet to read just the same. The loop's drain, not the
+// ring's: io_uring's accept watchdog stops a ring accepting (ring.draining)
+// with no drain begun, and only a drain's closeSettled ends a linger.
+func (r *ring) drainClose(c *connCtl) bool {
+	//: closing, by the drain or by its handler while the loop drains.
+	return c.state == stClosing && (c.reason == rDrain || (c.reason == rNone && r.lp.draining))
+}
+
 // lingers reports whether slot, its output gone, still lingers before its
 // close. A close the drain decided on a connection whose peer still sends
 // would, with that input unread, send a reset, and the reset discards what
 // the kernel holds of the output not yet delivered: the answers the drain
-// waited for (#1385). So the drain shuts the writing side first — the peer
-// reads every answer, then the end — and the slot keeps reading, and
-// dropping, until the peer ends or drainLinger passed (closeSettled looks).
+// waited for (#1385), or the answer a handler wrote before its clean close
+// while the loop drains — an HTTP/1.1 Connection: close (#1609). So such a
+// close shuts the writing side first — the peer reads every answer, then
+// the end — and the slot keeps reading, and dropping, until the peer ends or
+// drainLinger passed (closeSettled looks).
 func (r *ring) lingers(slot int32) bool {
 	c := &r.conns[slot]
-	//: not the drain's close, or a peer that already ended: no reset to fear.
-	if c.state != stClosing || c.reason != rDrain || c.flags&fPeerDone != 0 {
+	//: not a drain's close, or a peer that already ended: no reset to fear.
+	if !r.drainClose(c) || c.flags&fPeerDone != 0 {
 		//: closed now.
 		return false
 	}
@@ -603,12 +625,27 @@ func (r *ring) lingers(slot int32) bool {
 	if c.linger == lingerNone {
 		c.linger = lingerHalf
 		c.lastIO = r.lp.tick
+		r.dropSpill(c)
 		r.drv.halfClose(r, slot)
 		//: lingering.
 		return true
 	}
 	//: until the bound.
 	return r.lp.tick-c.lastIO < drainLingerTicks
+}
+
+// dropSpill returns c's spill once the batch is over: a lingering slot reads
+// and drops, and a handler's close keeps the input it had not consumed —
+// read into that spill, the lingering bytes went to the handler after its
+// close, and each refreshed the linger's bound (#1609 review).
+func (r *ring) dropSpill(c *connCtl) {
+	//: no spill: nothing held.
+	if c.spill.empty() {
+		//: done.
+		return
+	}
+	r.lp.deferred = append(r.lp.deferred, c.spill)
+	c.spill = chunkRef{idx: noChunk}
 }
 
 // sent records that some of slot's output was sent, and fires OnWritable when

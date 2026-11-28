@@ -897,6 +897,10 @@ sequences:
     steps:
       - bind: c
         eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.state != stOpen
       - op: +=
         set: c.spill.len
         value: int32(n)
@@ -1065,12 +1069,17 @@ sequences:
             - eval: r.markDirty(slot)
               to: r.markDirty
           when: (c.state == stClosing || c.flags&fPeerDone != 0) && !c.sending()
+  - of: (*ring).drainClose
+    steps:
+      - return: c.state == stClosing && (c.reason == rDrain || (c.reason == rNone && r.lp.draining))
   - of: (*ring).lingers
     participants:
       - id: caller
         kind: actor
       - id: (*ring).lingers
         kind: self
+      - id: r.dropSpill
+        kind: internal
       - id: r.drv.halfClose
         kind: internal
     steps:
@@ -1079,18 +1088,30 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: c.state != stClosing || c.reason != rDrain || c.flags&fPeerDone != 0
+          when: "!r.drainClose(c) || c.flags&fPeerDone != 0"
       - opt:
           do:
             - set: c.linger
               value: lingerHalf
             - set: c.lastIO
               value: r.lp.tick
+            - eval: r.dropSpill(c)
+              to: r.dropSpill
             - eval: r.drv.halfClose(r, slot)
               to: r.drv.halfClose
             - return: "true"
           when: c.linger == lingerNone
       - return: r.lp.tick-c.lastIO < drainLingerTicks
+  - of: (*ring).dropSpill
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.spill.empty()
+      - set: r.lp.deferred
+        value: append(r.lp.deferred, c.spill)
+      - set: c.spill
+        value: "chunkRef{idx: noChunk}"
   - of: (*ring).sent
     participants:
       - id: caller
@@ -10142,17 +10163,9 @@ sequences:
         kind: internal
       - id: rr.r.fail
         kind: internal
-      - id: prepRecv
-        kind: internal
-      - id: singleShot
-        kind: internal
-      - id: rr.ul.onFD
-        kind: internal
-      - id: rr.setEpoch
+      - id: rr.prepRecvOn
         kind: internal
     steps:
-      - bind: c
-        eval: "&rr.r.conns[slot]"
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
@@ -10164,6 +10177,27 @@ sequences:
               to: rr.r.fail
             - return: ""
           when: s == nil
+      - eval: rr.prepRecvOn(s, slot, g)
+        to: rr.prepRecvOn
+  - of: (*uRing).prepRecvOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).prepRecvOn
+        kind: self
+      - id: prepRecv
+        kind: internal
+      - id: singleShot
+        kind: internal
+      - id: rr.ul.onFD
+        kind: internal
+      - id: rr.setEpoch
+        kind: internal
+      - id: rr.setRecvOn
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&rr.r.conns[slot]"
       - eval: prepRecv(s, uint32(c.fd), bufGroup+uint16(g), udPack(udRecv, c.gen, uint32(slot)))
         to: prepRecv
       - opt:
@@ -10189,6 +10223,20 @@ sequences:
         value: uint8(g)
       - op: ++
         set: rr.armedOn[g]
+      - eval: rr.setRecvOn(slot, true)
+        to: rr.setRecvOn
+  - of: (*uRing).setRecvOn
+    steps:
+      - loop:
+          cond: int(slot) >= len(rr.recvOn)
+          do:
+            - set: rr.recvOn
+              value: append(rr.recvOn, false)
+      - set: rr.recvOn[slot]
+        value: "on"
+  - of: (*uRing).hasRecv
+    steps:
+      - return: int(slot) < len(rr.recvOn) && rr.recvOn[slot]
   - of: (*uRing).setEpoch
     steps:
       - opt:
@@ -10214,6 +10262,8 @@ sequences:
       - id: rr.takeBuf
         kind: internal
       - id: rr.setEpoch
+        kind: internal
+      - id: rr.setRecvOn
         kind: internal
       - id: rr.recvBytes
         kind: internal
@@ -10244,6 +10294,8 @@ sequences:
               to: rr.setEpoch
             - op: "--"
               set: rr.armedOn[rr.recvGroup[slot]]
+            - eval: rr.setRecvOn(slot, false)
+              to: rr.setRecvOn
           when: "!more"
       - switch:
           cases:
@@ -10325,7 +10377,7 @@ sequences:
           do:
             - eval: rr.armRecv(slot)
               to: rr.armRecv
-          when: "!more && reads(&rr.r.conns[slot])"
+          when: "!more && rr.r.reads(&rr.r.conns[slot])"
   - of: (*uRing).recvBytes
     participants:
       - id: caller
@@ -10353,7 +10405,7 @@ sequences:
           do:
             - eval: rr.armRecv(slot)
               to: rr.armRecv
-          when: "!more && reads(&rr.r.conns[slot])"
+          when: "!more && rr.r.reads(&rr.r.conns[slot])"
   - of: (*uRing).recvStarved
     participants:
       - id: caller
@@ -10369,7 +10421,7 @@ sequences:
         eval: "&rr.r.conns[slot]"
       - switch:
           cases:
-            - case: reads(c) && len(rr.starved) < starvedCap
+            - case: rr.r.reads(c) && len(rr.starved) < starvedCap
               do:
                 - set: rr.starved
                   value: "append(rr.starved, starvedRecv{slot: slot, gen: c.gen})"
@@ -10377,9 +10429,9 @@ sequences:
               do:
                 - eval: rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
                   to: rr.r.fail
-  - of: reads
+  - of: (*ring).reads
     steps:
-      - return: c.state == stOpen || (c.state == stClosing && c.reason == rDrain)
+      - return: c.state == stOpen || r.drainClose(c)
   - of: (*uRing).recvEOF
     participants:
       - id: caller
@@ -10935,7 +10987,7 @@ sequences:
                 init:
                   bind: c
                   eval: "&rr.r.conns[e.slot]"
-                when: c.gen == e.gen && reads(c)
+                when: c.gen == e.gen && rr.r.reads(c) && !rr.hasRecv(e.slot)
       - set: rr.starved
         value: rr.starved[:copy(rr.starved, rr.starved[k:])]
   - of: (*uRing).flush
@@ -11098,6 +11150,8 @@ sequences:
         kind: self
       - id: rr.u.get
         kind: internal
+      - id: rr.prepRecvOn
+        kind: internal
       - id: prepShutdownFixed
         kind: internal
       - id: rr.ul.onFD
@@ -11105,6 +11159,22 @@ sequences:
     steps:
       - bind: c
         eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - alt:
+                - do:
+                    - eval: rr.prepRecvOn(s, slot, rr.roomiest(nil))
+                      to: rr.prepRecvOn
+                  init:
+                    bind: s
+                    eval: rr.u.get()
+                    to: rr.u.get
+                  when: s != nil
+                - do:
+                    - op: ++
+                      set: r.st.retries
+                  else: true
+          when: "!rr.hasRecv(slot)"
       - bind: s
         eval: rr.u.get()
         to: rr.u.get

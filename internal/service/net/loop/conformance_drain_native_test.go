@@ -7,6 +7,7 @@
 package loop
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -798,6 +799,113 @@ func TestConformance_drainClosesTheSilentUnderPosts(t *testing.T) {
 			t.Fatalf("the silent connection after the drain: %v", err)
 		}
 		resetClose([]stdnet.Conn{c0, silent})
+	}
+	eachBackend(t, runCase)
+}
+
+// TestConformance_drainLingerDropsTheSpill pins the linger of a handler's
+// close while the ring drains (#1609 review): the connection closed by its
+// handler keeps the input it had not consumed, a partial line, in its spill.
+// Lingering, the slot reads on and drops; read into that spill, the bytes went
+// to the handler again — OnData after its Close — and each refreshed the
+// linger's bound, so a client trickling bytes held the drain to its context
+// (DrainTimeout). The handler reads CLOSE, no OnData follows the Close, and
+// Shutdown returns once drainLinger passed. The partial line is in the spill
+// and the drain begun, each seen on the loop, before the next step.
+func TestConformance_drainLingerDropsTheSpill(t *testing.T) {
+	runCase := func(t *testing.T, b backendCase) {
+		var closedAt, after atomic.Int64
+		partial, draining := make(chan struct{}), make(chan struct{})
+		var partialOnce, drainingOnce sync.Once
+		h := &lineH{}
+		h.onData = func(_ corenet.LoopIO, _ corenet.LoopConnRef, buf []byte) {
+			//: an OnData once the handler closed is the defect.
+			if closedAt.Load() != 0 {
+				after.Add(1)
+			}
+			//: the partial line reached the handler, which leaves it in the
+			//: spill.
+			if bytes.HasPrefix(buf, []byte("par")) {
+				partialOnce.Do(func() { close(partial) })
+			}
+			//: the CLOSE line: the handler closes in this callback.
+			if strings.Contains(string(buf), "CLOSE\n") {
+				closedAt.Store(time.Now().UnixNano())
+			}
+		}
+		h.batchEnd = func(lio corenet.LoopIO) {
+			//: a batch of the loop's drain: the drain has begun.
+			if lp, ok := lio.(*loop); ok && lp.draining {
+				drainingOnce.Do(func() { close(draining) })
+			}
+		}
+		g, addr := serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings = 1, 1 })
+		c := dial(t, addr)
+		echo(t, c, "warm\n")
+		// await fails the test unless ch closes within five seconds.
+		await := func(ch <-chan struct{}, what string) {
+			t.Helper()
+			//: the signal, or the bound.
+			select {
+			//: seen.
+			case <-ch:
+			//: never seen.
+			case <-time.After(5 * time.Second):
+				t.Fatalf("timed out waiting for %s", what)
+			}
+		}
+		//: a partial line: the spill holds it, and the drain leaves the
+		//: connection to its handler.
+		_, _ = c.Write([]byte("par"))
+		await(partial, "the partial line on the loop")
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		start := time.Now()
+		shut := make(chan error, 1)
+		go func() { shut <- g.Shutdown(ctx) }()
+		await(draining, "the loop's drain")
+		//: the handler's close while the ring drains, a partial line left behind.
+		_, _ = c.Write([]byte("tial\nCLOSE\nxy"))
+		stop := make(chan struct{})
+		trickled := make(chan struct{})
+		go func() {
+			defer close(trickled)
+			tick := time.NewTicker(200 * time.Millisecond)
+			defer tick.Stop()
+			//: a byte every 200 ms, well inside drainLinger, until told.
+			for {
+				select {
+				case <-stop:
+					return
+				case <-tick.C:
+					//: the server may have closed: the write's failure ends it.
+					if _, err := c.Write([]byte("z")); err != nil {
+						return
+					}
+				}
+			}
+		}()
+		err := <-shut
+		elapsed := time.Since(start)
+		close(stop)
+		<-trickled
+		//: the drain ended by itself, the linger bounded.
+		if err != nil {
+			t.Fatalf("Shutdown after %v: %v", elapsed, err)
+		}
+		//: the handler read CLOSE: the close lingered, not the drain's own.
+		if closedAt.Load() == 0 {
+			t.Fatal("the handler never read CLOSE: the drain closed the connection first")
+		}
+		//: within the linger's bound and a margin.
+		if elapsed > 1500*time.Millisecond {
+			t.Fatalf("Shutdown took %v, want the linger's bound (%v) and a margin", elapsed, drainLinger)
+		}
+		//: nothing reached the handler after its close.
+		if n := after.Load(); n != 0 {
+			t.Fatalf("%d OnData after the handler's Close", n)
+		}
+		resetClose([]stdnet.Conn{c})
 	}
 	eachBackend(t, runCase)
 }

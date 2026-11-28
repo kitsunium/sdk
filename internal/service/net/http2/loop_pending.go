@@ -107,12 +107,14 @@ func (a *LoopHandler) OnDone(io corenet.LoopIO, job corenet.LoopJobValue) {
 	a.answerSlot(io, st, e, slot, idx)
 }
 
-// answerSlot writes a worker's answer on its stream, ends the connection when
-// it was the last of a closing one, and frees the slot. On a connection the
-// batch fed, the answer joins the batch's output and the batch's end writes
-// and closes it (flush, closeIfDone): written and closed here, it went out
-// ahead of the SETTINGS and the GOAWAY the batch had queued, and the close
-// refused them (#1385).
+// answerSlot writes a worker's answer on its stream, closes the connection
+// when the adapter ends it (ends: a connection error, or a GOAWAY with no
+// stream left open while the group serves; during the drain, the engine's
+// drain closes it), and frees the slot. On a connection the batch fed, the
+// answer joins the batch's output, which the batch's end writes (flush) and
+// whose close closeIfDone decides the same way: written and closed here, it
+// went out ahead of the SETTINGS and the GOAWAY the batch had queued, and
+// the close refused them (#1385).
 func (a *LoopHandler) answerSlot(io corenet.LoopIO, st *laneState, e *connEntry, slot *workSlot, idx uint32) {
 	c := h2Call{a: a, io: io, ref: slot.ref, st: st, e: e}
 	off := len(st.out)
@@ -132,7 +134,7 @@ func (a *LoopHandler) answerSlot(io corenet.LoopIO, st *laneState, e *connEntry,
 	st.out = st.lane.AppendCredits(&e.conn, st.out)
 	out := st.out[off:]
 	//: written from the lane's thread, the connection's order kept by the loop.
-	a.writeClose(io, slot.ref, out, st.lane.Closing(&e.conn) || st.lane.Done(&e.conn))
+	a.writeClose(io, slot.ref, out, a.ends(st, e))
 	st.out = st.out[:off]
 }
 
@@ -271,7 +273,8 @@ func (*LoopHandler) announce(st *laneState) {
 }
 
 // runDrainGoAway is the op the drain posts: on the lane's thread, it writes
-// GOAWAY on every HTTP/2 connection and closes those with no open stream.
+// GOAWAY on every HTTP/2 connection; the engine's drain closes them once
+// nothing is in flight (ends).
 func runDrainGoAway(io corenet.LoopIO, key uintptr) {
 	v, ok := drainRegistry.LoadAndDelete(key)
 	//: the registry is the op's only state.
@@ -300,23 +303,19 @@ func (st *laneState) announceDrain(io corenet.LoopIO) {
 	st.goAwayDone.Store(true)
 }
 
-// announceConn writes GOAWAY(NO_ERROR) on one connection and closes it when
-// nothing is in flight. A connection the batch fed is left to the batch's
-// end: the answers it was given wait in the batch's output, written at
-// OnBatchEnd, which then closes it (closeIfDone); a close here would refuse
-// them, and its streams, answered already, no longer count as in flight
-// (#1385). Its GOAWAY joins that output, behind it: the batch's output may
-// open with the server's SETTINGS, which RFC 9113 §3.4 makes the
-// connection's first frame, and written at once the GOAWAY came first.
+// announceConn writes GOAWAY(NO_ERROR) on one connection, and leaves its
+// close to the engine's drain (ends): InFlight keeps it while a stream is
+// open, and the drain closes it once nothing is in flight and its output has
+// left. A connection the batch fed has its GOAWAY join the batch's output,
+// behind it: the batch's output may open with the server's SETTINGS, which
+// RFC 9113 §3.4 makes the connection's first frame, and written at once the
+// GOAWAY came first (#1385).
 func (st *laneState) announceConn(io corenet.LoopIO, ref corenet.LoopConnRef, e *connEntry) {
-	//: one GOAWAY a connection, whoever asked first.
-	if e.flags&entryGoAway == 0 {
+	//: one GOAWAY a connection, whoever asked first; one a connection error
+	//: ended wrote its own (goAway).
+	if e.flags&entryGoAway == 0 && !st.lane.Closing(&e.conn) {
 		e.flags |= entryGoAway
 		st.writeGoAway(io, ref, e)
-	}
-	//: nothing in flight and nothing the batch still owes it: it ends now.
-	if st.lane.Done(&e.conn) && e.activeAt != st.lane.epoch {
-		swallowErr(io.Close(ref))
 	}
 }
 

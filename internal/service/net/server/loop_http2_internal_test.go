@@ -72,7 +72,11 @@ func TestLoopHTTP2_oneChainBothVersions(t *testing.T) {
 			var wg sync.WaitGroup
 			errc := make(chan error, 2*conns)
 			for i := range conns {
-				wg.Go(func() { errc <- tokenRounds(t, loopDial, addr, i, rounds) })
+				//: dialled here: loopDial fails the test, which only the test's
+				//: own goroutine may do; the rounds report theirs.
+				conn := loopDial(t, addr)
+				dialled := func(*testing.T, string) stdnet.Conn { return conn }
+				wg.Go(func() { errc <- tokenRounds(t, dialled, addr, i, rounds) })
 				wg.Go(func() { errc <- h2TokenRounds(t, addr, conns+i, rounds) })
 			}
 			wg.Wait()
@@ -230,15 +234,15 @@ func frameBytes(typ corehttp2.FrameType, flags corehttp2.FrameFlags, stream uint
 	return append(buf, payload...)
 }
 
-// write sends bytes already framed.
+// write sends bytes already framed, and reports nothing: a flood the server
+// cut short is the point, its answer is what is read; and next calls it off
+// the test's goroutine (readGoAway, drainClean), where a t.Logf made after the
+// test ended panics the binary (#1609).
 func (c *rawH2) write(b []byte) {
-	c.t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	//: a flood the server cut short is the point: its answer is what is read.
-	if _, err := c.conn.Write(b); err != nil {
-		c.t.Logf("write: %v", err)
-	}
+	_, err := c.conn.Write(b)
+	swallowErr(err)
 }
 
 // literalField is an HPACK literal without indexing, both strings plain.
@@ -276,8 +280,8 @@ type frameEvent struct {
 }
 
 // next reads the next frame, skipping what the client takes for granted:
-// SETTINGS and WINDOW_UPDATE. It fails the test on any read error but EOF,
-// which it reports.
+// SETTINGS and WINDOW_UPDATE. It reports any read error and fails nothing, so
+// a goroutine other than the test's may call it.
 func (c *rawH2) next() (frameEvent, error) {
 	c.t.Helper()
 	for {
@@ -310,19 +314,69 @@ func (c *rawH2) next() (frameEvent, error) {
 	}
 }
 
-// goAwayCode reads frames until GOAWAY and returns its code, failing on
-// anything else unless a frame it does not care about. EOF before a GOAWAY fails.
+// untilGoAway is readGoAway on the test's own goroutine: a read failing
+// before the GOAWAY fails the test.
 func (c *rawH2) untilGoAway() corehttp2.ErrCode {
 	c.t.Helper()
+	code, err := c.readGoAway()
+	//: no GOAWAY: the read's failure is the test's.
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	return code
+}
+
+// readGoAway reads frames until GOAWAY and returns its code, skipping every
+// other frame; a read failing first, EOF included, is its error. It fails
+// nothing, so a goroutine other than the test's may run it (#1609): a
+// t.Fatal there ends that goroutine alone, and the test, waiting for its
+// result, hangs to the binary's alarm with the cause unsaid.
+func (c *rawH2) readGoAway() (corehttp2.ErrCode, error) {
+	//: frame by frame, to the GOAWAY or the read's end.
 	for {
 		ev, err := c.next()
+		//: the connection ended, failed or timed out before any GOAWAY.
 		if err != nil {
-			c.t.Fatalf("read until GOAWAY: %v", err)
+			return 0, errTest("read until GOAWAY: " + err.Error())
 		}
+		//: the GOAWAY: its code.
 		if ev.h.Type == corehttp2.FrameGoAway {
-			return corehttp2.ErrCode(binary.BigEndian.Uint32(ev.payload[4:8]))
+			return corehttp2.ErrCode(binary.BigEndian.Uint32(ev.payload[4:8])), nil
 		}
 	}
+}
+
+// helperWait bounds the wait of a test's goroutine for a helper running on
+// another, well inside the binary's five-minute alarm: every read under it
+// ends by the connection's 30 s deadline (dialRawH2), so a helper still
+// silent past it is stuck, and the test says which instead of hanging.
+const helperWait = 60 * time.Second
+
+// awaitHelper returns what a helper running off the test's goroutine sent on
+// ch, failing the test, from its own goroutine, when nothing came within
+// helperWait.
+func awaitHelper[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	timer := time.NewTimer(helperWait)
+	defer timer.Stop()
+	//: the helper's result, or the bound.
+	select {
+	//: sent.
+	case v := <-ch:
+		return v
+	//: nothing: the test fails, naming what it waited for.
+	case <-timer.C:
+		t.Fatalf("%s: no result within %v", what, helperWait)
+	}
+	//: unreachable: Fatalf ends the goroutine.
+	var zero T
+	return zero
+}
+
+// goAwayResult is readGoAway's two results, sent across goroutines.
+type goAwayResult struct {
+	code corehttp2.ErrCode
+	err  error
 }
 
 // TestLoopHTTP2_pendingAndReset pins #961's second criterion: on every backend
@@ -540,29 +594,169 @@ func TestLoopHTTP2_drain(t *testing.T) {
 		t.Run(b.String(), func(t *testing.T) {
 			h := newWorkerH()
 			srv, addr := startLoopServer(t, b, http2.HandleLoop(h, http1.Parser{}), Plaintext())
+			// release lets the parked worker go, once: deferred, it runs
+			// before the server's cleanup, which a worker still parked would
+			// hold to the binary's alarm when the test fails first.
+			release := sync.OnceFunc(func() { close(h.release) })
+			defer release()
 			idle := dialRawH2(t, addr)
 			busy := dialRawH2(t, addr)
 			busy.get(1, "/slow")
 			waitJob(t, h)
-			idleDone, busyDone := make(chan corehttp2.ErrCode, 1), make(chan error, 1)
-			go func() { idleDone <- idle.untilGoAway() }()
+			idleDone, busyDone := make(chan goAwayResult, 1), make(chan error, 1)
+			go func() {
+				code, err := idle.readGoAway()
+				idleDone <- goAwayResult{code: code, err: err}
+			}()
 			go func() { busyDone <- busy.drainClean(1, "worked /slow") }()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			shut := make(chan error, 1)
 			go func() { shut <- srv.Shutdown(ctx) }()
 			time.Sleep(50 * time.Millisecond) // the drain's first sweep has run
-			if code := <-idleDone; code != corehttp2.ErrCodeNoError {
-				t.Fatalf("idle connection GOAWAY code = %v", code)
+			got := awaitHelper(t, idleDone, "idle connection")
+			//: the idle connection ended without its GOAWAY: the cause, said.
+			if got.err != nil {
+				t.Fatalf("idle connection: %v", got.err)
 			}
-			close(h.release)
-			if err := <-busyDone; err != nil {
+			//: a GOAWAY, but not the drain's.
+			if got.code != corehttp2.ErrCodeNoError {
+				t.Fatalf("idle connection GOAWAY code = %v", got.code)
+			}
+			release()
+			//: the busy connection's answer, its GOAWAY and its clean close.
+			if err := awaitHelper(t, busyDone, "busy connection"); err != nil {
 				t.Fatal(err)
 			}
-			if err := <-shut; err != nil {
+			//: the drain itself.
+			if err := awaitHelper(t, shut, "Shutdown"); err != nil {
 				t.Fatalf("Shutdown: %v", err)
 			}
 		})
+	}
+}
+
+// TestLoopHTTP2_drainLatePreface pins #1609 on every backend: a connection
+// open but silent when the drain begins, its preface read once the drain's
+// announcement has walked the lane, still gets GOAWAY(NO_ERROR) before a
+// clean close. The announcement saw it sniffing, not HTTP/2; read later, the
+// preface made it HTTP/2 with nothing in flight, and the drain closed it
+// silent: "read until GOAWAY: EOF".
+func TestLoopHTTP2_drainLatePreface(t *testing.T) {
+	hello := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) { res.Body = []byte("ok") })
+	runCase := func(t *testing.T, b corenet.LoopBackend) {
+		srv, addr := startLoopServer(t, b, http2.HandleLoop(hello, http1.Parser{}), Plaintext())
+		conn, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { swallowErr(conn.Close()) })
+		if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		c := &rawH2{t: t, conn: conn, br: bufio.NewReaderSize(conn, 1<<16)}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		shut := make(chan error, 1)
+		go func() { shut <- srv.Shutdown(ctx) }()
+		// The announcement runs at once; the drain leaves a silent connection
+		// open for a second (portableQuiet, drainQuiet), so the preface lands
+		// between the two.
+		time.Sleep(100 * time.Millisecond)
+		if _, err := conn.Write([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		c.send(corehttp2.FrameSettings, 0, 0, nil)
+		//: the drain's word, then the clean close.
+		if code := c.untilGoAway(); code != corehttp2.ErrCodeNoError {
+			t.Fatalf("GOAWAY code = %v", code)
+		}
+		//: the clean close: EOF, never a reset.
+		if _, err := c.next(); err != io.EOF {
+			t.Fatalf("after the GOAWAY: %v, want EOF", err)
+		}
+		//: the drain itself.
+		if err := awaitHelper(t, shut, "Shutdown"); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}
+	for _, b := range loopBackends() {
+		t.Run(b.String(), func(t *testing.T) { runCase(t, b) })
+	}
+}
+
+// TestLoopHTTP2_drainLateReader pins #1609's close on every backend: a
+// client that reads late — a small receive buffer, nothing read while a
+// large answer and the drain's GOAWAY wait on the server's side — and that
+// sends a frame meanwhile, still reads the whole answer, the GOAWAY, then a
+// clean end. A connection closed with that frame unread answers with a
+// reset, and the reset discards what the server's kernel still held of its
+// output: the answer's tail and the GOAWAY. The drain's close shuts the
+// writing side first and reads on (lingers), so nothing is unread at the
+// close.
+func TestLoopHTTP2_drainLateReader(t *testing.T) {
+	const size = 256 << 10
+	big := corenet.HTTP1HandlerFunc(func(_ *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+		res.Body = bytes.Repeat([]byte("b"), size)
+	})
+	runCase := func(t *testing.T, b corenet.LoopBackend) {
+		srv, addr := startLoopServer(t, b, http2.HandleLoop(big, http1.Parser{}), Plaintext(), Loop(corenet.LoopValue{Backend: b, OutputCap: 2 * size}))
+		conn, err := stdnet.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { swallowErr(conn.Close()) })
+		//: a small receive buffer: what the client has not read waits on the
+		//: server's side.
+		if tc, ok := conn.(*stdnet.TCPConn); ok {
+			swallowErr(tc.SetReadBuffer(16 << 10))
+		}
+		if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		c := &rawH2{t: t, conn: conn, br: bufio.NewReaderSize(conn, 1<<16)}
+		if _, err := conn.Write([]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		//: windows wide enough for the whole answer at once: the stream ends
+		//: on the server's side, nothing in flight but bytes.
+		c.send(corehttp2.FrameSettings, 0, 0, []byte{0, 4, 0x7f, 0xff, 0xff, 0xff})
+		c.send(corehttp2.FrameWindowUpdate, 0, 0, binary.BigEndian.AppendUint32(nil, 1<<30))
+		c.get(1, "/big")
+		time.Sleep(200 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		shut := make(chan error, 1)
+		go func() { shut <- srv.Shutdown(ctx) }()
+		//: the GOAWAY queued behind the answer and the close decided, the
+		//: client sends one more frame, then reads.
+		time.Sleep(200 * time.Millisecond)
+		c.write(frameBytes(corehttp2.FramePing, 0, 0, []byte("latelate")))
+		got, sawGoAway := 0, false
+		for {
+			ev, err := c.next()
+			//: the end: clean, and after the whole answer and the GOAWAY.
+			if err != nil {
+				if err != io.EOF || got != size || !sawGoAway {
+					t.Fatalf("after %d of %d bytes, GOAWAY read %v: %v, want EOF after both", got, size, sawGoAway, err)
+				}
+				break
+			}
+			//: the answer's bytes, and the drain's word.
+			switch ev.h.Type {
+			case corehttp2.FrameData:
+				got += len(ev.payload)
+			case corehttp2.FrameGoAway:
+				sawGoAway = true
+			}
+		}
+		//: the drain itself.
+		if err := awaitHelper(t, shut, "Shutdown"); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	}
+	for _, b := range loopBackends() {
+		t.Run(b.String(), func(t *testing.T) { runCase(t, b) })
 	}
 }
 

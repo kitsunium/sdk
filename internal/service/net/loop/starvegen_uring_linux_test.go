@@ -58,6 +58,8 @@ func TestURing_starvedRearmsOnlyItsConnection(t *testing.T) {
 			if slot < 0 {
 				return
 			}
+			// The multishot's last completion, as onRecv records it.
+			rr.setRecvOn(slot, false)
 			rr.recvStarved(slot)
 			queued = len(rr.starved)
 			held := slices.Clone(rr.starved)
@@ -92,6 +94,11 @@ func TestURing_starvedRearmsOnlyItsConnection(t *testing.T) {
 		onLoop(t, g, func() {
 			// The queue as it stood when the first connection starved.
 			restore()
+			//: the slot's new connection taken as one with no recv armed:
+			//: only the generation keeps the first's entry off it.
+			if c.handOn {
+				rr.setRecvOn(slot, false)
+			}
 			ops := rr.r.conns[slot].ops
 			rr.rearmStarved()
 			armed = rr.r.conns[slot].ops - ops

@@ -126,3 +126,63 @@ func TestCloseSettled_judgesAfterTheBatchsAnswers(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
+
+// TestLingers_aHandlersCloseLingersInTheLoopsDrain pins whose drain a
+// handler's close lingers in (#1609 review): the loop's. io_uring's accept
+// watchdog stops a ring accepting (ring.draining) with no drain begun, and
+// only a drain's closeSettled ends a linger: a handler's close lingering
+// there, its peer never ending, held its descriptor and its count in live
+// for good. Lingering, the slot's spill is returned: what it reads is
+// dropped, never handed to the handler after its close.
+func TestLingers_aHandlersCloseLingersInTheLoopsDrain(t *testing.T) {
+	type tc struct {
+		name string
+		// loopDrains is the loop's drain; the ring stops accepting in every
+		// case.
+		loopDrains bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Parallel()
+		h := &batchAnswerH{}
+		//: nothing consumed: a partial line stays in the spill.
+		h.consume = func([]byte) int { return 0 }
+		lp, r, d := newTestLoop(h, corenet.LoopValue{}, 0)
+		s := accept(t, r)
+		r.draining, lp.draining = true, c.loopDrains
+		//: a partial line held in the spill, then the handler's close.
+		r.deliver(s, []byte("par"))
+		if r.conns[s].spill.empty() {
+			t.Fatal("the partial line was not kept")
+		}
+		if err := lp.Close(r.ref(s)); err != nil {
+			t.Fatal(err)
+		}
+		h.OnBatchEnd(lp)
+		lp.settleDrain()
+		lp.endBatch()
+		//: outside the loop's drain: closed at once, as before #1609.
+		if !c.loopDrains {
+			if len(d.halfClosed) != 0 || len(d.closed) != 1 || d.closed[0] != s {
+				t.Fatalf("half closed %v, closed %v: want the close at once outside the loop's drain", d.halfClosed, d.closed)
+			}
+			return
+		}
+		//: in the loop's drain: the writing side shut, the slot reading on.
+		if len(d.halfClosed) != 1 || d.halfClosed[0] != s || len(d.closed) != 0 {
+			t.Fatalf("half closed %v, closed %v: want the close to linger in the loop's drain", d.halfClosed, d.closed)
+		}
+		//: lingering, the spill is gone: nothing more reaches the handler.
+		if !r.conns[s].spill.empty() {
+			t.Fatal("the lingering slot kept its spill")
+		}
+		lp.tick += drainLingerTicks
+		lp.settleDrain()
+		lp.endBatch()
+		if len(d.closed) != 1 || d.closed[0] != s {
+			t.Fatalf("closed %v once the bound passed, want the connection", d.closed)
+		}
+	}
+	for _, c := range []tc{{name: "the ring's watchdog alone"}, {name: "the loop's drain", loopDrains: true}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}

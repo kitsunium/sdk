@@ -55,8 +55,12 @@ func (a *LoopHandler) feed(io corenet.LoopIO, ref corenet.LoopConnRef, st *laneS
 	for _, ev := range st.lane.Events() {
 		c.event(ev)
 	}
-	//: the h2 reading of Connection: close: one GOAWAY, the streams finish.
-	if io.Pressure(ref) {
+	//: the h2 reading of Connection: close, or a drain begun: one GOAWAY, the
+	//: streams finish. The drain's announcement walks only the connections
+	//: already HTTP/2; one whose preface is read after it — still sniffing
+	//: then, or not yet open — gets its GOAWAY here, behind the batch's
+	//: SETTINGS and answers, or the drain closed it silent (#1609).
+	if io.Pressure(ref) || a.draining.Load() {
 		c.goAway()
 	}
 	st.pushWrite(ref, off, e)
@@ -395,10 +399,12 @@ func (c *h2Call) answerStatus(stream uint32, status int) {
 }
 
 // goAway writes GOAWAY(NO_ERROR) once: the connection serves its streams and
-// closes when they end.
+// closes when they end. A connection a connection error ended has written
+// its GOAWAY already, with the error's code: a GOAWAY(NO_ERROR) behind it, the
+// drain's or Connection: close's, could be read as the final cause.
 func (c *h2Call) goAway() {
-	//: one GOAWAY a connection, whoever asked.
-	if c.e.flags&entryGoAway != 0 {
+	//: one GOAWAY a connection, whoever asked, the error's first.
+	if c.e.flags&entryGoAway != 0 || c.st.lane.Closing(&c.e.conn) {
 		//: already written.
 		return
 	}
@@ -541,8 +547,8 @@ func (st *laneState) writeAll(io corenet.LoopIO) {
 }
 
 // closeIfDone closes ref when its output was refused, a protocol error ended
-// it, or a GOAWAY went out and no stream is left open.
-func (*LoopHandler) closeIfDone(io corenet.LoopIO, ref corenet.LoopConnRef, st *laneState) {
+// it, or a GOAWAY went out and no stream is left open (ends).
+func (a *LoopHandler) closeIfDone(io corenet.LoopIO, ref corenet.LoopConnRef, st *laneState) {
 	e := st.entry(ref)
 	//: closed meanwhile.
 	if !e.live() || e.gen != ref.Gen {
@@ -550,10 +556,24 @@ func (*LoopHandler) closeIfDone(io corenet.LoopIO, ref corenet.LoopConnRef, st *
 		return
 	}
 	//: ended, or nothing more to serve.
-	if e.flags&entryEnded != 0 || st.lane.Closing(&e.conn) || st.lane.Done(&e.conn) {
+	if e.flags&entryEnded != 0 || a.ends(st, e) {
 		//: a stale reference is the only refusal, and means already closed.
 		swallowErr(io.Close(ref))
 	}
+}
+
+// ends reports whether the adapter closes e's connection itself: a
+// connection error ended it, or a GOAWAY went out and no stream is left open
+// while the group serves. Once the drain has begun, a connection with nothing
+// more to serve is the engine's to close, as Draining's contract has it: its
+// close is the drain's, which shuts the writing side first and reads on
+// (lingers), so the GOAWAY is read whenever the client reads. Closed here, the
+// close raced the engine's drain: run before the engine knew of it, by the
+// announcement Draining posts, it closed at once, and a client frame arriving
+// after it reset the connection with the GOAWAY unread (#1609).
+func (a *LoopHandler) ends(st *laneState, e *connEntry) bool {
+	//: an error's end at once; a done connection, unless the drain closes it.
+	return st.lane.Closing(&e.conn) || (st.lane.Done(&e.conn) && !a.draining.Load())
 }
 
 // endBatch ends the lane's batch: the output and scratches cleared, the

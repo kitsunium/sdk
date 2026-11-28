@@ -212,10 +212,14 @@ type uRing struct {
 	recycle []uint16
 	// given is, per group, the buffers handed to the kernel so far;
 	// armedOn the recvs armed on it; recvGroup, per slot, the group its
-	// recv was last armed on.
+	// recv was last armed on; recvOn, per slot, whether a recv is armed —
+	// set when one is, cleared when its last completion comes, so a
+	// lingering slot is given one when it has none (halfClose), never a
+	// second.
 	given     []int
 	armedOn   []int
 	recvGroup []uint8
+	recvOn    []bool
 	// held counts the returns giveBack put off because an entry still named
 	// a buffer the kernel held (uring.entryFree).
 	held int
@@ -1787,7 +1791,6 @@ func (rr *uRing) roomiest(left []int) int {
 
 // armRecvOn arms slot's multishot recv on buffer group g, counted.
 func (rr *uRing) armRecvOn(slot int32, g int) {
-	c := &rr.r.conns[slot]
 	s := rr.u.get()
 	//: no room: the slot fails rather than sits deaf.
 	if s == nil {
@@ -1796,6 +1799,12 @@ func (rr *uRing) armRecvOn(slot int32, g int) {
 		//: closed.
 		return
 	}
+	rr.prepRecvOn(s, slot, g)
+}
+
+// prepRecvOn fills s as slot's multishot recv on buffer group g, counted.
+func (rr *uRing) prepRecvOn(s *sqe, slot int32, g int) {
+	c := &rr.r.conns[slot]
 	prepRecv(s, uint32(c.fd), bufGroup+uint16(g), udPack(udRecv, c.gen, uint32(slot)))
 	//: uring-multishot-recv switched off: one completion, re-armed after it.
 	if !rr.ul.uses.multishot {
@@ -1812,6 +1821,22 @@ func (rr *uRing) armRecvOn(slot int32, g int) {
 	}
 	rr.recvGroup[slot] = uint8(g)
 	rr.armedOn[g]++
+	rr.setRecvOn(slot, true)
+}
+
+// setRecvOn records whether slot has a recv armed.
+func (rr *uRing) setRecvOn(slot int32, on bool) {
+	//: the table grows with the peak; so does the record.
+	for int(slot) >= len(rr.recvOn) {
+		rr.recvOn = append(rr.recvOn, false)
+	}
+	rr.recvOn[slot] = on
+}
+
+// hasRecv reports whether slot has a recv armed.
+func (rr *uRing) hasRecv(slot int32) bool {
+	//: within the record, and armed.
+	return int(slot) < len(rr.recvOn) && rr.recvOn[slot]
 }
 
 // setEpoch records the closes count slot's recv was armed at, or noEpoch.
@@ -1850,6 +1875,7 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 		rr.r.conns[slot].ops--
 		rr.setEpoch(slot, noEpoch)
 		rr.armedOn[rr.recvGroup[slot]]--
+		rr.setRecvOn(slot, false)
 	}
 	//: by result.
 	switch {
@@ -1908,7 +1934,7 @@ func (rr *uRing) takeBuf(c *cqe) {
 // cancelled and ended.
 func (rr *uRing) recvCancelled(slot int32, more bool) {
 	//: still reading, and the recv ended: armed again.
-	if !more && reads(&rr.r.conns[slot]) {
+	if !more && rr.r.reads(&rr.r.conns[slot]) {
 		rr.armRecv(slot)
 	}
 }
@@ -1927,7 +1953,7 @@ func (rr *uRing) recvBytes(slot int32, more bool) {
 	}
 	//: re-armed unless the connection is going: a drain's close reads on,
 	//: to linger (ring.lingers).
-	if !more && reads(&rr.r.conns[slot]) {
+	if !more && rr.r.reads(&rr.r.conns[slot]) {
 		rr.armRecv(slot)
 	}
 }
@@ -1941,7 +1967,7 @@ func (rr *uRing) recvStarved(slot int32) {
 	switch {
 	//: queued, to be re-armed: an open connection, or a drain's close that
 	//: reads on to linger.
-	case reads(c) && len(rr.starved) < starvedCap:
+	case rr.r.reads(c) && len(rr.starved) < starvedCap:
 		rr.starved = append(rr.starved, starvedRecv{slot: slot, gen: c.gen})
 	//: an open one past the bound fails.
 	case c.state == stOpen:
@@ -1950,13 +1976,13 @@ func (rr *uRing) recvStarved(slot int32) {
 	//: a lingering one past the bound reads no more: drainLinger ends it.
 }
 
-// reads reports whether c's recv stays armed: an open connection, or one the
-// drain closes, which reads on to linger (ring.lingers) — on every path that
-// re-arms a recv, so a linger never stops reading on an ENOBUFS or a cancel
-// and closes with input unread.
-func reads(c *connCtl) bool {
-	//: open, or the drain's closing.
-	return c.state == stOpen || (c.state == stClosing && c.reason == rDrain)
+// reads reports whether c's recv stays armed: an open connection, or one a
+// drain closes (ring.drainClose), which reads on to linger (ring.lingers) —
+// on every path that re-arms a recv, so a linger never stops reading on an
+// ENOBUFS or a cancel and closes with input unread.
+func (r *ring) reads(c *connCtl) bool {
+	//: open, or a drain's closing.
+	return c.state == stOpen || r.drainClose(c)
 }
 
 // recvEOF marks an open connection's peer done: it settles at the end of the
@@ -2321,9 +2347,10 @@ func (rr *uRing) rearmStarved() {
 		e := rr.starved[k]
 		k++
 		//: re-armed only if the connection that starved still holds its
-		//: slot, and still reads: one that finished left its entry behind,
-		//: and the slot's next connection has its own recv.
-		if c := &rr.r.conns[e.slot]; c.gen == e.gen && reads(c) {
+		//: slot, still reads, and has no recv: one that finished left its
+		//: entry behind, and the slot's next connection has its own recv; a
+		//: linger armed one already (halfClose).
+		if c := &rr.r.conns[e.slot]; c.gen == e.gen && rr.r.reads(c) && !rr.hasRecv(e.slot) {
 			rr.armRecvOn(e.slot, g)
 			left[g]--
 			room--
@@ -2452,11 +2479,26 @@ func (rr *uRing) shutdown(r *ring, slot int32) {
 }
 
 // halfClose implements driver: IORING_OP_SHUTDOWN of the writing side, the
-// FIN after the output; the recv stays armed, so the lingering slot reads to
-// its peer's end (ring.lingers). With no room in the SQ the slot lingers
-// without it, to drainLinger.
+// FIN after the output, and a recv for the lingering slot, so it reads to its
+// peer's end (ring.lingers). A handler's close made before the loop's drain
+// may have none: a recv that ended then was not re-armed (ring.reads) —
+// every completion in single-shot mode, an ENOBUFS, a multishot the kernel
+// ended —, and the linger, reading nothing, closed at its bound with the
+// peer's input unread, a reset that discarded the answer the kernel still
+// held (#1609 review). With no room in the SQ the slot lingers without
+// either, to drainLinger.
 func (rr *uRing) halfClose(r *ring, slot int32) {
 	c := &r.conns[slot]
+	//: no recv armed: one now, before the shutdown, so the input the peer
+	//: sends after the FIN is read and dropped.
+	if !rr.hasRecv(slot) {
+		//: room for it; without, the bound ends the linger.
+		if s := rr.u.get(); s != nil {
+			rr.prepRecvOn(s, slot, rr.roomiest(nil))
+		} else {
+			r.st.retries++
+		}
+	}
 	s := rr.u.get()
 	//: no room: the bound ends it.
 	if s == nil {
