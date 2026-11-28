@@ -429,15 +429,17 @@ sequences:
             to: cfg.validate
           when: err != nil
       - bind: m
-        eval: "&SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead}"
+        eval: "&SQL{cfg: cfg, snapIso: stdsql.LevelRepeatableRead, lockIso: stdsql.LevelReadCommitted, readBackWait: readBackTimeout}"
       - opt:
           do:
-            - set: m.snapIso
-              value: stdsql.LevelSerializable
+            - set: m.snapIso, m.lockIso
+              value: stdsql.LevelSerializable, stdsql.LevelDefault
           when: cfg.Dialect == coresql.DialectSQLite
       - bind: t
         eval: cfg.Dialect.QuoteIdent(cfg.Table)
         to: cfg.Dialect.QuoteIdent
+      - set: m.lockRow
+        value: "\"UPDATE \" + t + \" SET id = id WHERE id = 1\""
       - bind: ph
         eval: cfg.Dialect.Placeholder
       - set: m.sel
@@ -568,6 +570,10 @@ sequences:
           when: len(es) == 0
       - lock:
           mutex: m.mu
+      - opt:
+          do:
+            - panic: m.unknown
+          when: m.unknown != nil
       - bind: last
         eval: es[len(es)-1]
       - bind: li
@@ -603,6 +609,10 @@ sequences:
     steps:
       - lock:
           mutex: m.mu
+      - opt:
+          do:
+            - return: coreconsensus.LogIdentityValue{}, coreconsensus.PositionValue{}, m.unknown
+          when: m.unknown != nil
       - return: m.li, m.pos, nil
   - of: (*SQL).Restore
     participants:
@@ -616,9 +626,11 @@ sequences:
         kind: internal
       - id: unsupported
         kind: internal
-      - id: m.cfg.Transactor.Transact
-        kind: value
+      - id: m.restoreTx
+        kind: internal
       - id: failed
+        kind: internal
+      - id: m.restoreOutcome
         kind: internal
     steps:
       - var:
@@ -648,8 +660,34 @@ sequences:
           when: v != sqlSnapshotVersion
       - lock:
           mutex: m.mu
-      - bind: err
-        eval: |-
+      - bind: done, err
+        eval: m.restoreTx(r, &meta)
+        to: m.restoreTx
+      - switch:
+          cases:
+            - case: err != nil && !done
+              do:
+                - return: failed("restore", err)
+                  to: failed
+            - case: err != nil
+              do:
+                - return: m.restoreOutcome(&meta, err)
+                  to: m.restoreOutcome
+      - set: m.li, m.pos, m.unknown
+        value: meta.Log, meta.Position, nil
+      - return: nil
+  - of: (*SQL).restoreTx
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).restoreTx
+        kind: self
+      - id: m.cfg.Transactor.Transact
+        kind: value
+    steps:
+      - set: err
+        to: m.cfg.Transactor.Transact
+        value: |-
           m.cfg.Transactor.Transact(context.Background(), coresql.TxOptionsValue{}, func(ctx context.Context, ex coresql.Executor) error {
           		if err := m.cfg.Truncate(ctx, ex); err != nil {
           			return err
@@ -657,17 +695,104 @@ sequences:
           		if err := m.cfg.Load(ctx, ex, r); err != nil {
           			return err
           		}
-          		return m.writePosition(ctx, ex, meta.Log, meta.Position)
+          		//: a position written is the function's end.
+          		if err := m.writePosition(ctx, ex, meta.Log, meta.Position); err != nil {
+          			return err
+          		}
+          		done = true
+          		return nil
+          	})
+      - return: done, err
+  - of: (*SQL).restoreOutcome
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).restoreOutcome
+        kind: self
+      - id: m.readBack
+        kind: internal
+      - id: failed
+        kind: internal
+      - id: origin
+        kind: internal
+    steps:
+      - bind: li, pos, rerr
+        eval: m.readBack()
+        to: m.readBack
+      - opt:
+          do:
+            - set: m.li, m.pos, m.unknown
+              value: meta.Log, meta.Position, nil
+            - return: nil
+          when: rerr == nil && li == meta.Log && pos == meta.Position
+      - opt:
+          do:
+            - return: failed("restore", cause)
+              to: failed
+          when: rerr == nil && li == m.li && pos == m.pos
+      - bind: f
+        eval: "[]errs.FieldValue{errs.String(\"op\", \"restore\"), errs.String(\"why\", \"the outcome of the restore's transaction is unknown\"), errs.String(\"cause\", cause.Error())}"
+      - opt:
+          do:
+            - set: f
+              value: append(f, errs.String("readback", rerr.Error()))
+          when: rerr != nil
+      - set: m.unknown
+        to: origin
+        value: origin(coreconsensus.StateMachineFailed, f...)
+      - return: m.unknown
+  - of: (*SQL).readBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SQL).readBack
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: m.cfg.Transactor.Transact
+        kind: value
+    steps:
+      - var:
+          name: li
+          type: coreconsensus.LogIdentityValue
+      - var:
+          name: pos
+          type: coreconsensus.PositionValue
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), m.readBackWait)
+        to: context
+      - defer: cancel()
+      - bind: read
+        eval: "false"
+      - bind: err
+        eval: |-
+          m.cfg.Transactor.Transact(ctx, coresql.TxOptionsValue{Isolation: m.lockIso}, func(ctx context.Context, ex coresql.Executor) error {
+          		// A transactor that runs fn again keeps no answer of an earlier pass.
+          		read = false
+          		//: the row's lock, waited for behind a COMMIT in flight.
+          		if _, err := ex.ExecContext(ctx, m.lockRow); err != nil {
+          			return err
+          		}
+          		l, p, found, err := m.readPosition(ctx, ex)
+          		//: a position row that is not there names no outcome.
+          		if err == nil && !found {
+          			return origin(coreconsensus.StateMachineFailed, errs.String("why", "the position row is not there"))
+          		}
+          		//: a read that failed.
+          		if err != nil {
+          			return err
+          		}
+          		li, pos, read = l, p, true
+          		// The read is all this transaction is for: an error rolls it back.
+          		return origin(coreconsensus.StateMachineFailed, errs.String("why", "a read back rolls back"))
           	})
         to: m.cfg.Transactor.Transact
       - opt:
           do:
-            - return: failed("restore", err)
-              to: failed
-          when: err != nil
-      - set: m.li, m.pos
-        value: meta.Log, meta.Position
-      - return: nil
+            - return: li, pos, nil
+          when: read
+      - return: li, pos, err
+  - of: (*SQL).RestoresAtomically
   - of: (*SQL).writePosition
     participants:
       - id: caller
@@ -787,9 +912,23 @@ sequences:
         kind: actor
       - id: (*SQL).Snapshot
         kind: self
+      - id: m.mu.Lock
+        kind: value
+      - id: m.mu.Unlock
+        kind: value
       - id: s.hold
         kind: internal
     steps:
+      - eval: m.mu.Lock()
+        to: m.mu.Lock
+      - bind: unknown
+        eval: m.unknown
+      - eval: m.mu.Unlock()
+        to: m.mu.Unlock
+      - opt:
+          do:
+            - return: nil, unknown
+          when: unknown != nil
       - bind: s
         eval: "&sqlSnapshot{m: m, write: make(chan *writeReq), release: make(chan struct{}), done: make(chan struct{})}"
       - bind: ready

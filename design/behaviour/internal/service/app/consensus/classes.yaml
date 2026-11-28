@@ -2382,7 +2382,12 @@ files:
       - cutRetryMin
       - Latest
       - (*Node).restoreFrom
+      - (*Node).restoresAtomically
+      - machinePosition
+      - (*Node).atomicPosition
+      - (*Node).keptPosition
       - (*Node).restoreRefused
+      - (*Node).refusedDurable
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
@@ -8914,7 +8919,9 @@ types:
           failure to do so travels with it — unless the node has no table: its
           configuration is read from its snapshots' metadata, and a node left none
           starts with no member to admit (#526). The copy stays until another is
-          published over it, and a restart falls back to no table again.
+          published over it, and a restart falls back to no table again. A removal
+          that fails STORAGE_FAILED stops the node, its marker written, and the
+          refusal is returned with its own code.
         name: restoreFailed
         params: snapID string, err error
         recv: n *Node
@@ -9185,7 +9192,10 @@ types:
           older snapshot is not restored again and stays on the state it accepted.
           A machine whose Restore refused the stream may hold the prefix it decoded
           in place, a volatile one included: the fallback applied over it (#1582),
-          so STATE_MACHINE_FAILED refuses the start too.
+          so STATE_MACHINE_FAILED refuses the start too. An AtomicRestorer's
+          refusal left its state as it was, and returns its own error, which may
+          carry STATE_MACHINE_FAILED, as machine.SQL's does: it falls back, as
+          before #1582, onto a state the older base or the replay continues (#1607).
         name: refusesStart
         params: rerr error
         recv: n *Node
@@ -10660,16 +10670,55 @@ types:
           from it, serialised with Apply. install says the restore is a running
           node's, on the apply goroutine, rather than a start's: a Restore it
           refuses stops the node there, before it takes another item, where a
-          start's refusal fails the start (restoreRefused).
+          start's refusal fails the start, unless the machine is an AtomicRestorer
+          that kept its position (restoreRefused).
         name: restoreFrom
         params: m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool
         recv: n *Node
         results: error
       - doc: |-
+          restoresAtomically reports whether the machine declared its Restore
+          atomic: an AtomicRestorer whose Restore returned an error holds the state
+          it held before the call (#1607). It is the engine's one test of the
+          sibling, read by restoreRefused and refusesStart.
+        name: restoresAtomically
+        recv: n *Node
+        results: bool
+      - doc: |-
+          atomicPosition reads the position a durable AtomicRestorer holds before
+          its Restore, the one a refusal must leave (keptPosition); nil for any
+          other machine, which has none to compare or is not trusted with one.
+        name: atomicPosition
+        recv: n *Node
+        results: "*machinePosition"
+      - doc: |-
+          keptPosition reports whether an AtomicRestorer's refused Restore left the
+          position pre it held before the call: the one breach of its contract the
+          engine can see. A volatile one has nothing to compare and is believed; a
+          durable one whose position moved, or that names none before or after,
+          broke the contract or does not know its state, and is stopped as a
+          machine that may have written its disk (#1607).
+        name: keptPosition
+        params: pre *machinePosition
+        recv: n *Node
+        results: bool
+      - doc: |-
           restoreRefused is what a Restore that returned err leaves the node. The
           engine cannot tell a machine that read aside and kept its state from one
           that decoded part of the stream into its live state and failed: the
-          machine may hold a prefix of the snapshot no correct node holds (#1582).
+          machine may hold a prefix of the snapshot no correct node holds (#1582),
+          unless it is an AtomicRestorer, whose refusal left its state as it was
+          (#1607). Such a refusal is returned as is, as every refusal was before
+          #1582: an install is refused, restoreItem answers it, restoreFailed
+          removes the copy, or keeps it on a node with no table, and raft stays
+          where it was, so the entries handed after the restore continue the state
+          the machine holds; a start falls back to an older snapshot or a replay
+          (refusesStart). Neither stops the node, as a transient failure of a
+          database would for good. A durable AtomicRestorer whose AppliedPosition
+          moved across the refusal, or failed before or after it, broke its
+          contract or lost track of its state (machine.SQL after a COMMIT whose
+          outcome it could not read back): it is stopped as a durable machine,
+          with its marker (keptPosition).
           At an install, on the apply goroutine, the refusal stops the node before
           the restore is answered, so the goroutine takes no item after it and no
           entry is applied, and no Barrier released, over that prefix: stopped from
@@ -10689,7 +10738,15 @@ types:
           Restore, on its metadata or checksums, touched no machine and is not
           judged here.
         name: restoreRefused
-        params: m *coreconsensus.SnapshotMetaValue, err error, install bool
+        params: m *coreconsensus.SnapshotMetaValue, err error, install bool, pre *machinePosition
+        recv: n *Node
+        results: error
+      - doc: |-
+          refusedDurable stops the node STATE_MACHINE_FAILED, with its marker, on
+          a refused Restore that may have moved a durable machine's state, and
+          returns the stop's error: at an install as at a start.
+        name: refusedDurable
+        params: m *coreconsensus.SnapshotMetaValue, err error, why string
         recv: n *Node
         results: error
       - doc: |-
@@ -12442,6 +12499,19 @@ types:
         recv: c *chunkReader
         results: error
     name: chunkReader
+  - doc: machinePosition is what a DurableStateMachine's AppliedPosition answered.
+    fields:
+      - doc: d is the machine asked, read again after the refusal.
+        name: d
+        type: coreconsensus.DurableStateMachine
+      - name: li
+        type: coreconsensus.LogIdentityValue
+      - name: pos
+        type: coreconsensus.PositionValue
+      - name: err
+        type: error
+    kind: struct
+    name: machinePosition
   - doc: ctxReader reads r until ctx is done, then answers ctx's error.
     fields:
       - name: ctx

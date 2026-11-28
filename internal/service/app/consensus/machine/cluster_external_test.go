@@ -35,7 +35,9 @@ type testCluster3 struct {
 	cid        coreconsensus.ClusterID
 	durability svcconsensus.Durability
 	machineFor func(i int) coreconsensus.StateMachine
-	members    []*member
+	// every is the entries between two cuts; zero is never in a test.
+	every   uint64
+	members []*member
 	// mu guards each member's node and sm, which a restart replaces while
 	// clients look for the leader.
 	mu sync.Mutex
@@ -49,17 +51,28 @@ func clusterTiming() coreconsensus.TimingContractSpec {
 }
 
 func (c *testCluster3) config(m *member) svcconsensus.Config {
+	every := uint64(100000)
+	//: a cluster that cuts often, so that a node left behind is caught up by an install.
+	if c.every != 0 {
+		every = c.every
+	}
 	return svcconsensus.Config{
 		Cluster: c.cid, Machine: m.sm, Durability: c.durability, Log: m.log, Snapshots: m.snaps,
 		Transport: svcconsensus.NewMemoryTransport(c.net, m.id), InitialTiming: clusterTiming(),
 		MaxSnapshotBytes: 1 << 30, SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20,
-		MinVoters: 1, SnapshotEvery: 100000, SnapshotTrailing: 4,
+		MinVoters: 1, SnapshotEvery: every, SnapshotTrailing: 4,
 	}
 }
 
 func newTestCluster(t *testing.T, durability svcconsensus.Durability, machineFor func(i int) coreconsensus.StateMachine) *testCluster3 {
 	t.Helper()
-	c := &testCluster3{t: t, net: svcconsensus.NewMemoryNetwork(), cid: coreconsensus.ClusterID{9, 1, 6}, durability: durability, machineFor: machineFor}
+	return newTestClusterEvery(t, durability, 0, machineFor)
+}
+
+// newTestClusterEvery is newTestCluster whose nodes cut every entries.
+func newTestClusterEvery(t *testing.T, durability svcconsensus.Durability, every uint64, machineFor func(i int) coreconsensus.StateMachine) *testCluster3 {
+	t.Helper()
+	c := &testCluster3{t: t, net: svcconsensus.NewMemoryNetwork(), cid: coreconsensus.ClusterID{9, 1, 6}, durability: durability, machineFor: machineFor, every: every}
 	var founders []coreconsensus.MemberValue
 	for i := range 3 {
 		m := &member{log: svcconsensus.NewMemoryLog(), snaps: svcconsensus.NewMemorySnapshots()}

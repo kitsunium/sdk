@@ -2,8 +2,9 @@
 // D3): the glue every product wrote by hand around a database, and the
 // reference key-value machine the linearizability checker models.
 //
-// [SQL] is a [coreconsensus.DurableStateMachine] and a
-// [coreconsensus.BatchingStateMachine] over a [coresql.Transactor]. A
+// [SQL] is a [coreconsensus.DurableStateMachine], a
+// [coreconsensus.BatchingStateMachine] and a
+// [coreconsensus.AtomicRestorer] over a [coresql.Transactor]. A
 // batch of committed commands is applied in ONE transaction: the caller's
 // [SQLConfig].Apply runs each command on the transaction's executor, and
 // the machine writes the log identity and the position of the last one
@@ -20,7 +21,11 @@
 // until Release, so [SQLConfig].Dump streams the state of the batch last
 // committed while the next batches commit. A restore runs
 // [SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in
-// one transaction.
+// one transaction: a refused one leaves the database as it was, and the
+// node it runs under keeps running on the state it had applied, except
+// on VERSION_UNSUPPORTED, which stops it (D18), and when the outcome of
+// the transaction could not be read back, or the machine's position could
+// not be read again after the refusal, which stops it with its marker.
 //
 //	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
 //		Transactor: tm, Dialect: sql.DialectPostgres,

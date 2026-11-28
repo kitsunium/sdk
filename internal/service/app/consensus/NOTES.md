@@ -1813,10 +1813,31 @@ on D16's targets they rest on are ADR 0152's amendment of 2026-11-11.
   `r` reached `io.EOF`; on any error it drops the new state and returns,
   the old one untouched. The tests' `kv` and `machine/`'s `KV` read aside.
   `machine/`'s `SQL` restores in one transaction and so loses nothing
-  either, yet its refusal stops the node: the engine has no word from a
-  machine that its `Restore` is atomic.
-  The only way out of such a stop or start refusal is a restart of the
-  process, on a new machine: the machine whose `Restore` was refused is
+  either; it says so as an `AtomicRestorer` (#1607), the sibling whose
+  failed `Restore` left the state, its position included, as it was.
+  `restoresAtomically` (`snapshot.go`) is the engine's one test of it:
+  `restoreRefused` returns such a refusal as is, as every refusal was
+  before #1582 — the install is refused, `restoreItem` lets its hold go,
+  `restoreFailed` removes the copy (or keeps it on a node with no
+  table; a removal that fails STORAGE_FAILED stops the node, marked, D4),
+  raft stays where it was, and the
+  entries handed after the restore continue the state the machine holds;
+  a later offer, or a leader's appends, catch the node up. At a start,
+  `refusesStart` lets it fall back, though `SQL`'s error carries
+  STATE_MACHINE_FAILED. VERSION_UNSUPPORTED and a nil `Restore` whose end
+  is refused still stop it, and so does a durable one whose
+  `AppliedPosition` moved across the refusal or failed (`keptPosition`):
+  `SQL` names no position after a COMMIT whose outcome it could not read
+  back on the primary under the position row's lock (`restoreOutcome`,
+  `readBack`; an acknowledgement lost after the server
+  committed had it refuse with the old position over the snapshot's
+  state). A machine that declares the sibling and breaks its contract
+  otherwise diverges unseen: the engine has nothing more to check it with
+  (`TestAnAtomicRestorerRefusedAtAnInstallKeepsRunning`,
+  `TestAnAtomicRestorerRefusedAtStartFallsBack`, `machine/`'s
+  `TestAnSQLFollowerWhoseInstallLoadFailsKeepsRunning`).
+  For a machine that does not declare it, the only way out of such a stop
+  or start refusal is a restart of the process, on a new machine: the machine whose `Restore` was refused is
   never handed to another node, since a start that then falls back — the
   copy rotted between its two reads, no older snapshot, a log from index
   1 — replays the log over the prefix it holds. Each attempt reads the

@@ -6,15 +6,23 @@
 State machines for the consensus engine (ADR 0152 D3, #916), published by
 `pkg/v1/app/consensus/machine`:
 
-- `SQL` (`NewSQL`, `SQLConfig`) — a `DurableStateMachine` and a
-  `BatchingStateMachine` over a `core/data/sql.Transactor`. A batch is one
+- `SQL` (`NewSQL`, `SQLConfig`) — a `DurableStateMachine`, a
+  `BatchingStateMachine` and an `AtomicRestorer` over a
+  `core/data/sql.Transactor`. A batch is one
   transaction: the caller's `Apply` per command, then the UPDATE of the one
   position row (`DefaultPositionTable`, id 1: the log identity's six fields
   and the applied term and index), then the commit. A snapshot is a
   read-only transaction (REPEATABLE READ, SERIALIZABLE on SQLite) opened and
   read once on the apply goroutine, held by a goroutine until `Release`,
   `WriteTo` served in it (`sqlsnap.go`); a restore is `Truncate`, `Load`
-  and the snapshot's position in one transaction. Snapshot format: `KSQL`,
+  and the snapshot's position in one transaction, the header checked before
+  it opens and `m.pos` moved once it committed, so a refusal leaves the
+  state as it was and the node keeps running (#1607), except on
+  VERSION_UNSUPPORTED, which stops it (D18), and on an outcome the read
+  back cannot name or a position the engine cannot read again after the
+  refusal (`keptPosition`), which stop it with its marker. A failure of the
+  transaction's function is a refusal at once; only one after its end is
+  read back. Snapshot format: `KSQL`,
   version 1, then what `Dump` wrote.
 - `KV` (`NewKV`, `KVGet`, `KVPut`, `KVCompareAndSwap`, `KVResult`) — the
   reference volatile machine: a per-key revision that only grows (D6's ABA
@@ -29,7 +37,9 @@ never `service/app/consensus`, so the engine's own tests may use it.
 ## Tests
 
 - `sqldouble_external_test.go` — the SQL double: a database/sql driver over
-  memory, snapshot isolation by copy, that knows the position table and the
+  memory, snapshot isolation by copy (a read-only transaction's commit
+  writes nothing back), the position row's lock (`armInflight`: a COMMIT
+  that answers an error and commits later), that knows the position table and the
   tests' `entries` table and fails any other statement; `armCrash` fails the
   next position write at or past an index, once.
 - `cluster_external_test.go` — three nodes over the memory transport, built
@@ -39,9 +49,24 @@ never `service/app/consensus`, so the engine's own tests may use it.
   checker, repeated (a test file cannot be imported), its known histories,
   and a run of four clients over the KV with a leader crash, the history
   mutated as its negative control.
+- `atomicrestore_external_test.go` — a `Restore` whose `Load` fails half
+  way, or whose position write fails, leaves the rows and the position as
+  they were; a follower whose install's `Load` fails keeps running and a
+  later offer restores it; a lost COMMIT acknowledgement (`lostAck`) is
+  read back, a retried read back keeps no earlier answer, and one past
+  its bound (`SetReadBackTimeout`, `export_test.go`) is unknown (#1607).
 
 ## Do NOT
 
+- Write to the database in `Restore` outside its one transaction, or move
+  `m.li`/`m.pos` before it committed: `SQL` is an `AtomicRestorer`, and the
+  engine keeps a node running on the state a refused restore left (#1607).
+- Return a refusal from `Restore` without reading the position back, or
+  read it back read-only (a `ReadReplica` serves it) or without the row's
+  lock (a COMMIT in flight): a COMMIT whose acknowledgement was lost
+  committed (`restoreOutcome`, `readBack`); an
+  outcome it cannot read stays in `unknown`, which refuses
+  `AppliedPosition` and `Snapshot` and panics `ApplyBatch`.
 - Write the position outside the batch's transaction: a crash between the
   two replays the batch or skips it, the defect this package exists for.
 - Recover a failed batch: it panics, the node stops STATE_MACHINE_FAILED

@@ -88,6 +88,8 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func TokenOf\(err error\) \(TokenValue, bool\)](<#TokenOf>)
 - [func VerifyBackup\(p \*BackupParams, opt \*RestoreOptions\) \(BackupPointValue, error\)](<#VerifyBackup>)
 - [type AlarmID](<#AlarmID>)
+- [type AtomicRestorer](<#AtomicRestorer>)
+  - [func \(AtomicRestorer\) RestoresAtomically\(\)](<#AtomicRestorer.RestoresAtomically>)
 - [type AuthenticatedPeerValue](<#AuthenticatedPeerValue>)
 - [type BackupParams](<#BackupParams>)
 - [type BackupPointValue](<#BackupPointValue>)
@@ -1708,6 +1710,35 @@ AlarmID is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Ala
 ```go
 type AlarmID uint64
 ```
+
+<a name="AtomicRestorer"></a>
+## type [AtomicRestorer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
+
+AtomicRestorer is the sibling of a StateMachine whose failed Restore leaves its state as it was, the position a DurableStateMachine reports included: its refusal neither stops the node nor fails a start, except on VERSION\_UNSUPPORTED (D18) and for a durable one whose AppliedPosition moved across the refusal or failed, which is stopped with its marker. A type that embeds one inherits the marker, and must keep its own Restore atomic.
+
+```go
+type AtomicRestorer = coreconsensus.AtomicRestorer
+```
+
+AtomicRestorer is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.AtomicRestorer`, declared as:
+
+```go
+type AtomicRestorer interface {
+	// RestoresAtomically marks the machine as an AtomicRestorer. It does
+	// nothing, and the engine never calls it.
+	RestoresAtomically()
+	StateMachine
+}
+```
+
+<a name="AtomicRestorer.RestoresAtomically"></a>
+### func \(AtomicRestorer\) [RestoresAtomically](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
+
+```go
+func (AtomicRestorer) RestoresAtomically()
+```
+
+RestoresAtomically marks the machine as an AtomicRestorer. It does nothing, and the engine never calls it.
 
 <a name="AuthenticatedPeerValue"></a>
 ## type [AuthenticatedPeerValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -4528,9 +4559,10 @@ type StateMachine interface {
 	// Apply. An error coded VERSION_UNSUPPORTED says the snapshot is of a
 	// format this build does not read: the node stops, as for an entry
 	// kind it does not know, and a restart over that snapshot is refused
-	// (D18). The engine cannot tell a refusal that left the state as it
-	// was from one that wrote part of the stream into it, so it assumes
-	// the second: any other error stops the node with
+	// (D18). Unless the machine is an AtomicRestorer, the engine cannot
+	// tell a refusal that left the state as it was from one that wrote
+	// part of the stream into it, so it assumes the second: any other
+	// error stops the node with
 	// STATE_MACHINE_FAILED before it applies another entry or releases a
 	// Barrier or WaitApplied, and no snapshot is offered again to it. A
 	// DurableStateMachine may have written that part to its disk, where
@@ -4547,8 +4579,12 @@ type StateMachine interface {
 	// never handed to another node, whose start could fall back over the
 	// part it holds. A machine that builds the new state
 	// aside and swaps it in only on success keeps its state through a
-	// refusal, but the engine cannot tell, and stops all the same. A
-	// machine reads r to io.EOF: after it
+	// refusal, but the engine cannot tell, and stops all the same, unless
+	// the machine declares it as an AtomicRestorer: then its refusal
+	// neither stops the node nor fails a start, the install is refused
+	// and the node keeps the state it had applied, and a start falls
+	// back, unless the machine is durable and its AppliedPosition moved
+	// across the refusal or failed, which stops it with its marker. A machine reads r to io.EOF: after it
 	// returns, the engine reads what it left, and checks the stream's
 	// sizes and SHA-256 against the metadata. A Restore that returns nil
 	// on a stream whose end is then refused leaves the machine on a
@@ -4578,7 +4614,7 @@ Apply applies one committed command and returns its result, delivered to the Pro
 func (StateMachine) Restore(r io.Reader, meta SnapshotMetaValue) error
 ```
 
-Restore replaces the state with a snapshot's. It is serialised with Apply. An error coded VERSION\_UNSUPPORTED says the snapshot is of a format this build does not read: the node stops, as for an entry kind it does not know, and a restart over that snapshot is refused (D18). The engine cannot tell a refusal that left the state as it was from one that wrote part of the stream into it, so it assumes the second: any other error stops the node with STATE\_MACHINE\_FAILED before it applies another entry or releases a Barrier or WaitApplied, and no snapshot is offered again to it. A DurableStateMachine may have written that part to its disk, where the next start would resume past its AppliedPosition: its stop leaves a marker that refuses the next start until an operator clears it. A volatile machine's stop leaves none: its state goes with the process, and a supervisor starts the node again on a new machine. At a start, a Restore that returns any other error fails the start with STATE\_MACHINE\_FAILED, a volatile machine's included, rather than falling back to an older snapshot or a replay from the first entry; a snapshot the engine refuses before Restore, on its checksums, still falls back. The only way out is a restart of the process on a new machine: the machine whose Restore was refused is never handed to another node, whose start could fall back over the part it holds. A machine that builds the new state aside and swaps it in only on success keeps its state through a refusal, but the engine cannot tell, and stops all the same. A machine reads r to io.EOF: after it returns, the engine reads what it left, and checks the stream's sizes and SHA-256 against the metadata. A Restore that returns nil on a stream whose end is then refused leaves the machine on a state the engine cannot vouch for: the node stops with STATE\_MACHINE\_FAILED before it applies another entry, and a start that restores that way fails with it.
+Restore replaces the state with a snapshot's. It is serialised with Apply. An error coded VERSION\_UNSUPPORTED says the snapshot is of a format this build does not read: the node stops, as for an entry kind it does not know, and a restart over that snapshot is refused (D18). Unless the machine is an AtomicRestorer, the engine cannot tell a refusal that left the state as it was from one that wrote part of the stream into it, so it assumes the second: any other error stops the node with STATE\_MACHINE\_FAILED before it applies another entry or releases a Barrier or WaitApplied, and no snapshot is offered again to it. A DurableStateMachine may have written that part to its disk, where the next start would resume past its AppliedPosition: its stop leaves a marker that refuses the next start until an operator clears it. A volatile machine's stop leaves none: its state goes with the process, and a supervisor starts the node again on a new machine. At a start, a Restore that returns any other error fails the start with STATE\_MACHINE\_FAILED, a volatile machine's included, rather than falling back to an older snapshot or a replay from the first entry; a snapshot the engine refuses before Restore, on its checksums, still falls back. The only way out is a restart of the process on a new machine: the machine whose Restore was refused is never handed to another node, whose start could fall back over the part it holds. A machine that builds the new state aside and swaps it in only on success keeps its state through a refusal, but the engine cannot tell, and stops all the same, unless the machine declares it as an AtomicRestorer: then its refusal neither stops the node nor fails a start, the install is refused and the node keeps the state it had applied, and a start falls back, unless the machine is durable and its AppliedPosition moved across the refusal or failed, which stops it with its marker. A machine reads r to io.EOF: after it returns, the engine reads what it left, and checks the stream's sizes and SHA-256 against the metadata. A Restore that returns nil on a stream whose end is then refused leaves the machine on a state the engine cannot vouch for: the node stops with STATE\_MACHINE\_FAILED before it applies another entry, and a start that restores that way fails with it.
 
 <a name="StateMachine.Snapshot"></a>
 ### func \(StateMachine\) [Snapshot](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)

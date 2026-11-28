@@ -37,7 +37,8 @@ func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error)
 // from it, serialised with Apply. install says the restore is a running
 // node's, on the apply goroutine, rather than a start's: a Restore it
 // refuses stops the node there, before it takes another item, where a
-// start's refusal fails the start (restoreRefused).
+// start's refusal fails the start, unless the machine is an AtomicRestorer
+// that kept its position (restoreRefused).
 func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, install bool) error {
 	h, err := n.cfg.Snapshots.Open(m.ID)
 	if err != nil {
@@ -75,9 +76,10 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 		// snapshot's index (#1562). The chunk reader hashes what it decodes
 		// either way: the comparison is the only cost.
 		sr := &snapshotReader{cr: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes), meta: m}
+		pre := n.atomicPosition()
 		//: a refused restore moves nothing, applied included, and may leave a prefix the machine wrote.
 		if err := n.cfg.Machine.Restore(sr, m); err != nil {
-			return n.restoreRefused(&m, err, install)
+			return n.restoreRefused(&m, err, install, pre)
 		}
 		// A machine may stop reading before the end: the rest is read, so
 		// the end is checked whatever the machine read, before applied
@@ -121,10 +123,68 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 	return nil
 }
 
+// restoresAtomically reports whether the machine declared its Restore
+// atomic: an AtomicRestorer whose Restore returned an error holds the state
+// it held before the call (#1607). It is the engine's one test of the
+// sibling, read by restoreRefused and refusesStart.
+func (n *Node) restoresAtomically() bool {
+	_, ok := n.cfg.Machine.(coreconsensus.AtomicRestorer)
+	return ok
+}
+
+// machinePosition is what a DurableStateMachine's AppliedPosition answered.
+type machinePosition struct {
+	// d is the machine asked, read again after the refusal.
+	d   coreconsensus.DurableStateMachine
+	li  coreconsensus.LogIdentityValue
+	pos coreconsensus.PositionValue
+	err error
+}
+
+// atomicPosition reads the position a durable AtomicRestorer holds before
+// its Restore, the one a refusal must leave (keptPosition); nil for any
+// other machine, which has none to compare or is not trusted with one.
+func (n *Node) atomicPosition() *machinePosition {
+	d, ok := n.cfg.Machine.(coreconsensus.DurableStateMachine)
+	//: only a durable AtomicRestorer is checked.
+	if !ok || !n.restoresAtomically() {
+		return nil
+	}
+	li, pos, err := d.AppliedPosition()
+	return &machinePosition{d: d, li: li, pos: pos, err: err}
+}
+
+// keptPosition reports whether an AtomicRestorer's refused Restore left the
+// position pre it held before the call: the one breach of its contract the
+// engine can see. A volatile one has nothing to compare and is believed; a
+// durable one whose position moved, or that names none before or after,
+// broke the contract or does not know its state, and is stopped as a
+// machine that may have written its disk (#1607).
+func (n *Node) keptPosition(pre *machinePosition) bool {
+	//: a volatile AtomicRestorer.
+	if pre == nil {
+		return true
+	}
+	li, pos, err := pre.d.AppliedPosition()
+	return pre.err == nil && err == nil && li == pre.li && pos == pre.pos
+}
+
 // restoreRefused is what a Restore that returned err leaves the node. The
 // engine cannot tell a machine that read aside and kept its state from one
 // that decoded part of the stream into its live state and failed: the
-// machine may hold a prefix of the snapshot no correct node holds (#1582).
+// machine may hold a prefix of the snapshot no correct node holds (#1582),
+// unless it is an AtomicRestorer, whose refusal left its state as it was
+// (#1607). Such a refusal is returned as is, as every refusal was before
+// #1582: an install is refused, restoreItem answers it, restoreFailed
+// removes the copy, or keeps it on a node with no table, and raft stays
+// where it was, so the entries handed after the restore continue the state
+// the machine holds; a start falls back to an older snapshot or a replay
+// (refusesStart). Neither stops the node, as a transient failure of a
+// database would for good. A durable AtomicRestorer whose AppliedPosition
+// moved across the refusal, or failed before or after it, broke its
+// contract or lost track of its state (machine.SQL after a COMMIT whose
+// outcome it could not read back): it is stopped as a durable machine,
+// with its marker (keptPosition).
 // At an install, on the apply goroutine, the refusal stops the node before
 // the restore is answered, so the goroutine takes no item after it and no
 // entry is applied, and no Barrier released, over that prefix: stopped from
@@ -143,7 +203,15 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64, ins
 // and a replay from index 1 would run over the prefix it holds. A snapshot the engine refuses before
 // Restore, on its metadata or checksums, touched no machine and is not
 // judged here.
-func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool) error {
+func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, install bool, pre *machinePosition) error {
+	// An AtomicRestorer whose position moved broke its contract whatever
+	// its code: returned VERSION_UNSUPPORTED, a start failed with no
+	// marker, and the next one took the moved position for the snapshot's
+	// and skipped its restore, on the state the machine refused (#1607).
+	//: a durable AtomicRestorer that moved its position, or names none, stops as a durable machine.
+	if n.restoresAtomically() && !n.keptPosition(pre) {
+		return n.refusedDurable(m, err, "an AtomicRestorer refused a restore and moved its position, or named none")
+	}
 	_, durable := n.cfg.Machine.(coreconsensus.DurableStateMachine)
 	switch {
 	//: a format this build does not read: the start returns it, an install stops on it here.
@@ -153,13 +221,12 @@ func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, ins
 			n.stop(err, false)
 		}
 		return err
+	//: a machine whose Restore is atomic kept its state: refused as before #1582, with no stop.
+	case n.restoresAtomically():
+		return err
 	//: a durable machine may have written the prefix to its disk.
 	case durable:
-		serr := origin(coreconsensus.StateMachineFailed,
-			errs.String("why", "a durable machine refused a restore it may have written"),
-			errs.String("id", m.ID), errs.String("cause", err.Error()))
-		n.stop(serr, false)
-		return serr
+		return n.refusedDurable(m, err, "a durable machine refused a restore it may have written")
 	}
 	serr := origin(coreconsensus.StateMachineFailed,
 		errs.String("why", "a volatile machine refused a restore it may have written"),
@@ -168,6 +235,17 @@ func (n *Node) restoreRefused(m *coreconsensus.SnapshotMetaValue, err error, ins
 	if install {
 		n.stopUnmarked(serr)
 	}
+	return serr
+}
+
+// refusedDurable stops the node STATE_MACHINE_FAILED, with its marker, on
+// a refused Restore that may have moved a durable machine's state, and
+// returns the stop's error: at an install as at a start.
+func (n *Node) refusedDurable(m *coreconsensus.SnapshotMetaValue, err error, why string) error {
+	serr := origin(coreconsensus.StateMachineFailed,
+		errs.String("why", why),
+		errs.String("id", m.ID), errs.String("cause", err.Error()))
+	n.stop(serr, false)
 	return serr
 }
 

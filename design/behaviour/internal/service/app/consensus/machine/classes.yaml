@@ -32,6 +32,20 @@ constants:
         value: "\"kit_consensus_applied\""
     name: DefaultPositionTable
   - doc: |-
+      readBackTimeout bounds the read back of a Restore whose transaction
+      reported a failure: the wait for the position row's lock, which a COMMIT
+      still in flight holds. It exceeds the 10 s after which MySQL's
+      semi-synchronous replication gives up on its replica and lets a held
+      COMMIT end (rpl_semi_sync_master_timeout's default), and a healthy
+      server's group fsync by far; past it the outcome is unknown and the
+      engine stops the node, the safe side, rather than keep the apply
+      goroutine waiting on a server that may never answer.
+    items:
+      - name: readBackTimeout
+        type: time.Duration
+        value: 15 * time.Second
+    name: readBackTimeout
+  - doc: |-
       maxTableName bounds a position table's name: PostgreSQL's 63 bytes, the
       shortest identifier limit of the three dialects.
     items:
@@ -95,6 +109,7 @@ files:
     name: machine_compliance.go
   - decls:
       - DefaultPositionTable
+      - readBackTimeout
       - maxTableName
       - sqlSnapshotMagic
       - positionColumns
@@ -109,6 +124,10 @@ files:
       - (*SQL).ApplyBatch
       - (*SQL).AppliedPosition
       - (*SQL).Restore
+      - (*SQL).restoreTx
+      - (*SQL).restoreOutcome
+      - (*SQL).readBack
+      - (*SQL).RestoresAtomically
       - (*SQL).writePosition
       - (*SQL).readPosition
       - clusterOf
@@ -222,6 +241,7 @@ imports:
   stdsql: database/sql
   strings: strings
   sync: sync
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/app/consensus/machine
@@ -312,10 +332,15 @@ types:
           transaction.
         name: Dump
         type: func(ctx context.Context, ex coresql.Executor, w io.Writer) error
-      - doc: Truncate removes the machine's state on ex, before a Load.
+      - doc: |-
+          Truncate removes the machine's state on ex, before a Load, with
+          statements the transaction rolls back: never one that commits
+          implicitly, such as MySQL's TRUNCATE TABLE (use DELETE).
         name: Truncate
         type: func(ctx context.Context, ex coresql.Executor) error
-      - doc: Load writes on ex the state Dump wrote into r.
+      - doc: |-
+          Load writes on ex the state Dump wrote into r, with statements
+          the transaction rolls back, as Truncate.
         name: Load
         type: func(ctx context.Context, ex coresql.Executor, r io.Reader) error
     kind: struct
@@ -350,12 +375,29 @@ types:
       - doc: snapIso is the isolation a snapshot's transaction reads at.
         name: snapIso
         type: stdsql.IsolationLevel
+      - doc: |-
+          lockRow takes the position row's lock without changing it, and
+          lockIso is the isolation its read back runs at (readBack).
+        name: lockRow
+        type: string
+      - name: lockIso
+        type: stdsql.IsolationLevel
+      - doc: "readBackWait bounds readBack: readBackTimeout, which a test lowers."
+        name: readBackWait
+        type: time.Duration
       - name: mu
         type: sync.Mutex
       - name: li
         type: coreconsensus.LogIdentityValue
       - name: pos
         type: coreconsensus.PositionValue
+      - doc: |-
+          unknown is set when a Restore's outcome could not be read back: the
+          database holds the old state or the snapshot's, and the machine does
+          not know which. Until a Restore succeeds, AppliedPosition and
+          Snapshot return it and ApplyBatch panics with it (#1607).
+        name: unknown
+        type: error
     kind: struct
     methods:
       - name: Apply
@@ -372,6 +414,50 @@ types:
         params: r io.Reader, meta coreconsensus.SnapshotMetaValue
         recv: m *SQL
         results: error
+      - doc: |-
+          restoreTx runs Restore's transaction: Truncate, Load and the snapshot's
+          position. done is set once its function ran to its end, in any pass a
+          retrying transactor made: only then can a COMMIT have been sent, whose
+          outcome the database holds. It is never reset, so a pass that committed
+          and lost its answer is still read back after a later pass failed. The
+          caller holds mu.
+        name: restoreTx
+        params: r io.Reader, meta *coreconsensus.SnapshotMetaValue
+        recv: m *SQL
+        results: done bool, err error
+      - doc: |-
+          restoreOutcome judges a Restore whose transaction returned cause on the
+          position the database holds, read back in a transaction of its own: a
+          COMMIT whose acknowledgement was lost committed although database/sql
+          reports it failed, and returned as a refusal with the old position, the
+          engine applied the entries after that position over the snapshot's state
+          (#1607). The snapshot's position is a restore that took effect, nil; the
+          old one a refusal that left the state as it was; anything else, or no
+          answer, an outcome the machine cannot name, kept in unknown so that the
+          engine, reading AppliedPosition back, stops the node. The caller holds mu.
+        name: restoreOutcome
+        params: meta *coreconsensus.SnapshotMetaValue, cause error
+        recv: m *SQL
+        results: error
+      - doc: |-
+          readBack reads the position row as the primary holds it once no
+          transaction can still commit over it: in a read-write transaction, so
+          that a transactor with a ReadReplica does not route it to a replica that
+          has not replayed the COMMIT, which first takes the row's lock, which the
+          restore's transaction holds until the server ends it, then reads the
+          row, at READ COMMITTED, as the holder left it, then rolls back; within
+          readBackTimeout. Read on a replica, or without the lock while a COMMIT
+          was in flight, it saw the old position and the restore was taken for a
+          refusal over the snapshot's state (#1607). PostgreSQL and MySQL make the
+          UPDATE wait for the holder and read the version it committed; SQLite
+          commits in the call, so nothing is in flight there. A database with no
+          row, a wait that ends, or any failure answers an error: the outcome is
+          unknown.
+        name: readBack
+        recv: m *SQL
+        results: coreconsensus.LogIdentityValue, coreconsensus.PositionValue, error
+      - name: RestoresAtomically
+        recv: m *SQL
       - doc: |-
           writePosition updates the one position row inside the transaction ex
           belongs to.
@@ -458,7 +544,8 @@ types:
 vars:
   - doc: |-
       The ports each machine implements: SQL every sibling a durable, batching
-      machine speaks, KV the state machine alone (it is volatile).
+      machine whose restore is one transaction speaks, KV the state machine
+      alone (it is volatile).
     grouped: true
     items:
       - name: _
@@ -466,6 +553,9 @@ vars:
         value: (*SQL)(nil)
       - name: _
         type: coreconsensus.BatchingStateMachine
+        value: (*SQL)(nil)
+      - name: _
+        type: coreconsensus.AtomicRestorer
         value: (*SQL)(nil)
       - name: _
         type: coreconsensus.StateMachine

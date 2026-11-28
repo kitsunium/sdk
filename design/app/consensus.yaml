@@ -63,12 +63,12 @@ packages:
           - doc: |-
               CodeStateMachineFailed identifies a node whose Apply panicked or could not
               complete — the entry IS committed —, whose Restore returned nil on
-              a snapshot whose end the engine then refused, or whose Restore
-              returned an error not coded VERSION_UNSUPPORTED. A volatile
-              machine's refused Restore stops the node with no marker. Before an
-              operator clears the stop marker the others leave, a
-              DurableStateMachine must be verified or rebuilt: the next start
-              trusts its AppliedPosition.
+              a snapshot whose end the engine then refused, or whose Restore,
+              not an AtomicRestorer's, returned an error not coded
+              VERSION_UNSUPPORTED. A volatile machine's refused Restore stops the
+              node with no marker. Before an operator clears the stop marker the
+              others leave, a DurableStateMachine must be verified or rebuilt: the
+              next start trusts its AppliedPosition.
             name: CodeStateMachineFailed
             value: "0x00_02_39_0A"
         type: errs.Code
@@ -731,9 +731,10 @@ packages:
               Apply. An error coded VERSION_UNSUPPORTED says the snapshot is of a
               format this build does not read: the node stops, as for an entry
               kind it does not know, and a restart over that snapshot is refused
-              (D18). The engine cannot tell a refusal that left the state as it
-              was from one that wrote part of the stream into it, so it assumes
-              the second: any other error stops the node with
+              (D18). Unless the machine is an AtomicRestorer, the engine cannot
+              tell a refusal that left the state as it was from one that wrote
+              part of the stream into it, so it assumes the second: any other
+              error stops the node with
               STATE_MACHINE_FAILED before it applies another entry or releases a
               Barrier or WaitApplied, and no snapshot is offered again to it. A
               DurableStateMachine may have written that part to its disk, where
@@ -750,8 +751,12 @@ packages:
               never handed to another node, whose start could fall back over the
               part it holds. A machine that builds the new state
               aside and swaps it in only on success keeps its state through a
-              refusal, but the engine cannot tell, and stops all the same. A
-              machine reads r to io.EOF: after it
+              refusal, but the engine cannot tell, and stops all the same, unless
+              the machine declares it as an AtomicRestorer: then its refusal
+              neither stops the node nor fails a start, the install is refused
+              and the node keeps the state it had applied, and a start falls
+              back, unless the machine is durable and its AppliedPosition moved
+              across the refusal or failed, which stops it with its marker. A machine reads r to io.EOF: after it
               returns, the engine reads what it left, and checks the stream's
               sizes and SHA-256 against the metadata. A Restore that returns nil
               on a stream whose end is then refused leaves the machine on a
@@ -812,6 +817,36 @@ packages:
                 type: "[]any"
             name: ApplyBatch
         name: BatchingStateMachine
+      - doc: |-
+          AtomicRestorer is the sibling of a state machine whose Restore is
+          atomic: a Restore that returns an error leaves the state exactly as
+          it was before the call, the position a DurableStateMachine's
+          AppliedPosition reports included. The engine recognises it by a type
+          assertion on the machine. At an install, its refusal does not stop
+          the node and leaves no marker: the install is refused as any failed
+          one, its copy removed (kept on a node with no table), and the node goes on from the state it had
+          applied, through a later offer or the appends of a leader that still
+          holds what it lacks. At a start, its refusal falls back to an older
+          snapshot or to a replay of the log, as for a snapshot the engine
+          refused on its checksums. VERSION_UNSUPPORTED still stops the node
+          and refuses a start (D18), and a Restore that returned nil on a
+          stream whose end the engine then refused still stops it: the machine
+          accepted that state. A durable AtomicRestorer whose AppliedPosition
+          moved across a refused Restore, or failed before or after it, is
+          stopped as a DurableStateMachine is, with its marker: the one breach
+          the engine sees. Any other breach leaves the node, unseen, on a state
+          no correct node holds. The marker is a method, so a type that embeds
+          an AtomicRestorer, machine.SQL included, inherits it, and with it the
+          promise: one that redefines Restore must keep it atomic, or not
+          embed the machine.
+        embeds:
+          - StateMachine
+        methods:
+          - doc: |-
+              RestoresAtomically marks the machine as an AtomicRestorer. It does
+              nothing, and the engine never calls it.
+            name: RestoresAtomically
+        name: AtomicRestorer
       - doc: |-
           LogReader reads the log. Expected outcomes are answers, not failures: an
           index below the first retained one is COMPACTED.
@@ -1270,7 +1305,7 @@ packages:
               cause survives only in the stop's text, and the stop marker is
               permanent. It stops a node, or fails its start, whose Restore
               returned an error not coded VERSION_UNSUPPORTED too: the machine may have written part of the
-              snapshot into its state. A volatile machine's stop on it leaves no
+              snapshot into its state; an AtomicRestorer's refusal is not one. A volatile machine's stop on it leaves no
               marker, its state going with the process. Before an operator clears
               that marker, a DurableStateMachine must be verified or rebuilt,
               because the next start trusts its AppliedPosition.
@@ -4678,8 +4713,9 @@ packages:
       D3): the glue every product wrote by hand around a database, and the
       reference key-value machine the linearizability checker models.
 
-      [SQL] is a [coreconsensus.DurableStateMachine] and a
-      [coreconsensus.BatchingStateMachine] over a [coresql.Transactor]. A
+      [SQL] is a [coreconsensus.DurableStateMachine], a
+      [coreconsensus.BatchingStateMachine] and a
+      [coreconsensus.AtomicRestorer] over a [coresql.Transactor]. A
       batch of committed commands is applied in ONE transaction: the caller's
       [SQLConfig].Apply runs each command on the transaction's executor, and
       the machine writes the log identity and the position of the last one
@@ -4696,7 +4732,11 @@ packages:
       until Release, so [SQLConfig].Dump streams the state of the batch last
       committed while the next batches commit. A restore runs
       [SQLConfig].Truncate, [SQLConfig].Load and the snapshot's position in
-      one transaction.
+      one transaction: a refused one leaves the database as it was, and the
+      node it runs under keeps running on the state it had applied, except
+      on VERSION_UNSUPPORTED, which stops it (D18), and when the outcome of
+      the transaction could not be read back, or the machine's position could
+      not be read again after the refusal, which stops it with its marker.
 
       	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
       		Transactor: tm, Dialect: sql.DialectPostgres,
@@ -4770,6 +4810,21 @@ packages:
       - doc: |-
           SQLConfig builds an SQL machine. Every field but Table is required: the
           machine runs the caller's statements and owns the position table alone.
+          The machine assumes a durable COMMIT (PostgreSQL's synchronous_commit
+          on, MySQL's innodb_flush_log_at_trx_commit=1 and sync_binlog=1,
+          SQLite in WAL mode with synchronous=FULL or EXTRA, in a rollback-journal
+          mode with synchronous=EXTRA: FULL may roll a COMMIT back after a power
+          loss there, and NORMAL in WAL mode) and a failover to a
+          synchronous copy only: otherwise a committed batch or restore can be
+          lost, and neither DurabilityDurable nor the AtomicRestorer promise
+          holds. Truncate and Load run only statements the transaction rolls
+          back: a statement that commits implicitly (MySQL's TRUNCATE TABLE or
+          any DDL) leaves a failed restore's tables changed under the old
+          position, a state the read back takes for a refusal. Under MySQL the
+          read back of a failed restore runs at READ COMMITTED, which MySQL
+          logs only row-based: binlog_format=ROW or MIXED, which switches to
+          row-based logging there; under STATEMENT every failed restore ends
+          in an unknown outcome, and the node stops with its marker.
         name: SQLConfig
         struct:
           fields:
@@ -4795,10 +4850,15 @@ packages:
                 transaction.
               name: Dump
               type: func(ctx context.Context, ex coresql.Executor, w io.Writer) error
-            - doc: Truncate removes the machine's state on ex, before a Load.
+            - doc: |-
+                Truncate removes the machine's state on ex, before a Load, with
+                statements the transaction rolls back: never one that commits
+                implicitly, such as MySQL's TRUNCATE TABLE (use DELETE).
               name: Truncate
               type: func(ctx context.Context, ex coresql.Executor) error
-            - doc: Load writes on ex the state Dump wrote into r.
+            - doc: |-
+                Load writes on ex the state Dump wrote into r, with statements
+                the transaction rolls back, as Truncate.
               name: Load
               type: func(ctx context.Context, ex coresql.Executor, r io.Reader) error
       - doc: |-
@@ -4817,7 +4877,8 @@ packages:
           - doc: |-
               ApplyBatch applies es in one transaction, writes the position of the
               last one in that same transaction, commits, then fills results. It
-              panics when the batch cannot complete (D3).
+              panics when the batch cannot complete (D3), and when a Restore's
+              outcome is unknown.
             in:
               - name: es
                 type: "[]coreconsensus.EntryValue"
@@ -4827,7 +4888,8 @@ packages:
             recv: pointer
           - doc: |-
               AppliedPosition returns the log identity and the position the database
-              holds applied.
+              holds applied. After a Restore whose outcome is unknown it returns
+              STATE_MACHINE_FAILED, until a Restore succeeds.
             name: AppliedPosition
             out:
               - type: coreconsensus.LogIdentityValue
@@ -4835,7 +4897,8 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
-              Snapshot opens the read-only transaction the view is read from and
+              Snapshot refuses with STATE_MACHINE_FAILED after a Restore whose
+              outcome is unknown. Otherwise it opens the read-only transaction the view is read from and
               reads the position in it, so that the database pins its view now.
               It starts one goroutine, which holds that transaction and serves
               WriteTo in it: the goroutine ends at Release, or at once when the
@@ -4848,7 +4911,22 @@ packages:
           - doc: |-
               Restore replaces the state with a snapshot's: Truncate, Load and the
               snapshot's position, in one transaction. A snapshot no SQL machine
-              wrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED.
+              wrote is SNAPSHOT_CORRUPT, one of a newer format VERSION_UNSUPPORTED,
+              both refused before the transaction opens. A refusal leaves the
+              database and the position as they were: whatever fails in the
+              transaction rolls it back, and the position the machine reports
+              moves only once it committed. A transaction that returned an error
+              is judged on the position row, because a COMMIT whose
+              acknowledgement was lost, or that the server still runs, commits
+              although it reports a failure. The row is read back on the primary,
+              in a read-write transaction that a ReadReplica never serves: it
+              first takes the row's lock, which waits for a COMMIT in flight,
+              then reads the row at READ COMMITTED and rolls back, within 15
+              seconds. The snapshot's position is a restore
+              that took effect, and Restore returns nil; the position before, a
+              refusal; anything else, or no answer, an outcome the machine cannot
+              name, after which AppliedPosition and Snapshot refuse and
+              ApplyBatch panics, so that the engine stops the node.
             in:
               - name: r
                 type: io.Reader
@@ -4857,6 +4935,14 @@ packages:
             name: Restore
             out:
               - type: error
+            recv: pointer
+          - doc: |-
+              RestoresAtomically marks SQL as a coreconsensus.AtomicRestorer: its
+              Restore is one transaction, whose outcome it reads back when the
+              transaction reports a failure, so the engine keeps a node running
+              when it refuses. A type that embeds SQL inherits the marker, and
+              must keep its own Restore atomic. It does nothing.
+            name: RestoresAtomically
             recv: pointer
         name: SQL
         struct:
@@ -6942,6 +7028,17 @@ packages:
           - name: PEMIdentity
             target: svcconsensus.PEMIdentity
         doc: Every type needed to implement a published port is aliased here (R2-32).
+      - alias:
+          - doc: |-
+              AtomicRestorer is the sibling of a StateMachine whose failed Restore
+              leaves its state as it was, the position a DurableStateMachine
+              reports included: its refusal neither stops the node nor fails a
+              start, except on VERSION_UNSUPPORTED (D18) and for a durable one
+              whose AppliedPosition moved across the refusal or failed, which is
+              stopped with its marker. A type that embeds one inherits the marker,
+              and must keep its own Restore atomic.
+            name: AtomicRestorer
+            target: coreconsensus.AtomicRestorer
       - const:
           - name: WipeAndRejoin
             reexport: svcconsensus.WipeAndRejoin
@@ -7938,7 +8035,11 @@ packages:
       A batch that cannot complete panics, and the node stops with
       STATE_MACHINE_FAILED. A snapshot streams from a read-only transaction
       opened when it is taken; a restore truncates and loads in one transaction
-      with the snapshot's position.
+      with the snapshot's position, and a refused one leaves the database as it
+      was, so the node keeps running (SQL is an AtomicRestorer), except on
+      VERSION_UNSUPPORTED, which stops it, and on an outcome it could not read
+      back or a position it could not read again after the refusal, which stop
+      it with its marker.
 
       	sm, err := machine.NewSQL(ctx, machine.SQLConfig{
       		Transactor: tm, Dialect: sql.DialectPostgres,
