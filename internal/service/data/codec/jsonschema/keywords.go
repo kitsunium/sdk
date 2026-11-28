@@ -155,12 +155,32 @@ func typeMatches(v *value, name string) bool {
 	}
 }
 
-// buildType compiles "type": a name or an array of names.
+// typeNames are the seven names "type" may hold (2020-12 Validation §6.1.1).
+var typeNames = map[string]bool{
+	"null": true, "boolean": true, "object": true, "array": true,
+	"number": true, "string": true, "integer": true,
+}
+
+// buildType compiles "type": a name or an array of names, each one of the
+// seven types, none twice and at least one; anything else is the schema's
+// mistake, refused here rather than failing every document.
 func buildType(k keyword) (check, error) {
 	//: one name, or several.
 	names, err := stringList(k.kw, "type")
 	if err != nil {
 		return nil, err
+	}
+	//: an empty list names no type.
+	if len(names) == 0 {
+		return nil, keywordInvalid("type")
+	}
+	seen := make(map[string]bool, len(names))
+	//: each name a type, and named once.
+	for _, name := range names {
+		if !typeNames[name] || seen[name] {
+			return nil, keywordInvalid("type")
+		}
+		seen[name] = true
 	}
 	return func(e *eval, v *value, path string) bool {
 		for _, name := range names {
