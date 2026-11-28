@@ -47,8 +47,9 @@ const positionColumns = "cluster, epoch, predecessor, predecessor_epoch, kept_in
 // machine runs the caller's statements and owns the position table alone.
 // The machine assumes a durable COMMIT (PostgreSQL's synchronous_commit
 // on, MySQL's innodb_flush_log_at_trx_commit=1 and sync_binlog=1,
-// SQLite's synchronous=FULL or EXTRA, since a COMMIT in WAL mode under
-// NORMAL may roll back after a power loss) and a failover to a
+// SQLite in WAL mode with synchronous=FULL or EXTRA, in a rollback-journal
+// mode with synchronous=EXTRA: FULL may roll a COMMIT back after a power
+// loss there, and NORMAL in WAL mode) and a failover to a
 // synchronous copy only: otherwise a committed batch or restore can be
 // lost, and neither DurabilityDurable nor the AtomicRestorer promise
 // holds. Truncate and Load run only statements the transaction rolls
